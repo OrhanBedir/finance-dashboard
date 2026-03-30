@@ -9,6 +9,8 @@ const jwt = require("jsonwebtoken");
 const path = require("path");
 const fs = require("fs");
 
+app.use(cors());
+
 const app = express();
 
 /* ================== MIDDLEWARE ================== */
