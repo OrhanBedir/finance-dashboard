@@ -1,6 +1,32 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import "./App.css";
 
+function Row({ label, value, isPercent, isNegativeHighlight }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        padding: "10px 16px",
+        borderBottom: "1px solid #e5e7eb",
+        background: "#fff",
+      }}
+    >
+      <div style={{ color: "#374151" }}>{label}</div>
+
+      <div
+        style={{
+          fontWeight: "600",
+          color: isNegativeHighlight ? "#dc2626" : "#111827",
+        }}
+      >
+        {isPercent
+          ? `%${value.toFixed(1)}`
+          : formatMoneyByCurrency(value || 0, "TRY")}
+      </div>
+    </div>
+  );
+}
 const API_BASE = (
   import.meta.env.VITE_API_BASE || "http://localhost:5001"
 ).replace(/\/$/, "");
@@ -4594,6 +4620,21 @@ function RegionAnalysis() {
     loadRegionData();
   }, [loadRegionData]);
 
+  const executiveSummary = useMemo(() => {
+    const completed = topSummary.completedTRY + topSummary.completedUSD * 32; // şimdilik sabit kur
+
+    const invoiced = topSummary.invoicedTRY + topSummary.invoicedUSD * 32;
+
+    const ratio = completed > 0 ? (invoiced / completed) * 100 : 0;
+
+    return {
+      completed,
+      invoiced,
+      ratio,
+      notInvoiced: completed - invoiced,
+    };
+  }, [topSummary]);
+
   const regionSummary = useMemo(() => {
     const base = {
       Ankara: {
@@ -4701,6 +4742,79 @@ function RegionAnalysis() {
   return (
     <>
       <h1>🗺️ Region Analysis</h1>
+
+      <div
+        style={{
+          maxWidth: "600px",
+          margin: "20px auto",
+          borderRadius: "12px",
+          overflow: "hidden",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+        }}
+      >
+        <Row label="Tamamlanan İş Tutarı" value={executiveSummary.completed} />
+
+        <Row label="Kesilen Fatura Tutarı" value={executiveSummary.invoiced} />
+
+        <Row
+          label="Faturalanma Oranı"
+          value={executiveSummary.ratio}
+          isPercent
+        />
+
+        <Row
+          label="Faturalanmamış İş"
+          value={executiveSummary.notInvoiced}
+          isNegativeHighlight
+        />
+      </div>
+      <div
+        style={{
+          maxWidth: "500px",
+          margin: "20px auto",
+          borderRadius: "12px",
+          overflow: "hidden",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+          border: "1px solid #e5e7eb",
+        }}
+      >
+        <div
+          style={{
+            background: "#1f2937",
+            color: "#fff",
+            padding: "10px 16px",
+            fontWeight: "600",
+            fontSize: "16px",
+          }}
+        >
+          GENEL ÖZET
+        </div>
+
+        <div style={{ background: "#f9fafb" }}>
+          {/* Satır */}
+          <Row
+            label="Tamamlanan İş Tutarı"
+            value={executiveSummary.completed}
+          />
+
+          <Row
+            label="Kesilen Fatura Tutarı"
+            value={executiveSummary.invoiced}
+          />
+
+          <Row
+            label="Faturalandırma Oranı"
+            value={executiveSummary.ratio}
+            isPercent
+          />
+
+          <Row
+            label="Faturalandırılmamış İş"
+            value={executiveSummary.notInvoiced}
+            isNegativeHighlight
+          />
+        </div>
+      </div>
 
       <div className="cards" style={{ marginBottom: "20px" }}>
         <div className="card ok statCard">
