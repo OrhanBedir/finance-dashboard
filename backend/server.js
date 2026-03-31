@@ -77,6 +77,12 @@ app.post("/finance-auth/login", async (req, res) => {
   }
 });
 
+const PORT = process.env.PORT || 8080;
+
+app.listen(PORT, () => {
+  console.log(`Server çalışıyor: ${PORT}`);
+});
+
 function getAllowedFinanceUsers() {
   return String(process.env.FINANCE_ALLOWED_USERS || "")
     .split(",")
@@ -1913,7 +1919,7 @@ app.post(
             parseFinanceNumber(odenenTutar),
             parseFinanceNumber(kalanBorc),
             note ? String(note).trim() : null,
-          ]
+          ],
         );
 
         inserted++;
@@ -1932,7 +1938,7 @@ app.post(
         error: err.message || "Excel import sırasında hata oluştu",
       });
     }
-  }
+  },
 );
 
 /* ================== MANUAL INVOICE ENTRY ================== */
@@ -3175,7 +3181,9 @@ app.get("/export/site-entry-excel", async (req, res) => {
 
     rows.forEach((row) => {
       let region = "Tanımsız";
-      const code = String(row.site_code || "").toUpperCase().trim();
+      const code = String(row.site_code || "")
+        .toUpperCase()
+        .trim();
 
       if (
         code.startsWith("IZ") ||
