@@ -843,6 +843,14 @@ function buildMasterJoinedQuery(
   `;
 }
 
+app.get("/", (req, res) => {
+  res.send("Finance backend çalışıyor");
+});
+
+app.get("/health", (req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 /* ================== DB SETUP ================== */
 app.get("/setup-db", async (req, res) => {
   try {
