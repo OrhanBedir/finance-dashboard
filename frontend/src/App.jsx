@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import "./App.css";
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE || "http://localhost:5001").replace(/\/$/, "");
+const API_BASE = (
+  import.meta.env.VITE_API_BASE || "http://localhost:5001"
+).replace(/\/$/, "");
 
 function normalizeCurrency(value) {
   const raw = String(value || "")
@@ -2272,6 +2273,9 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
 
       const response = await fetch(`${API_BASE}/finance/personel/upload`, {
         method: "POST",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("finance_token") || ""}`,
+        },
         body: formData,
       });
 
@@ -2283,7 +2287,12 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
 
       alert(`✅ ${data.inserted || 0} personel yüklendi`);
 
-      const personelData = await fetchJson(`${API_BASE}/finance/personel/list`);
+      const personelData = await fetchJson(
+        `${API_BASE}/finance/personel/list`,
+        {
+          withAuth: true,
+        },
+      );
       setPersonnelMaster(personelData.rows || []);
     } catch (err) {
       console.error("PERSONEL EXCEL UPLOAD ERROR:", err);
@@ -2320,12 +2329,14 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
       if (editingSalaryId) {
         await fetchJson(`${API_BASE}/finance/salary/${editingSalaryId}`, {
           method: "PUT",
+          withAuth: true,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
       } else {
         await fetchJson(`${API_BASE}/finance/salary/add`, {
           method: "POST",
+          withAuth: true,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
@@ -2433,7 +2444,7 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
   }, []);
 
   useEffect(() => {
-    fetchJson(`${API_BASE}/finance/personel/list`)
+    fetchJson(`${API_BASE}/finance/personel/list`, { withAuth: true })
       .then((data) => setPersonnelMaster(data.rows || []))
       .catch((err) => {
         console.error("PERSONNEL MASTER LOAD ERROR:", err);
@@ -2531,6 +2542,7 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
     try {
       await fetchJson(`${API_BASE}/finance/invoice-entry/${row.id}`, {
         method: "DELETE",
+        withAuth: true,
       });
 
       await loadFinance();
@@ -2612,6 +2624,7 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
           `${API_BASE}/finance/invoice-entry/${editingInvoiceId}`,
           {
             method: "PUT",
+            withAuth: true,
             headers: {
               "Content-Type": "application/json",
             },
@@ -2621,6 +2634,7 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
       } else {
         await fetchJson(`${API_BASE}/finance/invoice-entry/add`, {
           method: "POST",
+          withAuth: true,
           headers: {
             "Content-Type": "application/json",
           },
@@ -2679,6 +2693,7 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
     try {
       await fetchJson(`${API_BASE}/finance/salary/${row.id}`, {
         method: "DELETE",
+        withAuth: true,
       });
 
       setSalaryRows((prev) => prev.filter((x) => x.id !== row.id));
@@ -2692,6 +2707,11 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
     try {
       const response = await fetch(
         `${API_BASE}/finance/invoice-entry/export-excel`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("finance_token") || ""}`,
+          },
+        },
       );
 
       if (!response.ok) {
@@ -2719,6 +2739,11 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
     try {
       const response = await fetch(
         `${API_BASE}/finance/salary/export-excel?ay=${salaryFilterMonth}&yil=${salaryFilterYear}`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("finance_token") || ""}`,
+          },
+        },
       );
 
       if (!response.ok) {
@@ -2762,7 +2787,9 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
 
   const loadSalaryRows = async () => {
     try {
-      const data = await fetchJson(`${API_BASE}/finance/salary/list`);
+      const data = await fetchJson(`${API_BASE}/finance/salary/list`, {
+        withAuth: true,
+      });
       setSalaryRows(data.rows || []);
     } catch (err) {
       console.error("SALARY LIST ERROR:", err);
@@ -2788,11 +2815,11 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
         manualInvoiceData,
         salaryData,
       ] = await Promise.all([
-        fetchJson(`${API_BASE}/finance/summary`),
-        fetchJson(paymentsUrl),
-        fetchJson(`${API_BASE}/finance/upcoming-payments`),
-        fetchJson(`${API_BASE}/finance/invoice-entry/list`),
-        fetchJson(`${API_BASE}/finance/salary/list`),
+        fetchJson(`${API_BASE}/finance/summary`, { withAuth: true }),
+        fetchJson(paymentsUrl, { withAuth: true }),
+        fetchJson(`${API_BASE}/finance/upcoming-payments`, { withAuth: true }),
+        fetchJson(`${API_BASE}/finance/invoice-entry/list`, { withAuth: true }),
+        fetchJson(`${API_BASE}/finance/salary/list`, { withAuth: true }),
       ]);
 
       console.log("MANUAL INVOICE DATA:", manualInvoiceData.rows);
