@@ -4665,6 +4665,36 @@ function RegionAnalysis() {
     );
   }, [rows]);
 
+  const topSummary = useMemo(() => {
+    return rows.reduce(
+      (acc, row) => {
+        const currency = normalizeCurrency(row.currency);
+        const unitPrice = Number(row.unit_price || 0);
+        const doneQty = Number(row.done_qty || 0);
+        const billedQty = Number(row.billed_qty || 0);
+
+        const completedAmount = doneQty * unitPrice;
+        const invoicedAmount = billedQty * unitPrice;
+
+        if (currency === "USD") {
+          acc.completedUSD += completedAmount;
+          acc.invoicedUSD += invoicedAmount;
+        } else {
+          acc.completedTRY += completedAmount;
+          acc.invoicedTRY += invoicedAmount;
+        }
+
+        return acc;
+      },
+      {
+        completedTRY: 0,
+        completedUSD: 0,
+        invoicedTRY: 0,
+        invoicedUSD: 0,
+      },
+    );
+  }, [rows]);
+
   if (loading) return <div className="loading">Yükleniyor...</div>;
   if (errorMessage) return <div className="loading">{errorMessage}</div>;
 
@@ -4775,6 +4805,28 @@ function RegionAnalysis() {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="cards" style={{ marginBottom: "20px" }}>
+        <div className="card ok statCard">
+          <div className="statLabel">Tamamlanan İş Tutarı</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(topSummary.completedTRY, "TRY")}
+          </div>
+          <div style={{ marginTop: "6px", fontSize: "14px", opacity: 0.9 }}>
+            USD: {formatMoneyByCurrency(topSummary.completedUSD, "USD")}
+          </div>
+        </div>
+
+        <div className="card partial statCard">
+          <div className="statLabel">Kesilen Fatura Tutarı</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(topSummary.invoicedTRY, "TRY")}
+          </div>
+          <div style={{ marginTop: "6px", fontSize: "14px", opacity: 0.9 }}>
+            USD: {formatMoneyByCurrency(topSummary.invoicedUSD, "USD")}
+          </div>
+        </div>
       </div>
     </>
   );

@@ -885,28 +885,6 @@ app.get("/debug/current-db", async (req, res) => {
   }
 });
 
-app.get("/debug/seed-subcon", async (req, res) => {
-  try {
-    await pool.query(`
-      INSERT INTO subcon_payables (subcon_name, invoice_amount, paid_amount, note)
-      VALUES
-      ('Federal', 268070.36, 0, 'RF Subcon'),
-      ('Etk', 49200.00, 0, 'RF Subcon'),
-      ('Hasan Türüdü', 137760.00, 56400.00, 'RF Subcon'),
-      ('2Kx', 7800.00, 6500.00, 'RF Subcon'),
-      ('Çağatay Demirel', 119520.00, 0, 'RF Subcon'),
-      ('Murat Bektaş', 21600.00, 0, 'RF Subcon'),
-      ('Çiğdem Toprakçı', 16200.00, 0, 'RF Subcon'),
-      ('Kadriye Begümhan Saral', 32400.00, 0, 'RF Subcon'),
-      ('Serhat Akpınar', 36000.00, 0, 'RF Subcon')
-    `);
-
-    res.json({ ok: true, message: "RF Subcon verileri eklendi" });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
 /* ================== DB SETUP ================== */
 app.get("/setup-db", async (req, res) => {
   try {
