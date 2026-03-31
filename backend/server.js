@@ -77,10 +77,8 @@ app.post("/finance-auth/login", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 8080;
-
-app.listen(PORT, () => {
-  console.log(`Server çalışıyor: ${PORT}`);
+app.get("/test", (req, res) => {
+  res.json({ ok: true });
 });
 
 function getAllowedFinanceUsers() {
@@ -3883,6 +3881,11 @@ app.get("/finance/overdue-invoices", async (req, res) => {
     });
   }
 });
+const PORT = process.env.PORT || 8080;
+
+app.listen(PORT, () => {
+  console.log(`Server çalışıyor: ${PORT}`);
+});
 
 /* ================== START ================== */
-app.listen(5001, () => console.log("Server çalışıyor 🚀"));
+
