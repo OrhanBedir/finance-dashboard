@@ -4752,19 +4752,22 @@ function RegionAnalysis() {
           boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
         }}
       >
-        <Row label="Tamamlanan İş Tutarı" value={executiveSummary.completed} />
-
-        <Row label="Kesilen Fatura Tutarı" value={executiveSummary.invoiced} />
-
+        <Row
+          label="Tamamlanan İş Tutarı"
+          value={executiveSummary?.completed || 0}
+        />
+        <Row
+          label="Kesilen Fatura Tutarı"
+          value={executiveSummary?.invoiced || 0}
+        />
         <Row
           label="Faturalanma Oranı"
-          value={executiveSummary.ratio}
+          value={executiveSummary?.ratio || 0}
           isPercent
         />
-
         <Row
           label="Faturalanmamış İş"
-          value={executiveSummary.notInvoiced}
+          value={executiveSummary?.notInvoiced || 0}
           isNegativeHighlight
         />
       </div>
