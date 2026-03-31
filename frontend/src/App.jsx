@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import "./App.css";
 
-const API_BASE = "https://finance-dashboard-production-96fe.up.railway.app";
+const API_BASE = "https://finance-dashboard-topaz-three.vercel.app";
 
 function normalizeCurrency(value) {
   const raw = String(value || "")
