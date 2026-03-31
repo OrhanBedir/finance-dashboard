@@ -1613,7 +1613,7 @@ function DailyEntry() {
                   <td>{row.item_code || "-"}</td>
                   <td>{row.item_description || "-"}</td>
                   <td>{row.requested_qty ?? "-"}</td>
-                   <td>{row.due_qty ?? "-"}</td>
+                  <td>{row.due_qty ?? "-"}</td>
                   <td>{row.currency || "-"}</td>
                   <td>
                     {Number(row.unit_price || 0) === 0
@@ -2266,6 +2266,10 @@ function formatDonemLabel(value) {
 }
 
 function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
+  function parseDateTR(dateStr) {
+    const [day, month, year] = dateStr.split(".");
+    return new Date(`${year}-${month}-${day}`);
+  }
   //Silinecek// Fatura takip
 
   const [showInvoiceExcelImport, setShowInvoiceExcelImport] = useState(false);
@@ -2320,6 +2324,7 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [paymentRows, setPaymentRows] = useState([]);
+
   const [errorMessage, setErrorMessage] = useState("");
   const [paymentDateFilter, setPaymentDateFilter] = useState("");
   const [upcomingRows, setUpcomingRows] = useState([]);
@@ -2986,9 +2991,10 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
 
   const sortedPaymentRows = useMemo(() => {
     return [...paymentRows].sort((a, b) => {
-      const dateA = new Date(a.payment_date || 0).getTime();
-      const dateB = new Date(b.payment_date || 0).getTime();
-      return dateB - dateA;
+      const dateA = a.due_date ? String(a.due_date) : "9999-12-31";
+      const dateB = b.due_date ? String(b.due_date) : "9999-12-31";
+
+      return dateA.localeCompare(dateB);
     });
   }, [paymentRows]);
 
@@ -3344,172 +3350,15 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
                     )}
                   </td>
                   <td>{formatDateOnly(row.payment_date)}</td>
-                  <td>{formatDateOnly(row.due_date)}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
 
-      <div className="tableWrap">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "12px",
-            flexWrap: "wrap",
-            marginBottom: "12px",
-          }}
-        >
-          <h3 className="listTitle" style={{ margin: 0 }}>
-            HW Payment Kayıtları
-          </h3>
-
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <input
-              type="date"
-              value={paymentDateFilter}
-              onChange={(e) => setPaymentDateFilter(e.target.value)}
-            />
-
-            <button
-              type="button"
-              className="tab"
-              onClick={() => setPaymentDateFilter("")}
-            >
-              Filtreyi Temizle
-            </button>
-          </div>
-        </div>
-
-        {paymentDateFilter && (
-          <div
-            style={{
-              marginBottom: "12px",
-              fontWeight: 700,
-              fontSize: "16px",
-            }}
-          >
-            Seçilen Gün Toplamı:{" "}
-            {formatMoneyByCurrency(filteredDayTotal || 0, "TRY")}
-          </div>
-        )}
-
-        <table>
-          <thead>
-            <tr>
-              <th>Invoice No</th>
-              <th>Invoice Amount</th>
-              <th>Payment Amount</th>
-              <th>Remaining Amount</th>
-              <th>Payment Date</th>
-              <th>Due Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedPaymentRows.length === 0 ? (
-              <EmptyRow colSpan={6} text="Henüz payment kaydı bulunamadı" />
-            ) : (
-              sortedPaymentRows.map((row, index) => (
-                <tr key={row.id ?? index}>
-                  <td>{row.invoice_no || "-"}</td>
-                  <td>
-                    {formatMoneyByCurrency(
-                      row.invoice_amount || 0,
-                      row.currency,
-                    )}
+                  <td
+                    style={{
+                      color:
+                        new Date(row.due_date) < new Date() ? "red" : "inherit",
+                    }}
+                  >
+                    {row.due_date ? formatDateOnly(row.due_date) : "-"}
                   </td>
-                  <td>
-                    {formatMoneyByCurrency(
-                      row.payment_amount || 0,
-                      row.currency,
-                    )}
-                  </td>
-                  <td>
-                    {formatMoneyByCurrency(
-                      row.remaining_amount || 0,
-                      row.currency,
-                    )}
-                  </td>
-                  <td>{formatDateOnly(row.payment_date)}</td>
-                  <td>{formatDateOnly(row.due_date)}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="tableWrap">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "12px",
-            flexWrap: "wrap",
-            marginBottom: "12px",
-          }}
-        >
-          <h3 className="listTitle" style={{ margin: 0 }}>
-            Manuel Fatura Kayıtları
-          </h3>
-
-          <button
-            type="button"
-            className="tab"
-            onClick={handleExportInvoiceDatabase}
-          >
-            Fatura Database İndir
-          </button>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Bölge</th>
-              <th>Proje</th>
-              <th>Proje Kodu</th>
-              <th>Fatura No</th>
-              <th>Fatura Tarihi</th>
-              <th>Tedarikçi</th>
-              <th>Fatura Kalemi</th>
-              <th>İş Kalemi</th>
-              <th>PO No</th>
-              <th>Site ID</th>
-              <th>Tutar</th>
-              <th>KDV</th>
-              <th>Toplam</th>
-              <th>Ödenen</th>
-              <th>Kalan Borç</th>
-              <th>Not</th>
-            </tr>
-          </thead>
-          <tbody>
-            {manualInvoiceRows.length === 0 ? (
-              <EmptyRow
-                colSpan={16}
-                text="Henüz manuel fatura kaydı bulunamadı"
-              />
-            ) : (
-              manualInvoiceRows.map((row, index) => (
-                <tr key={row.id ?? index}>
-                  <td>{row.invoice_no || "-"}</td>
-                  <td>{row.invoice_type || "-"}</td>
-                  <td>{row.company_name || "-"}</td>
-                  <td>{row.description || "-"}</td>
-
-                  <td>
-                    {formatMoneyByCurrency(row.amount || 0, row.currency)}
-                  </td>
-
-                  <td>{formatDateOnly(row.invoice_date)}</td>
-                  <td>{formatDateOnly(row.due_date)}</td>
-
-                  <td>{row.status || "-"}</td>
-                  <td>{row.note || "-"}</td>
                 </tr>
               ))
             )}
