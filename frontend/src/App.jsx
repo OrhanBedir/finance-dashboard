@@ -4620,21 +4620,6 @@ function RegionAnalysis() {
     loadRegionData();
   }, [loadRegionData]);
 
-  const executiveSummary = useMemo(() => {
-    const completed = topSummary.completedTRY + topSummary.completedUSD * 32; // şimdilik sabit kur
-
-    const invoiced = topSummary.invoicedTRY + topSummary.invoicedUSD * 32;
-
-    const ratio = completed > 0 ? (invoiced / completed) * 100 : 0;
-
-    return {
-      completed,
-      invoiced,
-      ratio,
-      notInvoiced: completed - invoiced,
-    };
-  }, [topSummary]);
-
   const regionSummary = useMemo(() => {
     const base = {
       Ankara: {
@@ -4735,6 +4720,25 @@ function RegionAnalysis() {
       },
     );
   }, [rows]);
+
+  const executiveSummary = useMemo(() => {
+    const completed =
+      Number(topSummary?.completedTRY || 0) +
+      Number(topSummary?.completedUSD || 0) * 32;
+
+    const invoiced =
+      Number(topSummary?.invoicedTRY || 0) +
+      Number(topSummary?.invoicedUSD || 0) * 32;
+
+    const ratio = completed > 0 ? (invoiced / completed) * 100 : 0;
+
+    return {
+      completed,
+      invoiced,
+      ratio,
+      notInvoiced: completed - invoiced,
+    };
+  }, [topSummary]);
 
   if (loading) return <div className="loading">Yükleniyor...</div>;
   if (errorMessage) return <div className="loading">{errorMessage}</div>;
