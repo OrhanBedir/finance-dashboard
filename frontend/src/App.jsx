@@ -3102,7 +3102,7 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
         </button>
 
         
-        
+
         <button
           type="button"
           className={
@@ -3116,15 +3116,7 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
           HW Fatura Yükle
         </button>
 
-        <button
-          type="button"
-          className={
-            showInvoiceExcelImport ? "tab activeTab smallTab" : "tab smallTab"
-          }
-          onClick={() => setShowInvoiceExcelImport((prev) => !prev)}
-        >
-          Fatura Excel Aktar
-        </button>
+        
 
         <button
           type="button"
