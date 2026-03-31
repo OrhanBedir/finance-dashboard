@@ -2994,7 +2994,7 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
       const dateA = a.due_date ? String(a.due_date) : "9999-12-31";
       const dateB = b.due_date ? String(b.due_date) : "9999-12-31";
 
-      return dateA.localeCompare(dateB);
+      return dateB.localeCompare(dateA);
     });
   }, [paymentRows]);
 
