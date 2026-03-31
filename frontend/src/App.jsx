@@ -3203,7 +3203,12 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
 
         <div className="card cancel statCard">
           <div className="statLabel">Gider Kayıt</div>
-          <div className="statValue">{summary.expense_count || 0}</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(
+              manualInvoiceSummary.totalRemaining || 0,
+              "TRY",
+            )}
+          </div>
         </div>
       </div>
 
