@@ -76,6 +76,118 @@ function formatDateOnly(value) {
 
   return str;
 }
+//Silinecek//Fatura bilgi yükle//
+function InvoiceEntryExcelUploadInline({ onClose, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleUpload = async () => {
+    if (!file) {
+      setMessage("❌ Lütfen bir Excel dosyası seç");
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setMessage("");
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(
+        `${API_BASE}/finance/invoice-entry/import-excel`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("finance_token") || ""}`,
+          },
+          body: formData,
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(
+          data.error || "Fatura Excel import sırasında hata oluştu",
+        );
+      }
+
+      setMessage(
+        `✅ Excel başarıyla içeri alındı. Eklenen kayıt: ${data.inserted || 0}`,
+      );
+      setFile(null);
+
+      const input = document.getElementById("invoice-entry-excel-upload-input");
+      if (input) input.value = "";
+
+      if (onUploaded) {
+        await onUploaded();
+      }
+    } catch (err) {
+      console.error("INVOICE ENTRY EXCEL IMPORT ERROR:", err);
+      setMessage(`❌ ${err.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="entryPanel" style={{ marginBottom: "18px" }}>
+      <div className="entryForm">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "14px",
+            gap: "12px",
+            flexWrap: "wrap",
+          }}
+        >
+          <h3 className="listTitle" style={{ margin: 0 }}>
+            📥 Fatura Excel İçe Aktar
+          </h3>
+
+          <button
+            type="button"
+            className="tab"
+            onClick={onClose}
+            style={{ padding: "10px 14px" }}
+          >
+            Kapat
+          </button>
+        </div>
+
+        <div className="formGrid">
+          <div className="formGroup formGroupWide">
+            <label>Fatura Takip Excel Dosyası</label>
+            <input
+              id="invoice-entry-excel-upload-input"
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+          </div>
+        </div>
+
+        <div className="entryActions">
+          <button
+            type="button"
+            className="saveButton"
+            onClick={handleUpload}
+            disabled={uploading}
+          >
+            {uploading ? "Yükleniyor..." : "Exceli İçeri Al"}
+          </button>
+        </div>
+
+        {message && <div className="entryMessage">{message}</div>}
+      </div>
+    </div>
+  );
+}
 
 async function fetchJson(url, options = {}) {
   const { withAuth = false, ...fetchOptions } = options;
@@ -2153,6 +2265,10 @@ function formatDonemLabel(value) {
 }
 
 function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
+  //Silinecek// Fatura takip
+
+  const [showInvoiceExcelImport, setShowInvoiceExcelImport] = useState(false);
+
   const handleMaasAvansClick = () => {
     const password = prompt("Bu alana giriş için şifre giriniz:");
 
@@ -2985,6 +3101,8 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
           HW Payment Yükle
         </button>
 
+        
+        
         <button
           type="button"
           className={
@@ -2996,6 +3114,16 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
           }}
         >
           HW Fatura Yükle
+        </button>
+
+        <button
+          type="button"
+          className={
+            showInvoiceExcelImport ? "tab activeTab smallTab" : "tab smallTab"
+          }
+          onClick={() => setShowInvoiceExcelImport((prev) => !prev)}
+        >
+          Fatura Excel Aktar
         </button>
 
         <button
@@ -3022,6 +3150,13 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
       {showUpload && (
         <FinanceUploadInline
           onClose={() => setShowUpload(false)}
+          onUploaded={loadFinance}
+        />
+      )}
+
+      {showInvoiceExcelImport && (
+        <InvoiceEntryExcelUploadInline
+          onClose={() => setShowInvoiceExcelImport(false)}
           onUploaded={loadFinance}
         />
       )}
