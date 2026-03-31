@@ -2991,10 +2991,17 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
 
   const sortedPaymentRows = useMemo(() => {
     return [...paymentRows].sort((a, b) => {
-      const dateA = a.due_date ? String(a.due_date) : "9999-12-31";
-      const dateB = b.due_date ? String(b.due_date) : "9999-12-31";
+      // boş kontrol
+      const aEmpty = !a.due_date;
+      const bEmpty = !b.due_date;
 
-      return dateB.localeCompare(dateA);
+      // 🚨 boşlar en alta
+      if (aEmpty && !bEmpty) return 1;
+      if (!aEmpty && bEmpty) return -1;
+      if (aEmpty && bEmpty) return 0;
+
+      // 📅 dolular kendi arasında sıralansın (büyükten küçüğe)
+      return String(b.due_date).localeCompare(String(a.due_date));
     });
   }, [paymentRows]);
 
