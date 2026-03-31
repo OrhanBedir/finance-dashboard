@@ -1613,6 +1613,7 @@ function DailyEntry() {
                   <td>{row.item_code || "-"}</td>
                   <td>{row.item_description || "-"}</td>
                   <td>{row.requested_qty ?? "-"}</td>
+                   <td>{row.due_qty ?? "-"}</td>
                   <td>{row.currency || "-"}</td>
                   <td>
                     {Number(row.unit_price || 0) === 0
