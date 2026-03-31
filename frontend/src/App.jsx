@@ -4702,6 +4702,28 @@ function RegionAnalysis() {
     <>
       <h1>🗺️ Region Analysis</h1>
 
+      <div className="cards" style={{ marginBottom: "20px" }}>
+        <div className="card ok statCard">
+          <div className="statLabel">Tamamlanan İş Tutarı</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(topSummary.completedTRY, "TRY")}
+          </div>
+          <div style={{ marginTop: "6px", fontSize: "14px", opacity: 0.9 }}>
+            USD: {formatMoneyByCurrency(topSummary.completedUSD, "USD")}
+          </div>
+        </div>
+
+        <div className="card partial statCard">
+          <div className="statLabel">Kesilen Fatura Tutarı</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(topSummary.invoicedTRY, "TRY")}
+          </div>
+          <div style={{ marginTop: "6px", fontSize: "14px", opacity: 0.9 }}>
+            USD: {formatMoneyByCurrency(topSummary.invoicedUSD, "USD")}
+          </div>
+        </div>
+      </div>
+
       <div className="regionCards">
         {regionSummary.length === 0 ? (
           <div className="loading">Bölge verisi bulunamadı</div>
@@ -4805,28 +4827,6 @@ function RegionAnalysis() {
             )}
           </tbody>
         </table>
-      </div>
-
-      <div className="cards" style={{ marginBottom: "20px" }}>
-        <div className="card ok statCard">
-          <div className="statLabel">Tamamlanan İş Tutarı</div>
-          <div className="statValue">
-            {formatMoneyByCurrency(topSummary.completedTRY, "TRY")}
-          </div>
-          <div style={{ marginTop: "6px", fontSize: "14px", opacity: 0.9 }}>
-            USD: {formatMoneyByCurrency(topSummary.completedUSD, "USD")}
-          </div>
-        </div>
-
-        <div className="card partial statCard">
-          <div className="statLabel">Kesilen Fatura Tutarı</div>
-          <div className="statValue">
-            {formatMoneyByCurrency(topSummary.invoicedTRY, "TRY")}
-          </div>
-          <div style={{ marginTop: "6px", fontSize: "14px", opacity: 0.9 }}>
-            USD: {formatMoneyByCurrency(topSummary.invoicedUSD, "USD")}
-          </div>
-        </div>
       </div>
     </>
   );
