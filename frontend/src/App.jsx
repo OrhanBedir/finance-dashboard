@@ -2308,6 +2308,9 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
     };
   }
 
+  const [showSubconModal, setShowSubconModal] = useState(false);
+  const [subconRows, setSubconRows] = useState([]);
+
   const [showPersonFilterList, setShowPersonFilterList] = useState(false);
   const [salaryRows, setSalaryRows] = useState([]);
   const [editingSalaryId, setEditingSalaryId] = useState(null);
@@ -2382,6 +2385,17 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
   const [selectedPerson, setSelectedPerson] = useState("");
 
   const [personelUploadLoading, setPersonelUploadLoading] = useState(false);
+
+  const handleShowSubconModal = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE}/finance/subcon-payables`);
+      setSubconRows(data.rows || []);
+      setShowSubconModal(true);
+    } catch (err) {
+      console.error("SUBCON PAYABLES LOAD ERROR:", err);
+      alert(err.message || "Taşeron ödeme durumu alınamadı");
+    }
+  };
 
   const handlePersonelExcelUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -3201,7 +3215,11 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
           </div>
         </div>
 
-        <div className="card cancel statCard">
+        <div
+          className="card cancel statCard"
+          onClick={handleShowSubconModal}
+          style={{ cursor: "pointer" }}
+        >
           <div className="statLabel">Gider Kayıt</div>
           <div className="statValue">
             {formatMoneyByCurrency(
@@ -3836,6 +3854,101 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
                           >
                             Sil
                           </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSubconModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={() => setShowSubconModal(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1100px",
+              maxHeight: "85vh",
+              overflow: "auto",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "18px",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <h3 className="listTitle" style={{ margin: 0 }}>
+                RF Subcon Ödeme Durumu
+              </h3>
+
+              <button
+                type="button"
+                className="tab"
+                onClick={() => setShowSubconModal(false)}
+              >
+                Kapat
+              </button>
+            </div>
+
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Subcon</th>
+                    <th>Fatura Tutarı (KDV Dahil)</th>
+                    <th>Yapılan Ödeme</th>
+                    <th>Kalan Ödeme</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {subconRows.length === 0 ? (
+                    <EmptyRow
+                      colSpan={4}
+                      text="Taşeron ödeme kaydı bulunamadı"
+                    />
+                  ) : (
+                    subconRows.map((row, index) => (
+                      <tr key={row.id ?? index}>
+                        <td>{row.subcon_name || "-"}</td>
+                        <td>
+                          {formatMoneyByCurrency(
+                            row.invoice_amount || 0,
+                            "TRY",
+                          )}
+                        </td>
+                        <td>
+                          {formatMoneyByCurrency(row.paid_amount || 0, "TRY")}
+                        </td>
+                        <td>
+                          {formatMoneyByCurrency(
+                            row.remaining_amount || 0,
+                            "TRY",
+                          )}
                         </td>
                       </tr>
                     ))
