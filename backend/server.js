@@ -11,7 +11,11 @@ const fs = require("fs");
 const app = express();
 
 /* ================== MIDDLEWARE ================== */
-app.use(cors());
+app.use(
+  cors({
+    origin: "*",
+  }),
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -3888,4 +3892,3 @@ app.listen(PORT, () => {
 });
 
 /* ================== START ================== */
-
