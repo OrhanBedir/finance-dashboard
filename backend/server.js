@@ -13,9 +13,13 @@ const app = express();
 /* ================== MIDDLEWARE ================== */
 app.use(
   cors({
-    origin: "*",
+    origin: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
+
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -857,6 +861,13 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => {
   res.status(200).json({ ok: true });
+});
+
+app.get("/debug/cors", (req, res) => {
+  res.json({
+    ok: true,
+    origin: req.headers.origin || null,
+  });
 });
 
 /* ================== DB SETUP ================== */
