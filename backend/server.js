@@ -870,6 +870,21 @@ app.get("/debug/cors", (req, res) => {
   });
 });
 
+app.get("/debug/current-db", async (req, res) => {
+  try {
+    const dbName = await pool.query("SELECT current_database() AS db");
+    const count = await pool.query("SELECT COUNT(*)::int AS total FROM subcon_payables");
+
+    res.json({
+      ok: true,
+      db: dbName.rows[0]?.db,
+      subcon_count: count.rows[0]?.total || 0,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /* ================== DB SETUP ================== */
 app.get("/setup-db", async (req, res) => {
   try {
