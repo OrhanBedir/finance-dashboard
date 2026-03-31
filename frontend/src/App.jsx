@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import "./App.css";
 
-const API_BASE = "http://localhost:5001";
+const API_BASE = "https://SENIN-RAILWAY-ADRESIN.up.railway.app";
 
 function normalizeCurrency(value) {
   const raw = String(value || "")

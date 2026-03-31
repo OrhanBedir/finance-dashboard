@@ -8,14 +8,12 @@ const ExcelJS = require("exceljs");
 const jwt = require("jsonwebtoken");
 const path = require("path");
 const fs = require("fs");
-
-app.use(cors());
-
 const app = express();
 
 /* ================== MIDDLEWARE ================== */
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 /* ================== UPLOAD ================== */
 const uploadDir = path.join(__dirname, "uploads");
