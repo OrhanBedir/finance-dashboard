@@ -3101,8 +3101,6 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
           HW Payment Yükle
         </button>
 
-        
-
         <button
           type="button"
           className={
@@ -3115,8 +3113,6 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
         >
           HW Fatura Yükle
         </button>
-
-        
 
         <button
           type="button"
@@ -3308,42 +3304,46 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
       </div>
 
       <div className="tableWrap">
-        <h3 className="listTitle">Manuel Fatura Kayıtları</h3>
+        <h3 className="listTitle">Huawei Payment Kayıtları</h3>
 
         <table>
           <thead>
             <tr>
-              <th>Fatura No</th>
-              <th>Tür</th>
-              <th>Firma</th>
-              <th>Açıklama</th>
-              <th>Tutar</th>
-              <th>Fatura Tarihi</th>
-              <th>Vade</th>
-              <th>Durum</th>
-              <th>Not</th>
+              <th>Invoice No</th>
+              <th>Invoice Amount</th>
+              <th>Payment Amount</th>
+              <th>Remaining Amount</th>
+              <th>Payment Date</th>
+              <th>Due Date</th>
             </tr>
           </thead>
           <tbody>
-            {manualInvoiceRows.length === 0 ? (
-              <EmptyRow colSpan={9} text="Henüz manuel fatura kaydı yok" />
+            {sortedPaymentRows.length === 0 ? (
+              <EmptyRow colSpan={6} text="Henüz payment kaydı bulunamadı" />
             ) : (
-              manualInvoiceRows.map((row, index) => (
+              sortedPaymentRows.map((row, index) => (
                 <tr key={row.id ?? index}>
                   <td>{row.invoice_no || "-"}</td>
-                  <td>{row.invoice_type || "-"}</td>
-                  <td>{row.company_name || "-"}</td>
-                  <td>{row.description || "-"}</td>
                   <td>
                     {formatMoneyByCurrency(
-                      row.amount || 0,
-                      row.currency || "TRY",
+                      row.invoice_amount || 0,
+                      row.currency,
                     )}
                   </td>
-                  <td>{formatDateOnly(row.invoice_date)}</td>
+                  <td>
+                    {formatMoneyByCurrency(
+                      row.payment_amount || 0,
+                      row.currency,
+                    )}
+                  </td>
+                  <td>
+                    {formatMoneyByCurrency(
+                      row.remaining_amount || 0,
+                      row.currency,
+                    )}
+                  </td>
+                  <td>{formatDateOnly(row.payment_date)}</td>
                   <td>{formatDateOnly(row.due_date)}</td>
-                  <td>{row.status || "-"}</td>
-                  <td>{row.note || "-"}</td>
                 </tr>
               ))
             )}
