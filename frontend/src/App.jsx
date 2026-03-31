@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import "./App.css";
 
-const API_BASE = "https://finance-dashboard-production-96fe.up.railway.app";
+const API_BASE =
+  (import.meta.env.VITE_API_BASE || "http://localhost:5001").replace(/\/$/, "");
 
 function normalizeCurrency(value) {
   const raw = String(value || "")
@@ -76,18 +77,19 @@ function formatDateOnly(value) {
 }
 
 async function fetchJson(url, options = {}) {
+  const { withAuth = false, ...fetchOptions } = options;
   const token = localStorage.getItem("finance_token") || "";
 
   const response = await fetch(url, {
-    ...options,
+    ...fetchOptions,
     headers: {
-      ...(options.headers || {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(fetchOptions.headers || {}),
+      ...(withAuth && token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
 
   const text = await response.text();
-  console.log("RAW RESPONSE:", text);
+  console.log("RAW RESPONSE:", url, text);
 
   let data = {};
   try {
