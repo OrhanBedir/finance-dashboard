@@ -4636,7 +4636,9 @@ function RegionAnalysis() {
         );
 
         const data = await res.json();
-        console.log("USD API DATA:", data);
+        console.log("USD API FULL:", JSON.stringify(data, null, 2));
+        console.log("USD API TRY:", data?.rates?.TRY);
+        console.log("USD API OK:", res.ok);
 
         if (data?.rates?.TRY) {
           setUsdRate(data.rates.TRY);
