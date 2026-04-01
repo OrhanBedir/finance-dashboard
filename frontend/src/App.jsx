@@ -4632,7 +4632,7 @@ function RegionAnalysis() {
     const fetchRate = async () => {
       try {
         const res = await fetch(
-          "https://api.exchangerate.host/latest?base=USD&symbols=TRY",
+          "https://open.er-api.com/v6/latest/USD",
         );
 
         const data = await res.json();
