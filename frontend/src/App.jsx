@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import "./App.css";
 
-function Row({ label, value, isPercent, isNegativeHighlight }) {
+function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   return (
     <div
       style={{
@@ -21,12 +21,16 @@ function Row({ label, value, isPercent, isNegativeHighlight }) {
         }}
       >
         {isPercent
-          ? `%${value.toFixed(1)}`
-          : formatMoneyByCurrency(value || 0, "TRY")}
+          ? `%${Number(value || 0).toFixed(1)}`
+          : isPlainNumber
+            ? formatNumber(value || 0)
+            : formatMoneyByCurrency(value || 0, "TRY")}
       </div>
     </div>
   );
 }
+
+
 const API_BASE = (
   import.meta.env.VITE_API_BASE || "http://localhost:5001"
 ).replace(/\/$/, "");
@@ -4803,44 +4807,55 @@ function RegionAnalysis() {
         </div>
       </div>
 
-      <div className="regionCards">
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: "24px",
+          flexWrap: "wrap",
+          margin: "10px auto 30px auto",
+        }}
+      >
         {regionSummary.length === 0 ? (
           <div className="loading">Bölge verisi bulunamadı</div>
         ) : (
-          regionSummary.map((item) => {
-            let regionClass = "tanimsiz";
-
-            if (item.region === "Ankara") regionClass = "ankara";
-            else if (item.region === "İzmir") regionClass = "izmir";
-            else if (item.region === "Antalya") regionClass = "antalya";
-
-            return (
-              <div key={item.region} className={`regionCard ${regionClass}`}>
-                <h3>📍 {item.region}</h3>
-                <div className="regionLine">Kayıt: {item.total_records}</div>
-                <div className="regionLine">
-                  Toplam TRY: {formatMoneyByCurrency(item.total_try, "TRY")}
-                </div>
-                <div className="regionLine">
-                  Toplam USD: {formatMoneyByCurrency(item.total_usd, "USD")}
-                </div>
-                <div className="regionLine">
-                  PO Bekler TRY:{" "}
-                  {formatMoneyByCurrency(item.po_bekler_try, "TRY")}
-                </div>
-                <div className="regionLine">
-                  PO Bekler USD:{" "}
-                  {formatMoneyByCurrency(item.po_bekler_usd, "USD")}
-                </div>
-                <div className="regionLine">
-                  OK TRY: {formatMoneyByCurrency(item.ok_try, "TRY")}
-                </div>
-                <div className="regionLine">
-                  OK USD: {formatMoneyByCurrency(item.ok_usd, "USD")}
-                </div>
+          regionSummary.map((item) => (
+            <div
+              key={item.region}
+              style={{
+                width: "100%",
+                maxWidth: "420px",
+                borderRadius: "16px",
+                overflow: "hidden",
+                boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
+                border: "1px solid #e5e7eb",
+                background: "#fff",
+              }}
+            >
+              <div
+                style={{
+                  background: "#1f2937",
+                  color: "#fff",
+                  padding: "12px 16px",
+                  fontWeight: "700",
+                  fontSize: "22px",
+                  textAlign: "center",
+                }}
+              >
+                📍 {item.region}
               </div>
-            );
-          })
+
+              <div style={{ background: "#f9fafb" }}>
+                <Row label="Kayıt Sayısı" value={item.total_records} isPlainNumber />
+                <Row label="Toplam TRY" value={item.total_try} />
+                <Row label="Toplam USD" value={item.total_usd * 32} />
+                <Row label="PO Bekler TRY" value={item.po_bekler_try} />
+                <Row label="PO Bekler USD" value={item.po_bekler_usd * 32} />
+                <Row label="OK TRY" value={item.ok_try} />
+                <Row label="OK USD" value={item.ok_usd * 32} />
+              </div>
+            </div>
+          ))
         )}
       </div>
 
