@@ -4607,6 +4607,7 @@ function formatTRY(value) {
 }
 
 function RegionAnalysis() {
+  const [usdRate, setUsdRate] = useState(32); // fallback
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -4625,6 +4626,25 @@ function RegionAnalysis() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const fetchRate = async () => {
+      try {
+        const res = await fetch(
+          "https://api.exchangerate.host/latest?base=USD&symbols=TRY",
+        );
+        const data = await res.json();
+
+        if (data?.rates?.TRY) {
+          setUsdRate(data.rates.TRY);
+        }
+      } catch (err) {
+        console.error("USD RATE ERROR:", err);
+      }
+    };
+
+    fetchRate();
   }, []);
 
   useEffect(() => {
@@ -4818,46 +4838,58 @@ function RegionAnalysis() {
         {regionSummary.length === 0 ? (
           <div className="loading">Bölge verisi bulunamadı</div>
         ) : (
-          regionSummary.map((item) => (
-            <div
-              key={item.region}
-              style={{
-                width: "100%",
-                borderRadius: "16px",
-                overflow: "hidden",
-                boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
-                border: "1px solid #e5e7eb",
-                background: "#fff",
-              }}
-            >
+          regionSummary.map((item) => {
+            const totalUSDTRY = (item.total_usd || 0) * usdRate;
+
+            const poBeklerTRY =
+              (item.po_bekler_try || 0) + (item.po_bekler_usd || 0) * usdRate;
+
+            const grandTotal =
+              (item.total_try || 0) + totalUSDTRY + poBeklerTRY;
+
+            return (
               <div
+                key={item.region}
                 style={{
-                  background: "#1f2937",
-                  color: "#fff",
-                  padding: "12px 16px",
-                  fontWeight: "700",
-                  fontSize: "22px",
-                  textAlign: "center",
+                  width: "100%",
+                  borderRadius: "16px",
+                  overflow: "hidden",
+                  boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
+                  border: "1px solid #e5e7eb",
+                  background: "#fff",
                 }}
               >
-                📍 {item.region}
-              </div>
+                <div
+                  style={{
+                    background: "#1f2937",
+                    color: "#fff",
+                    padding: "12px 16px",
+                    fontWeight: "700",
+                    fontSize: "22px",
+                    textAlign: "center",
+                  }}
+                >
+                  📍 {item.region}
+                </div>
 
-              <div style={{ background: "#f9fafb" }}>
-                <Row
-                  label="Kayıt Sayısı"
-                  value={item.total_records}
-                  isPlainNumber
-                />
-                <Row label="Toplam TRY" value={item.total_try} />
-                <Row label="Toplam USD" value={item.total_usd * 32} />
-                <Row label="PO Bekler TRY" value={item.po_bekler_try} />
-                <Row label="PO Bekler USD" value={item.po_bekler_usd * 32} />
-                <Row label="OK TRY" value={item.ok_try} />
-                <Row label="OK USD" value={item.ok_usd * 32} />
+                <div style={{ background: "#f9fafb" }}>
+                  <Row
+                    label="Kayıt Sayısı"
+                    value={item.total_records}
+                    isPlainNumber
+                  />
+                  <Row label="Toplam TRY" value={item.total_try} />
+                  <Row label="Toplam USD (TRY)" value={totalUSDTRY} />
+                  <Row
+                    label="PO Bekler (TRY)"
+                    value={poBeklerTRY}
+                    isNegativeHighlight
+                  />
+                  <Row label="GENEL TOPLAM" value={grandTotal} />
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
