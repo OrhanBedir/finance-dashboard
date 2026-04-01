@@ -217,6 +217,13 @@ function InvoiceEntryExcelUploadInline({ onClose, onUploaded }) {
 
 async function fetchJson(url, options = {}) {
   const { withAuth = false, ...fetchOptions } = options;
+  if (response.status === 401) {
+    localStorage.removeItem("finance_token");
+    localStorage.removeItem("finance_user_email");
+    window.location.reload();
+    throw new Error("Oturum süresi dolmuş");
+  }
+
   const token = localStorage.getItem("finance_token") || "";
 
   const response = await fetch(url, {
