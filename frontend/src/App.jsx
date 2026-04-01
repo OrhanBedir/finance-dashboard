@@ -4901,9 +4901,22 @@ function RegionAnalysis() {
                   <Row label="Toplam TRY" value={item.total_try} />
                   <Row label="Toplam USD (TRY)" value={totalUSDTRY} />
                   <Row
-                    label="PO Bekler (TRY)"
+                    label={
+                      <>
+                        PO Bekler (TRY)
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            color: "#9ca3af",
+                            marginLeft: "6px",
+                          }}
+                          title="USD → TRY çevrilmiş değer"
+                        >
+                          (kur: {usdRate?.toFixed(1)})
+                        </span>
+                      </>
+                    }
                     value={poBeklerTRY}
-                    isNegativeHighlight
                   />
                   <Row label="GENEL TOPLAM" value={grandTotal} />
                 </div>
