@@ -19,7 +19,6 @@ app.use(
   }),
 );
 
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -873,7 +872,9 @@ app.get("/debug/cors", (req, res) => {
 app.get("/debug/current-db", async (req, res) => {
   try {
     const dbName = await pool.query("SELECT current_database() AS db");
-    const count = await pool.query("SELECT COUNT(*)::int AS total FROM subcon_payables");
+    const count = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM subcon_payables",
+    );
 
     res.json({
       ok: true,
@@ -1103,7 +1104,11 @@ app.get("/force-reset-boq", async (req, res) => {
 /* ================== FINANCE SUMMARY ================== */
 app.get("/finance/summary", requireFinanceAuth, async (req, res) => {
   try {
-    const now = new Date();
+    const trNow = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }),
+    );
+
+    const now = trNow;
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
 
