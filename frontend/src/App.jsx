@@ -4755,11 +4755,22 @@ function RegionAnalysis() {
   const executiveSummary = useMemo(() => {
     const completed =
       Number(topSummary?.completedTRY || 0) +
-      Number(topSummary?.completedUSD || 0) * 32;
+      Number(topSummary?.completedUSD || 0) * usdRate;
 
     const invoiced =
       Number(topSummary?.invoicedTRY || 0) +
-      Number(topSummary?.invoicedUSD || 0) * 32;
+      Number(topSummary?.invoicedUSD || 0) * usdRate;
+
+    // 🔥 YENİ: PO toplamı (regionSummary'den çekiyoruz)
+    const totalPO = regionSummary.reduce((sum, r) => {
+      const poTRY =
+        Number(r.po_bekler_try || 0) +
+        Number(r.po_bekler_usd || 0) * usdRate +
+        Number(r.ok_try || 0) +
+        Number(r.ok_usd || 0) * usdRate;
+
+      return sum + poTRY;
+    }, 0);
 
     const ratio = completed > 0 ? (invoiced / completed) * 100 : 0;
 
@@ -4768,8 +4779,12 @@ function RegionAnalysis() {
       invoiced,
       ratio,
       notInvoiced: completed - invoiced,
+
+      // 🔥 YENİLER
+      poOpenedNotInvoiced: Math.max(totalPO - invoiced, 0),
+      noPO: Math.max(completed - totalPO, 0),
     };
-  }, [topSummary]);
+  }, [topSummary, regionSummary, usdRate]);
 
   if (loading) return <div className="loading">Yükleniyor...</div>;
   if (errorMessage) return <div className="loading">{errorMessage}</div>;
@@ -4823,6 +4838,16 @@ function RegionAnalysis() {
             value={executiveSummary.notInvoiced}
             isNegativeHighlight
           />
+          <Row
+            label="PO Açılmış Ama Faturalanmamış"
+            value={executiveSummary.poOpenedNotInvoiced}
+          />
+
+          <Row
+            label="PO Açılmamış İş"
+            value={executiveSummary.noPO}
+            isNegativeHighlight
+          />
         </div>
       </div>
 
@@ -4873,8 +4898,6 @@ function RegionAnalysis() {
                 </div>
 
                 <div style={{ background: "#f9fafb" }}>
-                  
-                
                   <Row label="Toplam TRY" value={item.total_try} />
                   <Row label="Toplam USD (TRY)" value={totalUSDTRY} />
                   <Row
