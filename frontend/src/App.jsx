@@ -4607,7 +4607,7 @@ function formatTRY(value) {
 }
 
 function RegionAnalysis() {
-  const [usdRate, setUsdRate] = useState(32); // fallback
+  const [usdRate, setUsdRate] = useState(45); // fallback
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -4634,13 +4634,17 @@ function RegionAnalysis() {
         const res = await fetch(
           "https://api.exchangerate.host/latest?base=USD&symbols=TRY",
         );
+
         const data = await res.json();
+        console.log("USD API DATA:", data);
 
         if (data?.rates?.TRY) {
           setUsdRate(data.rates.TRY);
+          console.log("USD RATE SET:", data.rates.TRY);
         }
       } catch (err) {
         console.error("USD RATE ERROR:", err);
+        setUsdRate(45); // 👈 fallback
       }
     };
 
