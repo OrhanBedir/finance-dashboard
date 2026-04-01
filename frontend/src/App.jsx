@@ -30,7 +30,6 @@ function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   );
 }
 
-
 const API_BASE = (
   import.meta.env.VITE_API_BASE || "http://localhost:5001"
 ).replace(/\/$/, "");
@@ -4809,11 +4808,11 @@ function RegionAnalysis() {
 
       <div
         style={{
-          display: "flex",
-          justifyContent: "center",
+          display: "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
           gap: "24px",
-          flexWrap: "wrap",
-          margin: "10px auto 30px auto",
+          maxWidth: "1200px",
+          margin: "20px auto",
         }}
       >
         {regionSummary.length === 0 ? (
@@ -4824,7 +4823,6 @@ function RegionAnalysis() {
               key={item.region}
               style={{
                 width: "100%",
-                maxWidth: "420px",
                 borderRadius: "16px",
                 overflow: "hidden",
                 boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
@@ -4846,7 +4844,11 @@ function RegionAnalysis() {
               </div>
 
               <div style={{ background: "#f9fafb" }}>
-                <Row label="Kayıt Sayısı" value={item.total_records} isPlainNumber />
+                <Row
+                  label="Kayıt Sayısı"
+                  value={item.total_records}
+                  isPlainNumber
+                />
                 <Row label="Toplam TRY" value={item.total_try} />
                 <Row label="Toplam USD" value={item.total_usd * 32} />
                 <Row label="PO Bekler TRY" value={item.po_bekler_try} />
