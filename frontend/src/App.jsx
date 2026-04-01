@@ -4873,11 +4873,8 @@ function RegionAnalysis() {
                 </div>
 
                 <div style={{ background: "#f9fafb" }}>
-                  <Row
-                    label="Kayıt Sayısı"
-                    value={item.total_records}
-                    isPlainNumber
-                  />
+                  
+                
                   <Row label="Toplam TRY" value={item.total_try} />
                   <Row label="Toplam USD (TRY)" value={totalUSDTRY} />
                   <Row
