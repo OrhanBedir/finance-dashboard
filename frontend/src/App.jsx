@@ -4753,43 +4753,15 @@ function RegionAnalysis() {
 
   return (
     <>
-      <h1>🗺️ Region Analysis</h1>
+      <h1 style={{ marginBottom: "10px" }}>🗺️ Region Analysis</h1>
 
       <div
         style={{
-          maxWidth: "600px",
-          margin: "20px auto",
-          borderRadius: "12px",
+          maxWidth: "520px",
+          margin: "10px auto 30px auto",
+          borderRadius: "16px",
           overflow: "hidden",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-        }}
-      >
-        <Row
-          label="Tamamlanan İş Tutarı"
-          value={executiveSummary?.completed || 0}
-        />
-        <Row
-          label="Kesilen Fatura Tutarı"
-          value={executiveSummary?.invoiced || 0}
-        />
-        <Row
-          label="Faturalanma Oranı"
-          value={executiveSummary?.ratio || 0}
-          isPercent
-        />
-        <Row
-          label="Faturalanmamış İş"
-          value={executiveSummary?.notInvoiced || 0}
-          isNegativeHighlight
-        />
-      </div>
-      <div
-        style={{
-          maxWidth: "500px",
-          margin: "20px auto",
-          borderRadius: "12px",
-          overflow: "hidden",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+          boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
           border: "1px solid #e5e7eb",
         }}
       >
@@ -4828,28 +4800,6 @@ function RegionAnalysis() {
             value={executiveSummary.notInvoiced}
             isNegativeHighlight
           />
-        </div>
-      </div>
-
-      <div className="cards" style={{ marginBottom: "20px" }}>
-        <div className="card ok statCard">
-          <div className="statLabel">Tamamlanan İş Tutarı</div>
-          <div className="statValue">
-            {formatMoneyByCurrency(topSummary.completedTRY, "TRY")}
-          </div>
-          <div style={{ marginTop: "6px", fontSize: "14px", opacity: 0.9 }}>
-            USD: {formatMoneyByCurrency(topSummary.completedUSD, "USD")}
-          </div>
-        </div>
-
-        <div className="card partial statCard">
-          <div className="statLabel">Kesilen Fatura Tutarı</div>
-          <div className="statValue">
-            {formatMoneyByCurrency(topSummary.invoicedTRY, "TRY")}
-          </div>
-          <div style={{ marginTop: "6px", fontSize: "14px", opacity: 0.9 }}>
-            USD: {formatMoneyByCurrency(topSummary.invoicedUSD, "USD")}
-          </div>
         </div>
       </div>
 
