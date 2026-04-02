@@ -4631,9 +4631,7 @@ function RegionAnalysis() {
   useEffect(() => {
     const fetchRate = async () => {
       try {
-        const res = await fetch(
-          "https://open.er-api.com/v6/latest/USD",
-        );
+        const res = await fetch("https://open.er-api.com/v6/latest/USD");
 
         const data = await res.json();
         console.log("USD API FULL:", JSON.stringify(data, null, 2));
@@ -4904,8 +4902,11 @@ function RegionAnalysis() {
                 </div>
 
                 <div style={{ background: "#f9fafb" }}>
-                  <Row label="Toplam TRY" value={item.total_try} />
-                  <Row label="Toplam USD (TRY)" value={totalUSDTRY} />
+                  <Row
+                    label="Toplam TRY (USD dahil)"
+                    value={(item.total_try || 0) + totalUSDTRY}
+                  />
+
                   <Row
                     label={
                       <>
