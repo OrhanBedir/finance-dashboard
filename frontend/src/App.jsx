@@ -4870,11 +4870,20 @@ function RegionAnalysis() {
           regionSummary.map((item) => {
             const totalUSDTRY = (item.total_usd || 0) * usdRate;
 
+            const completed = (item.total_try || 0) + totalUSDTRY;
+
+            const billed =
+              (item.billed_try || 0) + (item.billed_usd || 0) * usdRate;
+
+            const notBilled = completed - billed;
+
             const poBeklerTRY =
               (item.po_bekler_try || 0) + (item.po_bekler_usd || 0) * usdRate;
 
-            const grandTotal =
-              (item.total_try || 0) + totalUSDTRY + poBeklerTRY;
+            const poAcikAmaFaturaYok = billed;
+            const poAcilmamis = poBeklerTRY;
+
+            const oran = completed > 0 ? (billed / completed) * 100 : 0;
 
             return (
               <div
