@@ -4911,30 +4911,23 @@ function RegionAnalysis() {
                 </div>
 
                 <div style={{ background: "#f9fafb" }}>
-                  <Row
-                    label="Toplam TRY (USD dahil)"
-                    value={(item.total_try || 0) + totalUSDTRY}
-                  />
+                  <Row label="Tamamlanan İş Tutarı" value={completed} />
+
+                  <Row label="Kesilen Fatura Tutarı" value={billed} />
 
                   <Row
-                    label={
-                      <>
-                        PO Bekler (TRY)
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: "#9ca3af",
-                            marginLeft: "6px",
-                          }}
-                          title="USD → TRY çevrilmiş değer"
-                        >
-                          (kur: {usdRate?.toFixed(1)})
-                        </span>
-                      </>
-                    }
-                    value={poBeklerTRY}
+                    label="Faturalandırma Oranı"
+                    value={`%${oran.toFixed(1)}`}
                   />
-                  <Row label="GENEL TOPLAM" value={grandTotal} />
+
+                  <Row label="Faturalanmamış İş" value={notBilled} />
+
+                  <Row
+                    label="PO Açılmış Ama Faturalanmamış"
+                    value={poAcikAmaFaturaYok}
+                  />
+
+                  <Row label="PO Açılmamış İş" value={poAcilmamis} />
                 </div>
               </div>
             );
