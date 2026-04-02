@@ -4934,8 +4934,7 @@ function RegionAnalysis() {
                   <Row label="Faturalanmamış İş" value={notBilled} />
 
                   <Row
-                    label="PO Açılmış Ama Faturalanmamış"
-                    value={poAcikAmaFaturaYok}
+                    label="PO Açık / Faturasız" value={poAcikAmaFaturaYok}
                   />
 
                   <Row label="PO Açılmamış İş" value={poAcilmamis} />
