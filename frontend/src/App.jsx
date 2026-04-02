@@ -4696,28 +4696,24 @@ function RegionAnalysis() {
     };
 
     rows.forEach((row) => {
-      const billedQty = Number(row.billed_qty || 0);
-      const unitPrice = Number(row.unit_price || 0);
-      const billedAmount = billedQty * unitPrice;
-
-      if (currency === "USD") {
-        base[region].billed_usd += billedAmount;
-      } else {
-        base[region].billed_try += billedAmount;
-      }
-
       const region = getRegion(row.site_code);
       if (!base[region]) return;
 
       const currency = normalizeCurrency(row.currency);
       const amount = Number(row.total_done_amount || 0);
 
+      const billedQty = Number(row.billed_qty || 0);
+      const unitPrice = Number(row.unit_price || 0);
+      const billedAmount = billedQty * unitPrice;
+
       base[region].total_records += 1;
 
       if (currency === "USD") {
         base[region].total_usd += amount;
+        base[region].billed_usd += billedAmount;
       } else {
         base[region].total_try += amount;
+        base[region].billed_try += billedAmount;
       }
 
       if (row.status === "PO_BEKLER") {
@@ -4885,19 +4881,21 @@ function RegionAnalysis() {
         ) : (
           regionSummary.map((item) => {
             const totalUSDTRY = (item.total_usd || 0) * usdRate;
-
             const completed = (item.total_try || 0) + totalUSDTRY;
 
             const billed =
               (item.billed_try || 0) + (item.billed_usd || 0) * usdRate;
 
-            const notBilled = completed - billed;
+            const notBilled = Math.max(completed - billed, 0);
 
-            const poBeklerTRY =
-              (item.po_bekler_try || 0) + (item.po_bekler_usd || 0) * usdRate;
+            const poToplamTRY =
+              (item.po_bekler_try || 0) +
+              (item.po_bekler_usd || 0) * usdRate +
+              (item.ok_try || 0) +
+              (item.ok_usd || 0) * usdRate;
 
-            const poAcikAmaFaturaYok = billed;
-            const poAcilmamis = poBeklerTRY;
+            const poAcikAmaFaturaYok = Math.max(poToplamTRY - billed, 0);
+            const poAcilmamis = Math.max(completed - poToplamTRY, 0);
 
             const oran = completed > 0 ? (billed / completed) * 100 : 0;
 
