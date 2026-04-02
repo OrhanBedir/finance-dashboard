@@ -4888,14 +4888,13 @@ function RegionAnalysis() {
 
             const notBilled = Math.max(completed - billed, 0);
 
-            const poToplamTRY =
-              (item.po_bekler_try || 0) +
-              (item.po_bekler_usd || 0) * usdRate +
-              (item.ok_try || 0) +
-              (item.ok_usd || 0) * usdRate;
+            const okTRY = (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
 
-            const poAcikAmaFaturaYok = Math.max(poToplamTRY - billed, 0);
-            const poAcilmamis = Math.max(completed - poToplamTRY, 0);
+            const poBeklerTRY =
+              (item.po_bekler_try || 0) + (item.po_bekler_usd || 0) * usdRate;
+
+            const poAcikAmaFaturaYok = okTRY;
+            const poAcilmamis = poBeklerTRY;
 
             const oran = completed > 0 ? (billed / completed) * 100 : 0;
 
@@ -4933,9 +4932,7 @@ function RegionAnalysis() {
 
                   <Row label="Faturalanmamış İş" value={notBilled} />
 
-                  <Row
-                    label="PO Açık / Faturasız" value={poAcikAmaFaturaYok}
-                  />
+                  <Row label="PO Açık / Faturasız" value={poAcikAmaFaturaYok} />
 
                   <Row label="PO Açılmamış İş" value={poAcilmamis} />
                 </div>
