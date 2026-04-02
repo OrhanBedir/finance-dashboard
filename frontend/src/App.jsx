@@ -4666,6 +4666,8 @@ function RegionAnalysis() {
         po_bekler_usd: 0,
         ok_try: 0,
         ok_usd: 0,
+        billed_try: 0,
+        billed_usd: 0,
       },
       İzmir: {
         region: "İzmir",
@@ -4676,6 +4678,8 @@ function RegionAnalysis() {
         po_bekler_usd: 0,
         ok_try: 0,
         ok_usd: 0,
+        billed_try: 0,
+        billed_usd: 0,
       },
       Antalya: {
         region: "Antalya",
@@ -4686,10 +4690,22 @@ function RegionAnalysis() {
         po_bekler_usd: 0,
         ok_try: 0,
         ok_usd: 0,
+        billed_try: 0,
+        billed_usd: 0,
       },
     };
 
     rows.forEach((row) => {
+      const billedQty = Number(row.billed_qty || 0);
+      const unitPrice = Number(row.unit_price || 0);
+      const billedAmount = billedQty * unitPrice;
+
+      if (currency === "USD") {
+        base[region].billed_usd += billedAmount;
+      } else {
+        base[region].billed_try += billedAmount;
+      }
+
       const region = getRegion(row.site_code);
       if (!base[region]) return;
 
@@ -4915,10 +4931,7 @@ function RegionAnalysis() {
 
                   <Row label="Kesilen Fatura Tutarı" value={billed} />
 
-                  <Row
-                    label="Faturalandırma Oranı"
-                    value={`%${oran.toFixed(1)}`}
-                  />
+                  <Row label="Faturalandırma Oranı" value={oran} isPercent />
 
                   <Row label="Faturalanmamış İş" value={notBilled} />
 
