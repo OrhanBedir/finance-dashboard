@@ -4932,7 +4932,7 @@ function RegionAnalysis() {
 
                   <Row label="Faturalanmamış İş" value={notBilled} />
 
-                  <Row label="PO Açık / Faturasız" value={poAcikAmaFaturaYok} />
+                  
 
                   <Row label="PO Açılmamış İş" value={poAcilmamis} />
                 </div>
