@@ -4854,7 +4854,7 @@ function RegionAnalysis() {
       "Done Qty": row.done_qty ?? "",
       "Requested Qty": row.requested_qty ?? "",
       "Billed Qty": row.billed_qty ?? "",
-      Currency: row.currency || "",
+      
       
       
       Subcon: row.subcon_name || "",
