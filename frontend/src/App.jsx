@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import "./App.css";
+import * as XLSX from "xlsx";
 
 function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   return (
@@ -4844,61 +4845,34 @@ function RegionAnalysis() {
       return;
     }
 
-    const headers = [
-      "Status",
-      "Project Code",
-      "Site Code",
-      "Item Code",
-      "Item Description",
-      "Done Qty",
-      "Requested Qty",
-      "Billed Qty",
-      "Currency",
-      "Unit Price",
-      "Total Done Amount",
-      "Subcon",
-    ];
+    const excelRows = detailRows.map((row) => ({
+      Status: row.status || "",
+      "Project Code": row.project_code || "",
+      "Site Code": row.site_code || "",
+      "Item Code": row.item_code || "",
+      "Item Description": row.item_description || "",
+      "Done Qty": row.done_qty ?? "",
+      "Requested Qty": row.requested_qty ?? "",
+      "Billed Qty": row.billed_qty ?? "",
+      Currency: row.currency || "",
+      "Unit Price": row.unit_price ?? "",
+      "Total Done Amount": row.total_done_amount ?? "",
+      Subcon: row.subcon_name || "",
+    }));
 
-    const csvRows = detailRows.map((row) => [
-      row.status || "",
-      row.project_code || "",
-      row.site_code || "",
-      row.item_code || "",
-      row.item_description || "",
-      row.done_qty ?? "",
-      row.requested_qty ?? "",
-      row.billed_qty ?? "",
-      row.currency || "",
-      row.unit_price ?? "",
-      row.total_done_amount ?? "",
-      row.subcon_name || "",
-    ]);
+    const worksheet = XLSX.utils.json_to_sheet(excelRows);
+    const workbook = XLSX.utils.book_new();
 
-    const csvContent = [headers, ...csvRows]
-      .map((r) =>
-        r
-          .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
-          .join(","),
-      )
-      .join("\n");
-
-    const blob = new Blob(["\uFEFF" + csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
-
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Detay");
 
     const safeTitle = (detailTitle || "region-detail")
       .replace(/[^\w\s-]/g, "")
       .replace(/\s+/g, "_");
 
-    a.download = `${safeTitle}_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
+    XLSX.writeFile(
+      workbook,
+      `${safeTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
   };
 
   if (loading) return <div className="loading">Yükleniyor...</div>;
