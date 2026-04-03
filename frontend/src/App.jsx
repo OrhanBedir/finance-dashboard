@@ -896,6 +896,10 @@ function DailyEntry() {
     subcon_name: "",
     onair_date: "",
     note: "",
+
+    qc_durum: "NOK",
+    kabul_durum: "NOK",
+    kabul_not: "",
   };
 
   const [form, setForm] = useState(initialForm);
@@ -1177,6 +1181,9 @@ function DailyEntry() {
       subcon_name: row.subcon_name || "",
       onair_date: row.onair_date ? String(row.onair_date).slice(0, 10) : "",
       note: row.note || "",
+      qc_durum: row.qc_durum || "NOK",
+      kabul_durum: row.kabul_durum || "NOK",
+      kabul_not: row.kabul_not || "",
     });
 
     setItemCodeSearch(row.item_code || "");
@@ -1242,6 +1249,9 @@ function DailyEntry() {
         subcon_name: form.subcon_name,
         onair_date: form.onair_date || null,
         note: form.note,
+        qc_durum: form.qc_durum,
+        kabul_durum: form.kabul_durum,
+        kabul_not: form.kabul_not,
       };
 
       if (editingId) {
@@ -1595,6 +1605,41 @@ function DailyEntry() {
               </select>
             </div>
 
+            <div className="formGroup">
+              <label>QC Durum</label>
+              <select
+                name="qc_durum"
+                value={form.qc_durum}
+                onChange={handleChange}
+              >
+                <option value="OK">OK</option>
+                <option value="NOK">NOK</option>
+              </select>
+            </div>
+
+            <div className="formGroup">
+              <label>Kabul Durum</label>
+              <select
+                name="kabul_durum"
+                value={form.kabul_durum}
+                onChange={handleChange}
+              >
+                <option value="OK">OK</option>
+                <option value="NOK">NOK</option>
+              </select>
+            </div>
+
+            <div className="formGroup formGroupWide">
+              <label>Kabul Not</label>
+              <textarea
+                name="kabul_not"
+                value={form.kabul_not}
+                onChange={handleChange}
+                placeholder="Kabul ile ilgili not"
+                rows={3}
+              />
+            </div>
+
             <div className="formGroup formGroupWide">
               <label>Not</label>
               <textarea
@@ -1711,6 +1756,9 @@ function DailyEntry() {
               <th>Taşeron</th>
               <th>Not</th>
               <th>İşlem</th>
+              <th>QC Durum</th>
+              <th>Kabul Durum</th>
+              <th>Kabul Not</th>
             </tr>
           </thead>
           <tbody>
@@ -1740,6 +1788,9 @@ function DailyEntry() {
                     </td>
                     <td>{row.subcon_name}</td>
                     <td>{row.note}</td>
+                    <td>{row.qc_durum || "-"}</td>
+                    <td>{row.kabul_durum || "-"}</td>
+                    <td>{row.kabul_not || "-"}</td>
                     <td>
                       <div
                         style={{
@@ -1798,6 +1849,9 @@ function DailyEntry() {
               <th>Status</th>
               <th>PO No</th>
               <th>Taşeron</th>
+              <th>QC Durum</th>
+              <th>Kabul Durum</th>
+              <th>Kabul Not</th>
             </tr>
           </thead>
           <tbody>
@@ -1836,6 +1890,9 @@ function DailyEntry() {
                     </td>
                     <td>{row.po_no || "-"}</td>
                     <td>{row.subcon_name}</td>
+                    <td>{row.qc_durum || "-"}</td>
+                    <td>{row.kabul_durum || "-"}</td>
+                    <td>{row.kabul_not || "-"}</td>
                   </tr>
                 );
               })
@@ -4854,9 +4911,7 @@ function RegionAnalysis() {
       "Done Qty": row.done_qty ?? "",
       "Requested Qty": row.requested_qty ?? "",
       "Billed Qty": row.billed_qty ?? "",
-      
-      
-      
+
       Subcon: row.subcon_name || "",
     }));
 
