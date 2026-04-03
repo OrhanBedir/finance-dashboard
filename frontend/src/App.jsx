@@ -4904,6 +4904,9 @@ function RegionAnalysis() {
 
     const excelRows = detailRows.map((row) => ({
       Status: row.status || "",
+      "QC Durum": row.qc_durum || "NOK",
+      "Kabul Durum": row.kabul_durum || "NOK",
+      "Kabul Not": row.kabul_not || "",
       "Project Code": row.project_code || "",
       "Site Code": row.site_code || "",
       "Item Code": row.item_code || "",
@@ -4911,7 +4914,6 @@ function RegionAnalysis() {
       "Done Qty": row.done_qty ?? "",
       "Requested Qty": row.requested_qty ?? "",
       "Billed Qty": row.billed_qty ?? "",
-
       Subcon: row.subcon_name || "",
     }));
 
