@@ -4855,8 +4855,8 @@ function RegionAnalysis() {
       "Requested Qty": row.requested_qty ?? "",
       "Billed Qty": row.billed_qty ?? "",
       Currency: row.currency || "",
-      "Unit Price": row.unit_price ?? "",
-      "Total Done Amount": row.total_done_amount ?? "",
+      
+      
       Subcon: row.subcon_name || "",
     }));
 
