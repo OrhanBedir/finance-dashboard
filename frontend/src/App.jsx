@@ -4838,6 +4838,69 @@ function RegionAnalysis() {
     };
   }, [topSummary, regionSummary, usdRate]);
 
+  const exportDetailRowsToExcel = () => {
+    if (!detailRows.length) {
+      alert("İndirilecek kayıt bulunamadı");
+      return;
+    }
+
+    const headers = [
+      "Status",
+      "Project Code",
+      "Site Code",
+      "Item Code",
+      "Item Description",
+      "Done Qty",
+      "Requested Qty",
+      "Billed Qty",
+      "Currency",
+      "Unit Price",
+      "Total Done Amount",
+      "Subcon",
+    ];
+
+    const csvRows = detailRows.map((row) => [
+      row.status || "",
+      row.project_code || "",
+      row.site_code || "",
+      row.item_code || "",
+      row.item_description || "",
+      row.done_qty ?? "",
+      row.requested_qty ?? "",
+      row.billed_qty ?? "",
+      row.currency || "",
+      row.unit_price ?? "",
+      row.total_done_amount ?? "",
+      row.subcon_name || "",
+    ]);
+
+    const csvContent = [headers, ...csvRows]
+      .map((r) =>
+        r
+          .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
+          .join(","),
+      )
+      .join("\n");
+
+    const blob = new Blob(["\uFEFF" + csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+
+    const safeTitle = (detailTitle || "region-detail")
+      .replace(/[^\w\s-]/g, "")
+      .replace(/\s+/g, "_");
+
+    a.download = `${safeTitle}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
   if (loading) return <div className="loading">Yükleniyor...</div>;
   if (errorMessage) return <div className="loading">{errorMessage}</div>;
 
@@ -5029,13 +5092,23 @@ function RegionAnalysis() {
                 {detailTitle}
               </h3>
 
-              <button
-                type="button"
-                className="tab"
-                onClick={() => setDetailModalOpen(false)}
-              >
-                Kapat
-              </button>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={exportDetailRowsToExcel}
+                >
+                  Excel İndir
+                </button>
+
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={() => setDetailModalOpen(false)}
+                >
+                  Kapat
+                </button>
+              </div>
             </div>
 
             <div className="tableWrap">
