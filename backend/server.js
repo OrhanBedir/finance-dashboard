@@ -2939,8 +2939,11 @@ app.post("/master/add", async (req, res) => {
         subcon_name,
         onair_date,
         note
+        qc_durum,
+        kabul_durum,
+        kabul_not,
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       RETURNING *
       `,
       [
@@ -2952,7 +2955,10 @@ app.post("/master/add", async (req, res) => {
         Number(m.done_qty || 0),
         m.subcon_name,
         m.onair_date || null,
-        m.note,
+        m.note || null,
+        payload.qc_durum || "NOK",
+        payload.kabul_durum || "NOK",
+        payload.kabul_not || null,
       ],
     );
 
