@@ -4607,10 +4607,46 @@ function formatTRY(value) {
 }
 
 function RegionAnalysis() {
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [detailTitle, setDetailTitle] = useState("");
+  const [detailRows, setDetailRows] = useState([]);
   const [usdRate, setUsdRate] = useState(45); // fallback
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+
+  const openRegionDetail = (regionName, type) => {
+    const filtered = rows.filter((row) => {
+      const sameRegion = getRegion(row.site_code) === regionName;
+      if (!sameRegion) return false;
+
+      const currency = normalizeCurrency(row.currency);
+      const unitPrice = Number(row.unit_price || 0);
+      const doneQty = Number(row.done_qty || 0);
+      const billedQty = Number(row.billed_qty || 0);
+
+      const completedAmount = doneQty * unitPrice;
+      const billedAmount = billedQty * unitPrice;
+
+      if (type === "NOT_INVOICED") {
+        return completedAmount > billedAmount;
+      }
+
+      if (type === "PO_BEKLER") {
+        return String(row.status || "").toUpperCase() === "PO_BEKLER";
+      }
+
+      return false;
+    });
+
+    setDetailTitle(
+      type === "NOT_INVOICED"
+        ? `${regionName} - Faturalanmamış İşler`
+        : `${regionName} - PO Açılmamış İşler`,
+    );
+    setDetailRows(filtered);
+    setDetailModalOpen(true);
+  };
 
   const loadRegionData = useCallback(async () => {
     try {
@@ -4930,17 +4966,144 @@ function RegionAnalysis() {
 
                   <Row label="Faturalandırma Oranı" value={oran} isPercent />
 
-                  <Row label="Faturalanmamış İş" value={notBilled} />
+                  <div
+                    onClick={() =>
+                      openRegionDetail(item.region, "NOT_INVOICED")
+                    }
+                    style={{ cursor: "pointer" }}
+                  >
+                    <Row label="Faturalanmamış İş" value={notBilled} />
+                  </div>
 
-                  
-
-                  <Row label="PO Açılmamış İş" value={poAcilmamis} />
+                  <div
+                    onClick={() => openRegionDetail(item.region, "PO_BEKLER")}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <Row label="PO Açılmamış İş" value={poAcilmamis} />
+                  </div>
                 </div>
               </div>
             );
           })
         )}
       </div>
+
+      {detailModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={() => setDetailModalOpen(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1400px",
+              maxHeight: "85vh",
+              overflow: "auto",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "18px",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <h3 className="listTitle" style={{ margin: 0 }}>
+                {detailTitle}
+              </h3>
+
+              <button
+                type="button"
+                className="tab"
+                onClick={() => setDetailModalOpen(false)}
+              >
+                Kapat
+              </button>
+            </div>
+
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Project Code</th>
+                    <th>Site Code</th>
+                    <th>Item Code</th>
+                    <th>Item Description</th>
+                    <th>Done Qty</th>
+                    <th>Requested Qty</th>
+                    <th>Billed Qty</th>
+                    <th>Currency</th>
+                    <th>Unit Price</th>
+                    <th>Total Done Amount</th>
+                    <th>Subcon</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailRows.length === 0 ? (
+                    <EmptyRow colSpan={12} text="Kayıt bulunamadı" />
+                  ) : (
+                    detailRows.map((row, index) => (
+                      <tr
+                        key={
+                          row.id ??
+                          `${row.project_code}-${row.site_code}-${row.item_code}-${index}`
+                        }
+                      >
+                        <td>
+                          <StatusBadge status={row.status} />
+                        </td>
+                        <td>{row.project_code || "-"}</td>
+                        <td>{row.site_code || "-"}</td>
+                        <td>{row.item_code || "-"}</td>
+                        <td>{row.item_description || "-"}</td>
+                        <td>{row.done_qty ?? "-"}</td>
+                        <td>{row.requested_qty ?? "-"}</td>
+                        <td>{row.billed_qty ?? "-"}</td>
+                        <td>{row.currency || "-"}</td>
+                        <td>
+                          {Number(row.unit_price || 0) === 0
+                            ? "-"
+                            : formatMoneyByCurrency(
+                                row.unit_price,
+                                row.currency,
+                              )}
+                        </td>
+                        <td>
+                          {Number(row.total_done_amount || 0) === 0
+                            ? "-"
+                            : formatMoneyByCurrency(
+                                row.total_done_amount,
+                                row.currency,
+                              )}
+                        </td>
+                        <td>{row.subcon_name || "-"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="tableWrap">
         <table>
