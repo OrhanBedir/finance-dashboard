@@ -1641,12 +1641,12 @@ function DailyEntry() {
             </div>
 
             <div className="formGroup formGroupWide">
-              <label>Not</label>
+              <label>RF Not</label>
               <textarea
                 name="note"
                 value={form.note}
                 onChange={handleChange}
-                placeholder="Ek not"
+                placeholder="RF ile ilgili not giriniz"
                 rows={3}
               />
             </div>
