@@ -1065,6 +1065,34 @@ function DailyEntry() {
     ]);
   };
 
+  const handleExportAllEntriesExcel = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/export/site-entry-excel-all`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("EXPORT ALL ERROR:", errorText);
+        alert("Tüm işler Excel indirilemedi");
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `site_entries_all_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("EXPORT ALL SITE ENTRIES ERROR:", err);
+      alert("Tüm işler Excel indirilemedi");
+    }
+  };
+
   useEffect(() => {
     loadRows();
     loadProjectCodes();
@@ -1371,16 +1399,13 @@ function DailyEntry() {
             HW PO Yükle
           </button>
 
+          
           <button
             type="button"
-            className={showCompletedImport ? "tab activeTab" : "tab"}
-            onClick={() => {
-              setShowCompletedImport((prev) => !prev);
-              if (showBoqUpload) setShowBoqUpload(false);
-              if (showHwPoUpload) setShowHwPoUpload(false);
-            }}
+            className="tab"
+            onClick={handleExportAllEntriesExcel}
           >
-            Geçmiş İşleri Yükle
+            Tüm İşleri Excel İndir
           </button>
         </div>
       </div>

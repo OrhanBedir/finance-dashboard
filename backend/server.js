@@ -2922,6 +2922,90 @@ app.post(
 );
 
 /* ================== MASTER ADD ================== */
+app.get("/export/site-entry-excel-all", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        site_type,
+        project_code,
+        site_code,
+        item_code,
+        item_description,
+        done_qty,
+        subcon_name,
+        onair_date,
+        note,
+        qc_durum,
+        kabul_durum,
+        kabul_not
+      FROM master_works
+      ORDER BY id DESC
+    `);
+
+    const rows = result.rows || [];
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Tum_Isler");
+
+    sheet.columns = [
+      { header: "Saha Türü", key: "site_type", width: 14 },
+      { header: "Project Code", key: "project_code", width: 16 },
+      { header: "Site Code", key: "site_code", width: 22 },
+      { header: "Item Code", key: "item_code", width: 16 },
+      { header: "Item Description", key: "item_description", width: 45 },
+      { header: "Done Qty", key: "done_qty", width: 12 },
+      { header: "Subcon Name", key: "subcon_name", width: 18 },
+      { header: "OnAir Date", key: "onair_date", width: 14 },
+      { header: "QC Durum", key: "qc_durum", width: 12 },
+      { header: "Kabul Durum", key: "kabul_durum", width: 14 },
+      { header: "Kabul Not", key: "kabul_not", width: 35 },
+      { header: "RF Not", key: "note", width: 35 },
+    ];
+
+    rows.forEach((row) => {
+      sheet.addRow({
+        site_type: row.site_type || "",
+        project_code: row.project_code || "",
+        site_code: row.site_code || "",
+        item_code: row.item_code || "",
+        item_description: row.item_description || "",
+        done_qty: row.done_qty ?? "",
+        subcon_name: row.subcon_name || "",
+        onair_date: row.onair_date
+          ? new Date(row.onair_date).toLocaleDateString("tr-TR")
+          : "",
+        qc_durum: row.qc_durum || "",
+        kabul_durum: row.kabul_durum || "",
+        kabul_not: row.kabul_not || "",
+        note: row.note || "",
+      });
+    });
+
+    sheet.getRow(1).font = { bold: true };
+    sheet.views = [{ state: "frozen", ySplit: 1 }];
+    sheet.autoFilter = {
+      from: "A1",
+      to: "L1",
+    };
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=site_entries_all_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error("EXPORT ALL SITE ENTRIES ERROR:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+
 app.post("/master/add", async (req, res) => {
   try {
     const m = req.body;
