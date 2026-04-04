@@ -5667,6 +5667,7 @@ function RegionAnalysis() {
 function App() {
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
+  const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
 
   const [advanceForm, setAdvanceForm] = useState({
     supplier_name: "",
