@@ -241,8 +241,14 @@ async function buildUpcomingCollectionsData() {
 
     let effectiveDueDate = null;
 
-    // Önce invoice_date + terms ile hesapla
-    if (row.invoice_date) {
+    // Önce payment tablosundaki due_date'i kullan
+    if (row.due_date) {
+      effectiveDueDate = new Date(row.due_date);
+      effectiveDueDate.setHours(0, 0, 0, 0);
+    }
+
+    // due_date yoksa invoice_date + terms ile hesapla
+    if (!effectiveDueDate && row.invoice_date) {
       const invoiceDateObj = new Date(row.invoice_date);
       invoiceDateObj.setHours(0, 0, 0, 0);
 
@@ -3004,7 +3010,6 @@ app.get("/export/site-entry-excel-all", async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
-
 
 app.post("/master/add", async (req, res) => {
   try {
