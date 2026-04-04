@@ -4780,8 +4780,15 @@ function FinanceDashboard({
                         supplier_name: value,
                       }));
 
-                      filterSupplierSuggestions(value);
-                      setShowSupplierSuggestions(true);
+                      const filtered = (manualInvoiceRows || [])
+                        .map((x) => x.tedarikci)
+                        .filter(Boolean)
+                        .filter((v, i, arr) => arr.indexOf(v) === i)
+                        .filter((name) =>
+                          name.toLowerCase().includes(value.toLowerCase()),
+                        );
+
+                      setSupplierSuggestions(value ? filtered.slice(0, 8) : []);
                     }}
                     onFocus={() => {
                       filterSupplierSuggestions(advanceForm.supplier_name);
@@ -4789,6 +4796,43 @@ function FinanceDashboard({
                     }}
                     placeholder="Tedarikçi adı"
                   />
+
+                  {supplierSuggestions.length > 0 && (
+                    <div
+                      style={{
+                        border: "1px solid #ddd",
+                        borderRadius: "10px",
+                        marginTop: "6px",
+                        background: "#fff",
+                        maxHeight: "180px",
+                        overflowY: "auto",
+                        boxShadow: "0 8px 20px rgba(0,0,0,0.08)",
+                      }}
+                    >
+                      {supplierSuggestions.map((name, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            padding: "10px 12px",
+                            cursor: "pointer",
+                            borderBottom:
+                              i !== supplierSuggestions.length - 1
+                                ? "1px solid #f1f1f1"
+                                : "none",
+                          }}
+                          onClick={() => {
+                            setAdvanceForm((prev) => ({
+                              ...prev,
+                              supplier_name: name,
+                            }));
+                            setSupplierSuggestions([]);
+                          }}
+                        >
+                          {name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {showSupplierSuggestions &&
                     supplierSuggestions.length > 0 && (
@@ -5621,6 +5665,7 @@ function RegionAnalysis() {
 }
 
 function App() {
+  const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
 
   const [advanceForm, setAdvanceForm] = useState({
@@ -5704,6 +5749,7 @@ function App() {
       alert(data.message || "Avans başarıyla işlendi");
 
       setAdvanceModalOpen(false);
+      setSupplierSuggestions([]);
       setAdvanceForm({
         supplier_name: "",
         amount: "",
@@ -5715,6 +5761,7 @@ function App() {
       });
       setSupplierSuggestions([]);
       setShowSupplierSuggestions(false);
+      
 
       await loadSupplierAdvances();
     } catch (err) {
