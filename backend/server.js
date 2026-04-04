@@ -1689,6 +1689,176 @@ app.get("/finance/salary/export-excel", async (req, res) => {
   }
 });
 
+app.get("/finance/supplier-advances", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        id,
+        supplier_name,
+        amount,
+        project_code,
+        region,
+        created_by,
+        payment_date,
+        note,
+        created_at
+      FROM supplier_advances
+      ORDER BY created_at DESC, id DESC
+    `);
+
+    const totalResult = await pool.query(`
+      SELECT COALESCE(SUM(amount), 0) AS total_advance
+      FROM supplier_advances
+    `);
+
+    res.json({
+      ok: true,
+      rows: result.rows,
+      total_advance: Number(totalResult.rows[0]?.total_advance || 0),
+    });
+  } catch (err) {
+    console.error("SUPPLIER ADVANCES ERROR:", err);
+    res.status(500).json({
+      ok: false,
+      error: "Taşeron avansları alınırken hata oluştu",
+      detail: err.message,
+    });
+  }
+});
+
+app.post("/finance/invoices/apply-advance", async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const {
+      supplier_name,
+      amount,
+      payment_date,
+      note,
+      project_code,
+      region,
+      created_by,
+    } = req.body;
+
+    const advanceAmount = Number(amount || 0);
+
+    if (!supplier_name || advanceAmount <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Tedarikçi ve geçerli tutar zorunludur",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // Açık faturaları en eski tarihten başla
+    const invoiceResult = await client.query(
+      `
+      SELECT
+        id,
+        supplier_name,
+        invoice_no,
+        invoice_date,
+        total_amount,
+        paid_amount,
+        remaining_amount,
+        status
+      FROM invoice_entries
+      WHERE TRIM(UPPER(COALESCE(supplier_name, ''))) = TRIM(UPPER($1))
+        AND COALESCE(remaining_amount, 0) > 0
+      ORDER BY invoice_date ASC, id ASC
+      `,
+      [supplier_name],
+    );
+
+    let remainingAdvance = advanceAmount;
+    const appliedRows = [];
+
+    for (const invoice of invoiceResult.rows) {
+      if (remainingAdvance <= 0) break;
+
+      const currentRemaining = Number(invoice.remaining_amount || 0);
+      if (currentRemaining <= 0) continue;
+
+      const applyAmount = Math.min(remainingAdvance, currentRemaining);
+
+      const newPaid = Number(invoice.paid_amount || 0) + applyAmount;
+      const newRemaining = currentRemaining - applyAmount;
+      const newStatus = newRemaining <= 0 ? "Ödendi" : "Kısmi Ödendi";
+
+      await client.query(
+        `
+        UPDATE invoice_entries
+        SET
+          paid_amount = $1,
+          remaining_amount = $2,
+          status = $3
+        WHERE id = $4
+        `,
+        [newPaid, newRemaining, newStatus, invoice.id],
+      );
+
+      appliedRows.push({
+        invoice_id: invoice.id,
+        invoice_no: invoice.invoice_no,
+        applied_amount: applyAmount,
+      });
+
+      remainingAdvance -= applyAmount;
+    }
+
+    // Artan olursa supplier_advances'a yaz
+    if (remainingAdvance > 0) {
+      await client.query(
+        `
+        INSERT INTO supplier_advances (
+          supplier_name,
+          amount,
+          project_code,
+          region,
+          created_by,
+          payment_date,
+          note
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `,
+        [
+          supplier_name,
+          remainingAdvance,
+          project_code || null,
+          region || null,
+          created_by || null,
+          payment_date || null,
+          note || null,
+        ],
+      );
+    }
+
+    await client.query("COMMIT");
+
+    res.json({
+      ok: true,
+      applied_rows: appliedRows,
+      unapplied_advance: remainingAdvance,
+      message:
+        remainingAdvance > 0
+          ? "Ödeme faturalara dağıtıldı, kalan tutar avans olarak kaydedildi."
+          : "Ödeme faturalara başarıyla dağıtıldı.",
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("APPLY ADVANCE ERROR:", err);
+    res.status(500).json({
+      ok: false,
+      error: "Avans uygulanırken hata oluştu",
+      detail: err.message,
+    });
+  } finally {
+    client.release();
+  }
+});
+
+
 app.post("/finance/salary/add", async (req, res) => {
   try {
     const {

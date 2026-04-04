@@ -1399,7 +1399,6 @@ function DailyEntry() {
             HW PO Yükle
           </button>
 
-          
           <button
             type="button"
             className="tab"
@@ -2385,7 +2384,18 @@ function formatDonemLabel(value) {
   return `${months[Number(month) - 1]} ${year}`;
 }
 
-function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
+function FinanceDashboard({
+  financeToken,
+  financeUserEmail,
+  onFinanceLogout,
+  advanceModalOpen,
+  setAdvanceModalOpen,
+  advanceForm,
+  setAdvanceForm,
+  handleApplyAdvance,
+  supplierAdvances,
+  supplierAdvanceTotal,
+}) {
   function parseDateTR(dateStr) {
     const [day, month, year] = dateStr.split(".");
     return new Date(`${year}-${month}-${day}`);
@@ -3828,8 +3838,20 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
 
               <div
                 className="entryActions"
-                style={{ justifyContent: "flex-end" }}
+                style={{
+                  justifyContent: "flex-end",
+                  display: "flex",
+                  gap: "10px",
+                }}
               >
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={() => setAdvanceModalOpen(true)}
+                >
+                  Avans Gir
+                </button>
+
                 <button type="submit" className="saveButton">
                   Faturayı Kaydet
                 </button>
@@ -4663,6 +4685,218 @@ function FinanceDashboard({ financeToken, financeUserEmail, onFinanceLogout }) {
           </div>
         </div>
       )}
+      {advanceModalOpen && (
+        <div
+          onClick={() => setAdvanceModalOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: "760px",
+              background: "#fff",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.18)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "18px",
+              }}
+            >
+              <h2 style={{ margin: 0 }}>💸 Avans Gir</h2>
+              <button
+                type="button"
+                className="tab"
+                onClick={() => setAdvanceModalOpen(false)}
+              >
+                Kapat
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "14px",
+              }}
+            >
+              <div style={{ gridColumn: "1 / span 2" }}>
+                <label style={{ fontWeight: 600 }}>Tedarikçi</label>
+                <input
+                  type="text"
+                  value={advanceForm.supplier_name}
+                  onChange={(e) =>
+                    setAdvanceForm((prev) => ({
+                      ...prev,
+                      supplier_name: e.target.value,
+                    }))
+                  }
+                  placeholder="Tedarikçi adı"
+                />
+              </div>
+
+              <div>
+                <label style={{ fontWeight: 600 }}>Tutar (₺)</label>
+                <input
+                  type="number"
+                  value={advanceForm.amount}
+                  onChange={(e) =>
+                    setAdvanceForm((prev) => ({
+                      ...prev,
+                      amount: e.target.value,
+                    }))
+                  }
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <label style={{ fontWeight: 600 }}>Ödeme Tarihi</label>
+                <input
+                  type="date"
+                  value={advanceForm.payment_date}
+                  onChange={(e) =>
+                    setAdvanceForm((prev) => ({
+                      ...prev,
+                      payment_date: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div>
+                <label style={{ fontWeight: 600 }}>Project Code</label>
+                <input
+                  type="text"
+                  value={advanceForm.project_code}
+                  onChange={(e) =>
+                    setAdvanceForm((prev) => ({
+                      ...prev,
+                      project_code: e.target.value,
+                    }))
+                  }
+                  placeholder="56A0QEF"
+                />
+              </div>
+
+              <div>
+                <label style={{ fontWeight: 600 }}>Bölge</label>
+                <input
+                  type="text"
+                  value={advanceForm.region}
+                  onChange={(e) =>
+                    setAdvanceForm((prev) => ({
+                      ...prev,
+                      region: e.target.value,
+                    }))
+                  }
+                  placeholder="ANKARA / İZMİR / ANTALYA"
+                />
+              </div>
+
+              <div style={{ gridColumn: "1 / span 2" }}>
+                <label style={{ fontWeight: 600 }}>Not</label>
+                <textarea
+                  value={advanceForm.note}
+                  onChange={(e) =>
+                    setAdvanceForm((prev) => ({
+                      ...prev,
+                      note: e.target.value,
+                    }))
+                  }
+                  placeholder="Açıklama"
+                  rows={4}
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: "20px",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div
+                style={{
+                  background: "#fee2e2",
+                  color: "#991b1b",
+                  padding: "12px 16px",
+                  borderRadius: "14px",
+                  fontWeight: 700,
+                }}
+              >
+                Toplam Avans:{" "}
+                {formatMoneyByCurrency(supplierAdvanceTotal || 0, "TRY")}
+              </div>
+
+              <button
+                type="button"
+                className="saveButton"
+                onClick={handleApplyAdvance}
+              >
+                Avansı Kaydet
+              </button>
+            </div>
+
+            {supplierAdvances?.length > 0 && (
+              <div style={{ marginTop: "22px" }}>
+                <h3 style={{ marginBottom: "10px" }}>
+                  Taşeron Avans Hareketleri
+                </h3>
+                <div className="tableWrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Tedarikçi</th>
+                        <th>Tutar</th>
+                        <th>Project Code</th>
+                        <th>Bölge</th>
+                        <th>Kullanıcı</th>
+                        <th>Tarih</th>
+                        <th>Not</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {supplierAdvances.map((row, index) => (
+                        <tr key={row.id || index}>
+                          <td>{row.supplier_name || "-"}</td>
+                          <td>
+                            {formatMoneyByCurrency(row.amount || 0, "TRY")}
+                          </td>
+                          <td>{row.project_code || "-"}</td>
+                          <td>{row.region || "-"}</td>
+                          <td>{row.created_by || "-"}</td>
+                          <td>{row.payment_date || "-"}</td>
+                          <td>{row.note || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -5302,6 +5536,105 @@ function RegionAnalysis() {
 }
 
 function App() {
+  const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
+
+  const [advanceForm, setAdvanceForm] = useState({
+    supplier_name: "",
+    amount: "",
+    payment_date: new Date().toISOString().slice(0, 10),
+    note: "",
+    project_code: "",
+    region: "",
+    created_by: "Orhan",
+  });
+
+  const [supplierAdvances, setSupplierAdvances] = useState([]);
+  const [supplierAdvanceTotal, setSupplierAdvanceTotal] = useState(0);
+
+  const [page, setPage] = useState("finance");
+
+  const [financeToken, setFinanceToken] = useState(
+    localStorage.getItem("finance_token") || "",
+  );
+
+  const [financeUserEmail, setFinanceUserEmail] = useState(
+    localStorage.getItem("finance_user_email") || "",
+  );
+
+  const [financeLoginEmail, setFinanceLoginEmail] = useState("");
+  const [financeLoginPassword, setFinanceLoginPassword] = useState("");
+  const [financeLoginError, setFinanceLoginError] = useState("");
+  const [financeLoginLoading, setFinanceLoginLoading] = useState(false);
+
+  const loadSupplierAdvances = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/finance/supplier-advances`);
+      const data = await response.json();
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Avanslar alınamadı");
+      }
+
+      setSupplierAdvances(data.rows || []);
+      setSupplierAdvanceTotal(Number(data.total_advance || 0));
+    } catch (err) {
+      console.error("LOAD ADVANCES ERROR:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadSupplierAdvances();
+  }, []);
+
+  const handleApplyAdvance = async () => {
+    try {
+      const payload = {
+        ...advanceForm,
+        amount: Number(advanceForm.amount || 0),
+      };
+
+      if (!payload.supplier_name || payload.amount <= 0) {
+        alert("Tedarikçi ve geçerli tutar zorunlu");
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE}/finance/invoices/apply-advance`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Avans uygulanamadı");
+      }
+
+      alert(data.message || "Avans başarıyla işlendi");
+
+      setAdvanceModalOpen(false);
+      setAdvanceForm({
+        supplier_name: "",
+        amount: "",
+        payment_date: new Date().toISOString().slice(0, 10),
+        note: "",
+        project_code: "",
+        region: "",
+        created_by: "Orhan",
+      });
+
+      await loadSupplierAdvances();
+    } catch (err) {
+      console.error("APPLY ADVANCE FRONT ERROR:", err);
+      alert(err.message || "Avans uygulanamadı");
+    }
+  };
+
   const handleFinanceLogin = async (e) => {
     e.preventDefault();
 
@@ -5341,21 +5674,6 @@ function App() {
       setFinanceLoginLoading(false);
     }
   };
-
-  const [page, setPage] = useState("finance");
-
-  const [financeToken, setFinanceToken] = useState(
-    localStorage.getItem("finance_token") || "",
-  );
-
-  const [financeUserEmail, setFinanceUserEmail] = useState(
-    localStorage.getItem("finance_user_email") || "",
-  );
-
-  const [financeLoginEmail, setFinanceLoginEmail] = useState("");
-  const [financeLoginPassword, setFinanceLoginPassword] = useState("");
-  const [financeLoginError, setFinanceLoginError] = useState("");
-  const [financeLoginLoading, setFinanceLoginLoading] = useState(false);
 
   const handleFinanceLogout = () => {
     localStorage.removeItem("finance_token");
@@ -5413,6 +5731,13 @@ function App() {
             financeToken={financeToken}
             financeUserEmail={financeUserEmail}
             onFinanceLogout={handleFinanceLogout}
+            advanceModalOpen={advanceModalOpen}
+            setAdvanceModalOpen={setAdvanceModalOpen}
+            advanceForm={advanceForm}
+            setAdvanceForm={setAdvanceForm}
+            handleApplyAdvance={handleApplyAdvance}
+            supplierAdvances={supplierAdvances}
+            supplierAdvanceTotal={supplierAdvanceTotal}
           />
         ) : (
           <div
@@ -5458,6 +5783,7 @@ function App() {
             </form>
           </div>
         ))}
+
       {page === "executive" && <ExecutiveDashboard />}
       {page === "region" && <RegionAnalysis />}
       {page === "entry" && <DailyEntry />}
