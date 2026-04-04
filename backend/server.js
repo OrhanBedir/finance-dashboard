@@ -1751,22 +1751,20 @@ app.post("/finance/invoices/apply-advance", async (req, res) => {
 
     await client.query("BEGIN");
 
-    // Açık faturaları en eski tarihten başla
     const invoiceResult = await client.query(
       `
       SELECT
         id,
-        supplier_name,
-        invoice_no,
-        invoice_date,
-        total_amount,
-        paid_amount,
-        remaining_amount,
-        status
+        tedarikci,
+        fatura_no,
+        fatura_tarihi,
+        toplam_tutar,
+        odenen_tutar,
+        kalan_borc
       FROM invoice_entries
-      WHERE TRIM(UPPER(COALESCE(supplier_name, ''))) = TRIM(UPPER($1))
-        AND COALESCE(remaining_amount, 0) > 0
-      ORDER BY invoice_date ASC, id ASC
+      WHERE TRIM(UPPER(COALESCE(tedarikci, ''))) = TRIM(UPPER($1))
+        AND COALESCE(kalan_borc, 0) > 0
+      ORDER BY fatura_tarihi ASC, id ASC
       `,
       [supplier_name],
     );
@@ -1777,12 +1775,12 @@ app.post("/finance/invoices/apply-advance", async (req, res) => {
     for (const invoice of invoiceResult.rows) {
       if (remainingAdvance <= 0) break;
 
-      const currentRemaining = Number(invoice.remaining_amount || 0);
+      const currentRemaining = Number(invoice.kalan_borc || 0);
       if (currentRemaining <= 0) continue;
 
       const applyAmount = Math.min(remainingAdvance, currentRemaining);
 
-      const newPaid = Number(invoice.paid_amount || 0) + applyAmount;
+      const newPaid = Number(invoice.odenen_tutar || 0) + applyAmount;
       const newRemaining = currentRemaining - applyAmount;
       const newStatus = newRemaining <= 0 ? "Ödendi" : "Kısmi Ödendi";
 
@@ -1790,8 +1788,8 @@ app.post("/finance/invoices/apply-advance", async (req, res) => {
         `
         UPDATE invoice_entries
         SET
-          paid_amount = $1,
-          remaining_amount = $2,
+          odenen_tutar = $1,
+          kalan_borc = $2,
           status = $3
         WHERE id = $4
         `,
@@ -1800,14 +1798,13 @@ app.post("/finance/invoices/apply-advance", async (req, res) => {
 
       appliedRows.push({
         invoice_id: invoice.id,
-        invoice_no: invoice.invoice_no,
+        invoice_no: invoice.fatura_no,
         applied_amount: applyAmount,
       });
 
       remainingAdvance -= applyAmount;
     }
 
-    // Artan olursa supplier_advances'a yaz
     if (remainingAdvance > 0) {
       await client.query(
         `
@@ -1857,7 +1854,6 @@ app.post("/finance/invoices/apply-advance", async (req, res) => {
     client.release();
   }
 });
-
 
 app.post("/finance/salary/add", async (req, res) => {
   try {

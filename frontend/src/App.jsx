@@ -5697,7 +5697,8 @@ function App() {
       const data = await response.json();
 
       if (!response.ok || data.ok === false) {
-        throw new Error(data.error || "Avans uygulanamadı");
+        console.error("APPLY ADVANCE RESPONSE:", data);
+        throw new Error(data.detail || data.error || "Avans uygulanamadı");
       }
 
       alert(data.message || "Avans başarıyla işlendi");
@@ -5712,6 +5713,8 @@ function App() {
         region: "",
         created_by: "Orhan",
       });
+      setSupplierSuggestions([]);
+      setShowSupplierSuggestions(false);
 
       await loadSupplierAdvances();
     } catch (err) {
