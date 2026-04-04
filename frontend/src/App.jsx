@@ -2438,6 +2438,9 @@ function FinanceDashboard({
     };
   }
 
+  const [supplierSuggestions, setSupplierSuggestions] = useState([]);
+  const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
+
   const [showSubconModal, setShowSubconModal] = useState(false);
   const [subconRows, setSubconRows] = useState([]);
 
@@ -2477,6 +2480,31 @@ function FinanceDashboard({
     String(new Date().getFullYear()),
   );
   const [salaryFilterPersonel, setSalaryFilterPersonel] = useState("");
+
+  const supplierOptions = useMemo(() => {
+    const names = (manualInvoiceRows || [])
+      .map((x) => String(x.tedarikci || "").trim())
+      .filter(Boolean);
+
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b, "tr"));
+  }, [manualInvoiceRows]);
+
+  const filterSupplierSuggestions = (value) => {
+    const q = String(value || "")
+      .toLowerCase()
+      .trim();
+
+    if (!q) {
+      setSupplierSuggestions([]);
+      return;
+    }
+
+    const filtered = supplierOptions
+      .filter((name) => name.toLowerCase().includes(q))
+      .slice(0, 8);
+
+    setSupplierSuggestions(filtered);
+  };
 
   const [invoiceForm, setInvoiceForm] = useState({
     bolge: "",
@@ -4687,7 +4715,10 @@ function FinanceDashboard({
       )}
       {advanceModalOpen && (
         <div
-          onClick={() => setAdvanceModalOpen(false)}
+          onClick={() => {
+            setAdvanceModalOpen(false);
+            setShowSupplierSuggestions(false);
+          }}
           style={{
             position: "fixed",
             inset: 0,
@@ -4737,17 +4768,71 @@ function FinanceDashboard({
             >
               <div style={{ gridColumn: "1 / span 2" }}>
                 <label style={{ fontWeight: 600 }}>Tedarikçi</label>
-                <input
-                  type="text"
-                  value={advanceForm.supplier_name}
-                  onChange={(e) =>
-                    setAdvanceForm((prev) => ({
-                      ...prev,
-                      supplier_name: e.target.value,
-                    }))
-                  }
-                  placeholder="Tedarikçi adı"
-                />
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    value={advanceForm.supplier_name}
+                    onChange={(e) => {
+                      const value = e.target.value;
+
+                      setAdvanceForm((prev) => ({
+                        ...prev,
+                        supplier_name: value,
+                      }));
+
+                      filterSupplierSuggestions(value);
+                      setShowSupplierSuggestions(true);
+                    }}
+                    onFocus={() => {
+                      filterSupplierSuggestions(advanceForm.supplier_name);
+                      setShowSupplierSuggestions(true);
+                    }}
+                    placeholder="Tedarikçi adı"
+                  />
+
+                  {showSupplierSuggestions &&
+                    supplierSuggestions.length > 0 && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          left: 0,
+                          right: 0,
+                          marginTop: "6px",
+                          background: "#fff",
+                          border: "1px solid #d1d5db",
+                          borderRadius: "12px",
+                          boxShadow: "0 10px 24px rgba(0,0,0,0.10)",
+                          maxHeight: "220px",
+                          overflowY: "auto",
+                          zIndex: 10000,
+                        }}
+                      >
+                        {supplierSuggestions.map((name, index) => (
+                          <div
+                            key={`${name}-${index}`}
+                            onMouseDown={() => {
+                              setAdvanceForm((prev) => ({
+                                ...prev,
+                                supplier_name: name,
+                              }));
+                              setShowSupplierSuggestions(false);
+                            }}
+                            style={{
+                              padding: "10px 12px",
+                              cursor: "pointer",
+                              borderBottom:
+                                index !== supplierSuggestions.length - 1
+                                  ? "1px solid #f1f5f9"
+                                  : "none",
+                            }}
+                          >
+                            {name}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                </div>
               </div>
 
               <div>
