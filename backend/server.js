@@ -1782,18 +1782,16 @@ app.post("/finance/invoices/apply-advance", async (req, res) => {
 
       const newPaid = Number(invoice.odenen_tutar || 0) + applyAmount;
       const newRemaining = currentRemaining - applyAmount;
-      const newStatus = newRemaining <= 0 ? "Ödendi" : "Kısmi Ödendi";
 
       await client.query(
         `
-        UPDATE invoice_entries
-        SET
-          odenen_tutar = $1,
-          kalan_borc = $2,
-          status = $3
-        WHERE id = $4
-        `,
-        [newPaid, newRemaining, newStatus, invoice.id],
+       UPDATE invoice_entries
+       SET
+       odenen_tutar = $1,
+       kalan_borc = $2
+       WHERE id = $3
+      `,
+        [newPaid, newRemaining, invoice.id],
       );
 
       appliedRows.push({
