@@ -27,6 +27,13 @@ app.use(
 );
 
 app.use(express.json());
+app.get("/", (req, res) => {
+  res.send("API çalışıyor 🚀");
+});
+
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
 app.use(express.urlencoded({ extended: true }));
 
 /* ================== UPLOAD ================== */
