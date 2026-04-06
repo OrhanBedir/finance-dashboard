@@ -974,12 +974,12 @@ app.get("/setup-db", async (req, res) => {
       ADD COLUMN IF NOT EXISTS qc_durum TEXT DEFAULT 'NOK'
     `);
 
-     await pool.query(`
+    await pool.query(`
       ALTER TABLE master_works
       ADD COLUMN IF NOT EXISTS kabul_durum TEXT DEFAULT 'NOK'
     `);
 
-     await pool.query(`
+    await pool.query(`
       ALTER TABLE master_works
       ADD COLUMN IF NOT EXISTS kabul_not TEXT
     `);
@@ -2950,21 +2950,40 @@ app.post("/boq/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ ok: false, error: "Dosya yok" });
     }
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS boq_items (
+        id SERIAL PRIMARY KEY,
+        s_bom_code TEXT,
+        boq_items_en TEXT,
+        currency TEXT,
+        unit_price NUMERIC,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     const workbook = XLSX.readFile(req.file.path);
 
-    const sheetName = workbook.SheetNames.find(
-      (name) => String(name).trim().toLowerCase() === "boq item",
-    );
+    const sheetName =
+      workbook.SheetNames.find(
+        (name) => String(name).trim().toLowerCase() === "boq item",
+      ) || workbook.SheetNames[0];
 
     if (!sheetName) {
       return res.status(400).json({
         ok: false,
-        error: `BoQ Item sheet bulunamadı. Mevcut sheetler: ${workbook.SheetNames.join(", ")}`,
+        error: "Excel içinde sheet bulunamadı",
       });
     }
 
     const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+
+    if (!rows || rows.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Excel içinde veri bulunamadı",
+      });
+    }
 
     await pool.query(`DELETE FROM boq_items`);
 
@@ -3015,15 +3034,18 @@ app.post("/boq/upload", upload.single("file"), async (req, res) => {
       }
     }
 
-    res.json({
+    return res.json({
       ok: true,
-      message: "BoQ Item sheet yüklendi",
+      message: "BoQ başarıyla yüklendi",
       inserted,
       sheet_name: sheetName,
     });
   } catch (err) {
-    console.error("BOQ UPLOAD ERROR:", err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    console.error("BOQ UPLOAD ERROR:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message || "BoQ upload sırasında hata oluştu",
+    });
   }
 });
 
@@ -3250,9 +3272,9 @@ app.post("/master/add", async (req, res) => {
         note,
         qc_durum,
         kabul_durum,
-        kabul_not,
+        kabul_not
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *
       `,
       [
