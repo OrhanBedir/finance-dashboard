@@ -1101,8 +1101,12 @@ app.get("/setup-db", async (req, res) => {
 
     res.json({ ok: true, message: "Tüm DB hazır ✅" });
   } catch (err) {
-    console.error("SETUP DB ERROR:", err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    console.error("SETUP DB ERROR FULL:", err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || String(err) || "Setup DB hatası",
+      detail: err?.stack || null,
+    });
   }
 });
 
