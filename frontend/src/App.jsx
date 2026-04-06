@@ -32,7 +32,7 @@ function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
 }
 
 const API_BASE = (
-  import.meta.env.VITE_API_BASE || "http://localhost:5001"
+  import.meta.env.VITE_API_BASE || "https://finance-backend-production.up.railway.app"
 ).replace(/\/$/, "");
 
 function normalizeCurrency(value) {
