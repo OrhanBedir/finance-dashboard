@@ -1,4 +1,11 @@
 require("dotenv").config();
+
+console.log("DB ENV:", {
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT,
+});
 const express = require("express");
 const cors = require("cors");
 const pool = require("./db");
@@ -896,6 +903,19 @@ app.get("/debug/current-db", async (req, res) => {
 app.get("/setup-db", async (req, res) => {
   try {
     await pool.query(`
+     CREATE TABLE IF NOT EXISTS supplier_advances (
+       id SERIAL PRIMARY KEY,
+       supplier_name TEXT NOT NULL,
+       amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+       project_code TEXT,
+       region TEXT,
+       created_by TEXT,
+       payment_date DATE,
+       note TEXT,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS master_works (
         id SERIAL PRIMARY KEY,
         site_type TEXT,
@@ -1730,6 +1750,18 @@ app.post("/finance/invoices/apply-advance", async (req, res) => {
   const client = await pool.connect();
 
   try {
+    const dbCheck = await client.query(`
+      SELECT current_database() AS db, current_schema() AS schema
+    `);
+    console.log("APPLY_ADVANCE DB CHECK:", dbCheck.rows[0]);
+
+    const tableCheck = await client.query(`
+      SELECT table_schema, table_name
+      FROM information_schema.tables
+      WHERE table_name = 'supplier_advances'
+    `);
+    console.log("SUPPLIER_ADVANCES TABLE CHECK:", tableCheck.rows);
+
     const {
       supplier_name,
       amount,

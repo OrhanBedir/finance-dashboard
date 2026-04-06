@@ -833,6 +833,7 @@ function ExecutiveDashboard() {
               <th>Done Qty</th>
               <th>Requested Qty</th>
               <th>Billed Qty</th>
+              <td>{row.dueQty}</td>
               <th>Currency</th>
               <th>Unit Price</th>
               <th>Total Done Amount</th>
