@@ -923,20 +923,23 @@ app.get("/setup-db", async (req, res) => {
       );
     `);
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS master_works (
-        id SERIAL PRIMARY KEY,
-        site_type TEXT,
-        project_code TEXT,
-        site_code TEXT,
-        item_code TEXT,
-        item_description TEXT,
-        done_qty NUMERIC,
-        subcon_name TEXT,
-        onair_date DATE,
-        note TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+       CREATE TABLE IF NOT EXISTS master_works (
+       id SERIAL PRIMARY KEY,
+       site_type TEXT,
+       project_code TEXT,
+       site_code TEXT,
+       item_code TEXT,
+       item_description TEXT,
+       done_qty NUMERIC,
+       subcon_name TEXT,
+       onair_date DATE,
+       note TEXT,
+       qc_durum TEXT DEFAULT 'NOK',
+       kabul_durum TEXT DEFAULT 'NOK',
+       kabul_not TEXT,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+   `);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS po_rows (
@@ -965,6 +968,20 @@ app.get("/setup-db", async (req, res) => {
         unit_price NUMERIC,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+    await pool.query(`
+      ALTER TABLE master_works
+      ADD COLUMN IF NOT EXISTS qc_durum TEXT DEFAULT 'NOK'
+    `);
+
+     await pool.query(`
+      ALTER TABLE master_works
+      ADD COLUMN IF NOT EXISTS kabul_durum TEXT DEFAULT 'NOK'
+    `);
+
+     await pool.query(`
+      ALTER TABLE master_works
+      ADD COLUMN IF NOT EXISTS kabul_not TEXT
     `);
 
     await pool.query(`
@@ -2763,7 +2780,7 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
           done_qty,
           subcon_name,
           onair_date,
-          note
+          note,
         )
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         `,
@@ -3230,7 +3247,7 @@ app.post("/master/add", async (req, res) => {
         done_qty,
         subcon_name,
         onair_date,
-        note
+        note,
         qc_durum,
         kabul_durum,
         kabul_not,
@@ -3248,9 +3265,9 @@ app.post("/master/add", async (req, res) => {
         m.subcon_name,
         m.onair_date || null,
         m.note || null,
-        payload.qc_durum || "NOK",
-        payload.kabul_durum || "NOK",
-        payload.kabul_not || null,
+        m.qc_durum || "NOK",
+        m.kabul_durum || "NOK",
+        m.kabul_not || null,
       ],
     );
 
