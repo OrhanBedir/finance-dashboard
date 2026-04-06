@@ -833,7 +833,7 @@ function ExecutiveDashboard() {
               <th>Done Qty</th>
               <th>Requested Qty</th>
               <th>Billed Qty</th>
-              <td>{row.dueQty}</td>
+              <th>Due Qty</th>
               <th>Currency</th>
               <th>Unit Price</th>
               <th>Total Done Amount</th>
@@ -861,6 +861,7 @@ function ExecutiveDashboard() {
                   <td>{row.done_qty ?? "-"}</td>
                   <td>{row.requested_qty ?? "-"}</td>
                   <td>{row.billed_qty ?? "-"}</td>
+                  <td>{row.due_qty ?? "-"}</td>
                   <td>{row.currency || "-"}</td>
                   <td>
                     {Number(row.unit_price || 0) === 0
@@ -1788,7 +1789,7 @@ function DailyEntry() {
           </thead>
           <tbody>
             {siteEntries.length === 0 ? (
-              <EmptyRow colSpan={13} text="Bu saha için giriş yapılmamış" />
+              <EmptyRow colSpan={15} text="Bu saha için giriş yapılmamış" />
             ) : (
               siteEntries.map((row, index) => {
                 const analysis = getQtyAnalysis(
@@ -1813,15 +1814,14 @@ function DailyEntry() {
                     </td>
                     <td>{row.subcon_name}</td>
                     <td>{row.note}</td>
-                    <td>{row.qc_durum || "-"}</td>
-                    <td>{row.kabul_durum || "-"}</td>
-                    <td>{row.kabul_not || "-"}</td>
+
                     <td>
                       <div
                         style={{
                           display: "flex",
                           gap: "8px",
                           flexWrap: "wrap",
+                          justifyContent: "center",
                         }}
                       >
                         <button
@@ -1829,6 +1829,7 @@ function DailyEntry() {
                           className="tab"
                           style={{ padding: "8px 12px" }}
                           onClick={() => handleEdit(row)}
+                          title="Kaydı düzenle"
                         >
                           Düzenle
                         </button>
@@ -1842,11 +1843,16 @@ function DailyEntry() {
                             color: "#991b1b",
                           }}
                           onClick={() => handleDelete(row)}
+                          title="Kaydı sil"
                         >
                           Sil
                         </button>
                       </div>
                     </td>
+
+                    <td>{row.qc_durum || "-"}</td>
+                    <td>{row.kabul_durum || "-"}</td>
+                    <td>{row.kabul_not || "-"}</td>
                   </tr>
                 );
               })
@@ -5763,7 +5769,6 @@ function App() {
       });
       setSupplierSuggestions([]);
       setShowSupplierSuggestions(false);
-      
 
       await loadSupplierAdvances();
     } catch (err) {
