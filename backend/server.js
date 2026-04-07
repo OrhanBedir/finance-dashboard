@@ -3282,6 +3282,31 @@ app.post("/master/add", async (req, res) => {
   try {
     const m = req.body;
 
+    const duplicateCheck = await pool.query(
+      `
+  SELECT id
+  FROM master_works
+  WHERE project_code = $1
+    AND site_code = $2
+    AND item_code = $3
+  LIMIT 1
+  `,
+      [
+        String(m.project_code || "").trim(),
+        String(m.site_code || "")
+          .trim()
+          .toUpperCase(),
+        String(m.item_code || "").trim(),
+      ],
+    );
+
+    if (duplicateCheck.rows.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Bu item talep listesinde mevcut",
+      });
+    }
+
     const result = await pool.query(
       `
       INSERT INTO master_works
