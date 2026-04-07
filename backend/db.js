@@ -1,16 +1,11 @@
 const { Pool } = require("pg");
 
-const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString) {
-  throw new Error("DATABASE_URL tanımlı değil");
-}
-
 const pool = new Pool({
-  connectionString,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  port: Number(process.env.DB_PORT || 5432),
+  ssl: false,
 });
 
 module.exports = pool;
