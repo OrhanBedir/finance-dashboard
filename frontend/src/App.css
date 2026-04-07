@@ -666,3 +666,9 @@ input[type="file"] {
   background: #f59e0b;
   color: white;
 }
+.desc-cell {
+  max-width: 300px;      /* genişliği ayarlayabilirsin */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

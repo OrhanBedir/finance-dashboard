@@ -872,7 +872,9 @@ function ExecutiveDashboard() {
                   <td>{row.project_code || "-"}</td>
                   <td>{row.site_code || "-"}</td>
                   <td>{row.item_code || "-"}</td>
-                  <td>{row.item_description || "-"}</td>
+                  <td className="desc-cell" title={row.item_description}>
+                    {row.item_description}
+                  </td>
                   <td>{row.done_qty ?? "-"}</td>
                   <td>{row.requested_qty ?? "-"}</td>
                   <td>{row.billed_qty ?? "-"}</td>
