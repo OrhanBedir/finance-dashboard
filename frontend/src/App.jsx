@@ -948,6 +948,7 @@ function DailyEntry() {
     const year = d.getFullYear();
     return `${day}.${month}.${year}`;
   }
+
   const initialForm = {
     site_type: "5G",
     project_code: "",
@@ -980,6 +981,8 @@ function DailyEntry() {
   const [itemDescriptionSearch, setItemDescriptionSearch] = useState("");
   const [showItemCodeList, setShowItemCodeList] = useState(false);
   const [showItemDescriptionList, setShowItemDescriptionList] = useState(false);
+  const itemCodeBoxRef = useRef(null);
+  const itemDescriptionBoxRef = useRef(null);
 
   const loadRows = async () => {
     try {
@@ -1165,6 +1168,29 @@ function DailyEntry() {
     loadSitePoRows(form.project_code, form.site_code);
     loadSiteEntries(form.project_code, form.site_code);
   }, [form.project_code, form.site_code]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        itemCodeBoxRef.current &&
+        !itemCodeBoxRef.current.contains(e.target)
+      ) {
+        setShowItemCodeList(false);
+      }
+
+      if (
+        itemDescriptionBoxRef.current &&
+        !itemDescriptionBoxRef.current.contains(e.target)
+      ) {
+        setShowItemDescriptionList(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -1595,7 +1621,11 @@ function DailyEntry() {
               />
             </div>
 
-            <div className="formGroup" style={{ position: "relative" }}>
+            <div
+              className="formGroup"
+              style={{ position: "relative" }}
+              ref={itemCodeBoxRef}
+            >
               <label>Item Code</label>
 
               <input
@@ -1649,6 +1679,7 @@ function DailyEntry() {
             <div
               className="formGroup formGroupWide"
               style={{ position: "relative" }}
+              ref={itemDescriptionBoxRef}
             >
               <label>Item Description</label>
 
