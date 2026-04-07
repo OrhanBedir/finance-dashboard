@@ -31,7 +31,7 @@ function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   );
 }
 
-const API_BASE = "https://finance-dashboard-production-e82f.up.railway.app";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5001";
 
 function normalizeCurrency(value) {
   const raw = String(value || "")
