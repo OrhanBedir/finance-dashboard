@@ -1300,9 +1300,9 @@ function DailyEntry() {
         item_description: form.item_description,
         done_qty: Number(form.done_qty || 0),
         subcon_name: form.subcon_name,
-        onair_date: form.onair_date
-          ? form.onair_date.split(".").reverse().join("-")
-          : null,
+        onair_date: row.onair_date
+          ? new Date(row.onair_date).toLocaleDateString("tr-TR")
+          : "",
         note: form.note,
         qc_durum: form.qc_durum,
         kabul_durum: form.kabul_durum,
