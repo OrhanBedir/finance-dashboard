@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import "./App.css";
 import * as XLSX from "xlsx";
 import "react-datepicker/dist/react-datepicker.css";
@@ -1904,10 +1905,8 @@ function DailyEntry() {
                     <td>{row.project_code}</td>
                     <td>{row.site_code}</td>
                     <td>{row.item_code}</td>
-                    <td>
-                      <td title={row.item_description}>
-                        <div className="desc-cell">{row.item_description}</div>
-                      </td>
+                    <td title={row.item_description}>
+                      <div className="desc-cell">{row.item_description}</div>
                     </td>
                     <td>{row.done_qty}</td>
                     <td>{row.requested_qty ?? "-"}</td>
