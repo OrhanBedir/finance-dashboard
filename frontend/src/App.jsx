@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import "./App.css";
 import * as XLSX from "xlsx";
@@ -770,9 +769,9 @@ function ExecutiveDashboard() {
         >
           <h2>📊 Finance Summary</h2>
 
-          <p>Total Collections: {summary.summary.total_collections}</p>
-          <p>This Month: {summary.summary.this_month_collections}</p>
-          <p>Expense Count: {summary.summary.expense_count}</p>
+          <p>Total Collections: {summary.total_collections || 0}</p>
+          <p>This Month: {summary.this_month_collections || 0}</p>
+          <p>Expense Count: {summary.expense_count || 0}</p>
         </div>
       )}
 
@@ -866,7 +865,7 @@ function ExecutiveDashboard() {
           </thead>
           <tbody>
             {filteredRows.length === 0 ? (
-              <EmptyRow colSpan={12} />
+              <EmptyRow colSpan={13} />
             ) : (
               filteredRows.map((row, index) => (
                 <tr
