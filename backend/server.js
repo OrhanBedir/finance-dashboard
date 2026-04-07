@@ -28,7 +28,6 @@ app.use(
 
 app.use(express.json());
 
-
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
@@ -2778,6 +2777,21 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
       const normalizedItemCode = itemCode ? String(itemCode).trim() : "";
 
       if (!normalizedSiteCode || !normalizedItemCode) continue;
+      const duplicateCheck = await pool.query(
+        `
+        SELECT id
+        FROM master_works
+        WHERE project_code = $1
+           AND site_code = $2
+           AND item_code = $3
+        LIMIT 1
+        `,
+        [projectCode, normalizedSiteCode, normalizedItemCode],
+      );
+
+      if (duplicateCheck.rows.length > 0) {
+        continue; // varsa bu satırı atla
+      }
 
       await pool.query(
         `
