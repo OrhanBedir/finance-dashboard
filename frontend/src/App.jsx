@@ -711,7 +711,7 @@ function ExecutiveDashboard() {
         fetchJson(`${API_BASE}/dashboard/result`),
       ]);
 
-      setSummary(summaryData.summary || null);
+      setSummary(summaryData || null);
       setRows(resultData.rows || []);
     } catch (err) {
       console.error("DASHBOARD LOAD ERROR:", err);
