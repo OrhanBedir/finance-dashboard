@@ -672,3 +672,21 @@ input[type="file"] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.datePickerInput {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 14px;
+  font-size: 16px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.react-datepicker-wrapper {
+  width: 100%;
+}
+
+.react-datepicker__input-container {
+  width: 100%;
+}

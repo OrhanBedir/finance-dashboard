@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import "./App.css";
 import * as XLSX from "xlsx";
+import "react-datepicker/dist/react-datepicker.css";
+import DatePicker from "react-datepicker";
 
 function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   return (
@@ -910,6 +912,34 @@ function ExecutiveDashboard() {
   );
 }
 
+function parseTRDateToDate(value) {
+  if (!value) return null;
+  const parts = value.split(".");
+  if (parts.length !== 3) return null;
+
+  const [day, month, year] = parts.map(Number);
+  if (!day || !month || !year) return null;
+
+  const d = new Date(year, month - 1, day);
+  if (
+    d.getFullYear() !== year ||
+    d.getMonth() !== month - 1 ||
+    d.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return d;
+}
+
+function formatDateToTR(date) {
+  if (!date) return "";
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${day}.${month}.${year}`;
+}
+
 function DailyEntry() {
   function getTodayTR() {
     const d = new Date();
@@ -1549,40 +1579,19 @@ function DailyEntry() {
 
             <div className="formGroup">
               <label>OnAir Date</label>
-              <input
-                type="text"
-                name="onair_date"
-                placeholder="GG.AA.YYYY"
-                value={form.onair_date}
-                maxLength={10}
-                onChange={(e) => {
-                  let raw = e.target.value.replace(/\D/g, "").slice(0, 8);
-
-                  let day = raw.slice(0, 2);
-                  let month = raw.slice(2, 4);
-                  let year = raw.slice(4, 8);
-
-                  if (day.length === 2) {
-                    let d = Number(day);
-                    if (d < 1) day = "01";
-                    if (d > 31) day = "31";
-                  }
-
-                  if (month.length === 2) {
-                    let m = Number(month);
-                    if (m < 1) month = "01";
-                    if (m > 12) month = "12";
-                  }
-
-                  let formatted = day;
-                  if (month) formatted += "." + month;
-                  if (year) formatted += "." + year;
-
+              <DatePicker
+                selected={parseTRDateToDate(form.onair_date)}
+                onChange={(date) =>
                   setForm((prev) => ({
                     ...prev,
-                    onair_date: formatted,
-                  }));
-                }}
+                    onair_date: formatDateToTR(date),
+                  }))
+                }
+                dateFormat="dd.MM.yyyy"
+                placeholderText="GG.AA.YYYY"
+                className="datePickerInput"
+                isClearable
+                showPopperArrow={false}
               />
             </div>
 
