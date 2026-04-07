@@ -1544,17 +1544,37 @@ function DailyEntry() {
               <label>OnAir Date</label>
               <input
                 type="text"
+                name="onair_date"
                 placeholder="GG.AA.YYYY"
                 value={form.onair_date}
+                maxLength={10}
                 onChange={(e) => {
-                  let val = e.target.value.replace(/\D/g, ""); // sadece rakam
+                  let raw = e.target.value.replace(/\D/g, "").slice(0, 8);
 
-                  if (val.length >= 2)
-                    val = val.slice(0, 2) + "." + val.slice(2);
-                  if (val.length >= 5)
-                    val = val.slice(0, 5) + "." + val.slice(5, 9);
+                  let day = raw.slice(0, 2);
+                  let month = raw.slice(2, 4);
+                  let year = raw.slice(4, 8);
 
-                  setForm({ ...form, onair_date: val });
+                  if (day.length === 2) {
+                    let d = Number(day);
+                    if (d < 1) day = "01";
+                    if (d > 31) day = "31";
+                  }
+
+                  if (month.length === 2) {
+                    let m = Number(month);
+                    if (m < 1) month = "01";
+                    if (m > 12) month = "12";
+                  }
+
+                  let formatted = day;
+                  if (month) formatted += "." + month;
+                  if (year) formatted += "." + year;
+
+                  setForm((prev) => ({
+                    ...prev,
+                    onair_date: formatted,
+                  }));
                 }}
               />
             </div>
