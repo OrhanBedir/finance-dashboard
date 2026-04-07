@@ -872,8 +872,8 @@ function ExecutiveDashboard() {
                   <td>{row.project_code || "-"}</td>
                   <td>{row.site_code || "-"}</td>
                   <td>{row.item_code || "-"}</td>
-                  <td className="desc-cell" title={row.item_description}>
-                    {row.item_description}
+                  <td title={row.item_description}>
+                    <div className="desc-cell">{row.item_description}</div>
                   </td>
                   <td>{row.done_qty ?? "-"}</td>
                   <td>{row.requested_qty ?? "-"}</td>
@@ -1820,7 +1820,11 @@ function DailyEntry() {
                     <td>{row.project_code}</td>
                     <td>{row.site_code}</td>
                     <td>{row.item_code}</td>
-                    <td>{row.item_description}</td>
+                    <td>
+                      <td title={row.item_description}>
+                        <div className="desc-cell">{row.item_description}</div>
+                      </td>
+                    </td>
                     <td>{row.done_qty}</td>
                     <td>{row.requested_qty ?? "-"}</td>
                     <td>{analysis.diff}</td>
