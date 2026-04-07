@@ -656,6 +656,12 @@ function HWPoUploadInline({ onClose, onUploaded }) {
   );
 }
 
+function formatDateTR(date) {
+  if (!date) return "";
+  const d = new Date(date);
+  return d.toLocaleDateString("tr-TR");
+}
+
 function ExecutiveDashboard() {
   const [summary, setSummary] = useState(null);
   const [rows, setRows] = useState([]);
@@ -1535,10 +1541,19 @@ function DailyEntry() {
             <div className="formGroup">
               <label>OnAir Date</label>
               <input
-                type="date"
-                name="onair_date"
+                type="text"
+                placeholder="GG.AA.YYYY"
                 value={form.onair_date}
-                onChange={handleChange}
+                onChange={(e) => {
+                  let val = e.target.value.replace(/\D/g, ""); // sadece rakam
+
+                  if (val.length >= 2)
+                    val = val.slice(0, 2) + "." + val.slice(2);
+                  if (val.length >= 5)
+                    val = val.slice(0, 5) + "." + val.slice(5, 9);
+
+                  setForm({ ...form, onair_date: val });
+                }}
               />
             </div>
 
@@ -1834,6 +1849,7 @@ function DailyEntry() {
                       </span>
                     </td>
                     <td>{row.subcon_name}</td>
+                    <td>{formatDateTR(row.onair_date)}</td>
                     <td>{row.note}</td>
 
                     <td>
