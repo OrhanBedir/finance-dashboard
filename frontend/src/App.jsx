@@ -750,6 +750,23 @@ function ExecutiveDashboard() {
     <>
       <h1>📊 PO Dashboard</h1>
 
+      {summary && (
+        <div
+          style={{
+            padding: "20px",
+            background: "#111",
+            color: "#fff",
+            borderRadius: "8px",
+          }}
+        >
+          <h2>📊 Finance Summary</h2>
+
+          <p>Total Collections: {summary.summary.total_collections}</p>
+          <p>This Month: {summary.summary.this_month_collections}</p>
+          <p>Expense Count: {summary.summary.expense_count}</p>
+        </div>
+      )}
+
       <div className="cards">
         <div
           className="card ok"
