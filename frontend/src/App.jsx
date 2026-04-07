@@ -911,6 +911,13 @@ function ExecutiveDashboard() {
 }
 
 function DailyEntry() {
+  function getTodayTR() {
+    const d = new Date();
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}.${month}.${year}`;
+  }
   const initialForm = {
     site_type: "5G",
     project_code: "",
@@ -919,7 +926,7 @@ function DailyEntry() {
     item_description: "",
     done_qty: "",
     subcon_name: "",
-    onair_date: "",
+    onair_date: getTodayTR(),
     note: "",
 
     qc_durum: "NOK",
