@@ -690,3 +690,222 @@ input[type="file"] {
 .react-datepicker__input-container {
   width: 100%;
 }
+table th {
+  white-space: nowrap;       /* satır kırılmasın */
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 8px;
+  color: #374151;
+}
+
+table td {
+  text-align: center;
+  padding: 10px 8px;
+  font-size: 13px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+.tableWrap table th {
+  white-space: nowrap;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 12px 10px;
+}
+
+.tableWrap table td {
+  text-align: center;
+  padding: 12px 10px;
+  font-size: 13px;
+}
+table thead {
+  background: #f3f4f6;
+}
+.tableWrap {
+  overflow-x: auto;
+  max-height: 70vh;
+}
+
+.tableWrap table thead th {
+  position: sticky;
+  top: 0;
+  background: #f3f4f6;
+  z-index: 2;
+  box-shadow: inset 0 -1px 0 #e5e7eb;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border: 1px solid transparent;
+}
+
+.status-ok {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.status-po_bekler {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.status-cancel {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.status-partial {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+.statusBadge {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+/* 🔥 NEW PREMIUM STATUS BADGE */
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* OK */
+.status-ok {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+/* PO_BEKLER */
+.status-po_bekler {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+/* CANCEL */
+.status-cancel {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+/* PARTIAL */
+.status-partial {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #93c5fd;
+}
+.statusBadge {
+  transition: all 0.2s ease;
+}
+
+.statusBadge:hover {
+  transform: scale(1.05);
+}
+.analysisBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 90px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 14px;
+  border: 1px solid transparent;
+}
+
+.analysis-complete {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.analysis-missing {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.analysis-over {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.analysis-waiting {
+  background: #e5e7eb;
+  color: #374151;
+  border-color: #cbd5e1;
+}
+.analysisBadge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.analysisBadge.ok {
+  background: #e6f4ea;
+  color: #1e7e34;
+}
+
+.analysisBadge.missing {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.analysisBadge.over {
+  background: #f8d7da;
+  color: #842029;
+}
+
+.analysisBadge.po {
+  background: #e2e3e5;
+  color: #41464b;
+}
+.tableWrap {
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.tableWrap thead th {
+  position: sticky;
+  top: 0;
+  background: #f3f4f6;
+  z-index: 2;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import "./App.css";
 import * as XLSX from "xlsx";
 import "react-datepicker/dist/react-datepicker.css";
@@ -258,7 +258,7 @@ function StatusBadge({ status }) {
   const safeStatus = String(status || "").toUpperCase();
 
   return (
-    <span className={`statusBadge status-${safeStatus.toLowerCase()}`}>
+    <span className={`badge ${safeStatus.toLowerCase()}`}>
       {safeStatus || "-"}
     </span>
   );
@@ -278,7 +278,7 @@ function getQtyAnalysis(doneQty, requestedQty) {
   const done = Number(doneQty || 0);
   const requested = Number(requestedQty || 0);
 
-  if (requested === 0 && done > 0) {
+  if (!requestedQty || requested === 0) {
     return {
       diff: "-",
       label: "PO Bekliyor",
@@ -312,28 +312,15 @@ function getQtyAnalysis(doneQty, requestedQty) {
 }
 
 function getRegion(siteCode = "") {
-  const code = String(siteCode || "")
-    .trim()
-    .toUpperCase();
-
-  if (
-    code.startsWith("ES") ||
-    code.startsWith("BO") ||
-    code.startsWith("ZO") ||
-    code.startsWith("KA") ||
-    code.includes("_ANK") ||
-    code.startsWith("AN")
-  ) {
-    return "Ankara";
-  }
+  const code = String(siteCode).toUpperCase().trim();
 
   if (
     code.startsWith("IZ") ||
-    code.startsWith("US") ||
     code.startsWith("MU") ||
+    code.startsWith("US") ||
     code.startsWith("MN") ||
-    code.startsWith("AI") ||
-    code.startsWith("DE")
+    code.startsWith("DE") ||
+    code.startsWith("AI")
   ) {
     return "İzmir";
   }
@@ -341,10 +328,20 @@ function getRegion(siteCode = "") {
   if (
     code.startsWith("AT") ||
     code.startsWith("IP") ||
-    code.startsWith("BU") ||
-    code.startsWith("AF")
+    code.startsWith("AF") ||
+    code.startsWith("BU")
   ) {
     return "Antalya";
+  }
+
+  if (
+    code.startsWith("ES") ||
+    code.startsWith("BO") ||
+    code.startsWith("ZO") ||
+    code.startsWith("KA") ||
+    code.startsWith("Z")
+  ) {
+    return "Ankara";
   }
 
   return "Tanımsız";
@@ -714,7 +711,7 @@ function ExecutiveDashboard() {
         fetchJson(`${API_BASE}/dashboard/result`),
       ]);
 
-      setSummary(summaryData || null);
+      setSummary(summaryData.summary || null);
       setRows(resultData.rows || []);
     } catch (err) {
       console.error("DASHBOARD LOAD ERROR:", err);
@@ -772,9 +769,9 @@ function ExecutiveDashboard() {
         >
           <h2>📊 Finance Summary</h2>
 
-          <p>Total Collections: {summary.total_collections || 0}</p>
-          <p>This Month: {summary.this_month_collections || 0}</p>
-          <p>Expense Count: {summary.expense_count || 0}</p>
+          <p>Total Collections: {summary.summary.total_collections}</p>
+          <p>This Month: {summary.summary.this_month_collections}</p>
+          <p>Expense Count: {summary.summary.expense_count}</p>
         </div>
       )}
 
@@ -868,7 +865,7 @@ function ExecutiveDashboard() {
           </thead>
           <tbody>
             {filteredRows.length === 0 ? (
-              <EmptyRow colSpan={13} />
+              <EmptyRow colSpan={12} />
             ) : (
               filteredRows.map((row, index) => (
                 <tr
@@ -1366,7 +1363,9 @@ function DailyEntry() {
         item_description: form.item_description,
         done_qty: Number(form.done_qty || 0),
         subcon_name: form.subcon_name,
-        onair_date: form.onair_date || null,
+        onair_date: row.onair_date
+          ? new Date(row.onair_date).toLocaleDateString("tr-TR")
+          : "",
         note: form.note,
         qc_durum: form.qc_durum,
         kabul_durum: form.kabul_durum,
@@ -1882,8 +1881,7 @@ function DailyEntry() {
               <th>Fark</th>
               <th>Analiz</th>
               <th>Taşeron</th>
-              <th>OnAir</th>
-              <th>RF Not</th>
+              <th>Not</th>
               <th>İşlem</th>
               <th>QC Durum</th>
               <th>Kabul Durum</th>
@@ -1906,8 +1904,10 @@ function DailyEntry() {
                     <td>{row.project_code}</td>
                     <td>{row.site_code}</td>
                     <td>{row.item_code}</td>
-                    <td title={row.item_description}>
-                      <div className="desc-cell">{row.item_description}</div>
+                    <td>
+                      <td title={row.item_description}>
+                        <div className="desc-cell">{row.item_description}</div>
+                      </td>
                     </td>
                     <td>{row.done_qty}</td>
                     <td>{row.requested_qty ?? "-"}</td>
@@ -1967,187 +1967,28 @@ function DailyEntry() {
         </table>
       </div>
 
-      <h3 className="listTitle">Son Girilen İşler</h3>
-
-      <div
-        style={{
-          maxHeight: "40vh",
-          overflow: "auto",
-        }}
-      >
+      <div className="tableWrap">
+        <h3 className="listTitle">Son Girilen İşler</h3>
         <table>
           <thead>
             <tr>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Saha Türü
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Project
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Site
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Item Code
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Açıklama
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Done Qty
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Requested Qty
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Fark
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Analiz
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Currency
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Unit Price
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Status
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                PO No
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Taşeron
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                QC Durum
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Kabul Durum
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Kabul Not
-              </th>
+              <th>Saha Türü</th>
+              <th>Project</th>
+              <th>Site</th>
+              <th>Item Code</th>
+              <th>Açıklama</th>
+              <th>Done Qty</th>
+              <th>Requested Qty</th>
+              <th>Fark</th>
+              <th>Analiz</th>
+              <th>Currency</th>
+              <th>Unit Price</th>
+              <th>Status</th>
+              <th>PO No</th>
+              <th>Taşeron</th>
+              <th>QC Durum</th>
+              <th>Kabul Durum</th>
+              <th>Kabul Not</th>
             </tr>
           </thead>
           <tbody>
@@ -2415,6 +2256,214 @@ function FinanceInvoiceUploadInline({ onClose, onUploaded }) {
   );
 }
 
+function ManualInvoiceEntryInline({ onClose, onSaved }) {
+  const initialForm = {
+    invoice_no: "",
+    invoice_type: "GIDEN",
+    company_name: "",
+    description: "",
+    amount: "",
+    currency: "TRY",
+    invoice_date: "",
+    due_date: "",
+    status: "BEKLIYOR",
+    note: "",
+  };
+
+  const [form, setForm] = useState(initialForm);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      setMessage("");
+
+      await fetchJson(`${API_BASE}/finance/invoice-entry/add`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...form,
+          amount: Number(form.amount || 0),
+        }),
+      });
+
+      setMessage("✅ Fatura kaydedildi");
+      setForm(initialForm);
+
+      if (onSaved) {
+        await onSaved();
+      }
+    } catch (err) {
+      console.error("MANUAL INVOICE SAVE ERROR:", err);
+      setMessage(`❌ ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="entryPanel" style={{ marginBottom: "18px" }}>
+      <div className="entryForm">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "14px",
+            gap: "12px",
+            flexWrap: "wrap",
+          }}
+        >
+          <h3 className="listTitle" style={{ margin: 0 }}>
+            🧾 Fatura Girişi
+          </h3>
+
+          <button
+            type="button"
+            className="tab"
+            onClick={onClose}
+            style={{ padding: "10px 14px" }}
+          >
+            Kapat
+          </button>
+        </div>
+
+        <form onSubmit={handleSave}>
+          <div className="formGrid">
+            <div className="formGroup">
+              <label>Fatura No</label>
+              <input
+                name="invoice_no"
+                value={form.invoice_no}
+                onChange={handleChange}
+                placeholder="Fatura no"
+              />
+            </div>
+
+            <div className="formGroup">
+              <label>Fatura Türü</label>
+              <select
+                name="invoice_type"
+                value={form.invoice_type}
+                onChange={handleChange}
+              >
+                <option value="GELEN">Gelen</option>
+                <option value="GIDEN">Giden</option>
+              </select>
+            </div>
+
+            <div className="formGroup">
+              <label>Firma</label>
+              <input
+                name="company_name"
+                value={form.company_name}
+                onChange={handleChange}
+                placeholder="Firma adı"
+                required
+              />
+            </div>
+
+            <div className="formGroup">
+              <label>Tutar</label>
+              <input
+                type="number"
+                step="0.01"
+                name="amount"
+                value={form.amount}
+                onChange={handleChange}
+                placeholder="0"
+                required
+              />
+            </div>
+
+            <div className="formGroup">
+              <label>Para Birimi</label>
+              <select
+                name="currency"
+                value={form.currency}
+                onChange={handleChange}
+              >
+                <option value="TRY">TRY</option>
+                <option value="USD">USD</option>
+              </select>
+            </div>
+
+            <div className="formGroup">
+              <label>Durum</label>
+              <select name="status" value={form.status} onChange={handleChange}>
+                <option value="BEKLIYOR">Bekliyor</option>
+                <option value="ODENDI">Ödendi</option>
+                <option value="KISMI">Kısmi</option>
+              </select>
+            </div>
+
+            <div className="formGroup">
+              <label>Fatura Tarihi</label>
+              <input
+                type="date"
+                name="invoice_date"
+                value={form.invoice_date}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="formGroup">
+              <label>Vade Tarihi</label>
+              <input
+                type="date"
+                name="due_date"
+                value={form.due_date}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="formGroup formGroupWide">
+              <label>Açıklama</label>
+              <input
+                name="description"
+                value={form.description}
+                onChange={handleChange}
+                placeholder="Açıklama"
+              />
+            </div>
+
+            <div className="formGroup formGroupWide">
+              <label>Not</label>
+              <textarea
+                name="note"
+                value={form.note}
+                onChange={handleChange}
+                rows={3}
+                placeholder="Not"
+              />
+            </div>
+          </div>
+
+          <div className="entryActions">
+            <button type="submit" className="saveButton" disabled={saving}>
+              {saving ? "Kaydediliyor..." : "Faturayı Kaydet"}
+            </button>
+          </div>
+
+          {message && <div className="entryMessage">{message}</div>}
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function formatTLInput(value) {
   const numeric = String(value || "").replace(/[^\d]/g, "");
   if (!numeric) return "";
@@ -2502,12 +2551,6 @@ function FinanceDashboard({
     };
   }
 
-  const [usdTryRate, setUsdTryRate] = useState(0);
-  const [subconDetailRows, setSubconDetailRows] = useState([]);
-  const [subconFilter, setSubconFilter] = useState("");
-  const [subconSummaryRows, setSubconSummaryRows] = useState([]);
-  const [showSubconSummaryModal, setShowSubconSummaryModal] = useState(false);
-
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
 
@@ -2517,11 +2560,11 @@ function FinanceDashboard({
   const [showPersonFilterList, setShowPersonFilterList] = useState(false);
   const [salaryRows, setSalaryRows] = useState([]);
   const [editingSalaryId, setEditingSalaryId] = useState(null);
-
+  const [salarySearch, setSalarySearch] = useState("");
   const [manualInvoiceSearch, setManualInvoiceSearch] = useState("");
   const [manualInvoiceStatusFilter, setManualInvoiceStatusFilter] =
     useState("ALL");
-
+  const [showInvoiceEntry, setShowInvoiceEntry] = useState(false);
   const [manualInvoiceRows, setManualInvoiceRows] = useState([]);
   const [overdueRows, setOverdueRows] = useState([]);
   const [showOverdueModal, setShowOverdueModal] = useState(false);
@@ -2551,163 +2594,6 @@ function FinanceDashboard({
   );
   const [salaryFilterPersonel, setSalaryFilterPersonel] = useState("");
 
-  const normalizeSubconName = (value) =>
-    String(value || "")
-      .trim()
-      .toLocaleUpperCase("tr-TR");
-
-  const recalculatedSubconSummaryRows = useMemo(() => {
-    const detailMap = new Map();
-
-    (subconDetailRows || []).forEach((row) => {
-      const subconName = normalizeSubconName(row.subcon_name);
-      if (!subconName) return;
-
-      const doneQty = Number(row.done_qty || 0);
-      const billedQty = Number(row.billed_qty || 0);
-      const unitPrice = Number(row.unit_price || 0);
-      const curr = String(row.currency || "TRY").toUpperCase();
-
-      const hakedisRaw = doneQty * unitPrice;
-      const faturayaHazirRaw = billedQty * unitPrice;
-
-      const hakedisTL =
-        curr === "USD" ? hakedisRaw * Number(usdTryRate || 0) : hakedisRaw;
-
-      const faturayaHazirTL =
-        curr === "USD"
-          ? faturayaHazirRaw * Number(usdTryRate || 0)
-          : faturayaHazirRaw;
-
-      if (!detailMap.has(subconName)) {
-        detailMap.set(subconName, {
-          subcon_name: subconName,
-          total_hakedis: 0,
-          total_faturaya_hazir: 0,
-        });
-      }
-
-      const existing = detailMap.get(subconName);
-      existing.total_hakedis += hakedisTL;
-      existing.total_faturaya_hazir += faturayaHazirTL;
-    });
-
-    return (subconSummaryRows || []).map((summaryRow) => {
-      const subconName = normalizeSubconName(summaryRow.subcon_name);
-      const recalculated = detailMap.get(subconName);
-
-      return {
-        ...summaryRow,
-        total_hakedis: Number(recalculated?.total_hakedis || 0),
-        total_faturaya_hazir: Number(recalculated?.total_faturaya_hazir || 0),
-        total_fatura: Number(summaryRow.total_fatura || 0),
-        total_odenen: Number(summaryRow.total_odenen || 0),
-        kalan_borc: Number(summaryRow.kalan_borc || 0),
-        fazla_odeme: Number(summaryRow.fazla_odeme || 0),
-      };
-    });
-  }, [subconDetailRows, subconSummaryRows, usdTryRate]);
-
-  const filteredSubconSummaryRows = useMemo(() => {
-    const q = subconFilter.toLowerCase().trim();
-
-    if (!q) return recalculatedSubconSummaryRows;
-
-    return recalculatedSubconSummaryRows.filter((row) =>
-      (row.subcon_name || "").toLowerCase().includes(q),
-    );
-  }, [recalculatedSubconSummaryRows, subconFilter]);
-
-  const totalRow = useMemo(
-    () =>
-      filteredSubconSummaryRows.reduce(
-        (acc, row) => {
-          acc.total_hakedis += Number(row.total_hakedis || 0);
-          acc.total_faturaya_hazir += Number(row.total_faturaya_hazir || 0);
-          acc.total_fatura += Number(row.total_fatura || 0);
-          acc.total_odenen += Number(row.total_odenen || 0);
-          acc.kalan_borc += Number(row.kalan_borc || 0);
-          acc.fazla_odeme += Number(row.fazla_odeme || 0);
-          return acc;
-        },
-        {
-          total_hakedis: 0,
-          total_faturaya_hazir: 0,
-          total_fatura: 0,
-          total_odenen: 0,
-          kalan_borc: 0,
-          fazla_odeme: 0,
-        },
-      ),
-    [filteredSubconSummaryRows],
-  );
-
-  const filteredSubconDetailRows = useMemo(() => {
-    const q = subconFilter.toLowerCase().trim();
-
-    let rows = subconDetailRows || [];
-
-    if (q) {
-      rows = rows.filter((row) =>
-        (row.subcon_name || "").toLowerCase().includes(q),
-      );
-    }
-
-    return rows;
-  }, [subconDetailRows, subconFilter]);
-
-  const handleExportFilteredSubconExcel = () => {
-    if (!filteredSubconDetailRows.length) {
-      alert("İndirilecek kayıt bulunamadı");
-      return;
-    }
-
-    const excelRows = filteredSubconDetailRows.map((row) => {
-      const billedQty = Number(row.billed_qty || 0);
-      const doneQty = Number(row.done_qty || 0);
-      const unitPrice = Number(row.unit_price || 0);
-      const rawTotal = doneQty * unitPrice;
-      const curr = String(row.currency || "TRY").toUpperCase();
-      const totalTl =
-        curr === "USD" ? rawTotal * Number(usdTryRate || 0) : rawTotal;
-
-      return {
-        Bölge: getRegion(row.site_code) || "",
-        Status: row.status || "",
-        Project: row.project_code || "",
-        Site: row.site_code || "",
-        Item: row.item_code || "",
-        "Item Description": row.item_description || "",
-        Done: doneQty,
-        Req: Number(row.requested_qty || 0),
-        Analiz: getQtyAnalysis(row.done_qty, row.requested_qty).label,
-        Billed: billedQty,
-        Curr: curr,
-        Unit: unitPrice,
-        Total: Number(totalTl.toFixed(2)),
-        Subcon: row.subcon_name || "",
-        OnAir: formatDateTR(row.onair_date),
-        QC: row.qc_durum || "",
-        Kabul: row.kabul_durum || "",
-        "RF Not": row.kabul_not || "",
-      };
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Subcon Detail");
-
-    const safeName = subconFilter
-      ? subconFilter.replace(/[^\wğüşöçıİĞÜŞÖÇ -]/gi, "").replace(/\s+/g, "_")
-      : "tum_taseronlar";
-
-    XLSX.writeFile(
-      workbook,
-      `subcon_detail_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-    );
-  };
-
   const supplierOptions = useMemo(() => {
     const names = (manualInvoiceRows || [])
       .map((x) => String(x.tedarikci || "").trim())
@@ -2733,16 +2619,6 @@ function FinanceDashboard({
     setSupplierSuggestions(filtered);
   };
 
-  const loadSubconDetailRows = async () => {
-    try {
-      const data = await fetchJson(`${API_BASE}/master/list-detailed`);
-      setSubconDetailRows(data.rows || []);
-    } catch (err) {
-      console.error("SUBCON DETAIL LOAD ERROR:", err);
-      alert(err.message || "Taşeron detay verisi alınamadı");
-    }
-  };
-
   const [invoiceForm, setInvoiceForm] = useState({
     bolge: "",
     proje: "",
@@ -2750,7 +2626,6 @@ function FinanceDashboard({
     fatura_no: "",
     fatura_tarihi: "",
     tedarikci: "",
-    rf_montaj_firma: "",
     fatura_kalemi: "",
     is_kalemi: "",
     po_no: "",
@@ -2975,23 +2850,6 @@ function FinanceDashboard({
     }));
   }, []);
 
-  const handleShowSubconSummary = async () => {
-    try {
-      const [summaryData, detailData] = await Promise.all([
-        fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`),
-        fetchJson(`${API_BASE}/master/list-detailed`),
-      ]);
-
-      setSubconSummaryRows(summaryData.rows || []);
-      setUsdTryRate(Number(summaryData.usd_try_rate || 0));
-      setSubconDetailRows(detailData.rows || []);
-      setShowSubconSummaryModal(true);
-    } catch (err) {
-      console.error("SUBCON SUMMARY LOAD ERROR:", err);
-      alert(err.message || "Taşeron hakediş özeti alınamadı");
-    }
-  };
-
   useEffect(() => {
     fetchJson(`${API_BASE}/finance/personel/list`, { withAuth: true })
       .then((data) => setPersonnelMaster(data.rows || []))
@@ -3013,6 +2871,7 @@ function FinanceDashboard({
       String(salaryForm.banka_maliyeti || "0").replace(/[^\d]/g, ""),
     );
 
+    const kalanNetOdeme = Math.max(netMaas - avans, 0);
     const bankayaYatacakNet = Math.max(kalanNetOdeme - elden, 0);
     const toplamIsverenMaliyeti = bankaMaliyeti + elden;
 
@@ -3048,18 +2907,6 @@ function FinanceDashboard({
       elden_net: kalan - banka,
     }));
   }, [salaryForm.banka_net, salaryForm.kalan_maas]);
-
-  useEffect(() => {
-    if (showSubconSummaryModal) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [showSubconSummaryModal]);
 
   const kalanNetOdeme = useMemo(() => {
     const netMaas = Number(salaryForm.net_maas || 0);
@@ -3123,7 +2970,6 @@ function FinanceDashboard({
         ? String(row.fatura_tarihi).slice(0, 10)
         : "",
       tedarikci: row.tedarikci || "",
-      rf_montaj_firma: row.rf_montaj_firma || "",
       fatura_kalemi: row.fatura_kalemi || "",
       is_kalemi: row.is_kalemi || "",
       po_no: row.po_no || "",
@@ -3168,7 +3014,6 @@ function FinanceDashboard({
         fatura_no: invoiceForm.fatura_no,
         fatura_tarihi: invoiceForm.fatura_tarihi || null,
         tedarikci: invoiceForm.tedarikci,
-        rf_montaj_firma: invoiceForm.rf_montaj_firma,
         fatura_kalemi: invoiceForm.fatura_kalemi,
         is_kalemi: invoiceForm.is_kalemi,
         po_no: invoiceForm.po_no,
@@ -3180,7 +3025,6 @@ function FinanceDashboard({
         kalan_borc: Number(invoiceForm.kalan_borc || 0),
         note: invoiceForm.note,
       };
-      console.log("MANUAL INVOICE PAYLOAD:", payload);
 
       if (editingInvoiceId) {
         await fetchJson(
@@ -3212,7 +3056,6 @@ function FinanceDashboard({
         fatura_no: "",
         fatura_tarihi: "",
         tedarikci: "",
-        rf_montaj_firma: "",
         fatura_kalemi: "",
         is_kalemi: "",
         po_no: "",
@@ -3424,6 +3267,13 @@ function FinanceDashboard({
     loadFinance();
   }, [loadFinance]);
 
+  const filteredDayTotal = useMemo(() => {
+    return paymentRows.reduce((sum, row) => {
+      const amount = Number(row.payment_amount || 0);
+      return sum + amount;
+    }, 0);
+  }, [paymentRows]);
+
   const sortedPaymentRows = useMemo(() => {
     return [...paymentRows].sort((a, b) => {
       // boş kontrol
@@ -3582,15 +3432,6 @@ function FinanceDashboard({
         >
           Maaş & Avans
         </button>
-        <button
-          type="button"
-          className="tab smallTab"
-          onClick={() => {
-            handleShowSubconSummary();
-          }}
-        >
-          Taşeron Hakediş
-        </button>
       </div>
 
       {showUpload && (
@@ -3611,6 +3452,13 @@ function FinanceDashboard({
         <FinanceInvoiceUploadInline
           onClose={() => setShowInvoiceUpload(false)}
           onUploaded={loadFinance}
+        />
+      )}
+
+      {showInvoiceEntry && (
+        <ManualInvoiceEntryInline
+          onClose={() => setShowInvoiceEntry(false)}
+          onSaved={loadFinance}
         />
       )}
 
@@ -3763,80 +3611,18 @@ function FinanceDashboard({
         </table>
       </div>
 
-      <h3 className="listTitle">Huawei Payment Kayıtları</h3>
+      <div className="tableWrap">
+        <h3 className="listTitle">Huawei Payment Kayıtları</h3>
 
-      <div
-        className="tableWrap"
-        style={{
-          maxHeight: "50vh",
-          overflowY: "auto",
-          overflowX: "auto",
-          marginTop: "12px",
-        }}
-      >
         <table>
           <thead>
             <tr>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Invoice No
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Invoice Amount
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Payment Amount
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Remaining Amount
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Payment Date
-              </th>
-              <th
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  background: "#f3f4f6",
-                  zIndex: 2,
-                }}
-              >
-                Due Date
-              </th>
+              <th>Invoice No</th>
+              <th>Invoice Amount</th>
+              <th>Payment Amount</th>
+              <th>Remaining Amount</th>
+              <th>Payment Date</th>
+              <th>Due Date</th>
             </tr>
           </thead>
           <tbody>
@@ -4176,16 +3962,6 @@ function FinanceDashboard({
                     value={invoiceForm.kalan_borc}
                     onChange={handleInvoiceFormChange}
                     placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>RF Montaj Firma</label>
-                  <input
-                    name="rf_montaj_firma"
-                    value={invoiceForm.rf_montaj_firma}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Subcon Name ile aynı firma adı"
                   />
                 </div>
 
@@ -5363,218 +5139,6 @@ function FinanceDashboard({
           </div>
         </div>
       )}
-
-      {showSubconSummaryModal && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "flex-start",
-            overflowY: "auto",
-            zIndex: 9999,
-            padding: "20px",
-          }}
-          onClick={() => setShowSubconSummaryModal(false)}
-        >
-          <div
-            style={{
-              background: "#fff",
-              width: "100%",
-              maxWidth: "1200px",
-              maxHeight: "85vh",
-              overflowY: "auto",
-              overflowX: "hidden",
-              borderRadius: "20px",
-              padding: "24px",
-              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "18px",
-                gap: "12px",
-                flexWrap: "wrap",
-              }}
-            >
-              {/* SOL TARAF */}
-              <div
-                style={{
-                  display: "flex",
-                  gap: "10px",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
-                <h3 className="listTitle" style={{ margin: 0 }}>
-                  Taşeron Bazlı İş Tamamlama & Faturalama Özeti
-                </h3>
-
-                {/* ✅ KUR BİLGİSİ (KÜÇÜK) */}
-                <div
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "#0e7490",
-                    background: "#ecfeff",
-                    border: "1px solid #67e8f9",
-                    padding: "4px 8px",
-                    borderRadius: "8px",
-                  }}
-                >
-                  USD/TRY: {usdTryRate ? usdTryRate.toFixed(4) : "-"}
-                </div>
-
-                <input
-                  type="text"
-                  placeholder="Taşeron ara..."
-                  value={subconFilter}
-                  onChange={(e) => setSubconFilter(e.target.value)}
-                  style={{
-                    width: "220px",
-                    padding: "8px",
-                    borderRadius: "8px",
-                    border: "1px solid #ddd",
-                  }}
-                />
-              </div>
-
-              {/* SAĞ TARAF */}
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={handleExportFilteredSubconExcel}
-                >
-                  Excel İndir
-                </button>
-
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={() => setShowSubconSummaryModal(false)}
-                >
-                  Kapat
-                </button>
-              </div>
-            </div>
-            <div
-              className="tableWrap"
-              style={{
-                maxHeight: "55vh",
-                overflowY: "auto",
-                overflowX: "auto",
-                marginTop: "12px",
-              }}
-            >
-              <table>
-                <thead>
-                  <tr>
-                    <th>Taşeron</th>
-                    <th>Tamamlanan İş Bedeli</th>
-                    <th>HW’ye Kesilen Fatura Bedeli</th>
-                    <th>Kestiği Fatura</th>
-                    <th>Ödenen</th>
-                    <th>Kalan Borç</th>
-                    <th>Fazla Ödeme</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {filteredSubconSummaryRows.length === 0 ? (
-                    <EmptyRow colSpan={7} text="Taşeron özeti bulunamadı" />
-                  ) : (
-                    <>
-                      {filteredSubconSummaryRows.map((row, index) => (
-                        <tr key={`${row.subcon_name}-${index}`}>
-                          <td>{row.subcon_name || "-"}</td>
-                          <td>
-                            {formatMoneyByCurrency(
-                              row.total_hakedis || 0,
-                              "TRY",
-                            )}
-                          </td>
-                          <td>
-                            {formatMoneyByCurrency(
-                              row.total_faturaya_hazir || 0,
-                              "TRY",
-                            )}
-                          </td>
-                          <td>
-                            {formatMoneyByCurrency(
-                              row.total_fatura || 0,
-                              "TRY",
-                            )}
-                          </td>
-                          <td>
-                            {formatMoneyByCurrency(
-                              row.total_odenen || 0,
-                              "TRY",
-                            )}
-                          </td>
-                          <td
-                            style={{
-                              color:
-                                Number(row.kalan_borc || 0) > 0
-                                  ? "#b45309"
-                                  : "#111827",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {formatMoneyByCurrency(row.kalan_borc || 0, "TRY")}
-                          </td>
-                          <td
-                            style={{
-                              color:
-                                Number(row.fazla_odeme || 0) > 0
-                                  ? "#dc2626"
-                                  : "#111827",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {formatMoneyByCurrency(row.fazla_odeme || 0, "TRY")}
-                          </td>
-                        </tr>
-                      ))}
-
-                      <tr style={{ fontWeight: 800, background: "#f3f4f6" }}>
-                        <td>TOPLAM</td>
-                        <td>
-                          {formatMoneyByCurrency(totalRow.total_hakedis, "TRY")}
-                        </td>
-                        <td>
-                          {formatMoneyByCurrency(
-                            totalRow.total_faturaya_hazir,
-                            "TRY",
-                          )}
-                        </td>
-                        <td>
-                          {formatMoneyByCurrency(totalRow.total_fatura, "TRY")}
-                        </td>
-                        <td>
-                          {formatMoneyByCurrency(totalRow.total_odenen, "TRY")}
-                        </td>
-                        <td>
-                          {formatMoneyByCurrency(totalRow.kalan_borc, "TRY")}
-                        </td>
-                        <td>
-                          {formatMoneyByCurrency(totalRow.fazla_odeme, "TRY")}
-                        </td>
-                      </tr>
-                    </>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
@@ -5602,22 +5166,9 @@ function formatTRY(value) {
 }
 
 function RegionAnalysis() {
-  const [filterText, setFilterText] = useState("");
-  const [regionSearch, setRegionSearch] = useState("");
-  const [sortConfig, setSortConfig] = useState({
-    key: null,
-    direction: "asc",
-  });
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailRows, setDetailRows] = useState([]);
-  const filteredRows = detailRows.filter((row) =>
-    Object.values(row).some((val) =>
-      String(val || "")
-        .toLowerCase()
-        .includes(filterText.toLowerCase()),
-    ),
-  );
   const [usdRate, setUsdRate] = useState(45); // fallback
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -5882,92 +5433,6 @@ function RegionAnalysis() {
     );
   };
 
-  const filteredRegionRows = useMemo(() => {
-    const q = regionSearch.toLowerCase().trim();
-
-    const cleanRows = rows.filter(
-      (row) => getRegion(row.site_code) !== "Tanımsız",
-    );
-
-    if (!q) return cleanRows;
-
-    return cleanRows.filter((row) => {
-      const text = `
-      ${getRegion(row.site_code) || ""}
-      ${row.status || ""}
-      ${row.project_code || ""}
-      ${row.site_code || ""}
-      ${row.item_code || ""}
-      ${row.item_description || ""}
-      ${row.subcon_name || ""}
-      ${row.onair_date || ""}
-    `.toLowerCase();
-
-      return text.includes(q);
-    });
-  }, [rows, regionSearch]);
-  const sortedRows = useMemo(() => {
-    let sortable = [...filteredRegionRows];
-
-    if (sortConfig.key) {
-      sortable.sort((a, b) => {
-        const aVal = a[sortConfig.key] ?? "";
-        const bVal = b[sortConfig.key] ?? "";
-
-        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
-        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
-        return 0;
-      });
-    }
-
-    return sortable;
-  }, [filteredRegionRows, sortConfig]);
-
-  const handleSort = (key) => {
-    setSortConfig((prev) => ({
-      key,
-      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
-    }));
-  };
-
-  const handleExportRegionExcel = () => {
-    if (!filteredRegionRows.length) {
-      alert("İndirilecek kayıt bulunamadı");
-      return;
-    }
-
-    const excelRows = filteredRegionRows.map((row) => ({
-      Bölge: getRegion(row.site_code) || "",
-      Status: row.status || "",
-      "Project Code": row.project_code || "",
-      "Site Code": row.site_code || "",
-      "Item Code": row.item_code || "",
-      "Item Description": row.item_description || "",
-      "OnAir Date": formatDateTR(row.onair_date),
-      "Done Qty": row.done_qty ?? "",
-      "Requested Qty": row.requested_qty ?? "",
-      "Billed Qty": row.billed_qty ?? "",
-      Currency: row.currency || "",
-      "Unit Price":
-        Number(row.unit_price || 0) === 0 ? "" : Number(row.unit_price || 0),
-      "Total Done Amount":
-        Number(row.total_done_amount || 0) === 0
-          ? ""
-          : Number(row.total_done_amount || 0),
-      Subcon: row.subcon_name || "",
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Region Analysis");
-
-    XLSX.writeFile(
-      workbook,
-      `region_analysis_${new Date().toISOString().slice(0, 10)}.xlsx`,
-    );
-  };
-
   if (loading) return <div className="loading">Yükleniyor...</div>;
   if (errorMessage) return <div className="loading">{errorMessage}</div>;
 
@@ -6197,10 +5662,10 @@ function RegionAnalysis() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.length === 0 ? (
+                  {detailRows.length === 0 ? (
                     <EmptyRow colSpan={12} text="Kayıt bulunamadı" />
                   ) : (
-                    filteredRows.map((row, index) => (
+                    detailRows.map((row, index) => (
                       <tr
                         key={
                           row.id ??
@@ -6216,12 +5681,7 @@ function RegionAnalysis() {
                         <td>{row.item_description || "-"}</td>
                         <td>{row.done_qty ?? "-"}</td>
                         <td>{row.requested_qty ?? "-"}</td>
-                        <td>
-                          {Math.min(
-                            Number(row.done_qty || 0),
-                            Number(row.requested_qty || 0),
-                          )}
-                        </td>
+                        <td>{row.billed_qty ?? "-"}</td>
                         <td>{row.currency || "-"}</td>
                         <td>
                           {Number(row.unit_price || 0) === 0
@@ -6250,129 +5710,32 @@ function RegionAnalysis() {
         </div>
       )}
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "12px",
-          gap: "12px",
-          flexWrap: "wrap",
-        }}
-      >
-        <input
-          type="text"
-          placeholder="Bölge, status, proje, site, item, taşeron, OnAir Date ara"
-          value={regionSearch}
-          onChange={(e) => setRegionSearch(e.target.value)}
-          style={{
-            padding: "10px 14px",
-            borderRadius: "8px",
-            border: "1px solid #d1d5db",
-            minWidth: "320px",
-          }}
-        />
-
-        <button type="button" className="tab" onClick={handleExportRegionExcel}>
-          Excel İndir
-        </button>
-      </div>
-
-      <div
-        className="tableWrap"
-        style={{
-          maxHeight: "60vh",
-          overflowY: "auto",
-          overflowX: "auto",
-        }}
-      >
+      <div className="tableWrap">
         <table>
           <thead>
             <tr>
               <th>Bölge</th>
               <th>Status</th>
-              <th
-                onClick={() => handleSort("project_code")}
-                style={{ cursor: "pointer" }}
-              >
-                Project
-              </th>
-              <th
-                onClick={() => handleSort("site_code")}
-                style={{ cursor: "pointer" }}
-              >
-                Site
-              </th>
-              <th
-                onClick={() => handleSort("item_code")}
-                style={{ cursor: "pointer" }}
-              >
-                Item
-              </th>
-              <th
-                onClick={() => handleSort("done_qty")}
-                style={{ cursor: "pointer" }}
-              >
-                Done
-              </th>
-              <th
-                onClick={() => handleSort("requested_qty")}
-                style={{ cursor: "pointer" }}
-              >
-                Req
-              </th>
-              <th>Analiz</th>
-              <th
-                onClick={() => handleSort("billed_qty")}
-                style={{ cursor: "pointer" }}
-              >
-                Billed
-              </th>
-              <th>Curr</th>
-              <th
-                onClick={() => handleSort("unit_price")}
-                style={{ cursor: "pointer" }}
-              >
-                Unit
-              </th>
-              <th
-                onClick={() => handleSort("total_done_amount")}
-                style={{ cursor: "pointer" }}
-              >
-                Total
-              </th>
-              <th
-                onClick={() => handleSort("subcon_name")}
-                style={{ cursor: "pointer" }}
-              >
-                Subcon
-              </th>
-              <th
-                onClick={() => handleSort("onair_date")}
-                style={{ cursor: "pointer" }}
-              >
-                OnAir
-              </th>
-              <th>QC</th>
-              <th>Kabul</th>
-              <th>RF Not</th>
+              <th>Project Code</th>
+              <th>Site Code</th>
+              <th>Item Code</th>
+              <th>Done Qty</th>
+              <th>Requested Qty</th>
+              <th>Billed Qty</th>
+              <th>Currency</th>
+              <th>Unit Price</th>
+              <th>Total Done Amount</th>
+              <th>Subcon</th>
             </tr>
           </thead>
           <tbody>
-            {sortedRows.length === 0 ? (
-              <EmptyRow colSpan={16} text="Tanımlı bölge kaydı bulunamadı" />
+            {rows.filter((row) => getRegion(row.site_code) !== "Tanımsız")
+              .length === 0 ? (
+              <EmptyRow colSpan={12} text="Tanımlı bölge kaydı bulunamadı" />
             ) : (
-              sortedRows.map((row, index) => {
-                const analysis = getQtyAnalysis(
-                  row.done_qty,
-                  row.requested_qty,
-                );
-                const autoBilled = Math.min(
-                  Number(row.done_qty || 0),
-                  Number(row.requested_qty || 0),
-                );
-
-                return (
+              rows
+                .filter((row) => getRegion(row.site_code) !== "Tanımsız")
+                .map((row, index) => (
                   <tr
                     key={
                       row.id ??
@@ -6388,19 +5751,7 @@ function RegionAnalysis() {
                     <td>{row.item_code || "-"}</td>
                     <td>{row.done_qty ?? "-"}</td>
                     <td>{row.requested_qty ?? "-"}</td>
-                    <td>
-                      <span className={`analysisBadge ${analysis.className}`}>
-                        {analysis.label}
-                      </span>
-                    </td>
-                    <td>
-                      {autoBilled === 0
-                        ? "-"
-                        : formatMoneyByCurrency(
-                            autoBilled * Number(row.unit_price || 0),
-                            row.currency,
-                          )}
-                    </td>
+                    <td>{row.billed_qty ?? "-"}</td>
                     <td>{row.currency || "-"}</td>
                     <td>
                       {Number(row.unit_price || 0) === 0
@@ -6416,13 +5767,8 @@ function RegionAnalysis() {
                           )}
                     </td>
                     <td>{row.subcon_name || "-"}</td>
-                    <td>{formatDateTR(row.onair_date)}</td>
-                    <td>{row.qc_durum || "-"}</td>
-                    <td>{row.kabul_durum || "-"}</td>
-                    <td className="desc-cell">{row.note || "-"}</td>
                   </tr>
-                );
-              })
+                ))
             )}
           </tbody>
         </table>

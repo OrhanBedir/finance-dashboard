@@ -108,6 +108,103 @@ app.get("/test", (req, res) => {
   res.json({ ok: true });
 });
 
+const https = require("https");
+
+function fetchText(url) {
+  return new Promise((resolve, reject) => {
+    https
+      .get(url, (res) => {
+        let data = "";
+
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+
+        res.on("end", () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(data);
+          } else {
+            reject(new Error(`TCMB yanıt hatası: ${res.statusCode}`));
+          }
+        });
+      })
+      .on("error", reject);
+  });
+}
+
+function parseTcmbUsdSellingRate(xmlText) {
+  const usdBlockMatch = xmlText.match(
+    /<Currency[^>]+CurrencyCode="USD"[\s\S]*?<\/Currency>/i,
+  );
+
+  if (!usdBlockMatch) {
+    throw new Error("TCMB XML içinde USD bulunamadı");
+  }
+
+  const usdBlock = usdBlockMatch[0];
+
+  const forexSellingMatch = usdBlock.match(
+    /<ForexSelling>(.*?)<\/ForexSelling>/i,
+  );
+
+  if (!forexSellingMatch || !forexSellingMatch[1]) {
+    throw new Error("USD ForexSelling değeri bulunamadı");
+  }
+
+  const rawRate = forexSellingMatch[1].trim().replace(",", ".");
+  const rate = Number(rawRate);
+
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new Error("Geçersiz USD kuru");
+  }
+
+  return rate;
+}
+
+async function getTcmbUsdTrySellingRate() {
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, "0");
+  const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(today.getFullYear());
+
+  const xmlUrl = `https://www.tcmb.gov.tr/kurlar/${yyyy}${mm}/${dd}${mm}${yyyy}.xml`;
+
+  try {
+    const xmlText = await fetchText(xmlUrl);
+    return parseTcmbUsdSellingRate(xmlText);
+  } catch (err) {
+    // Hafta sonu / tatil için son 5 güne kadar geri git
+    for (let i = 1; i <= 5; i += 1) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+
+      const ddd = String(d.getDate()).padStart(2, "0");
+      const mmm = String(d.getMonth() + 1).padStart(2, "0");
+      const yyy = String(d.getFullYear());
+
+      const fallbackUrl = `https://www.tcmb.gov.tr/kurlar/${yyy}${mmm}/${ddd}${mmm}${yyy}.xml`;
+
+      try {
+        const xmlText = await fetchText(fallbackUrl);
+        return parseTcmbUsdSellingRate(xmlText);
+      } catch (_) {
+        // sıradaki güne geç
+      }
+    }
+
+    throw new Error("TCMB USD kuru alınamadı");
+  }
+}
+
+function toTlAmount(amount, currency, usdTryRate) {
+  const numericAmount = Number(amount || 0);
+  const curr = String(currency || "TRY").toUpperCase();
+
+  if (!Number.isFinite(numericAmount)) return 0;
+  if (curr === "USD") return numericAmount * usdTryRate;
+  return numericAmount;
+}
+
 function getAllowedFinanceUsers() {
   return String(process.env.FINANCE_ALLOWED_USERS || "")
     .split(",")
@@ -222,14 +319,14 @@ async function buildUpcomingCollectionsData() {
       p.invoice_no,
       p.due_date,
       p.payment_date,
-      COALESCE(p.remaining_amount, 0) AS remaining_amount,
+      COALESCE(p.invoice_amount, 0) - COALESCE(p.payment_amount, 0) AS remaining_amount,
       COALESCE(p.currency, 'TRY') AS currency,
       i.invoice_date,
       COALESCE(i.terms, '') AS terms
     FROM hw_payment_rows p
     LEFT JOIN hw_invoice_rows i
       ON TRIM(COALESCE(i.invoice_no, '')) = TRIM(COALESCE(p.invoice_no, ''))
-    WHERE COALESCE(p.remaining_amount, 0) > 0
+    WHERE COALESCE(p.invoice_amount, 0) - COALESCE(p.payment_amount, 0) > 0
     ORDER BY p.id ASC
   `);
 
@@ -379,7 +476,7 @@ async function buildOverdueInvoicesData() {
   const paymentResult = await pool.query(`
     SELECT
       COALESCE(invoice_no, '') AS invoice_no,
-      COALESCE(remaining_amount, 0) AS remaining_amount,
+      COALESCE(invoice_amount, 0) - COALESCE(payment_amount, 0) AS remaining_amount,
       COALESCE(currency, 'TRY') AS currency,
       payment_date,
       due_date,
@@ -704,15 +801,19 @@ function normalizeCurrency(value) {
 }
 
 function getRegion(siteCode) {
-  const code = String(siteCode || "").toUpperCase();
+  const code = String(siteCode || "")
+    .trim()
+    .toUpperCase();
 
   if (
     code.startsWith("ES") ||
     code.startsWith("BO") ||
     code.startsWith("ZO") ||
-    code.startsWith("KA")
+    code.startsWith("KA") ||
+    code.includes("_ANK") ||
+    code.startsWith("AN")
   ) {
-    return "ANKARA";
+    return "Ankara";
   }
 
   if (
@@ -723,7 +824,7 @@ function getRegion(siteCode) {
     code.startsWith("AI") ||
     code.startsWith("DE")
   ) {
-    return "İZMİR";
+    return "İzmir";
   }
 
   if (
@@ -732,7 +833,7 @@ function getRegion(siteCode) {
     code.startsWith("BU") ||
     code.startsWith("AF")
   ) {
-    return "ANTALYA";
+    return "Antalya";
   }
 
   return "DİĞER";
@@ -838,8 +939,14 @@ function buildMasterJoinedQuery(
       COALESCE(m.note, '') AS note,
       m.created_at,
 
-      COALESCE(site_po.requested_qty, 0) AS requested_qty,
-      COALESCE(site_po.billed_qty, 0) AS billed_qty,
+      CASE
+        WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.requested_qty, 0)
+        ELSE COALESCE(item_po.requested_qty, 0)
+      END AS requested_qty,
+      CASE
+        WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.billed_qty, 0)
+        ELSE COALESCE(item_po.billed_qty, 0)
+      END AS billed_qty,
       COALESCE(site_po.due_qty, 0) AS due_qty,
       COALESCE(site_po.po_no, '') AS po_no,
 
@@ -2081,6 +2188,43 @@ app.delete("/finance/salary/:id", async (req, res) => {
   }
 });
 
+// silinecek excel yükleme//
+
+app.get("/debug/subcon-check", async (req, res) => {
+  try {
+    const totalWorks = await pool.query(`
+      SELECT COUNT(*)::int AS total
+      FROM master_works
+    `);
+
+    const filledSubcons = await pool.query(`
+      SELECT COUNT(*)::int AS total
+      FROM master_works
+      WHERE COALESCE(TRIM(subcon_name), '') <> ''
+    `);
+
+    const sampleSubcons = await pool.query(`
+      SELECT
+        site_code,
+        item_code,
+        subcon_name,
+        done_qty
+      FROM master_works
+      ORDER BY id DESC
+      LIMIT 20
+    `);
+
+    res.json({
+      ok: true,
+      total_works: totalWorks.rows[0]?.total || 0,
+      filled_subcon_count: filledSubcons.rows[0]?.total || 0,
+      sample_rows: sampleSubcons.rows || [],
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /* ================== MANUAL INVOICE EXCEL IMPORT ================== */
 app.post(
   "/finance/invoice-entry/import-excel",
@@ -2102,7 +2246,29 @@ app.post(
       }
 
       const sheet = workbook.Sheets[firstSheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+      const rawRows = XLSX.utils.sheet_to_json(sheet, {
+        header: 1,
+        defval: null,
+      });
+
+      if (!rawRows.length || rawRows.length < 2) {
+        return res.status(400).json({
+          ok: false,
+          error: "Excel içinde veri bulunamadı",
+        });
+      }
+
+      // 2. satırı header kabul et
+      const headers = rawRows[1];
+      const dataRows = rawRows.slice(2);
+
+      const rows = dataRows.map((row) => {
+        const obj = {};
+        headers.forEach((header, index) => {
+          obj[header] = row[index];
+        });
+        return obj;
+      });
 
       if (!rows.length) {
         return res.status(400).json({
@@ -2120,6 +2286,11 @@ app.post(
         const faturaNo = getCell(r, ["Fatura No"]);
         const faturaTarihi = getCell(r, ["Fatura Tarihi"]);
         const tedarikci = getCell(r, ["Tedarikçi", "Tedarikci"]);
+        const rf_montaj_firma = getCell(r, [
+          "RF Montaj Firma",
+          "rf_montaj_firma",
+        ]);
+
         const faturaKalemi = getCell(r, ["Fatura Kalemi"]);
         const isKalemi = getCell(r, ["İş Kalemi", "Is Kalemi"]);
         const poNo = getCell(r, ["PO No"]);
@@ -2151,6 +2322,7 @@ app.post(
             fatura_no,
             fatura_tarihi,
             tedarikci,
+            rf_montaj_firma,
             fatura_kalemi,
             is_kalemi,
             po_no,
@@ -2164,7 +2336,7 @@ app.post(
           )
           VALUES
           (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
           )
           `,
           [
@@ -2174,6 +2346,7 @@ app.post(
             faturaNo ? String(faturaNo).trim() : null,
             parseExcelDateFlexible(faturaTarihi),
             tedarikci ? String(tedarikci).trim() : null,
+            rf_montaj_firma ? String(rf_montaj_firma).trim() : null, // ✅
             faturaKalemi ? String(faturaKalemi).trim() : null,
             isKalemi ? String(isKalemi).trim() : null,
             poNo ? String(poNo).trim() : null,
@@ -2216,6 +2389,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       fatura_no,
       fatura_tarihi,
       tedarikci,
+      rf_montaj_firma,
       fatura_kalemi,
       is_kalemi,
       po_no,
@@ -2238,6 +2412,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         fatura_no,
         fatura_tarihi,
         tedarikci,
+        rf_montaj_firma,
         fatura_kalemi,
         is_kalemi,
         po_no,
@@ -2251,7 +2426,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       )
       VALUES
       (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
       )
       RETURNING *
       `,
@@ -2262,6 +2437,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         fatura_no || null,
         fatura_tarihi || null,
         tedarikci || null,
+        rf_montaj_firma || null,
         fatura_kalemi || null,
         is_kalemi || null,
         po_no || null,
@@ -2750,6 +2926,7 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
         "Ödeme Şartı",
         "Term",
       ]);
+
       const siteType =
         getCell(r, ["Site Type", "site_type", "Saha Türü"]) || "5G";
 
@@ -2771,26 +2948,60 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
       const onAirDate = getCell(r, ["OnAir Date", "onair_date", "Tarih"]);
       const note = getCell(r, ["Not", "Note", "note"]);
 
+      const qcDurum = getCell(r, ["QC Durum", "qc_durum"]);
+      const kabulDurum = getCell(r, ["Kabul Durum", "kabul_durum"]);
+      const kabulNot = getCell(r, ["Kabul Not", "kabul_not"]);
+
       const normalizedSiteCode = siteCode
         ? String(siteCode).trim().toUpperCase()
         : "";
+
       const normalizedItemCode = itemCode ? String(itemCode).trim() : "";
 
       if (!normalizedSiteCode || !normalizedItemCode) continue;
+
       const duplicateCheck = await pool.query(
         `
         SELECT id
         FROM master_works
         WHERE project_code = $1
-           AND site_code = $2
-           AND item_code = $3
+          AND site_code = $2
+          AND item_code = $3
         LIMIT 1
         `,
         [projectCode, normalizedSiteCode, normalizedItemCode],
       );
 
       if (duplicateCheck.rows.length > 0) {
-        continue; // varsa bu satırı atla
+        await pool.query(
+          `
+          UPDATE master_works
+          SET
+            subcon_name = $1,
+            onair_date = $2,
+            qc_durum = $3,
+            kabul_durum = $4,
+            kabul_not = $5,
+            note = $6
+          WHERE
+            project_code = $7
+            AND site_code = $8
+            AND item_code = $9
+          `,
+          [
+            subconName ? String(subconName).trim() : null,
+            parseExcelDate(onAirDate),
+            qcDurum || "NOK",
+            kabulDurum || "NOK",
+            kabulNot ? String(kabulNot).trim() : null,
+            note ? String(note).trim() : null,
+            projectCode ? String(projectCode).trim() : null,
+            normalizedSiteCode,
+            normalizedItemCode,
+          ],
+        );
+
+        continue;
       }
 
       await pool.query(
@@ -2806,8 +3017,11 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
           subcon_name,
           onair_date,
           note,
+          qc_durum,
+          kabul_durum,
+          kabul_not
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
         `,
         [
           siteType ? String(siteType).trim() : "5G",
@@ -2819,6 +3033,9 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
           subconName ? String(subconName).trim() : null,
           parseExcelDate(onAirDate),
           note ? String(note).trim() : null,
+          qcDurum || "NOK",
+          kabulDurum || "NOK",
+          kabulNot ? String(kabulNot).trim() : null,
         ],
       );
 
@@ -3284,13 +3501,13 @@ app.post("/master/add", async (req, res) => {
 
     const duplicateCheck = await pool.query(
       `
-  SELECT id
-  FROM master_works
-  WHERE project_code = $1
-    AND site_code = $2
-    AND item_code = $3
-  LIMIT 1
-  `,
+      SELECT id
+      FROM master_works
+      WHERE project_code = $1
+        AND site_code = $2
+        AND item_code = $3
+      LIMIT 1
+      `,
       [
         String(m.project_code || "").trim(),
         String(m.site_code || "")
@@ -3301,9 +3518,41 @@ app.post("/master/add", async (req, res) => {
     );
 
     if (duplicateCheck.rows.length > 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "Bu item talep listesinde mevcut",
+      await pool.query(
+        `
+        UPDATE master_works
+        SET
+          done_qty = $1,
+          subcon_name = $2,
+          onair_date = $3,
+          qc_durum = $4,
+          kabul_durum = $5,
+          kabul_not = $6,
+          note = $7
+        WHERE
+          project_code = $8
+          AND site_code = $9
+          AND item_code = $10
+        `,
+        [
+          parseNumber(m.done_qty),
+          m.subcon_name ? String(m.subcon_name).trim() : null,
+          parseExcelDate(m.onair_date),
+          m.qc_durum || "NOK",
+          m.kabul_durum || "NOK",
+          m.kabul_not ? String(m.kabul_not).trim() : null,
+          m.note ? String(m.note).trim() : null,
+          String(m.project_code || "").trim(),
+          String(m.site_code || "")
+            .trim()
+            .toUpperCase(),
+          String(m.item_code || "").trim(),
+        ],
+      );
+
+      return res.json({
+        ok: true,
+        message: "Kayıt güncellendi",
       });
     }
 
@@ -3328,18 +3577,20 @@ app.post("/master/add", async (req, res) => {
       RETURNING *
       `,
       [
-        m.site_type,
-        m.project_code,
-        m.site_code ? String(m.site_code).trim().toUpperCase() : null,
-        m.item_code,
-        m.item_description,
-        Number(m.done_qty || 0),
-        m.subcon_name,
-        m.onair_date || null,
-        m.note || null,
+        m.site_type || "5G",
+        String(m.project_code || "").trim(),
+        String(m.site_code || "")
+          .trim()
+          .toUpperCase(),
+        String(m.item_code || "").trim(),
+        m.item_description ? String(m.item_description).trim() : null,
+        parseNumber(m.done_qty),
+        m.subcon_name ? String(m.subcon_name).trim() : null,
+        parseExcelDate(m.onair_date),
+        m.note ? String(m.note).trim() : null,
         m.qc_durum || "NOK",
         m.kabul_durum || "NOK",
-        m.kabul_not || null,
+        m.kabul_not ? String(m.kabul_not).trim() : null,
       ],
     );
 
@@ -3362,6 +3613,7 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
       fatura_no,
       fatura_tarihi,
       tedarikci,
+      rf_montaj_firma,
       fatura_kalemi,
       is_kalemi,
       po_no,
@@ -3384,17 +3636,18 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
         fatura_no = $4,
         fatura_tarihi = $5,
         tedarikci = $6,
-        fatura_kalemi = $7,
-        is_kalemi = $8,
-        po_no = $9,
-        site_id = $10,
-        tutar = $11,
-        kdv = $12,
-        toplam_tutar = $13,
-        odenen_tutar = $14,
-        kalan_borc = $15,
-        note = $16
-      WHERE id = $17
+        rf_montaj_firma = $7, -- ✅ EKLENDİ
+        fatura_kalemi = $8,
+        is_kalemi = $9,
+        po_no = $10,
+        site_id = $11,
+        tutar = $12,
+        kdv = $13,
+        toplam_tutar = $14,
+        odenen_tutar = $15,
+        kalan_borc = $16,
+        note = $17
+      WHERE id = $18
       RETURNING *
       `,
       [
@@ -3404,6 +3657,7 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
         fatura_no || null,
         fatura_tarihi || null,
         tedarikci || null,
+        rf_montaj_firma || null, // ✅
         fatura_kalemi || null,
         is_kalemi || null,
         po_no || null,
@@ -3445,20 +3699,26 @@ app.put("/master/:id", async (req, res) => {
         done_qty = $6,
         subcon_name = $7,
         onair_date = $8,
-        note = $9
-      WHERE id = $10
+        note = $9,
+        qc_durum = $10,
+        kabul_durum = $11,
+        kabul_not = $12
+      WHERE id = $13
       RETURNING *
       `,
       [
-        m.site_type,
-        m.project_code,
+        m.site_type || "5G",
+        m.project_code ? String(m.project_code).trim() : null,
         m.site_code ? String(m.site_code).trim().toUpperCase() : null,
-        m.item_code,
-        m.item_description,
-        Number(m.done_qty || 0),
-        m.subcon_name,
-        m.onair_date || null,
-        m.note,
+        m.item_code ? String(m.item_code).trim() : null,
+        m.item_description ? String(m.item_description).trim() : null,
+        parseNumber(m.done_qty),
+        m.subcon_name ? String(m.subcon_name).trim() : null,
+        parseExcelDate(m.onair_date),
+        m.note ? String(m.note).trim() : null,
+        m.qc_durum || "NOK",
+        m.kabul_durum || "NOK",
+        m.kabul_not ? String(m.kabul_not).trim() : null,
         id,
       ],
     );
@@ -3730,6 +3990,144 @@ app.get("/export/status-excel", async (req, res) => {
   }
 });
 
+/* ================== Taşeron Hakediş Analiz ================== */
+
+const normalizeSubconName = (name) =>
+  String(name || "")
+    .trim()
+    .toLocaleLowerCase("tr-TR");
+
+app.get("/finance/subcon-hakedis-summary", async (req, res) => {
+  try {
+    const usdTryRate = await getTcmbUsdTrySellingRate();
+
+    const detailResult = await pool.query(`
+      SELECT
+        mw.subcon_name,
+        mw.done_qty,
+        COALESCE(pr.requested_qty, 0) AS requested_qty,
+        COALESCE(pr.billed_qty, 0) AS billed_qty,
+        COALESCE(pr.unit_price, 0) AS unit_price,
+        COALESCE(pr.currency, 'TRY') AS currency
+      FROM master_works mw
+      LEFT JOIN po_rows pr
+        ON pr.project_code = mw.project_code
+       AND pr.site_code = mw.site_code
+       AND pr.item_code = mw.item_code
+      WHERE mw.subcon_name IS NOT NULL
+        AND TRIM(mw.subcon_name) <> ''
+    `);
+
+    const invoiceResult = await pool.query(`
+      SELECT
+        TRIM(COALESCE(rf_montaj_firma, '')) AS subcon_name,
+        SUM(COALESCE(toplam_tutar, 0)) AS total_fatura,
+        SUM(COALESCE(odenen_tutar, 0)) AS total_odenen
+      FROM invoice_entries
+      WHERE COALESCE(TRIM(rf_montaj_firma), '') <> ''
+      GROUP BY TRIM(COALESCE(rf_montaj_firma, ''))
+    `);
+
+    const map = new Map();
+
+    for (const row of detailResult.rows) {
+      const rawSubconName = String(row.subcon_name || "").trim();
+      const subconName = normalizeSubconName(rawSubconName);
+      if (!subconName) continue;
+
+      const existing = map.get(subconName) || {
+        subcon_name: rawSubconName,
+        total_hakedis: 0,
+        total_faturaya_hazir: 0,
+        total_fatura: 0,
+        total_odenen: 0,
+        kalan_borc: 0,
+        fazla_odeme: 0,
+      };
+
+      const doneQty = Number(row.done_qty || 0);
+      const billedQty = Number(row.billed_qty || 0);
+      const unitPrice = Number(row.unit_price || 0);
+      const curr = String(row.currency || "TRY").toUpperCase();
+
+      const hakedisRaw = doneQty * unitPrice;
+      const faturayaHazirRaw = billedQty * unitPrice;
+
+      const hakedisTL =
+        curr === "USD" ? hakedisRaw * Number(usdTryRate || 0) : hakedisRaw;
+
+      const faturayaHazirTL =
+        curr === "USD"
+          ? faturayaHazirRaw * Number(usdTryRate || 0)
+          : faturayaHazirRaw;
+
+      existing.total_hakedis += hakedisTL;
+      existing.total_faturaya_hazir += faturayaHazirTL;
+
+      map.set(subconName, existing);
+    }
+
+    for (const row of invoiceResult.rows) {
+      const rawSubconName = String(row.subcon_name || "").trim();
+      const subconName = normalizeSubconName(rawSubconName);
+      if (!subconName) continue;
+
+      const existing = map.get(subconName) || {
+        subcon_name: rawSubconName,
+        total_hakedis: 0,
+        total_faturaya_hazir: 0,
+        total_fatura: 0,
+        total_odenen: 0,
+        kalan_borc: 0,
+        fazla_odeme: 0,
+      };
+
+      existing.total_fatura = Number(row.total_fatura || 0);
+      existing.total_odenen = Number(row.total_odenen || 0);
+
+      map.set(subconName, existing);
+    }
+
+    const rows = Array.from(map.values()).map((row) => {
+      const kalan_borc = Math.max(
+        Number(row.total_fatura || 0) - Number(row.total_odenen || 0),
+        0,
+      );
+
+      const fazla_odeme = Math.max(
+        Number(row.total_odenen || 0) - Number(row.total_fatura || 0),
+        0,
+      );
+
+      return {
+        subcon_name: row.subcon_name,
+        total_hakedis: Number((row.total_hakedis || 0).toFixed(2)),
+        total_faturaya_hazir: Number(
+          (row.total_faturaya_hazir || 0).toFixed(2),
+        ),
+        total_fatura: Number((row.total_fatura || 0).toFixed(2)),
+        total_odenen: Number((row.total_odenen || 0).toFixed(2)),
+        kalan_borc: Number(kalan_borc.toFixed(2)),
+        fazla_odeme: Number(fazla_odeme.toFixed(2)),
+      };
+    });
+
+    rows.sort((a, b) => a.subcon_name.localeCompare(b.subcon_name, "tr"));
+
+    res.json({
+      ok: true,
+      usd_try_rate: Number(usdTryRate || 0),
+      rows,
+    });
+  } catch (err) {
+    console.error("SUBCON HAKEDIS SUMMARY ERROR:", err);
+    res.status(500).json({
+      ok: false,
+      error: err.message || "Taşeron hakediş özeti alınamadı",
+    });
+  }
+});
+
 /* ================== FINANCE HW PAYMENT UPLOAD ================== */
 app.post(
   "/finance/hw-payment/upload",
@@ -3824,7 +4222,6 @@ app.post(
             invoice_amount,
             payment_amount,
             prepayment_amount,
-            remaining_amount,
             payment_date,
             due_date,
             customer_name,
@@ -3833,7 +4230,7 @@ app.post(
             supplier_name,
             currency
           )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
           `,
           [
             invoiceNo ? String(invoiceNo).trim() : null,
@@ -3879,7 +4276,7 @@ app.get("/finance/payments/list", requireFinanceAuth, async (req, res) => {
         COALESCE(invoice_amount, 0) AS invoice_amount,
         COALESCE(payment_amount, 0) AS payment_amount,
         COALESCE(prepayment_amount, 0) AS prepayment_amount,
-        COALESCE(remaining_amount, 0) AS remaining_amount,
+        COALESCE(invoice_amount, 0) - COALESCE(payment_amount, 0) AS remaining_amount,
         payment_date,
         due_date,
         COALESCE(customer_name, '') AS customer_name,
@@ -4150,7 +4547,7 @@ app.get("/finance/subcon-payables", async (req, res) => {
         subcon_name,
         COALESCE(invoice_amount, 0) AS invoice_amount,
         COALESCE(paid_amount, 0) AS paid_amount,
-        COALESCE(invoice_amount, 0) - COALESCE(paid_amount, 0) AS remaining_amount,
+        COALESCE(invoice_amount, 0) - COALESCE(payment_amount, 0) AS remaining_amount,
         COALESCE(note, '') AS note
       FROM subcon_payables
       ORDER BY subcon_name ASC
@@ -4210,7 +4607,7 @@ app.get("/finance/overdue-invoices", async (req, res) => {
     const paymentResult = await pool.query(`
       SELECT
         COALESCE(invoice_no, '') AS invoice_no,
-        COALESCE(remaining_amount, 0) AS remaining_amount,
+        COALESCE(invoice_amount, 0) - COALESCE(payment_amount, 0) AS remaining_amount,
         COALESCE(currency, 'TRY') AS currency,
         payment_date,
         due_date,
