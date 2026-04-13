@@ -6225,7 +6225,6 @@ function RegionAnalysis() {
                   minHeight: "320px",
                   background: "#fff",
                   boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
-                  
                 }}
               >
                 <div
@@ -6237,7 +6236,6 @@ function RegionAnalysis() {
                     background: "#fff",
                     boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
                     border: "1px solid #e5e7eb",
-                    
                   }}
                 >
                   {(() => {
@@ -6271,39 +6269,46 @@ function RegionAnalysis() {
                           {item.region}
                         </div>
 
-                        <div style={{ display: "grid", gap: "12px" }}>
-                          <div style={regionRowStyle}>
-                            <span>Toplam İş</span>
-                            <strong>{formatTRY(completed)}</strong>
+                        <div
+                          style={{
+                            borderRadius: "12px",
+                            overflow: "hidden",
+                            border: "1px solid #e5e7eb",
+                            marginTop: "10px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              background: "#1f2937",
+                              color: "#fff",
+                              padding: "10px 16px",
+                              fontWeight: "600",
+                              fontSize: "15px",
+                              textAlign: "center",
+                            }}
+                          >
+                            {item.region}
                           </div>
 
-                          <div style={regionRowStyle}>
-                            <span>Kesilen Fatura</span>
-                            <strong>{formatTRY(billed)}</strong>
-                          </div>
-
-                          <div style={regionRowStyle}>
-                            <span>Faturalandırma Oranı</span>
-                            <strong>%{ratio.toFixed(1)}</strong>
-                          </div>
-
-                          <div style={regionRowStyle}>
-                            <span>PO Açılmış</span>
-                            <strong>{formatTRY(okAmount)}</strong>
-                          </div>
-
-                          <div style={regionRowStyle}>
-                            <span>PO Açılmamış</span>
-                            <strong style={{ color: "#dc2626" }}>
-                              {formatTRY(poBekler)}
-                            </strong>
-                          </div>
-
-                          <div style={regionRowStyle}>
-                            <span>Faturalanmamış İş</span>
-                            <strong style={{ color: "#dc2626" }}>
-                              {formatTRY(notBilled)}
-                            </strong>
+                          <div style={{ background: "#f9fafb" }}>
+                            <Row label="Toplam İş" value={completed} />
+                            <Row label="Kesilen Fatura" value={billed} />
+                            <Row
+                              label="Faturalandırma Oranı"
+                              value={ratio}
+                              isPercent
+                            />
+                            <Row label="PO Açılmış" value={okAmount} />
+                            <Row
+                              label="PO Açılmamış"
+                              value={poBekler}
+                              isNegativeHighlight
+                            />
+                            <Row
+                              label="Faturalanmamış İş"
+                              value={notBilled}
+                              isNegativeHighlight
+                            />
                           </div>
                         </div>
                       </>
