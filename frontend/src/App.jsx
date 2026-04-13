@@ -6624,15 +6624,17 @@ function RegionAnalysis() {
                     </span>
                   </td>
                   <td>
-                    {Number(row.done_qty || 0) ===
-                    Number(row.requested_qty || 0)
-                      ? "Tamam"
+                    {row.status === "PO_BEKLER"
+                      ? "Eksik"
                       : Number(row.done_qty || 0) === 0
                         ? "Giriş Yok"
-                        : Number(row.done_qty || 0) <
+                        : Number(row.done_qty || 0) ===
                             Number(row.requested_qty || 0)
-                          ? "Eksik"
-                          : "Fazla"}
+                          ? "Tamam"
+                          : Number(row.done_qty || 0) >
+                              Number(row.requested_qty || 0)
+                            ? "Eksik"
+                            : "Fazla"}
                   </td>
                   <td>{row.project_code || "-"}</td>
                   <td>{row.site_code || "-"}</td>
