@@ -3213,6 +3213,7 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
 
       const dueQty = getCell(r, ["Due Qty", "Remaining Qty", "Kalan Miktar"]);
       const unitPrice = getCell(r, ["Unit Price", "Price", "Birim Fiyat"]);
+      
       const currency = getCell(r, ["Currency", "Curr", "Para Birimi"]);
       const poNo = getCell(r, ["PO No", "PO", "Purchase Order", "PO Number"]);
 
