@@ -6216,8 +6216,71 @@ function RegionAnalysis() {
                   boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
                 }}
               >
-                <h3>{item.region}</h3>
-                <div>Toplam İş: {completed.toLocaleString()}</div>
+                <div
+                  key={item.region}
+                  style={{
+                    borderRadius: "16px",
+                    padding: "20px",
+                    background: "#fff",
+                    boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+                    border: "1px solid #e5e7eb",
+                  }}
+                >
+                  {(() => {
+                    const totalUSDTRY = (item.total_usd || 0) * usdRate;
+                    const completed = (item.total_try || 0) + totalUSDTRY;
+
+                    const billed =
+                      (item.billed_try || 0) + (item.billed_usd || 0) * usdRate;
+
+                    const poBekler =
+                      (item.po_bekler_try || 0) +
+                      (item.po_bekler_usd || 0) * usdRate;
+
+                    const okAmount =
+                      (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
+
+                    const notBilled = Math.max(completed - billed, 0);
+                    const ratio =
+                      completed > 0 ? (billed / completed) * 100 : 0;
+
+                    return (
+                      <>
+                        <div
+                          style={{
+                            fontSize: "24px",
+                            fontWeight: "700",
+                            marginBottom: "16px",
+                            textAlign: "center",
+                          }}
+                        >
+                          {item.region}
+                        </div>
+
+                        <div style={{ display: "grid", gap: "10px" }}>
+                          <Row label="Toplam İş" value={completed} />
+                          <Row label="Kesilen Fatura" value={billed} />
+                          <Row
+                            label="Faturalandırma Oranı"
+                            value={ratio}
+                            isPercent
+                          />
+                          <Row label="PO Açılmış" value={okAmount} />
+                          <Row
+                            label="PO Açılmamış"
+                            value={poBekler}
+                            isNegativeHighlight
+                          />
+                          <Row
+                            label="Faturalanmamış İş"
+                            value={notBilled}
+                            isNegativeHighlight
+                          />
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
             );
           })
