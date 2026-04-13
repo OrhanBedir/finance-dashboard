@@ -5763,8 +5763,6 @@ function formatTRY(value) {
 }
 
 function RegionAnalysis() {
-  
-
   const [filterText, setFilterText] = useState("");
   const [regionSearch, setRegionSearch] = useState("");
   const [sortConfig, setSortConfig] = useState({
@@ -6047,8 +6045,6 @@ function RegionAnalysis() {
 
   //Ekip Kazanç Hesaplaması//
 
-
-
   const filteredRegionRows = useMemo(() => {
     const q = regionSearch.toLowerCase().trim();
 
@@ -6137,11 +6133,63 @@ function RegionAnalysis() {
 
   if (loading) return <div className="loading">Yükleniyor...</div>;
   if (errorMessage) return <div className="loading">{errorMessage}</div>;
- //Geçici olarak ekledim silinecek//
+  //Geçici olarak ekledim silinecek//
   return (
     <>
-      <h2>Region Analysis</h2>
-      <div>Rows: {rows.length}</div>
+      <h1 style={{ marginBottom: "10px" }}>🗺️ Region Analysis</h1>
+
+      <div
+        style={{
+          maxWidth: "520px",
+          margin: "10px auto 30px auto",
+          borderRadius: "16px",
+          overflow: "hidden",
+          boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
+          border: "1px solid #e5e7eb",
+        }}
+      >
+        <div
+          style={{
+            background: "#1f2937",
+            color: "#fff",
+            padding: "10px 16px",
+            fontWeight: "600",
+            fontSize: "16px",
+          }}
+        >
+          GENEL ÖZET
+        </div>
+
+        <div style={{ background: "#f9fafb" }}>
+          <Row
+            label="Tamamlanan İş Tutarı"
+            value={executiveSummary.completed}
+          />
+          <Row
+            label="Kesilen Fatura Tutarı"
+            value={executiveSummary.invoiced}
+          />
+          <Row
+            label="Faturalandırma Oranı"
+            value={executiveSummary.ratio}
+            isPercent
+          />
+          <Row
+            label="Faturalandırılmamış İş"
+            value={executiveSummary.notInvoiced}
+            isNegativeHighlight
+          />
+          <Row
+            label="PO Açılmış Ama Faturalanmamış"
+            value={executiveSummary.poOpenedNotInvoiced}
+          />
+          <Row
+            label="PO Açılmamış İş"
+            value={executiveSummary.noPO}
+            isNegativeHighlight
+          />
+        </div>
+      </div>
     </>
   );
 }
