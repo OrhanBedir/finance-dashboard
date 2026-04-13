@@ -5772,6 +5772,11 @@ function RegionAnalysis() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailRows, setDetailRows] = useState([]);
+  const [usdRate, setUsdRate] = useState(45);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
   const filteredRows = detailRows.filter((row) =>
     Object.values(row).some((val) =>
       String(val || "")
@@ -5779,17 +5784,22 @@ function RegionAnalysis() {
         .includes(filterText.toLowerCase()),
     ),
   );
-  const [usdRate, setUsdRate] = useState(45); // fallback
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+
+  const regionRowStyle = {
+    display: "grid",
+    gridTemplateColumns: "1fr auto",
+    alignItems: "center",
+    gap: "12px",
+    padding: "12px 16px",
+    borderBottom: "1px solid #e5e7eb",
+    fontSize: "15px",
+  };
 
   const openRegionDetail = (regionName, type) => {
     const filtered = rows.filter((row) => {
       const sameRegion = getRegion(row.site_code) === regionName;
       if (!sameRegion) return false;
 
-      const currency = normalizeCurrency(row.currency);
       const unitPrice = Number(row.unit_price || 0);
       const doneQty = Number(row.done_qty || 0);
       const billedQty = Number(row.billed_qty || 0);
@@ -5837,19 +5847,14 @@ function RegionAnalysis() {
     const fetchRate = async () => {
       try {
         const res = await fetch("https://open.er-api.com/v6/latest/USD");
-
         const data = await res.json();
-        console.log("USD API FULL:", JSON.stringify(data, null, 2));
-        console.log("USD API TRY:", data?.rates?.TRY);
-        console.log("USD API OK:", res.ok);
 
         if (data?.rates?.TRY) {
           setUsdRate(data.rates.TRY);
-          console.log("USD RATE SET:", data.rates.TRY);
         }
       } catch (err) {
         console.error("USD RATE ERROR:", err);
-        setUsdRate(45); // 👈 fallback
+        setUsdRate(45);
       }
     };
 
@@ -5921,7 +5926,7 @@ function RegionAnalysis() {
         base[region].billed_try += billedAmount;
       }
 
-      if (row.status === "PO_BEKLER") {
+      if (String(row.status || "").toUpperCase() === "PO_BEKLER") {
         if (currency === "USD") {
           base[region].po_bekler_usd += amount;
         } else {
@@ -5929,7 +5934,7 @@ function RegionAnalysis() {
         }
       }
 
-      if (row.status === "OK") {
+      if (String(row.status || "").toUpperCase() === "OK") {
         if (currency === "USD") {
           base[region].ok_usd += amount;
         } else {
@@ -5975,14 +5980,13 @@ function RegionAnalysis() {
 
   const executiveSummary = useMemo(() => {
     const completed =
-      Number(topSummary?.completedTRY || 0) +
-      Number(topSummary?.completedUSD || 0) * usdRate;
+      Number(topSummary.completedTRY || 0) +
+      Number(topSummary.completedUSD || 0) * usdRate;
 
     const invoiced =
-      Number(topSummary?.invoicedTRY || 0) +
-      Number(topSummary?.invoicedUSD || 0) * usdRate;
+      Number(topSummary.invoicedTRY || 0) +
+      Number(topSummary.invoicedUSD || 0) * usdRate;
 
-    // 🔥 YENİ: PO toplamı (regionSummary'den çekiyoruz)
     const totalPO = regionSummary.reduce((sum, r) => {
       const poTRY =
         Number(r.po_bekler_try || 0) +
@@ -5999,9 +6003,7 @@ function RegionAnalysis() {
       completed,
       invoiced,
       ratio,
-      notInvoiced: completed - invoiced,
-
-      // 🔥 YENİLER
+      notInvoiced: Math.max(completed - invoiced, 0),
       poOpenedNotInvoiced: Math.max(totalPO - invoiced, 0),
       noPO: Math.max(completed - totalPO, 0),
     };
@@ -6030,7 +6032,6 @@ function RegionAnalysis() {
 
     const worksheet = XLSX.utils.json_to_sheet(excelRows);
     const workbook = XLSX.utils.book_new();
-
     XLSX.utils.book_append_sheet(workbook, worksheet, "Detay");
 
     const safeTitle = (detailTitle || "region-detail")
@@ -6043,8 +6044,6 @@ function RegionAnalysis() {
     );
   };
 
-  //Ekip Kazanç Hesaplaması//
-
   const filteredRegionRows = useMemo(() => {
     const q = regionSearch.toLowerCase().trim();
 
@@ -6056,21 +6055,22 @@ function RegionAnalysis() {
 
     return cleanRows.filter((row) => {
       const text = `
-      ${getRegion(row.site_code) || ""}
-      ${row.status || ""}
-      ${row.project_code || ""}
-      ${row.site_code || ""}
-      ${row.item_code || ""}
-      ${row.item_description || ""}
-      ${row.subcon_name || ""}
-      ${row.onair_date || ""}
-    `.toLowerCase();
+        ${getRegion(row.site_code) || ""}
+        ${row.status || ""}
+        ${row.project_code || ""}
+        ${row.site_code || ""}
+        ${row.item_code || ""}
+        ${row.item_description || ""}
+        ${row.subcon_name || ""}
+        ${row.onair_date || ""}
+      `.toLowerCase();
 
       return text.includes(q);
     });
   }, [rows, regionSearch]);
+
   const sortedRows = useMemo(() => {
-    let sortable = [...filteredRegionRows];
+    const sortable = [...filteredRegionRows];
 
     if (sortConfig.key) {
       sortable.sort((a, b) => {
@@ -6122,7 +6122,6 @@ function RegionAnalysis() {
 
     const worksheet = XLSX.utils.json_to_sheet(excelRows);
     const workbook = XLSX.utils.book_new();
-
     XLSX.utils.book_append_sheet(workbook, worksheet, "Region Analysis");
 
     XLSX.writeFile(
@@ -6131,22 +6130,15 @@ function RegionAnalysis() {
     );
   };
 
-  const regionRowStyle = {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "12px",
-    padding: "10px 0",
-    borderBottom: "1px solid #e5e7eb",
-    fontSize: "15px",
-  };
-
   if (loading) return <div className="loading">Yükleniyor...</div>;
   if (errorMessage) return <div className="loading">{errorMessage}</div>;
-  //Geçici olarak ekledim silinecek//
+
   return (
     <>
-      <h1 style={{ marginBottom: "10px" }}>🗺️ Region Analysis</h1>
+      <h1 style={{ marginBottom: "10px", textAlign: "center" }}>
+        🗺️ Region Analysis
+      </h1>
+
       <div
         style={{
           maxWidth: "520px",
@@ -6164,6 +6156,7 @@ function RegionAnalysis() {
             padding: "10px 16px",
             fontWeight: "600",
             fontSize: "16px",
+            textAlign: "center",
           }}
         >
           GENEL ÖZET
@@ -6215,105 +6208,74 @@ function RegionAnalysis() {
           regionSummary.map((item) => {
             const totalUSDTRY = (item.total_usd || 0) * usdRate;
             const completed = (item.total_try || 0) + totalUSDTRY;
+            const billed =
+              (item.billed_try || 0) + (item.billed_usd || 0) * usdRate;
+            const poBekler =
+              (item.po_bekler_try || 0) + (item.po_bekler_usd || 0) * usdRate;
+            const okAmount = (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
+            const notBilled = Math.max(completed - billed, 0);
+            const ratio = completed > 0 ? (billed / completed) * 100 : 0;
 
             return (
               <div
                 key={item.region}
                 style={{
                   borderRadius: "16px",
-                  padding: "24px",
-                  minHeight: "320px",
-                  background: "#fff",
+                  overflow: "hidden",
                   boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+                  border: "1px solid #e5e7eb",
+                  background: "#fff",
                 }}
               >
                 <div
-                  key={item.region}
                   style={{
-                    borderRadius: "16px",
-                    padding: "24px",
-                    minHeight: "320px",
-                    background: "#fff",
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
-                    border: "1px solid #e5e7eb",
+                    background: "#1f2937",
+                    color: "#fff",
+                    padding: "12px 16px",
+                    fontWeight: "700",
+                    fontSize: "20px",
+                    textAlign: "center",
                   }}
                 >
-                  {(() => {
-                    const totalUSDTRY = (item.total_usd || 0) * usdRate;
-                    const completed = (item.total_try || 0) + totalUSDTRY;
+                  {item.region}
+                </div>
 
-                    const billed =
-                      (item.billed_try || 0) + (item.billed_usd || 0) * usdRate;
+                <div style={{ background: "#f9fafb" }}>
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151" }}>Toplam İş</span>
+                    <strong>{formatTRY(completed)}</strong>
+                  </div>
 
-                    const poBekler =
-                      (item.po_bekler_try || 0) +
-                      (item.po_bekler_usd || 0) * usdRate;
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151" }}>Kesilen Fatura</span>
+                    <strong>{formatTRY(billed)}</strong>
+                  </div>
 
-                    const okAmount =
-                      (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151" }}>
+                      Faturalandırma Oranı
+                    </span>
+                    <strong>%{ratio.toFixed(1)}</strong>
+                  </div>
 
-                    const notBilled = Math.max(completed - billed, 0);
-                    const ratio =
-                      completed > 0 ? (billed / completed) * 100 : 0;
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151" }}>PO Açılmış</span>
+                    <strong>{formatTRY(okAmount)}</strong>
+                  </div>
 
-                    return (
-                      <>
-                        <div
-                          style={{
-                            fontSize: "24px",
-                            fontWeight: "700",
-                            marginBottom: "16px",
-                            textAlign: "center",
-                          }}
-                        >
-                          {item.region}
-                        </div>
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151" }}>PO Açılmamış</span>
+                    <strong style={{ color: "#dc2626" }}>
+                      {formatTRY(poBekler)}
+                    </strong>
+                  </div>
 
-                        <div
-                          style={{
-                            borderRadius: "12px",
-                            overflow: "hidden",
-                            border: "1px solid #e5e7eb",
-                            marginTop: "10px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              background: "#1f2937",
-                              color: "#fff",
-                              padding: "10px 16px",
-                              fontWeight: "600",
-                              fontSize: "15px",
-                              textAlign: "center",
-                            }}
-                          >
-                            {item.region}
-                          </div>
-
-                          <div style={{ background: "#f9fafb" }}>
-                            <Row label="Toplam İş" value={completed} />
-                            <Row label="Kesilen Fatura" value={billed} />
-                            <Row
-                              label="Faturalandırma Oranı"
-                              value={ratio}
-                              isPercent
-                            />
-                            <Row label="PO Açılmış" value={okAmount} />
-                            <Row
-                              label="PO Açılmamış"
-                              value={poBekler}
-                              isNegativeHighlight
-                            />
-                            <Row
-                              label="Faturalanmamış İş"
-                              value={notBilled}
-                              isNegativeHighlight
-                            />
-                          </div>
-                        </div>
-                      </>
-                    );
-                  })()}
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151" }}>Faturalanmamış İş</span>
+                    <strong style={{ color: "#dc2626" }}>
+                      {formatTRY(notBilled)}
+                    </strong>
+                  </div>
                 </div>
               </div>
             );
