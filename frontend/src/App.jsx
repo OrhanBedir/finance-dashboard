@@ -6507,6 +6507,7 @@ function RegionAnalysis() {
             <tr>
               <th>Bölge</th>
               <th>Status</th>
+              <th>Analiz</th>
               <th
                 onClick={() => handleSort("project_code")}
                 style={{ cursor: "pointer" }}
@@ -6621,6 +6622,17 @@ function RegionAnalysis() {
                     >
                       {row.status || "-"}
                     </span>
+                  </td>
+                  <td>
+                    {Number(row.done_qty || 0) ===
+                    Number(row.requested_qty || 0)
+                      ? "Tamam"
+                      : Number(row.done_qty || 0) === 0
+                        ? "Giriş Yok"
+                        : Number(row.done_qty || 0) <
+                            Number(row.requested_qty || 0)
+                          ? "Eksik"
+                          : "Fazla"}
                   </td>
                   <td>{row.project_code || "-"}</td>
                   <td>{row.site_code || "-"}</td>
