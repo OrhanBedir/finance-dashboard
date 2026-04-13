@@ -6211,8 +6211,7 @@ function RegionAnalysis() {
               (item.billed_try || 0) + (item.billed_usd || 0) * usdRate;
             const poBekler =
               (item.po_bekler_try || 0) + (item.po_bekler_usd || 0) * usdRate;
-            const okAmount =
-              (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
+            const okAmount = (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
             const notBilled = Math.max(completed - billed, 0);
             const ratio = completed > 0 ? (billed / completed) * 100 : 0;
 
@@ -6295,7 +6294,9 @@ function RegionAnalysis() {
                       cursor: "pointer",
                       borderBottom: "none",
                     }}
-                    onClick={() => openRegionDetail(item.region, "NOT_INVOICED")}
+                    onClick={() =>
+                      openRegionDetail(item.region, "NOT_INVOICED")
+                    }
                   >
                     <span style={{ color: "#374151", textAlign: "left" }}>
                       Faturalanmamış İş
@@ -6420,7 +6421,9 @@ function RegionAnalysis() {
                           `${row.project_code}-${row.site_code}-${row.item_code}-${index}`
                         }
                       >
-                        <td>{row.status || "-"}</td>
+                        <td>
+                          <StatusBadge status={row.status} />
+                        </td>
                         <td>{row.project_code || "-"}</td>
                         <td>{row.site_code || "-"}</td>
                         <td>{row.item_code || "-"}</td>
@@ -6570,7 +6573,10 @@ function RegionAnalysis() {
           <tbody>
             {sortedRows.length === 0 ? (
               <tr>
-                <td colSpan="13" style={{ textAlign: "center", padding: "20px" }}>
+                <td
+                  colSpan="13"
+                  style={{ textAlign: "center", padding: "20px" }}
+                >
                   Tanımlı bölge kaydı bulunamadı
                 </td>
               </tr>
@@ -6583,7 +6589,35 @@ function RegionAnalysis() {
                   }
                 >
                   <td>{getRegion(row.site_code)}</td>
-                  <td>{row.status || "-"}</td>
+                  <td>
+                    <span
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "20px",
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        display: "inline-block",
+                        background:
+                          row.status === "OK"
+                            ? "#e6f4ea"
+                            : row.status === "PARTIAL"
+                              ? "#fff4e5"
+                              : row.status === "CANCEL"
+                                ? "#fdecea"
+                                : "#f3f3f3",
+                        color:
+                          row.status === "OK"
+                            ? "#2e7d32"
+                            : row.status === "PARTIAL"
+                              ? "#ed6c02"
+                              : row.status === "CANCEL"
+                                ? "#d32f2f"
+                                : "#555",
+                      }}
+                    >
+                      {row.status || "-"}
+                    </span>
+                  </td>
                   <td>{row.project_code || "-"}</td>
                   <td>{row.site_code || "-"}</td>
                   <td>{row.item_code || "-"}</td>
