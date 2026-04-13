@@ -5763,10 +5763,12 @@ function formatTRY(value) {
 }
 
 function RegionAnalysis() {
-
-  
-
-  
+  return (
+    <>
+      <h2>Region Analysis</h2>
+      <div>Rows: {rows.length}</div>
+    </>
+  );
 
   const [filterText, setFilterText] = useState("");
   const [regionSearch, setRegionSearch] = useState("");
