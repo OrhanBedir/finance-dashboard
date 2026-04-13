@@ -6189,7 +6189,40 @@ function RegionAnalysis() {
           />
         </div>
       </div>
-      
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
+          gap: "24px",
+          maxWidth: "1200px",
+          margin: "20px auto",
+        }}
+      >
+        {regionSummary.length === 0 ? (
+          <div className="loading">Bölge verisi bulunamadı</div>
+        ) : (
+          regionSummary.map((item) => {
+            const totalUSDTRY = (item.total_usd || 0) * usdRate;
+            const completed = (item.total_try || 0) + totalUSDTRY;
+
+            return (
+              <div
+                key={item.region}
+                style={{
+                  borderRadius: "16px",
+                  padding: "20px",
+                  background: "#fff",
+                  boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+                }}
+              >
+                <h3>{item.region}</h3>
+                <div>Toplam İş: {completed.toLocaleString()}</div>
+              </div>
+            );
+          })
+        )}
+      </div>
     </>
   );
 }
