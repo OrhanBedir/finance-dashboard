@@ -132,8 +132,6 @@ function fetchText(url) {
   });
 }
 
-
-
 function parseTcmbUsdSellingRate(xmlText) {
   const usdBlockMatch = xmlText.match(
     /<Currency[^>]+CurrencyCode="USD"[\s\S]*?<\/Currency>/i,
@@ -392,7 +390,6 @@ function getStartOfMonth(date) {
 function getEndOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
 }
-
 
 async function buildUpcomingCollectionsData() {
   const result = await pool.query(`
@@ -1004,6 +1001,7 @@ const COMMON_MATCH_CTES = `
 function buildMasterJoinedQuery(
   extraWhere = "",
   extraOrder = "ORDER BY m.created_at DESC, m.id DESC",
+  useItemPoFallback = true,
 ) {
   return `
     ${COMMON_MATCH_CTES}
@@ -1022,11 +1020,13 @@ function buildMasterJoinedQuery(
 
       CASE
         WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.requested_qty, 0)
-        ELSE COALESCE(item_po.requested_qty, 0)
+        WHEN ${useItemPoFallback ? "TRUE" : "FALSE"} THEN COALESCE(item_po.requested_qty, 0)
+        ELSE 0
       END AS requested_qty,
       CASE
-        WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.billed_qty, 0)
-        ELSE COALESCE(item_po.billed_qty, 0)
+       WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.billed_qty, 0)
+       WHEN ${useItemPoFallback ? "TRUE" : "FALSE"} THEN COALESCE(item_po.billed_qty, 0)
+       ELSE 0
       END AS billed_qty,
       COALESCE(site_po.due_qty, 0) AS due_qty,
       COALESCE(site_po.po_no, '') AS po_no,
@@ -1585,10 +1585,11 @@ app.get("/master/by-site", async (req, res) => {
 
     const query = buildMasterJoinedQuery(
       `
-      WHERE ($1 = '' OR TRIM(COALESCE(m.project_code, '')) = TRIM($1))
-        AND ($2 = '' OR UPPER(TRIM(COALESCE(m.site_code, ''))) = UPPER(TRIM($2)))
+       WHERE ($1 = '' OR TRIM(COALESCE(m.project_code, '')) = TRIM($1))
+       AND ($2 = '' OR UPPER(TRIM(COALESCE(m.site_code, ''))) = UPPER(TRIM($2)))
       `,
       "ORDER BY m.created_at DESC, m.id DESC",
+      false,
     );
 
     const result = await pool.query(query, [project_code, site_code]);
@@ -3213,7 +3214,7 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
 
       const dueQty = getCell(r, ["Due Qty", "Remaining Qty", "Kalan Miktar"]);
       const unitPrice = getCell(r, ["Unit Price", "Price", "Birim Fiyat"]);
-      
+
       const currency = getCell(r, ["Currency", "Curr", "Para Birimi"]);
       const poNo = getCell(r, ["PO No", "PO", "Purchase Order", "PO Number"]);
 
@@ -3264,6 +3265,33 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
   } catch (err) {
     console.error("HW PO UPLOAD ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/update-row-note", async (req, res) => {
+  try {
+    const { project_code, site_code, item_code, qc_durum, note, kabul_not } =
+      req.body;
+
+    await pool.query(
+      `
+      UPDATE master_works
+      SET 
+        qc_durum = $1,
+        note = $2,
+        kabul_not = $3
+      WHERE 
+        project_code = $4
+        AND site_code = $5
+        AND item_code = $6
+      `,
+      [qc_durum, note, kabul_not, project_code, site_code, item_code],
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "update error" });
   }
 });
 
