@@ -2504,6 +2504,8 @@ function FinanceDashboard({
 
   const [usdTryRate, setUsdTryRate] = useState(0);
   const [subconDetailRows, setSubconDetailRows] = useState([]);
+  const [selectedSubcontractor, setSelectedSubcontractor] = useState("");
+
   const [subconFilter, setSubconFilter] = useState("");
   const [subconSummaryRows, setSubconSummaryRows] = useState([]);
   const [showSubconSummaryModal, setShowSubconSummaryModal] = useState(false);
@@ -2617,6 +2619,57 @@ function FinanceDashboard({
       (row.subcon_name || "").toLowerCase().includes(q),
     );
   }, [recalculatedSubconSummaryRows, subconFilter]);
+
+  const subcontractorPeriodStats = useMemo(() => {
+    if (!selectedSubcontractor) return null;
+
+    const now = new Date();
+
+    const weekAgo = new Date();
+    weekAgo.setDate(now.getDate() - 7);
+
+    const monthAgo = new Date();
+    monthAgo.setMonth(now.getMonth() - 1);
+
+    let weekDoneQty = 0;
+    let monthDoneQty = 0;
+    let weekJobCount = 0;
+    let monthJobCount = 0;
+
+    (subconDetailRows || []).forEach((row) => {
+      if (row.subcon_name !== selectedSubcontractor) return;
+
+      const doneQty = Number(row.done_qty || 0);
+      const unitPrice = Number(row.unit_price || 0);
+
+      const curr = String(row.currency || "TRY").toUpperCase();
+
+      let total = doneQty * unitPrice;
+
+      if (curr === "USD") {
+        total = total * Number(usdTryRate || 0);
+      }
+
+      const date = row.onair_date ? new Date(row.onair_date) : null;
+
+      if (date && date >= weekAgo) {
+        weekDoneQty += total;
+        weekJobCount += 1;
+      }
+
+      if (date && date >= monthAgo) {
+        monthDoneQty += total;
+        monthJobCount += 1;
+      }
+    });
+
+    return {
+      weekDoneQty,
+      monthDoneQty,
+      weekJobCount,
+      monthJobCount,
+    };
+  }, [selectedSubcontractor, subconDetailRows, usdTryRate]);
 
   const totalRow = useMemo(
     () =>
@@ -2991,6 +3044,18 @@ function FinanceDashboard({
       alert(err.message || "Taşeron hakediş özeti alınamadı");
     }
   };
+
+  useEffect(() => {
+    if (showInvoiceEntryModal) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "auto";
+    }
+
+    return () => {
+      document.body.style.overflow = "auto";
+    };
+  }, [showInvoiceEntryModal]);
 
   useEffect(() => {
     fetchJson(`${API_BASE}/finance/personel/list`, { withAuth: true })
@@ -3986,11 +4051,13 @@ function FinanceDashboard({
               background: "#fff",
               width: "100%",
               maxWidth: "1200px",
-              maxHeight: "90vh",
-              overflow: "auto",
+              height: "90vh",
               borderRadius: "24px",
-              padding: "24px",
+              padding: 0,
               boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -3999,9 +4066,10 @@ function FinanceDashboard({
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                marginBottom: "20px",
-                gap: "12px",
-                flexWrap: "wrap",
+                padding: "24px",
+                borderBottom: "1px solid #e5e7eb",
+                background: "#fff",
+                flexShrink: 0,
               }}
             >
               <h3 className="listTitle" style={{ margin: 0 }}>
@@ -4017,356 +4085,380 @@ function FinanceDashboard({
               </button>
             </div>
 
-            <form onSubmit={handleSaveManualInvoice}>
-              <div className="formGrid">
-                <div className="formGroup">
-                  <label>Bölge</label>
-                  <input
-                    name="bolge"
-                    value={invoiceForm.bolge}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Antalya / İzmir / Ankara"
-                  />
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                padding: "24px",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
+              <form onSubmit={handleSaveManualInvoice}>
+                <div className="formGrid">
+                  <div className="formGroup">
+                    <label>Bölge</label>
+                    <input
+                      name="bolge"
+                      value={invoiceForm.bolge}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="Antalya / İzmir / Ankara"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Proje</label>
+                    <input
+                      name="proje"
+                      value={invoiceForm.proje}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="TT / TC"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Proje Kodu</label>
+                    <input
+                      name="proje_kodu"
+                      value={invoiceForm.proje_kodu}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="56A0QEF"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Fatura No</label>
+                    <input
+                      name="fatura_no"
+                      value={invoiceForm.fatura_no}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="Fatura no"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Fatura Tarihi</label>
+                    <input
+                      type="date"
+                      name="fatura_tarihi"
+                      value={invoiceForm.fatura_tarihi}
+                      onChange={handleInvoiceFormChange}
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Tedarikçi</label>
+                    <input
+                      name="tedarikci"
+                      value={invoiceForm.tedarikci}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="Firma / Tedarikçi"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Fatura Kalemi</label>
+                    <input
+                      name="fatura_kalemi"
+                      value={invoiceForm.fatura_kalemi}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="Örn: Oda/Room (Konaklama)"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>İş Kalemi</label>
+                    <input
+                      name="is_kalemi"
+                      value={invoiceForm.is_kalemi}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="Örn: KONAKLAMA / PROJE"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>PO No</label>
+                    <input
+                      name="po_no"
+                      value={invoiceForm.po_no}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="PO numarası"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Site ID</label>
+                    <input
+                      name="site_id"
+                      value={invoiceForm.site_id}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="BU8944"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Tutar (₺)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      name="tutar"
+                      value={invoiceForm.tutar}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>KDV (₺)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      name="kdv"
+                      value={invoiceForm.kdv}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Toplam Tutar (₺)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      name="toplam_tutar"
+                      value={invoiceForm.toplam_tutar}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Ödenen Tutar (₺)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      name="odenen_tutar"
+                      value={invoiceForm.odenen_tutar}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>Kalan Borç (₺)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      name="kalan_borc"
+                      value={invoiceForm.kalan_borc}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div className="formGroup">
+                    <label>RF Montaj Firma</label>
+                    <input
+                      name="rf_montaj_firma"
+                      value={invoiceForm.rf_montaj_firma}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="Subcon Name ile aynı firma adı"
+                    />
+                  </div>
+
+                  <div className="formGroup formGroupWide">
+                    <label>Not</label>
+                    <textarea
+                      name="note"
+                      value={invoiceForm.note}
+                      onChange={handleInvoiceFormChange}
+                      placeholder="Not"
+                      rows={3}
+                    />
+                  </div>
                 </div>
 
-                <div className="formGroup">
-                  <label>Proje</label>
-                  <input
-                    name="proje"
-                    value={invoiceForm.proje}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="TT / TC"
-                  />
+                <div
+                  className="entryActions"
+                  style={{
+                    justifyContent: "flex-end",
+                    display: "flex",
+                    gap: "10px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="tab"
+                    onClick={() => setAdvanceModalOpen(true)}
+                  >
+                    Avans Gir
+                  </button>
+
+                  <button type="submit" className="saveButton">
+                    Faturayı Kaydet
+                  </button>
+                </div>
+              </form>
+
+              <div
+                className="cards"
+                style={{ marginTop: "18px", marginBottom: "18px" }}
+              >
+                <div className="card ok statCard">
+                  <div className="statLabel">Toplam Fatura</div>
+                  <div className="statValue">
+                    {formatMoneyByCurrency(
+                      manualInvoiceSummary.totalAmount,
+                      "TRY",
+                    )}
+                  </div>
                 </div>
 
-                <div className="formGroup">
-                  <label>Proje Kodu</label>
-                  <input
-                    name="proje_kodu"
-                    value={invoiceForm.proje_kodu}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="56A0QEF"
-                  />
+                <div className="card partial statCard">
+                  <div className="statLabel">Ödenen</div>
+                  <div className="statValue">
+                    {formatMoneyByCurrency(
+                      manualInvoiceSummary.totalPaid,
+                      "TRY",
+                    )}
+                  </div>
                 </div>
 
-                <div className="formGroup">
-                  <label>Fatura No</label>
-                  <input
-                    name="fatura_no"
-                    value={invoiceForm.fatura_no}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Fatura no"
-                  />
+                <div className="card cancel statCard">
+                  <div className="statLabel">Kalan Borç</div>
+                  <div className="statValue">
+                    {formatMoneyByCurrency(
+                      manualInvoiceSummary.totalRemaining,
+                      "TRY",
+                    )}
+                  </div>
                 </div>
 
-                <div className="formGroup">
-                  <label>Fatura Tarihi</label>
-                  <input
-                    type="date"
-                    name="fatura_tarihi"
-                    value={invoiceForm.fatura_tarihi}
-                    onChange={handleInvoiceFormChange}
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Tedarikçi</label>
-                  <input
-                    name="tedarikci"
-                    value={invoiceForm.tedarikci}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Firma / Tedarikçi"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Fatura Kalemi</label>
-                  <input
-                    name="fatura_kalemi"
-                    value={invoiceForm.fatura_kalemi}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Örn: Oda/Room (Konaklama)"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>İş Kalemi</label>
-                  <input
-                    name="is_kalemi"
-                    value={invoiceForm.is_kalemi}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Örn: KONAKLAMA / PROJE"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>PO No</label>
-                  <input
-                    name="po_no"
-                    value={invoiceForm.po_no}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="PO numarası"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Site ID</label>
-                  <input
-                    name="site_id"
-                    value={invoiceForm.site_id}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="BU8944"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Tutar (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="tutar"
-                    value={invoiceForm.tutar}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>KDV (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="kdv"
-                    value={invoiceForm.kdv}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Toplam Tutar (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="toplam_tutar"
-                    value={invoiceForm.toplam_tutar}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Ödenen Tutar (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="odenen_tutar"
-                    value={invoiceForm.odenen_tutar}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Kalan Borç (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="kalan_borc"
-                    value={invoiceForm.kalan_borc}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>RF Montaj Firma</label>
-                  <input
-                    name="rf_montaj_firma"
-                    value={invoiceForm.rf_montaj_firma}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Subcon Name ile aynı firma adı"
-                  />
-                </div>
-
-                <div className="formGroup formGroupWide">
-                  <label>Not</label>
-                  <textarea
-                    name="note"
-                    value={invoiceForm.note}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Not"
-                    rows={3}
-                  />
+                <div className="card bekler statCard">
+                  <div className="statLabel">Bekleyen</div>
+                  <div className="statValue">
+                    {manualInvoiceSummary.waitingCount}
+                  </div>
                 </div>
               </div>
 
-              <div
-                className="entryActions"
-                style={{
-                  justifyContent: "flex-end",
-                  display: "flex",
-                  gap: "10px",
-                }}
-              >
+              <div className="toolbar" style={{ marginBottom: "16px" }}>
+                <input
+                  className="search"
+                  placeholder="Fatura no, tedarikçi, proje, site ara"
+                  value={manualInvoiceSearch}
+                  onChange={(e) => setManualInvoiceSearch(e.target.value)}
+                />
+
+                <select
+                  className="select"
+                  value={manualInvoiceStatusFilter}
+                  onChange={(e) => setManualInvoiceStatusFilter(e.target.value)}
+                >
+                  <option value="ALL">Tümü</option>
+                  <option value="BEKLIYOR">Bekliyor</option>
+                  <option value="KISMI">Kısmi</option>
+                  <option value="ODENDI">Ödendi</option>
+                </select>
+
                 <button
                   type="button"
                   className="tab"
-                  onClick={() => setAdvanceModalOpen(true)}
+                  onClick={handleExportInvoiceDatabase}
                 >
-                  Avans Gir
-                </button>
-
-                <button type="submit" className="saveButton">
-                  Faturayı Kaydet
+                  Excel İndir
                 </button>
               </div>
-            </form>
 
-            {/* 📊 ÖZET KARTLAR */}
-            <div
-              className="cards"
-              style={{ marginTop: "18px", marginBottom: "18px" }}
-            >
-              <div className="card ok statCard">
-                <div className="statLabel">Toplam Fatura</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalAmount,
-                    "TRY",
-                  )}
-                </div>
-              </div>
+              <div className="tableWrap">
+                <h3 className="listTitle">Girilen Faturalar</h3>
 
-              <div className="card partial statCard">
-                <div className="statLabel">Ödenen</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(manualInvoiceSummary.totalPaid, "TRY")}
-                </div>
-              </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Bölge</th>
+                      <th>Proje</th>
+                      <th>Fatura No</th>
+                      <th>Tedarikçi</th>
+                      <th>Fatura Tarihi</th>
+                      <th>Toplam</th>
+                      <th>Ödenen</th>
+                      <th>Kalan</th>
+                      <th>Durum</th>
+                      <th>İşlem</th>
+                    </tr>
+                  </thead>
 
-              <div className="card cancel statCard">
-                <div className="statLabel">Kalan Borç</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalRemaining,
-                    "TRY",
-                  )}
-                </div>
-              </div>
-
-              <div className="card bekler statCard">
-                <div className="statLabel">Bekleyen</div>
-                <div className="statValue">
-                  {manualInvoiceSummary.waitingCount}
-                </div>
-              </div>
-            </div>
-
-            {/* 🔍 ARAMA + FİLTRE */}
-            <div className="toolbar" style={{ marginBottom: "16px" }}>
-              <input
-                className="search"
-                placeholder="Fatura no, tedarikçi, proje, site ara"
-                value={manualInvoiceSearch}
-                onChange={(e) => setManualInvoiceSearch(e.target.value)}
-              />
-
-              <select
-                className="select"
-                value={manualInvoiceStatusFilter}
-                onChange={(e) => setManualInvoiceStatusFilter(e.target.value)}
-              >
-                <option value="ALL">Tümü</option>
-                <option value="BEKLIYOR">Bekliyor</option>
-                <option value="KISMI">Kısmi</option>
-                <option value="ODENDI">Ödendi</option>
-              </select>
-
-              <button
-                type="button"
-                className="tab"
-                onClick={handleExportInvoiceDatabase}
-              >
-                Excel İndir
-              </button>
-            </div>
-
-            {/* 📋 TABLO */}
-            <div className="tableWrap">
-              <h3 className="listTitle">Girilen Faturalar</h3>
-
-              <table>
-                <thead>
-                  <tr>
-                    <th>Bölge</th>
-                    <th>Proje</th>
-
-                    <th>Fatura No</th>
-                    <th>Tedarikçi</th>
-                    <th>Fatura Tarihi</th>
-                    <th>Toplam</th>
-                    <th>Ödenen</th>
-                    <th>Kalan</th>
-                    <th>Durum</th>
-                    <th>İşlem</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {filteredManualInvoiceRows.length === 0 ? (
-                    <EmptyRow colSpan={9} text="Kayıt yok" />
-                  ) : (
-                    filteredManualInvoiceRows.map((row, i) => (
-                      <tr key={row.id ?? i}>
-                        <td>{row.bolge || "-"}</td>
-                        <td>{row.proje || "-"}</td>
-
-                        <td>{row.fatura_no || "-"}</td>
-                        <td>{row.tedarikci || "-"}</td>
-                        <td>{formatDateOnly(row.fatura_tarihi)}</td>
-                        <td>
-                          {formatMoneyByCurrency(row.toplam_tutar || 0, "TRY")}
-                        </td>
-                        <td>
-                          {formatMoneyByCurrency(row.odenen_tutar || 0, "TRY")}
-                        </td>
-                        <td>
-                          {formatMoneyByCurrency(row.kalan_borc || 0, "TRY")}
-                        </td>
-                        <td>
-                          <span
-                            className={`badge ${
-                              Number(row.kalan_borc || 0) > 0 ? "bekler" : "ok"
-                            }`}
+                  <tbody>
+                    {filteredManualInvoiceRows.length === 0 ? (
+                      <EmptyRow colSpan={10} text="Kayıt yok" />
+                    ) : (
+                      filteredManualInvoiceRows.map((row, i) => (
+                        <tr key={row.id ?? i}>
+                          <td>{row.bolge || "-"}</td>
+                          <td>{row.proje || "-"}</td>
+                          <td>{row.fatura_no || "-"}</td>
+                          <td>{row.tedarikci || "-"}</td>
+                          <td>{formatDateOnly(row.fatura_tarihi)}</td>
+                          <td>
+                            {formatMoneyByCurrency(
+                              row.toplam_tutar || 0,
+                              "TRY",
+                            )}
+                          </td>
+                          <td>
+                            {formatMoneyByCurrency(
+                              row.odenen_tutar || 0,
+                              "TRY",
+                            )}
+                          </td>
+                          <td
+                            style={{
+                              color:
+                                Number(row.kalan_borc || 0) > 0
+                                  ? "#ef4444"
+                                  : "#10b981",
+                              fontWeight: 600,
+                            }}
                           >
-                            {Number(row.kalan_borc || 0) > 0
-                              ? "Bekliyor"
-                              : "Ödendi"}
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="tab"
-                            onClick={() => handleEditManualInvoice(row)}
-                          >
-                            Düzenle
-                          </button>
+                            {formatMoneyByCurrency(row.kalan_borc || 0, "TRY")}
+                          </td>
+                          <td>
+                            <span
+                              className={`badge ${
+                                Number(row.kalan_borc || 0) > 0
+                                  ? "bekler"
+                                  : "ok"
+                              }`}
+                            >
+                              {Number(row.kalan_borc || 0) > 0
+                                ? "Bekliyor"
+                                : "Ödendi"}
+                            </span>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="tab"
+                              onClick={() => handleEditManualInvoice(row)}
+                            >
+                              Düzenle
+                            </button>
 
-                          <button
-                            type="button"
-                            className="tab danger"
-                            onClick={() => handleDeleteManualInvoice(row)}
-                          >
-                            Sil
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                            <button
+                              type="button"
+                              className="tab danger"
+                              onClick={() => handleDeleteManualInvoice(row)}
+                            >
+                              Sil
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -5393,77 +5485,141 @@ function FinanceDashboard({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "18px",
-                gap: "12px",
-                flexWrap: "wrap",
-              }}
-            >
-              {/* SOL TARAF */}
+            {/* SAĞ TARAF */}
+
+            <div style={{ marginBottom: "18px" }}>
+              {/* 1. SATIR */}
               <div
                 style={{
                   display: "flex",
-                  gap: "10px",
-                  alignItems: "center",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: "16px",
                   flexWrap: "wrap",
+                  marginBottom: "12px",
                 }}
               >
-                <h3 className="listTitle" style={{ margin: 0 }}>
-                  Taşeron Bazlı İş Tamamlama & Faturalama Özeti
-                </h3>
-
-                {/* ✅ KUR BİLGİSİ (KÜÇÜK) */}
+                {/* SOL */}
                 <div
                   style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "#0e7490",
-                    background: "#ecfeff",
-                    border: "1px solid #67e8f9",
-                    padding: "4px 8px",
-                    borderRadius: "8px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "12px",
+                    flexWrap: "wrap",
                   }}
                 >
-                  USD/TRY: {usdTryRate ? usdTryRate.toFixed(4) : "-"}
+                  <h3 className="listTitle" style={{ margin: 0 }}>
+                    Taşeron Bazlı İş Tamamlama & Faturalama Özeti
+                  </h3>
+
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      color: "#0e7490",
+                      background: "#ecfeff",
+                      border: "1px solid #67e8f9",
+                      padding: "6px 10px",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    USD/TRY: {usdTryRate ? usdTryRate.toFixed(4) : "-"}
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Taşeron ara..."
+                    value={subconFilter}
+                    onChange={(e) => setSubconFilter(e.target.value)}
+                    style={{
+                      width: "220px",
+                      padding: "10px",
+                      borderRadius: "8px",
+                      border: "1px solid #ddd",
+                    }}
+                  />
                 </div>
 
-                <input
-                  type="text"
-                  placeholder="Taşeron ara..."
-                  value={subconFilter}
-                  onChange={(e) => setSubconFilter(e.target.value)}
+                
+                {/* SAĞ */}
+                <div
                   style={{
-                    width: "220px",
-                    padding: "8px",
-                    borderRadius: "8px",
-                    border: "1px solid #ddd",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    flexWrap: "wrap",
+                    justifyContent: "flex-end",
                   }}
-                />
+                >
+                  {selectedSubcontractor && subcontractorPeriodStats && (
+                    <>
+                      <div
+                        style={{
+                          background: "#16a34a",
+                          color: "#fff",
+                          padding: "10px 14px",
+                          borderRadius: "10px",
+                          textAlign: "center",
+                          minWidth: "150px",
+                        }}
+                      >
+                        <div style={{ fontSize: "12px" }}>Bu Hafta</div>
+                        <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                          {formatMoneyByCurrency(
+                            subcontractorPeriodStats.weekDoneQty || 0,
+                            "TRY",
+                          )}
+                        </div>
+                        <div style={{ fontSize: "12px", opacity: 0.9 }}>
+                          {subcontractorPeriodStats.weekJobCount || 0} kayıt
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          background: "#f97316",
+                          color: "#fff",
+                          padding: "10px 14px",
+                          borderRadius: "10px",
+                          textAlign: "center",
+                          minWidth: "150px",
+                        }}
+                      >
+                        <div style={{ fontSize: "12px" }}>Bu Ay</div>
+                        <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                          {formatMoneyByCurrency(
+                            subcontractorPeriodStats.monthDoneQty || 0,
+                            "TRY",
+                          )}
+                        </div>
+                        <div style={{ fontSize: "12px", opacity: 0.9 }}>
+                          {subcontractorPeriodStats.monthJobCount || 0} kayıt
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <button
+                    type="button"
+                    className="tab"
+                    onClick={handleExportFilteredSubconExcel}
+                  >
+                    Excel İndir
+                  </button>
+
+                  <button
+                    type="button"
+                    className="tab"
+                    onClick={() => setShowSubconSummaryModal(false)}
+                  >
+                    Kapat
+                  </button>
+                </div>
               </div>
 
-              {/* SAĞ TARAF */}
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={handleExportFilteredSubconExcel}
-                >
-                  Excel İndir
-                </button>
-
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={() => setShowSubconSummaryModal(false)}
-                >
-                  Kapat
-                </button>
-              </div>
+              {/* 2. SATIR */}
             </div>
+
             <div
               className="tableWrap"
               style={{
@@ -5492,7 +5648,13 @@ function FinanceDashboard({
                   ) : (
                     <>
                       {filteredSubconSummaryRows.map((row, index) => (
-                        <tr key={`${row.subcon_name}-${index}`}>
+                        <tr
+                          key={`${row.subcon_name}-${index}`}
+                          onClick={() =>
+                            setSelectedSubcontractor(row.subcon_name || "")
+                          }
+                          style={{ cursor: "pointer" }}
+                        >
                           <td>{row.subcon_name || "-"}</td>
                           <td>
                             {formatMoneyByCurrency(
@@ -5881,6 +6043,84 @@ function RegionAnalysis() {
       `${safeTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`,
     );
   };
+
+  //Ekip Kazanç Hesaplaması//
+
+  const subcontractorPeriodStats = useMemo(() => {
+    try {
+      if (!selectedSubcontractor || !Array.isArray(allWorkRows)) {
+        return {
+          weekDoneQty: 0,
+          monthDoneQty: 0,
+          weekJobCount: 0,
+          monthJobCount: 0,
+        };
+      }
+
+      const now = new Date();
+      const weekStart = getStartOfWeek(now);
+      const weekEnd = getEndOfWeek(now);
+      const monthStart = getStartOfMonth(now);
+      const monthEnd = getEndOfMonth(now);
+
+      let weekDoneQty = 0;
+      let monthDoneQty = 0;
+      let weekJobCount = 0;
+      let monthJobCount = 0;
+
+      const selectedName = normalizeText(selectedSubcontractor);
+
+      allWorkRows.forEach((row) => {
+        const rowSubcon =
+          normalizeText(row.subcon_name) ||
+          normalizeText(row.subcontractor) ||
+          normalizeText(row.taseron) ||
+          normalizeText(row.taşeron);
+
+        if (rowSubcon !== selectedName) return;
+
+        const onAirDate =
+          parseSafeDate(row.onair_date) ||
+          parseSafeDate(row.on_air_date) ||
+          parseSafeDate(row.onAirDate) ||
+          parseSafeDate(row.onairDate);
+
+        if (!onAirDate) return;
+
+        const doneQty =
+          toNumber(row.total_done_qnty) ||
+          toNumber(row.done_qty) ||
+          toNumber(row.doneQnty) ||
+          toNumber(row.totalDoneQnty) ||
+          0;
+
+        if (onAirDate >= weekStart && onAirDate <= weekEnd) {
+          weekDoneQty += doneQty;
+          weekJobCount += 1;
+        }
+
+        if (onAirDate >= monthStart && onAirDate <= monthEnd) {
+          monthDoneQty += doneQty;
+          monthJobCount += 1;
+        }
+      });
+
+      return {
+        weekDoneQty,
+        monthDoneQty,
+        weekJobCount,
+        monthJobCount,
+      };
+    } catch (err) {
+      console.error("subcontractorPeriodStats error:", err);
+      return {
+        weekDoneQty: 0,
+        monthDoneQty: 0,
+        weekJobCount: 0,
+        monthJobCount: 0,
+      };
+    }
+  }, [selectedSubcontractor, allWorkRows]);
 
   const filteredRegionRows = useMemo(() => {
     const q = regionSearch.toLowerCase().trim();

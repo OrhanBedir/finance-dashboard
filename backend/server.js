@@ -132,6 +132,8 @@ function fetchText(url) {
   });
 }
 
+
+
 function parseTcmbUsdSellingRate(xmlText) {
   const usdBlockMatch = xmlText.match(
     /<Currency[^>]+CurrencyCode="USD"[\s\S]*?<\/Currency>/i,
@@ -312,6 +314,85 @@ function toYmdLocal(value) {
 
   return `${year}-${month}-${day}`;
 }
+
+//Ekip Yaptığı İş //
+
+function parseSafeDate(value) {
+  if (!value) return null;
+
+  if (value instanceof Date && !isNaN(value)) return value;
+
+  const str = String(value).trim();
+
+  // yyyy-mm-dd
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    const d = new Date(str);
+    return isNaN(d) ? null : d;
+  }
+
+  // dd.mm.yyyy
+  if (/^\d{2}\.\d{2}\.\d{4}$/.test(str)) {
+    const [day, month, year] = str.split(".");
+    const d = new Date(`${year}-${month}-${day}`);
+    return isNaN(d) ? null : d;
+  }
+
+  // dd/mm/yyyy
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+    const [day, month, year] = str.split("/");
+    const d = new Date(`${year}-${month}-${day}`);
+    return isNaN(d) ? null : d;
+  }
+
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
+
+function toNumber(value) {
+  if (value === null || value === undefined || value === "") return 0;
+
+  if (typeof value === "number") return value;
+
+  const cleaned = String(value)
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .replace(/[^\d.-]/g, "");
+
+  const num = Number(cleaned);
+  return isNaN(num) ? 0 : num;
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase("tr-TR");
+}
+
+function getStartOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay(); // pazar=0
+  const diff = day === 0 ? -6 : 1 - day; // pazartesi başlangıç
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function getEndOfWeek(date) {
+  const start = getStartOfWeek(date);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+  return end;
+}
+
+function getStartOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+}
+
+function getEndOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+}
+
 
 async function buildUpcomingCollectionsData() {
   const result = await pool.query(`

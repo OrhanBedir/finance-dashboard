@@ -909,3 +909,108 @@ table thead {
   background: #f3f4f6;
   z-index: 2;
 }
+
+.subconPeriodCards {
+  display: flex;
+  gap: 14px;
+  margin: 18px 0 20px;
+  flex-wrap: wrap;
+}
+
+.subconPeriodCard {
+  min-width: 220px;
+  flex: 1;
+  border-radius: 16px;
+  padding: 16px 18px;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+}
+
+.subconPeriodCard.green {
+  background: linear-gradient(135deg, #3fae49, #2f8f38);
+}
+
+.subconPeriodCard.orange {
+  background: linear-gradient(135deg, #f6a100, #d98400);
+}
+
+.subconPeriodTitle {
+  font-size: 15px;
+  font-weight: 600;
+  opacity: 0.95;
+  margin-bottom: 8px;
+}
+
+.subconPeriodValue {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.1;
+  margin-bottom: 6px;
+}
+
+.subconPeriodSub {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+@media (max-width: 768px) {
+  .subconPeriodCards {
+    flex-direction: column;
+  }
+
+  .subconPeriodCard {
+    min-width: 100%;
+  }
+}
+.subconPeriodCards {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0 16px 0;
+}
+
+.subconPeriodCard {
+  flex: 1;
+  min-width: 240px;
+  border-radius: 16px;
+  padding: 16px 18px;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.subconPeriodCard.green {
+  background: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+.subconPeriodCard.orange {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+.subconPeriodTitle {
+  font-size: 14px;
+  font-weight: 700;
+  opacity: 0.95;
+  margin-bottom: 8px;
+}
+
+.subconPeriodValue {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.1;
+  margin-bottom: 6px;
+}
+
+.subconPeriodSub {
+  font-size: 13px;
+  opacity: 0.95;
+}
+
+@media (max-width: 768px) {
+  .subconPeriodCards {
+    flex-direction: column;
+  }
+
+  .subconPeriodCard {
+    min-width: 100%;
+  }
+}
