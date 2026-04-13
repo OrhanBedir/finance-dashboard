@@ -6661,7 +6661,18 @@ function RegionAnalysis() {
                         )}
                   </td>
                   <td>{row.subcon_name || "-"}</td>
-                  <td>{row.qc_durum || "-"}</td>
+                  <td>
+                    <select
+                      value={row.qc_durum || ""}
+                      onChange={(e) =>
+                        handleUpdate(row, { qc_durum: e.target.value })
+                      }
+                    >
+                      <option value="">-</option>
+                      <option value="OK">OK</option>
+                      <option value="NOK">NOK</option>
+                    </select>
+                  </td>
                   <td>{row.note || "-"}</td>
                   <td>{row.kabul_not || "-"}</td>
                   <td>{formatDateTR(row.onair_date)}</td>
