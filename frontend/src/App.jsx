@@ -5786,10 +5786,9 @@ function RegionAnalysis() {
   );
 
   const regionRowStyle = {
-    display: "grid",
-    gridTemplateColumns: "1fr auto",
+    display: "flex",
+    justifyContent: "space-between",
     alignItems: "center",
-    gap: "12px",
     padding: "12px 16px",
     borderBottom: "1px solid #e5e7eb",
     fontSize: "15px",
@@ -6242,8 +6241,12 @@ function RegionAnalysis() {
 
                 <div style={{ background: "#f9fafb" }}>
                   <div style={regionRowStyle}>
-                    <span style={{ color: "#374151" }}>Toplam İş</span>
-                    <strong>{formatTRY(completed)}</strong>
+                    <span style={{ color: "#6b7280", textAlign: "left" }}>
+                      Toplam İş
+                    </span>
+                    <strong style={{ textAlign: "right" }}>
+                      {formatTRY(completed)}
+                    </strong>
                   </div>
 
                   <div style={regionRowStyle}>
