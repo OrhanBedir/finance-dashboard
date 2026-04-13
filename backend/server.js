@@ -1042,7 +1042,7 @@ function buildMasterJoinedQuery(
         WHEN
           CASE
             WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.requested_qty, 0)
-            ELSE COALESCE(item_po.requested_qty, 0)
+            ELSE 0
            END = 0
         THEN 'PO_BEKLER'
 
@@ -1051,7 +1051,7 @@ function buildMasterJoinedQuery(
         WHEN COALESCE(m.done_qty, 0) <
           CASE
             WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.requested_qty, 0)
-            ELSE COALESCE(item_po.requested_qty, 0)
+            ELSE 0
           END
         THEN 'PARTIAL'
 
