@@ -6604,7 +6604,9 @@ function RegionAnalysis() {
                               ? "#fff4e5"
                               : row.status === "CANCEL"
                                 ? "#fdecea"
-                                : "#f3f3f3",
+                                : row.status === "PO_BEKLER"
+                                  ? "#fff8db"
+                                  : "#f3f3f3",
                         color:
                           row.status === "OK"
                             ? "#2e7d32"
@@ -6612,7 +6614,9 @@ function RegionAnalysis() {
                               ? "#ed6c02"
                               : row.status === "CANCEL"
                                 ? "#d32f2f"
-                                : "#555",
+                                : row.status === "PO_BEKLER"
+                                  ? "#a16207"
+                                  : "#555",
                       }}
                     >
                       {row.status || "-"}
