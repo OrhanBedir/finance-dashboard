@@ -6563,6 +6563,10 @@ function RegionAnalysis() {
               >
                 Subcon
               </th>
+              <th>QC</th>
+              <th>RF Not</th>
+              <th>Kabul Not</th>
+
               <th
                 onClick={() => handleSort("onair_date")}
                 style={{ cursor: "pointer" }}
@@ -6657,6 +6661,9 @@ function RegionAnalysis() {
                         )}
                   </td>
                   <td>{row.subcon_name || "-"}</td>
+                  <td>{row.qc_durum || "-"}</td>
+                  <td>{row.note || "-"}</td>
+                  <td>{row.kabul_not || "-"}</td>
                   <td>{formatDateTR(row.onair_date)}</td>
                 </tr>
               ))
