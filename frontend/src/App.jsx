@@ -5766,12 +5766,7 @@ function RegionAnalysis() {
 
   
 
-  return (
-    <div style={{ padding: 24 }}>
-      <h2>Region Analysis</h2>
-      <div>Test 1</div>
-    </div>
-  );
+  
 
   const [filterText, setFilterText] = useState("");
   const [regionSearch, setRegionSearch] = useState("");
