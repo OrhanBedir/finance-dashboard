@@ -5540,7 +5540,6 @@ function FinanceDashboard({
                   />
                 </div>
 
-                
                 {/* SAĞ */}
                 <div
                   style={{
@@ -5764,6 +5763,7 @@ function formatTRY(value) {
 }
 
 function RegionAnalysis() {
+  return <div style={{ padding: 24 }}>Region Analysis test çalıştı</div>;
   const [filterText, setFilterText] = useState("");
   const [regionSearch, setRegionSearch] = useState("");
   const [sortConfig, setSortConfig] = useState({
