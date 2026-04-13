@@ -6211,7 +6211,8 @@ function RegionAnalysis() {
               (item.billed_try || 0) + (item.billed_usd || 0) * usdRate;
             const poBekler =
               (item.po_bekler_try || 0) + (item.po_bekler_usd || 0) * usdRate;
-            const okAmount = (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
+            const okAmount =
+              (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
             const notBilled = Math.max(completed - billed, 0);
             const ratio = completed > 0 ? (billed / completed) * 100 : 0;
 
@@ -6241,7 +6242,7 @@ function RegionAnalysis() {
 
                 <div style={{ background: "#f9fafb" }}>
                   <div style={regionRowStyle}>
-                    <span style={{ color: "#6b7280", textAlign: "left" }}>
+                    <span style={{ color: "#374151", textAlign: "left" }}>
                       Toplam İş
                     </span>
                     <strong style={{ textAlign: "right" }}>
@@ -6250,32 +6251,56 @@ function RegionAnalysis() {
                   </div>
 
                   <div style={regionRowStyle}>
-                    <span style={{ color: "#374151" }}>Kesilen Fatura</span>
-                    <strong>{formatTRY(billed)}</strong>
-                  </div>
-
-                  <div style={regionRowStyle}>
-                    <span style={{ color: "#374151" }}>
-                      Faturalandırma Oranı
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      Kesilen Fatura
                     </span>
-                    <strong>%{ratio.toFixed(1)}</strong>
-                  </div>
-
-                  <div style={regionRowStyle}>
-                    <span style={{ color: "#374151" }}>PO Açılmış</span>
-                    <strong>{formatTRY(okAmount)}</strong>
-                  </div>
-
-                  <div style={regionRowStyle}>
-                    <span style={{ color: "#374151" }}>PO Açılmamış</span>
-                    <strong style={{ color: "#dc2626" }}>
-                      {formatTRY(poBekler)}
+                    <strong style={{ textAlign: "right" }}>
+                      {formatTRY(billed)}
                     </strong>
                   </div>
 
                   <div style={regionRowStyle}>
-                    <span style={{ color: "#374151" }}>Faturalanmamış İş</span>
-                    <strong style={{ color: "#dc2626" }}>
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      Faturalandırma Oranı
+                    </span>
+                    <strong style={{ textAlign: "right" }}>
+                      %{ratio.toFixed(1)}
+                    </strong>
+                  </div>
+
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      PO Açılmış
+                    </span>
+                    <strong style={{ textAlign: "right" }}>
+                      {formatTRY(okAmount)}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{ ...regionRowStyle, cursor: "pointer" }}
+                    onClick={() => openRegionDetail(item.region, "PO_BEKLER")}
+                  >
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      PO Açılmamış
+                    </span>
+                    <strong style={{ color: "#dc2626", textAlign: "right" }}>
+                      {formatTRY(poBekler)}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      ...regionRowStyle,
+                      cursor: "pointer",
+                      borderBottom: "none",
+                    }}
+                    onClick={() => openRegionDetail(item.region, "NOT_INVOICED")}
+                  >
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      Faturalanmamış İş
+                    </span>
+                    <strong style={{ color: "#dc2626", textAlign: "right" }}>
                       {formatTRY(notBilled)}
                     </strong>
                   </div>
@@ -6284,6 +6309,308 @@ function RegionAnalysis() {
             );
           })
         )}
+      </div>
+
+      {detailModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={() => setDetailModalOpen(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1400px",
+              maxHeight: "85vh",
+              overflow: "auto",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "18px",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <h3 className="listTitle" style={{ margin: 0 }}>
+                {detailTitle}
+              </h3>
+
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <input
+                  type="text"
+                  placeholder="Detay içinde ara..."
+                  value={filterText}
+                  onChange={(e) => setFilterText(e.target.value)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid #d1d5db",
+                    minWidth: "260px",
+                  }}
+                />
+
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={exportDetailRowsToExcel}
+                >
+                  Excel İndir
+                </button>
+
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={() => setDetailModalOpen(false)}
+                >
+                  Kapat
+                </button>
+              </div>
+            </div>
+
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Project Code</th>
+                    <th>Site Code</th>
+                    <th>Item Code</th>
+                    <th>Item Description</th>
+                    <th>Done Qty</th>
+                    <th>Requested Qty</th>
+                    <th>Billed Qty</th>
+                    <th>Currency</th>
+                    <th>Unit Price</th>
+                    <th>Total Done Amount</th>
+                    <th>Subcon</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan="12"
+                        style={{ textAlign: "center", padding: "20px" }}
+                      >
+                        Kayıt bulunamadı
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRows.map((row, index) => (
+                      <tr
+                        key={
+                          row.id ??
+                          `${row.project_code}-${row.site_code}-${row.item_code}-${index}`
+                        }
+                      >
+                        <td>{row.status || "-"}</td>
+                        <td>{row.project_code || "-"}</td>
+                        <td>{row.site_code || "-"}</td>
+                        <td>{row.item_code || "-"}</td>
+                        <td>{row.item_description || "-"}</td>
+                        <td>{row.done_qty ?? "-"}</td>
+                        <td>{row.requested_qty ?? "-"}</td>
+                        <td>{row.billed_qty ?? "-"}</td>
+                        <td>{row.currency || "-"}</td>
+                        <td>
+                          {Number(row.unit_price || 0) === 0
+                            ? "-"
+                            : formatMoneyByCurrency(
+                                row.unit_price,
+                                row.currency,
+                              )}
+                        </td>
+                        <td>
+                          {Number(row.total_done_amount || 0) === 0
+                            ? "-"
+                            : formatMoneyByCurrency(
+                                row.total_done_amount,
+                                row.currency,
+                              )}
+                        </td>
+                        <td>{row.subcon_name || "-"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          margin: "30px auto 12px auto",
+          gap: "12px",
+          flexWrap: "wrap",
+          maxWidth: "1200px",
+        }}
+      >
+        <input
+          type="text"
+          placeholder="Bölge, status, proje, site, item, taşeron, OnAir Date ara"
+          value={regionSearch}
+          onChange={(e) => setRegionSearch(e.target.value)}
+          style={{
+            padding: "10px 14px",
+            borderRadius: "8px",
+            border: "1px solid #d1d5db",
+            minWidth: "320px",
+          }}
+        />
+
+        <button type="button" className="tab" onClick={handleExportRegionExcel}>
+          Excel İndir
+        </button>
+      </div>
+
+      <div
+        className="tableWrap"
+        style={{
+          maxWidth: "1200px",
+          margin: "0 auto 40px auto",
+          maxHeight: "60vh",
+          overflowY: "auto",
+          overflowX: "auto",
+          background: "#fff",
+          borderRadius: "16px",
+          boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+          border: "1px solid #e5e7eb",
+        }}
+      >
+        <table>
+          <thead>
+            <tr>
+              <th>Bölge</th>
+              <th>Status</th>
+              <th
+                onClick={() => handleSort("project_code")}
+                style={{ cursor: "pointer" }}
+              >
+                Project
+              </th>
+              <th
+                onClick={() => handleSort("site_code")}
+                style={{ cursor: "pointer" }}
+              >
+                Site
+              </th>
+              <th
+                onClick={() => handleSort("item_code")}
+                style={{ cursor: "pointer" }}
+              >
+                Item
+              </th>
+              <th
+                onClick={() => handleSort("done_qty")}
+                style={{ cursor: "pointer" }}
+              >
+                Done
+              </th>
+              <th
+                onClick={() => handleSort("requested_qty")}
+                style={{ cursor: "pointer" }}
+              >
+                Req
+              </th>
+              <th
+                onClick={() => handleSort("billed_qty")}
+                style={{ cursor: "pointer" }}
+              >
+                Billed
+              </th>
+              <th>Curr</th>
+              <th
+                onClick={() => handleSort("unit_price")}
+                style={{ cursor: "pointer" }}
+              >
+                Unit
+              </th>
+              <th
+                onClick={() => handleSort("total_done_amount")}
+                style={{ cursor: "pointer" }}
+              >
+                Total
+              </th>
+              <th
+                onClick={() => handleSort("subcon_name")}
+                style={{ cursor: "pointer" }}
+              >
+                Subcon
+              </th>
+              <th
+                onClick={() => handleSort("onair_date")}
+                style={{ cursor: "pointer" }}
+              >
+                OnAir
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedRows.length === 0 ? (
+              <tr>
+                <td colSpan="13" style={{ textAlign: "center", padding: "20px" }}>
+                  Tanımlı bölge kaydı bulunamadı
+                </td>
+              </tr>
+            ) : (
+              sortedRows.map((row, index) => (
+                <tr
+                  key={
+                    row.id ??
+                    `${row.project_code}-${row.site_code}-${row.item_code}-${index}`
+                  }
+                >
+                  <td>{getRegion(row.site_code)}</td>
+                  <td>{row.status || "-"}</td>
+                  <td>{row.project_code || "-"}</td>
+                  <td>{row.site_code || "-"}</td>
+                  <td>{row.item_code || "-"}</td>
+                  <td>{row.done_qty ?? "-"}</td>
+                  <td>{row.requested_qty ?? "-"}</td>
+                  <td>{row.billed_qty ?? "-"}</td>
+                  <td>{row.currency || "-"}</td>
+                  <td>
+                    {Number(row.unit_price || 0) === 0
+                      ? "-"
+                      : formatMoneyByCurrency(row.unit_price, row.currency)}
+                  </td>
+                  <td>
+                    {Number(row.total_done_amount || 0) === 0
+                      ? "-"
+                      : formatMoneyByCurrency(
+                          row.total_done_amount,
+                          row.currency,
+                        )}
+                  </td>
+                  <td>{row.subcon_name || "-"}</td>
+                  <td>{formatDateTR(row.onair_date)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </>
   );
