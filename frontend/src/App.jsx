@@ -1836,15 +1836,96 @@ function DailyEntry() {
           <table>
             <thead>
               <tr>
-                <th>PO No</th>
-                <th>Project Code</th>
-                <th>Site Code</th>
-                <th>Item Code</th>
-                <th>Item Description</th>
-                <th>Requested Qty</th>
-                <th>Due Qty</th>
-                <th>Currency</th>
-                <th>Unit Price</th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  PO No
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Project Code
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Site Code
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Item Code
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Item Description
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Requested Qty
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Due Qty
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Currency
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Unit Price
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -1908,102 +1989,252 @@ function DailyEntry() {
           </button>
         </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>Saha Türü</th>
-              <th>Project</th>
-              <th>Site</th>
-              <th>Item Code</th>
-              <th>Açıklama</th>
-              <th>Done Qty</th>
-              <th>Requested Qty</th>
-              <th>Fark</th>
-              <th>Analiz</th>
-              <th>Taşeron</th>
-              <th>OnAir</th>
-              <th>RF Not</th>
-              <th>İşlem</th>
-              <th>QC Durum</th>
-              <th>Kabul Durum</th>
-              <th>Kabul Not</th>
-            </tr>
-          </thead>
-          <tbody>
-            {siteEntries.length === 0 ? (
-              <EmptyRow colSpan={15} text="Bu saha için giriş yapılmamış" />
-            ) : (
-              siteEntries.map((row, index) => {
-                const analysis = getQtyAnalysis(
-                  row.done_qty,
-                  row.requested_qty,
-                );
+        <div
+          style={{
+            maxHeight: "38vh",
+            overflowY: "auto",
+            overflowX: "auto",
+          }}
+        >
+          <table>
+            <thead>
+              <tr>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Saha Türü
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Project
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Site
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Item Code
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Açıklama
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Done Qty
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Requested Qty
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Fark
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Analiz
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Taşeron
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  OnAir
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  RF Not
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  İşlem
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  QC Durum
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Kabul Durum
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Kabul Not
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {siteEntries.length === 0 ? (
+                <EmptyRow colSpan={15} text="Bu saha için giriş yapılmamış" />
+              ) : (
+                siteEntries.map((row, index) => {
+                  const analysis = getQtyAnalysis(
+                    row.done_qty,
+                    row.requested_qty,
+                  );
 
-                return (
-                  <tr key={`${row.id}-${index}`}>
-                    <td>{row.site_type}</td>
-                    <td>{row.project_code}</td>
-                    <td>{row.site_code}</td>
-                    <td>{row.item_code}</td>
-                    <td title={row.item_description}>
-                      <div className="desc-cell">{row.item_description}</div>
-                    </td>
-                    <td>{row.done_qty}</td>
-                    <td>{row.requested_qty ?? "-"}</td>
-                    <td>{analysis.diff}</td>
-                    <td>
-                      <span className={`analysisBadge ${analysis.className}`}>
-                        {analysis.label}
-                      </span>
-                    </td>
-                    <td>{row.subcon_name}</td>
-                    <td>{formatDateTR(row.onair_date)}</td>
-                    <td>{row.note}</td>
-
-                    <td>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "8px",
-                          flexWrap: "wrap",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="tab"
-                          style={{ padding: "8px 12px" }}
-                          onClick={() => handleEdit(row)}
-                          title="Kaydı düzenle"
-                        >
-                          Düzenle
-                        </button>
-
-                        <button
-                          type="button"
-                          className="tab"
+                  return (
+                    <tr key={`${row.id}-${index}`}>
+                      <td>{row.site_type}</td>
+                      <td>{row.project_code}</td>
+                      <td>{row.site_code}</td>
+                      <td>{row.item_code}</td>
+                      <td title={row.item_description}>
+                        <div className="desc-cell">{row.item_description}</div>
+                      </td>
+                      <td>{row.done_qty}</td>
+                      <td>{row.requested_qty ?? "-"}</td>
+                      <td>{analysis.diff}</td>
+                      <td>
+                        <span className={`analysisBadge ${analysis.className}`}>
+                          {analysis.label}
+                        </span>
+                      </td>
+                      <td>{row.subcon_name}</td>
+                      <td>{formatDateTR(row.onair_date)}</td>
+                      <td>{row.note}</td>
+                      <td>
+                        <div
                           style={{
-                            padding: "8px 12px",
-                            background: "#fee2e2",
-                            color: "#991b1b",
+                            display: "flex",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                            justifyContent: "center",
                           }}
-                          onClick={() => handleDelete(row)}
-                          title="Kaydı sil"
                         >
-                          Sil
-                        </button>
-                      </div>
-                    </td>
+                          <button
+                            type="button"
+                            className="tab"
+                            style={{ padding: "8px 12px" }}
+                            onClick={() => handleEdit(row)}
+                            title="Kaydı düzenle"
+                          >
+                            Düzenle
+                          </button>
 
-                    <td>{row.qc_durum || "-"}</td>
-                    <td>{row.kabul_durum || "-"}</td>
-                    <td>{row.kabul_not || "-"}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                          <button
+                            type="button"
+                            className="tab"
+                            style={{
+                              padding: "8px 12px",
+                              background: "#fee2e2",
+                              color: "#991b1b",
+                            }}
+                            onClick={() => handleDelete(row)}
+                            title="Kaydı sil"
+                          >
+                            Sil
+                          </button>
+                        </div>
+                      </td>
+                      <td>{row.qc_durum || "-"}</td>
+                      <td>{row.kabul_durum || "-"}</td>
+                      <td>{row.kabul_not || "-"}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <h3 className="listTitle">Son Girilen İşler</h3>

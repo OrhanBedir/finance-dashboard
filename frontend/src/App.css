@@ -219,12 +219,10 @@ h2 {
   background: white;
   border-radius: 12px;
   padding: 14px;
-  overflow-x: auto;
-  overflow-y: auto;
+  overflow: visible;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   width: 100%;
   margin: 0 auto 18px;
-  max-height: 50vh;
 }
 
 table {
