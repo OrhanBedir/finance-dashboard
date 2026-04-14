@@ -1103,10 +1103,10 @@ table thead {
 
 .dailyStickyTop {
   position: sticky;
-  top: 72px;
+  top: 0;
   z-index: 999;
-  background: #f3f4f6;
-  padding: 12px 0 10px;
+  backdrop-filter: blur(8px);
+  background: rgba(249, 250, 251, 0.8);
 }
 .uploadBox {
   background: white;
