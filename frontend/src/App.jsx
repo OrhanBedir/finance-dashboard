@@ -1461,14 +1461,14 @@ function DailyEntry() {
           alignItems: "center",
           gap: "12px",
           flexWrap: "wrap",
-          marginBottom: "4px",
+          marginBottom: "8px",
         }}
       >
-        <h1 style={{ margin: 0, fontSize: "30px", lineHeight: 1.1 }}>
+        <h1 style={{ margin: 0, fontSize: "28px", lineHeight: 1.1 }}>
           📝 Günlük İş Girişi
         </h1>
 
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           <button
             type="button"
             className={showQcUpload ? "tab activeTab" : "tab"}
@@ -1515,8 +1515,6 @@ function DailyEntry() {
           </button>
         </div>
       </div>
-
-      <div style={{ height: "110px" }} />
 
       {showBoqUpload && (
         <BoQUploadInline
