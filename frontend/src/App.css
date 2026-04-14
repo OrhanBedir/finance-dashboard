@@ -58,11 +58,19 @@ h2 {
 }
 
 .navTabs {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: center;
-  margin-bottom: 20px;
   flex-wrap: wrap;
+
+  background: #f3f4f6;
+
+  padding: 6px 0;   /* 🔥 küçülttük */
+  margin-bottom: 8px; /* 🔥 küçülttük */
 }
 
 .tab {
@@ -1109,10 +1117,9 @@ table thead {
   box-shadow: 0 4px 10px rgba(0,0,0,0.05);
 }
 .tab {
-  padding: 6px 12px;        /* 🔽 küçüldü */
-  font-size: 13px;          /* 🔽 yazı küçüldü */
-  border-radius: 8px;       /* biraz daha kompakt */
-  font-weight: 500;
+  padding: 6px 12px;   /* 🔥 küçüldü */
+  font-size: 13px;     /* 🔥 küçüldü */
+  border-radius: 8px;
 }
 .activeTab {
   padding: 6px 12px;
@@ -1121,4 +1128,8 @@ table thead {
 .topButtons .tab {
   padding: 5px 10px;
   font-size: 12px;
+}
+h1 {
+  margin-top: 8px;
+  margin-bottom: 8px;
 }

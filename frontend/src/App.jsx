@@ -1464,7 +1464,7 @@ function DailyEntry() {
           marginBottom: "14px",
         }}
       >
-        <h1 style={{ margin: 0 }}>📝 Günlük İş Girişi</h1>
+        <h1 style={{ margin: "4px 0 8px" }}>📝 Günlük İş Girişi</h1>
 
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           <button
