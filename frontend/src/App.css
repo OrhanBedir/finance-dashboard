@@ -231,6 +231,7 @@ h2 {
 table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 1100px;
   
 }
 
@@ -724,6 +725,7 @@ table td {
 table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 1100px;
 }
 
 
