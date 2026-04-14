@@ -1100,3 +1100,12 @@ table thead {
   border-color: #1d4ed8;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
+.dailyStickyTop {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #f3f4f6;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+}
