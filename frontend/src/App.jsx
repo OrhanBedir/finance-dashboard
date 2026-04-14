@@ -1825,44 +1825,56 @@ function DailyEntry() {
 
       <div className="tableWrap">
         <h3 className="listTitle">Bu Saha İçin Açılmış PO Kalemleri</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>PO No</th>
-              <th>Project Code</th>
-              <th>Site Code</th>
-              <th>Item Code</th>
-              <th>Item Description</th>
-              <th>Requested Qty</th>
-              <th>Due Qty</th>
-              <th>Currency</th>
-              <th>Unit Price</th>
-            </tr>
-          </thead>
-          <tbody>
-            {poRows.length === 0 ? (
-              <EmptyRow colSpan={9} text="Bu saha için PO kalemi bulunamadı" />
-            ) : (
-              poRows.map((row, index) => (
-                <tr key={`${row.po_no || "no-po"}-${row.item_code}-${index}`}>
-                  <td>{row.po_no || "-"}</td>
-                  <td>{row.project_code || "-"}</td>
-                  <td>{row.site_code || "-"}</td>
-                  <td>{row.item_code || "-"}</td>
-                  <td>{row.item_description || "-"}</td>
-                  <td>{row.requested_qty ?? "-"}</td>
-                  <td>{row.due_qty ?? "-"}</td>
-                  <td>{row.currency || "-"}</td>
-                  <td>
-                    {Number(row.unit_price || 0) === 0
-                      ? "-"
-                      : formatMoneyByCurrency(row.unit_price, row.currency)}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+
+        <div
+          style={{
+            maxHeight: "38vh",
+            overflowY: "auto",
+            overflowX: "auto",
+          }}
+        >
+          <table>
+            <thead>
+              <tr>
+                <th>PO No</th>
+                <th>Project Code</th>
+                <th>Site Code</th>
+                <th>Item Code</th>
+                <th>Item Description</th>
+                <th>Requested Qty</th>
+                <th>Due Qty</th>
+                <th>Currency</th>
+                <th>Unit Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {poRows.length === 0 ? (
+                <EmptyRow
+                  colSpan={9}
+                  text="Bu saha için PO kalemi bulunamadı"
+                />
+              ) : (
+                poRows.map((row, index) => (
+                  <tr key={`${row.po_no || "no-po"}-${row.item_code}-${index}`}>
+                    <td>{row.po_no || "-"}</td>
+                    <td>{row.project_code || "-"}</td>
+                    <td>{row.site_code || "-"}</td>
+                    <td>{row.item_code || "-"}</td>
+                    <td>{row.item_description || "-"}</td>
+                    <td>{row.requested_qty ?? "-"}</td>
+                    <td>{row.due_qty ?? "-"}</td>
+                    <td>{row.currency || "-"}</td>
+                    <td>
+                      {Number(row.unit_price || 0) === 0
+                        ? "-"
+                        : formatMoneyByCurrency(row.unit_price, row.currency)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="tableWrap">
