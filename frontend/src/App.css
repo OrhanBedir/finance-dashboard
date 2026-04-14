@@ -1066,3 +1066,37 @@ table thead {
 .recharts-wrapper {
   margin: 0 auto;
 }
+.itemDescHighlight {
+  height: 56px;
+  font-size: 16px;
+  border: 2px solid #2563eb;
+  background: #f0f6ff;
+}
+.itemDescLabel {
+  font-size: 16px;
+  font-weight: 800;
+  color: #1d4ed8;
+}
+.itemDescHighlight:focus {
+  outline: none;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+.itemDescLabel {
+  font-size: 16px;
+  font-weight: 800;
+  color: #1d4ed8;
+}
+
+.itemDescHighlight {
+  height: 56px;
+  font-size: 16px;
+  border: 2px solid #2563eb;
+  background: #f0f6ff;
+}
+
+.itemDescHighlight:focus {
+  outline: none;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}

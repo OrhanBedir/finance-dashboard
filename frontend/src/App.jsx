@@ -1682,9 +1682,12 @@ function DailyEntry() {
               style={{ position: "relative" }}
               ref={itemDescriptionBoxRef}
             >
-              <label>Item Description</label>
+              <label className="itemDescLabel">
+                🔎 Item Description (Buradan arayın)
+              </label>
 
               <input
+                className="itemDescHighlight"
                 type="text"
                 value={itemDescriptionSearch}
                 onChange={(e) => {
@@ -1692,7 +1695,7 @@ function DailyEntry() {
                   setShowItemDescriptionList(true);
                 }}
                 onFocus={() => setShowItemDescriptionList(true)}
-                placeholder="Item description filtrele..."
+                placeholder="🔎 Aramak için item description yazın..."
                 disabled={itemOptions.length === 0}
               />
 
