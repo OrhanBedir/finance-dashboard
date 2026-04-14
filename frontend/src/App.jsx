@@ -6033,13 +6033,33 @@ function RegionAnalysis() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Detay");
 
-    const safeTitle = (detailTitle || "region-detail")
-      .replace(/[^\w\s-]/g, "")
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    const normalizedRegion = String(detailTitle || "")
+      .split(" - ")[0]
+      .trim()
+      .replace(/İ/g, "I")
+      .replace(/I/g, "I")
+      .replace(/ı/g, "i")
+      .replace(/Ş/g, "S")
+      .replace(/ş/g, "s")
+      .replace(/Ğ/g, "G")
+      .replace(/ğ/g, "g")
+      .replace(/Ü/g, "U")
+      .replace(/ü/g, "u")
+      .replace(/Ö/g, "O")
+      .replace(/ö/g, "o")
+      .replace(/Ç/g, "C")
+      .replace(/ç/g, "c")
       .replace(/\s+/g, "_");
+
+    const fileLabel = detailTitle.includes("Faturalanmamış")
+      ? "Faturalanmamis_Isler"
+      : "PO_Bekleyen_Isler";
 
     XLSX.writeFile(
       workbook,
-      `${safeTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `${normalizedRegion}_${fileLabel}_${fileDate}.xlsx`,
     );
   };
 
