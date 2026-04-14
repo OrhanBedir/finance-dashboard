@@ -7132,45 +7132,46 @@ function App() {
 
   return (
     <div className="container">
-      <div className="navTabs">
-        <button
-          className={page === "finance" ? "tab activeTab" : "tab"}
-          onClick={() => setPage("finance")}
-        >
-          Finance Dashboard
-        </button>
+      <div className="navTabsFixed">
+        <div className="navTabsInner">
+          <button
+            className={activeTab === "finance" ? "tab activeTab" : "tab"}
+            onClick={() => setActiveTab("finance")}
+          >
+            Finance Dashboard
+          </button>
 
-        <button
-          className={page === "region" ? "tab activeTab" : "tab"}
-          onClick={() => setPage("region")}
-        >
-          Region Analysis
-        </button>
+          <button
+            className={activeTab === "region" ? "tab activeTab" : "tab"}
+            onClick={() => setActiveTab("region")}
+          >
+            Region Analysis
+          </button>
 
-        <button
-          className={page === "executive" ? "tab activeTab" : "tab"}
-          onClick={() => setPage("executive")}
-        >
-          Executive Dashboard
-        </button>
+          <button
+            className={activeTab === "executive" ? "tab activeTab" : "tab"}
+            onClick={() => setActiveTab("executive")}
+          >
+            Executive Dashboard
+          </button>
 
-        <button
-          className={page === "entry" ? "tab activeTab" : "tab"}
-          onClick={() => setPage("entry")}
-        >
-          Günlük İş Girişi
-        </button>
+          <button
+            className={activeTab === "daily" ? "tab activeTab" : "tab"}
+            onClick={() => setActiveTab("daily")}
+          >
+            Günlük İş Girişi
+          </button>
 
-        <button
-          type="button"
-          className="tab"
-          onClick={() =>
-            window.open("https://avans-po-sistemi.vercel.app/", "_blank")
-          }
-        >
-          Avans Talep
-        </button>
+          <button
+            className={activeTab === "advance" ? "tab activeTab" : "tab"}
+            onClick={() => setActiveTab("advance")}
+          >
+            Avans Talep
+          </button>
+        </div>
       </div>
+
+      <div className="navTabsSpacer" />
 
       {page === "finance" &&
         (financeToken ? (
