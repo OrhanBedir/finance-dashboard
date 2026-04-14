@@ -10,6 +10,9 @@ body,
   width: 100%;
   min-height: 100%;
 }
+body {
+  overflow-y: scroll;
+}
 html {
   overflow-y: scroll;
   scrollbar-gutter: stable;
@@ -228,7 +231,7 @@ h2 {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 1100px;
+  
 }
 
 th,
@@ -1036,4 +1039,30 @@ table thead {
 .statCard {
   transform: translateZ(0);
   backface-visibility: hidden;
+}
+.container,
+.summaryRow,
+.chartBox,
+.amountPanel,
+.financeTopGrid,
+.financeMainPanel,
+.financeSidePanel,
+.tableWrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chartBox,
+.amountPanel,
+.financeMiniCard,
+.tableWrap {
+  overflow: hidden;
+}
+
+.recharts-responsive-container {
+  min-width: 0 !important;
+}
+
+.recharts-wrapper {
+  margin: 0 auto;
 }
