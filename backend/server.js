@@ -1033,8 +1033,8 @@ function buildMasterJoinedQuery(
       COALESCE(best_boq.currency, 'TRY') AS currency,
 
       CASE
-        WHEN COALESCE(site_po.requested_qty, 0) = 0 THEN 'PO_BEKLER'
         WHEN COALESCE(m.done_qty, 0) = 0 THEN 'CANCEL'
+        WHEN COALESCE(site_po.requested_qty, 0) = 0 THEN 'PO_BEKLER'
         WHEN COALESCE(m.done_qty, 0) < COALESCE(site_po.requested_qty, 0) THEN 'PARTIAL'
         ELSE 'OK'
       END AS status,
