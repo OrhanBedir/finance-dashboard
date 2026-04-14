@@ -631,12 +631,13 @@ input[type="file"] {
 }
 
 .card {
-  transition: all 0.25s ease;
+  transition: none !important;
+  transform: none !important;
 }
 
 .card:hover {
-  transform: none;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 .smallTab {
@@ -834,7 +835,7 @@ table thead {
 }
 
 .statusBadge:hover {
-  transform: scale(1.05);
+  transform: none !important;
 }
 .analysisBadge {
   display: inline-flex;
@@ -1016,4 +1017,13 @@ table thead {
 }
 .card {
   will-change: auto;
+}
+.card,
+.card:hover,
+.statusBadge,
+.statusBadge:hover,
+.analysisBadge,
+.analysisBadge:hover {
+  transform: none !important;
+  transition: none !important;
 }
