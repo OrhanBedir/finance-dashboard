@@ -1697,6 +1697,7 @@ function DailyEntry() {
                 onFocus={() => setShowItemDescriptionList(true)}
                 placeholder="🔎 Aramak için item description yazın..."
                 disabled={itemOptions.length === 0}
+                autoFocus
               />
 
               {showItemDescriptionList &&
