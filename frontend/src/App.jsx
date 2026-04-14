@@ -1462,6 +1462,7 @@ function DailyEntry() {
             gap: "12px",
             flexWrap: "wrap",
             marginBottom: "14px",
+            maxWidth: "100%",
           }}
         >
           <h1 style={{ margin: 0 }}>📝 Günlük İş Girişi</h1>
