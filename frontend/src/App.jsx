@@ -1461,12 +1461,14 @@ function DailyEntry() {
           alignItems: "center",
           gap: "12px",
           flexWrap: "wrap",
-          marginBottom: "14px",
+          marginBottom: "4px",
         }}
       >
-        <h1 style={{ margin: "4px 0 8px" }}>📝 Günlük İş Girişi</h1>
+        <h1 style={{ margin: 0, fontSize: "30px", lineHeight: 1.1 }}>
+          📝 Günlük İş Girişi
+        </h1>
 
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button
             type="button"
             className={showQcUpload ? "tab activeTab" : "tab"}

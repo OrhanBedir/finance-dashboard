@@ -61,16 +61,13 @@ h2 {
   position: sticky;
   top: 0;
   z-index: 1000;
-
   display: flex;
   gap: 10px;
   justify-content: center;
   flex-wrap: wrap;
-
   background: #f3f4f6;
-
-  padding: 6px 0;   /* 🔥 küçülttük */
-  margin-bottom: 8px; /* 🔥 küçülttük */
+  padding: 8px 0;
+  margin-bottom: 12px;
 }
 
 .tab {
