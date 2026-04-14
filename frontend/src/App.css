@@ -1110,3 +1110,10 @@ table thead {
   background: #f3f4f6;
   padding: 12px 0 10px;
 }
+.uploadBox {
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+}

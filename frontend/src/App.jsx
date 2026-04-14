@@ -968,6 +968,7 @@ function DailyEntry() {
     kabul_not: "",
   };
 
+  const [showQcUpload, setShowQcUpload] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [rows, setRows] = useState([]);
   const [siteEntries, setSiteEntries] = useState([]);
@@ -1470,6 +1471,18 @@ function DailyEntry() {
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <button
               type="button"
+              className={showQcUpload ? "tab activeTab" : "tab"}
+              onClick={() => {
+                setShowQcUpload((prev) => !prev);
+                if (showBoqUpload) setShowBoqUpload(false);
+                if (showHwPoUpload) setShowHwPoUpload(false);
+                if (showCompletedImport) setShowCompletedImport(false);
+              }}
+            >
+              QC Yükle
+            </button>
+            <button
+              type="button"
               className={showBoqUpload ? "tab activeTab" : "tab"}
               onClick={() => {
                 setShowBoqUpload((prev) => !prev);
@@ -1521,6 +1534,13 @@ function DailyEntry() {
         <CompletedWorksImportInline
           onClose={() => setShowCompletedImport(false)}
           onImported={refreshAll}
+        />
+      )}
+
+      {showQcUpload && (
+        <QCUploadInline
+          onClose={() => setShowQcUpload(false)}
+          onUploaded={refreshAll}
         />
       )}
 
@@ -6971,6 +6991,68 @@ function App() {
       {page === "executive" && <ExecutiveDashboard />}
       {page === "region" && <RegionAnalysis />}
       {page === "entry" && <DailyEntry />}
+    </div>
+  );
+}
+
+function QCUploadInline({ onClose, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleUpload = async () => {
+    if (!file) {
+      alert("Dosya seç");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch(`${API_BASE}/qc/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Upload hatası");
+      }
+
+      alert(`✅ ${data.updatedCount} kayıt güncellendi`);
+
+      if (onUploaded) onUploaded();
+      onClose();
+    } catch (err) {
+      console.error(err);
+      alert(`❌ ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="uploadBox">
+      <h3>QC Excel Yükle</h3>
+
+      <input
+        type="file"
+        accept=".xlsx, .xls"
+        onChange={(e) => setFile(e.target.files[0])}
+      />
+
+      <div style={{ marginTop: "10px", display: "flex", gap: "10px" }}>
+        <button onClick={handleUpload} className="saveButton">
+          {loading ? "Yükleniyor..." : "Yükle"}
+        </button>
+
+        <button onClick={onClose} className="tab">
+          Kapat
+        </button>
+      </div>
     </div>
   );
 }

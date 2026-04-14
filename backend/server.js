@@ -55,6 +55,186 @@ app.get("/finance-auth/test-login", (req, res) => {
   });
 });
 
+//QC Upload//
+
+app.post(
+  "/qc/upload",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ ok: false, error: "Dosya yok" });
+      }
+
+      const workbook = XLSX.readFile(req.file.path);
+      const firstSheetName = workbook.SheetNames[0];
+
+      if (!firstSheetName) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "Excel içinde sheet bulunamadı" });
+      }
+
+      const sheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+      if (!rows.length) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "Excel içinde veri bulunamadı" });
+      }
+
+      const EXCLUDED_ITEMS = [
+        "8812184870",
+        "8812184927",
+        "8812184930",
+        "8812184919",
+        "8818274546",
+      ];
+
+      function normalizeText(value) {
+        return String(value || "").trim().toUpperCase();
+      }
+
+      function normalizeStatus(value) {
+        const v = normalizeText(value);
+
+        if (!v) return null;
+        if (v === "CLOSED" || v === "OK") return "OK";
+        if (v === "EXECUTING" || v === "NOK") return "NOK";
+
+        return "NOK";
+      }
+
+      function getSiteTypeFromCode(siteCode) {
+        const code = normalizeText(siteCode);
+
+        if (code.includes("_NS_")) return "STANDALONE";
+        if (code.includes("_DSS_")) return "DSS";
+        if (code.includes("_TRP_") || code.includes("_NR700_")) return "TRP";
+        if (code.includes("_NR3500_") || code.includes("_5G_")) return "5G";
+        if (
+          code.includes("_L1800_") ||
+          code.includes("_L2600_") ||
+          code.includes("_L900_") ||
+          code.includes("_LTE_")
+        ) {
+          return "LTE";
+        }
+
+        return "OTHER";
+      }
+
+      function getRuleByTemplate(siteCode, templateName) {
+        const siteType = getSiteTypeFromCode(siteCode);
+        const template = normalizeText(templateName);
+
+        if (siteType === "STANDALONE") {
+          if (template.includes("STANDALONE AI")) {
+            return { type: "ALL_EXCEPT_SPECIAL" };
+          }
+
+          if (template.includes("TRS QUALITY CHECK LIST")) {
+            return { type: "ONLY_8818274546" };
+          }
+        }
+
+        if (siteType === "DSS") {
+          if (
+            template.includes("DSS-GPS READINESS TASK") ||
+            template.includes("DSS READINESS TASK")
+          ) {
+            return { type: "ALL_EXCEPT_SPECIAL" };
+          }
+        }
+
+        if (siteType === "LTE") {
+          if (template.includes("KONTROL CHECKLIST")) {
+            return { type: "ALL_EXCEPT_SPECIAL" };
+          }
+        }
+
+        if (siteType === "5G") {
+          if (
+            template.includes("5G READINESS QC CHECKLIST") ||
+            template.includes("5G READINESS YENI POLE")
+          ) {
+            return { type: "ALL_EXCEPT_SPECIAL" };
+          }
+        }
+
+        if (siteType === "TRP") {
+          if (template.includes("MODERNIZASYON LOWCOST TASK")) {
+            return { type: "ALL_EXCEPT_SPECIAL" };
+          }
+        }
+
+        return null;
+      }
+
+      let updatedCount = 0;
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i] || [];
+
+        const siteId = row[1]; // B kolonu = DU ID / Site ID
+        const statusRaw = row[7]; // H kolonu = status
+        const templateName = row[15]; // P kolonu = Template Name
+
+        const siteCode = String(siteId || "").trim().toUpperCase();
+        const qcDurum = normalizeStatus(statusRaw);
+
+        if (!siteCode || !qcDurum || !templateName) {
+          continue;
+        }
+
+        const rule = getRuleByTemplate(siteCode, templateName);
+
+        if (!rule) {
+          continue;
+        }
+
+        if (rule.type === "ONLY_8818274546") {
+          const result = await pool.query(
+            `
+            UPDATE master_works
+            SET qc_durum = $1
+            WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
+              AND TRIM(COALESCE(item_code, '')) = '8818274546'
+            `,
+            [qcDurum, siteCode],
+          );
+
+          updatedCount += result.rowCount || 0;
+        }
+
+        if (rule.type === "ALL_EXCEPT_SPECIAL") {
+          const result = await pool.query(
+            `
+            UPDATE master_works
+            SET qc_durum = $1
+            WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
+              AND TRIM(COALESCE(item_code, '')) <> ALL($3::text[])
+            `,
+            [qcDurum, siteCode, EXCLUDED_ITEMS],
+          );
+
+          updatedCount += result.rowCount || 0;
+        }
+      }
+
+      return res.json({
+        ok: true,
+        updatedCount,
+        message: "QC verileri master kayıtlara işlendi",
+      });
+    } catch (err) {
+      console.error("QC UPLOAD ERROR:", err.message);
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  },
+);
+
 app.post("/finance-auth/login", async (req, res) => {
   try {
     const email = String(req.body.email || "")
