@@ -1468,7 +1468,7 @@ function DailyEntry() {
         >
           <h1 style={{ margin: 0 }}>📝 Günlük İş Girişi</h1>
 
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <div className="topButtons">
             <button
               type="button"
               className={showQcUpload ? "tab activeTab" : "tab"}

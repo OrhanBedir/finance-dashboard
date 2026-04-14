@@ -1115,3 +1115,17 @@ table thead {
   margin-bottom: 16px;
   box-shadow: 0 4px 10px rgba(0,0,0,0.05);
 }
+.tab {
+  padding: 6px 12px;        /* 🔽 küçüldü */
+  font-size: 13px;          /* 🔽 yazı küçüldü */
+  border-radius: 8px;       /* biraz daha kompakt */
+  font-weight: 500;
+}
+.activeTab {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.topButtons .tab {
+  padding: 5px 10px;
+  font-size: 12px;
+}
