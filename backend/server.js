@@ -4325,6 +4325,7 @@ app.post(
             invoice_amount,
             payment_amount,
             prepayment_amount,
+            remaining_amount,
             payment_date,
             due_date,
             customer_name,
@@ -4333,7 +4334,7 @@ app.post(
             supplier_name,
             currency
           )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
           `,
           [
             invoiceNo ? String(invoiceNo).trim() : null,
