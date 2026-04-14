@@ -1001,7 +1001,6 @@ const COMMON_MATCH_CTES = `
 function buildMasterJoinedQuery(
   extraWhere = "",
   extraOrder = "ORDER BY m.created_at DESC, m.id DESC",
-  useItemPoFallback = true,
 ) {
   return `
     ${COMMON_MATCH_CTES}
@@ -1016,18 +1015,13 @@ function buildMasterJoinedQuery(
       COALESCE(m.subcon_name, '') AS subcon_name,
       m.onair_date,
       COALESCE(m.note, '') AS note,
+      COALESCE(m.qc_durum, '') AS qc_durum,
+      COALESCE(m.kabul_durum, '') AS kabul_durum,
+      COALESCE(m.kabul_not, '') AS kabul_not,
       m.created_at,
 
-      CASE
-        WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.requested_qty, 0)
-        WHEN ${useItemPoFallback ? "TRUE" : "FALSE"} THEN COALESCE(item_po.requested_qty, 0)
-        ELSE 0
-      END AS requested_qty,
-      CASE
-       WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.billed_qty, 0)
-       WHEN ${useItemPoFallback ? "TRUE" : "FALSE"} THEN COALESCE(item_po.billed_qty, 0)
-       ELSE 0
-      END AS billed_qty,
+      COALESCE(site_po.requested_qty, 0) AS requested_qty,
+      COALESCE(site_po.billed_qty, 0) AS billed_qty,
       COALESCE(site_po.due_qty, 0) AS due_qty,
       COALESCE(site_po.po_no, '') AS po_no,
 
@@ -1039,22 +1033,9 @@ function buildMasterJoinedQuery(
       COALESCE(best_boq.currency, 'TRY') AS currency,
 
       CASE
-        WHEN
-          CASE
-            WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.requested_qty, 0)
-            ELSE 0
-           END = 0
-        THEN 'PO_BEKLER'
-
+        WHEN COALESCE(site_po.requested_qty, 0) = 0 THEN 'PO_BEKLER'
         WHEN COALESCE(m.done_qty, 0) = 0 THEN 'CANCEL'
-
-        WHEN COALESCE(m.done_qty, 0) <
-          CASE
-            WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.requested_qty, 0)
-            ELSE 0
-          END
-        THEN 'PARTIAL'
-
+        WHEN COALESCE(m.done_qty, 0) < COALESCE(site_po.requested_qty, 0) THEN 'PARTIAL'
         ELSE 'OK'
       END AS status,
 
@@ -1602,7 +1583,6 @@ app.get("/master/by-site", async (req, res) => {
        AND ($2 = '' OR UPPER(TRIM(COALESCE(m.site_code, ''))) = UPPER(TRIM($2)))
       `,
       "ORDER BY m.created_at DESC, m.id DESC",
-      false,
     );
 
     const result = await pool.query(query, [project_code, site_code]);
