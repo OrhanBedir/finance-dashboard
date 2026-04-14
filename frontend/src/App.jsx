@@ -1455,66 +1455,70 @@ function DailyEntry() {
   return (
     <>
       <div className="dailyStickyTop">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "12px",
-            flexWrap: "wrap",
-            marginBottom: "14px",
-            maxWidth: "100%",
-          }}
-        >
-          <h1 style={{ margin: 0 }}>📝 Günlük İş Girişi</h1>
+        <div className="dailyStickyInner">
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "12px",
+              flexWrap: "wrap",
+              marginBottom: "14px",
+            }}
+          >
+            <h1 style={{ margin: 0 }}>📝 Günlük İş Girişi</h1>
 
-          <div className="topButtons">
-            <button
-              type="button"
-              className={showQcUpload ? "tab activeTab" : "tab"}
-              onClick={() => {
-                setShowQcUpload((prev) => !prev);
-                if (showBoqUpload) setShowBoqUpload(false);
-                if (showHwPoUpload) setShowHwPoUpload(false);
-                if (showCompletedImport) setShowCompletedImport(false);
-              }}
-            >
-              QC Yükle
-            </button>
-            <button
-              type="button"
-              className={showBoqUpload ? "tab activeTab" : "tab"}
-              onClick={() => {
-                setShowBoqUpload((prev) => !prev);
-                if (showHwPoUpload) setShowHwPoUpload(false);
-                if (showCompletedImport) setShowCompletedImport(false);
-              }}
-            >
-              BoQ Yükle
-            </button>
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className={showQcUpload ? "tab activeTab" : "tab"}
+                onClick={() => {
+                  setShowQcUpload((prev) => !prev);
+                  if (showBoqUpload) setShowBoqUpload(false);
+                  if (showHwPoUpload) setShowHwPoUpload(false);
+                  if (showCompletedImport) setShowCompletedImport(false);
+                }}
+              >
+                QC Yükle
+              </button>
 
-            <button
-              type="button"
-              className={showHwPoUpload ? "tab activeTab" : "tab"}
-              onClick={() => {
-                setShowHwPoUpload((prev) => !prev);
-                if (showBoqUpload) setShowBoqUpload(false);
-                if (showCompletedImport) setShowCompletedImport(false);
-              }}
-            >
-              HW PO Yükle
-            </button>
+              <button
+                type="button"
+                className={showBoqUpload ? "tab activeTab" : "tab"}
+                onClick={() => {
+                  setShowBoqUpload((prev) => !prev);
+                  if (showHwPoUpload) setShowHwPoUpload(false);
+                  if (showCompletedImport) setShowCompletedImport(false);
+                }}
+              >
+                BoQ Yükle
+              </button>
 
-            <button
-              type="button"
-              className="tab"
-              onClick={handleExportAllEntriesExcel}
-            >
-              Tüm İşleri Excel İndir
-            </button>
+              <button
+                type="button"
+                className={showHwPoUpload ? "tab activeTab" : "tab"}
+                onClick={() => {
+                  setShowHwPoUpload((prev) => !prev);
+                  if (showBoqUpload) setShowBoqUpload(false);
+                  if (showCompletedImport) setShowCompletedImport(false);
+                }}
+              >
+                HW PO Yükle
+              </button>
+
+              <button
+                type="button"
+                className="tab"
+                onClick={handleExportAllEntriesExcel}
+              >
+                Tüm İşleri Excel İndir
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      <div style={{ height: "110px" }} />
 
       {showBoqUpload && (
         <BoQUploadInline
