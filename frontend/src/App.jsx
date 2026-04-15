@@ -6046,13 +6046,12 @@ function RegionAnalysis() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
-  const [openQcReadyRegion, setOpenQcReadyRegion] = useState(null);
 
   const [qcReadyModalOpen, setQcReadyModalOpen] = useState(false);
   const [qcReadyModalRegion, setQcReadyModalRegion] = useState("");
 
-  const openQcReadyModal = (region) => {
-    setQcReadyModalRegion(region);
+  const openQcReadyModal = (regionName) => {
+    setQcReadyModalRegion(regionName);
     setQcReadyModalOpen(true);
   };
 
@@ -6121,29 +6120,6 @@ function RegionAnalysis() {
     }
   }, []);
 
-  const toggleQcReadyRegion = (regionName) => {
-    setOpenQcReadyRegion((prev) => (prev === regionName ? null : regionName));
-  };
-
-  const getQcReadyRowsByRegion = (regionName) => {
-    return filteredRows.filter((row) => {
-      const rowRegion = String(row.region || row.bolge || "").toLowerCase();
-
-      const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
-
-      const poOk =
-        String(row.status || "").toUpperCase() === "OK" ||
-        String(row.status || "").toUpperCase() === "PO_OK";
-
-      const billedZero =
-        Number(row.billed_qty || row.billed || row.billed_amount || 0) === 0;
-
-      return (
-        rowRegion === regionName.toLowerCase() && qcOk && poOk && billedZero
-      );
-    });
-  };
-
   const getQcReadyTotalByRegion = (regionName) => {
     return getQcReadyRowsByRegion(regionName).reduce((sum, row) => {
       const total =
@@ -6152,6 +6128,23 @@ function RegionAnalysis() {
 
       return sum + total;
     }, 0);
+  };
+
+  const getQcReadyRowsByRegion = (regionName) => {
+    return rows.filter((row) => {
+      const rowRegion = getRegion(row.site_code).toLowerCase();
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
+      const billedZero = Number(row.billed_qty ?? row.billed ?? 0) === 0;
+
+      return (
+        rowRegion === String(regionName).toLowerCase() &&
+        statusOk &&
+        qcOk &&
+        billedZero
+      );
+    });
   };
 
   useEffect(() => {
