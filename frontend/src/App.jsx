@@ -6046,6 +6046,7 @@ function RegionAnalysis() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [openQcReadyRegion, setOpenQcReadyRegion] = useState(null);
 
   const filteredRows = detailRows.filter((row) =>
     Object.values(row).some((val) =>
@@ -6111,6 +6112,32 @@ function RegionAnalysis() {
       setLoading(false);
     }
   }, []);
+
+  const toggleQcReadyRegion = (regionName) => {
+    setOpenQcReadyRegion((prev) => (prev === regionName ? null : regionName));
+  };
+
+  const getQcReadyRowsByRegion = (regionName) => {
+    return filteredRows.filter((row) => {
+      const rowRegion = String(row.region || row.bolge || "").toLowerCase();
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const qtyDiff =
+        Number(row.requested_qty || 0) - Number(row.due_qty || 0) === 0;
+
+      return rowRegion === regionName.toLowerCase() && statusOk && qtyDiff;
+    });
+  };
+
+  const getQcReadyTotalByRegion = (regionName) => {
+    return getQcReadyRowsByRegion(regionName).reduce((sum, row) => {
+      const total =
+        Number(row.total_amount || row.total || 0) ||
+        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+      return sum + total;
+    }, 0);
+  };
 
   useEffect(() => {
     const fetchRate = async () => {
@@ -6595,6 +6622,59 @@ function RegionAnalysis() {
                       {formatTRY(notBilled)}
                     </strong>
                   </div>
+
+                  <div
+                    className="regionLine clickableLine"
+                    onClick={() => toggleQcReadyRegion(item.region)}
+                  >
+                    <span>QC OK Fatura Kesilecek</span>
+                    <span>
+                      {formatTRY(getQcReadyTotalByRegion(item.region))}
+                    </span>
+                  </div>
+
+                  {openQcReadyRegion === item.region && (
+                    <div className="regionDetailBox">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Project</th>
+                            <th>Site</th>
+                            <th>Item</th>
+                            <th>Req</th>
+                            <th>Due</th>
+                            <th>Done</th>
+                            <th>Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getQcReadyRowsByRegion(item.region).length === 0 ? (
+                            <tr>
+                              <td colSpan="7">Kayıt bulunamadı</td>
+                            </tr>
+                          ) : (
+                            getQcReadyRowsByRegion(item.region).map(
+                              (row, i) => (
+                                <tr key={i}>
+                                  <td>{row.project_code || "-"}</td>
+                                  <td>{row.site_code || "-"}</td>
+                                  <td>{row.item_code || "-"}</td>
+                                  <td>{row.requested_qty ?? "-"}</td>
+                                  <td>{row.due_qty ?? "-"}</td>
+                                  <td>{row.done_qty ?? "-"}</td>
+                                  <td>
+                                    {formatTRY(
+                                      row.total_amount || row.total || 0,
+                                    )}
+                                  </td>
+                                </tr>
+                              ),
+                            )
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </div>
             );
