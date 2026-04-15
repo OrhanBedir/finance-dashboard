@@ -6132,13 +6132,14 @@ function RegionAnalysis() {
 
       const req = Number(row.requested_qty || 0);
       const due = Number(row.due_qty || 0);
+      const diff = req - due;
 
       return (
         rowRegion === String(regionName).toLowerCase() &&
         statusOk &&
         qcOk &&
         billedZero &&
-        req === due
+        diff === 0
       );
     });
   };
@@ -6153,13 +6154,14 @@ function RegionAnalysis() {
 
       const req = Number(row.requested_qty || 0);
       const due = Number(row.due_qty || 0);
+      const diff = req - due;
 
       return (
         rowRegion === String(regionName).toLowerCase() &&
         statusOk &&
         qcOk &&
         billedZero &&
-        req !== due
+        diff !== 0
       );
     });
   };
