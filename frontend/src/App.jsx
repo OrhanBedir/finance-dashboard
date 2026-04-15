@@ -6129,11 +6129,18 @@ function RegionAnalysis() {
     return filteredRows.filter((row) => {
       const rowRegion = String(row.region || row.bolge || "").toLowerCase();
 
-      const statusOk = String(row.status || "").toUpperCase() === "OK";
-      const qtyDiff =
-        Number(row.requested_qty || 0) - Number(row.due_qty || 0) === 0;
+      const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
 
-      return rowRegion === regionName.toLowerCase() && statusOk && qtyDiff;
+      const poOk =
+        String(row.status || "").toUpperCase() === "OK" ||
+        String(row.status || "").toUpperCase() === "PO_OK";
+
+      const billedZero =
+        Number(row.billed_qty || row.billed || row.billed_amount || 0) === 0;
+
+      return (
+        rowRegion === regionName.toLowerCase() && qcOk && poOk && billedZero
+      );
     });
   };
 
