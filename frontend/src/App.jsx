@@ -6049,9 +6049,11 @@ function RegionAnalysis() {
 
   const [qcReadyModalOpen, setQcReadyModalOpen] = useState(false);
   const [qcReadyModalRegion, setQcReadyModalRegion] = useState("");
+  const [qcReadyType, setQcReadyType] = useState("");
 
-  const openQcReadyModal = (regionName) => {
+  const openQcReadyModal = (regionName, type) => {
     setQcReadyModalRegion(regionName);
+    setQcReadyType(type);
     setQcReadyModalOpen(true);
   };
 
@@ -6120,32 +6122,72 @@ function RegionAnalysis() {
     }
   }, []);
 
-  const getQcReadyTotalByRegion = (regionName) => {
-    return getQcReadyRowsByRegion(regionName).reduce((sum, row) => {
-      const total =
-        Number(row.total_amount || row.total || 0) ||
-        Number(row.done_qty || 0) * Number(row.unit_price || 0);
-
-      return sum + total;
-    }, 0);
-  };
-
-  const getQcReadyRowsByRegion = (regionName) => {
+  const getQcReady80RowsByRegion = (regionName) => {
     return rows.filter((row) => {
-      const rowRegion = getRegion(row.site_code).toLowerCase();
+      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
       const billedZero = Number(row.billed_qty ?? row.billed ?? 0) === 0;
 
+      const req = Number(row.requested_qty || 0);
+      const due = Number(row.due_qty || 0);
+
       return (
         rowRegion === String(regionName).toLowerCase() &&
         statusOk &&
         qcOk &&
-        billedZero
+        billedZero &&
+        req === due
       );
     });
   };
+
+  const getQcReady20RowsByRegion = (regionName) => {
+    return rows.filter((row) => {
+      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
+      const billedZero = Number(row.billed_qty ?? row.billed ?? 0) === 0;
+
+      const req = Number(row.requested_qty || 0);
+      const due = Number(row.due_qty || 0);
+
+      return (
+        rowRegion === String(regionName).toLowerCase() &&
+        statusOk &&
+        qcOk &&
+        billedZero &&
+        req !== due
+      );
+    });
+  };
+
+  const getQcReady80TotalByRegion = (regionName) => {
+    return getQcReady80RowsByRegion(regionName).reduce((sum, row) => {
+      const total =
+        Number(row.total_done_amount || row.total_amount || row.total || 0) ||
+        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+      return sum + total * 0.8;
+    }, 0);
+  };
+
+  const getQcReady20TotalByRegion = (regionName) => {
+    return getQcReady20RowsByRegion(regionName).reduce((sum, row) => {
+      const total =
+        Number(row.total_done_amount || row.total_amount || row.total || 0) ||
+        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+      return sum + total * 0.2;
+    }, 0);
+  };
+
+  const qcReadyModalRows =
+    qcReadyType === "80"
+      ? getQcReady80RowsByRegion(qcReadyModalRegion)
+      : getQcReady20RowsByRegion(qcReadyModalRegion);
 
   useEffect(() => {
     const fetchRate = async () => {
@@ -6617,7 +6659,6 @@ function RegionAnalysis() {
                     style={{
                       ...regionRowStyle,
                       cursor: "pointer",
-                      borderBottom: "none",
                     }}
                     onClick={() =>
                       openRegionDetail(item.region, "NOT_INVOICED")
@@ -6635,15 +6676,30 @@ function RegionAnalysis() {
                     style={{
                       ...regionRowStyle,
                       cursor: "pointer",
-                      borderBottom: "none",
                     }}
-                    onClick={() => openQcReadyModal(item.region)}
+                    onClick={() => openQcReadyModal(item.region, "80")}
                   >
                     <span style={{ color: "#374151", textAlign: "left" }}>
-                      QC OK Fatura Kesilecek
+                      QC OK Fatura Kesilecek 80%
                     </span>
                     <strong style={{ color: "#166534", textAlign: "right" }}>
-                      {formatTRY(getQcReadyTotalByRegion(item.region))}
+                      {formatTRY(getQcReady80TotalByRegion(item.region))}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      ...regionRowStyle,
+                      cursor: "pointer",
+                      borderBottom: "none",
+                    }}
+                    onClick={() => openQcReadyModal(item.region, "20")}
+                  >
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      QC OK Fatura Kesilecek 20%
+                    </span>
+                    <strong style={{ color: "#2563eb", textAlign: "right" }}>
+                      {formatTRY(getQcReady20TotalByRegion(item.region))}
                     </strong>
                   </div>
                 </div>
@@ -6691,7 +6747,7 @@ function RegionAnalysis() {
               }}
             >
               <h3 style={{ margin: 0 }}>
-                QC OK Fatura Kesilecek - {qcReadyModalRegion}
+                QC OK Fatura Kesilecek {qcReadyType}% - {qcReadyModalRegion}
               </h3>
 
               <button
@@ -6718,23 +6774,37 @@ function RegionAnalysis() {
                   </tr>
                 </thead>
                 <tbody>
-                  {getQcReadyRowsByRegion(qcReadyModalRegion).length === 0 ? (
+                  {qcReadyModalRows.length === 0 ? (
                     <tr>
                       <td colSpan="8">Kayıt bulunamadı</td>
                     </tr>
                   ) : (
-                    getQcReadyRowsByRegion(qcReadyModalRegion).map((row, i) => (
-                      <tr key={i}>
-                        <td>{row.project_code || "-"}</td>
-                        <td>{row.site_code || "-"}</td>
-                        <td>{row.item_code || "-"}</td>
-                        <td>{row.item_description || "-"}</td>
-                        <td>{row.requested_qty ?? "-"}</td>
-                        <td>{row.due_qty ?? "-"}</td>
-                        <td>{row.done_qty ?? "-"}</td>
-                        <td>{formatTRY(row.total_amount || row.total || 0)}</td>
-                      </tr>
-                    ))
+                    qcReadyModalRows.map((row, i) => {
+                      const rawTotal =
+                        Number(
+                          row.total_done_amount ||
+                            row.total_amount ||
+                            row.total ||
+                            0,
+                        ) ||
+                        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+                      const shownTotal =
+                        qcReadyType === "80" ? rawTotal * 0.8 : rawTotal * 0.2;
+
+                      return (
+                        <tr key={i}>
+                          <td>{row.project_code || "-"}</td>
+                          <td>{row.site_code || "-"}</td>
+                          <td>{row.item_code || "-"}</td>
+                          <td>{row.item_description || "-"}</td>
+                          <td>{row.requested_qty ?? "-"}</td>
+                          <td>{row.due_qty ?? "-"}</td>
+                          <td>{row.done_qty ?? "-"}</td>
+                          <td>{formatTRY(shownTotal)}</td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
