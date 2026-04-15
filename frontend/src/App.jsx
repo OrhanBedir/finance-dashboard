@@ -6048,6 +6048,14 @@ function RegionAnalysis() {
   const [errorMessage, setErrorMessage] = useState("");
   const [openQcReadyRegion, setOpenQcReadyRegion] = useState(null);
 
+  const [qcReadyModalOpen, setQcReadyModalOpen] = useState(false);
+  const [qcReadyModalRegion, setQcReadyModalRegion] = useState("");
+
+  const openQcReadyModal = (region) => {
+    setQcReadyModalRegion(region);
+    setQcReadyModalOpen(true);
+  };
+
   const filteredRows = detailRows.filter((row) =>
     Object.values(row).some((val) =>
       String(val || "")
@@ -6624,63 +6632,116 @@ function RegionAnalysis() {
                   </div>
 
                   <div
-                    className="regionLine clickableLine"
-                    onClick={() => toggleQcReadyRegion(item.region)}
+                    style={{
+                      ...regionRowStyle,
+                      cursor: "pointer",
+                      borderBottom: "none",
+                    }}
+                    onClick={() => openQcReadyModal(item.region)}
                   >
-                    <span>QC OK Fatura Kesilecek</span>
-                    <span>
-                      {formatTRY(getQcReadyTotalByRegion(item.region))}
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      QC OK Fatura Kesilecek
                     </span>
+                    <strong style={{ color: "#166534", textAlign: "right" }}>
+                      {formatTRY(getQcReadyTotalByRegion(item.region))}
+                    </strong>
                   </div>
-
-                  {openQcReadyRegion === item.region && (
-                    <div className="regionDetailBox">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Project</th>
-                            <th>Site</th>
-                            <th>Item</th>
-                            <th>Req</th>
-                            <th>Due</th>
-                            <th>Done</th>
-                            <th>Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {getQcReadyRowsByRegion(item.region).length === 0 ? (
-                            <tr>
-                              <td colSpan="7">Kayıt bulunamadı</td>
-                            </tr>
-                          ) : (
-                            getQcReadyRowsByRegion(item.region).map(
-                              (row, i) => (
-                                <tr key={i}>
-                                  <td>{row.project_code || "-"}</td>
-                                  <td>{row.site_code || "-"}</td>
-                                  <td>{row.item_code || "-"}</td>
-                                  <td>{row.requested_qty ?? "-"}</td>
-                                  <td>{row.due_qty ?? "-"}</td>
-                                  <td>{row.done_qty ?? "-"}</td>
-                                  <td>
-                                    {formatTRY(
-                                      row.total_amount || row.total || 0,
-                                    )}
-                                  </td>
-                                </tr>
-                              ),
-                            )
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
                 </div>
               </div>
             );
           })
         )}
       </div>
+
+      {qcReadyModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={() => setQcReadyModalOpen(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1100px",
+              maxHeight: "85vh",
+              overflow: "auto",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "16px",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <h3 style={{ margin: 0 }}>
+                QC OK Fatura Kesilecek - {qcReadyModalRegion}
+              </h3>
+
+              <button
+                type="button"
+                className="tab"
+                onClick={() => setQcReadyModalOpen(false)}
+              >
+                Kapat
+              </button>
+            </div>
+
+            <div className="tableWrap" style={{ marginBottom: 0 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Project</th>
+                    <th>Site</th>
+                    <th>Item</th>
+                    <th>Açıklama</th>
+                    <th>Req</th>
+                    <th>Due</th>
+                    <th>Done</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {getQcReadyRowsByRegion(qcReadyModalRegion).length === 0 ? (
+                    <tr>
+                      <td colSpan="8">Kayıt bulunamadı</td>
+                    </tr>
+                  ) : (
+                    getQcReadyRowsByRegion(qcReadyModalRegion).map((row, i) => (
+                      <tr key={i}>
+                        <td>{row.project_code || "-"}</td>
+                        <td>{row.site_code || "-"}</td>
+                        <td>{row.item_code || "-"}</td>
+                        <td>{row.item_description || "-"}</td>
+                        <td>{row.requested_qty ?? "-"}</td>
+                        <td>{row.due_qty ?? "-"}</td>
+                        <td>{row.done_qty ?? "-"}</td>
+                        <td>{formatTRY(row.total_amount || row.total || 0)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {detailModalOpen && (
         <div
