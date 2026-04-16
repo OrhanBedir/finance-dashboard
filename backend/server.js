@@ -3827,7 +3827,9 @@ app.get("/export/site-entry-excel-all", async (req, res) => {
 
 app.get("/export/qc-ready-excel", async (req, res) => {
   try {
-    const region = String(req.query.region || "").trim().toLowerCase();
+    const region = String(req.query.region || "")
+      .trim()
+      .toLowerCase();
     const type = String(req.query.type || "").trim(); // "80" veya "20"
 
     const result = await pool.query(`
@@ -3857,7 +3859,7 @@ app.get("/export/qc-ready-excel", async (req, res) => {
 
     const filteredRows = allRows.filter((row) => {
       const rowRegion = String(
-        getRegion(row.site_code, row.project_code) || ""
+        getRegion(row.site_code, row.project_code) || "",
       ).toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
@@ -3902,8 +3904,10 @@ app.get("/export/qc-ready-excel", async (req, res) => {
         Number(row.total_done_amount || 0) ||
         Number(row.done_qty || 0) * Number(row.unit_price || 0);
 
-      const shownTotal =
-        type === "80" ? rawTotal * 0.8 : rawTotal * 0.2;
+      const total80 = rawTotal * 0.8;
+      const total20 = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+
+      const shownTotal = type === "80" ? total80 : total20;
 
       sheet.addRow({
         project_code: row.project_code || "",
@@ -3940,17 +3944,16 @@ app.get("/export/qc-ready-excel", async (req, res) => {
     // 📥 DOWNLOAD AYARI (eksik olan yer burasıydı)
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=qc_ready_${region}_${type}.xlsx`
+      `attachment; filename=qc_ready_${region}_${type}.xlsx`,
     );
 
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
 
     await workbook.xlsx.write(res);
     res.end();
-
   } catch (err) {
     console.error("QC READY EXPORT ERROR:", err);
     res.status(500).send("Excel oluşturulamadı");
@@ -4284,10 +4287,6 @@ async function fetchData() {
 
 /* ================== EXPORT STATUS EXCEL ================== */
 
-
-
-
-
 app.get("/export/site-entry-excel", async (req, res) => {
   try {
     const { project_code = "", site_code = "" } = req.query;
@@ -4403,8 +4402,6 @@ app.get("/export/site-entry-excel", async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
-
-   
 
 app.get("/export/status-excel", async (req, res) => {
   try {

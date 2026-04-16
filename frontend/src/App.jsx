@@ -6180,7 +6180,11 @@ function RegionAnalysis() {
       Number(row.total_done_amount || row.total_amount || row.total || 0) ||
       Number(row.done_qty || 0) * Number(row.unit_price || 0);
 
-    const shownTotal = qcReadyType === "80" ? rawTotal * 0.8 : rawTotal * 0.2;
+    const total80 = rawTotal * 0.8;
+
+    const total20 = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+
+    const shownTotal = qcReadyType === "80" ? total80 : total20;
 
     return sum + shownTotal;
   }, 0);
@@ -6846,6 +6850,8 @@ function RegionAnalysis() {
                     </tr>
                   ) : (
                     qcReadyModalRows.map((row, i) => {
+                      
+
                       const rawTotal =
                         Number(
                           row.total_done_amount ||
@@ -6855,8 +6861,12 @@ function RegionAnalysis() {
                         ) ||
                         Number(row.done_qty || 0) * Number(row.unit_price || 0);
 
+                      const total80 = rawTotal * 0.8;
+                      const total20 =
+                        Number(row.due_qty || 0) * Number(row.unit_price || 0);
+
                       const shownTotal =
-                        qcReadyType === "80" ? rawTotal * 0.8 : rawTotal * 0.2;
+                        qcReadyType === "80" ? total80 : total20;
 
                       return (
                         <tr key={i}>
