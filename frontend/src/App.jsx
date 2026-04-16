@@ -1811,7 +1811,7 @@ function DailyEntry() {
             flexWrap: "wrap",
           }}
         >
-          <h3 className="listTitle" style={{ margin: 0 }}>
+          <h3 style={{ textAlign: "center", marginBottom: "12px" }}>
             Bu Saha İçin Girilmiş İşler
           </h3>
 
