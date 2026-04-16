@@ -1058,6 +1058,29 @@ function normalizeCurrency(value) {
   return raw || "TRY";
 }
 
+function detectSiteTypeFromSiteCode(siteCode) {
+  const code = String(siteCode || "")
+    .trim()
+    .toUpperCase();
+
+  if (code.includes("NR3500") || code.includes("5GEXP")) return "5G";
+  if (code.includes("NS")) return "STANDALONE";
+
+  if (
+    code.includes("L800") ||
+    code.includes("L2600") ||
+    code.includes("L2100") ||
+    code.includes("L1800") ||
+    code.includes("L900") ||
+    code.includes("NR700") ||
+    code.includes("TRP")
+  ) {
+    return "LTE";
+  }
+
+  return "DİĞER";
+}
+
 function getRegion(siteCode, projectCode = "") {
   const code = String(siteCode || "")
     .trim()
@@ -3796,7 +3819,7 @@ app.get("/export/site-entry-excel-all", async (req, res) => {
     sheet.views = [{ state: "frozen", ySplit: 1 }];
     sheet.autoFilter = {
       from: "A1",
-      to: "L1",
+      to: "Q1",
     };
 
     res.setHeader(
