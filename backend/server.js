@@ -57,183 +57,183 @@ app.get("/finance-auth/test-login", (req, res) => {
 
 //QC Upload//
 
-app.post(
-  "/qc/upload",
-  upload.single("file"),
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ ok: false, error: "Dosya yok" });
+app.post("/qc/upload", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ ok: false, error: "Dosya yok" });
+    }
+
+    const workbook = XLSX.readFile(req.file.path);
+    const firstSheetName = workbook.SheetNames[0];
+
+    if (!firstSheetName) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Excel içinde sheet bulunamadı" });
+    }
+
+    const sheet = workbook.Sheets[firstSheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+    if (!rows.length) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Excel içinde veri bulunamadı" });
+    }
+
+    const EXCLUDED_ITEMS = [
+      "8812184870",
+      "8812184927",
+      "8812184930",
+      "8812184919",
+      "8818274546",
+    ];
+
+    function normalizeText(value) {
+      return String(value || "")
+        .trim()
+        .toUpperCase();
+    }
+
+    function normalizeStatus(value) {
+      const v = normalizeText(value);
+
+      if (!v) return null;
+      if (v === "CLOSED" || v === "OK") return "OK";
+      if (v === "EXECUTING" || v === "NOK") return "NOK";
+
+      return "NOK";
+    }
+
+    function getSiteTypeFromCode(siteCode) {
+      const code = normalizeText(siteCode);
+
+      if (code.includes("_NS_")) return "STANDALONE";
+      if (code.includes("_DSS_")) return "DSS";
+      if (code.includes("_TRP_") || code.includes("_NR700_")) return "TRP";
+      if (code.includes("_NR3500_") || code.includes("_5G_")) return "5G";
+      if (
+        code.includes("_L1800_") ||
+        code.includes("_L2600_") ||
+        code.includes("_L900_") ||
+        code.includes("_LTE_")
+      ) {
+        return "LTE";
       }
 
-      const workbook = XLSX.readFile(req.file.path);
-      const firstSheetName = workbook.SheetNames[0];
+      return "OTHER";
+    }
 
-      if (!firstSheetName) {
-        return res
-          .status(400)
-          .json({ ok: false, error: "Excel içinde sheet bulunamadı" });
+    function getRuleByTemplate(siteCode, templateName) {
+      const siteType = getSiteTypeFromCode(siteCode);
+      const template = normalizeText(templateName);
+
+      if (siteType === "STANDALONE") {
+        if (template.includes("STANDALONE AI")) {
+          return { type: "ALL_EXCEPT_SPECIAL" };
+        }
+
+        if (template.includes("TRS QUALITY CHECK LIST")) {
+          return { type: "ONLY_8818274546" };
+        }
       }
 
-      const sheet = workbook.Sheets[firstSheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-
-      if (!rows.length) {
-        return res
-          .status(400)
-          .json({ ok: false, error: "Excel içinde veri bulunamadı" });
-      }
-
-      const EXCLUDED_ITEMS = [
-        "8812184870",
-        "8812184927",
-        "8812184930",
-        "8812184919",
-        "8818274546",
-      ];
-
-      function normalizeText(value) {
-        return String(value || "").trim().toUpperCase();
-      }
-
-      function normalizeStatus(value) {
-        const v = normalizeText(value);
-
-        if (!v) return null;
-        if (v === "CLOSED" || v === "OK") return "OK";
-        if (v === "EXECUTING" || v === "NOK") return "NOK";
-
-        return "NOK";
-      }
-
-      function getSiteTypeFromCode(siteCode) {
-        const code = normalizeText(siteCode);
-
-        if (code.includes("_NS_")) return "STANDALONE";
-        if (code.includes("_DSS_")) return "DSS";
-        if (code.includes("_TRP_") || code.includes("_NR700_")) return "TRP";
-        if (code.includes("_NR3500_") || code.includes("_5G_")) return "5G";
+      if (siteType === "DSS") {
         if (
-          code.includes("_L1800_") ||
-          code.includes("_L2600_") ||
-          code.includes("_L900_") ||
-          code.includes("_LTE_")
+          template.includes("DSS-GPS READINESS TASK") ||
+          template.includes("DSS READINESS TASK")
         ) {
-          return "LTE";
+          return { type: "ALL_EXCEPT_SPECIAL" };
         }
-
-        return "OTHER";
       }
 
-      function getRuleByTemplate(siteCode, templateName) {
-        const siteType = getSiteTypeFromCode(siteCode);
-        const template = normalizeText(templateName);
-
-        if (siteType === "STANDALONE") {
-          if (template.includes("STANDALONE AI")) {
-            return { type: "ALL_EXCEPT_SPECIAL" };
-          }
-
-          if (template.includes("TRS QUALITY CHECK LIST")) {
-            return { type: "ONLY_8818274546" };
-          }
+      if (siteType === "LTE") {
+        if (template.includes("KONTROL CHECKLIST")) {
+          return { type: "ALL_EXCEPT_SPECIAL" };
         }
-
-        if (siteType === "DSS") {
-          if (
-            template.includes("DSS-GPS READINESS TASK") ||
-            template.includes("DSS READINESS TASK")
-          ) {
-            return { type: "ALL_EXCEPT_SPECIAL" };
-          }
-        }
-
-        if (siteType === "LTE") {
-          if (template.includes("KONTROL CHECKLIST")) {
-            return { type: "ALL_EXCEPT_SPECIAL" };
-          }
-        }
-
-        if (siteType === "5G") {
-          if (
-            template.includes("5G READINESS QC CHECKLIST") ||
-            template.includes("5G READINESS YENI POLE")
-          ) {
-            return { type: "ALL_EXCEPT_SPECIAL" };
-          }
-        }
-
-        if (siteType === "TRP") {
-          if (template.includes("MODERNIZASYON LOWCOST TASK")) {
-            return { type: "ALL_EXCEPT_SPECIAL" };
-          }
-        }
-
-        return null;
       }
 
-      let updatedCount = 0;
-
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i] || [];
-
-        const siteId = row[1]; // B kolonu = DU ID / Site ID
-        const statusRaw = row[7]; // H kolonu = status
-        const templateName = row[15]; // P kolonu = Template Name
-
-        const siteCode = String(siteId || "").trim().toUpperCase();
-        const qcDurum = normalizeStatus(statusRaw);
-
-        if (!siteCode || !qcDurum || !templateName) {
-          continue;
+      if (siteType === "5G") {
+        if (
+          template.includes("5G READINESS QC CHECKLIST") ||
+          template.includes("5G READINESS YENI POLE")
+        ) {
+          return { type: "ALL_EXCEPT_SPECIAL" };
         }
+      }
 
-        const rule = getRuleByTemplate(siteCode, templateName);
-
-        if (!rule) {
-          continue;
+      if (siteType === "TRP") {
+        if (template.includes("MODERNIZASYON LOWCOST TASK")) {
+          return { type: "ALL_EXCEPT_SPECIAL" };
         }
+      }
 
-        if (rule.type === "ONLY_8818274546") {
-          const result = await pool.query(
-            `
+      return null;
+    }
+
+    let updatedCount = 0;
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i] || [];
+
+      const siteId = row[1]; // B kolonu = DU ID / Site ID
+      const statusRaw = row[7]; // H kolonu = status
+      const templateName = row[15]; // P kolonu = Template Name
+
+      const siteCode = String(siteId || "")
+        .trim()
+        .toUpperCase();
+      const qcDurum = normalizeStatus(statusRaw);
+
+      if (!siteCode || !qcDurum || !templateName) {
+        continue;
+      }
+
+      const rule = getRuleByTemplate(siteCode, templateName);
+
+      if (!rule) {
+        continue;
+      }
+
+      if (rule.type === "ONLY_8818274546") {
+        const result = await pool.query(
+          `
             UPDATE master_works
             SET qc_durum = $1
             WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
               AND TRIM(COALESCE(item_code, '')) = '8818274546'
             `,
-            [qcDurum, siteCode],
-          );
+          [qcDurum, siteCode],
+        );
 
-          updatedCount += result.rowCount || 0;
-        }
+        updatedCount += result.rowCount || 0;
+      }
 
-        if (rule.type === "ALL_EXCEPT_SPECIAL") {
-          const result = await pool.query(
-            `
+      if (rule.type === "ALL_EXCEPT_SPECIAL") {
+        const result = await pool.query(
+          `
             UPDATE master_works
             SET qc_durum = $1
             WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
               AND TRIM(COALESCE(item_code, '')) <> ALL($3::text[])
             `,
-            [qcDurum, siteCode, EXCLUDED_ITEMS],
-          );
+          [qcDurum, siteCode, EXCLUDED_ITEMS],
+        );
 
-          updatedCount += result.rowCount || 0;
-        }
+        updatedCount += result.rowCount || 0;
       }
-
-      return res.json({
-        ok: true,
-        updatedCount,
-        message: "QC verileri master kayıtlara işlendi",
-      });
-    } catch (err) {
-      console.error("QC UPLOAD ERROR:", err.message);
-      return res.status(500).json({ ok: false, error: err.message });
     }
-  },
-);
+
+    return res.json({
+      ok: true,
+      updatedCount,
+      message: "QC verileri master kayıtlara işlendi",
+    });
+  } catch (err) {
+    console.error("QC UPLOAD ERROR:", err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 app.post("/finance-auth/login", async (req, res) => {
   try {
@@ -1058,11 +1058,24 @@ function normalizeCurrency(value) {
   return raw || "TRY";
 }
 
-function getRegion(siteCode) {
+function getRegion(siteCode, projectCode = "") {
   const code = String(siteCode || "")
     .trim()
     .toUpperCase();
 
+  const project = String(projectCode || "")
+    .trim()
+    .toUpperCase();
+
+  // 🔴 1) TT PROJESİ (56A0SJC) ÖZEL KURAL
+  if (project === "56A0SJC") {
+    if (code.endsWith("_IZM")) return "İzmir";
+    if (code.endsWith("_KON")) return "Konya";
+    if (code.endsWith("_ANT")) return "Antalya";
+    if (code.endsWith("_ANK")) return "Ankara";
+  }
+
+  // 🟡 2) NORMAL HUAWEI KURALLARI
   if (
     code.startsWith("ES") ||
     code.startsWith("BO") ||
@@ -1080,7 +1093,8 @@ function getRegion(siteCode) {
     code.startsWith("MU") ||
     code.startsWith("MN") ||
     code.startsWith("AI") ||
-    code.startsWith("DE")
+    code.startsWith("DE") ||
+    code.includes("_IZM") // bunu da ekledik
   ) {
     return "İzmir";
   }
@@ -1089,7 +1103,8 @@ function getRegion(siteCode) {
     code.startsWith("AT") ||
     code.startsWith("IP") ||
     code.startsWith("BU") ||
-    code.startsWith("AF")
+    code.startsWith("AF") ||
+    code.includes("_ANT") // bunu da ekledik
   ) {
     return "Antalya";
   }
@@ -3736,22 +3751,25 @@ app.get("/export/site-entry-excel-all", async (req, res) => {
     ];
 
     rows.forEach((row) => {
-      sheet.addRow({
-        site_type: row.site_type || "",
-        project_code: row.project_code || "",
-        site_code: row.site_code || "",
-        item_code: row.item_code || "",
-        item_description: row.item_description || "",
-        done_qty: row.done_qty ?? "",
-        subcon_name: row.subcon_name || "",
-        onair_date: row.onair_date
-          ? new Date(row.onair_date).toLocaleDateString("tr-TR")
-          : "",
-        qc_durum: row.qc_durum || "",
-        kabul_durum: row.kabul_durum || "",
-        kabul_not: row.kabul_not || "",
-        note: row.note || "",
-      });
+      sheet.columns = [
+        { header: "Saha Türü", key: "site_type", width: 14 },
+        { header: "Bölge", key: "region", width: 14 },
+        { header: "Status", key: "status", width: 14 },
+        { header: "Analiz", key: "analysis", width: 14 },
+        { header: "Project Code", key: "project_code", width: 16 },
+        { header: "Site Code", key: "site_code", width: 20 },
+        { header: "Item Code", key: "item_code", width: 16 },
+        { header: "Item Description", key: "item_description", width: 45 },
+        { header: "Done Qty", key: "done_qty", width: 12 },
+        { header: "Requested Qty", key: "requested_qty", width: 14 },
+        { header: "Due Qty", key: "due_qty", width: 12 },
+        { header: "Billed Quantity", key: "billed_qty", width: 14 },
+        { header: "QC Durum", key: "qc_durum", width: 12 },
+        { header: "OnAir Date", key: "onair_date", width: 14 },
+        { header: "Subcon Name", key: "subcon_name", width: 18 },
+        { header: "RF Not", key: "note", width: 35 },
+        { header: "Kabul Not", key: "kabul_not", width: 35 },
+      ];
     });
 
     sheet.getRow(1).font = { bold: true };
@@ -4140,47 +4158,62 @@ app.get("/export/site-entry-excel", async (req, res) => {
     ];
 
     rows.forEach((row) => {
-      let region = "Tanımsız";
-      const code = String(row.site_code || "")
-        .toUpperCase()
-        .trim();
+      const siteCode = String(row.site_code || "").toUpperCase();
 
-      if (
-        code.startsWith("IZ") ||
-        code.startsWith("MU") ||
-        code.startsWith("US") ||
-        code.startsWith("MN") ||
-        code.startsWith("DE") ||
-        code.startsWith("AI")
-      ) {
-        region = "İzmir";
+      let detectedSiteType = row.site_type || "";
+
+      if (siteCode.includes("NS")) {
+        detectedSiteType = "STANDALONE";
+      } else if (siteCode.includes("NR3500") || siteCode.includes("5GEXP")) {
+        detectedSiteType = "5G";
       } else if (
-        code.startsWith("AT") ||
-        code.startsWith("IP") ||
-        code.startsWith("AF") ||
-        code.startsWith("BU")
+        siteCode.includes("L800") ||
+        siteCode.includes("L2600") ||
+        siteCode.includes("L2100") ||
+        siteCode.includes("NR700") ||
+        siteCode.includes("TRP") ||
+        siteCode.includes("_L") ||
+        siteCode.endsWith("L")
       ) {
-        region = "Antalya";
-      } else if (
-        code.startsWith("ES") ||
-        code.startsWith("BO") ||
-        code.startsWith("ZO") ||
-        code.startsWith("KA") ||
-        code.startsWith("Z")
-      ) {
-        region = "Ankara";
+        detectedSiteType = "LTE";
       }
 
-      worksheet.addRow({
-        region,
+      const region = getRegion(row.site_code);
+
+      let analysis = "Eksik";
+      const doneQty = Number(row.done_qty || 0);
+      const reqQty = Number(row.requested_qty || 0);
+
+      if (String(row.status || "").toUpperCase() === "PO_BEKLER") {
+        analysis = "Eksik";
+      } else if (doneQty === 0) {
+        analysis = "Giriş Yok";
+      } else if (doneQty === reqQty) {
+        analysis = "Tamam";
+      } else if (doneQty > reqQty) {
+        analysis = "Fazla";
+      }
+
+      sheet.addRow({
+        site_type: detectedSiteType,
+        region: region || "",
+        status: row.status || "",
+        analysis,
         project_code: row.project_code || "",
         site_code: row.site_code || "",
         item_code: row.item_code || "",
         item_description: row.item_description || "",
-        done_qty: Number(row.done_qty || 0),
-        requested_qty: Number(row.requested_qty || 0),
-        onair_date: row.onair_date || "",
+        done_qty: row.done_qty ?? "",
+        requested_qty: row.requested_qty ?? "",
+        due_qty: row.due_qty ?? "",
+        billed_qty: row.billed_qty ?? "",
+        qc_durum: row.qc_durum || "",
+        onair_date: row.onair_date
+          ? new Date(row.onair_date).toLocaleDateString("tr-TR")
+          : "",
         subcon_name: row.subcon_name || "",
+        note: row.note || "",
+        kabul_not: row.kabul_not || "",
       });
     });
 

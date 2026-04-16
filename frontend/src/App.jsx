@@ -952,6 +952,31 @@ function DailyEntry() {
     return `${day}.${month}.${year}`;
   }
 
+  function detectSiteTypeFromSiteCode(siteCode) {
+    const code = String(siteCode || "").toUpperCase();
+
+    if (code.includes("NR3500") || code.includes("5GEXP")) {
+      return "5G";
+    }
+
+    if (code.includes("NS")) {
+      return "STANDALONE";
+    }
+
+    if (
+      code.includes("L800") ||
+      code.includes("L2600") ||
+      code.includes("L2100") ||
+      code.includes("NR700") ||
+      code.includes("TRP") ||
+      code.includes("L")
+    ) {
+      return "LTE";
+    }
+
+    return "5G";
+  }
+
   const initialForm = {
     site_type: "5G",
     project_code: "",
@@ -1232,9 +1257,12 @@ function DailyEntry() {
     }
 
     if (name === "site_code") {
+      const upperValue = value.trim().toUpperCase();
+
       setForm((prev) => ({
         ...prev,
-        site_code: value.trim().toUpperCase(),
+        site_code: upperValue,
+        site_type: detectSiteTypeFromSiteCode(upperValue),
       }));
       return;
     }
@@ -1269,6 +1297,7 @@ function DailyEntry() {
     setForm((prev) => ({
       ...prev,
       site_code: value,
+      site_type: detectSiteTypeFromSiteCode(value),
     }));
   };
 
@@ -1319,7 +1348,7 @@ function DailyEntry() {
     setMessage("");
 
     setForm({
-      site_type: row.site_type || "5G",
+      site_type: detectSiteTypeFromSiteCode(row.site_code),
       project_code: row.project_code || "",
       site_code: row.site_code || "",
       item_code: row.item_code || "",
@@ -1388,7 +1417,7 @@ function DailyEntry() {
 
     try {
       const payload = {
-        site_type: form.site_type,
+        site_type: detectSiteTypeFromSiteCode(form.site_code),
         project_code: form.project_code,
         site_code: form.site_code,
         item_code: form.item_code,
@@ -7232,7 +7261,10 @@ function RegionAnalysis() {
           <tbody>
             {sortedRows.length === 0 ? (
               <tr>
-                <td colSpan="17" style={{ textAlign: "center", padding: "20px" }}>
+                <td
+                  colSpan="17"
+                  style={{ textAlign: "center", padding: "20px" }}
+                >
                   Tanımlı bölge kaydı bulunamadı
                 </td>
               </tr>
