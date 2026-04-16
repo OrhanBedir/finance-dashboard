@@ -2034,38 +2034,51 @@ function DailyEntry() {
                       <td>{formatDateTR(row.onair_date)}</td>
                       <td>{row.note}</td>
                       <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "8px",
-                            flexWrap: "wrap",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="tab"
-                            style={{ padding: "8px 12px" }}
-                            onClick={() => handleEdit(row)}
-                            title="Kaydı düzenle"
-                          >
-                            Düzenle
-                          </button>
-
-                          <button
-                            type="button"
-                            className="tab"
+                        <td>
+                          <div
                             style={{
-                              padding: "8px 12px",
-                              background: "#fee2e2",
-                              color: "#991b1b",
+                              display: "flex",
+                              gap: "8px",
+                              flexWrap: "nowrap",
+                              justifyContent: "center",
+                              alignItems: "center",
                             }}
-                            onClick={() => handleDelete(row)}
-                            title="Kaydı sil"
                           >
-                            Sil
-                          </button>
-                        </div>
+                            <button
+                              type="button"
+                              className="tab"
+                              style={{
+                                padding: "8px 14px",
+                                minWidth: "86px",
+                                borderRadius: "10px",
+                                fontWeight: "600",
+                                whiteSpace: "nowrap",
+                              }}
+                              onClick={() => handleEdit(row)}
+                              title="Kaydı düzenle"
+                            >
+                              Düzenle
+                            </button>
+
+                            <button
+                              type="button"
+                              className="tab"
+                              style={{
+                                padding: "8px 14px",
+                                minWidth: "70px",
+                                borderRadius: "10px",
+                                fontWeight: "600",
+                                whiteSpace: "nowrap",
+                                background: "#fee2e2",
+                                color: "#991b1b",
+                              }}
+                              onClick={() => handleDelete(row)}
+                              title="Kaydı sil"
+                            >
+                              Sil
+                            </button>
+                          </div>
+                        </td>
                       </td>
                       <td>{row.qc_durum || "-"}</td>
                       <td>{row.kabul_durum || "-"}</td>
@@ -2078,8 +2091,6 @@ function DailyEntry() {
           </table>
         </div>
       </div>
-
-
 
       {showEntryModal && (
         <div
