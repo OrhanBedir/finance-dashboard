@@ -6175,6 +6175,43 @@ function RegionAnalysis() {
     fetchRate();
   }, []);
 
+  const handleExportQcReadyExcel = () => {
+    if (!qcReadyModalRows.length) {
+      alert("İndirilecek kayıt bulunamadı");
+      return;
+    }
+
+    const excelRows = qcReadyModalRows.map((row) => {
+      const rawTotal =
+        Number(row.total_done_amount || row.total_amount || row.total || 0) ||
+        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+      const shownTotal = qcReadyType === "80" ? rawTotal * 0.8 : rawTotal * 0.2;
+
+      return {
+        Project: row.project_code || "",
+        Site: row.site_code || "",
+        Item: row.item_code || "",
+        Açıklama: row.item_description || "",
+        Req: row.requested_qty ?? "",
+        Due: row.due_qty ?? "",
+        Done: row.done_qty ?? "",
+        Tutar: shownTotal,
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(excelRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "QC Ready");
+
+    XLSX.writeFile(
+      workbook,
+      `qc_ready_${qcReadyType}_${qcReadyModalRegion}_${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`,
+    );
+  };
+
   useEffect(() => {
     loadRegionData();
   }, [loadRegionData]);
@@ -6718,13 +6755,23 @@ function RegionAnalysis() {
                 QC OK Fatura Kesilecek {qcReadyType}% - {qcReadyModalRegion}
               </h3>
 
-              <button
-                type="button"
-                className="tab"
-                onClick={() => setQcReadyModalOpen(false)}
-              >
-                Kapat
-              </button>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={handleExportQcReadyExcel}
+                >
+                  Excel İndir
+                </button>
+
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={() => setQcReadyModalOpen(false)}
+                >
+                  Kapat
+                </button>
+              </div>
             </div>
 
             <div className="tableWrap" style={{ marginBottom: 0 }}>
