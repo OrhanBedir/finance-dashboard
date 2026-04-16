@@ -1004,17 +1004,24 @@ function DailyEntry() {
   const [projectCodes, setProjectCodes] = useState([]);
   const [itemOptions, setItemOptions] = useState([]);
   const [poRows, setPoRows] = useState([]);
+  const uniquePoItemCodes = [
+    ...new Set(
+      poRows.map((row) => String(row.item_code || "").trim()).filter(Boolean),
+    ),
+  ];
+
   const poSummary = poRows.reduce(
     (acc, row) => {
       const qty = Number(row.requested_qty || 0);
       const price = Number(row.unit_price || 0);
 
-      acc.totalQty += qty;
       acc.totalAmount += qty * price;
       return acc;
     },
-    { totalQty: 0, totalAmount: 0 },
+    { totalAmount: 0 },
   );
+
+  poSummary.totalQty = uniquePoItemCodes.length;
 
   const entrySummary = siteEntries.reduce(
     (acc, row) => {
