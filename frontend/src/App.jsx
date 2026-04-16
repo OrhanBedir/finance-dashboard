@@ -1023,17 +1023,26 @@ function DailyEntry() {
 
   poSummary.totalQty = uniquePoItemCodes.length;
 
+  const uniqueEntryItemCodes = [
+    ...new Set(
+      siteEntries
+        .map((row) => String(row.item_code || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
   const entrySummary = siteEntries.reduce(
     (acc, row) => {
       const qty = Number(row.done_qty || 0);
       const price = Number(row.unit_price || 0);
 
-      acc.totalQty += qty;
       acc.totalAmount += qty * price;
       return acc;
     },
-    { totalQty: 0, totalAmount: 0 },
+    { totalAmount: 0 },
   );
+
+  entrySummary.totalQty = uniqueEntryItemCodes.length;
 
   const farkQty = poSummary.totalQty - entrySummary.totalQty;
   const farkTutar = poSummary.totalAmount - entrySummary.totalAmount;
@@ -1662,40 +1671,52 @@ function DailyEntry() {
             flexWrap: "wrap",
           }}
         >
-          <div style={{ flex: 1, minWidth: "320px" }}>
-            <label
-              style={{
-                display: "block",
-                fontWeight: "700",
-                marginBottom: "8px",
-                color: "#374151",
-              }}
-            >
-              Site Code
-            </label>
-
-            <input
-              value={siteSearchCode}
-              onChange={handleSiteSearchChange}
-              placeholder="Örn: AT8227_NS_WM"
-              style={{
-                width: "100%",
-                padding: "14px 16px",
-                border: "1px solid #d1d5db",
-                borderRadius: "10px",
-                fontSize: "15px",
-              }}
-            />
-          </div>
-
-          <button
-            type="button"
-            className="saveButton"
-            onClick={handleOpenEntryModal}
-            disabled={!siteSearchCode}
+          <div
+            style={{ display: "flex", justifyContent: "center", width: "100%" }}
           >
-            Veri Gir
-          </button>
+            <div style={{ width: "420px" }}>
+              <label
+                style={{
+                  display: "block",
+                  fontWeight: "700",
+                  marginBottom: "8px",
+                  color: "#374151",
+                  textAlign: "center",
+                }}
+              >
+                Site Code
+              </label>
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <input
+                  value={siteSearchCode}
+                  onChange={handleSiteSearchChange}
+                  placeholder="Site ID giriniz"
+                  style={{
+                    flex: 1,
+                    padding: "12px 14px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "10px",
+                    fontSize: "14px",
+                    outline: "none",
+                  }}
+                />
+
+                <button
+                  type="button"
+                  className="saveButton"
+                  onClick={handleOpenEntryModal}
+                  disabled={!siteSearchCode}
+                  style={{
+                    padding: "12px 18px",
+                    borderRadius: "10px",
+                  }}
+                >
+                  Veri Gir
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
