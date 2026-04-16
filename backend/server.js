@@ -3830,49 +3830,12 @@ app.get("/export/qc-ready-excel", async (req, res) => {
     const region = String(req.query.region || "").trim().toLowerCase();
     const type = String(req.query.type || "").trim(); // "80", "20_fac_ok", "20_fac_nok"
 
-    const result = await pool.query(`
-      SELECT
-        project_code,
-        site_code,
-        item_code,
-        item_description,
-        done_qty,
-        requested_qty,
-        due_qty,
-        billed_qty,
-        unit_price,
-        currency,
-        total_done_amount,
-        total_amount,
-        total,
-        status,
-        qc_durum,
-        kabul_durum,
-        kabul_not,
-        subcon_name,
-        onair_date,
-        note
-      FROM dashboard_result
-    `);
+    const result = await pool.query(buildMasterJoinedQuery());
 
-    const normalizeCurrency = (value) => {
-      const raw = String(value || "")
-        .trim()
-        .toUpperCase();
-
-      if (
-        raw === "USD" ||
-        raw === "$" ||
-        raw === "US$" ||
-        raw.includes("USD")
-      ) {
-        return "USD";
-      }
-
-      return "TRY";
-    };
-
-    const allRows = result.rows || [];
+    const allRows = (result.rows || []).map((row) => ({
+      ...row,
+      currency: normalizeCurrency(row.currency),
+    }));
 
     const filteredRows = allRows.filter((row) => {
       const rowRegion = String(
@@ -3950,7 +3913,7 @@ app.get("/export/qc-ready-excel", async (req, res) => {
         requested_qty: row.requested_qty ?? "",
         due_qty: row.due_qty ?? "",
         done_qty: row.done_qty ?? "",
-        currency: normalizeCurrency(row.currency),
+        currency: row.currency || "TRY",
         unit_price: Number(row.unit_price || 0),
         qc_durum: row.qc_durum || "",
         kabul_durum: row.kabul_durum || "",
@@ -3985,7 +3948,7 @@ app.get("/export/qc-ready-excel", async (req, res) => {
     res.end();
   } catch (err) {
     console.error("QC READY EXCEL EXPORT ERROR:", err);
-    res.status(500).send("Excel oluşturulamadı");
+    res.status(500).send(`Excel oluşturulamadı: ${err.message}`);
   }
 });
 
