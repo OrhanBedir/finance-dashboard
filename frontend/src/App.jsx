@@ -6175,41 +6175,51 @@ function RegionAnalysis() {
     fetchRate();
   }, []);
 
-  const handleExportQcReadyExcel = () => {
-    if (!qcReadyModalRows.length) {
-      alert("İndirilecek kayıt bulunamadı");
-      return;
-    }
+  const qcReadyModalTotal = qcReadyModalRows.reduce((sum, row) => {
+    const rawTotal =
+      Number(row.total_done_amount || row.total_amount || row.total || 0) ||
+      Number(row.done_qty || 0) * Number(row.unit_price || 0);
 
-    const excelRows = qcReadyModalRows.map((row) => {
-      const rawTotal =
-        Number(row.total_done_amount || row.total_amount || row.total || 0) ||
-        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+    const shownTotal = qcReadyType === "80" ? rawTotal * 0.8 : rawTotal * 0.2;
 
-      const shownTotal = qcReadyType === "80" ? rawTotal * 0.8 : rawTotal * 0.2;
+    return sum + shownTotal;
+  }, 0);
 
-      return {
-        Project: row.project_code || "",
-        Site: row.site_code || "",
-        Item: row.item_code || "",
-        Açıklama: row.item_description || "",
-        Req: row.requested_qty ?? "",
-        Due: row.due_qty ?? "",
-        Done: row.done_qty ?? "",
-        Tutar: shownTotal,
-      };
-    });
+  const handleExportQcReadyExcel = async () => {
+    try {
+      const params = new URLSearchParams({
+        region: qcReadyModalRegion || "",
+        type: qcReadyType || "",
+      });
 
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "QC Ready");
+      const response = await fetch(
+        `${API_BASE}/export/qc-ready-excel?${params.toString()}`,
+      );
 
-    XLSX.writeFile(
-      workbook,
-      `qc_ready_${qcReadyType}_${qcReadyModalRegion}_${new Date()
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("QC READY EXPORT ERROR:", errorText);
+        alert("Excel indirilemedi");
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `qc_ready_${qcReadyModalRegion}_${qcReadyType}_${new Date()
         .toISOString()
-        .slice(0, 10)}.xlsx`,
-    );
+        .slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("QC READY EXCEL ERROR:", err);
+      alert("Excel indirilemedi");
+    }
   };
 
   useEffect(() => {
@@ -6754,6 +6764,47 @@ function RegionAnalysis() {
               <h3 style={{ margin: 0 }}>
                 QC OK Fatura Kesilecek {qcReadyType}% - {qcReadyModalRegion}
               </h3>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "16px",
+                  marginBottom: "12px",
+                  marginTop: "8px",
+                }}
+              >
+                <div
+                  style={{
+                    background: "#f9fafb",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "10px",
+                    padding: "8px 12px",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Toplam Satır
+                  </div>
+                  <div style={{ fontWeight: "600" }}>
+                    {qcReadyModalRows.length}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    background: "#f9fafb",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "10px",
+                    padding: "8px 12px",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Toplam Tutar ({qcReadyType}%)
+                  </div>
+                  <div style={{ fontWeight: "600" }}>
+                    {formatTRY(qcReadyModalTotal)}
+                  </div>
+                </div>
+              </div>
 
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                 <button
