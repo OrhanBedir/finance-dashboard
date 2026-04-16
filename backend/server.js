@@ -3825,6 +3825,138 @@ app.get("/export/site-entry-excel-all", async (req, res) => {
   }
 });
 
+app.get("/export/qc-ready-excel", async (req, res) => {
+  try {
+    const region = String(req.query.region || "").trim().toLowerCase();
+    const type = String(req.query.type || "").trim(); // "80" veya "20"
+
+    const result = await pool.query(`
+      SELECT
+        project_code,
+        site_code,
+        item_code,
+        item_description,
+        done_qty,
+        requested_qty,
+        due_qty,
+        billed_qty,
+        unit_price,
+        currency,
+        total_done_amount,
+        status,
+        qc_durum,
+        kabul_durum,
+        kabul_not,
+        subcon_name,
+        onair_date,
+        note
+      FROM dashboard_result
+    `);
+
+    const allRows = result.rows || [];
+
+    const filteredRows = allRows.filter((row) => {
+      const rowRegion = String(
+        getRegion(row.site_code, row.project_code) || ""
+      ).toLowerCase();
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
+      const billedZero = Number(row.billed_qty ?? 0) === 0;
+
+      const reqQty = Number(row.requested_qty || 0);
+      const dueQty = Number(row.due_qty || 0);
+      const diff = reqQty - dueQty;
+
+      if (rowRegion !== region) return false;
+      if (!statusOk || !qcOk || !billedZero) return false;
+
+      if (type === "80") return diff === 0;
+      if (type === "20") return diff !== 0;
+
+      return false;
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("QC_Ready");
+
+    sheet.columns = [
+      { header: "Project", key: "project_code", width: 16 },
+      { header: "Site", key: "site_code", width: 22 },
+      { header: "Item", key: "item_code", width: 16 },
+      { header: "Açıklama", key: "item_description", width: 45 },
+      { header: "Req", key: "requested_qty", width: 10 },
+      { header: "Due", key: "due_qty", width: 10 },
+      { header: "Done", key: "done_qty", width: 10 },
+      { header: "QC Durum", key: "qc_durum", width: 12 },
+      { header: "Kabul Durum", key: "kabul_durum", width: 12 },
+      { header: "Taşeron", key: "subcon_name", width: 18 },
+      { header: "OnAir", key: "onair_date", width: 14 },
+      { header: "RF Not", key: "note", width: 28 },
+      { header: "Kabul Not", key: "kabul_not", width: 28 },
+      { header: `Tutar (${type}%)`, key: "shown_total", width: 16 },
+    ];
+
+    filteredRows.forEach((row) => {
+      const rawTotal =
+        Number(row.total_done_amount || 0) ||
+        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+      const shownTotal =
+        type === "80" ? rawTotal * 0.8 : rawTotal * 0.2;
+
+      sheet.addRow({
+        project_code: row.project_code || "",
+        site_code: row.site_code || "",
+        item_code: row.item_code || "",
+        item_description: row.item_description || "",
+        requested_qty: row.requested_qty ?? "",
+        due_qty: row.due_qty ?? "",
+        done_qty: row.done_qty ?? "",
+        qc_durum: row.qc_durum || "",
+        kabul_durum: row.kabul_durum || "",
+        subcon_name: row.subcon_name || "",
+        onair_date: row.onair_date
+          ? new Date(row.onair_date).toLocaleDateString("tr-TR")
+          : "",
+        note: row.note || "",
+        kabul_not: row.kabul_not || "",
+        shown_total: shownTotal,
+      });
+    });
+
+    // Header bold
+    sheet.getRow(1).font = { bold: true };
+
+    // Freeze header
+    sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+    // Filter
+    sheet.autoFilter = {
+      from: "A1",
+      to: "N1",
+    };
+
+    // 📥 DOWNLOAD AYARI (eksik olan yer burasıydı)
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=qc_ready_${region}_${type}.xlsx`
+    );
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+
+  } catch (err) {
+    console.error("QC READY EXPORT ERROR:", err);
+    res.status(500).send("Excel oluşturulamadı");
+  }
+});
+
 app.post("/master/add", async (req, res) => {
   try {
     const m = req.body;
@@ -4152,6 +4284,10 @@ async function fetchData() {
 
 /* ================== EXPORT STATUS EXCEL ================== */
 
+
+
+
+
 app.get("/export/site-entry-excel", async (req, res) => {
   try {
     const { project_code = "", site_code = "" } = req.query;
@@ -4267,6 +4403,8 @@ app.get("/export/site-entry-excel", async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
+   
 
 app.get("/export/status-excel", async (req, res) => {
   try {
