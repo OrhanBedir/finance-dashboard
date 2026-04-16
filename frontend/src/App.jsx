@@ -1550,6 +1550,14 @@ function DailyEntry() {
           >
             Tamamlanan Import
           </button>
+
+          <button
+            type="button"
+            className="tab"
+            onClick={handleExportAllEntriesExcel}
+          >
+            Tüm İşleri Excel İndir
+          </button>
         </div>
       </div>
 
@@ -7224,10 +7232,7 @@ function RegionAnalysis() {
           <tbody>
             {sortedRows.length === 0 ? (
               <tr>
-                <td
-                  colSpan="13"
-                  style={{ textAlign: "center", padding: "20px" }}
-                >
+                <td colSpan="17" style={{ textAlign: "center", padding: "20px" }}>
                   Tanımlı bölge kaydı bulunamadı
                 </td>
               </tr>
