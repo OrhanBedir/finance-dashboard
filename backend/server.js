@@ -3826,8 +3826,30 @@ app.get("/export/site-entry-excel-all", async (req, res) => {
 });
 
 app.get("/export/qc-ready-excel", async (req, res) => {
+  function safeFileName(value) {
+    return String(value || "")
+      .trim()
+      .replace(/İ/g, "I")
+      .replace(/I/g, "I")
+      .replace(/ı/g, "i")
+      .replace(/Ş/g, "S")
+      .replace(/ş/g, "s")
+      .replace(/Ğ/g, "G")
+      .replace(/ğ/g, "g")
+      .replace(/Ü/g, "U")
+      .replace(/ü/g, "u")
+      .replace(/Ö/g, "O")
+      .replace(/ö/g, "o")
+      .replace(/Ç/g, "C")
+      .replace(/ç/g, "c")
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+  }
+
   try {
-    const region = String(req.query.region || "").trim().toLowerCase();
+    const region = String(req.query.region || "")
+      .trim()
+      .toLowerCase();
     const type = String(req.query.type || "").trim(); // "80", "20_fac_ok", "20_fac_nok"
 
     const result = await pool.query(buildMasterJoinedQuery());
@@ -3935,9 +3957,12 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       to: "Q1",
     };
 
+    const safeRegion = safeFileName(region);
+    const safeType = safeFileName(type);
+
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=qc_ready_${region}_${type}.xlsx`,
+      `attachment; filename="qc_ready_${safeRegion}_${safeType}.xlsx"`,
     );
     res.setHeader(
       "Content-Type",
