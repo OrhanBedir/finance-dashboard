@@ -1845,44 +1845,11 @@ function DailyEntry() {
           <h3 className="listTitle" style={{ margin: 0, textAlign: "center" }}>
             Bu Saha İçin Girilmiş İşler
           </h3>
-          <div
-            style={{
-              marginBottom: "10px",
-              fontSize: "14px",
-              padding: "10px 12px",
-              borderRadius: "10px",
-              background:
-                farkQty === 0 && farkTutar === 0
-                  ? "#ecfdf5"
-                  : farkQty > 0 || farkTutar > 0
-                    ? "#fff7ed"
-                    : "#fef2f2",
-              color:
-                farkQty === 0 && farkTutar === 0
-                  ? "#166534"
-                  : farkQty > 0 || farkTutar > 0
-                    ? "#9a3412"
-                    : "#b91c1c",
-              border:
-                farkQty === 0 && farkTutar === 0
-                  ? "1px solid #bbf7d0"
-                  : farkQty > 0 || farkTutar > 0
-                    ? "1px solid #fdba74"
-                    : "1px solid #fecaca",
-            }}
-          >
-            <strong>
-              {farkQty === 0 && farkTutar === 0
-                ? "Tam Uyumlu"
-                : farkQty > 0 || farkTutar > 0
-                  ? "Eksik Giriş Var"
-                  : "Fazla Giriş Var"}
-            </strong>
-            {" — "}
-            <strong>Fark Adet:</strong> {farkQty}
-            {" | "}
+          <div style={{ marginBottom: "10px", fontSize: "14px" }}>
+            <strong>Fark Adet:</strong> {farkQty} &nbsp; | &nbsp;
             <strong>Fark Tutar:</strong> {formatTRY(farkTutar)}
           </div>
+
           <div style={{ marginBottom: "10px", fontSize: "14px" }}>
             <strong>Toplam Adet:</strong> {entrySummary.totalQty} &nbsp; |
             &nbsp;
