@@ -3827,10 +3827,8 @@ app.get("/export/site-entry-excel-all", async (req, res) => {
 
 app.get("/export/qc-ready-excel", async (req, res) => {
   try {
-    const region = String(req.query.region || "")
-      .trim()
-      .toLowerCase();
-    const type = String(req.query.type || "").trim(); // "80" veya "20"
+    const region = String(req.query.region || "").trim().toLowerCase();
+    const type = String(req.query.type || "").trim(); // "80", "20_fac_ok", "20_fac_nok"
 
     const result = await pool.query(`
       SELECT
@@ -3845,6 +3843,8 @@ app.get("/export/qc-ready-excel", async (req, res) => {
         unit_price,
         currency,
         total_done_amount,
+        total_amount,
+        total,
         status,
         qc_durum,
         kabul_durum,
@@ -3855,6 +3855,23 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       FROM dashboard_result
     `);
 
+    const normalizeCurrency = (value) => {
+      const raw = String(value || "")
+        .trim()
+        .toUpperCase();
+
+      if (
+        raw === "USD" ||
+        raw === "$" ||
+        raw === "US$" ||
+        raw.includes("USD")
+      ) {
+        return "USD";
+      }
+
+      return "TRY";
+    };
+
     const allRows = result.rows || [];
 
     const filteredRows = allRows.filter((row) => {
@@ -3862,19 +3879,29 @@ app.get("/export/qc-ready-excel", async (req, res) => {
         getRegion(row.site_code, row.project_code) || "",
       ).toLowerCase();
 
+      if (rowRegion !== region) return false;
+
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
-      const billedZero = Number(row.billed_qty ?? 0) === 0;
+      const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
+      const billedZero = Number(row.billed_qty ?? row.billed ?? 0) === 0;
 
       const reqQty = Number(row.requested_qty || 0);
       const dueQty = Number(row.due_qty || 0);
       const diff = reqQty - dueQty;
+      const progressedQty = diff;
 
-      if (rowRegion !== region) return false;
-      if (!statusOk || !qcOk || !billedZero) return false;
+      if (type === "80") {
+        return statusOk && qcOk && billedZero && diff === 0;
+      }
 
-      if (type === "80") return diff === 0;
-      if (type === "20") return diff !== 0;
+      if (type === "20_fac_ok") {
+        return statusOk && progressedQty > 0 && kabulOk;
+      }
+
+      if (type === "20_fac_nok") {
+        return statusOk && progressedQty > 0 && !kabulOk;
+      }
 
       return false;
     });
@@ -3890,24 +3917,30 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       { header: "Req", key: "requested_qty", width: 10 },
       { header: "Due", key: "due_qty", width: 10 },
       { header: "Done", key: "done_qty", width: 10 },
+      { header: "Currency", key: "currency", width: 10 },
+      { header: "Unit Price", key: "unit_price", width: 14 },
       { header: "QC Durum", key: "qc_durum", width: 12 },
       { header: "Kabul Durum", key: "kabul_durum", width: 12 },
       { header: "Taşeron", key: "subcon_name", width: 18 },
       { header: "OnAir", key: "onair_date", width: 14 },
       { header: "RF Not", key: "note", width: 28 },
       { header: "Kabul Not", key: "kabul_not", width: 28 },
-      { header: `Tutar (${type}%)`, key: "shown_total", width: 16 },
+      { header: "Raw Total", key: "raw_total", width: 16 },
+      { header: "Shown Total", key: "shown_total", width: 16 },
     ];
 
     filteredRows.forEach((row) => {
       const rawTotal =
-        Number(row.total_done_amount || 0) ||
+        Number(row.total_done_amount || row.total_amount || row.total || 0) ||
         Number(row.done_qty || 0) * Number(row.unit_price || 0);
 
-      const total80 = rawTotal * 0.8;
-      const total20 = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+      let shownTotal = 0;
 
-      const shownTotal = type === "80" ? total80 : total20;
+      if (type === "80") {
+        shownTotal = rawTotal * 0.8;
+      } else if (type === "20_fac_ok" || type === "20_fac_nok") {
+        shownTotal = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+      }
 
       sheet.addRow({
         project_code: row.project_code || "",
@@ -3917,6 +3950,8 @@ app.get("/export/qc-ready-excel", async (req, res) => {
         requested_qty: row.requested_qty ?? "",
         due_qty: row.due_qty ?? "",
         done_qty: row.done_qty ?? "",
+        currency: normalizeCurrency(row.currency),
+        unit_price: Number(row.unit_price || 0),
         qc_durum: row.qc_durum || "",
         kabul_durum: row.kabul_durum || "",
         subcon_name: row.subcon_name || "",
@@ -3925,28 +3960,22 @@ app.get("/export/qc-ready-excel", async (req, res) => {
           : "",
         note: row.note || "",
         kabul_not: row.kabul_not || "",
+        raw_total: rawTotal,
         shown_total: shownTotal,
       });
     });
 
-    // Header bold
     sheet.getRow(1).font = { bold: true };
-
-    // Freeze header
     sheet.views = [{ state: "frozen", ySplit: 1 }];
-
-    // Filter
     sheet.autoFilter = {
       from: "A1",
-      to: "N1",
+      to: "Q1",
     };
 
-    // 📥 DOWNLOAD AYARI (eksik olan yer burasıydı)
     res.setHeader(
       "Content-Disposition",
       `attachment; filename=qc_ready_${region}_${type}.xlsx`,
     );
-
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3955,7 +3984,7 @@ app.get("/export/qc-ready-excel", async (req, res) => {
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
-    console.error("QC READY EXPORT ERROR:", err);
+    console.error("QC READY EXCEL EXPORT ERROR:", err);
     res.status(500).send("Excel oluşturulamadı");
   }
 });

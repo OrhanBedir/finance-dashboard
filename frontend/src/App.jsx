@@ -6328,23 +6328,7 @@ function RegionAnalysis() {
           ? getFacNok20RowsByRegion(qcReadyModalRegion)
           : [];
 
-  useEffect(() => {
-    const fetchRate = async () => {
-      try {
-        const res = await fetch("https://open.er-api.com/v6/latest/USD");
-        const data = await res.json();
 
-        if (data?.rates?.TRY) {
-          setUsdRate(data.rates.TRY);
-        }
-      } catch (err) {
-        console.error("USD RATE ERROR:", err);
-        setUsdRate(45);
-      }
-    };
-
-    fetchRate();
-  }, []);
 
   const qcReadyModalTotal = qcReadyModalRows.reduce((sum, row) => {
     const rawTotal =
