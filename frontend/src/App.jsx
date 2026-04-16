@@ -1803,32 +1803,35 @@ function DailyEntry() {
       <div className="tableWrap">
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr",
             alignItems: "center",
             marginBottom: "12px",
             gap: "12px",
-            flexWrap: "wrap",
           }}
         >
-          <h3 style={{ textAlign: "center", marginBottom: "12px" }}>
+          <div></div>
+
+          <h3 className="listTitle" style={{ margin: 0, textAlign: "center" }}>
             Bu Saha İçin Girilmiş İşler
           </h3>
 
-          <button
-            type="button"
-            onClick={handleExportExcel}
-            style={{
-              padding: "10px 16px",
-              background: "#e5e7eb",
-              border: "none",
-              borderRadius: "8px",
-              fontWeight: "600",
-              cursor: "pointer",
-            }}
-          >
-            Excel İndir
-          </button>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              style={{
+                padding: "10px 16px",
+                background: "#e5e7eb",
+                border: "none",
+                borderRadius: "8px",
+                fontWeight: "600",
+                cursor: "pointer",
+              }}
+            >
+              Excel İndir
+            </button>
+          </div>
         </div>
 
         <div
