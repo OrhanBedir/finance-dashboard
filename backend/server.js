@@ -3735,23 +3735,9 @@ app.post(
 /* ================== MASTER ADD ================== */
 app.get("/export/site-entry-excel-all", async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT
-        site_type,
-        project_code,
-        site_code,
-        item_code,
-        item_description,
-        done_qty,
-        subcon_name,
-        onair_date,
-        note,
-        qc_durum,
-        kabul_durum,
-        kabul_not
-      FROM master_works
-      ORDER BY id DESC
-    `);
+    const result = await pool.query(
+      buildMasterJoinedQuery("", "ORDER BY m.created_at DESC, m.id DESC"),
+    );
 
     const rows = result.rows || [];
 
