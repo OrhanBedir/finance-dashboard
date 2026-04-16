@@ -1484,8 +1484,74 @@ function DailyEntry() {
 
   return (
     <>
-      
-      
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "12px",
+          flexWrap: "wrap",
+          marginBottom: "8px",
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: "28px", lineHeight: 1.1 }}>
+          📋 Günlük İş Girişi
+        </h1>
+
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={showQcUpload ? "tab activeTab" : "tab"}
+            onClick={() => {
+              setShowQcUpload((prev) => !prev);
+              setShowBoqUpload(false);
+              setShowHwPoUpload(false);
+              setShowCompletedImport(false);
+            }}
+          >
+            QC Yükle
+          </button>
+
+          <button
+            type="button"
+            className={showBoqUpload ? "tab activeTab" : "tab"}
+            onClick={() => {
+              setShowBoqUpload((prev) => !prev);
+              setShowQcUpload(false);
+              setShowHwPoUpload(false);
+              setShowCompletedImport(false);
+            }}
+          >
+            BoQ Yükle
+          </button>
+
+          <button
+            type="button"
+            className={showHwPoUpload ? "tab activeTab" : "tab"}
+            onClick={() => {
+              setShowHwPoUpload((prev) => !prev);
+              setShowBoqUpload(false);
+              setShowQcUpload(false);
+              setShowCompletedImport(false);
+            }}
+          >
+            HW PO Yükle
+          </button>
+
+          <button
+            type="button"
+            className={showCompletedImport ? "tab activeTab" : "tab"}
+            onClick={() => {
+              setShowCompletedImport((prev) => !prev);
+              setShowBoqUpload(false);
+              setShowQcUpload(false);
+              setShowHwPoUpload(false);
+            }}
+          >
+            Tamamlanan Import
+          </button>
+        </div>
+      </div>
 
       {showBoqUpload && (
         <BoQUploadInline
