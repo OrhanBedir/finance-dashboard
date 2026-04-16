@@ -943,7 +943,32 @@ function formatDateToTR(date) {
   return `${day}.${month}.${year}`;
 }
 
+function useUsdRate() {
+  const [usdRate, setUsdRate] = useState(45);
+
+  useEffect(() => {
+    const fetchRate = async () => {
+      try {
+        const res = await fetch("https://open.er-api.com/v6/latest/USD");
+        const data = await res.json();
+
+        if (data?.rates?.TRY) {
+          setUsdRate(data.rates.TRY);
+        }
+      } catch (err) {
+        console.error("USD RATE ERROR:", err);
+      }
+    };
+
+    fetchRate();
+  }, []);
+
+  return usdRate;
+}
+
 function DailyEntry() {
+  
+  const usdRate = useUsdRate();
   function getTodayTR() {
     const d = new Date();
     const day = String(d.getDate()).padStart(2, "0");
@@ -1004,6 +1029,25 @@ function DailyEntry() {
   const [projectCodes, setProjectCodes] = useState([]);
   const [itemOptions, setItemOptions] = useState([]);
   const [poRows, setPoRows] = useState([]);
+
+  const normalizeCurrency = (value) => {
+    const raw = String(value || "")
+      .trim()
+      .toUpperCase();
+
+    if (raw === "USD" || raw === "$" || raw === "US$" || raw.includes("USD")) {
+      return "USD";
+    }
+
+    return "TRY";
+  };
+
+  
+
+  const convertToTRY = (amount, currency) => {
+    const num = Number(amount || 0);
+    return normalizeCurrency(currency) === "USD" ? num * usdRate : num;
+  };
   const uniquePoItemCodes = [
     ...new Set(
       poRows.map((row) => String(row.item_code || "").trim()).filter(Boolean),
@@ -1013,7 +1057,7 @@ function DailyEntry() {
   const poSummary = poRows.reduce(
     (acc, row) => {
       const qty = Number(row.requested_qty || 0);
-      const price = Number(row.unit_price || 0);
+      const price = convertToTRY(row.unit_price, row.currency);
 
       acc.totalAmount += qty * price;
       return acc;
@@ -1034,7 +1078,7 @@ function DailyEntry() {
   const entrySummary = siteEntries.reduce(
     (acc, row) => {
       const qty = Number(row.done_qty || 0);
-      const price = Number(row.unit_price || 0);
+      const price = convertToTRY(row.unit_price, row.currency);
 
       acc.totalAmount += qty * price;
       return acc;
@@ -6079,10 +6123,11 @@ function RegionAnalysis() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailRows, setDetailRows] = useState([]);
-  const [usdRate, setUsdRate] = useState(45);
+  
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const usdRate = useUsdRate();
 
   const [qcReadyModalOpen, setQcReadyModalOpen] = useState(false);
   const [qcReadyModalRegion, setQcReadyModalRegion] = useState("");
