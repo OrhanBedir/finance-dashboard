@@ -1832,32 +1832,34 @@ function DailyEntry() {
       </div>
 
       <div className="tableWrap">
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr auto 1fr",
-            alignItems: "center",
-            marginBottom: "12px",
-            gap: "12px",
-          }}
-        >
-          <div></div>
+        <div className="tableWrap">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr auto 1fr auto",
+              alignItems: "center",
+              gap: "12px",
+              marginBottom: "14px",
+            }}
+          >
+            <div style={{ fontSize: "14px", textAlign: "left" }}>
+              <strong>Toplam Adet:</strong> {entrySummary.totalQty} {" | "}
+              <strong>Toplam Tutar:</strong>{" "}
+              {formatTRY(entrySummary.totalAmount)}
+            </div>
 
-          <h3 className="listTitle" style={{ margin: 0, textAlign: "center" }}>
-            Bu Saha İçin Girilmiş İşler
-          </h3>
-          <div style={{ marginBottom: "10px", fontSize: "14px" }}>
-            <strong>Fark Adet:</strong> {farkQty} &nbsp; | &nbsp;
-            <strong>Fark Tutar:</strong> {formatTRY(farkTutar)}
-          </div>
+            <h3
+              className="listTitle"
+              style={{ margin: 0, textAlign: "center" }}
+            >
+              Bu Saha İçin Girilmiş İşler
+            </h3>
 
-          <div style={{ marginBottom: "10px", fontSize: "14px" }}>
-            <strong>Toplam Adet:</strong> {entrySummary.totalQty} &nbsp; |
-            &nbsp;
-            <strong>Toplam Tutar:</strong> {formatTRY(entrySummary.totalAmount)}
-          </div>
+            <div style={{ fontSize: "14px", textAlign: "right" }}>
+              <strong>Fark Adet:</strong> {farkQty} {" | "}
+              <strong>Fark Tutar:</strong> {formatTRY(farkTutar)}
+            </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button
               type="button"
               onClick={handleExportExcel}
