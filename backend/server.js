@@ -3846,9 +3846,8 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       .replace(/[^a-zA-Z0-9_-]/g, "");
   }
 
-
-
   try {
+    const usdRate = await getTcmbUsdTrySellingRate();
     const region = String(req.query.region || "")
       .trim()
       .toLowerCase();
@@ -3917,16 +3916,21 @@ app.get("/export/qc-ready-excel", async (req, res) => {
     ];
 
     filteredRows.forEach((row) => {
-      const rawTotal =
+      const currency = normalizeCurrency(row.currency);
+      const rawBase =
         Number(row.total_done_amount || row.total_amount || row.total || 0) ||
         Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+      const rawTotal = currency === "USD" ? rawBase * usdRate : rawBase;
 
       let shownTotal = 0;
 
       if (type === "80") {
         shownTotal = rawTotal * 0.8;
       } else if (type === "20_fac_ok" || type === "20_fac_nok") {
-        shownTotal = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+        const facBase = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+
+        shownTotal = currency === "USD" ? facBase * usdRate : facBase;
       }
 
       sheet.addRow({
