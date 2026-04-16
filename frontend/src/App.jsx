@@ -6188,13 +6188,23 @@ function RegionAnalysis() {
 
   const getFacOk20TotalByRegion = (regionName) => {
     return getFacOk20RowsByRegion(regionName).reduce((sum, row) => {
-      return sum + Number(row.due_qty || 0) * Number(row.unit_price || 0);
+      const base = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+
+      const total =
+        normalizeCurrency(row.currency) === "USD" ? base * usdRate : base;
+
+      return sum + total;
     }, 0);
   };
 
   const getFacNok20TotalByRegion = (regionName) => {
     return getFacNok20RowsByRegion(regionName).reduce((sum, row) => {
-      return sum + Number(row.due_qty || 0) * Number(row.unit_price || 0);
+      const base = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+
+      const total =
+        normalizeCurrency(row.currency) === "USD" ? base * usdRate : base;
+
+      return sum + total;
     }, 0);
   };
 
@@ -6301,9 +6311,12 @@ function RegionAnalysis() {
 
   const getQcReady80TotalByRegion = (regionName) => {
     return getQcReady80RowsByRegion(regionName).reduce((sum, row) => {
-      const total =
+      const base =
         Number(row.total_done_amount || row.total_amount || row.total || 0) ||
         Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+      const total =
+        normalizeCurrency(row.currency) === "USD" ? base * usdRate : base;
 
       return sum + total * 0.8;
     }, 0);
@@ -6328,15 +6341,19 @@ function RegionAnalysis() {
           ? getFacNok20RowsByRegion(qcReadyModalRegion)
           : [];
 
-
-
   const qcReadyModalTotal = qcReadyModalRows.reduce((sum, row) => {
-    const rawTotal =
+    const currency = normalizeCurrency(row.currency);
+
+    const rawBase =
       Number(row.total_done_amount || row.total_amount || row.total || 0) ||
       Number(row.done_qty || 0) * Number(row.unit_price || 0);
 
+    const rawTotal = currency === "USD" ? rawBase * usdRate : rawBase;
+
+    const facBase = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+    const total20 = currency === "USD" ? facBase * usdRate : facBase;
+
     const total80 = rawTotal * 0.8;
-    const total20 = Number(row.due_qty || 0) * Number(row.unit_price || 0);
 
     const shownTotal = qcReadyType === "80" ? total80 : total20;
 
