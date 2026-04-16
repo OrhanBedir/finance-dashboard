@@ -6031,6 +6031,60 @@ function RegionAnalysis() {
     ),
   );
 
+  // ✅ FAC OK 20%
+  const getFacOk20RowsByRegion = (regionName) => {
+    return rows.filter((row) => {
+      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
+
+      const reqQty = Number(row.requested_qty || 0);
+      const dueQty = Number(row.due_qty || 0);
+      const progressedQty = reqQty - dueQty;
+
+      return (
+        rowRegion === String(regionName).toLowerCase() &&
+        statusOk &&
+        progressedQty > 0 &&
+        kabulOk
+      );
+    });
+  };
+
+  // ❌ FAC NOK 20%
+  const getFacNok20RowsByRegion = (regionName) => {
+    return rows.filter((row) => {
+      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
+
+      const reqQty = Number(row.requested_qty || 0);
+      const dueQty = Number(row.due_qty || 0);
+      const progressedQty = reqQty - dueQty;
+
+      return (
+        rowRegion === String(regionName).toLowerCase() &&
+        statusOk &&
+        progressedQty > 0 &&
+        !kabulOk
+      );
+    });
+  };
+
+  const getFacOk20TotalByRegion = (regionName) => {
+    return getFacOk20RowsByRegion(regionName).reduce((sum, row) => {
+      return sum + Number(row.due_qty || 0) * Number(row.unit_price || 0);
+    }, 0);
+  };
+
+  const getFacNok20TotalByRegion = (regionName) => {
+    return getFacNok20RowsByRegion(regionName).reduce((sum, row) => {
+      return sum + Number(row.due_qty || 0) * Number(row.unit_price || 0);
+    }, 0);
+  };
+
   const regionRowStyle = {
     display: "flex",
     justifyContent: "space-between",
@@ -6155,7 +6209,11 @@ function RegionAnalysis() {
   const qcReadyModalRows =
     qcReadyType === "80"
       ? getQcReady80RowsByRegion(qcReadyModalRegion)
-      : getQcReady20RowsByRegion(qcReadyModalRegion);
+      : qcReadyType === "20_fac_ok"
+        ? getFacOk20RowsByRegion(qcReadyModalRegion)
+        : qcReadyType === "20_fac_nok"
+          ? getFacNok20RowsByRegion(qcReadyModalRegion)
+          : [];
 
   useEffect(() => {
     const fetchRate = async () => {
@@ -6181,7 +6239,6 @@ function RegionAnalysis() {
       Number(row.done_qty || 0) * Number(row.unit_price || 0);
 
     const total80 = rawTotal * 0.8;
-
     const total20 = Number(row.due_qty || 0) * Number(row.unit_price || 0);
 
     const shownTotal = qcReadyType === "80" ? total80 : total20;
@@ -6712,13 +6769,29 @@ function RegionAnalysis() {
                       cursor: "pointer",
                       borderBottom: "none",
                     }}
-                    onClick={() => openQcReadyModal(item.region, "20")}
+                    onClick={() => openQcReadyModal(item.region, "20_fac_ok")}
                   >
-                    <span style={{ color: "#374151", textAlign: "left" }}>
-                      QC OK Fatura Kesilecek 20%
+                    <span style={{ color: "#16a34a", textAlign: "left" }}>
+                      FAC OK Fatura Bekler 20%
                     </span>
-                    <strong style={{ color: "#2563eb", textAlign: "right" }}>
-                      {formatTRY(getQcReady20TotalByRegion(item.region))}
+                    <strong style={{ color: "#16a34a", textAlign: "right" }}>
+                      {formatTRY(getFacOk20TotalByRegion(item.region))}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      ...regionRowStyle,
+                      cursor: "pointer",
+                      borderBottom: "none",
+                    }}
+                    onClick={() => openQcReadyModal(item.region, "20_fac_nok")}
+                  >
+                    <span style={{ color: "#dc2626", textAlign: "left" }}>
+                      FAC NOK Fatura Bekler 20%
+                    </span>
+                    <strong style={{ color: "#dc2626", textAlign: "right" }}>
+                      {formatTRY(getFacNok20TotalByRegion(item.region))}
                     </strong>
                   </div>
                 </div>
@@ -6850,8 +6923,6 @@ function RegionAnalysis() {
                     </tr>
                   ) : (
                     qcReadyModalRows.map((row, i) => {
-                      
-
                       const rawTotal =
                         Number(
                           row.total_done_amount ||
