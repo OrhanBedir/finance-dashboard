@@ -968,6 +968,9 @@ function DailyEntry() {
     kabul_not: "",
   };
 
+  const [showEntryModal, setShowEntryModal] = useState(false);
+  const [siteSearchCode, setSiteSearchCode] = useState("");
+
   const [showQcUpload, setShowQcUpload] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [rows, setRows] = useState([]);
@@ -1259,6 +1262,16 @@ function DailyEntry() {
     }));
   };
 
+  const handleSiteSearchChange = (e) => {
+    const value = e.target.value.trim().toUpperCase();
+    setSiteSearchCode(value);
+
+    setForm((prev) => ({
+      ...prev,
+      site_code: value,
+    }));
+  };
+
   const filteredItemCodes = useMemo(() => {
     const q = itemCodeSearch.toLowerCase().trim();
 
@@ -1287,6 +1300,20 @@ function DailyEntry() {
     return list.slice(0, 30);
   }, [itemOptions, itemDescriptionSearch]);
 
+  const handleOpenEntryModal = () => {
+    if (!siteSearchCode) {
+      alert("Önce Site Code gir");
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      site_code: siteSearchCode,
+    }));
+
+    setShowEntryModal(true);
+  };
+
   const handleEdit = (row) => {
     setEditingId(row.id);
     setMessage("");
@@ -1308,7 +1335,7 @@ function DailyEntry() {
 
     setItemCodeSearch(row.item_code || "");
     setItemDescriptionSearch(row.item_description || "");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setShowEntryModal(true);
   };
 
   const handleCancelEdit = () => {
@@ -1319,6 +1346,7 @@ function DailyEntry() {
     setForm(initialForm);
     setShowItemCodeList(false);
     setShowItemDescriptionList(false);
+    setShowEntryModal(false);
   };
 
   const handleDelete = async (row) => {
@@ -1414,6 +1442,8 @@ function DailyEntry() {
       });
 
       setEditingId(null);
+
+      setShowEntryModal(false);
 
       await Promise.all([
         loadRows(),
@@ -1545,282 +1575,50 @@ function DailyEntry() {
       )}
 
       <div className="entryPanel">
-        <form className="entryForm" onSubmit={handleSave}>
-          <div className="formGrid">
-            <div className="formGroup">
-              <label>Saha Türü</label>
-              <select
-                name="site_type"
-                value={form.site_type}
-                onChange={handleChange}
-              >
-                <option value="5G">5G</option>
-                <option value="DSS">DSS</option>
-                <option value="LTE">LTE</option>
-                <option value="STANDALONE">STANDALONE</option>
-                <option value="Diğer">Diğer</option>
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>Project Code</label>
-              <select
-                name="project_code"
-                value={form.project_code}
-                onChange={handleChange}
-                required
-              >
-                <option value="">Seçiniz</option>
-                <option value="56A0SJC">56A0SJC</option>
-                <option value="56A0QEF">56A0QEF</option>
-                <option value="56A0NCD">56A0NCD</option>
-                <option value="56A0TCT">56A0TCT</option>
-                {projectCodes
-                  .filter(
-                    (p) =>
-                      !["56A0SJC", "56A0QEF", "56A0NCD", "56A0TCT"].includes(
-                        p.project_code,
-                      ),
-                  )
-                  .map((p, i) => (
-                    <option
-                      key={`${p.project_code}-${i}`}
-                      value={p.project_code}
-                    >
-                      {p.project_code}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>Site Code</label>
-              <input
-                name="site_code"
-                value={form.site_code}
-                onChange={handleChange}
-                placeholder="Örn: AT8227_NS_WM"
-                required
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>Done Qty</label>
-              <input
-                type="number"
-                step="0.01"
-                name="done_qty"
-                value={form.done_qty}
-                onChange={handleChange}
-                placeholder="Örn: 2"
-                required
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>Subcon Name</label>
-              <input
-                name="subcon_name"
-                value={form.subcon_name}
-                onChange={handleChange}
-                placeholder="Taşeron adı"
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>OnAir Date</label>
-              <DatePicker
-                selected={parseTRDateToDate(form.onair_date)}
-                onChange={(date) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    onair_date: formatDateToTR(date),
-                  }))
-                }
-                dateFormat="dd.MM.yyyy"
-                placeholderText="GG.AA.YYYY"
-                className="datePickerInput"
-                isClearable
-                showPopperArrow={false}
-              />
-            </div>
-
-            <div
-              className="formGroup"
-              style={{ position: "relative" }}
-              ref={itemCodeBoxRef}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "end",
+            gap: "16px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: "320px" }}>
+            <label
+              style={{
+                display: "block",
+                fontWeight: "700",
+                marginBottom: "8px",
+                color: "#374151",
+              }}
             >
-              <label>Item Code</label>
+              Site Code
+            </label>
 
-              <input
-                type="text"
-                value={itemCodeSearch}
-                onChange={(e) => {
-                  setItemCodeSearch(e.target.value);
-                  setShowItemCodeList(true);
-                }}
-                onFocus={() => setShowItemCodeList(true)}
-                placeholder="Item code filtrele..."
-                disabled={itemOptions.length === 0}
-              />
-
-              {showItemCodeList && filteredItemCodes.length > 0 && (
-                <div className="filterDropdown">
-                  {filteredItemCodes.map((item, idx) => (
-                    <div
-                      key={`${item.item_code}-${idx}`}
-                      className="filterDropdownItem"
-                      onMouseDown={() => handleItemCodePick(item)}
-                    >
-                      {item.item_code}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <select
-                name="item_code"
-                value={form.item_code}
-                onChange={handleChange}
-                required
-                disabled={itemOptions.length === 0}
-                style={{ marginTop: "8px" }}
-              >
-                <option value="">
-                  {itemOptions.length === 0 ? "Kayıt bulunamadı" : "Seçiniz"}
-                </option>
-                {itemOptions.map((item, idx) => (
-                  <option
-                    key={`${item.item_code}-${idx}`}
-                    value={item.item_code}
-                  >
-                    {item.item_code}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div
-              className="formGroup formGroupWide"
-              style={{ position: "relative" }}
-              ref={itemDescriptionBoxRef}
-            >
-              <label className="itemDescLabel">
-                🔎 Item Description (Buradan arayın)
-              </label>
-
-              <input
-                className="itemDescHighlight"
-                type="text"
-                value={itemDescriptionSearch}
-                onChange={(e) => {
-                  setItemDescriptionSearch(e.target.value);
-                  setShowItemDescriptionList(true);
-                }}
-                onFocus={() => setShowItemDescriptionList(true)}
-                placeholder="🔎 Aramak için item description yazın..."
-                disabled={itemOptions.length === 0}
-                autoFocus
-              />
-
-              {showItemDescriptionList &&
-                filteredItemDescriptions.length > 0 && (
-                  <div className="filterDropdown">
-                    {filteredItemDescriptions.map((item, idx) => (
-                      <div
-                        key={`${item.item_code}-${idx}`}
-                        className="filterDropdownItem"
-                        onMouseDown={() => handleItemDescriptionPick(item)}
-                      >
-                        {item.item_description}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-              <select
-                name="item_description"
-                value={form.item_description}
-                onChange={handleDescriptionChange}
-                required
-                disabled={itemOptions.length === 0}
-                style={{ marginTop: "8px" }}
-              >
-                <option value="">
-                  {itemOptions.length === 0 ? "Kayıt bulunamadı" : "Seçiniz"}
-                </option>
-                {itemOptions.map((item, idx) => (
-                  <option
-                    key={`${item.item_code}-${idx}`}
-                    value={item.item_description}
-                  >
-                    {item.item_description}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>QC Durum</label>
-              <select
-                name="qc_durum"
-                value={form.qc_durum}
-                onChange={handleChange}
-              >
-                <option value="OK">OK</option>
-                <option value="NOK">NOK</option>
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>Kabul Durum</label>
-              <select
-                name="kabul_durum"
-                value={form.kabul_durum}
-                onChange={handleChange}
-              >
-                <option value="OK">OK</option>
-                <option value="NOK">NOK</option>
-              </select>
-            </div>
-
-            <div className="formGroup formGroupWide">
-              <label>Kabul Not</label>
-              <textarea
-                name="kabul_not"
-                value={form.kabul_not}
-                onChange={handleChange}
-                placeholder="Kabul ile ilgili not"
-                rows={3}
-              />
-            </div>
-
-            <div className="formGroup formGroupWide">
-              <label>RF Not</label>
-              <textarea
-                name="note"
-                value={form.note}
-                onChange={handleChange}
-                placeholder="RF ile ilgili not giriniz"
-                rows={3}
-              />
-            </div>
+            <input
+              value={siteSearchCode}
+              onChange={handleSiteSearchChange}
+              placeholder="Örn: AT8227_NS_WM"
+              style={{
+                width: "100%",
+                padding: "14px 16px",
+                border: "1px solid #d1d5db",
+                borderRadius: "10px",
+                fontSize: "15px",
+              }}
+            />
           </div>
 
-          <div className="entryActions" style={{ gap: "10px" }}>
-            {editingId && (
-              <button type="button" className="tab" onClick={handleCancelEdit}>
-                Vazgeç
-              </button>
-            )}
-
-            <button type="submit" className="saveButton" disabled={saving}>
-              {saving ? "Kaydediliyor..." : editingId ? "Güncelle" : "Kaydet"}
-            </button>
-          </div>
-
-          {message && <div className="entryMessage">{message}</div>}
-        </form>
+          <button
+            type="button"
+            className="saveButton"
+            onClick={handleOpenEntryModal}
+            disabled={!siteSearchCode}
+          >
+            Veri Gir
+          </button>
+        </div>
       </div>
 
       <div className="tableWrap">
@@ -2466,6 +2264,344 @@ function DailyEntry() {
           </tbody>
         </table>
       </div>
+
+      {showEntryModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={handleCancelEdit}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1100px",
+              maxHeight: "90vh",
+              overflow: "auto",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+                marginBottom: "18px",
+              }}
+            >
+              <h3 style={{ margin: 0 }}>
+                {editingId ? "Kaydı Düzenle" : "Yeni Veri Girişi"}
+              </h3>
+
+              <button type="button" className="tab" onClick={handleCancelEdit}>
+                Kapat
+              </button>
+            </div>
+
+            <form className="entryForm" onSubmit={handleSave}>
+              <div className="formGrid">
+                <div className="formGroup">
+                  <label>Saha Türü</label>
+                  <select
+                    name="site_type"
+                    value={form.site_type}
+                    onChange={handleChange}
+                  >
+                    <option value="5G">5G</option>
+                    <option value="DSS">DSS</option>
+                    <option value="LTE">LTE</option>
+                    <option value="STANDALONE">STANDALONE</option>
+                    <option value="Diğer">Diğer</option>
+                  </select>
+                </div>
+
+                <div className="formGroup">
+                  <label>Project Code</label>
+                  <select
+                    name="project_code"
+                    value={form.project_code}
+                    onChange={handleChange}
+                    required
+                  >
+                    <option value="">Seçiniz</option>
+                    <option value="56A0SJC">56A0SJC</option>
+                    <option value="56A0QEF">56A0QEF</option>
+                    <option value="56A0NCD">56A0NCD</option>
+                    <option value="56A0TCT">56A0TCT</option>
+                    {projectCodes
+                      .filter(
+                        (p) =>
+                          ![
+                            "56A0SJC",
+                            "56A0QEF",
+                            "56A0NCD",
+                            "56A0TCT",
+                          ].includes(p.project_code),
+                      )
+                      .map((p, i) => (
+                        <option
+                          key={`${p.project_code}-${i}`}
+                          value={p.project_code}
+                        >
+                          {p.project_code}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="formGroup">
+                  <label>Site Code</label>
+                  <input
+                    name="site_code"
+                    value={form.site_code}
+                    onChange={handleChange}
+                    placeholder="Örn: AT8227_NS_WM"
+                    required
+                  />
+                </div>
+
+                <div className="formGroup">
+                  <label>Done Qty</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    name="done_qty"
+                    value={form.done_qty}
+                    onChange={handleChange}
+                    placeholder="Örn: 2"
+                    required
+                  />
+                </div>
+
+                <div className="formGroup">
+                  <label>Subcon Name</label>
+                  <input
+                    name="subcon_name"
+                    value={form.subcon_name}
+                    onChange={handleChange}
+                    placeholder="Taşeron adı"
+                  />
+                </div>
+
+                <div className="formGroup">
+                  <label>OnAir Date</label>
+                  <DatePicker
+                    selected={parseTRDateToDate(form.onair_date)}
+                    onChange={(date) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        onair_date: formatDateToTR(date),
+                      }))
+                    }
+                    dateFormat="dd.MM.yyyy"
+                    placeholderText="GG.AA.YYYY"
+                    className="datePickerInput"
+                    isClearable
+                    showPopperArrow={false}
+                  />
+                </div>
+
+                <div
+                  className="formGroup"
+                  style={{ position: "relative" }}
+                  ref={itemCodeBoxRef}
+                >
+                  <label>Item Code</label>
+
+                  <input
+                    type="text"
+                    value={itemCodeSearch}
+                    onChange={(e) => {
+                      setItemCodeSearch(e.target.value);
+                      setShowItemCodeList(true);
+                    }}
+                    onFocus={() => setShowItemCodeList(true)}
+                    placeholder="Item code filtrele..."
+                    disabled={itemOptions.length === 0}
+                  />
+
+                  {showItemCodeList && filteredItemCodes.length > 0 && (
+                    <div className="filterDropdown">
+                      {filteredItemCodes.map((item, idx) => (
+                        <div
+                          key={`${item.item_code}-${idx}`}
+                          className="filterDropdownItem"
+                          onMouseDown={() => handleItemCodePick(item)}
+                        >
+                          {item.item_code}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <select
+                    name="item_code"
+                    value={form.item_code}
+                    onChange={handleChange}
+                    required
+                    disabled={itemOptions.length === 0}
+                    style={{ marginTop: "8px" }}
+                  >
+                    <option value="">
+                      {itemOptions.length === 0
+                        ? "Kayıt bulunamadı"
+                        : "Seçiniz"}
+                    </option>
+                    {itemOptions.map((item, idx) => (
+                      <option
+                        key={`${item.item_code}-${idx}`}
+                        value={item.item_code}
+                      >
+                        {item.item_code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div
+                  className="formGroup formGroupWide"
+                  style={{ position: "relative" }}
+                  ref={itemDescriptionBoxRef}
+                >
+                  <label className="itemDescLabel">
+                    🔎 Item Description (Buradan arayın)
+                  </label>
+
+                  <input
+                    className="itemDescHighlight"
+                    type="text"
+                    value={itemDescriptionSearch}
+                    onChange={(e) => {
+                      setItemDescriptionSearch(e.target.value);
+                      setShowItemDescriptionList(true);
+                    }}
+                    onFocus={() => setShowItemDescriptionList(true)}
+                    placeholder="🔎 Aramak için item description yazın..."
+                    disabled={itemOptions.length === 0}
+                  />
+
+                  {showItemDescriptionList &&
+                    filteredItemDescriptions.length > 0 && (
+                      <div className="filterDropdown">
+                        {filteredItemDescriptions.map((item, idx) => (
+                          <div
+                            key={`${item.item_code}-${idx}`}
+                            className="filterDropdownItem"
+                            onMouseDown={() => handleItemDescriptionPick(item)}
+                          >
+                            {item.item_description}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                  <select
+                    name="item_description"
+                    value={form.item_description}
+                    onChange={handleDescriptionChange}
+                    required
+                    disabled={itemOptions.length === 0}
+                    style={{ marginTop: "8px" }}
+                  >
+                    <option value="">
+                      {itemOptions.length === 0
+                        ? "Kayıt bulunamadı"
+                        : "Seçiniz"}
+                    </option>
+                    {itemOptions.map((item, idx) => (
+                      <option
+                        key={`${item.item_code}-${idx}`}
+                        value={item.item_description}
+                      >
+                        {item.item_description}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="formGroup">
+                  <label>QC Durum</label>
+                  <select
+                    name="qc_durum"
+                    value={form.qc_durum}
+                    onChange={handleChange}
+                  >
+                    <option value="OK">OK</option>
+                    <option value="NOK">NOK</option>
+                  </select>
+                </div>
+
+                <div className="formGroup">
+                  <label>Kabul Durum</label>
+                  <select
+                    name="kabul_durum"
+                    value={form.kabul_durum}
+                    onChange={handleChange}
+                  >
+                    <option value="OK">OK</option>
+                    <option value="NOK">NOK</option>
+                  </select>
+                </div>
+
+                <div className="formGroup formGroupWide">
+                  <label>Kabul Not</label>
+                  <textarea
+                    name="kabul_not"
+                    value={form.kabul_not}
+                    onChange={handleChange}
+                    placeholder="Kabul ile ilgili not"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="formGroup formGroupWide">
+                  <label>RF Not</label>
+                  <textarea
+                    name="note"
+                    value={form.note}
+                    onChange={handleChange}
+                    placeholder="RF ile ilgili not giriniz"
+                    rows={3}
+                  />
+                </div>
+              </div>
+
+              <div className="entryActions" style={{ gap: "10px" }}>
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={handleCancelEdit}
+                >
+                  Kapat
+                </button>
+
+                <button type="submit" className="saveButton" disabled={saving}>
+                  {saving
+                    ? "Kaydediliyor..."
+                    : editingId
+                      ? "Güncelle"
+                      : "Kaydet"}
+                </button>
+              </div>
+
+              {message && <div className="entryMessage">{message}</div>}
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }
