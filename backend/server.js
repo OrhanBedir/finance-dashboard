@@ -3846,7 +3846,7 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       .replace(/[^a-zA-Z0-9_-]/g, "");
   }
 
-  
+
 
   try {
     const region = String(req.query.region || "")
@@ -3962,10 +3962,7 @@ app.get("/export/qc-ready-excel", async (req, res) => {
     const safeRegion = safeFileName(region);
     const safeType = safeFileName(type);
 
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="qc_ready_${safeRegion}_${safeType}.xlsx"`,
-    );
+    res.attachment("qc_ready_export.xlsx");
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
