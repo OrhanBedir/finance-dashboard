@@ -1000,6 +1000,32 @@ function DailyEntry() {
   const [form, setForm] = useState(initialForm);
   const [rows, setRows] = useState([]);
   const [siteEntries, setSiteEntries] = useState([]);
+  const poSummary = poRows.reduce(
+    (acc, row) => {
+      const qty = Number(row.requested_qty || 0);
+      const price = Number(row.unit_price || 0);
+
+      acc.totalQty += qty;
+      acc.totalAmount += qty * price;
+      return acc;
+    },
+    { totalQty: 0, totalAmount: 0 },
+  );
+
+  const entrySummary = siteEntries.reduce(
+    (acc, row) => {
+      const qty = Number(row.done_qty || 0);
+      const price = Number(row.unit_price || 0);
+
+      acc.totalQty += qty;
+      acc.totalAmount += qty * price;
+      return acc;
+    },
+    { totalQty: 0, totalAmount: 0 },
+  );
+
+  const farkQty = poSummary.totalQty - entrySummary.totalQty;
+  const farkTutar = poSummary.totalAmount - entrySummary.totalAmount;
   const [projectCodes, setProjectCodes] = useState([]);
   const [itemOptions, setItemOptions] = useState([]);
   const [poRows, setPoRows] = useState([]);
@@ -1667,6 +1693,10 @@ function DailyEntry() {
 
       <div className="tableWrap">
         <h3 className="listTitle">Bu Saha İçin Açılmış PO Kalemleri</h3>
+        <div style={{ marginBottom: "10px", fontSize: "14px" }}>
+          <strong>Toplam Adet:</strong> {poSummary.totalQty} &nbsp; | &nbsp;
+          <strong>Toplam Tutar:</strong> {formatTRY(poSummary.totalAmount)}
+        </div>
 
         <div
           style={{
@@ -1815,6 +1845,49 @@ function DailyEntry() {
           <h3 className="listTitle" style={{ margin: 0, textAlign: "center" }}>
             Bu Saha İçin Girilmiş İşler
           </h3>
+          <div
+            style={{
+              marginBottom: "10px",
+              fontSize: "14px",
+              padding: "10px 12px",
+              borderRadius: "10px",
+              background:
+                farkQty === 0 && farkTutar === 0
+                  ? "#ecfdf5"
+                  : farkQty > 0 || farkTutar > 0
+                    ? "#fff7ed"
+                    : "#fef2f2",
+              color:
+                farkQty === 0 && farkTutar === 0
+                  ? "#166534"
+                  : farkQty > 0 || farkTutar > 0
+                    ? "#9a3412"
+                    : "#b91c1c",
+              border:
+                farkQty === 0 && farkTutar === 0
+                  ? "1px solid #bbf7d0"
+                  : farkQty > 0 || farkTutar > 0
+                    ? "1px solid #fdba74"
+                    : "1px solid #fecaca",
+            }}
+          >
+            <strong>
+              {farkQty === 0 && farkTutar === 0
+                ? "Tam Uyumlu"
+                : farkQty > 0 || farkTutar > 0
+                  ? "Eksik Giriş Var"
+                  : "Fazla Giriş Var"}
+            </strong>
+            {" — "}
+            <strong>Fark Adet:</strong> {farkQty}
+            {" | "}
+            <strong>Fark Tutar:</strong> {formatTRY(farkTutar)}
+          </div>
+          <div style={{ marginBottom: "10px", fontSize: "14px" }}>
+            <strong>Toplam Adet:</strong> {entrySummary.totalQty} &nbsp; |
+            &nbsp;
+            <strong>Toplam Tutar:</strong> {formatTRY(entrySummary.totalAmount)}
+          </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button
