@@ -3737,39 +3737,59 @@ app.get("/export/site-entry-excel-all", async (req, res) => {
 
     sheet.columns = [
       { header: "Saha Türü", key: "site_type", width: 14 },
+      { header: "Bölge", key: "region", width: 14 },
+      { header: "Status", key: "status", width: 14 },
+      { header: "Analiz", key: "analysis", width: 14 },
       { header: "Project Code", key: "project_code", width: 16 },
-      { header: "Site Code", key: "site_code", width: 22 },
+      { header: "Site Code", key: "site_code", width: 20 },
       { header: "Item Code", key: "item_code", width: 16 },
       { header: "Item Description", key: "item_description", width: 45 },
       { header: "Done Qty", key: "done_qty", width: 12 },
-      { header: "Subcon Name", key: "subcon_name", width: 18 },
-      { header: "OnAir Date", key: "onair_date", width: 14 },
+      { header: "Requested Qty", key: "requested_qty", width: 14 },
+      { header: "Due Qty", key: "due_qty", width: 12 },
+      { header: "Billed Quantity", key: "billed_qty", width: 14 },
       { header: "QC Durum", key: "qc_durum", width: 12 },
-      { header: "Kabul Durum", key: "kabul_durum", width: 14 },
-      { header: "Kabul Not", key: "kabul_not", width: 35 },
+      { header: "OnAir Date", key: "onair_date", width: 14 },
+      { header: "Subcon Name", key: "subcon_name", width: 18 },
       { header: "RF Not", key: "note", width: 35 },
+      { header: "Kabul Not", key: "kabul_not", width: 35 },
     ];
 
     rows.forEach((row) => {
-      sheet.columns = [
-        { header: "Saha Türü", key: "site_type", width: 14 },
-        { header: "Bölge", key: "region", width: 14 },
-        { header: "Status", key: "status", width: 14 },
-        { header: "Analiz", key: "analysis", width: 14 },
-        { header: "Project Code", key: "project_code", width: 16 },
-        { header: "Site Code", key: "site_code", width: 20 },
-        { header: "Item Code", key: "item_code", width: 16 },
-        { header: "Item Description", key: "item_description", width: 45 },
-        { header: "Done Qty", key: "done_qty", width: 12 },
-        { header: "Requested Qty", key: "requested_qty", width: 14 },
-        { header: "Due Qty", key: "due_qty", width: 12 },
-        { header: "Billed Quantity", key: "billed_qty", width: 14 },
-        { header: "QC Durum", key: "qc_durum", width: 12 },
-        { header: "OnAir Date", key: "onair_date", width: 14 },
-        { header: "Subcon Name", key: "subcon_name", width: 18 },
-        { header: "RF Not", key: "note", width: 35 },
-        { header: "Kabul Not", key: "kabul_not", width: 35 },
-      ];
+      const detectedSiteType = detectSiteTypeFromSiteCode(row.site_code || "");
+      const region = getRegion(row.site_code || "", row.project_code || "");
+      const analysis =
+        String(row.status || "").toUpperCase() === "PO_BEKLER"
+          ? "Eksik"
+          : Number(row.done_qty || 0) === 0
+            ? "Giriş Yok"
+            : Number(row.done_qty || 0) === Number(row.requested_qty || 0)
+              ? "Tamam"
+              : Number(row.done_qty || 0) > Number(row.requested_qty || 0)
+                ? "Fazla"
+                : "Eksik";
+
+      sheet.addRow({
+        site_type: detectedSiteType,
+        region,
+        status: row.status || "",
+        analysis,
+        project_code: row.project_code || "",
+        site_code: row.site_code || "",
+        item_code: row.item_code || "",
+        item_description: row.item_description || "",
+        done_qty: row.done_qty ?? "",
+        requested_qty: row.requested_qty ?? "",
+        due_qty: row.due_qty ?? "",
+        billed_qty: row.billed_qty ?? "",
+        qc_durum: row.qc_durum || "",
+        onair_date: row.onair_date
+          ? new Date(row.onair_date).toLocaleDateString("tr-TR")
+          : "",
+        subcon_name: row.subcon_name || "",
+        note: row.note || "",
+        kabul_not: row.kabul_not || "",
+      });
     });
 
     sheet.getRow(1).font = { bold: true };
