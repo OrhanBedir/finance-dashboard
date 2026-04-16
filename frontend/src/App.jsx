@@ -1000,6 +1000,10 @@ function DailyEntry() {
   const [form, setForm] = useState(initialForm);
   const [rows, setRows] = useState([]);
   const [siteEntries, setSiteEntries] = useState([]);
+
+  const [projectCodes, setProjectCodes] = useState([]);
+  const [itemOptions, setItemOptions] = useState([]);
+  const [poRows, setPoRows] = useState([]);
   const poSummary = poRows.reduce(
     (acc, row) => {
       const qty = Number(row.requested_qty || 0);
@@ -1026,9 +1030,6 @@ function DailyEntry() {
 
   const farkQty = poSummary.totalQty - entrySummary.totalQty;
   const farkTutar = poSummary.totalAmount - entrySummary.totalAmount;
-  const [projectCodes, setProjectCodes] = useState([]);
-  const [itemOptions, setItemOptions] = useState([]);
-  const [poRows, setPoRows] = useState([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [showBoqUpload, setShowBoqUpload] = useState(false);
