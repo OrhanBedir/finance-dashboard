@@ -3846,6 +3846,8 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       .replace(/[^a-zA-Z0-9_-]/g, "");
   }
 
+  
+
   try {
     const region = String(req.query.region || "")
       .trim()
