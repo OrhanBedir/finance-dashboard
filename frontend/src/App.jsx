@@ -967,7 +967,6 @@ function useUsdRate() {
 }
 
 function DailyEntry() {
-  
   const usdRate = useUsdRate();
   function getTodayTR() {
     const d = new Date();
@@ -1041,8 +1040,6 @@ function DailyEntry() {
 
     return "TRY";
   };
-
-  
 
   const convertToTRY = (amount, currency) => {
     const num = Number(amount || 0);
@@ -6123,7 +6120,7 @@ function RegionAnalysis() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailRows, setDetailRows] = useState([]);
-  
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -6376,7 +6373,7 @@ function RegionAnalysis() {
       if (!response.ok) {
         const errorText = await response.text();
         console.error("QC READY EXPORT ERROR:", errorText);
-        alert("Excel indirilemedi");
+        alert(`Excel indirilemedi: ${errorText}`);
         return;
       }
 
