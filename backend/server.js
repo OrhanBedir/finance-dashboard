@@ -2798,10 +2798,54 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
       ORDER BY fatura_tarihi DESC NULLS LAST, id DESC
     `);
 
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("AVANS TALEP RAPORU");
+    const query = String(req.query.query || "")
+      .toLowerCase()
+      .trim();
+    const status = String(req.query.status || "ALL").toUpperCase();
 
-    // Sütunlar
+    const filteredRows = (result.rows || []).filter((row) => {
+      const kalan = Number(row.kalan_borc || 0);
+      const toplam = Number(row.toplam_tutar || 0);
+      const odenen = Number(row.odenen_tutar || 0);
+
+      let durum = "BEKLIYOR";
+      if (kalan <= 0 && toplam > 0) durum = "ODENDI";
+      else if (odenen > 0 && kalan > 0) durum = "KISMI";
+
+      const statusOk =
+        status === "ALL"
+          ? true
+          : status === "BEKLIYOR"
+            ? kalan > 0
+            : status === "ODENDI"
+              ? kalan <= 0
+              : true;
+
+      const text = `
+        ${row.id || ""}
+        ${row.bolge || ""}
+        ${row.proje || ""}
+        ${row.proje_kodu || ""}
+        ${row.fatura_no || ""}
+        ${row.tedarikci || ""}
+        ${row.fatura_kalemi || ""}
+        ${row.is_kalemi || ""}
+        ${row.po_no || ""}
+        ${row.site_id || ""}
+        ${row.note || ""}
+        ${durum}
+      `
+        .toLowerCase()
+        .trim();
+
+      const searchOk = query ? text.includes(query) : true;
+
+      return statusOk && searchOk;
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("FATURA TAKIP RAPORU");
+
     worksheet.columns = [
       { header: "Kayıt No", key: "id", width: 10 },
       { header: "Talep Tarihi", key: "fatura_tarihi", width: 20 },
@@ -2812,7 +2856,7 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
       { header: "Fatura Kalemi", key: "fatura_kalemi", width: 24 },
       { header: "İş Kalemi", key: "is_kalemi", width: 22 },
       { header: "PO No", key: "po_no", width: 18 },
-      { header: "Site ID", key: "site_id", width: 16 },
+      { header: "Site ID", key: "site_id", width: 18 },
       { header: "Tutar", key: "tutar", width: 14 },
       { header: "KDV", key: "kdv", width: 14 },
       { header: "Toplam Tutar", key: "toplam_tutar", width: 16 },
@@ -2824,8 +2868,8 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
       { header: "Kayıt Zamanı", key: "created_at", width: 22 },
     ];
 
-    // Başlık satırı
     const lastColumnLetter = "S";
+
     worksheet.mergeCells(`A1:${lastColumnLetter}1`);
     const titleCell = worksheet.getCell("A1");
     titleCell.value = `FATURA TAKİP RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
@@ -2842,7 +2886,6 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
     };
     worksheet.getRow(1).height = 28;
 
-    // Header satırı
     const headerRow = worksheet.getRow(2);
     worksheet.columns.forEach((col, index) => {
       const cell = headerRow.getCell(index + 1);
@@ -2869,8 +2912,7 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
     });
     headerRow.height = 24;
 
-    // Veri satırları
-    result.rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       const toplam = Number(row.toplam_tutar || 0);
       const odenen = Number(row.odenen_tutar || 0);
       const kalan = Number(row.kalan_borc || 0);
@@ -2902,13 +2944,11 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
       });
     });
 
-    // Filtre
     worksheet.autoFilter = {
       from: "A2",
       to: `${lastColumnLetter}2`,
     };
 
-    // Freeze
     worksheet.views = [
       {
         state: "frozen",
@@ -2918,12 +2958,10 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
       },
     ];
 
-    // Genel stil
     worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber < 3) return; // header skip
+      if (rowNumber < 3) return;
 
       row.eachCell((cell) => {
-        // BORDER
         cell.border = {
           top: { style: "thin", color: { argb: "E5E7EB" } },
           left: { style: "thin", color: { argb: "E5E7EB" } },
@@ -2931,51 +2969,54 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
           right: { style: "thin", color: { argb: "E5E7EB" } },
         };
 
-        // ALIGNMENT
         cell.alignment = {
           vertical: "middle",
           horizontal: "left",
+          wrapText: true,
         };
 
-        // 🎨 ZEBRA BACKGROUND (BURASI OLAY)
         cell.fill = {
           type: "pattern",
           pattern: "solid",
           fgColor: {
-            argb: rowNumber % 2 === 0 ? "F3F4F6" : "FFFFFF", // gri / beyaz
+            argb: rowNumber % 2 === 0 ? "F3F4F6" : "FFFFFF",
           },
         };
       });
 
-      // 🔥 STATUS RENKLERİ (senin ekrandaki gibi)
       const statusCell = row.getCell(16);
-      const status = String(statusCell.value || "").toUpperCase();
+      const statusValue = String(statusCell.value || "").toUpperCase();
 
-      if (status === "ÖDENDİ") {
-        statusCell.font = { bold: true, color: { argb: "C55A11" } }; // turuncu
-      } else if (status === "REDDEDİLDİ") {
-        statusCell.font = { bold: true, color: { argb: "C00000" } }; // kırmızı
-      } else if (status === "KISMİ") {
+      if (statusValue === "ÖDENDİ") {
+        statusCell.font = { bold: true, color: { argb: "C55A11" } };
+      } else if (statusValue === "KISMİ") {
         statusCell.font = { bold: true, color: { argb: "9E480E" } };
+      } else {
+        statusCell.font = { bold: true, color: { argb: "C00000" } };
       }
     });
 
-    // Para kolonları format
     [11, 12, 13, 14, 15].forEach((colIndex) => {
       worksheet.getColumn(colIndex).numFmt = "#,##0";
     });
 
-    // Tarih kolonları
-    [2, 19].forEach((colIndex) => {
-      worksheet.getColumn(colIndex).numFmt = "dd.mm.yyyy hh:mm:ss";
-    });
+    worksheet.getColumn(2).numFmt = "dd.mm.yyyy";
+    worksheet.getColumn(19).numFmt = "dd.mm.yyyy hh:mm:ss";
 
-    // Satır yükseklikleri
     for (let i = 3; i <= worksheet.rowCount; i++) {
       worksheet.getRow(i).height = 20;
     }
 
-    const fileName = `invoice_database_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const safeQuery = query
+      ? query
+          .replace(/[^\wğüşöçıİĞÜŞÖÇ-]/gi, "_")
+          .replace(/_+/g, "_")
+          .replace(/^_+|_+$/g, "")
+      : "";
+
+    const fileName = safeQuery
+      ? `invoice_database_${safeQuery}_${new Date().toISOString().slice(0, 10)}.xlsx`
+      : `invoice_database_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
     res.setHeader(
       "Content-Type",
