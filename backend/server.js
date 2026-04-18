@@ -72,12 +72,22 @@ app.post("/auth/login", async (req, res) => {
       });
     }
 
+    const financeAllowedUsers = String(process.env.FINANCE_ALLOWED_USERS || "")
+      .split(",")
+      .map((x) => x.trim().toLowerCase())
+      .filter(Boolean);
+
+    const scope = financeAllowedUsers.includes(String(user.email).toLowerCase())
+      ? "finance"
+      : "app";
+
     const token = jwt.sign(
       {
         user_id: user.id,
         email: user.email,
         role: user.role,
         name: user.name,
+        scope,
       },
       process.env.JWT_SECRET || "simsek_secret_degistir",
       { expiresIn: "7d" },
