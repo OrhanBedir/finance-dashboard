@@ -8,7 +8,12 @@ console.log("DB ENV:", {
 });
 const express = require("express");
 const cors = require("cors");
-const pool = require("./db");
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false,
+  },
+});
 const multer = require("multer");
 const XLSX = require("xlsx");
 const ExcelJS = require("exceljs");
