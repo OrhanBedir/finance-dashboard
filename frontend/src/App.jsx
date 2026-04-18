@@ -3019,6 +3019,14 @@ function FinanceDashboard({
     };
   }, [selectedSubcontractor, subconDetailRows, usdTryRate]);
 
+  const selectedSubcontractorSummary = useMemo(() => {
+    if (!selectedSubcontractor) return null;
+
+    return recalculatedSubconSummaryRows.find(
+      (row) => row.subcon_name === selectedSubcontractor,
+    );
+  }, [selectedSubcontractor, recalculatedSubconSummaryRows]);
+
   const totalRow = useMemo(
     () =>
       filteredSubconSummaryRows.reduce(
@@ -5960,6 +5968,25 @@ function FinanceDashboard({
                     <div style={{ fontSize: "12px" }}>
                       {subcontractorPeriodStats.monthJobCount || 0} kayıt
                     </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#1f2937",
+                      color: "#fff",
+                      padding: "10px 14px",
+                      borderRadius: "10px",
+                      minWidth: "150px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px" }}>Toplam</div>
+                    <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                      {formatMoneyByCurrency(
+                        selectedSubcontractorSummary?.total_hakedis || 0,
+                        "TRY",
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px" }}>genel toplam</div>
                   </div>
                 </div>
               )}
