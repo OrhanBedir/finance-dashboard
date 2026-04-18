@@ -7757,6 +7757,95 @@ function App() {
     setPage("finance");
   };
 
+  if (!currentUser) {
+    return (
+      <div
+        style={{
+          height: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          background: "#f5f7fa",
+        }}
+      >
+        <div
+          style={{
+            width: "380px",
+            padding: "40px",
+            borderRadius: "16px",
+            background: "#fff",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
+          }}
+        >
+          <h2 style={{ textAlign: "center", marginBottom: "10px" }}>
+            Şimşek Haberleşme
+          </h2>
+
+          <p
+            style={{ textAlign: "center", marginBottom: "30px", color: "#666" }}
+          >
+            Sisteme giriş yapınız
+          </p>
+
+          <form onSubmit={handleLogin}>
+            <input
+              type="text"
+              placeholder="Kullanıcı adı"
+              value={loginForm.username}
+              onChange={(e) =>
+                setLoginForm({ ...loginForm, username: e.target.value })
+              }
+              style={{
+                width: "100%",
+                padding: "10px",
+                marginBottom: "15px",
+                borderRadius: "8px",
+                border: "1px solid #ddd",
+              }}
+            />
+
+            <input
+              type="password"
+              placeholder="Şifre"
+              value={loginForm.password}
+              onChange={(e) =>
+                setLoginForm({ ...loginForm, password: e.target.value })
+              }
+              style={{
+                width: "100%",
+                padding: "10px",
+                marginBottom: "15px",
+                borderRadius: "8px",
+                border: "1px solid #ddd",
+              }}
+            />
+
+            {loginError && (
+              <div style={{ color: "red", marginBottom: "10px" }}>
+                {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                padding: "12px",
+                background: "#d32f2f",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                fontWeight: "bold",
+              }}
+            >
+              Giriş Yap
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container">
       <div className="navTabs">
@@ -7862,8 +7951,74 @@ function App() {
       {page === "region" && <RegionAnalysis />}
       {page === "entry" && <DailyEntry />}
     </div>
+
+    
+
+
+
   );
 }
+
+const [currentUser, setCurrentUser] = useState(null);
+const [loginForm, setLoginForm] = useState({
+  username: "",
+  password: "",
+});
+const [loginError, setLoginError] = useState("");
+
+const USERS = [
+  {
+    username: "orhan",
+    password: "12345",
+    role: "genel_mudur",
+    name: "Orhan Bedir",
+  },
+  {
+    username: "muhasebe",
+    password: "12345",
+    role: "muhasebe",
+    name: "Muhasebe",
+  },
+  {
+    username: "rollout",
+    password: "12345",
+    role: "rollout_muduru",
+    name: "Rollout Müdürü",
+  },
+  {
+    username: "subcon1",
+    password: "12345",
+    role: "taseron",
+    name: "Taşeron 1",
+  },
+];
+
+const handleLogin = (e) => {
+  e.preventDefault();
+
+  const user = USERS.find(
+    (u) =>
+      u.username === loginForm.username.trim() &&
+      u.password === loginForm.password,
+  );
+
+  if (!user) {
+    setLoginError("Kullanıcı adı veya şifre hatalı.");
+    return;
+  }
+
+  setLoginError("");
+  setCurrentUser(user);
+};
+
+const handleLogout = () => {
+  setCurrentUser(null);
+  setLoginForm({
+    username: "",
+    password: "",
+  });
+  setLoginError("");
+};
 
 function QCUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
