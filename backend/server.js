@@ -12,10 +12,13 @@ const pool = require("./db");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const ExcelJS = require("exceljs");
-const jwt = require("jsonwebtoken");
+
 const path = require("path");
 const fs = require("fs");
 const app = express();
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
 
 /* ================== MIDDLEWARE ================== */
 app.use(
@@ -27,6 +30,82 @@ app.use(
 );
 
 app.use(express.json());
+
+app.post("/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        ok: false,
+        error: "E-posta ve şifre zorunlu",
+      });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT id, name, email, password_hash, role, is_active
+      FROM users
+      WHERE email = $1
+      LIMIT 1
+      `,
+      [String(email).trim().toLowerCase()],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({
+        ok: false,
+        error: "Kullanıcı bulunamadı",
+      });
+    }
+
+    const user = result.rows[0];
+
+    if (!user.is_active) {
+      return res.status(403).json({
+        ok: false,
+        error: "Kullanıcı pasif durumda",
+      });
+    }
+
+    const passwordOk = await bcrypt.compare(password, user.password_hash);
+
+    if (!passwordOk) {
+      return res.status(401).json({
+        ok: false,
+        error: "Şifre hatalı",
+      });
+    }
+
+    const token = jwt.sign(
+      {
+        user_id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+      },
+      process.env.JWT_SECRET || "simsek_secret_degistir",
+      { expiresIn: "7d" },
+    );
+
+    return res.json({
+      ok: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    console.error("AUTH LOGIN ERROR:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "Giriş sırasında hata oluştu",
+    });
+  }
+});
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });

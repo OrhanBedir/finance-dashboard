@@ -1,3 +1,4 @@
+require("dotenv").config();
 const { Pool } = require("pg");
 
 console.log("DB MODE:", process.env.DATABASE_URL ? "DATABASE_URL" : "LOCAL_DB");

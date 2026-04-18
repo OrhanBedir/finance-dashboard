@@ -7615,6 +7615,10 @@ function App() {
 
     border: "1px solid #ddd",
   };
+  
+
+
+
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
@@ -7727,7 +7731,7 @@ function App() {
       setFinanceLoginLoading(true);
       setFinanceLoginError("");
 
-      const response = await fetch(`${API_BASE}/finance-auth/login`, {
+      const response = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
