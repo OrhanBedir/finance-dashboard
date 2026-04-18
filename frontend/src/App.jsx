@@ -5839,27 +5839,22 @@ function FinanceDashboard({
               {/* 1. SATIR */}
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto auto",
+                  alignItems: "center",
                   gap: "16px",
-                  flexWrap: "wrap",
-                  marginBottom: "12px",
+                  marginBottom: "14px",
                 }}
               >
                 {/* SOL */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <h3 className="listTitle" style={{ margin: 0 }}>
-                    Taşeron Bazlı İş Tamamlama & Faturalama Özeti
-                  </h3>
+                <h3 className="listTitle" style={{ margin: 0 }}>
+                  Taşeron Bazlı İş Tamamlama & Faturalama Özeti
+                </h3>
 
+                {/* ORTA */}
+                <div
+                  style={{ display: "flex", gap: "12px", alignItems: "center" }}
+                >
                   <div
                     style={{
                       fontSize: "12px",
@@ -5869,6 +5864,7 @@ function FinanceDashboard({
                       border: "1px solid #67e8f9",
                       padding: "6px 10px",
                       borderRadius: "8px",
+                      whiteSpace: "nowrap",
                     }}
                   >
                     USD/TRY: {usdTryRate ? usdTryRate.toFixed(4) : "-"}
@@ -5892,60 +5888,11 @@ function FinanceDashboard({
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
                     gap: "10px",
-                    flexWrap: "wrap",
                     justifyContent: "flex-end",
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  {selectedSubcontractor && subcontractorPeriodStats && (
-                    <>
-                      <div
-                        style={{
-                          background: "#16a34a",
-                          color: "#fff",
-                          padding: "10px 14px",
-                          borderRadius: "10px",
-                          textAlign: "center",
-                          minWidth: "150px",
-                        }}
-                      >
-                        <div style={{ fontSize: "12px" }}>Bu Hafta</div>
-                        <div style={{ fontSize: "16px", fontWeight: 700 }}>
-                          {formatMoneyByCurrency(
-                            subcontractorPeriodStats.weekDoneQty || 0,
-                            "TRY",
-                          )}
-                        </div>
-                        <div style={{ fontSize: "12px", opacity: 0.9 }}>
-                          {subcontractorPeriodStats.weekJobCount || 0} kayıt
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          background: "#f97316",
-                          color: "#fff",
-                          padding: "10px 14px",
-                          borderRadius: "10px",
-                          textAlign: "center",
-                          minWidth: "150px",
-                        }}
-                      >
-                        <div style={{ fontSize: "12px" }}>Bu Ay</div>
-                        <div style={{ fontSize: "16px", fontWeight: 700 }}>
-                          {formatMoneyByCurrency(
-                            subcontractorPeriodStats.monthDoneQty || 0,
-                            "TRY",
-                          )}
-                        </div>
-                        <div style={{ fontSize: "12px", opacity: 0.9 }}>
-                          {subcontractorPeriodStats.monthJobCount || 0} kayıt
-                        </div>
-                      </div>
-                    </>
-                  )}
-
                   <button
                     type="button"
                     className="tab"
@@ -5964,7 +5911,58 @@ function FinanceDashboard({
                 </div>
               </div>
 
-              {/* 2. SATIR */}
+              {/* 2. SATIR (KARTLAR) */}
+              {selectedSubcontractor && subcontractorPeriodStats && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "#16a34a",
+                      color: "#fff",
+                      padding: "10px 14px",
+                      borderRadius: "10px",
+                      minWidth: "150px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px" }}>Bu Hafta</div>
+                    <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                      {formatMoneyByCurrency(
+                        subcontractorPeriodStats.weekDoneQty || 0,
+                        "TRY",
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px" }}>
+                      {subcontractorPeriodStats.weekJobCount || 0} kayıt
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#f97316",
+                      color: "#fff",
+                      padding: "10px 14px",
+                      borderRadius: "10px",
+                      minWidth: "150px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px" }}>Bu Ay</div>
+                    <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                      {formatMoneyByCurrency(
+                        subcontractorPeriodStats.monthDoneQty || 0,
+                        "TRY",
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px" }}>
+                      {subcontractorPeriodStats.monthJobCount || 0} kayıt
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div
