@@ -7757,7 +7757,7 @@ function App() {
     setPage("finance");
   };
 
-  if (!currentUser) {
+  if (!financeToken) {
     return (
       <div
         style={{
@@ -7769,35 +7769,87 @@ function App() {
         }}
       >
         <form
-          onSubmit={handleLogin}
+          onSubmit={handleFinanceLogin}
           style={{
             background: "#fff",
             padding: "40px",
             borderRadius: "16px",
-            width: "350px",
+            width: "380px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.10)",
           }}
         >
-          <h2>Şimşek Haberleşme</h2>
+          <h2 style={{ textAlign: "center", marginBottom: "10px" }}>
+            Şimşek Haberleşme
+          </h2>
+
+          <p
+            style={{
+              textAlign: "center",
+              marginBottom: "24px",
+              color: "#6b7280",
+            }}
+          >
+            Hoş geldiniz
+          </p>
 
           <input
-            type="text"
-            placeholder="Kullanıcı adı"
-            value={loginForm.username}
-            onChange={(e) =>
-              setLoginForm({ ...loginForm, username: e.target.value })
-            }
+            type="email"
+            placeholder="E-posta"
+            value={financeLoginEmail}
+            onChange={(e) => setFinanceLoginEmail(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "12px",
+              marginBottom: "12px",
+              borderRadius: "8px",
+              border: "1px solid #ddd",
+              boxSizing: "border-box",
+            }}
           />
 
           <input
             type="password"
             placeholder="Şifre"
-            value={loginForm.password}
-            onChange={(e) =>
-              setLoginForm({ ...loginForm, password: e.target.value })
-            }
+            value={financeLoginPassword}
+            onChange={(e) => setFinanceLoginPassword(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "12px",
+              marginBottom: "12px",
+              borderRadius: "8px",
+              border: "1px solid #ddd",
+              boxSizing: "border-box",
+            }}
           />
 
-          <button type="submit">Giriş Yap</button>
+          {financeLoginError && (
+            <div
+              style={{
+                color: "#b91c1c",
+                marginBottom: "12px",
+                textAlign: "center",
+                fontWeight: 600,
+              }}
+            >
+              {financeLoginError}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            style={{
+              width: "100%",
+              padding: "12px",
+              background: "#d32f2f",
+              color: "#fff",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            {financeLoginLoading ? "Giriş yapılıyor..." : "Giriş Yap"}
+          </button>
         </form>
       </div>
     );
