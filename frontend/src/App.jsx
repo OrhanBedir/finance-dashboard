@@ -7790,7 +7790,7 @@ function App() {
 
           {/* SAĞ */}
           <div style={{ color: "#666", fontSize: "14px" }}>
-            Finance Dashboard
+            Rollout Dashboard
           </div>
         </div>
 
@@ -7814,17 +7814,17 @@ function App() {
             }}
           >
             <h2 style={{ textAlign: "center", marginBottom: "10px" }}>
-              Giriş Yap
+              Hoş Geldiniz
             </h2>
 
             <p
               style={{
                 textAlign: "center",
-                marginBottom: "25px",
-                color: "#888",
+                marginBottom: "24px",
+                color: "#6b7280",
               }}
             >
-              Hoş geldiniz
+              Hesabınızla giriş yapın
             </p>
 
             <input
