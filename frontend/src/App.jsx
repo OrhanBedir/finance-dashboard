@@ -3693,36 +3693,39 @@ function FinanceDashboard({
     }
   };
 
-  const handleExportInvoiceDatabase = async () => {
-    try {
-      const response = await fetch(
-        `${API_BASE}/finance/invoice-entry/export-excel`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("finance_token") || ""}`,
-          },
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error("Excel indirilemedi");
-      }
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `invoice_database_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("INVOICE EXPORT ERROR:", err);
-      alert("Fatura database indirilemedi");
+  const handleExportFilteredInvoiceExcel = () => {
+    if (!filteredManualInvoiceRows.length) {
+      alert("İndirilecek kayıt bulunamadı");
+      return;
     }
+
+    const excelRows = filteredManualInvoiceRows.map((row) => ({
+      Bölge: row.bolge || "",
+      Proje: row.proje || "",
+      ProjeKodu: row.proje_kodu || "",
+      FaturaNo: row.fatura_no || "",
+      FaturaTarihi: row.fatura_tarihi || "",
+      Tedarikçi: row.tedarikci || "",
+      PONo: row.po_no || "",
+      SiteID: row.site_id || "",
+      Toplam: Number(row.toplam_tutar || 0),
+      Ödenen: Number(row.odenen_tutar || 0),
+      Kalan: Number(row.kalan_borc || 0),
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(excelRows);
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Faturalar");
+
+    const safeName = manualInvoiceSearch
+      ? manualInvoiceSearch.replace(/\s+/g, "_")
+      : "tum_kayitlar";
+
+    XLSX.writeFile(
+      workbook,
+      `fatura_listesi_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
   };
 
   const handleExportSalaryExcel = async () => {
@@ -4518,7 +4521,7 @@ function FinanceDashboard({
               <button
                 type="button"
                 className="tab"
-                onClick={handleExportInvoiceDatabase}
+                onClick={handleExportFilteredInvoiceExcel}
               >
                 Excel İndir
               </button>
