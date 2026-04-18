@@ -5,7 +5,7 @@ async function createUser() {
   try {
     const name = "Orhan Bedir";
     const email = "orhan@simsektel.com";
-    const plainPassword = "Simsek@2026";
+    const plainPassword = "simsek2026";
     const role = "genel_mudur";
 
     const passwordHash = await bcrypt.hash(plainPassword, 10);
