@@ -3558,6 +3558,8 @@ function FinanceDashboard({
       note: row.note || "",
     });
 
+    setShowUpload(false);
+    setShowInvoiceUpload(false);
     setShowInvoiceEntryModal(true);
     setShowInvoiceFormPanel(true);
   };
@@ -3648,6 +3650,7 @@ function FinanceDashboard({
         note: "",
       });
       setEditingInvoiceId(null);
+      setShowInvoiceFormPanel(false);
 
       await loadFinance();
     } catch (err) {
@@ -3989,16 +3992,34 @@ function FinanceDashboard({
         <button
           type="button"
           className={
-            showInvoiceEntryModal || showInvoiceFormPanel
-              ? "tab activeTab smallTab"
-              : "tab smallTab"
+            showInvoiceEntryModal ? "tab activeTab smallTab" : "tab smallTab"
           }
           onClick={() => {
             setShowInvoiceEntryModal(true);
-
-            // diğerlerini kapat
             setShowInvoiceFormPanel(false);
             setShowInvoiceUpload(false);
+            setShowUpload(false);
+            setEditingInvoiceId(null);
+
+            setInvoiceForm({
+              bolge: "",
+              proje: "",
+              proje_kodu: "",
+              fatura_no: "",
+              fatura_tarihi: "",
+              tedarikci: "",
+              rf_montaj_firma: "",
+              fatura_kalemi: "",
+              is_kalemi: "",
+              po_no: "",
+              site_id: "",
+              tutar: "",
+              kdv: "",
+              toplam_tutar: "",
+              odenen_tutar: "",
+              kalan_borc: "",
+              note: "",
+            });
           }}
         >
           Fatura Girişi
@@ -4410,13 +4431,17 @@ function FinanceDashboard({
             zIndex: 9999,
             padding: "20px",
           }}
-          onClick={() => setShowInvoiceEntryModal(false)}
+          onClick={() => {
+            setShowInvoiceEntryModal(false);
+            setShowInvoiceFormPanel(false);
+            setEditingInvoiceId(null);
+          }}
         >
           <div
             style={{
               background: "#fff",
               width: "100%",
-              maxWidth: "1200px",
+              maxWidth: "1280px",
               height: "90vh",
               borderRadius: "24px",
               padding: 0,
@@ -4433,242 +4458,484 @@ function FinanceDashboard({
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                padding: "24px",
+                padding: "20px 24px",
                 borderBottom: "1px solid #e5e7eb",
                 background: "#fff",
                 flexShrink: 0,
               }}
             >
               <h3 className="listTitle" style={{ margin: 0 }}>
-                {editingInvoiceId ? "🧾 Fatura Düzenle" : "🧾 Fatura Girişi"}
+                🧾 Fatura Girişi
               </h3>
 
               <button
                 type="button"
                 className="tab"
-                onClick={() => setShowInvoiceEntryModal(false)}
+                onClick={() => {
+                  setShowInvoiceEntryModal(false);
+                  setShowInvoiceFormPanel(false);
+                  setEditingInvoiceId(null);
+                }}
               >
                 Kapat
               </button>
             </div>
 
-            {/* BODY */}
+            {/* TOOLBAR */}
+            <div
+              style={{
+                padding: "16px 24px",
+                borderBottom: "1px solid #e5e7eb",
+                display: "flex",
+                gap: "12px",
+                flexWrap: "wrap",
+                alignItems: "center",
+                background: "#f8fafc",
+                flexShrink: 0,
+              }}
+            >
+              <input
+                type="text"
+                value={manualInvoiceSearch}
+                onChange={(e) => setManualInvoiceSearch(e.target.value)}
+                placeholder="Tedarikçi / fatura no / proje / site / PO ara"
+                style={{
+                  flex: "1 1 360px",
+                  minWidth: "280px",
+                }}
+              />
+
+              <select
+                value={manualInvoiceStatusFilter}
+                onChange={(e) => setManualInvoiceStatusFilter(e.target.value)}
+                style={{ minWidth: "180px" }}
+              >
+                <option value="ALL">Tüm Durumlar</option>
+                <option value="BEKLIYOR">Bekleyenler</option>
+                <option value="ODENDI">Ödenenler</option>
+              </select>
+
+              <button
+                type="button"
+                className="tab"
+                onClick={handleExportInvoiceDatabase}
+              >
+                Excel İndir
+              </button>
+
+              <button
+                type="button"
+                className="saveButton"
+                onClick={() => {
+                  setEditingInvoiceId(null);
+                  setInvoiceForm({
+                    bolge: "",
+                    proje: "",
+                    proje_kodu: "",
+                    fatura_no: "",
+                    fatura_tarihi: "",
+                    tedarikci: "",
+                    rf_montaj_firma: "",
+                    fatura_kalemi: "",
+                    is_kalemi: "",
+                    po_no: "",
+                    site_id: "",
+                    tutar: "",
+                    kdv: "",
+                    toplam_tutar: "",
+                    odenen_tutar: "",
+                    kalan_borc: "",
+                    note: "",
+                  });
+                  setShowInvoiceFormPanel(true);
+                }}
+              >
+                Yeni Fatura Gir
+              </button>
+            </div>
+
+            {/* SUMMARY */}
+            <div
+              style={{
+                padding: "16px 24px",
+                display: "flex",
+                gap: "12px",
+                flexWrap: "wrap",
+                borderBottom: "1px solid #e5e7eb",
+                flexShrink: 0,
+              }}
+            >
+              <div className="card ok statCard" style={{ minWidth: "220px" }}>
+                <div className="statLabel">Toplam Tutar</div>
+                <div className="statValue">
+                  {formatMoneyByCurrency(
+                    manualInvoiceSummary.totalAmount || 0,
+                    "TRY",
+                  )}
+                </div>
+              </div>
+
+              <div
+                className="card bekler statCard"
+                style={{ minWidth: "220px" }}
+              >
+                <div className="statLabel">Toplam Ödenen</div>
+                <div className="statValue">
+                  {formatMoneyByCurrency(
+                    manualInvoiceSummary.totalPaid || 0,
+                    "TRY",
+                  )}
+                </div>
+              </div>
+
+              <div
+                className="card cancel statCard"
+                style={{ minWidth: "220px" }}
+              >
+                <div className="statLabel">Kalan Borç</div>
+                <div className="statValue">
+                  {formatMoneyByCurrency(
+                    manualInvoiceSummary.totalRemaining || 0,
+                    "TRY",
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* TABLE */}
             <div
               style={{
                 flex: 1,
                 minHeight: 0,
-                overflowY: "auto",
-                padding: "24px",
-                WebkitOverflowScrolling: "touch",
+                overflow: "auto",
+                padding: "16px 24px 24px 24px",
               }}
             >
-              <form onSubmit={handleSaveManualInvoice}>
-                <div className="formGrid">
-                  <div className="formGroup">
-                    <label>Bölge</label>
-                    <input
-                      name="bolge"
-                      value={invoiceForm.bolge}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="Antalya / İzmir / Ankara"
-                    />
-                  </div>
+              <div className="tableWrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Bölge</th>
+                      <th>Proje</th>
+                      <th>Proje Kodu</th>
+                      <th>Fatura No</th>
+                      <th>Fatura Tarihi</th>
+                      <th>Tedarikçi</th>
+                      <th>PO No</th>
+                      <th>Site ID</th>
+                      <th>Toplam</th>
+                      <th>Ödenen</th>
+                      <th>Kalan</th>
+                      <th>İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredManualInvoiceRows.length === 0 ? (
+                      <EmptyRow colSpan={12} text="Kayıt bulunamadı" />
+                    ) : (
+                      filteredManualInvoiceRows.map((row, index) => (
+                        <tr key={row.id ?? index}>
+                          <td>{row.bolge || "-"}</td>
+                          <td>{row.proje || "-"}</td>
+                          <td>{row.proje_kodu || "-"}</td>
+                          <td>{row.fatura_no || "-"}</td>
+                          <td>{formatDateOnly(row.fatura_tarihi)}</td>
+                          <td>{row.tedarikci || "-"}</td>
+                          <td>{row.po_no || "-"}</td>
+                          <td>{row.site_id || "-"}</td>
+                          <td>{formatTRY(row.toplam_tutar || 0)}</td>
+                          <td>{formatTRY(row.odenen_tutar || 0)}</td>
+                          <td>{formatTRY(row.kalan_borc || 0)}</td>
+                          <td>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                type="button"
+                                className="tab"
+                                onClick={() => {
+                                  handleEditManualInvoice(row);
+                                  setShowInvoiceFormPanel(true);
+                                }}
+                              >
+                                Düzenle
+                              </button>
 
-                  <div className="formGroup">
-                    <label>Proje</label>
-                    <input
-                      name="proje"
-                      value={invoiceForm.proje}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="TT / TC"
-                    />
-                  </div>
+                              <button
+                                type="button"
+                                className="tab danger"
+                                onClick={() => handleDeleteManualInvoice(row)}
+                              >
+                                Sil
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-                  <div className="formGroup">
-                    <label>Proje Kodu</label>
-                    <input
-                      name="proje_kodu"
-                      value={invoiceForm.proje_kodu}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="56A0QEF"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>Fatura No</label>
-                    <input
-                      name="fatura_no"
-                      value={invoiceForm.fatura_no}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="Fatura no"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>Fatura Tarihi</label>
-                    <input
-                      type="date"
-                      name="fatura_tarihi"
-                      value={invoiceForm.fatura_tarihi}
-                      onChange={handleInvoiceFormChange}
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>Tedarikçi</label>
-                    <input
-                      name="tedarikci"
-                      value={invoiceForm.tedarikci}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="Firma / Tedarikçi"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>Fatura Kalemi</label>
-                    <input
-                      name="fatura_kalemi"
-                      value={invoiceForm.fatura_kalemi}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="Örn: Oda/Room (Konaklama)"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>İş Kalemi</label>
-                    <input
-                      name="is_kalemi"
-                      value={invoiceForm.is_kalemi}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="Örn: KONAKLAMA / PROJE"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>PO No</label>
-                    <input
-                      name="po_no"
-                      value={invoiceForm.po_no}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="PO numarası"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>Site ID</label>
-                    <input
-                      name="site_id"
-                      value={invoiceForm.site_id}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="BU8944"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>Tutar (₺)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      name="tutar"
-                      value={invoiceForm.tutar}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="0"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>KDV (₺)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      name="kdv"
-                      value={invoiceForm.kdv}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="0"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>Toplam Tutar (₺)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      name="toplam_tutar"
-                      value={invoiceForm.toplam_tutar}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="0"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>Ödenen Tutar (₺)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      name="odenen_tutar"
-                      value={invoiceForm.odenen_tutar}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="0"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>Kalan Borç (₺)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      name="kalan_borc"
-                      value={invoiceForm.kalan_borc}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="0"
-                    />
-                  </div>
-
-                  <div className="formGroup">
-                    <label>RF Montaj Firma</label>
-                    <input
-                      name="rf_montaj_firma"
-                      value={invoiceForm.rf_montaj_firma}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="Subcon Name ile aynı firma adı"
-                    />
-                  </div>
-
-                  <div className="formGroup formGroupWide">
-                    <label>Not</label>
-                    <textarea
-                      name="note"
-                      value={invoiceForm.note}
-                      onChange={handleInvoiceFormChange}
-                      placeholder="Not"
-                      rows={3}
-                    />
-                  </div>
-                </div>
-
+            {/* FORM PANEL */}
+            {showInvoiceFormPanel && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(255,255,255,0.96)",
+                  zIndex: 20,
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
                 <div
-                  className="entryActions"
                   style={{
-                    justifyContent: "flex-end",
                     display: "flex",
-                    gap: "10px",
-                    marginTop: "16px",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "20px 24px",
+                    borderBottom: "1px solid #e5e7eb",
+                    flexShrink: 0,
                   }}
                 >
+                  <h3 className="listTitle" style={{ margin: 0 }}>
+                    {editingInvoiceId
+                      ? "🧾 Fatura Düzenle"
+                      : "🧾 Yeni Fatura Girişi"}
+                  </h3>
+
                   <button
                     type="button"
                     className="tab"
-                    onClick={() => setShowInvoiceEntryModal(false)}
+                    onClick={() => {
+                      setShowInvoiceFormPanel(false);
+                      setEditingInvoiceId(null);
+                    }}
                   >
-                    Kapat
-                  </button>
-
-                  <button type="submit" className="saveButton">
-                    {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
+                    Geri Dön
                   </button>
                 </div>
-              </form>
-            </div>
+
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflowY: "auto",
+                    padding: "24px",
+                  }}
+                >
+                  <form onSubmit={handleSaveManualInvoice}>
+                    <div className="formGrid">
+                      <div className="formGroup">
+                        <label>Bölge</label>
+                        <input
+                          name="bolge"
+                          value={invoiceForm.bolge}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Antalya / İzmir / Ankara"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Proje</label>
+                        <input
+                          name="proje"
+                          value={invoiceForm.proje}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="TT / TC"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Proje Kodu</label>
+                        <input
+                          name="proje_kodu"
+                          value={invoiceForm.proje_kodu}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="56A0QEF"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Fatura No</label>
+                        <input
+                          name="fatura_no"
+                          value={invoiceForm.fatura_no}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Fatura no"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Fatura Tarihi</label>
+                        <input
+                          type="date"
+                          name="fatura_tarihi"
+                          value={invoiceForm.fatura_tarihi}
+                          onChange={handleInvoiceFormChange}
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Tedarikçi</label>
+                        <input
+                          name="tedarikci"
+                          value={invoiceForm.tedarikci}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Firma / Tedarikçi"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Fatura Kalemi</label>
+                        <input
+                          name="fatura_kalemi"
+                          value={invoiceForm.fatura_kalemi}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Örn: Oda/Room (Konaklama)"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>İş Kalemi</label>
+                        <input
+                          name="is_kalemi"
+                          value={invoiceForm.is_kalemi}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Örn: KONAKLAMA / PROJE"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>PO No</label>
+                        <input
+                          name="po_no"
+                          value={invoiceForm.po_no}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="PO numarası"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Site ID</label>
+                        <input
+                          name="site_id"
+                          value={invoiceForm.site_id}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="BU8944"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Tutar (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="tutar"
+                          value={invoiceForm.tutar}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>KDV (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="kdv"
+                          value={invoiceForm.kdv}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Toplam Tutar (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="toplam_tutar"
+                          value={invoiceForm.toplam_tutar}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Ödenen Tutar (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="odenen_tutar"
+                          value={invoiceForm.odenen_tutar}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Kalan Borç (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="kalan_borc"
+                          value={invoiceForm.kalan_borc}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>RF Montaj Firma</label>
+                        <input
+                          name="rf_montaj_firma"
+                          value={invoiceForm.rf_montaj_firma}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Subcon Name ile aynı firma adı"
+                        />
+                      </div>
+
+                      <div className="formGroup formGroupWide">
+                        <label>Not</label>
+                        <textarea
+                          name="note"
+                          value={invoiceForm.note}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Not"
+                          rows={3}
+                        />
+                      </div>
+                    </div>
+
+                    <div
+                      className="entryActions"
+                      style={{
+                        justifyContent: "flex-end",
+                        display: "flex",
+                        gap: "10px",
+                        marginTop: "16px",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="tab"
+                        onClick={() => {
+                          setShowInvoiceFormPanel(false);
+                          setEditingInvoiceId(null);
+                        }}
+                      >
+                        Vazgeç
+                      </button>
+
+                      <button type="submit" className="saveButton">
+                        {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
