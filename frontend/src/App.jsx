@@ -7765,83 +7765,40 @@ function App() {
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          background: "#f5f7fa",
+          background: "#f3f4f6",
         }}
       >
-        <div
+        <form
+          onSubmit={handleLogin}
           style={{
-            width: "380px",
+            background: "#fff",
             padding: "40px",
             borderRadius: "16px",
-            background: "#fff",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
+            width: "350px",
           }}
         >
-          <h2 style={{ textAlign: "center", marginBottom: "10px" }}>
-            Şimşek Haberleşme
-          </h2>
+          <h2>Şimşek Haberleşme</h2>
 
-          <p
-            style={{ textAlign: "center", marginBottom: "30px", color: "#666" }}
-          >
-            Sisteme giriş yapınız
-          </p>
+          <input
+            type="text"
+            placeholder="Kullanıcı adı"
+            value={loginForm.username}
+            onChange={(e) =>
+              setLoginForm({ ...loginForm, username: e.target.value })
+            }
+          />
 
-          <form onSubmit={handleLogin}>
-            <input
-              type="text"
-              placeholder="Kullanıcı adı"
-              value={loginForm.username}
-              onChange={(e) =>
-                setLoginForm({ ...loginForm, username: e.target.value })
-              }
-              style={{
-                width: "100%",
-                padding: "10px",
-                marginBottom: "15px",
-                borderRadius: "8px",
-                border: "1px solid #ddd",
-              }}
-            />
+          <input
+            type="password"
+            placeholder="Şifre"
+            value={loginForm.password}
+            onChange={(e) =>
+              setLoginForm({ ...loginForm, password: e.target.value })
+            }
+          />
 
-            <input
-              type="password"
-              placeholder="Şifre"
-              value={loginForm.password}
-              onChange={(e) =>
-                setLoginForm({ ...loginForm, password: e.target.value })
-              }
-              style={{
-                width: "100%",
-                padding: "10px",
-                marginBottom: "15px",
-                borderRadius: "8px",
-                border: "1px solid #ddd",
-              }}
-            />
-
-            {loginError && (
-              <div style={{ color: "red", marginBottom: "10px" }}>
-                {loginError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              style={{
-                width: "100%",
-                padding: "12px",
-                background: "#d32f2f",
-                color: "#fff",
-                border: "none",
-                borderRadius: "8px",
-                fontWeight: "bold",
-              }}
-            >
-              Giriş Yap
-            </button>
-          </form>
-        </div>
+          <button type="submit">Giriş Yap</button>
+        </form>
       </div>
     );
   }
@@ -7951,11 +7908,6 @@ function App() {
       {page === "region" && <RegionAnalysis />}
       {page === "entry" && <DailyEntry />}
     </div>
-
-    
-
-
-
   );
 }
 
