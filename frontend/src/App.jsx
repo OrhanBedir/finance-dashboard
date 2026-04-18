@@ -7604,6 +7604,17 @@ function RegionAnalysis() {
 }
 
 function App() {
+  const inputStyle = {
+    width: "100%",
+
+    padding: "12px",
+
+    marginBottom: "15px",
+
+    borderRadius: "8px",
+
+    border: "1px solid #ddd",
+  };
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
@@ -7759,98 +7770,96 @@ function App() {
 
   if (!financeToken) {
     return (
-      <div
-        style={{
-          height: "100vh",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          background: "#f3f4f6",
-        }}
-      >
-        <form
-          onSubmit={handleFinanceLogin}
+      <div style={{ height: "100vh", background: "#f3f4f6" }}>
+        {/* 🔹 HEADER */}
+        <div
           style={{
+            height: "60px",
             background: "#fff",
-            padding: "40px",
-            borderRadius: "16px",
-            width: "380px",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.10)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "0 30px",
+            borderBottom: "1px solid #eee",
           }}
         >
-          <h2 style={{ textAlign: "center", marginBottom: "10px" }}>
+          {/* SOL */}
+          <div style={{ fontWeight: "bold", fontSize: "18px" }}>
             Şimşek Haberleşme
-          </h2>
+          </div>
 
-          <p
+          {/* SAĞ */}
+          <div style={{ color: "#666", fontSize: "14px" }}>
+            Finance Dashboard
+          </div>
+        </div>
+
+        {/* 🔹 ORTA LOGIN */}
+        <div
+          style={{
+            height: "calc(100vh - 60px)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <form
+            onSubmit={handleFinanceLogin}
             style={{
-              textAlign: "center",
-              marginBottom: "24px",
-              color: "#6b7280",
+              background: "#fff",
+              padding: "40px",
+              borderRadius: "16px",
+              width: "360px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
             }}
           >
-            Hoş geldiniz
-          </p>
+            <h2 style={{ textAlign: "center", marginBottom: "10px" }}>
+              Giriş Yap
+            </h2>
 
-          <input
-            type="email"
-            placeholder="E-posta"
-            value={financeLoginEmail}
-            onChange={(e) => setFinanceLoginEmail(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "12px",
-              marginBottom: "12px",
-              borderRadius: "8px",
-              border: "1px solid #ddd",
-              boxSizing: "border-box",
-            }}
-          />
-
-          <input
-            type="password"
-            placeholder="Şifre"
-            value={financeLoginPassword}
-            onChange={(e) => setFinanceLoginPassword(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "12px",
-              marginBottom: "12px",
-              borderRadius: "8px",
-              border: "1px solid #ddd",
-              boxSizing: "border-box",
-            }}
-          />
-
-          {financeLoginError && (
-            <div
+            <p
               style={{
-                color: "#b91c1c",
-                marginBottom: "12px",
                 textAlign: "center",
-                fontWeight: 600,
+                marginBottom: "25px",
+                color: "#888",
               }}
             >
-              {financeLoginError}
-            </div>
-          )}
+              Hoş geldiniz
+            </p>
 
-          <button
-            type="submit"
-            style={{
-              width: "100%",
-              padding: "12px",
-              background: "#d32f2f",
-              color: "#fff",
-              border: "none",
-              borderRadius: "8px",
-              fontWeight: "bold",
-              cursor: "pointer",
-            }}
-          >
-            {financeLoginLoading ? "Giriş yapılıyor..." : "Giriş Yap"}
-          </button>
-        </form>
+            <input
+              type="email"
+              placeholder="E-posta"
+              value={financeLoginEmail}
+              onChange={(e) => setFinanceLoginEmail(e.target.value)}
+              style={inputStyle}
+            />
+
+            <input
+              type="password"
+              placeholder="Şifre"
+              value={financeLoginPassword}
+              onChange={(e) => setFinanceLoginPassword(e.target.value)}
+              style={inputStyle}
+            />
+
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                padding: "12px",
+                background: "#e53935",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              Giriş Yap
+            </button>
+          </form>
+        </div>
       </div>
     );
   }
@@ -7962,8 +7971,6 @@ function App() {
     </div>
   );
 }
-
-
 
 function QCUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
