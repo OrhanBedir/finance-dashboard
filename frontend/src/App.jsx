@@ -2890,6 +2890,7 @@ function FinanceDashboard({
     overdue_total: 0,
   });
 
+  const [showInvoiceFormPanel, setShowInvoiceFormPanel] = useState(false);
   const [showInvoiceEntryModal, setShowInvoiceEntryModal] = useState(false);
   const [showSalaryModal, setShowSalaryModal] = useState(false);
 
@@ -3558,6 +3559,7 @@ function FinanceDashboard({
     });
 
     setShowInvoiceEntryModal(true);
+    setShowInvoiceFormPanel(true);
   };
 
   const handleSaveManualInvoice = async (e) => {
@@ -4417,6 +4419,7 @@ function FinanceDashboard({
             }}
             onClick={(e) => e.stopPropagation()}
           >
+            {/* HEADER */}
             <div
               style={{
                 display: "flex",
@@ -4429,7 +4432,7 @@ function FinanceDashboard({
               }}
             >
               <h3 className="listTitle" style={{ margin: 0 }}>
-                🧾 Fatura Girişi
+                {editingInvoiceId ? "🧾 Fatura Düzenle" : "🧾 Fatura Girişi"}
               </h3>
 
               <button
@@ -4441,6 +4444,7 @@ function FinanceDashboard({
               </button>
             </div>
 
+            {/* BODY */}
             <div
               style={{
                 flex: 1,
@@ -4640,181 +4644,22 @@ function FinanceDashboard({
                     justifyContent: "flex-end",
                     display: "flex",
                     gap: "10px",
+                    marginTop: "16px",
                   }}
                 >
                   <button
                     type="button"
                     className="tab"
-                    onClick={() => setAdvanceModalOpen(true)}
+                    onClick={() => setShowInvoiceEntryModal(false)}
                   >
-                    Avans Gir
+                    Kapat
                   </button>
 
                   <button type="submit" className="saveButton">
-                    Faturayı Kaydet
+                    {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
                   </button>
                 </div>
               </form>
-
-              <div
-                className="cards"
-                style={{ marginTop: "18px", marginBottom: "18px" }}
-              >
-                <div className="card ok statCard">
-                  <div className="statLabel">Toplam Fatura</div>
-                  <div className="statValue">
-                    {formatMoneyByCurrency(
-                      manualInvoiceSummary.totalAmount,
-                      "TRY",
-                    )}
-                  </div>
-                </div>
-
-                <div className="card partial statCard">
-                  <div className="statLabel">Ödenen</div>
-                  <div className="statValue">
-                    {formatMoneyByCurrency(
-                      manualInvoiceSummary.totalPaid,
-                      "TRY",
-                    )}
-                  </div>
-                </div>
-
-                <div className="card cancel statCard">
-                  <div className="statLabel">Kalan Borç</div>
-                  <div className="statValue">
-                    {formatMoneyByCurrency(
-                      manualInvoiceSummary.totalRemaining,
-                      "TRY",
-                    )}
-                  </div>
-                </div>
-
-                <div className="card bekler statCard">
-                  <div className="statLabel">Bekleyen</div>
-                  <div className="statValue">
-                    {manualInvoiceSummary.waitingCount}
-                  </div>
-                </div>
-              </div>
-
-              <div className="toolbar" style={{ marginBottom: "16px" }}>
-                <input
-                  className="search"
-                  placeholder="Fatura no, tedarikçi, proje, site ara"
-                  value={manualInvoiceSearch}
-                  onChange={(e) => setManualInvoiceSearch(e.target.value)}
-                />
-
-                <select
-                  className="select"
-                  value={manualInvoiceStatusFilter}
-                  onChange={(e) => setManualInvoiceStatusFilter(e.target.value)}
-                >
-                  <option value="ALL">Tümü</option>
-                  <option value="BEKLIYOR">Bekliyor</option>
-                  <option value="KISMI">Kısmi</option>
-                  <option value="ODENDI">Ödendi</option>
-                </select>
-
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={handleExportInvoiceDatabase}
-                >
-                  Excel İndir
-                </button>
-              </div>
-
-              <div className="tableWrap">
-                <h3 className="listTitle">Girilen Faturalar</h3>
-
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Bölge</th>
-                      <th>Proje</th>
-                      <th>Fatura No</th>
-                      <th>Tedarikçi</th>
-                      <th>Fatura Tarihi</th>
-                      <th>Toplam</th>
-                      <th>Ödenen</th>
-                      <th>Kalan</th>
-                      <th>Durum</th>
-                      <th>İşlem</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {filteredManualInvoiceRows.length === 0 ? (
-                      <EmptyRow colSpan={10} text="Kayıt yok" />
-                    ) : (
-                      filteredManualInvoiceRows.map((row, i) => (
-                        <tr key={row.id ?? i}>
-                          <td>{row.bolge || "-"}</td>
-                          <td>{row.proje || "-"}</td>
-                          <td>{row.fatura_no || "-"}</td>
-                          <td>{row.tedarikci || "-"}</td>
-                          <td>{formatDateOnly(row.fatura_tarihi)}</td>
-                          <td>
-                            {formatMoneyByCurrency(
-                              row.toplam_tutar || 0,
-                              "TRY",
-                            )}
-                          </td>
-                          <td>
-                            {formatMoneyByCurrency(
-                              row.odenen_tutar || 0,
-                              "TRY",
-                            )}
-                          </td>
-                          <td
-                            style={{
-                              color:
-                                Number(row.kalan_borc || 0) > 0
-                                  ? "#ef4444"
-                                  : "#10b981",
-                              fontWeight: 600,
-                            }}
-                          >
-                            {formatMoneyByCurrency(row.kalan_borc || 0, "TRY")}
-                          </td>
-                          <td>
-                            <span
-                              className={`badge ${
-                                Number(row.kalan_borc || 0) > 0
-                                  ? "bekler"
-                                  : "ok"
-                              }`}
-                            >
-                              {Number(row.kalan_borc || 0) > 0
-                                ? "Bekliyor"
-                                : "Ödendi"}
-                            </span>
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="tab"
-                              onClick={() => handleEditManualInvoice(row)}
-                            >
-                              Düzenle
-                            </button>
-
-                            <button
-                              type="button"
-                              className="tab danger"
-                              onClick={() => handleDeleteManualInvoice(row)}
-                            >
-                              Sil
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
             </div>
           </div>
         </div>
