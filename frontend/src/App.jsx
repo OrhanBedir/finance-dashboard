@@ -3989,9 +3989,14 @@ function FinanceDashboard({
         <button
           type="button"
           className={
-            showInvoiceEntryModal ? "tab activeTab smallTab" : "tab smallTab"
+            showInvoiceEntryModal || showInvoiceFormPanel
+              ? "tab activeTab smallTab"
+              : "tab smallTab"
           }
-          onClick={() => setShowInvoiceEntryModal(true)}
+          onClick={() => {
+            setShowInvoiceEntryModal(true);
+            setShowInvoiceFormPanel(false);
+          }}
         >
           Fatura Girişi
         </button>
