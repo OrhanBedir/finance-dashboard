@@ -3995,7 +3995,10 @@ function FinanceDashboard({
           }
           onClick={() => {
             setShowInvoiceEntryModal(true);
+
+            // diğerlerini kapat
             setShowInvoiceFormPanel(false);
+            setShowInvoiceUpload(false);
           }}
         >
           Fatura Girişi
