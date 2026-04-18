@@ -1,30 +1,20 @@
 require("dotenv").config();
 
-console.log("DB ENV:", {
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
-});
 const express = require("express");
 const cors = require("cors");
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
-});
 const multer = require("multer");
 const XLSX = require("xlsx");
 const ExcelJS = require("exceljs");
-
 const path = require("path");
 const fs = require("fs");
-const app = express();
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-require("dotenv").config();
 
+const pool = require("./db");
+const app = express();
+
+console.log("DB MODE:", process.env.DATABASE_URL ? "DATABASE_URL" : "LOCAL_DB");
+console.log("DATABASE_URL EXISTS:", !!process.env.DATABASE_URL);
 /* ================== MIDDLEWARE ================== */
 app.use(
   cors({
