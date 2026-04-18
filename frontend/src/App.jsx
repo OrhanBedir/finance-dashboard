@@ -7963,66 +7963,7 @@ function App() {
   );
 }
 
-const [currentUser, setCurrentUser] = useState(null);
-const [loginForm, setLoginForm] = useState({
-  username: "",
-  password: "",
-});
-const [loginError, setLoginError] = useState("");
 
-const USERS = [
-  {
-    username: "orhan",
-    password: "12345",
-    role: "genel_mudur",
-    name: "Orhan Bedir",
-  },
-  {
-    username: "muhasebe",
-    password: "12345",
-    role: "muhasebe",
-    name: "Muhasebe",
-  },
-  {
-    username: "rollout",
-    password: "12345",
-    role: "rollout_muduru",
-    name: "Rollout Müdürü",
-  },
-  {
-    username: "subcon1",
-    password: "12345",
-    role: "taseron",
-    name: "Taşeron 1",
-  },
-];
-
-const handleLogin = (e) => {
-  e.preventDefault();
-
-  const user = USERS.find(
-    (u) =>
-      u.username === loginForm.username.trim() &&
-      u.password === loginForm.password,
-  );
-
-  if (!user) {
-    setLoginError("Kullanıcı adı veya şifre hatalı.");
-    return;
-  }
-
-  setLoginError("");
-  setCurrentUser(user);
-};
-
-const handleLogout = () => {
-  setCurrentUser(null);
-  setLoginForm({
-    username: "",
-    password: "",
-  });
-  setLoginError("");
-};
 
 function QCUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
