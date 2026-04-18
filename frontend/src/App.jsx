@@ -3693,39 +3693,46 @@ function FinanceDashboard({
     }
   };
 
-  const handleExportFilteredInvoiceExcel = () => {
-    if (!filteredManualInvoiceRows.length) {
-      alert("İndirilecek kayıt bulunamadı");
-      return;
+  const handleExportInvoiceDatabase = async () => {
+    try {
+      const params = new URLSearchParams();
+
+      if (manualInvoiceSearch?.trim()) {
+        params.append("query", manualInvoiceSearch.trim());
+      }
+
+      if (manualInvoiceStatusFilter && manualInvoiceStatusFilter !== "ALL") {
+        params.append("status", manualInvoiceStatusFilter);
+      }
+
+      const queryString = params.toString();
+      const url = `${API_BASE}/finance/invoice-entry/export-excel${queryString ? `?${queryString}` : ""}`;
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("finance_token") || ""}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Excel indirilemedi");
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = `invoice_database_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error("INVOICE EXPORT ERROR:", err);
+      alert(err.message || "Fatura database indirilemedi");
     }
-
-    const excelRows = filteredManualInvoiceRows.map((row) => ({
-      Bölge: row.bolge || "",
-      Proje: row.proje || "",
-      ProjeKodu: row.proje_kodu || "",
-      FaturaNo: row.fatura_no || "",
-      FaturaTarihi: row.fatura_tarihi || "",
-      Tedarikçi: row.tedarikci || "",
-      PONo: row.po_no || "",
-      SiteID: row.site_id || "",
-      Toplam: Number(row.toplam_tutar || 0),
-      Ödenen: Number(row.odenen_tutar || 0),
-      Kalan: Number(row.kalan_borc || 0),
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Faturalar");
-
-    const safeName = manualInvoiceSearch
-      ? manualInvoiceSearch.replace(/\s+/g, "_")
-      : "tum_kayitlar";
-
-    XLSX.writeFile(
-      workbook,
-      `fatura_listesi_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-    );
   };
 
   const handleExportSalaryExcel = async () => {
@@ -4521,7 +4528,7 @@ function FinanceDashboard({
               <button
                 type="button"
                 className="tab"
-                onClick={handleExportFilteredInvoiceExcel}
+                onClick={handleExportInvoiceDatabase}
               >
                 Excel İndir
               </button>
