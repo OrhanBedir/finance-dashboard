@@ -7615,9 +7615,6 @@ function App() {
 
     border: "1px solid #ddd",
   };
-  
-
-
 
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
@@ -7862,6 +7859,18 @@ function App() {
             >
               Giriş Yap
             </button>
+            {financeLoginError && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  color: "#b91c1c",
+                  fontWeight: "600",
+                  textAlign: "center",
+                }}
+              >
+                {financeLoginError}
+              </div>
+            )}
           </form>
         </div>
       </div>
