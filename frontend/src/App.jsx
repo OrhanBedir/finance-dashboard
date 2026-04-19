@@ -3960,8 +3960,6 @@ function FinanceDashboard({
             Giriş yapan: <b>{user?.name || financeUserEmail}</b>
           </div>
         </div>
-
-        
       </div>
 
       <div
@@ -7665,6 +7663,35 @@ function App() {
 
   const [page, setPage] = useState("finance");
 
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState("");
+  const loadAdminUsers = async () => {
+    try {
+      setAdminLoading(true);
+      setAdminError("");
+
+      const response = await fetch(`${API_BASE}/admin/users`, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Kullanıcılar alınamadı");
+      }
+
+      setAdminUsers(data.users || []);
+    } catch (err) {
+      setAdminError(err.message || "Kullanıcılar alınamadı");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
   const [financeToken, setFinanceToken] = useState(
     localStorage.getItem("finance_token") || "",
   );
@@ -7926,37 +7953,45 @@ function App() {
           marginBottom: "24px",
           position: "relative",
         }}
-      >.{isAdmin && (
-        <button
-          className={page === "finance" ? "tab activeTab" : "tab"}
-          onClick={() => setPage("finance")}
-        >
-          Finance Dashboard
-        </button>
-
+      >
+        .
+        {isAdmin && (
+          <button
+            className={page === "finance" ? "tab activeTab" : "tab"}
+            onClick={() => setPage("finance")}
+          >
+            Finance Dashboard
+          </button>
         )}
-
+        {isAdmin && (
+          <button
+            className={page === "admin" ? "tab activeTab" : "tab"}
+            onClick={() => {
+              setPage("admin");
+              loadAdminUsers(); // 👉 SAYFA AÇILINCA KULLANICILARI ÇEK
+            }}
+          >
+            Admin Panel
+          </button>
+        )}
         <button
           className={page === "region" ? "tab activeTab" : "tab"}
           onClick={() => setPage("region")}
         >
           Region Analysis
         </button>
-
         <button
           className={page === "executive" ? "tab activeTab" : "tab"}
           onClick={() => setPage("executive")}
         >
           Executive Dashboard
         </button>
-
         <button
           className={page === "entry" ? "tab activeTab" : "tab"}
           onClick={() => setPage("entry")}
         >
           Günlük İş Girişi
         </button>
-
         <button
           type="button"
           className="tab"
@@ -7966,7 +8001,6 @@ function App() {
         >
           Avans Talep
         </button>
-
         {(token || financeToken) && (
           <button
             type="button"
@@ -7990,7 +8024,8 @@ function App() {
         )}
       </div>
 
-      {page === "finance" && isAdmin &&
+      {page === "finance" &&
+        isAdmin &&
         (financeToken ? (
           <FinanceDashboard
             user={user}
@@ -8053,6 +8088,39 @@ function App() {
       {page === "executive" && <ExecutiveDashboard />}
       {page === "region" && <RegionAnalysis />}
       {page === "entry" && <DailyEntry />}
+      {page === "admin" && isAdmin && (
+        <div style={{ padding: "20px" }}>
+          <h2>👑 Admin Panel</h2>
+
+          {adminLoading && <p>Yükleniyor...</p>}
+          {adminError && <p style={{ color: "red" }}>{adminError}</p>}
+
+          {!adminLoading && !adminError && (
+            <table style={{ width: "100%", marginTop: "20px" }}>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Ad</th>
+                  <th>Email</th>
+                  <th>Rol</th>
+                  <th>Aktif</th>
+                </tr>
+              </thead>
+              <tbody>
+                {adminUsers.map((u) => (
+                  <tr key={u.id}>
+                    <td>{u.id}</td>
+                    <td>{u.name}</td>
+                    <td>{u.email}</td>
+                    <td>{u.role}</td>
+                    <td>{u.is_active ? "✅" : "❌"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   );
 }
