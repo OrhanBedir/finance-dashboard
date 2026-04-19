@@ -143,28 +143,7 @@ app.put(
     }
   },
 );
-app.put(
-  "/admin/users/:id/active",
-  authMiddleware,
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
 
-      const result = await pool.query(
-        `UPDATE users
-       SET is_active = NOT is_active
-       WHERE id = $1
-       RETURNING id, is_active`,
-        [id],
-      );
-
-      res.json({ ok: true, user: result.rows[0] });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  },
-);
 app.delete(
   "/admin/users/:id",
   authMiddleware,
