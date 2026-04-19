@@ -98,34 +98,44 @@ app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
-app.put("/admin/users/:id/active", authMiddleware, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
+app.put(
+  "/admin/users/:id/active",
+  authMiddleware,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-    const result = await pool.query(
-      `UPDATE users
+      const result = await pool.query(
+        `UPDATE users
        SET is_active = NOT is_active
        WHERE id = $1
        RETURNING id, is_active`,
-      [id]
-    );
+        [id],
+      );
 
-    res.json({ ok: true, user: result.rows[0] });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-app.delete("/admin/users/:id", authMiddleware, requireAdmin, async (req, res) => {
-  try {
-    const { id } = req.params;
+      res.json({ ok: true, user: result.rows[0] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  },
+);
+app.delete(
+  "/admin/users/:id",
+  authMiddleware,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-    await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
+      await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
 
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  },
+);
 
 // YENİ KULLANICI EKLE
 app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
@@ -328,6 +338,13 @@ app.post("/auth/login", async (req, res) => {
     }
 
     const user = result.rows[0];
+
+    if (!user.is_active) {
+      return res.status(403).json({
+        ok: false,
+        error: "Kullanıcı pasif durumda",
+      });
+    }
 
     if (!user.is_active) {
       return res.status(403).json({

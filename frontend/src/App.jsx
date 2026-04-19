@@ -7742,6 +7742,27 @@ function App() {
       alert(err.message);
     }
   };
+  const handleToggleActive = async (userId) => {
+    try {
+      const response = await fetch(`${API_BASE}/admin/users/${userId}/active`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Durum güncellenemedi");
+      }
+
+      await loadAdminUsers();
+    } catch (err) {
+      alert(err.message || "Durum güncellenemedi");
+    }
+  };
 
   const toggleUserActive = async (id) => {
     try {
@@ -8267,6 +8288,20 @@ function App() {
                       <td style={tdStyle}>{u.role}</td>
                       <td style={tdStyle}>{u.is_active ? "✅" : "❌"}</td>
                       <td style={tdStyle}>
+                        <button
+                          onClick={() => handleToggleActive(u.id)}
+                          style={{
+                            padding: "6px 10px",
+                            marginRight: "8px",
+                            background: u.is_active ? "#f59e0b" : "#6b7280",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {u.is_active ? "Pasife Al" : "Aktif Et"}
+                        </button>
                         {u.role === "admin" ? (
                           <button
                             onClick={() => handleAdminRoleChange(u.id, "user")}
