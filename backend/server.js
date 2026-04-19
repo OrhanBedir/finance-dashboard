@@ -100,7 +100,7 @@ app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
       `INSERT INTO users (name, email, password_hash, role, is_active)
        VALUES ($1, $2, $3, $4, true)
        RETURNING id, name, email, role, is_active`,
-      [name, email, hashed, role]
+      [name, email, hashed, role],
     );
 
     res.json({ ok: true, user: result.rows[0] });
@@ -108,6 +108,37 @@ app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+app.put(
+  "/admin/users/:id/active",
+  authMiddleware,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const result = await pool.query(
+        `
+      UPDATE users
+      SET is_active = NOT is_active
+      WHERE id = $1
+      RETURNING id, is_active
+      `,
+        [id],
+      );
+
+      if (result.rowCount === 0) {
+        return res
+          .status(404)
+          .json({ ok: false, error: "Kullanıcı bulunamadı" });
+      }
+
+      res.json({ ok: true, user: result.rows[0] });
+    } catch (err) {
+      console.error("ACTIVE TOGGLE ERROR:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  },
+);
 app.put(
   "/admin/users/:id/active",
   authMiddleware,
@@ -317,8 +348,6 @@ app.use((req, res, next) => {
   next();
 });
 
-
-
 app.post("/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -424,7 +453,6 @@ app.post("/auth/login", async (req, res) => {
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
-
 
 /* ================== UPLOAD ================== */
 const uploadDir = path.join(__dirname, "uploads");
