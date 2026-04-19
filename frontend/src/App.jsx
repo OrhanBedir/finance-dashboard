@@ -7700,15 +7700,16 @@ function App() {
       setAdminLoading(false);
     }
   };
+
   const handleAdminRoleChange = async (userId, newRole) => {
     try {
-      await fetch(`${API}/admin/users/${id}/role`, {
+      const response = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, // varsa
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ role }),
+        body: JSON.stringify({ role: newRole }),
       });
 
       const data = await response.json().catch(() => ({}));
