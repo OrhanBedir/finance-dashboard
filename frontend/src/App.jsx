@@ -7907,7 +7907,16 @@ function App() {
 
   return (
     <div className="container">
-      <div className="navTabs">
+      <div
+        className="navTabs"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "12px",
+          flexWrap: "wrap",
+        }}
+      >
         <button
           className={page === "finance" ? "tab activeTab" : "tab"}
           onClick={() => setPage("finance")}
@@ -7945,6 +7954,28 @@ function App() {
         >
           Avans Talep
         </button>
+        {token && user && (
+          <button
+            onClick={handleLogout}
+            style={{
+              background: "#dc3545",
+
+              color: "#fff",
+
+              border: "none",
+
+              padding: "10px 16px",
+
+              borderRadius: "8px",
+
+              cursor: "pointer",
+
+              fontWeight: "600",
+            }}
+          >
+            Çıkış Yap
+          </button>
+        )}
       </div>
 
       {page === "finance" &&
