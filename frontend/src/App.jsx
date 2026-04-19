@@ -2797,6 +2797,7 @@ function formatDonemLabel(value) {
 }
 
 function FinanceDashboard({
+  user,
   financeToken,
   financeUserEmail,
   onFinanceLogout,
@@ -3956,13 +3957,11 @@ function FinanceDashboard({
         <div>
           <h1 style={{ margin: "0 0 6px 0" }}>💰 Finance Dashboard</h1>
           <div style={{ fontSize: "14px", color: "#6b7280" }}>
-            Giriş yapan: <b>{financeUserEmail}</b>
+            Giriş yapan: <b>{user?.name || financeUserEmail}</b>
           </div>
         </div>
 
-        <button type="button" className="tab" onClick={onFinanceLogout}>
-          Çıkış Yap
-        </button>
+        
       </div>
 
       <div
@@ -7991,6 +7990,7 @@ function App() {
       {page === "finance" &&
         (financeToken ? (
           <FinanceDashboard
+            user={user}
             financeToken={financeToken}
             financeUserEmail={financeUserEmail}
             onFinanceLogout={handleFinanceLogout}
