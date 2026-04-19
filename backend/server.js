@@ -33,6 +33,9 @@ function authMiddleware(req, res, next) {
 const pool = require("./db");
 const app = express();
 
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
     return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
