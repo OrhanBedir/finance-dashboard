@@ -3,6 +3,7 @@ import "./App.css";
 import * as XLSX from "xlsx";
 import "react-datepicker/dist/react-datepicker.css";
 import DatePicker from "react-datepicker";
+import { useState } from "react";
 
 function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   return (
@@ -258,7 +259,7 @@ function StatusBadge({ status }) {
   const safeStatus = String(status || "").toUpperCase();
 
   return (
-    <span className={`badge ${safeStatus.toLowerCase()}`}>
+    <span className={`statusBadge status-${safeStatus.toLowerCase()}`}>
       {safeStatus || "-"}
     </span>
   );
@@ -278,7 +279,7 @@ function getQtyAnalysis(doneQty, requestedQty) {
   const done = Number(doneQty || 0);
   const requested = Number(requestedQty || 0);
 
-  if (!requestedQty || requested === 0) {
+  if (requested === 0 && done > 0) {
     return {
       diff: "-",
       label: "PO Bekliyor",
@@ -312,15 +313,28 @@ function getQtyAnalysis(doneQty, requestedQty) {
 }
 
 function getRegion(siteCode = "") {
-  const code = String(siteCode).toUpperCase().trim();
+  const code = String(siteCode || "")
+    .trim()
+    .toUpperCase();
+
+  if (
+    code.startsWith("ES") ||
+    code.startsWith("BO") ||
+    code.startsWith("ZO") ||
+    code.startsWith("KA") ||
+    code.includes("_ANK") ||
+    code.startsWith("AN")
+  ) {
+    return "Ankara";
+  }
 
   if (
     code.startsWith("IZ") ||
-    code.startsWith("MU") ||
     code.startsWith("US") ||
+    code.startsWith("MU") ||
     code.startsWith("MN") ||
-    code.startsWith("DE") ||
-    code.startsWith("AI")
+    code.startsWith("AI") ||
+    code.startsWith("DE")
   ) {
     return "İzmir";
   }
@@ -328,20 +342,10 @@ function getRegion(siteCode = "") {
   if (
     code.startsWith("AT") ||
     code.startsWith("IP") ||
-    code.startsWith("AF") ||
-    code.startsWith("BU")
+    code.startsWith("BU") ||
+    code.startsWith("AF")
   ) {
     return "Antalya";
-  }
-
-  if (
-    code.startsWith("ES") ||
-    code.startsWith("BO") ||
-    code.startsWith("ZO") ||
-    code.startsWith("KA") ||
-    code.startsWith("Z")
-  ) {
-    return "Ankara";
   }
 
   return "Tanımsız";
@@ -711,7 +715,7 @@ function ExecutiveDashboard() {
         fetchJson(`${API_BASE}/dashboard/result`),
       ]);
 
-      setSummary(summaryData.summary || null);
+      setSummary(summaryData || null);
       setRows(resultData.rows || []);
     } catch (err) {
       console.error("DASHBOARD LOAD ERROR:", err);
@@ -769,9 +773,9 @@ function ExecutiveDashboard() {
         >
           <h2>📊 Finance Summary</h2>
 
-          <p>Total Collections: {summary.summary.total_collections}</p>
-          <p>This Month: {summary.summary.this_month_collections}</p>
-          <p>Expense Count: {summary.summary.expense_count}</p>
+          <p>Total Collections: {summary.total_collections || 0}</p>
+          <p>This Month: {summary.this_month_collections || 0}</p>
+          <p>Expense Count: {summary.expense_count || 0}</p>
         </div>
       )}
 
@@ -865,7 +869,7 @@ function ExecutiveDashboard() {
           </thead>
           <tbody>
             {filteredRows.length === 0 ? (
-              <EmptyRow colSpan={12} />
+              <EmptyRow colSpan={13} />
             ) : (
               filteredRows.map((row, index) => (
                 <tr
@@ -940,13 +944,62 @@ function formatDateToTR(date) {
   return `${day}.${month}.${year}`;
 }
 
+function useUsdRate() {
+  const [usdRate, setUsdRate] = useState(45);
+
+  useEffect(() => {
+    const fetchRate = async () => {
+      try {
+        const res = await fetch("https://open.er-api.com/v6/latest/USD");
+        const data = await res.json();
+
+        if (data?.rates?.TRY) {
+          setUsdRate(data.rates.TRY);
+        }
+      } catch (err) {
+        console.error("USD RATE ERROR:", err);
+      }
+    };
+
+    fetchRate();
+  }, []);
+
+  return usdRate;
+}
+
 function DailyEntry() {
+  const usdRate = useUsdRate();
   function getTodayTR() {
     const d = new Date();
     const day = String(d.getDate()).padStart(2, "0");
     const month = String(d.getMonth() + 1).padStart(2, "0");
     const year = d.getFullYear();
     return `${day}.${month}.${year}`;
+  }
+
+  function detectSiteTypeFromSiteCode(siteCode) {
+    const code = String(siteCode || "").toUpperCase();
+
+    if (code.includes("NR3500") || code.includes("5GEXP")) {
+      return "5G";
+    }
+
+    if (code.includes("NS")) {
+      return "STANDALONE";
+    }
+
+    if (
+      code.includes("L800") ||
+      code.includes("L2600") ||
+      code.includes("L2100") ||
+      code.includes("NR700") ||
+      code.includes("TRP") ||
+      code.includes("L")
+    ) {
+      return "LTE";
+    }
+
+    return "5G";
   }
 
   const initialForm = {
@@ -965,12 +1018,76 @@ function DailyEntry() {
     kabul_not: "",
   };
 
+  const [showEntryModal, setShowEntryModal] = useState(false);
+  const [siteSearchCode, setSiteSearchCode] = useState("");
+
+  const [showQcUpload, setShowQcUpload] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [rows, setRows] = useState([]);
   const [siteEntries, setSiteEntries] = useState([]);
+
   const [projectCodes, setProjectCodes] = useState([]);
   const [itemOptions, setItemOptions] = useState([]);
   const [poRows, setPoRows] = useState([]);
+
+  const normalizeCurrency = (value) => {
+    const raw = String(value || "")
+      .trim()
+      .toUpperCase();
+
+    if (raw === "USD" || raw === "$" || raw === "US$" || raw.includes("USD")) {
+      return "USD";
+    }
+
+    return "TRY";
+  };
+
+  const convertToTRY = (amount, currency) => {
+    const num = Number(amount || 0);
+    return normalizeCurrency(currency) === "USD" ? num * usdRate : num;
+  };
+  const uniquePoItemCodes = [
+    ...new Set(
+      poRows.map((row) => String(row.item_code || "").trim()).filter(Boolean),
+    ),
+  ];
+
+  const poSummary = poRows.reduce(
+    (acc, row) => {
+      const qty = Number(row.requested_qty || 0);
+      const price = convertToTRY(row.unit_price, row.currency);
+
+      acc.totalAmount += qty * price;
+      return acc;
+    },
+    { totalAmount: 0 },
+  );
+
+  poSummary.totalQty = uniquePoItemCodes.length;
+
+  const uniqueEntryItemCodes = [
+    ...new Set(
+      siteEntries
+        .map((row) => String(row.item_code || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  const entrySummary = siteEntries.reduce(
+    (acc, row) => {
+      const qty = Number(row.done_qty || 0);
+      const price = convertToTRY(row.unit_price, row.currency);
+
+      acc.totalAmount += qty * price;
+      return acc;
+    },
+    { totalAmount: 0 },
+  );
+
+  entrySummary.totalQty = uniqueEntryItemCodes.length;
+
+  const farkQty = poSummary.totalQty - entrySummary.totalQty;
+  const farkTutar = poSummary.totalAmount - entrySummary.totalAmount;
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [showBoqUpload, setShowBoqUpload] = useState(false);
@@ -1225,9 +1342,12 @@ function DailyEntry() {
     }
 
     if (name === "site_code") {
+      const upperValue = value.trim().toUpperCase();
+
       setForm((prev) => ({
         ...prev,
-        site_code: value.trim().toUpperCase(),
+        site_code: upperValue,
+        site_type: detectSiteTypeFromSiteCode(upperValue),
       }));
       return;
     }
@@ -1252,6 +1372,17 @@ function DailyEntry() {
       ...prev,
       item_description: selectedDesc,
       item_code: selected?.item_code || "",
+    }));
+  };
+
+  const handleSiteSearchChange = (e) => {
+    const value = e.target.value.trim().toUpperCase();
+    setSiteSearchCode(value);
+
+    setForm((prev) => ({
+      ...prev,
+      site_code: value,
+      site_type: detectSiteTypeFromSiteCode(value),
     }));
   };
 
@@ -1283,12 +1414,26 @@ function DailyEntry() {
     return list.slice(0, 30);
   }, [itemOptions, itemDescriptionSearch]);
 
+  const handleOpenEntryModal = () => {
+    if (!siteSearchCode) {
+      alert("Önce Site Code gir");
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      site_code: siteSearchCode,
+    }));
+
+    setShowEntryModal(true);
+  };
+
   const handleEdit = (row) => {
     setEditingId(row.id);
     setMessage("");
 
     setForm({
-      site_type: row.site_type || "5G",
+      site_type: detectSiteTypeFromSiteCode(row.site_code),
       project_code: row.project_code || "",
       site_code: row.site_code || "",
       item_code: row.item_code || "",
@@ -1304,7 +1449,7 @@ function DailyEntry() {
 
     setItemCodeSearch(row.item_code || "");
     setItemDescriptionSearch(row.item_description || "");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setShowEntryModal(true);
   };
 
   const handleCancelEdit = () => {
@@ -1315,6 +1460,7 @@ function DailyEntry() {
     setForm(initialForm);
     setShowItemCodeList(false);
     setShowItemDescriptionList(false);
+    setShowEntryModal(false);
   };
 
   const handleDelete = async (row) => {
@@ -1356,16 +1502,14 @@ function DailyEntry() {
 
     try {
       const payload = {
-        site_type: form.site_type,
+        site_type: detectSiteTypeFromSiteCode(form.site_code),
         project_code: form.project_code,
         site_code: form.site_code,
         item_code: form.item_code,
         item_description: form.item_description,
         done_qty: Number(form.done_qty || 0),
         subcon_name: form.subcon_name,
-        onair_date: row.onair_date
-          ? new Date(row.onair_date).toLocaleDateString("tr-TR")
-          : "",
+        onair_date: form.onair_date || null,
         note: form.note,
         qc_durum: form.qc_durum,
         kabul_durum: form.kabul_durum,
@@ -1413,6 +1557,8 @@ function DailyEntry() {
 
       setEditingId(null);
 
+      setShowEntryModal(false);
+
       await Promise.all([
         loadRows(),
         loadSiteEntries(currentProject, currentSite),
@@ -1459,19 +1605,35 @@ function DailyEntry() {
           alignItems: "center",
           gap: "12px",
           flexWrap: "wrap",
-          marginBottom: "14px",
+          marginBottom: "8px",
         }}
       >
-        <h1 style={{ margin: 0 }}>📝 Günlük İş Girişi</h1>
+        <h1 style={{ margin: 0, fontSize: "28px", lineHeight: 1.1 }}>
+          📋 Günlük İş Girişi
+        </h1>
 
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={showQcUpload ? "tab activeTab" : "tab"}
+            onClick={() => {
+              setShowQcUpload((prev) => !prev);
+              setShowBoqUpload(false);
+              setShowHwPoUpload(false);
+              setShowCompletedImport(false);
+            }}
+          >
+            QC Yükle
+          </button>
+
           <button
             type="button"
             className={showBoqUpload ? "tab activeTab" : "tab"}
             onClick={() => {
               setShowBoqUpload((prev) => !prev);
-              if (showHwPoUpload) setShowHwPoUpload(false);
-              if (showCompletedImport) setShowCompletedImport(false);
+              setShowQcUpload(false);
+              setShowHwPoUpload(false);
+              setShowCompletedImport(false);
             }}
           >
             BoQ Yükle
@@ -1482,11 +1644,25 @@ function DailyEntry() {
             className={showHwPoUpload ? "tab activeTab" : "tab"}
             onClick={() => {
               setShowHwPoUpload((prev) => !prev);
-              if (showBoqUpload) setShowBoqUpload(false);
-              if (showCompletedImport) setShowCompletedImport(false);
+              setShowBoqUpload(false);
+              setShowQcUpload(false);
+              setShowCompletedImport(false);
             }}
           >
             HW PO Yükle
+          </button>
+
+          <button
+            type="button"
+            className={showCompletedImport ? "tab activeTab" : "tab"}
+            onClick={() => {
+              setShowCompletedImport((prev) => !prev);
+              setShowBoqUpload(false);
+              setShowQcUpload(false);
+              setShowHwPoUpload(false);
+            }}
+          >
+            Tamamlanan Import
           </button>
 
           <button
@@ -1520,521 +1696,855 @@ function DailyEntry() {
         />
       )}
 
+      {showQcUpload && (
+        <QCUploadInline
+          onClose={() => setShowQcUpload(false)}
+          onUploaded={refreshAll}
+        />
+      )}
+
       <div className="entryPanel">
-        <form className="entryForm" onSubmit={handleSave}>
-          <div className="formGrid">
-            <div className="formGroup">
-              <label>Saha Türü</label>
-              <select
-                name="site_type"
-                value={form.site_type}
-                onChange={handleChange}
-              >
-                <option value="5G">5G</option>
-                <option value="DSS">DSS</option>
-                <option value="LTE">LTE</option>
-                <option value="STANDALONE">STANDALONE</option>
-                <option value="Diğer">Diğer</option>
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>Project Code</label>
-              <select
-                name="project_code"
-                value={form.project_code}
-                onChange={handleChange}
-                required
-              >
-                <option value="">Seçiniz</option>
-                <option value="56A0SJC">56A0SJC</option>
-                <option value="56A0QEF">56A0QEF</option>
-                <option value="56A0NCD">56A0NCD</option>
-                <option value="56A0TCT">56A0TCT</option>
-                {projectCodes
-                  .filter(
-                    (p) =>
-                      !["56A0SJC", "56A0QEF", "56A0NCD", "56A0TCT"].includes(
-                        p.project_code,
-                      ),
-                  )
-                  .map((p, i) => (
-                    <option
-                      key={`${p.project_code}-${i}`}
-                      value={p.project_code}
-                    >
-                      {p.project_code}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>Site Code</label>
-              <input
-                name="site_code"
-                value={form.site_code}
-                onChange={handleChange}
-                placeholder="Örn: AT8227_NS_WM"
-                required
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>Done Qty</label>
-              <input
-                type="number"
-                step="0.01"
-                name="done_qty"
-                value={form.done_qty}
-                onChange={handleChange}
-                placeholder="Örn: 2"
-                required
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>Subcon Name</label>
-              <input
-                name="subcon_name"
-                value={form.subcon_name}
-                onChange={handleChange}
-                placeholder="Taşeron adı"
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>OnAir Date</label>
-              <DatePicker
-                selected={parseTRDateToDate(form.onair_date)}
-                onChange={(date) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    onair_date: formatDateToTR(date),
-                  }))
-                }
-                dateFormat="dd.MM.yyyy"
-                placeholderText="GG.AA.YYYY"
-                className="datePickerInput"
-                isClearable
-                showPopperArrow={false}
-              />
-            </div>
-
-            <div
-              className="formGroup"
-              style={{ position: "relative" }}
-              ref={itemCodeBoxRef}
-            >
-              <label>Item Code</label>
-
-              <input
-                type="text"
-                value={itemCodeSearch}
-                onChange={(e) => {
-                  setItemCodeSearch(e.target.value);
-                  setShowItemCodeList(true);
-                }}
-                onFocus={() => setShowItemCodeList(true)}
-                placeholder="Item code filtrele..."
-                disabled={itemOptions.length === 0}
-              />
-
-              {showItemCodeList && filteredItemCodes.length > 0 && (
-                <div className="filterDropdown">
-                  {filteredItemCodes.map((item, idx) => (
-                    <div
-                      key={`${item.item_code}-${idx}`}
-                      className="filterDropdownItem"
-                      onMouseDown={() => handleItemCodePick(item)}
-                    >
-                      {item.item_code}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <select
-                name="item_code"
-                value={form.item_code}
-                onChange={handleChange}
-                required
-                disabled={itemOptions.length === 0}
-                style={{ marginTop: "8px" }}
-              >
-                <option value="">
-                  {itemOptions.length === 0 ? "Kayıt bulunamadı" : "Seçiniz"}
-                </option>
-                {itemOptions.map((item, idx) => (
-                  <option
-                    key={`${item.item_code}-${idx}`}
-                    value={item.item_code}
-                  >
-                    {item.item_code}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div
-              className="formGroup formGroupWide"
-              style={{ position: "relative" }}
-              ref={itemDescriptionBoxRef}
-            >
-              <label>Item Description</label>
-
-              <input
-                type="text"
-                value={itemDescriptionSearch}
-                onChange={(e) => {
-                  setItemDescriptionSearch(e.target.value);
-                  setShowItemDescriptionList(true);
-                }}
-                onFocus={() => setShowItemDescriptionList(true)}
-                placeholder="Item description filtrele..."
-                disabled={itemOptions.length === 0}
-              />
-
-              {showItemDescriptionList &&
-                filteredItemDescriptions.length > 0 && (
-                  <div className="filterDropdown">
-                    {filteredItemDescriptions.map((item, idx) => (
-                      <div
-                        key={`${item.item_code}-${idx}`}
-                        className="filterDropdownItem"
-                        onMouseDown={() => handleItemDescriptionPick(item)}
-                      >
-                        {item.item_description}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-              <select
-                name="item_description"
-                value={form.item_description}
-                onChange={handleDescriptionChange}
-                required
-                disabled={itemOptions.length === 0}
-                style={{ marginTop: "8px" }}
-              >
-                <option value="">
-                  {itemOptions.length === 0 ? "Kayıt bulunamadı" : "Seçiniz"}
-                </option>
-                {itemOptions.map((item, idx) => (
-                  <option
-                    key={`${item.item_code}-${idx}`}
-                    value={item.item_description}
-                  >
-                    {item.item_description}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>QC Durum</label>
-              <select
-                name="qc_durum"
-                value={form.qc_durum}
-                onChange={handleChange}
-              >
-                <option value="OK">OK</option>
-                <option value="NOK">NOK</option>
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>Kabul Durum</label>
-              <select
-                name="kabul_durum"
-                value={form.kabul_durum}
-                onChange={handleChange}
-              >
-                <option value="OK">OK</option>
-                <option value="NOK">NOK</option>
-              </select>
-            </div>
-
-            <div className="formGroup formGroupWide">
-              <label>Kabul Not</label>
-              <textarea
-                name="kabul_not"
-                value={form.kabul_not}
-                onChange={handleChange}
-                placeholder="Kabul ile ilgili not"
-                rows={3}
-              />
-            </div>
-
-            <div className="formGroup formGroupWide">
-              <label>RF Not</label>
-              <textarea
-                name="note"
-                value={form.note}
-                onChange={handleChange}
-                placeholder="RF ile ilgili not giriniz"
-                rows={3}
-              />
-            </div>
-          </div>
-
-          <div className="entryActions" style={{ gap: "10px" }}>
-            {editingId && (
-              <button type="button" className="tab" onClick={handleCancelEdit}>
-                Vazgeç
-              </button>
-            )}
-
-            <button type="submit" className="saveButton" disabled={saving}>
-              {saving ? "Kaydediliyor..." : editingId ? "Güncelle" : "Kaydet"}
-            </button>
-          </div>
-
-          {message && <div className="entryMessage">{message}</div>}
-        </form>
-      </div>
-
-      <div className="tableWrap">
-        <h3 className="listTitle">Bu Saha İçin Açılmış PO Kalemleri</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>PO No</th>
-              <th>Project Code</th>
-              <th>Site Code</th>
-              <th>Item Code</th>
-              <th>Item Description</th>
-              <th>Requested Qty</th>
-              <th>Due Qty</th>
-              <th>Currency</th>
-              <th>Unit Price</th>
-            </tr>
-          </thead>
-          <tbody>
-            {poRows.length === 0 ? (
-              <EmptyRow colSpan={9} text="Bu saha için PO kalemi bulunamadı" />
-            ) : (
-              poRows.map((row, index) => (
-                <tr key={`${row.po_no || "no-po"}-${row.item_code}-${index}`}>
-                  <td>{row.po_no || "-"}</td>
-                  <td>{row.project_code || "-"}</td>
-                  <td>{row.site_code || "-"}</td>
-                  <td>{row.item_code || "-"}</td>
-                  <td>{row.item_description || "-"}</td>
-                  <td>{row.requested_qty ?? "-"}</td>
-                  <td>{row.due_qty ?? "-"}</td>
-                  <td>{row.currency || "-"}</td>
-                  <td>
-                    {Number(row.unit_price || 0) === 0
-                      ? "-"
-                      : formatMoneyByCurrency(row.unit_price, row.currency)}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="tableWrap">
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "12px",
-            gap: "12px",
+            alignItems: "end",
+            gap: "16px",
             flexWrap: "wrap",
           }}
         >
-          <h3 className="listTitle" style={{ margin: 0 }}>
-            Bu Saha İçin Girilmiş İşler
-          </h3>
-
-          <button
-            type="button"
-            onClick={handleExportExcel}
-            style={{
-              padding: "10px 16px",
-              background: "#e5e7eb",
-              border: "none",
-              borderRadius: "8px",
-              fontWeight: "600",
-              cursor: "pointer",
-            }}
+          <div
+            style={{ display: "flex", justifyContent: "center", width: "100%" }}
           >
-            Excel İndir
-          </button>
+            <div style={{ width: "420px" }}>
+              <label
+                style={{
+                  display: "block",
+                  fontWeight: "700",
+                  marginBottom: "8px",
+                  color: "#374151",
+                  textAlign: "center",
+                }}
+              >
+                Site Code
+              </label>
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <input
+                  value={siteSearchCode}
+                  onChange={handleSiteSearchChange}
+                  placeholder="Site ID giriniz"
+                  style={{
+                    flex: 1,
+                    padding: "12px 14px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "10px",
+                    fontSize: "14px",
+                    outline: "none",
+                  }}
+                />
+
+                <button
+                  type="button"
+                  className="saveButton"
+                  onClick={handleOpenEntryModal}
+                  disabled={!siteSearchCode}
+                  style={{
+                    padding: "12px 18px",
+                    borderRadius: "10px",
+                  }}
+                >
+                  Veri Gir
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Saha Türü</th>
-              <th>Project</th>
-              <th>Site</th>
-              <th>Item Code</th>
-              <th>Açıklama</th>
-              <th>Done Qty</th>
-              <th>Requested Qty</th>
-              <th>Fark</th>
-              <th>Analiz</th>
-              <th>Taşeron</th>
-              <th>Not</th>
-              <th>İşlem</th>
-              <th>QC Durum</th>
-              <th>Kabul Durum</th>
-              <th>Kabul Not</th>
-            </tr>
-          </thead>
-          <tbody>
-            {siteEntries.length === 0 ? (
-              <EmptyRow colSpan={15} text="Bu saha için giriş yapılmamış" />
-            ) : (
-              siteEntries.map((row, index) => {
-                const analysis = getQtyAnalysis(
-                  row.done_qty,
-                  row.requested_qty,
-                );
-
-                return (
-                  <tr key={`${row.id}-${index}`}>
-                    <td>{row.site_type}</td>
-                    <td>{row.project_code}</td>
-                    <td>{row.site_code}</td>
-                    <td>{row.item_code}</td>
-                    <td title={row.item_description}>
-                      <div className="desc-cell">{row.item_description}</div>
-                    </td>
-                    <td>{row.done_qty}</td>
-                    <td>{row.requested_qty ?? "-"}</td>
-                    <td>{analysis.diff}</td>
-                    <td>
-                      <span className={`analysisBadge ${analysis.className}`}>
-                        {analysis.label}
-                      </span>
-                    </td>
-                    <td>{row.subcon_name}</td>
-                    <td>{formatDateTR(row.onair_date)}</td>
-                    <td>{row.note}</td>
-
-                    <td>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "8px",
-                          flexWrap: "wrap",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="tab"
-                          style={{ padding: "8px 12px" }}
-                          onClick={() => handleEdit(row)}
-                          title="Kaydı düzenle"
-                        >
-                          Düzenle
-                        </button>
-
-                        <button
-                          type="button"
-                          className="tab"
-                          style={{
-                            padding: "8px 12px",
-                            background: "#fee2e2",
-                            color: "#991b1b",
-                          }}
-                          onClick={() => handleDelete(row)}
-                          title="Kaydı sil"
-                        >
-                          Sil
-                        </button>
-                      </div>
-                    </td>
-
-                    <td>{row.qc_durum || "-"}</td>
-                    <td>{row.kabul_durum || "-"}</td>
-                    <td>{row.kabul_not || "-"}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
       </div>
 
       <div className="tableWrap">
-        <h3 className="listTitle">Son Girilen İşler</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Saha Türü</th>
-              <th>Project</th>
-              <th>Site</th>
-              <th>Item Code</th>
-              <th>Açıklama</th>
-              <th>Done Qty</th>
-              <th>Requested Qty</th>
-              <th>Fark</th>
-              <th>Analiz</th>
-              <th>Currency</th>
-              <th>Unit Price</th>
-              <th>Status</th>
-              <th>PO No</th>
-              <th>Taşeron</th>
-              <th>QC Durum</th>
-              <th>Kabul Durum</th>
-              <th>Kabul Not</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <EmptyRow colSpan={15} text="Henüz iş girişi bulunamadı" />
-            ) : (
-              rows.map((row, index) => {
-                const analysis = getQtyAnalysis(
-                  row.done_qty,
-                  row.requested_qty,
-                );
+        <h3 className="listTitle">Bu Saha İçin Açılmış PO Kalemleri</h3>
+        <div style={{ marginBottom: "10px", fontSize: "14px" }}>
+          <strong>Toplam Adet:</strong> {poSummary.totalQty} &nbsp; | &nbsp;
+          <strong>Toplam Tutar:</strong> {formatTRY(poSummary.totalAmount)}
+        </div>
 
-                return (
-                  <tr key={`${row.id}-${index}`}>
-                    <td>{row.site_type}</td>
-                    <td>{row.project_code}</td>
-                    <td>{row.site_code}</td>
-                    <td>{row.item_code}</td>
-                    <td>{row.item_description}</td>
-                    <td>{row.done_qty}</td>
+        <div
+          style={{
+            maxHeight: "38vh",
+            overflowY: "auto",
+            overflowX: "auto",
+          }}
+        >
+          <table>
+            <thead>
+              <tr>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  PO No
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Project Code
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Site Code
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Item Code
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Item Description
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Requested Qty
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Due Qty
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Currency
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Unit Price
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {poRows.length === 0 ? (
+                <EmptyRow
+                  colSpan={9}
+                  text="Bu saha için PO kalemi bulunamadı"
+                />
+              ) : (
+                poRows.map((row, index) => (
+                  <tr key={`${row.po_no || "no-po"}-${row.item_code}-${index}`}>
+                    <td>{row.po_no || "-"}</td>
+                    <td>{row.project_code || "-"}</td>
+                    <td>{row.site_code || "-"}</td>
+                    <td>{row.item_code || "-"}</td>
+                    <td>{row.item_description || "-"}</td>
                     <td>{row.requested_qty ?? "-"}</td>
-                    <td>{analysis.diff}</td>
-                    <td>
-                      <span className={`analysisBadge ${analysis.className}`}>
-                        {analysis.label}
-                      </span>
-                    </td>
+                    <td>{row.due_qty ?? "-"}</td>
                     <td>{row.currency || "-"}</td>
                     <td>
                       {Number(row.unit_price || 0) === 0
                         ? "-"
                         : formatMoneyByCurrency(row.unit_price, row.currency)}
                     </td>
-                    <td>
-                      <StatusBadge status={row.status} />
-                    </td>
-                    <td>{row.po_no || "-"}</td>
-                    <td>{row.subcon_name}</td>
-                    <td>{row.qc_durum || "-"}</td>
-                    <td>{row.kabul_durum || "-"}</td>
-                    <td>{row.kabul_not || "-"}</td>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      <div className="tableWrap">
+        <div className="tableWrap">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr auto 1fr auto",
+              alignItems: "center",
+              gap: "12px",
+              marginBottom: "14px",
+            }}
+          >
+            <div style={{ fontSize: "14px", textAlign: "left" }}>
+              <strong>Toplam Adet:</strong> {entrySummary.totalQty} {" | "}
+              <strong>Toplam Tutar:</strong>{" "}
+              {formatTRY(entrySummary.totalAmount)}
+            </div>
+
+            <h3
+              className="listTitle"
+              style={{ margin: 0, textAlign: "center" }}
+            >
+              Bu Saha İçin Girilmiş İşler
+            </h3>
+
+            <div style={{ fontSize: "14px", textAlign: "right" }}>
+              <strong>Fark Adet:</strong> {farkQty} {" | "}
+              <strong>Fark Tutar:</strong> {formatTRY(farkTutar)}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              style={{
+                padding: "10px 16px",
+                background: "#e5e7eb",
+                border: "none",
+                borderRadius: "8px",
+                fontWeight: "600",
+                cursor: "pointer",
+              }}
+            >
+              Excel İndir
+            </button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            maxHeight: "38vh",
+            overflowY: "auto",
+            overflowX: "auto",
+          }}
+        >
+          <table>
+            <thead>
+              <tr>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Saha Türü
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Project
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Site
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Item Code
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Açıklama
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Done Qty
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Requested Qty
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Fark
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Analiz
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Taşeron
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  OnAir
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  RF Not
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  İşlem
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  QC Durum
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Kabul Durum
+                </th>
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  Kabul Not
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {siteEntries.length === 0 ? (
+                <EmptyRow colSpan={15} text="Bu saha için giriş yapılmamış" />
+              ) : (
+                siteEntries.map((row, index) => {
+                  const analysis = getQtyAnalysis(
+                    row.done_qty,
+                    row.requested_qty,
+                  );
+
+                  return (
+                    <tr key={`${row.id}-${index}`}>
+                      <td>{row.site_type}</td>
+                      <td>{row.project_code}</td>
+                      <td>{row.site_code}</td>
+                      <td>{row.item_code}</td>
+                      <td title={row.item_description}>
+                        <div className="desc-cell">{row.item_description}</div>
+                      </td>
+                      <td>{row.done_qty}</td>
+                      <td>{row.requested_qty ?? "-"}</td>
+                      <td>{analysis.diff}</td>
+                      <td>
+                        <span className={`analysisBadge ${analysis.className}`}>
+                          {analysis.label}
+                        </span>
+                      </td>
+                      <td>{row.subcon_name}</td>
+                      <td>{formatDateTR(row.onair_date)}</td>
+                      <td>{row.note}</td>
+                      <td>
+                        <td>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "8px",
+                              flexWrap: "nowrap",
+                              justifyContent: "center",
+                              alignItems: "center",
+                            }}
+                          >
+                            <button
+                              type="button"
+                              className="tab"
+                              style={{
+                                padding: "8px 14px",
+                                minWidth: "86px",
+                                borderRadius: "10px",
+                                fontWeight: "600",
+                                whiteSpace: "nowrap",
+                              }}
+                              onClick={() => handleEdit(row)}
+                              title="Kaydı düzenle"
+                            >
+                              Düzenle
+                            </button>
+
+                            <button
+                              type="button"
+                              className="tab"
+                              style={{
+                                padding: "8px 14px",
+                                minWidth: "70px",
+                                borderRadius: "10px",
+                                fontWeight: "600",
+                                whiteSpace: "nowrap",
+                                background: "#fee2e2",
+                                color: "#991b1b",
+                              }}
+                              onClick={() => handleDelete(row)}
+                              title="Kaydı sil"
+                            >
+                              Sil
+                            </button>
+                          </div>
+                        </td>
+                      </td>
+                      <td>{row.qc_durum || "-"}</td>
+                      <td>{row.kabul_durum || "-"}</td>
+                      <td>{row.kabul_not || "-"}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {showEntryModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={handleCancelEdit}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1100px",
+              maxHeight: "90vh",
+              overflow: "auto",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+                marginBottom: "18px",
+              }}
+            >
+              <h3 style={{ margin: 0 }}>
+                {editingId ? "Kaydı Düzenle" : "Yeni Veri Girişi"}
+              </h3>
+
+              <button type="button" className="tab" onClick={handleCancelEdit}>
+                Kapat
+              </button>
+            </div>
+
+            <form className="entryForm" onSubmit={handleSave}>
+              <div className="formGrid">
+                <div className="formGroup">
+                  <label>Saha Türü</label>
+                  <select
+                    name="site_type"
+                    value={form.site_type}
+                    onChange={handleChange}
+                  >
+                    <option value="5G">5G</option>
+                    <option value="DSS">DSS</option>
+                    <option value="LTE">LTE</option>
+                    <option value="STANDALONE">STANDALONE</option>
+                    <option value="Diğer">Diğer</option>
+                  </select>
+                </div>
+
+                <div className="formGroup">
+                  <label>Project Code</label>
+                  <select
+                    name="project_code"
+                    value={form.project_code}
+                    onChange={handleChange}
+                    required
+                  >
+                    <option value="">Seçiniz</option>
+                    <option value="56A0SJC">56A0SJC</option>
+                    <option value="56A0QEF">56A0QEF</option>
+                    <option value="56A0NCD">56A0NCD</option>
+                    <option value="56A0TCT">56A0TCT</option>
+                    {projectCodes
+                      .filter(
+                        (p) =>
+                          ![
+                            "56A0SJC",
+                            "56A0QEF",
+                            "56A0NCD",
+                            "56A0TCT",
+                          ].includes(p.project_code),
+                      )
+                      .map((p, i) => (
+                        <option
+                          key={`${p.project_code}-${i}`}
+                          value={p.project_code}
+                        >
+                          {p.project_code}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="formGroup">
+                  <label>Site Code</label>
+                  <input
+                    name="site_code"
+                    value={form.site_code}
+                    onChange={handleChange}
+                    placeholder="Örn: AT8227_NS_WM"
+                    required
+                  />
+                </div>
+
+                <div className="formGroup">
+                  <label>Done Qty</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    name="done_qty"
+                    value={form.done_qty}
+                    onChange={handleChange}
+                    placeholder="Örn: 2"
+                    required
+                  />
+                </div>
+
+                <div className="formGroup">
+                  <label>Subcon Name</label>
+                  <input
+                    name="subcon_name"
+                    value={form.subcon_name}
+                    onChange={handleChange}
+                    placeholder="Taşeron adı"
+                  />
+                </div>
+
+                <div className="formGroup">
+                  <label>OnAir Date</label>
+                  <DatePicker
+                    selected={parseTRDateToDate(form.onair_date)}
+                    onChange={(date) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        onair_date: formatDateToTR(date),
+                      }))
+                    }
+                    dateFormat="dd.MM.yyyy"
+                    placeholderText="GG.AA.YYYY"
+                    className="datePickerInput"
+                    isClearable
+                    showPopperArrow={false}
+                  />
+                </div>
+
+                <div
+                  className="formGroup"
+                  style={{ position: "relative" }}
+                  ref={itemCodeBoxRef}
+                >
+                  <label>Item Code</label>
+
+                  <input
+                    type="text"
+                    value={itemCodeSearch}
+                    onChange={(e) => {
+                      setItemCodeSearch(e.target.value);
+                      setShowItemCodeList(true);
+                    }}
+                    onFocus={() => setShowItemCodeList(true)}
+                    placeholder="Item code filtrele..."
+                    disabled={itemOptions.length === 0}
+                  />
+
+                  {showItemCodeList && filteredItemCodes.length > 0 && (
+                    <div className="filterDropdown">
+                      {filteredItemCodes.map((item, idx) => (
+                        <div
+                          key={`${item.item_code}-${idx}`}
+                          className="filterDropdownItem"
+                          onMouseDown={() => handleItemCodePick(item)}
+                        >
+                          {item.item_code}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <select
+                    name="item_code"
+                    value={form.item_code}
+                    onChange={handleChange}
+                    required
+                    disabled={itemOptions.length === 0}
+                    style={{ marginTop: "8px" }}
+                  >
+                    <option value="">
+                      {itemOptions.length === 0
+                        ? "Kayıt bulunamadı"
+                        : "Seçiniz"}
+                    </option>
+                    {itemOptions.map((item, idx) => (
+                      <option
+                        key={`${item.item_code}-${idx}`}
+                        value={item.item_code}
+                      >
+                        {item.item_code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div
+                  className="formGroup formGroupWide"
+                  style={{ position: "relative" }}
+                  ref={itemDescriptionBoxRef}
+                >
+                  <label className="itemDescLabel">
+                    🔎 Item Description (Buradan arayın)
+                  </label>
+
+                  <input
+                    className="itemDescHighlight"
+                    type="text"
+                    value={itemDescriptionSearch}
+                    onChange={(e) => {
+                      setItemDescriptionSearch(e.target.value);
+                      setShowItemDescriptionList(true);
+                    }}
+                    onFocus={() => setShowItemDescriptionList(true)}
+                    placeholder="🔎 Aramak için item description yazın..."
+                    disabled={itemOptions.length === 0}
+                  />
+
+                  {showItemDescriptionList &&
+                    filteredItemDescriptions.length > 0 && (
+                      <div className="filterDropdown">
+                        {filteredItemDescriptions.map((item, idx) => (
+                          <div
+                            key={`${item.item_code}-${idx}`}
+                            className="filterDropdownItem"
+                            onMouseDown={() => handleItemDescriptionPick(item)}
+                          >
+                            {item.item_description}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                  <select
+                    name="item_description"
+                    value={form.item_description}
+                    onChange={handleDescriptionChange}
+                    required
+                    disabled={itemOptions.length === 0}
+                    style={{ marginTop: "8px" }}
+                  >
+                    <option value="">
+                      {itemOptions.length === 0
+                        ? "Kayıt bulunamadı"
+                        : "Seçiniz"}
+                    </option>
+                    {itemOptions.map((item, idx) => (
+                      <option
+                        key={`${item.item_code}-${idx}`}
+                        value={item.item_description}
+                      >
+                        {item.item_description}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="formGroup">
+                  <label>QC Durum</label>
+                  <select
+                    name="qc_durum"
+                    value={form.qc_durum}
+                    onChange={handleChange}
+                  >
+                    <option value="OK">OK</option>
+                    <option value="NOK">NOK</option>
+                  </select>
+                </div>
+
+                <div className="formGroup">
+                  <label>Kabul Durum</label>
+                  <select
+                    name="kabul_durum"
+                    value={form.kabul_durum}
+                    onChange={handleChange}
+                  >
+                    <option value="OK">OK</option>
+                    <option value="NOK">NOK</option>
+                  </select>
+                </div>
+
+                <div className="formGroup formGroupWide">
+                  <label>Kabul Not</label>
+                  <textarea
+                    name="kabul_not"
+                    value={form.kabul_not}
+                    onChange={handleChange}
+                    placeholder="Kabul ile ilgili not"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="formGroup formGroupWide">
+                  <label>RF Not</label>
+                  <textarea
+                    name="note"
+                    value={form.note}
+                    onChange={handleChange}
+                    placeholder="RF ile ilgili not giriniz"
+                    rows={3}
+                  />
+                </div>
+              </div>
+
+              <div className="entryActions" style={{ gap: "10px" }}>
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={handleCancelEdit}
+                >
+                  Kapat
+                </button>
+
+                <button type="submit" className="saveButton" disabled={saving}>
+                  {saving
+                    ? "Kaydediliyor..."
+                    : editingId
+                      ? "Güncelle"
+                      : "Kaydet"}
+                </button>
+              </div>
+
+              {message && <div className="entryMessage">{message}</div>}
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -2254,214 +2764,6 @@ function FinanceInvoiceUploadInline({ onClose, onUploaded }) {
   );
 }
 
-function ManualInvoiceEntryInline({ onClose, onSaved }) {
-  const initialForm = {
-    invoice_no: "",
-    invoice_type: "GIDEN",
-    company_name: "",
-    description: "",
-    amount: "",
-    currency: "TRY",
-    invoice_date: "",
-    due_date: "",
-    status: "BEKLIYOR",
-    note: "",
-  };
-
-  const [form, setForm] = useState(initialForm);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  const handleSave = async (e) => {
-    e.preventDefault();
-    try {
-      setSaving(true);
-      setMessage("");
-
-      await fetchJson(`${API_BASE}/finance/invoice-entry/add`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...form,
-          amount: Number(form.amount || 0),
-        }),
-      });
-
-      setMessage("✅ Fatura kaydedildi");
-      setForm(initialForm);
-
-      if (onSaved) {
-        await onSaved();
-      }
-    } catch (err) {
-      console.error("MANUAL INVOICE SAVE ERROR:", err);
-      setMessage(`❌ ${err.message}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="entryPanel" style={{ marginBottom: "18px" }}>
-      <div className="entryForm">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "14px",
-            gap: "12px",
-            flexWrap: "wrap",
-          }}
-        >
-          <h3 className="listTitle" style={{ margin: 0 }}>
-            🧾 Fatura Girişi
-          </h3>
-
-          <button
-            type="button"
-            className="tab"
-            onClick={onClose}
-            style={{ padding: "10px 14px" }}
-          >
-            Kapat
-          </button>
-        </div>
-
-        <form onSubmit={handleSave}>
-          <div className="formGrid">
-            <div className="formGroup">
-              <label>Fatura No</label>
-              <input
-                name="invoice_no"
-                value={form.invoice_no}
-                onChange={handleChange}
-                placeholder="Fatura no"
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>Fatura Türü</label>
-              <select
-                name="invoice_type"
-                value={form.invoice_type}
-                onChange={handleChange}
-              >
-                <option value="GELEN">Gelen</option>
-                <option value="GIDEN">Giden</option>
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>Firma</label>
-              <input
-                name="company_name"
-                value={form.company_name}
-                onChange={handleChange}
-                placeholder="Firma adı"
-                required
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>Tutar</label>
-              <input
-                type="number"
-                step="0.01"
-                name="amount"
-                value={form.amount}
-                onChange={handleChange}
-                placeholder="0"
-                required
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>Para Birimi</label>
-              <select
-                name="currency"
-                value={form.currency}
-                onChange={handleChange}
-              >
-                <option value="TRY">TRY</option>
-                <option value="USD">USD</option>
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>Durum</label>
-              <select name="status" value={form.status} onChange={handleChange}>
-                <option value="BEKLIYOR">Bekliyor</option>
-                <option value="ODENDI">Ödendi</option>
-                <option value="KISMI">Kısmi</option>
-              </select>
-            </div>
-
-            <div className="formGroup">
-              <label>Fatura Tarihi</label>
-              <input
-                type="date"
-                name="invoice_date"
-                value={form.invoice_date}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div className="formGroup">
-              <label>Vade Tarihi</label>
-              <input
-                type="date"
-                name="due_date"
-                value={form.due_date}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div className="formGroup formGroupWide">
-              <label>Açıklama</label>
-              <input
-                name="description"
-                value={form.description}
-                onChange={handleChange}
-                placeholder="Açıklama"
-              />
-            </div>
-
-            <div className="formGroup formGroupWide">
-              <label>Not</label>
-              <textarea
-                name="note"
-                value={form.note}
-                onChange={handleChange}
-                rows={3}
-                placeholder="Not"
-              />
-            </div>
-          </div>
-
-          <div className="entryActions">
-            <button type="submit" className="saveButton" disabled={saving}>
-              {saving ? "Kaydediliyor..." : "Faturayı Kaydet"}
-            </button>
-          </div>
-
-          {message && <div className="entryMessage">{message}</div>}
-        </form>
-      </div>
-    </div>
-  );
-}
-
 function formatTLInput(value) {
   const numeric = String(value || "").replace(/[^\d]/g, "");
   if (!numeric) return "";
@@ -2496,6 +2798,7 @@ function formatDonemLabel(value) {
 }
 
 function FinanceDashboard({
+  user,
   financeToken,
   financeUserEmail,
   onFinanceLogout,
@@ -2549,6 +2852,14 @@ function FinanceDashboard({
     };
   }
 
+  const [usdTryRate, setUsdTryRate] = useState(0);
+  const [subconDetailRows, setSubconDetailRows] = useState([]);
+  const [selectedSubcontractor, setSelectedSubcontractor] = useState("");
+
+  const [subconFilter, setSubconFilter] = useState("");
+  const [subconSummaryRows, setSubconSummaryRows] = useState([]);
+  const [showSubconSummaryModal, setShowSubconSummaryModal] = useState(false);
+
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
 
@@ -2558,11 +2869,11 @@ function FinanceDashboard({
   const [showPersonFilterList, setShowPersonFilterList] = useState(false);
   const [salaryRows, setSalaryRows] = useState([]);
   const [editingSalaryId, setEditingSalaryId] = useState(null);
-  const [salarySearch, setSalarySearch] = useState("");
+
   const [manualInvoiceSearch, setManualInvoiceSearch] = useState("");
   const [manualInvoiceStatusFilter, setManualInvoiceStatusFilter] =
     useState("ALL");
-  const [showInvoiceEntry, setShowInvoiceEntry] = useState(false);
+
   const [manualInvoiceRows, setManualInvoiceRows] = useState([]);
   const [overdueRows, setOverdueRows] = useState([]);
   const [showOverdueModal, setShowOverdueModal] = useState(false);
@@ -2581,6 +2892,7 @@ function FinanceDashboard({
     overdue_total: 0,
   });
 
+  const [showInvoiceFormPanel, setShowInvoiceFormPanel] = useState(false);
   const [showInvoiceEntryModal, setShowInvoiceEntryModal] = useState(false);
   const [showSalaryModal, setShowSalaryModal] = useState(false);
 
@@ -2591,6 +2903,222 @@ function FinanceDashboard({
     String(new Date().getFullYear()),
   );
   const [salaryFilterPersonel, setSalaryFilterPersonel] = useState("");
+
+  const normalizeSubconName = (value) =>
+    String(value || "")
+      .trim()
+      .toLocaleUpperCase("tr-TR");
+
+  const recalculatedSubconSummaryRows = useMemo(() => {
+    const detailMap = new Map();
+
+    (subconDetailRows || []).forEach((row) => {
+      const subconName = normalizeSubconName(row.subcon_name);
+      if (!subconName) return;
+
+      const doneQty = Number(row.done_qty || 0);
+      const billedQty = Number(row.billed_qty || 0);
+      const unitPrice = Number(row.unit_price || 0);
+      const curr = String(row.currency || "TRY").toUpperCase();
+
+      const hakedisRaw = doneQty * unitPrice;
+      const faturayaHazirRaw = billedQty * unitPrice;
+
+      const hakedisTL =
+        curr === "USD" ? hakedisRaw * Number(usdTryRate || 0) : hakedisRaw;
+
+      const faturayaHazirTL =
+        curr === "USD"
+          ? faturayaHazirRaw * Number(usdTryRate || 0)
+          : faturayaHazirRaw;
+
+      if (!detailMap.has(subconName)) {
+        detailMap.set(subconName, {
+          subcon_name: subconName,
+          total_hakedis: 0,
+          total_faturaya_hazir: 0,
+        });
+      }
+
+      const existing = detailMap.get(subconName);
+      existing.total_hakedis += hakedisTL;
+      existing.total_faturaya_hazir += faturayaHazirTL;
+    });
+
+    return (subconSummaryRows || []).map((summaryRow) => {
+      const subconName = normalizeSubconName(summaryRow.subcon_name);
+      const recalculated = detailMap.get(subconName);
+
+      return {
+        ...summaryRow,
+        total_hakedis: Number(recalculated?.total_hakedis || 0),
+        total_faturaya_hazir: Number(recalculated?.total_faturaya_hazir || 0),
+        total_fatura: Number(summaryRow.total_fatura || 0),
+        total_odenen: Number(summaryRow.total_odenen || 0),
+        kalan_borc: Number(summaryRow.kalan_borc || 0),
+        fazla_odeme: Number(summaryRow.fazla_odeme || 0),
+      };
+    });
+  }, [subconDetailRows, subconSummaryRows, usdTryRate]);
+
+  const filteredSubconSummaryRows = useMemo(() => {
+    const q = subconFilter.toLowerCase().trim();
+
+    if (!q) return recalculatedSubconSummaryRows;
+
+    return recalculatedSubconSummaryRows.filter((row) =>
+      (row.subcon_name || "").toLowerCase().includes(q),
+    );
+  }, [recalculatedSubconSummaryRows, subconFilter]);
+
+  const subcontractorPeriodStats = useMemo(() => {
+    if (!selectedSubcontractor) return null;
+
+    const now = new Date();
+
+    const weekAgo = new Date();
+    weekAgo.setDate(now.getDate() - 7);
+
+    const monthAgo = new Date();
+    monthAgo.setMonth(now.getMonth() - 1);
+
+    let weekDoneQty = 0;
+    let monthDoneQty = 0;
+    let weekJobCount = 0;
+    let monthJobCount = 0;
+
+    (subconDetailRows || []).forEach((row) => {
+      if (row.subcon_name !== selectedSubcontractor) return;
+
+      const doneQty = Number(row.done_qty || 0);
+      const unitPrice = Number(row.unit_price || 0);
+
+      const curr = String(row.currency || "TRY").toUpperCase();
+
+      let total = doneQty * unitPrice;
+
+      if (curr === "USD") {
+        total = total * Number(usdTryRate || 0);
+      }
+
+      const date = row.onair_date ? new Date(row.onair_date) : null;
+
+      if (date && date >= weekAgo) {
+        weekDoneQty += total;
+        weekJobCount += 1;
+      }
+
+      if (date && date >= monthAgo) {
+        monthDoneQty += total;
+        monthJobCount += 1;
+      }
+    });
+
+    return {
+      weekDoneQty,
+      monthDoneQty,
+      weekJobCount,
+      monthJobCount,
+    };
+  }, [selectedSubcontractor, subconDetailRows, usdTryRate]);
+
+  const selectedSubcontractorSummary = useMemo(() => {
+    if (!selectedSubcontractor) return null;
+
+    return recalculatedSubconSummaryRows.find(
+      (row) => row.subcon_name === selectedSubcontractor,
+    );
+  }, [selectedSubcontractor, recalculatedSubconSummaryRows]);
+
+  const totalRow = useMemo(
+    () =>
+      filteredSubconSummaryRows.reduce(
+        (acc, row) => {
+          acc.total_hakedis += Number(row.total_hakedis || 0);
+          acc.total_faturaya_hazir += Number(row.total_faturaya_hazir || 0);
+          acc.total_fatura += Number(row.total_fatura || 0);
+          acc.total_odenen += Number(row.total_odenen || 0);
+          acc.kalan_borc += Number(row.kalan_borc || 0);
+          acc.fazla_odeme += Number(row.fazla_odeme || 0);
+          return acc;
+        },
+        {
+          total_hakedis: 0,
+          total_faturaya_hazir: 0,
+          total_fatura: 0,
+          total_odenen: 0,
+          kalan_borc: 0,
+          fazla_odeme: 0,
+        },
+      ),
+    [filteredSubconSummaryRows],
+  );
+
+  const filteredSubconDetailRows = useMemo(() => {
+    const q = subconFilter.toLowerCase().trim();
+
+    let rows = subconDetailRows || [];
+
+    if (q) {
+      rows = rows.filter((row) =>
+        (row.subcon_name || "").toLowerCase().includes(q),
+      );
+    }
+
+    return rows;
+  }, [subconDetailRows, subconFilter]);
+
+  const handleExportFilteredSubconExcel = () => {
+    if (!filteredSubconDetailRows.length) {
+      alert("İndirilecek kayıt bulunamadı");
+      return;
+    }
+
+    const excelRows = filteredSubconDetailRows.map((row) => {
+      const billedQty = Number(row.billed_qty || 0);
+      const doneQty = Number(row.done_qty || 0);
+      const unitPrice = Number(row.unit_price || 0);
+      const rawTotal = doneQty * unitPrice;
+      const curr = String(row.currency || "TRY").toUpperCase();
+      const totalTl =
+        curr === "USD" ? rawTotal * Number(usdTryRate || 0) : rawTotal;
+
+      return {
+        Bölge: getRegion(row.site_code) || "",
+        Status: row.status || "",
+        Project: row.project_code || "",
+        Site: row.site_code || "",
+        Item: row.item_code || "",
+        "Item Description": row.item_description || "",
+        Done: doneQty,
+        Req: Number(row.requested_qty || 0),
+        Analiz: getQtyAnalysis(row.done_qty, row.requested_qty).label,
+        Billed: billedQty,
+        Curr: curr,
+        Unit: unitPrice,
+        Total: Number(totalTl.toFixed(2)),
+        Subcon: row.subcon_name || "",
+        OnAir: formatDateTR(row.onair_date),
+        QC: row.qc_durum || "",
+        Kabul: row.kabul_durum || "",
+        "RF Not": row.kabul_not || "",
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(excelRows);
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Subcon Detail");
+
+    const safeName = subconFilter
+      ? subconFilter.replace(/[^\wğüşöçıİĞÜŞÖÇ -]/gi, "").replace(/\s+/g, "_")
+      : "tum_taseronlar";
+
+    XLSX.writeFile(
+      workbook,
+      `subcon_detail_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
+  };
 
   const supplierOptions = useMemo(() => {
     const names = (manualInvoiceRows || [])
@@ -2617,6 +3145,16 @@ function FinanceDashboard({
     setSupplierSuggestions(filtered);
   };
 
+  const loadSubconDetailRows = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE}/master/list-detailed`);
+      setSubconDetailRows(data.rows || []);
+    } catch (err) {
+      console.error("SUBCON DETAIL LOAD ERROR:", err);
+      alert(err.message || "Taşeron detay verisi alınamadı");
+    }
+  };
+
   const [invoiceForm, setInvoiceForm] = useState({
     bolge: "",
     proje: "",
@@ -2624,6 +3162,7 @@ function FinanceDashboard({
     fatura_no: "",
     fatura_tarihi: "",
     tedarikci: "",
+    rf_montaj_firma: "",
     fatura_kalemi: "",
     is_kalemi: "",
     po_no: "",
@@ -2848,6 +3387,35 @@ function FinanceDashboard({
     }));
   }, []);
 
+  const handleShowSubconSummary = async () => {
+    try {
+      const [summaryData, detailData] = await Promise.all([
+        fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`),
+        fetchJson(`${API_BASE}/master/list-detailed`),
+      ]);
+
+      setSubconSummaryRows(summaryData.rows || []);
+      setUsdTryRate(Number(summaryData.usd_try_rate || 0));
+      setSubconDetailRows(detailData.rows || []);
+      setShowSubconSummaryModal(true);
+    } catch (err) {
+      console.error("SUBCON SUMMARY LOAD ERROR:", err);
+      alert(err.message || "Taşeron hakediş özeti alınamadı");
+    }
+  };
+
+  useEffect(() => {
+    if (showInvoiceEntryModal) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "auto";
+    }
+
+    return () => {
+      document.body.style.overflow = "auto";
+    };
+  }, [showInvoiceEntryModal]);
+
   useEffect(() => {
     fetchJson(`${API_BASE}/finance/personel/list`, { withAuth: true })
       .then((data) => setPersonnelMaster(data.rows || []))
@@ -2869,7 +3437,6 @@ function FinanceDashboard({
       String(salaryForm.banka_maliyeti || "0").replace(/[^\d]/g, ""),
     );
 
-    const kalanNetOdeme = Math.max(netMaas - avans, 0);
     const bankayaYatacakNet = Math.max(kalanNetOdeme - elden, 0);
     const toplamIsverenMaliyeti = bankaMaliyeti + elden;
 
@@ -2905,6 +3472,18 @@ function FinanceDashboard({
       elden_net: kalan - banka,
     }));
   }, [salaryForm.banka_net, salaryForm.kalan_maas]);
+
+  useEffect(() => {
+    if (showSubconSummaryModal) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [showSubconSummaryModal]);
 
   const kalanNetOdeme = useMemo(() => {
     const netMaas = Number(salaryForm.net_maas || 0);
@@ -2968,6 +3547,7 @@ function FinanceDashboard({
         ? String(row.fatura_tarihi).slice(0, 10)
         : "",
       tedarikci: row.tedarikci || "",
+      rf_montaj_firma: row.rf_montaj_firma || "",
       fatura_kalemi: row.fatura_kalemi || "",
       is_kalemi: row.is_kalemi || "",
       po_no: row.po_no || "",
@@ -2980,7 +3560,10 @@ function FinanceDashboard({
       note: row.note || "",
     });
 
+    setShowUpload(false);
+    setShowInvoiceUpload(false);
     setShowInvoiceEntryModal(true);
+    setShowInvoiceFormPanel(true);
   };
 
   const handleSaveManualInvoice = async (e) => {
@@ -3012,6 +3595,7 @@ function FinanceDashboard({
         fatura_no: invoiceForm.fatura_no,
         fatura_tarihi: invoiceForm.fatura_tarihi || null,
         tedarikci: invoiceForm.tedarikci,
+        rf_montaj_firma: invoiceForm.rf_montaj_firma,
         fatura_kalemi: invoiceForm.fatura_kalemi,
         is_kalemi: invoiceForm.is_kalemi,
         po_no: invoiceForm.po_no,
@@ -3023,6 +3607,7 @@ function FinanceDashboard({
         kalan_borc: Number(invoiceForm.kalan_borc || 0),
         note: invoiceForm.note,
       };
+      console.log("MANUAL INVOICE PAYLOAD:", payload);
 
       if (editingInvoiceId) {
         await fetchJson(
@@ -3054,6 +3639,7 @@ function FinanceDashboard({
         fatura_no: "",
         fatura_tarihi: "",
         tedarikci: "",
+        rf_montaj_firma: "",
         fatura_kalemi: "",
         is_kalemi: "",
         po_no: "",
@@ -3066,6 +3652,7 @@ function FinanceDashboard({
         note: "",
       });
       setEditingInvoiceId(null);
+      setShowInvoiceFormPanel(false);
 
       await loadFinance();
     } catch (err) {
@@ -3110,33 +3697,43 @@ function FinanceDashboard({
 
   const handleExportInvoiceDatabase = async () => {
     try {
-      const response = await fetch(
-        `${API_BASE}/finance/invoice-entry/export-excel`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("finance_token") || ""}`,
-          },
+      const params = new URLSearchParams();
+
+      if (manualInvoiceSearch?.trim()) {
+        params.append("query", manualInvoiceSearch.trim());
+      }
+
+      if (manualInvoiceStatusFilter && manualInvoiceStatusFilter !== "ALL") {
+        params.append("status", manualInvoiceStatusFilter);
+      }
+
+      const queryString = params.toString();
+      const url = `${API_BASE}/finance/invoice-entry/export-excel${queryString ? `?${queryString}` : ""}`;
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("finance_token") || ""}`,
         },
-      );
+      });
 
       if (!response.ok) {
         throw new Error("Excel indirilemedi");
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      const downloadUrl = window.URL.createObjectURL(blob);
 
       const a = document.createElement("a");
-      a.href = url;
+      a.href = downloadUrl;
       a.download = `invoice_database_${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
 
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(downloadUrl);
     } catch (err) {
       console.error("INVOICE EXPORT ERROR:", err);
-      alert("Fatura database indirilemedi");
+      alert(err.message || "Fatura database indirilemedi");
     }
   };
 
@@ -3265,13 +3862,6 @@ function FinanceDashboard({
     loadFinance();
   }, [loadFinance]);
 
-  const filteredDayTotal = useMemo(() => {
-    return paymentRows.reduce((sum, row) => {
-      const amount = Number(row.payment_amount || 0);
-      return sum + amount;
-    }, 0);
-  }, [paymentRows]);
-
   const sortedPaymentRows = useMemo(() => {
     return [...paymentRows].sort((a, b) => {
       // boş kontrol
@@ -3368,13 +3958,9 @@ function FinanceDashboard({
         <div>
           <h1 style={{ margin: "0 0 6px 0" }}>💰 Finance Dashboard</h1>
           <div style={{ fontSize: "14px", color: "#6b7280" }}>
-            Giriş yapan: {financeUserEmail}
+            Giriş yapan: <b>{user?.name || financeUserEmail}</b>
           </div>
         </div>
-
-        <button type="button" className="tab" onClick={onFinanceLogout}>
-          Çıkış Yap
-        </button>
       </div>
 
       <div
@@ -3416,7 +4002,33 @@ function FinanceDashboard({
           className={
             showInvoiceEntryModal ? "tab activeTab smallTab" : "tab smallTab"
           }
-          onClick={() => setShowInvoiceEntryModal(true)}
+          onClick={() => {
+            setShowInvoiceEntryModal(true);
+            setShowInvoiceFormPanel(false);
+            setShowInvoiceUpload(false);
+            setShowUpload(false);
+            setEditingInvoiceId(null);
+
+            setInvoiceForm({
+              bolge: "",
+              proje: "",
+              proje_kodu: "",
+              fatura_no: "",
+              fatura_tarihi: "",
+              tedarikci: "",
+              rf_montaj_firma: "",
+              fatura_kalemi: "",
+              is_kalemi: "",
+              po_no: "",
+              site_id: "",
+              tutar: "",
+              kdv: "",
+              toplam_tutar: "",
+              odenen_tutar: "",
+              kalan_borc: "",
+              note: "",
+            });
+          }}
         >
           Fatura Girişi
         </button>
@@ -3429,6 +4041,15 @@ function FinanceDashboard({
           onClick={handleMaasAvansClick}
         >
           Maaş & Avans
+        </button>
+        <button
+          type="button"
+          className="tab smallTab"
+          onClick={() => {
+            handleShowSubconSummary();
+          }}
+        >
+          Taşeron Hakediş
         </button>
       </div>
 
@@ -3450,13 +4071,6 @@ function FinanceDashboard({
         <FinanceInvoiceUploadInline
           onClose={() => setShowInvoiceUpload(false)}
           onUploaded={loadFinance}
-        />
-      )}
-
-      {showInvoiceEntry && (
-        <ManualInvoiceEntryInline
-          onClose={() => setShowInvoiceEntry(false)}
-          onSaved={loadFinance}
         />
       )}
 
@@ -3609,18 +4223,80 @@ function FinanceDashboard({
         </table>
       </div>
 
-      <div className="tableWrap">
-        <h3 className="listTitle">Huawei Payment Kayıtları</h3>
+      <h3 className="listTitle">Huawei Payment Kayıtları</h3>
 
+      <div
+        className="tableWrap"
+        style={{
+          maxHeight: "50vh",
+          overflowY: "auto",
+          overflowX: "auto",
+          marginTop: "12px",
+        }}
+      >
         <table>
           <thead>
             <tr>
-              <th>Invoice No</th>
-              <th>Invoice Amount</th>
-              <th>Payment Amount</th>
-              <th>Remaining Amount</th>
-              <th>Payment Date</th>
-              <th>Due Date</th>
+              <th
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  background: "#f3f4f6",
+                  zIndex: 2,
+                }}
+              >
+                Invoice No
+              </th>
+              <th
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  background: "#f3f4f6",
+                  zIndex: 2,
+                }}
+              >
+                Invoice Amount
+              </th>
+              <th
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  background: "#f3f4f6",
+                  zIndex: 2,
+                }}
+              >
+                Payment Amount
+              </th>
+              <th
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  background: "#f3f4f6",
+                  zIndex: 2,
+                }}
+              >
+                Remaining Amount
+              </th>
+              <th
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  background: "#f3f4f6",
+                  zIndex: 2,
+                }}
+              >
+                Payment Date
+              </th>
+              <th
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  background: "#f3f4f6",
+                  zIndex: 2,
+                }}
+              >
+                Due Date
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -3763,29 +4439,37 @@ function FinanceDashboard({
             zIndex: 9999,
             padding: "20px",
           }}
-          onClick={() => setShowInvoiceEntryModal(false)}
+          onClick={() => {
+            setShowInvoiceEntryModal(false);
+            setShowInvoiceFormPanel(false);
+            setEditingInvoiceId(null);
+          }}
         >
           <div
             style={{
               background: "#fff",
               width: "100%",
-              maxWidth: "1200px",
-              maxHeight: "90vh",
-              overflow: "auto",
+              maxWidth: "1280px",
+              height: "90vh",
               borderRadius: "24px",
-              padding: "24px",
+              padding: 0,
               boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
             }}
             onClick={(e) => e.stopPropagation()}
           >
+            {/* HEADER */}
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                marginBottom: "20px",
-                gap: "12px",
-                flexWrap: "wrap",
+                padding: "20px 24px",
+                borderBottom: "1px solid #e5e7eb",
+                background: "#fff",
+                flexShrink: 0,
               }}
             >
               <h3 className="listTitle" style={{ margin: 0 }}>
@@ -3795,266 +4479,48 @@ function FinanceDashboard({
               <button
                 type="button"
                 className="tab"
-                onClick={() => setShowInvoiceEntryModal(false)}
+                onClick={() => {
+                  setShowInvoiceEntryModal(false);
+                  setShowInvoiceFormPanel(false);
+                  setEditingInvoiceId(null);
+                }}
               >
                 Kapat
               </button>
             </div>
 
-            <form onSubmit={handleSaveManualInvoice}>
-              <div className="formGrid">
-                <div className="formGroup">
-                  <label>Bölge</label>
-                  <input
-                    name="bolge"
-                    value={invoiceForm.bolge}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Antalya / İzmir / Ankara"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Proje</label>
-                  <input
-                    name="proje"
-                    value={invoiceForm.proje}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="TT / TC"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Proje Kodu</label>
-                  <input
-                    name="proje_kodu"
-                    value={invoiceForm.proje_kodu}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="56A0QEF"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Fatura No</label>
-                  <input
-                    name="fatura_no"
-                    value={invoiceForm.fatura_no}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Fatura no"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Fatura Tarihi</label>
-                  <input
-                    type="date"
-                    name="fatura_tarihi"
-                    value={invoiceForm.fatura_tarihi}
-                    onChange={handleInvoiceFormChange}
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Tedarikçi</label>
-                  <input
-                    name="tedarikci"
-                    value={invoiceForm.tedarikci}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Firma / Tedarikçi"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Fatura Kalemi</label>
-                  <input
-                    name="fatura_kalemi"
-                    value={invoiceForm.fatura_kalemi}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Örn: Oda/Room (Konaklama)"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>İş Kalemi</label>
-                  <input
-                    name="is_kalemi"
-                    value={invoiceForm.is_kalemi}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Örn: KONAKLAMA / PROJE"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>PO No</label>
-                  <input
-                    name="po_no"
-                    value={invoiceForm.po_no}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="PO numarası"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Site ID</label>
-                  <input
-                    name="site_id"
-                    value={invoiceForm.site_id}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="BU8944"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Tutar (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="tutar"
-                    value={invoiceForm.tutar}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>KDV (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="kdv"
-                    value={invoiceForm.kdv}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Toplam Tutar (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="toplam_tutar"
-                    value={invoiceForm.toplam_tutar}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Ödenen Tutar (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="odenen_tutar"
-                    value={invoiceForm.odenen_tutar}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Kalan Borç (₺)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="kalan_borc"
-                    value={invoiceForm.kalan_borc}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="0"
-                  />
-                </div>
-
-                <div className="formGroup formGroupWide">
-                  <label>Not</label>
-                  <textarea
-                    name="note"
-                    value={invoiceForm.note}
-                    onChange={handleInvoiceFormChange}
-                    placeholder="Not"
-                    rows={3}
-                  />
-                </div>
-              </div>
-
-              <div
-                className="entryActions"
-                style={{
-                  justifyContent: "flex-end",
-                  display: "flex",
-                  gap: "10px",
-                }}
-              >
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={() => setAdvanceModalOpen(true)}
-                >
-                  Avans Gir
-                </button>
-
-                <button type="submit" className="saveButton">
-                  Faturayı Kaydet
-                </button>
-              </div>
-            </form>
-
-            {/* 📊 ÖZET KARTLAR */}
+            {/* TOOLBAR */}
             <div
-              className="cards"
-              style={{ marginTop: "18px", marginBottom: "18px" }}
+              style={{
+                padding: "16px 24px",
+                borderBottom: "1px solid #e5e7eb",
+                display: "flex",
+                gap: "12px",
+                flexWrap: "wrap",
+                alignItems: "center",
+                background: "#f8fafc",
+                flexShrink: 0,
+              }}
             >
-              <div className="card ok statCard">
-                <div className="statLabel">Toplam Fatura</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalAmount,
-                    "TRY",
-                  )}
-                </div>
-              </div>
-
-              <div className="card partial statCard">
-                <div className="statLabel">Ödenen</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(manualInvoiceSummary.totalPaid, "TRY")}
-                </div>
-              </div>
-
-              <div className="card cancel statCard">
-                <div className="statLabel">Kalan Borç</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalRemaining,
-                    "TRY",
-                  )}
-                </div>
-              </div>
-
-              <div className="card bekler statCard">
-                <div className="statLabel">Bekleyen</div>
-                <div className="statValue">
-                  {manualInvoiceSummary.waitingCount}
-                </div>
-              </div>
-            </div>
-
-            {/* 🔍 ARAMA + FİLTRE */}
-            <div className="toolbar" style={{ marginBottom: "16px" }}>
               <input
-                className="search"
-                placeholder="Fatura no, tedarikçi, proje, site ara"
+                type="text"
                 value={manualInvoiceSearch}
                 onChange={(e) => setManualInvoiceSearch(e.target.value)}
+                placeholder="Tedarikçi / fatura no / proje / site / PO ara"
+                style={{
+                  flex: "1 1 360px",
+                  minWidth: "280px",
+                }}
               />
 
               <select
-                className="select"
                 value={manualInvoiceStatusFilter}
                 onChange={(e) => setManualInvoiceStatusFilter(e.target.value)}
+                style={{ minWidth: "180px" }}
               >
-                <option value="ALL">Tümü</option>
-                <option value="BEKLIYOR">Bekliyor</option>
-                <option value="KISMI">Kısmi</option>
-                <option value="ODENDI">Ödendi</option>
+                <option value="ALL">Tüm Durumlar</option>
+                <option value="BEKLIYOR">Bekleyenler</option>
+                <option value="ODENDI">Ödenenler</option>
               </select>
 
               <button
@@ -4064,84 +4530,420 @@ function FinanceDashboard({
               >
                 Excel İndir
               </button>
+
+              <button
+                type="button"
+                className="saveButton"
+                onClick={() => {
+                  setEditingInvoiceId(null);
+                  setInvoiceForm({
+                    bolge: "",
+                    proje: "",
+                    proje_kodu: "",
+                    fatura_no: "",
+                    fatura_tarihi: "",
+                    tedarikci: "",
+                    rf_montaj_firma: "",
+                    fatura_kalemi: "",
+                    is_kalemi: "",
+                    po_no: "",
+                    site_id: "",
+                    tutar: "",
+                    kdv: "",
+                    toplam_tutar: "",
+                    odenen_tutar: "",
+                    kalan_borc: "",
+                    note: "",
+                  });
+                  setShowInvoiceFormPanel(true);
+                }}
+              >
+                Yeni Fatura Gir
+              </button>
             </div>
 
-            {/* 📋 TABLO */}
-            <div className="tableWrap">
-              <h3 className="listTitle">Girilen Faturalar</h3>
-
-              <table>
-                <thead>
-                  <tr>
-                    <th>Bölge</th>
-                    <th>Proje</th>
-
-                    <th>Fatura No</th>
-                    <th>Tedarikçi</th>
-                    <th>Fatura Tarihi</th>
-                    <th>Toplam</th>
-                    <th>Ödenen</th>
-                    <th>Kalan</th>
-                    <th>Durum</th>
-                    <th>İşlem</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {filteredManualInvoiceRows.length === 0 ? (
-                    <EmptyRow colSpan={9} text="Kayıt yok" />
-                  ) : (
-                    filteredManualInvoiceRows.map((row, i) => (
-                      <tr key={row.id ?? i}>
-                        <td>{row.bolge || "-"}</td>
-                        <td>{row.proje || "-"}</td>
-
-                        <td>{row.fatura_no || "-"}</td>
-                        <td>{row.tedarikci || "-"}</td>
-                        <td>{formatDateOnly(row.fatura_tarihi)}</td>
-                        <td>
-                          {formatMoneyByCurrency(row.toplam_tutar || 0, "TRY")}
-                        </td>
-                        <td>
-                          {formatMoneyByCurrency(row.odenen_tutar || 0, "TRY")}
-                        </td>
-                        <td>
-                          {formatMoneyByCurrency(row.kalan_borc || 0, "TRY")}
-                        </td>
-                        <td>
-                          <span
-                            className={`badge ${
-                              Number(row.kalan_borc || 0) > 0 ? "bekler" : "ok"
-                            }`}
-                          >
-                            {Number(row.kalan_borc || 0) > 0
-                              ? "Bekliyor"
-                              : "Ödendi"}
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="tab"
-                            onClick={() => handleEditManualInvoice(row)}
-                          >
-                            Düzenle
-                          </button>
-
-                          <button
-                            type="button"
-                            className="tab danger"
-                            onClick={() => handleDeleteManualInvoice(row)}
-                          >
-                            Sil
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+            {/* SUMMARY */}
+            <div
+              style={{
+                padding: "16px 24px",
+                display: "flex",
+                gap: "12px",
+                flexWrap: "wrap",
+                borderBottom: "1px solid #e5e7eb",
+                flexShrink: 0,
+              }}
+            >
+              <div className="card ok statCard" style={{ minWidth: "220px" }}>
+                <div className="statLabel">Toplam Tutar</div>
+                <div className="statValue">
+                  {formatMoneyByCurrency(
+                    manualInvoiceSummary.totalAmount || 0,
+                    "TRY",
                   )}
-                </tbody>
-              </table>
+                </div>
+              </div>
+
+              <div
+                className="card bekler statCard"
+                style={{ minWidth: "220px" }}
+              >
+                <div className="statLabel">Toplam Ödenen</div>
+                <div className="statValue">
+                  {formatMoneyByCurrency(
+                    manualInvoiceSummary.totalPaid || 0,
+                    "TRY",
+                  )}
+                </div>
+              </div>
+
+              <div
+                className="card cancel statCard"
+                style={{ minWidth: "220px" }}
+              >
+                <div className="statLabel">Kalan Borç</div>
+                <div className="statValue">
+                  {formatMoneyByCurrency(
+                    manualInvoiceSummary.totalRemaining || 0,
+                    "TRY",
+                  )}
+                </div>
+              </div>
             </div>
+
+            {/* TABLE */}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflow: "auto",
+                padding: "16px 24px 24px 24px",
+              }}
+            >
+              <div className="tableWrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Bölge</th>
+                      <th>Proje</th>
+                      <th>Proje Kodu</th>
+                      <th>Fatura No</th>
+                      <th>Fatura Tarihi</th>
+                      <th>Tedarikçi</th>
+                      <th>PO No</th>
+                      <th>Site ID</th>
+                      <th>Toplam</th>
+                      <th>Ödenen</th>
+                      <th>Kalan</th>
+                      <th>İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredManualInvoiceRows.length === 0 ? (
+                      <EmptyRow colSpan={12} text="Kayıt bulunamadı" />
+                    ) : (
+                      filteredManualInvoiceRows.map((row, index) => (
+                        <tr key={row.id ?? index}>
+                          <td>{row.bolge || "-"}</td>
+                          <td>{row.proje || "-"}</td>
+                          <td>{row.proje_kodu || "-"}</td>
+                          <td>{row.fatura_no || "-"}</td>
+                          <td>{formatDateOnly(row.fatura_tarihi)}</td>
+                          <td>{row.tedarikci || "-"}</td>
+                          <td>{row.po_no || "-"}</td>
+                          <td>{row.site_id || "-"}</td>
+                          <td>{formatTRY(row.toplam_tutar || 0)}</td>
+                          <td>{formatTRY(row.odenen_tutar || 0)}</td>
+                          <td>{formatTRY(row.kalan_borc || 0)}</td>
+                          <td>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                type="button"
+                                className="tab"
+                                onClick={() => {
+                                  handleEditManualInvoice(row);
+                                  setShowInvoiceFormPanel(true);
+                                }}
+                              >
+                                Düzenle
+                              </button>
+
+                              <button
+                                type="button"
+                                className="tab danger"
+                                onClick={() => handleDeleteManualInvoice(row)}
+                              >
+                                Sil
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* FORM PANEL */}
+            {showInvoiceFormPanel && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(255,255,255,0.96)",
+                  zIndex: 20,
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "20px 24px",
+                    borderBottom: "1px solid #e5e7eb",
+                    flexShrink: 0,
+                  }}
+                >
+                  <h3 className="listTitle" style={{ margin: 0 }}>
+                    {editingInvoiceId
+                      ? "🧾 Fatura Düzenle"
+                      : "🧾 Yeni Fatura Girişi"}
+                  </h3>
+
+                  <button
+                    type="button"
+                    className="tab"
+                    onClick={() => {
+                      setShowInvoiceFormPanel(false);
+                      setEditingInvoiceId(null);
+                    }}
+                  >
+                    Geri Dön
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflowY: "auto",
+                    padding: "24px",
+                  }}
+                >
+                  <form onSubmit={handleSaveManualInvoice}>
+                    <div className="formGrid">
+                      <div className="formGroup">
+                        <label>Bölge</label>
+                        <input
+                          name="bolge"
+                          value={invoiceForm.bolge}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Antalya / İzmir / Ankara"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Proje</label>
+                        <input
+                          name="proje"
+                          value={invoiceForm.proje}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="TT / TC"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Proje Kodu</label>
+                        <input
+                          name="proje_kodu"
+                          value={invoiceForm.proje_kodu}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="56A0QEF"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Fatura No</label>
+                        <input
+                          name="fatura_no"
+                          value={invoiceForm.fatura_no}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Fatura no"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Fatura Tarihi</label>
+                        <input
+                          type="date"
+                          name="fatura_tarihi"
+                          value={invoiceForm.fatura_tarihi}
+                          onChange={handleInvoiceFormChange}
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Tedarikçi</label>
+                        <input
+                          name="tedarikci"
+                          value={invoiceForm.tedarikci}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Firma / Tedarikçi"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Fatura Kalemi</label>
+                        <input
+                          name="fatura_kalemi"
+                          value={invoiceForm.fatura_kalemi}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Örn: Oda/Room (Konaklama)"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>İş Kalemi</label>
+                        <input
+                          name="is_kalemi"
+                          value={invoiceForm.is_kalemi}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Örn: KONAKLAMA / PROJE"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>PO No</label>
+                        <input
+                          name="po_no"
+                          value={invoiceForm.po_no}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="PO numarası"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Site ID</label>
+                        <input
+                          name="site_id"
+                          value={invoiceForm.site_id}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="BU8944"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Tutar (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="tutar"
+                          value={invoiceForm.tutar}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>KDV (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="kdv"
+                          value={invoiceForm.kdv}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Toplam Tutar (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="toplam_tutar"
+                          value={invoiceForm.toplam_tutar}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Ödenen Tutar (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="odenen_tutar"
+                          value={invoiceForm.odenen_tutar}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>Kalan Borç (₺)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="kalan_borc"
+                          value={invoiceForm.kalan_borc}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="formGroup">
+                        <label>RF Montaj Firma</label>
+                        <input
+                          name="rf_montaj_firma"
+                          value={invoiceForm.rf_montaj_firma}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Subcon Name ile aynı firma adı"
+                        />
+                      </div>
+
+                      <div className="formGroup formGroupWide">
+                        <label>Not</label>
+                        <textarea
+                          name="note"
+                          value={invoiceForm.note}
+                          onChange={handleInvoiceFormChange}
+                          placeholder="Not"
+                          rows={3}
+                        />
+                      </div>
+                    </div>
+
+                    <div
+                      className="entryActions"
+                      style={{
+                        justifyContent: "flex-end",
+                        display: "flex",
+                        gap: "10px",
+                        marginTop: "16px",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="tab"
+                        onClick={() => {
+                          setShowInvoiceFormPanel(false);
+                          setEditingInvoiceId(null);
+                        }}
+                      >
+                        Vazgeç
+                      </button>
+
+                      <button type="submit" className="saveButton">
+                        {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -5137,6 +5939,304 @@ function FinanceDashboard({
           </div>
         </div>
       )}
+
+      {showSubconSummaryModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-start",
+            overflowY: "auto",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={() => setShowSubconSummaryModal(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1200px",
+              maxHeight: "85vh",
+              overflowY: "auto",
+              overflowX: "hidden",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* SAĞ TARAF */}
+
+            <div style={{ marginBottom: "18px" }}>
+              {/* 1. SATIR */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto auto",
+                  alignItems: "center",
+                  gap: "16px",
+                  marginBottom: "14px",
+                }}
+              >
+                {/* SOL */}
+                <h3 className="listTitle" style={{ margin: 0 }}>
+                  Taşeron Bazlı İş Tamamlama & Faturalama Özeti
+                </h3>
+
+                {/* ORTA */}
+                <div
+                  style={{ display: "flex", gap: "12px", alignItems: "center" }}
+                >
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      color: "#0e7490",
+                      background: "#ecfeff",
+                      border: "1px solid #67e8f9",
+                      padding: "6px 10px",
+                      borderRadius: "8px",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    USD/TRY: {usdTryRate ? usdTryRate.toFixed(4) : "-"}
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Taşeron ara..."
+                    value={subconFilter}
+                    onChange={(e) => setSubconFilter(e.target.value)}
+                    style={{
+                      width: "220px",
+                      padding: "10px",
+                      borderRadius: "8px",
+                      border: "1px solid #ddd",
+                    }}
+                  />
+                </div>
+
+                {/* SAĞ */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "10px",
+                    justifyContent: "flex-end",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="tab"
+                    onClick={handleExportFilteredSubconExcel}
+                  >
+                    Excel İndir
+                  </button>
+
+                  <button
+                    type="button"
+                    className="tab"
+                    onClick={() => setShowSubconSummaryModal(false)}
+                  >
+                    Kapat
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. SATIR (KARTLAR) */}
+              {selectedSubcontractor && subcontractorPeriodStats && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "#16a34a",
+                      color: "#fff",
+                      padding: "10px 14px",
+                      borderRadius: "10px",
+                      minWidth: "150px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px" }}>Bu Hafta</div>
+                    <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                      {formatMoneyByCurrency(
+                        subcontractorPeriodStats.weekDoneQty || 0,
+                        "TRY",
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px" }}>
+                      {subcontractorPeriodStats.weekJobCount || 0} kayıt
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#f97316",
+                      color: "#fff",
+                      padding: "10px 14px",
+                      borderRadius: "10px",
+                      minWidth: "150px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px" }}>Bu Ay</div>
+                    <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                      {formatMoneyByCurrency(
+                        subcontractorPeriodStats.monthDoneQty || 0,
+                        "TRY",
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px" }}>
+                      {subcontractorPeriodStats.monthJobCount || 0} kayıt
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "#1f2937",
+                      color: "#fff",
+                      padding: "10px 14px",
+                      borderRadius: "10px",
+                      minWidth: "150px",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px" }}>Toplam</div>
+                    <div style={{ fontSize: "16px", fontWeight: 700 }}>
+                      {formatMoneyByCurrency(
+                        selectedSubcontractorSummary?.total_hakedis || 0,
+                        "TRY",
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px" }}>genel toplam</div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div
+              className="tableWrap"
+              style={{
+                maxHeight: "55vh",
+                overflowY: "auto",
+                overflowX: "auto",
+                marginTop: "12px",
+              }}
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>Taşeron</th>
+                    <th>Tamamlanan İş Bedeli</th>
+                    <th>HW’ye Kesilen Fatura Bedeli</th>
+                    <th>Kestiği Fatura</th>
+                    <th>Ödenen</th>
+                    <th>Kalan Borç</th>
+                    <th>Fazla Ödeme</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filteredSubconSummaryRows.length === 0 ? (
+                    <EmptyRow colSpan={7} text="Taşeron özeti bulunamadı" />
+                  ) : (
+                    <>
+                      {filteredSubconSummaryRows.map((row, index) => (
+                        <tr
+                          key={`${row.subcon_name}-${index}`}
+                          onClick={() =>
+                            setSelectedSubcontractor(row.subcon_name || "")
+                          }
+                          style={{ cursor: "pointer" }}
+                        >
+                          <td>{row.subcon_name || "-"}</td>
+                          <td>
+                            {formatMoneyByCurrency(
+                              row.total_hakedis || 0,
+                              "TRY",
+                            )}
+                          </td>
+                          <td>
+                            {formatMoneyByCurrency(
+                              row.total_faturaya_hazir || 0,
+                              "TRY",
+                            )}
+                          </td>
+                          <td>
+                            {formatMoneyByCurrency(
+                              row.total_fatura || 0,
+                              "TRY",
+                            )}
+                          </td>
+                          <td>
+                            {formatMoneyByCurrency(
+                              row.total_odenen || 0,
+                              "TRY",
+                            )}
+                          </td>
+                          <td
+                            style={{
+                              color:
+                                Number(row.kalan_borc || 0) > 0
+                                  ? "#b45309"
+                                  : "#111827",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {formatMoneyByCurrency(row.kalan_borc || 0, "TRY")}
+                          </td>
+                          <td
+                            style={{
+                              color:
+                                Number(row.fazla_odeme || 0) > 0
+                                  ? "#dc2626"
+                                  : "#111827",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {formatMoneyByCurrency(row.fazla_odeme || 0, "TRY")}
+                          </td>
+                        </tr>
+                      ))}
+
+                      <tr style={{ fontWeight: 800, background: "#f3f4f6" }}>
+                        <td>TOPLAM</td>
+                        <td>
+                          {formatMoneyByCurrency(totalRow.total_hakedis, "TRY")}
+                        </td>
+                        <td>
+                          {formatMoneyByCurrency(
+                            totalRow.total_faturaya_hazir,
+                            "TRY",
+                          )}
+                        </td>
+                        <td>
+                          {formatMoneyByCurrency(totalRow.total_fatura, "TRY")}
+                        </td>
+                        <td>
+                          {formatMoneyByCurrency(totalRow.total_odenen, "TRY")}
+                        </td>
+                        <td>
+                          {formatMoneyByCurrency(totalRow.kalan_borc, "TRY")}
+                        </td>
+                        <td>
+                          {formatMoneyByCurrency(totalRow.fazla_odeme, "TRY")}
+                        </td>
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -5164,20 +6264,117 @@ function formatTRY(value) {
 }
 
 function RegionAnalysis() {
+  const [filterText, setFilterText] = useState("");
+  const [regionSearch, setRegionSearch] = useState("");
+  const [sortConfig, setSortConfig] = useState({
+    key: null,
+    direction: "asc",
+  });
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailRows, setDetailRows] = useState([]);
-  const [usdRate, setUsdRate] = useState(45); // fallback
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const usdRate = useUsdRate();
+
+  const [qcReadyModalOpen, setQcReadyModalOpen] = useState(false);
+  const [qcReadyModalRegion, setQcReadyModalRegion] = useState("");
+  const [qcReadyType, setQcReadyType] = useState("");
+
+  const openQcReadyModal = (regionName, type) => {
+    setQcReadyModalRegion(regionName);
+    setQcReadyType(type);
+    setQcReadyModalOpen(true);
+  };
+
+  const filteredRows = detailRows.filter((row) =>
+    Object.values(row).some((val) =>
+      String(val || "")
+        .toLowerCase()
+        .includes(filterText.toLowerCase()),
+    ),
+  );
+
+  // ✅ FAC OK 20%
+  const getFacOk20RowsByRegion = (regionName) => {
+    return rows.filter((row) => {
+      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
+
+      const reqQty = Number(row.requested_qty || 0);
+      const dueQty = Number(row.due_qty || 0);
+      const progressedQty = reqQty - dueQty;
+
+      return (
+        rowRegion === String(regionName).toLowerCase() &&
+        statusOk &&
+        progressedQty > 0 &&
+        kabulOk
+      );
+    });
+  };
+
+  // ❌ FAC NOK 20%
+  const getFacNok20RowsByRegion = (regionName) => {
+    return rows.filter((row) => {
+      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
+
+      const reqQty = Number(row.requested_qty || 0);
+      const dueQty = Number(row.due_qty || 0);
+      const progressedQty = reqQty - dueQty;
+
+      return (
+        rowRegion === String(regionName).toLowerCase() &&
+        statusOk &&
+        progressedQty > 0 &&
+        !kabulOk
+      );
+    });
+  };
+
+  const getFacOk20TotalByRegion = (regionName) => {
+    return getFacOk20RowsByRegion(regionName).reduce((sum, row) => {
+      const base = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+
+      const total =
+        normalizeCurrency(row.currency) === "USD" ? base * usdRate : base;
+
+      return sum + total;
+    }, 0);
+  };
+
+  const getFacNok20TotalByRegion = (regionName) => {
+    return getFacNok20RowsByRegion(regionName).reduce((sum, row) => {
+      const base = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+
+      const total =
+        normalizeCurrency(row.currency) === "USD" ? base * usdRate : base;
+
+      return sum + total;
+    }, 0);
+  };
+
+  const regionRowStyle = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "12px 16px",
+    borderBottom: "1px solid #e5e7eb",
+    fontSize: "15px",
+  };
 
   const openRegionDetail = (regionName, type) => {
     const filtered = rows.filter((row) => {
       const sameRegion = getRegion(row.site_code) === regionName;
       if (!sameRegion) return false;
 
-      const currency = normalizeCurrency(row.currency);
       const unitPrice = Number(row.unit_price || 0);
       const doneQty = Number(row.done_qty || 0);
       const billedQty = Number(row.billed_qty || 0);
@@ -5221,28 +6418,137 @@ function RegionAnalysis() {
     }
   }, []);
 
-  useEffect(() => {
-    const fetchRate = async () => {
-      try {
-        const res = await fetch("https://open.er-api.com/v6/latest/USD");
+  const getQcReady80RowsByRegion = (regionName) => {
+    return rows.filter((row) => {
+      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
 
-        const data = await res.json();
-        console.log("USD API FULL:", JSON.stringify(data, null, 2));
-        console.log("USD API TRY:", data?.rates?.TRY);
-        console.log("USD API OK:", res.ok);
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
+      const billedZero = Number(row.billed_qty ?? row.billed ?? 0) === 0;
 
-        if (data?.rates?.TRY) {
-          setUsdRate(data.rates.TRY);
-          console.log("USD RATE SET:", data.rates.TRY);
-        }
-      } catch (err) {
-        console.error("USD RATE ERROR:", err);
-        setUsdRate(45); // 👈 fallback
+      const req = Number(row.requested_qty || 0);
+      const due = Number(row.due_qty || 0);
+      const diff = req - due;
+
+      return (
+        rowRegion === String(regionName).toLowerCase() &&
+        statusOk &&
+        qcOk &&
+        billedZero &&
+        diff === 0
+      );
+    });
+  };
+
+  const getQcReady20RowsByRegion = (regionName) => {
+    return rows.filter((row) => {
+      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
+      const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
+      const billedZero = Number(row.billed_qty ?? row.billed ?? 0) === 0;
+
+      const req = Number(row.requested_qty || 0);
+      const due = Number(row.due_qty || 0);
+      const diff = req - due;
+
+      return (
+        rowRegion === String(regionName).toLowerCase() &&
+        statusOk &&
+        qcOk &&
+        billedZero &&
+        diff !== 0
+      );
+    });
+  };
+
+  const getQcReady80TotalByRegion = (regionName) => {
+    return getQcReady80RowsByRegion(regionName).reduce((sum, row) => {
+      const base =
+        Number(row.total_done_amount || row.total_amount || row.total || 0) ||
+        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+      const total =
+        normalizeCurrency(row.currency) === "USD" ? base * usdRate : base;
+
+      return sum + total * 0.8;
+    }, 0);
+  };
+
+  const getQcReady20TotalByRegion = (regionName) => {
+    return getQcReady20RowsByRegion(regionName).reduce((sum, row) => {
+      const total =
+        Number(row.total_done_amount || row.total_amount || row.total || 0) ||
+        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+      return sum + total * 0.2;
+    }, 0);
+  };
+
+  const qcReadyModalRows =
+    qcReadyType === "80"
+      ? getQcReady80RowsByRegion(qcReadyModalRegion)
+      : qcReadyType === "20_fac_ok"
+        ? getFacOk20RowsByRegion(qcReadyModalRegion)
+        : qcReadyType === "20_fac_nok"
+          ? getFacNok20RowsByRegion(qcReadyModalRegion)
+          : [];
+
+  const qcReadyModalTotal = qcReadyModalRows.reduce((sum, row) => {
+    const currency = normalizeCurrency(row.currency);
+
+    const rawBase =
+      Number(row.total_done_amount || row.total_amount || row.total || 0) ||
+      Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+    const rawTotal = currency === "USD" ? rawBase * usdRate : rawBase;
+
+    const facBase = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+    const total20 = currency === "USD" ? facBase * usdRate : facBase;
+
+    const total80 = rawTotal * 0.8;
+
+    const shownTotal = qcReadyType === "80" ? total80 : total20;
+
+    return sum + shownTotal;
+  }, 0);
+
+  const handleExportQcReadyExcel = async () => {
+    try {
+      const params = new URLSearchParams({
+        region: qcReadyModalRegion || "",
+        type: qcReadyType || "",
+      });
+
+      const response = await fetch(
+        `${API_BASE}/export/qc-ready-excel?${params.toString()}`,
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("QC READY EXPORT ERROR:", errorText);
+        alert(`Excel indirilemedi: ${errorText}`);
+        return;
       }
-    };
 
-    fetchRate();
-  }, []);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `qc_ready_${qcReadyModalRegion}_${qcReadyType}_${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("QC READY EXCEL ERROR:", err);
+      alert("Excel indirilemedi");
+    }
+  };
 
   useEffect(() => {
     loadRegionData();
@@ -5309,7 +6615,7 @@ function RegionAnalysis() {
         base[region].billed_try += billedAmount;
       }
 
-      if (row.status === "PO_BEKLER") {
+      if (String(row.status || "").toUpperCase() === "PO_BEKLER") {
         if (currency === "USD") {
           base[region].po_bekler_usd += amount;
         } else {
@@ -5317,7 +6623,7 @@ function RegionAnalysis() {
         }
       }
 
-      if (row.status === "OK") {
+      if (String(row.status || "").toUpperCase() === "OK") {
         if (currency === "USD") {
           base[region].ok_usd += amount;
         } else {
@@ -5363,14 +6669,13 @@ function RegionAnalysis() {
 
   const executiveSummary = useMemo(() => {
     const completed =
-      Number(topSummary?.completedTRY || 0) +
-      Number(topSummary?.completedUSD || 0) * usdRate;
+      Number(topSummary.completedTRY || 0) +
+      Number(topSummary.completedUSD || 0) * usdRate;
 
     const invoiced =
-      Number(topSummary?.invoicedTRY || 0) +
-      Number(topSummary?.invoicedUSD || 0) * usdRate;
+      Number(topSummary.invoicedTRY || 0) +
+      Number(topSummary.invoicedUSD || 0) * usdRate;
 
-    // 🔥 YENİ: PO toplamı (regionSummary'den çekiyoruz)
     const totalPO = regionSummary.reduce((sum, r) => {
       const poTRY =
         Number(r.po_bekler_try || 0) +
@@ -5387,9 +6692,7 @@ function RegionAnalysis() {
       completed,
       invoiced,
       ratio,
-      notInvoiced: completed - invoiced,
-
-      // 🔥 YENİLER
+      notInvoiced: Math.max(completed - invoiced, 0),
       poOpenedNotInvoiced: Math.max(totalPO - invoiced, 0),
       noPO: Math.max(completed - totalPO, 0),
     };
@@ -5418,16 +6721,121 @@ function RegionAnalysis() {
 
     const worksheet = XLSX.utils.json_to_sheet(excelRows);
     const workbook = XLSX.utils.book_new();
-
     XLSX.utils.book_append_sheet(workbook, worksheet, "Detay");
 
-    const safeTitle = (detailTitle || "region-detail")
-      .replace(/[^\w\s-]/g, "")
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    const normalizedRegion = String(detailTitle || "")
+      .split(" - ")[0]
+      .trim()
+      .replace(/İ/g, "I")
+      .replace(/I/g, "I")
+      .replace(/ı/g, "i")
+      .replace(/Ş/g, "S")
+      .replace(/ş/g, "s")
+      .replace(/Ğ/g, "G")
+      .replace(/ğ/g, "g")
+      .replace(/Ü/g, "U")
+      .replace(/ü/g, "u")
+      .replace(/Ö/g, "O")
+      .replace(/ö/g, "o")
+      .replace(/Ç/g, "C")
+      .replace(/ç/g, "c")
       .replace(/\s+/g, "_");
+
+    const fileLabel = detailTitle.includes("Faturalanmamış")
+      ? "Faturalanmamis_Isler"
+      : "PO_Bekleyen_Isler";
 
     XLSX.writeFile(
       workbook,
-      `${safeTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      `${normalizedRegion}_${fileLabel}_${fileDate}.xlsx`,
+    );
+  };
+
+  const filteredRegionRows = useMemo(() => {
+    const q = regionSearch.toLowerCase().trim();
+
+    const cleanRows = rows.filter(
+      (row) => getRegion(row.site_code) !== "Tanımsız",
+    );
+
+    if (!q) return cleanRows;
+
+    return cleanRows.filter((row) => {
+      const text = `
+        ${getRegion(row.site_code) || ""}
+        ${row.status || ""}
+        ${row.project_code || ""}
+        ${row.site_code || ""}
+        ${row.item_code || ""}
+        ${row.item_description || ""}
+        ${row.subcon_name || ""}
+        ${row.onair_date || ""}
+      `.toLowerCase();
+
+      return text.includes(q);
+    });
+  }, [rows, regionSearch]);
+
+  const sortedRows = useMemo(() => {
+    const sortable = [...filteredRegionRows];
+
+    if (sortConfig.key) {
+      sortable.sort((a, b) => {
+        const aVal = a[sortConfig.key] ?? "";
+        const bVal = b[sortConfig.key] ?? "";
+
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return sortable;
+  }, [filteredRegionRows, sortConfig]);
+
+  const handleSort = (key) => {
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const handleExportRegionExcel = () => {
+    if (!filteredRegionRows.length) {
+      alert("İndirilecek kayıt bulunamadı");
+      return;
+    }
+
+    const excelRows = filteredRegionRows.map((row) => ({
+      Bölge: getRegion(row.site_code) || "",
+      Status: row.status || "",
+      "Project Code": row.project_code || "",
+      "Site Code": row.site_code || "",
+      "Item Code": row.item_code || "",
+      "Item Description": row.item_description || "",
+      "OnAir Date": formatDateTR(row.onair_date),
+      "Done Qty": row.done_qty ?? "",
+      "Requested Qty": row.requested_qty ?? "",
+      "Billed Qty": row.billed_qty ?? "",
+      Currency: row.currency || "",
+      "Unit Price":
+        Number(row.unit_price || 0) === 0 ? "" : Number(row.unit_price || 0),
+      "Total Done Amount":
+        Number(row.total_done_amount || 0) === 0
+          ? ""
+          : Number(row.total_done_amount || 0),
+      Subcon: row.subcon_name || "",
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(excelRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Region Analysis");
+
+    XLSX.writeFile(
+      workbook,
+      `region_analysis_${new Date().toISOString().slice(0, 10)}.xlsx`,
     );
   };
 
@@ -5436,7 +6844,9 @@ function RegionAnalysis() {
 
   return (
     <>
-      <h1 style={{ marginBottom: "10px" }}>🗺️ Region Analysis</h1>
+      <h1 style={{ marginBottom: "10px", textAlign: "center" }}>
+        🗺️ Region Analysis
+      </h1>
 
       <div
         style={{
@@ -5455,29 +6865,26 @@ function RegionAnalysis() {
             padding: "10px 16px",
             fontWeight: "600",
             fontSize: "16px",
+            textAlign: "center",
           }}
         >
           GENEL ÖZET
         </div>
 
         <div style={{ background: "#f9fafb" }}>
-          {/* Satır */}
           <Row
             label="Tamamlanan İş Tutarı"
             value={executiveSummary.completed}
           />
-
           <Row
             label="Kesilen Fatura Tutarı"
             value={executiveSummary.invoiced}
           />
-
           <Row
             label="Faturalandırma Oranı"
             value={executiveSummary.ratio}
             isPercent
           />
-
           <Row
             label="Faturalandırılmamış İş"
             value={executiveSummary.notInvoiced}
@@ -5487,7 +6894,6 @@ function RegionAnalysis() {
             label="PO Açılmış Ama Faturalanmamış"
             value={executiveSummary.poOpenedNotInvoiced}
           />
-
           <Row
             label="PO Açılmamış İş"
             value={executiveSummary.noPO}
@@ -5511,30 +6917,21 @@ function RegionAnalysis() {
           regionSummary.map((item) => {
             const totalUSDTRY = (item.total_usd || 0) * usdRate;
             const completed = (item.total_try || 0) + totalUSDTRY;
-
             const billed =
               (item.billed_try || 0) + (item.billed_usd || 0) * usdRate;
-
-            const notBilled = Math.max(completed - billed, 0);
-
-            const okTRY = (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
-
-            const poBeklerTRY =
+            const poBekler =
               (item.po_bekler_try || 0) + (item.po_bekler_usd || 0) * usdRate;
-
-            const poAcikAmaFaturaYok = okTRY;
-            const poAcilmamis = poBeklerTRY;
-
-            const oran = completed > 0 ? (billed / completed) * 100 : 0;
+            const okAmount = (item.ok_try || 0) + (item.ok_usd || 0) * usdRate;
+            const notBilled = Math.max(completed - billed, 0);
+            const ratio = completed > 0 ? (billed / completed) * 100 : 0;
 
             return (
               <div
                 key={item.region}
                 style={{
-                  width: "100%",
                   borderRadius: "16px",
                   overflow: "hidden",
-                  boxShadow: "0 12px 30px rgba(0,0,0,0.08)",
+                  boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
                   border: "1px solid #e5e7eb",
                   background: "#fff",
                 }}
@@ -5545,34 +6942,124 @@ function RegionAnalysis() {
                     color: "#fff",
                     padding: "12px 16px",
                     fontWeight: "700",
-                    fontSize: "22px",
+                    fontSize: "20px",
                     textAlign: "center",
                   }}
                 >
-                  📍 {item.region}
+                  {item.region}
                 </div>
 
                 <div style={{ background: "#f9fafb" }}>
-                  <Row label="Tamamlanan İş Tutarı" value={completed} />
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      Toplam İş
+                    </span>
+                    <strong style={{ textAlign: "right" }}>
+                      {formatTRY(completed)}
+                    </strong>
+                  </div>
 
-                  <Row label="Kesilen Fatura Tutarı" value={billed} />
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      Kesilen Fatura
+                    </span>
+                    <strong style={{ textAlign: "right" }}>
+                      {formatTRY(billed)}
+                    </strong>
+                  </div>
 
-                  <Row label="Faturalandırma Oranı" value={oran} isPercent />
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      Faturalandırma Oranı
+                    </span>
+                    <strong style={{ textAlign: "right" }}>
+                      %{ratio.toFixed(1)}
+                    </strong>
+                  </div>
 
-                  <div
-                    onClick={() =>
-                      openRegionDetail(item.region, "NOT_INVOICED")
-                    }
-                    style={{ cursor: "pointer" }}
-                  >
-                    <Row label="Faturalanmamış İş" value={notBilled} />
+                  <div style={regionRowStyle}>
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      PO Açılmış
+                    </span>
+                    <strong style={{ textAlign: "right" }}>
+                      {formatTRY(okAmount)}
+                    </strong>
                   </div>
 
                   <div
+                    style={{ ...regionRowStyle, cursor: "pointer" }}
                     onClick={() => openRegionDetail(item.region, "PO_BEKLER")}
-                    style={{ cursor: "pointer" }}
                   >
-                    <Row label="PO Açılmamış İş" value={poAcilmamis} />
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      PO Açılmamış
+                    </span>
+                    <strong style={{ color: "#dc2626", textAlign: "right" }}>
+                      {formatTRY(poBekler)}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      ...regionRowStyle,
+                      cursor: "pointer",
+                    }}
+                    onClick={() =>
+                      openRegionDetail(item.region, "NOT_INVOICED")
+                    }
+                  >
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      Faturalanmamış İş
+                    </span>
+                    <strong style={{ color: "#dc2626", textAlign: "right" }}>
+                      {formatTRY(notBilled)}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      ...regionRowStyle,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => openQcReadyModal(item.region, "80")}
+                  >
+                    <span style={{ color: "#374151", textAlign: "left" }}>
+                      QC OK Fatura Kesilecek 80%
+                    </span>
+                    <strong style={{ color: "#166534", textAlign: "right" }}>
+                      {formatTRY(getQcReady80TotalByRegion(item.region))}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      ...regionRowStyle,
+                      cursor: "pointer",
+                      borderBottom: "none",
+                    }}
+                    onClick={() => openQcReadyModal(item.region, "20_fac_ok")}
+                  >
+                    <span style={{ color: "#16a34a", textAlign: "left" }}>
+                      FAC OK Fatura Bekler 20%
+                    </span>
+                    <strong style={{ color: "#16a34a", textAlign: "right" }}>
+                      {formatTRY(getFacOk20TotalByRegion(item.region))}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      ...regionRowStyle,
+                      cursor: "pointer",
+                      borderBottom: "none",
+                    }}
+                    onClick={() => openQcReadyModal(item.region, "20_fac_nok")}
+                  >
+                    <span style={{ color: "#dc2626", textAlign: "left" }}>
+                      FAC NOK Fatura Bekler 20%
+                    </span>
+                    <strong style={{ color: "#dc2626", textAlign: "right" }}>
+                      {formatTRY(getFacNok20TotalByRegion(item.region))}
+                    </strong>
                   </div>
                 </div>
               </div>
@@ -5580,6 +7067,165 @@ function RegionAnalysis() {
           })
         )}
       </div>
+
+      {qcReadyModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={() => setQcReadyModalOpen(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1100px",
+              maxHeight: "85vh",
+              overflow: "auto",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "16px",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <h3 style={{ margin: 0 }}>
+                QC OK Fatura Kesilecek {qcReadyType}% - {qcReadyModalRegion}
+              </h3>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "16px",
+                  marginBottom: "12px",
+                  marginTop: "8px",
+                }}
+              >
+                <div
+                  style={{
+                    background: "#f9fafb",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "10px",
+                    padding: "8px 12px",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Toplam Satır
+                  </div>
+                  <div style={{ fontWeight: "600" }}>
+                    {qcReadyModalRows.length}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    background: "#f9fafb",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "10px",
+                    padding: "8px 12px",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Toplam Tutar ({qcReadyType}%)
+                  </div>
+                  <div style={{ fontWeight: "600" }}>
+                    {formatTRY(qcReadyModalTotal)}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={handleExportQcReadyExcel}
+                >
+                  Excel İndir
+                </button>
+
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={() => setQcReadyModalOpen(false)}
+                >
+                  Kapat
+                </button>
+              </div>
+            </div>
+
+            <div className="tableWrap" style={{ marginBottom: 0 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Project</th>
+                    <th>Site</th>
+                    <th>Item</th>
+                    <th>Açıklama</th>
+                    <th>Req</th>
+                    <th>Due</th>
+                    <th>Done</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qcReadyModalRows.length === 0 ? (
+                    <tr>
+                      <td colSpan="8">Kayıt bulunamadı</td>
+                    </tr>
+                  ) : (
+                    qcReadyModalRows.map((row, i) => {
+                      const rawTotal =
+                        Number(
+                          row.total_done_amount ||
+                            row.total_amount ||
+                            row.total ||
+                            0,
+                        ) ||
+                        Number(row.done_qty || 0) * Number(row.unit_price || 0);
+
+                      const total80 = rawTotal * 0.8;
+                      const total20 =
+                        Number(row.due_qty || 0) * Number(row.unit_price || 0);
+
+                      const shownTotal =
+                        qcReadyType === "80" ? total80 : total20;
+
+                      return (
+                        <tr key={i}>
+                          <td>{row.project_code || "-"}</td>
+                          <td>{row.site_code || "-"}</td>
+                          <td>{row.item_code || "-"}</td>
+                          <td>{row.item_description || "-"}</td>
+                          <td>{row.requested_qty ?? "-"}</td>
+                          <td>{row.due_qty ?? "-"}</td>
+                          <td>{row.done_qty ?? "-"}</td>
+                          <td>{formatTRY(shownTotal)}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {detailModalOpen && (
         <div
@@ -5623,6 +7269,19 @@ function RegionAnalysis() {
               </h3>
 
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <input
+                  type="text"
+                  placeholder="Detay içinde ara..."
+                  value={filterText}
+                  onChange={(e) => setFilterText(e.target.value)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid #d1d5db",
+                    minWidth: "260px",
+                  }}
+                />
+
                 <button
                   type="button"
                   className="tab"
@@ -5660,10 +7319,17 @@ function RegionAnalysis() {
                   </tr>
                 </thead>
                 <tbody>
-                  {detailRows.length === 0 ? (
-                    <EmptyRow colSpan={12} text="Kayıt bulunamadı" />
+                  {filteredRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan="12"
+                        style={{ textAlign: "center", padding: "20px" }}
+                      >
+                        Kayıt bulunamadı
+                      </td>
+                    </tr>
                   ) : (
-                    detailRows.map((row, index) => (
+                    filteredRows.map((row, index) => (
                       <tr
                         key={
                           row.id ??
@@ -5708,65 +7374,225 @@ function RegionAnalysis() {
         </div>
       )}
 
-      <div className="tableWrap">
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          margin: "30px auto 12px auto",
+          gap: "12px",
+          flexWrap: "wrap",
+          maxWidth: "1200px",
+        }}
+      >
+        <input
+          type="text"
+          placeholder="Bölge, status, proje, site, item, taşeron, OnAir Date ara"
+          value={regionSearch}
+          onChange={(e) => setRegionSearch(e.target.value)}
+          style={{
+            padding: "10px 14px",
+            borderRadius: "8px",
+            border: "1px solid #d1d5db",
+            minWidth: "320px",
+          }}
+        />
+
+        <button type="button" className="tab" onClick={handleExportRegionExcel}>
+          Excel İndir
+        </button>
+      </div>
+
+      <div
+        className="tableWrap"
+        style={{
+          maxWidth: "1200px",
+          margin: "0 auto 40px auto",
+          maxHeight: "60vh",
+          overflowY: "auto",
+          overflowX: "auto",
+          background: "#fff",
+          borderRadius: "16px",
+          boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+          border: "1px solid #e5e7eb",
+        }}
+      >
         <table>
           <thead>
             <tr>
               <th>Bölge</th>
               <th>Status</th>
-              <th>Project Code</th>
-              <th>Site Code</th>
-              <th>Item Code</th>
-              <th>Done Qty</th>
-              <th>Requested Qty</th>
-              <th>Billed Qty</th>
-              <th>Currency</th>
-              <th>Unit Price</th>
-              <th>Total Done Amount</th>
-              <th>Subcon</th>
+              <th>Analiz</th>
+              <th
+                onClick={() => handleSort("project_code")}
+                style={{ cursor: "pointer" }}
+              >
+                Project
+              </th>
+              <th
+                onClick={() => handleSort("site_code")}
+                style={{ cursor: "pointer" }}
+              >
+                Site
+              </th>
+              <th
+                onClick={() => handleSort("item_code")}
+                style={{ cursor: "pointer" }}
+              >
+                Item
+              </th>
+              <th
+                onClick={() => handleSort("done_qty")}
+                style={{ cursor: "pointer" }}
+              >
+                Done
+              </th>
+              <th
+                onClick={() => handleSort("requested_qty")}
+                style={{ cursor: "pointer" }}
+              >
+                Req
+              </th>
+              <th
+                onClick={() => handleSort("billed_qty")}
+                style={{ cursor: "pointer" }}
+              >
+                Billed
+              </th>
+              <th>Curr</th>
+              <th
+                onClick={() => handleSort("unit_price")}
+                style={{ cursor: "pointer" }}
+              >
+                Unit
+              </th>
+              <th
+                onClick={() => handleSort("total_done_amount")}
+                style={{ cursor: "pointer" }}
+              >
+                Total
+              </th>
+              <th
+                onClick={() => handleSort("subcon_name")}
+                style={{ cursor: "pointer" }}
+              >
+                Subcon
+              </th>
+              <th>QC</th>
+              <th>RF Not</th>
+              <th>Kabul Not</th>
+
+              <th
+                onClick={() => handleSort("onair_date")}
+                style={{ cursor: "pointer" }}
+              >
+                OnAir
+              </th>
             </tr>
           </thead>
           <tbody>
-            {rows.filter((row) => getRegion(row.site_code) !== "Tanımsız")
-              .length === 0 ? (
-              <EmptyRow colSpan={12} text="Tanımlı bölge kaydı bulunamadı" />
+            {sortedRows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan="17"
+                  style={{ textAlign: "center", padding: "20px" }}
+                >
+                  Tanımlı bölge kaydı bulunamadı
+                </td>
+              </tr>
             ) : (
-              rows
-                .filter((row) => getRegion(row.site_code) !== "Tanımsız")
-                .map((row, index) => (
-                  <tr
-                    key={
-                      row.id ??
-                      `${row.project_code}-${row.site_code}-${row.item_code}-${index}`
-                    }
-                  >
-                    <td>{getRegion(row.site_code)}</td>
-                    <td>
-                      <StatusBadge status={row.status} />
-                    </td>
-                    <td>{row.project_code || "-"}</td>
-                    <td>{row.site_code || "-"}</td>
-                    <td>{row.item_code || "-"}</td>
-                    <td>{row.done_qty ?? "-"}</td>
-                    <td>{row.requested_qty ?? "-"}</td>
-                    <td>{row.billed_qty ?? "-"}</td>
-                    <td>{row.currency || "-"}</td>
-                    <td>
-                      {Number(row.unit_price || 0) === 0
-                        ? "-"
-                        : formatMoneyByCurrency(row.unit_price, row.currency)}
-                    </td>
-                    <td>
-                      {Number(row.total_done_amount || 0) === 0
-                        ? "-"
-                        : formatMoneyByCurrency(
-                            row.total_done_amount,
-                            row.currency,
-                          )}
-                    </td>
-                    <td>{row.subcon_name || "-"}</td>
-                  </tr>
-                ))
+              sortedRows.map((row, index) => (
+                <tr
+                  key={
+                    row.id ??
+                    `${row.project_code}-${row.site_code}-${row.item_code}-${index}`
+                  }
+                >
+                  <td>{getRegion(row.site_code)}</td>
+                  <td>
+                    <span
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "20px",
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        display: "inline-block",
+                        background:
+                          row.status === "OK"
+                            ? "#e6f4ea"
+                            : row.status === "PARTIAL"
+                              ? "#fff4e5"
+                              : row.status === "CANCEL"
+                                ? "#fdecea"
+                                : row.status === "PO_BEKLER"
+                                  ? "#fff8db"
+                                  : "#f3f3f3",
+                        color:
+                          row.status === "OK"
+                            ? "#2e7d32"
+                            : row.status === "PARTIAL"
+                              ? "#ed6c02"
+                              : row.status === "CANCEL"
+                                ? "#d32f2f"
+                                : row.status === "PO_BEKLER"
+                                  ? "#a16207"
+                                  : "#555",
+                      }}
+                    >
+                      {row.status || "-"}
+                    </span>
+                  </td>
+                  <td>
+                    {row.status === "PO_BEKLER"
+                      ? "Eksik"
+                      : Number(row.done_qty || 0) === 0
+                        ? "Giriş Yok"
+                        : Number(row.done_qty || 0) ===
+                            Number(row.requested_qty || 0)
+                          ? "Tamam"
+                          : Number(row.done_qty || 0) >
+                              Number(row.requested_qty || 0)
+                            ? "Eksik"
+                            : "Fazla"}
+                  </td>
+                  <td>{row.project_code || "-"}</td>
+                  <td>{row.site_code || "-"}</td>
+                  <td>{row.item_code || "-"}</td>
+                  <td>{row.done_qty ?? "-"}</td>
+                  <td>{row.requested_qty ?? "-"}</td>
+                  <td>{row.billed_qty ?? "-"}</td>
+                  <td>{row.currency || "-"}</td>
+                  <td>
+                    {Number(row.unit_price || 0) === 0
+                      ? "-"
+                      : formatMoneyByCurrency(row.unit_price, row.currency)}
+                  </td>
+                  <td>
+                    {Number(row.total_done_amount || 0) === 0
+                      ? "-"
+                      : formatMoneyByCurrency(
+                          row.total_done_amount,
+                          row.currency,
+                        )}
+                  </td>
+                  <td>{row.subcon_name || "-"}</td>
+                  <td>
+                    <select
+                      value={row.qc_durum || ""}
+                      onChange={(e) =>
+                        handleUpdate(row, { qc_durum: e.target.value })
+                      }
+                    >
+                      <option value="">-</option>
+                      <option value="OK">OK</option>
+                      <option value="NOK">NOK</option>
+                    </select>
+                  </td>
+                  <td>{row.note || "-"}</td>
+                  <td>{row.kabul_not || "-"}</td>
+                  <td>{formatDateTR(row.onair_date)}</td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
@@ -5776,6 +7602,55 @@ function RegionAnalysis() {
 }
 
 function App() {
+  const [newUser, setNewUser] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "user",
+  });
+  const [token, setToken] = useState(localStorage.getItem("token") || "");
+
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "null");
+    } catch {
+      return null;
+    }
+  });
+  const isAdmin = user?.role === "admin";
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    localStorage.removeItem("finance_token");
+    localStorage.removeItem("finance_user_email");
+
+    setToken("");
+    setUser(null);
+
+    if (typeof setFinanceToken === "function") {
+      setFinanceToken("");
+    }
+
+    if (typeof setFinanceUserEmail === "function") {
+      setFinanceUserEmail("");
+    }
+
+    window.location.reload();
+  };
+
+  const inputStyle = {
+    width: "100%",
+
+    padding: "12px",
+
+    marginBottom: "15px",
+
+    borderRadius: "8px",
+
+    border: "1px solid #ddd",
+  };
+
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
@@ -5794,6 +7669,146 @@ function App() {
   const [supplierAdvanceTotal, setSupplierAdvanceTotal] = useState(0);
 
   const [page, setPage] = useState("finance");
+
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState("");
+  const loadAdminUsers = async () => {
+    try {
+      setAdminLoading(true);
+      setAdminError("");
+
+      const response = await fetch(`${API_BASE}/admin/users`, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Kullanıcılar alınamadı");
+      }
+
+      setAdminUsers(data.users || []);
+    } catch (err) {
+      setAdminError(err.message || "Kullanıcılar alınamadı");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const handleAdminRoleChange = async (userId, newRole) => {
+    try {
+      const response = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ role: newRole }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Rol güncellenemedi");
+      }
+
+      await loadAdminUsers();
+    } catch (err) {
+      alert(err.message || "Rol güncellenemedi");
+    }
+  };
+
+  const handleCreateUser = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/users`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(newUser),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error);
+
+      setNewUser({ name: "", email: "", password: "", role: "user" });
+      loadAdminUsers();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+  const handleToggleActive = async (userId) => {
+    try {
+      const response = await fetch(`${API_BASE}/admin/users/${userId}/active`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Durum güncellenemedi");
+      }
+
+      await loadAdminUsers();
+    } catch (err) {
+      alert(err.message || "Durum güncellenemedi");
+    }
+  };
+
+  const toggleUserActive = async (id) => {
+    try {
+      await fetch(`${API_BASE}/admin/users/${id}/active`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      loadAdminUsers();
+    } catch (err) {
+      alert("Hata");
+    }
+  };
+
+  const deleteUser = async (id) => {
+    if (!confirm("Silmek istediğine emin misin?")) return;
+
+    try {
+      await fetch(`${API_BASE}/admin/users/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      loadAdminUsers();
+    } catch (err) {
+      alert("Silinemedi");
+    }
+  };
+
+  const thStyle = {
+    textAlign: "left",
+    padding: "12px",
+    borderBottom: "1px solid #e5e7eb",
+    fontSize: "14px",
+  };
+
+  const tdStyle = {
+    padding: "12px",
+    borderBottom: "1px solid #e5e7eb",
+    fontSize: "14px",
+  };
 
   const [financeToken, setFinanceToken] = useState(
     localStorage.getItem("finance_token") || "",
@@ -5846,6 +7861,7 @@ function App() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(payload),
         },
@@ -5888,7 +7904,7 @@ function App() {
       setFinanceLoginLoading(true);
       setFinanceLoginError("");
 
-      const response = await fetch(`${API_BASE}/finance-auth/login`, {
+      const response = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -5908,7 +7924,12 @@ function App() {
       localStorage.setItem("finance_token", data.token);
       localStorage.setItem("finance_user_email", data.user.email);
 
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user));
+
       setFinanceToken(data.token);
+      setToken(data.token);
+      setUser(data.user);
       setFinanceUserEmail(data.user.email);
 
       setFinanceLoginEmail("");
@@ -5929,37 +7950,166 @@ function App() {
     setPage("finance");
   };
 
+  if (!financeToken) {
+    return (
+      <div style={{ height: "100vh", background: "#f3f4f6" }}>
+        {/* 🔹 HEADER */}
+        <div
+          style={{
+            height: "60px",
+            background: "#fff",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "0 30px",
+            borderBottom: "1px solid #eee",
+          }}
+        >
+          {/* SOL */}
+          <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+            Şimşek Haberleşme
+          </div>
+
+          {/* SAĞ */}
+          <div style={{ color: "#666", fontSize: "14px" }}>
+            Rollout Dashboard
+          </div>
+        </div>
+
+        {/* 🔹 ORTA LOGIN */}
+        <div
+          style={{
+            height: "calc(100vh - 60px)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <form
+            onSubmit={handleFinanceLogin}
+            style={{
+              background: "#fff",
+              padding: "40px",
+              borderRadius: "16px",
+              width: "360px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
+            }}
+          >
+            <h2 style={{ textAlign: "center", marginBottom: "10px" }}>
+              Hoş Geldiniz
+            </h2>
+
+            <p
+              style={{
+                textAlign: "center",
+                marginBottom: "24px",
+                color: "#6b7280",
+              }}
+            >
+              Hesabınızla giriş yapın
+            </p>
+
+            <input
+              type="email"
+              placeholder="E-posta"
+              value={financeLoginEmail}
+              onChange={(e) => setFinanceLoginEmail(e.target.value)}
+              style={inputStyle}
+            />
+
+            <input
+              type="password"
+              placeholder="Şifre"
+              value={financeLoginPassword}
+              onChange={(e) => setFinanceLoginPassword(e.target.value)}
+              style={inputStyle}
+            />
+
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                padding: "12px",
+                background: "#e53935",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              Giriş Yap
+            </button>
+            {financeLoginError && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  color: "#b91c1c",
+                  fontWeight: "600",
+                  textAlign: "center",
+                }}
+              >
+                {financeLoginError}
+              </div>
+            )}
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container">
-      <div className="navTabs">
-        <button
-          className={page === "finance" ? "tab activeTab" : "tab"}
-          onClick={() => setPage("finance")}
-        >
-          Finance Dashboard
-        </button>
-
+      <div
+        className="navTabs"
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: "12px",
+          flexWrap: "wrap",
+          marginBottom: "24px",
+          position: "relative",
+        }}
+      >
+        .
+        {isAdmin && (
+          <button
+            className={page === "finance" ? "tab activeTab" : "tab"}
+            onClick={() => setPage("finance")}
+          >
+            Finance Dashboard
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            className={page === "admin" ? "tab activeTab" : "tab"}
+            onClick={() => {
+              setPage("admin");
+              loadAdminUsers(); // 👉 SAYFA AÇILINCA KULLANICILARI ÇEK
+            }}
+          >
+            Admin Panel
+          </button>
+        )}
         <button
           className={page === "region" ? "tab activeTab" : "tab"}
           onClick={() => setPage("region")}
         >
           Region Analysis
         </button>
-
         <button
           className={page === "executive" ? "tab activeTab" : "tab"}
           onClick={() => setPage("executive")}
         >
           Executive Dashboard
         </button>
-
         <button
           className={page === "entry" ? "tab activeTab" : "tab"}
           onClick={() => setPage("entry")}
         >
           Günlük İş Girişi
         </button>
-
         <button
           type="button"
           className="tab"
@@ -5969,11 +8119,34 @@ function App() {
         >
           Avans Talep
         </button>
+        {(token || financeToken) && (
+          <button
+            type="button"
+            onClick={handleLogout}
+            style={{
+              position: "absolute",
+              right: "0",
+              top: "50%",
+              transform: "translateY(-50%)",
+              background: "#dc3545",
+              color: "#fff",
+              border: "none",
+              padding: "10px 16px",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontWeight: "600",
+            }}
+          >
+            Çıkış Yap
+          </button>
+        )}
       </div>
 
       {page === "finance" &&
+        isAdmin &&
         (financeToken ? (
           <FinanceDashboard
+            user={user}
             financeToken={financeToken}
             financeUserEmail={financeUserEmail}
             onFinanceLogout={handleFinanceLogout}
@@ -6033,8 +8206,208 @@ function App() {
       {page === "executive" && <ExecutiveDashboard />}
       {page === "region" && <RegionAnalysis />}
       {page === "entry" && <DailyEntry />}
+      {page === "admin" && isAdmin && (
+        <div
+          style={{
+            maxWidth: "1200px",
+            margin: "24px auto",
+            background: "#fff",
+            borderRadius: "20px",
+            padding: "24px",
+            boxShadow: "0 8px 30px rgba(0,0,0,0.08)",
+          }}
+        >
+          <h2 style={{ marginBottom: "16px" }}>👑 Admin Panel</h2>
+          <div style={{ marginBottom: "20px" }}>
+            <h3>Yeni Kullanıcı</h3>
+
+            <input
+              placeholder="Ad"
+              value={newUser.name}
+              onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+            />
+
+            <input
+              placeholder="Email"
+              value={newUser.email}
+              onChange={(e) =>
+                setNewUser({ ...newUser, email: e.target.value })
+              }
+            />
+
+            <input
+              placeholder="Şifre"
+              type="password"
+              value={newUser.password}
+              onChange={(e) =>
+                setNewUser({ ...newUser, password: e.target.value })
+              }
+            />
+
+            <select
+              value={newUser.role}
+              onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+            >
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+
+            <button onClick={handleCreateUser}>Ekle</button>
+          </div>
+
+          {adminLoading && <p>Kullanıcılar yükleniyor...</p>}
+
+          {adminError && (
+            <p style={{ color: "#b91c1c", fontWeight: 600 }}>{adminError}</p>
+          )}
+
+          {!adminLoading && !adminError && (
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  marginTop: "12px",
+                }}
+              >
+                <thead>
+                  <tr style={{ background: "#f3f4f6" }}>
+                    <th style={thStyle}>ID</th>
+                    <th style={thStyle}>Ad</th>
+                    <th style={thStyle}>Email</th>
+                    <th style={thStyle}>Rol</th>
+                    <th style={thStyle}>Aktif</th>
+                    <th style={thStyle}>İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminUsers.map((u) => (
+                    <tr key={u.id}>
+                      <td style={tdStyle}>{u.id}</td>
+                      <td style={tdStyle}>{u.name}</td>
+                      <td style={tdStyle}>{u.email}</td>
+                      <td style={tdStyle}>{u.role}</td>
+                      <td style={tdStyle}>{u.is_active ? "✅" : "❌"}</td>
+
+                      <td style={tdStyle}>
+                        <button
+                          onClick={() => handleToggleActive(u.id)}
+                          style={{
+                            padding: "6px 10px",
+                            marginRight: "8px",
+                            background: u.is_active ? "#f59e0b" : "#6b7280",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {u.is_active ? "Pasife Al" : "Aktif Et"}
+                        </button>
+
+                        {u.role === "admin" ? (
+                          <button
+                            onClick={() => handleAdminRoleChange(u.id, "user")}
+                            style={{
+                              padding: "6px 10px",
+                              background: "#ef4444",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Admin → User
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleAdminRoleChange(u.id, "admin")}
+                            style={{
+                              padding: "6px 10px",
+                              background: "#10b981",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            User → Admin
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+function QCUploadInline({ onClose, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleUpload = async () => {
+    if (!file) {
+      alert("Dosya seç");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch(`${API_BASE}/qc/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Upload hatası");
+      }
+
+      alert(`✅ ${data.updatedCount} kayıt güncellendi`);
+
+      if (onUploaded) onUploaded();
+      onClose();
+    } catch (err) {
+      console.error(err);
+      alert(`❌ ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="uploadBox">
+      <h3>QC Excel Yükle</h3>
+
+      <input
+        type="file"
+        accept=".xlsx, .xls"
+        onChange={(e) => setFile(e.target.files[0])}
+      />
+
+      <div style={{ marginTop: "10px", display: "flex", gap: "10px" }}>
+        <button onClick={handleUpload} className="saveButton">
+          {loading ? "Yükleniyor..." : "Yükle"}
+        </button>
+
+        <button onClick={onClose} className="tab">
+          Kapat
+        </button>
+      </div>
+    </div>
+  );
+}
+// TEST ORHAN 123
 
 export default App;
