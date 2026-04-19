@@ -80,6 +80,41 @@ app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
     res.status(500).json({ ok: false, error: "Kullanıcılar alınamadı" });
   }
 });
+app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+
+    const hashed = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password, role, is_active)
+       VALUES ($1, $2, $3, $4, true)
+       RETURNING id, name, email, role, is_active`,
+      [name, email, hashed, role || "user"],
+    );
+
+    res.json({ ok: true, user: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+app.put("/admin/users/:id/active", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `UPDATE users
+       SET is_active = NOT is_active
+       WHERE id = $1
+       RETURNING id, is_active`,
+      [id]
+    );
+
+    res.json({ ok: true, user: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // YENİ KULLANICI EKLE
 app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
