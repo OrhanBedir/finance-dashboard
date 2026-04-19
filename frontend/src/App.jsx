@@ -7911,10 +7911,12 @@ function App() {
         className="navTabs"
         style={{
           display: "flex",
-          justifyContent: "space-between",
+          justifyContent: "center",
           alignItems: "center",
           gap: "12px",
           flexWrap: "wrap",
+          marginBottom: "24px",
+          position: "relative",
         }}
       >
         <button
@@ -7954,22 +7956,22 @@ function App() {
         >
           Avans Talep
         </button>
+
         {token && user && (
           <button
+            type="button"
             onClick={handleLogout}
             style={{
+              position: "absolute",
+              right: "0",
+              top: "50%",
+              transform: "translateY(-50%)",
               background: "#dc3545",
-
               color: "#fff",
-
               border: "none",
-
               padding: "10px 16px",
-
               borderRadius: "8px",
-
               cursor: "pointer",
-
               fontWeight: "600",
             }}
           >

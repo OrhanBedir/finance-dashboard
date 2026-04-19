@@ -1130,3 +1130,9 @@ h1 {
   margin-top: 8px;
   margin-bottom: 8px;
 }
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+}
