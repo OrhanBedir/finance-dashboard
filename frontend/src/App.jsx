@@ -7957,7 +7957,7 @@ function App() {
           Avans Talep
         </button>
 
-        {token && user && (
+        {(token || financeToken) && (
           <button
             type="button"
             onClick={handleLogout}
