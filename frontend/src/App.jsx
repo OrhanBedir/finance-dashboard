@@ -7714,6 +7714,60 @@ function App() {
     }
   };
 
+  const handleCreateUser = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/users`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(newUser),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error);
+
+      setNewUser({ name: "", email: "", password: "", role: "user" });
+      loadAdminUsers();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const toggleUserActive = async (id) => {
+    try {
+      await fetch(`${API_BASE}/admin/users/${id}/active`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      loadAdminUsers();
+    } catch (err) {
+      alert("Hata");
+    }
+  };
+
+  const deleteUser = async (id) => {
+    if (!confirm("Silmek istediğine emin misin?")) return;
+
+    try {
+      await fetch(`${API_BASE}/admin/users/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      loadAdminUsers();
+    } catch (err) {
+      alert("Silinemedi");
+    }
+  };
+
   const thStyle = {
     textAlign: "left",
     padding: "12px",
@@ -8135,6 +8189,42 @@ function App() {
           }}
         >
           <h2 style={{ marginBottom: "16px" }}>👑 Admin Panel</h2>
+          <div style={{ marginBottom: "20px" }}>
+            <h3>Yeni Kullanıcı</h3>
+
+            <input
+              placeholder="Ad"
+              value={newUser.name}
+              onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+            />
+
+            <input
+              placeholder="Email"
+              value={newUser.email}
+              onChange={(e) =>
+                setNewUser({ ...newUser, email: e.target.value })
+              }
+            />
+
+            <input
+              placeholder="Şifre"
+              type="password"
+              value={newUser.password}
+              onChange={(e) =>
+                setNewUser({ ...newUser, password: e.target.value })
+              }
+            />
+
+            <select
+              value={newUser.role}
+              onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+            >
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+
+            <button onClick={handleCreateUser}>Ekle</button>
+          </div>
 
           {adminLoading && <p>Kullanıcılar yükleniyor...</p>}
 

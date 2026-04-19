@@ -115,6 +115,17 @@ app.put("/admin/users/:id/active", authMiddleware, requireAdmin, async (req, res
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+app.delete("/admin/users/:id", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // YENİ KULLANICI EKLE
 app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
