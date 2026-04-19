@@ -10,6 +10,26 @@ const fs = require("fs");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: "Token yok" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    req.user = decoded;
+
+    next();
+  } catch {
+    return res.status(401).json({ error: "Geçersiz token" });
+  }
+}
+
 const pool = require("./db");
 const app = express();
 
@@ -5157,7 +5177,10 @@ app.get("/finance/upcoming-payments", async (req, res) => {
   }
 });
 
-app.get("/finance/debug-tables", async (req, res) => {
+app.get("/finance/debug-tables", authMiddleware, async (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ error: "Yetkiniz yok" });
+  }
   try {
     const tables = await pool.query(`
       SELECT table_name

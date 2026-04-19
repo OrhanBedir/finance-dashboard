@@ -7612,6 +7612,7 @@ function App() {
       return null;
     }
   });
+  const isAdmin = user?.role === "admin";
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -7987,7 +7988,7 @@ function App() {
         )}
       </div>
 
-      {page === "finance" &&
+      {page === "finance" && isAdmin &&
         (financeToken ? (
           <FinanceDashboard
             user={user}
