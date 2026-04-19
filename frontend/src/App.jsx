@@ -3956,13 +3956,11 @@ function FinanceDashboard({
         <div>
           <h1 style={{ margin: "0 0 6px 0" }}>💰 Finance Dashboard</h1>
           <div style={{ fontSize: "14px", color: "#6b7280" }}>
-            Giriş yapan: {financeUserEmail}
+            Giriş yapan: <b>{user?.name || financeUserEmail}</b>
           </div>
         </div>
 
-        <button type="button" className="tab" onClick={onFinanceLogout}>
-          Çıkış Yap
-        </button>
+        
       </div>
 
       <div
