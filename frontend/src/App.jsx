@@ -8288,6 +8288,7 @@ function App() {
                       <td style={tdStyle}>{u.role}</td>
                       <td style={tdStyle}>{u.is_active ? "✅" : "❌"}</td>
                       <td style={tdStyle}>
+                        {/* AKTİF / PASİF */}
                         <button
                           onClick={() => handleToggleActive(u.id)}
                           style={{
@@ -8303,6 +8304,7 @@ function App() {
                           {u.is_active ? "Pasife Al" : "Aktif Et"}
                         </button>
 
+                        {/* ROL */}
                         {u.role === "admin" ? (
                           <button
                             onClick={() => handleAdminRoleChange(u.id, "user")}
