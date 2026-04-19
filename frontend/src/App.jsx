@@ -3960,7 +3960,9 @@ function FinanceDashboard({
           </div>
         </div>
 
-        
+        <button type="button" className="tab" onClick={onFinanceLogout}>
+          Çıkış Yap
+        </button>
       </div>
 
       <div
