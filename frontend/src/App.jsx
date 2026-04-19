@@ -7692,6 +7692,19 @@ function App() {
     }
   };
 
+  const thStyle = {
+    textAlign: "left",
+    padding: "12px",
+    borderBottom: "1px solid #e5e7eb",
+    fontSize: "14px",
+  };
+
+  const tdStyle = {
+    padding: "12px",
+    borderBottom: "1px solid #e5e7eb",
+    fontSize: "14px",
+  };
+
   const [financeToken, setFinanceToken] = useState(
     localStorage.getItem("finance_token") || "",
   );
@@ -8089,35 +8102,55 @@ function App() {
       {page === "region" && <RegionAnalysis />}
       {page === "entry" && <DailyEntry />}
       {page === "admin" && isAdmin && (
-        <div style={{ padding: "20px" }}>
-          <h2>👑 Admin Panel</h2>
+        <div
+          style={{
+            maxWidth: "1200px",
+            margin: "24px auto",
+            background: "#fff",
+            borderRadius: "20px",
+            padding: "24px",
+            boxShadow: "0 8px 30px rgba(0,0,0,0.08)",
+          }}
+        >
+          <h2 style={{ marginBottom: "16px" }}>👑 Admin Panel</h2>
 
-          {adminLoading && <p>Yükleniyor...</p>}
-          {adminError && <p style={{ color: "red" }}>{adminError}</p>}
+          {adminLoading && <p>Kullanıcılar yükleniyor...</p>}
+
+          {adminError && (
+            <p style={{ color: "#b91c1c", fontWeight: 600 }}>{adminError}</p>
+          )}
 
           {!adminLoading && !adminError && (
-            <table style={{ width: "100%", marginTop: "20px" }}>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Ad</th>
-                  <th>Email</th>
-                  <th>Rol</th>
-                  <th>Aktif</th>
-                </tr>
-              </thead>
-              <tbody>
-                {adminUsers.map((u) => (
-                  <tr key={u.id}>
-                    <td>{u.id}</td>
-                    <td>{u.name}</td>
-                    <td>{u.email}</td>
-                    <td>{u.role}</td>
-                    <td>{u.is_active ? "✅" : "❌"}</td>
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  marginTop: "12px",
+                }}
+              >
+                <thead>
+                  <tr style={{ background: "#f3f4f6" }}>
+                    <th style={thStyle}>ID</th>
+                    <th style={thStyle}>Ad</th>
+                    <th style={thStyle}>Email</th>
+                    <th style={thStyle}>Rol</th>
+                    <th style={thStyle}>Aktif</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {adminUsers.map((u) => (
+                    <tr key={u.id}>
+                      <td style={tdStyle}>{u.id}</td>
+                      <td style={tdStyle}>{u.name}</td>
+                      <td style={tdStyle}>{u.email}</td>
+                      <td style={tdStyle}>{u.role}</td>
+                      <td style={tdStyle}>{u.is_active ? "✅" : "❌"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
