@@ -7616,14 +7616,22 @@ function App() {
 
   const handleLogout = () => {
     localStorage.removeItem("token");
-
     localStorage.removeItem("user");
+    localStorage.removeItem("finance_token");
+    localStorage.removeItem("finance_user_email");
 
     setToken("");
-
     setUser(null);
 
-    window.location.reload(); // 🔥 en garanti logout
+    if (typeof setFinanceToken === "function") {
+      setFinanceToken("");
+    }
+
+    if (typeof setFinanceUserEmail === "function") {
+      setFinanceUserEmail("");
+    }
+
+    window.location.reload();
   };
 
   const inputStyle = {
