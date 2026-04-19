@@ -7691,6 +7691,28 @@ function App() {
       setAdminLoading(false);
     }
   };
+  const handleAdminRoleChange = async (userId, newRole) => {
+    try {
+      const response = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ role: newRole }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Rol güncellenemedi");
+      }
+
+      await loadAdminUsers();
+    } catch (err) {
+      alert(err.message || "Rol güncellenemedi");
+    }
+  };
 
   const thStyle = {
     textAlign: "left",
@@ -8136,6 +8158,7 @@ function App() {
                     <th style={thStyle}>Email</th>
                     <th style={thStyle}>Rol</th>
                     <th style={thStyle}>Aktif</th>
+                    <th style={thStyle}>İşlem</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -8146,6 +8169,37 @@ function App() {
                       <td style={tdStyle}>{u.email}</td>
                       <td style={tdStyle}>{u.role}</td>
                       <td style={tdStyle}>{u.is_active ? "✅" : "❌"}</td>
+                      <td style={tdStyle}>
+                        {u.role === "admin" ? (
+                          <button
+                            onClick={() => handleAdminRoleChange(u.id, "user")}
+                            style={{
+                              padding: "6px 10px",
+                              background: "#ef4444",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Admin → User
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleAdminRoleChange(u.id, "admin")}
+                            style={{
+                              padding: "6px 10px",
+                              background: "#10b981",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            User → Admin
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
