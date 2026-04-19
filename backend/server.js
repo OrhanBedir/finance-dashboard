@@ -310,7 +310,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+
 
 app.post("/auth/login", async (req, res) => {
   try {
@@ -417,7 +417,7 @@ app.post("/auth/login", async (req, res) => {
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
-app.use(express.urlencoded({ extended: true }));
+
 
 /* ================== UPLOAD ================== */
 const uploadDir = path.join(__dirname, "uploads");
