@@ -85,15 +85,22 @@ app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
 });
 app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role = "user" } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        ok: false,
+        error: "Ad, email ve şifre zorunlu",
+      });
+    }
 
     const hashed = await bcrypt.hash(password, 10);
 
     const result = await pool.query(
-      `INSERT INTO users (name, email, password, role, is_active)
+      `INSERT INTO users (name, email, password_hash, role, is_active)
        VALUES ($1, $2, $3, $4, true)
        RETURNING id, name, email, role, is_active`,
-      [name, email, hashed, role || "user"],
+      [name, email, hashed, role]
     );
 
     res.json({ ok: true, user: result.rows[0] });

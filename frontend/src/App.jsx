@@ -5,7 +5,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import DatePicker from "react-datepicker";
 import { useState } from "react";
 
-const API = import.meta.env.VITE_API_BASE;
+
 
 function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   return (
