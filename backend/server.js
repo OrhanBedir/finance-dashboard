@@ -113,16 +113,18 @@ app.put(
   authMiddleware,
   requireAdmin,
   async (req, res) => {
+    console.log("ACTIVE ROUTE HIT:", req.params.id);
+
     try {
       const { id } = req.params;
 
       const result = await pool.query(
         `
-      UPDATE users
-      SET is_active = NOT is_active
-      WHERE id = $1
-      RETURNING id, is_active
-      `,
+        UPDATE users
+        SET is_active = NOT is_active
+        WHERE id = $1
+        RETURNING id, is_active
+        `,
         [id],
       );
 
@@ -131,6 +133,8 @@ app.put(
           .status(404)
           .json({ ok: false, error: "Kullanıcı bulunamadı" });
       }
+
+      console.log("ACTIVE TOGGLED:", result.rows[0]);
 
       res.json({ ok: true, user: result.rows[0] });
     } catch (err) {
