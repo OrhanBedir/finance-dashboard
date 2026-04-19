@@ -5,6 +5,8 @@ import "react-datepicker/dist/react-datepicker.css";
 import DatePicker from "react-datepicker";
 import { useState } from "react";
 
+const API = import.meta.env.VITE_API_BASE;
+
 function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   return (
     <div
@@ -7700,13 +7702,13 @@ function App() {
   };
   const handleAdminRoleChange = async (userId, newRole) => {
     try {
-      const response = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
+      await fetch(`${API}/admin/users/${id}/role`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`, // varsa
         },
-        body: JSON.stringify({ role: newRole }),
+        body: JSON.stringify({ role }),
       });
 
       const data = await response.json().catch(() => ({}));
