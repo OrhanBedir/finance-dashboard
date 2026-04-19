@@ -8302,6 +8302,7 @@ function App() {
                         >
                           {u.is_active ? "Pasife Al" : "Aktif Et"}
                         </button>
+
                         {u.role === "admin" ? (
                           <button
                             onClick={() => handleAdminRoleChange(u.id, "user")}
