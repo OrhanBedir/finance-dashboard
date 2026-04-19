@@ -7601,6 +7601,12 @@ function RegionAnalysis() {
 }
 
 function App() {
+  const [newUser, setNewUser] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "user",
+  });
   const [token, setToken] = useState(localStorage.getItem("token") || "");
 
   const [user, setUser] = useState(() => {
