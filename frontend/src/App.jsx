@@ -7926,13 +7926,15 @@ function App() {
           marginBottom: "24px",
           position: "relative",
         }}
-      >
+      >.{isAdmin && (
         <button
           className={page === "finance" ? "tab activeTab" : "tab"}
           onClick={() => setPage("finance")}
         >
           Finance Dashboard
         </button>
+
+        )}
 
         <button
           className={page === "region" ? "tab activeTab" : "tab"}
