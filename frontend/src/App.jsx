@@ -7604,6 +7604,28 @@ function RegionAnalysis() {
 }
 
 function App() {
+  const [token, setToken] = useState(localStorage.getItem("token") || "");
+
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "null");
+    } catch {
+      return null;
+    }
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+
+    localStorage.removeItem("user");
+
+    setToken("");
+
+    setUser(null);
+
+    window.location.reload(); // 🔥 en garanti logout
+  };
+
   const inputStyle = {
     width: "100%",
 
@@ -7686,6 +7708,7 @@ function App() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(payload),
         },
@@ -7748,7 +7771,12 @@ function App() {
       localStorage.setItem("finance_token", data.token);
       localStorage.setItem("finance_user_email", data.user.email);
 
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user));
+
       setFinanceToken(data.token);
+      setToken(data.token);
+      setUser(data.user);
       setFinanceUserEmail(data.user.email);
 
       setFinanceLoginEmail("");
