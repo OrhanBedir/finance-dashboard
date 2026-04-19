@@ -33,6 +33,170 @@ function authMiddleware(req, res, next) {
 const pool = require("./db");
 const app = express();
 
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== "admin") {
+    return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+  }
+  next();
+}
+
+// TÜM KULLANICILARI LİSTELE
+app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, email, role, is_active, created_at
+      FROM users
+      ORDER BY id DESC
+    `);
+
+    res.json({ ok: true, users: result.rows });
+  } catch (err) {
+    console.error("ADMIN USERS LIST ERROR:", err);
+    res.status(500).json({ ok: false, error: "Kullanıcılar alınamadı" });
+  }
+});
+
+// YENİ KULLANICI EKLE
+app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const { name, email, password, role = "user" } = req.body;
+
+    if (!name || !email || !password) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Ad, email ve şifre zorunlu" });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+      `
+      INSERT INTO users (name, email, password_hash, role, is_active)
+      VALUES ($1, $2, $3, $4, true)
+      RETURNING id, name, email, role, is_active, created_at
+      `,
+      [name, email, passwordHash, role],
+    );
+
+    res.json({ ok: true, user: result.rows[0] });
+  } catch (err) {
+    console.error("ADMIN USER CREATE ERROR:", err);
+    res.status(500).json({ ok: false, error: "Kullanıcı eklenemedi" });
+  }
+});
+
+// ROL GÜNCELLE
+app.put(
+  "/admin/users/:id/role",
+  authMiddleware,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { role } = req.body;
+
+      if (!role || !["admin", "user"].includes(role)) {
+        return res.status(400).json({ ok: false, error: "Geçersiz rol" });
+      }
+
+      const result = await pool.query(
+        `
+      UPDATE users
+      SET role = $1
+      WHERE id = $2
+      RETURNING id, name, email, role, is_active, created_at
+      `,
+        [role, id],
+      );
+
+      if (!result.rows.length) {
+        return res
+          .status(404)
+          .json({ ok: false, error: "Kullanıcı bulunamadı" });
+      }
+
+      res.json({ ok: true, user: result.rows[0] });
+    } catch (err) {
+      console.error("ADMIN USER ROLE UPDATE ERROR:", err);
+      res.status(500).json({ ok: false, error: "Rol güncellenemedi" });
+    }
+  },
+);
+
+// AKTİF / PASİF
+app.put(
+  "/admin/users/:id/status",
+  authMiddleware,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { is_active } = req.body;
+
+      const result = await pool.query(
+        `
+      UPDATE users
+      SET is_active = $1
+      WHERE id = $2
+      RETURNING id, name, email, role, is_active, created_at
+      `,
+        [!!is_active, id],
+      );
+
+      if (!result.rows.length) {
+        return res
+          .status(404)
+          .json({ ok: false, error: "Kullanıcı bulunamadı" });
+      }
+
+      res.json({ ok: true, user: result.rows[0] });
+    } catch (err) {
+      console.error("ADMIN USER STATUS UPDATE ERROR:", err);
+      res.status(500).json({ ok: false, error: "Durum güncellenemedi" });
+    }
+  },
+);
+
+// ŞİFRE RESET
+app.put(
+  "/admin/users/:id/password",
+  authMiddleware,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { password } = req.body;
+
+      if (!password) {
+        return res.status(400).json({ ok: false, error: "Yeni şifre zorunlu" });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      const result = await pool.query(
+        `
+      UPDATE users
+      SET password_hash = $1
+      WHERE id = $2
+      RETURNING id, name, email, role, is_active, created_at
+      `,
+        [passwordHash, id],
+      );
+
+      if (!result.rows.length) {
+        return res
+          .status(404)
+          .json({ ok: false, error: "Kullanıcı bulunamadı" });
+      }
+
+      res.json({ ok: true, user: result.rows[0] });
+    } catch (err) {
+      console.error("ADMIN USER PASSWORD RESET ERROR:", err);
+      res.status(500).json({ ok: false, error: "Şifre güncellenemedi" });
+    }
+  },
+);
+
 console.log("DB MODE:", process.env.DATABASE_URL ? "DATABASE_URL" : "LOCAL_DB");
 console.log("DATABASE_URL EXISTS:", !!process.env.DATABASE_URL);
 /* ================== MIDDLEWARE ================== */
