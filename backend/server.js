@@ -77,9 +77,18 @@ app.post("/auth/login", async (req, res) => {
       .map((x) => x.trim().toLowerCase())
       .filter(Boolean);
 
-    const scope = financeAllowedUsers.includes(String(user.email).toLowerCase())
-      ? "finance"
-      : "app";
+    const userEmail = String(user.email || "").toLowerCase();
+    const userRole = String(user.role || "").toLowerCase();
+
+    const isAdminUser =
+      userEmail === "orhan@simsektel.com" ||
+      userRole === "admin" ||
+      userRole === "genel_mudur";
+
+    const scope =
+      isAdminUser || financeAllowedUsers.includes(userEmail)
+        ? "finance"
+        : "app";
 
     const token = jwt.sign(
       {
