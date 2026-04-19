@@ -40,6 +40,31 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  const allowedOrigins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://finance-dashboard-topaz-three.vercel.app",
+    "https://finance-dashboard.vercel.app",
+  ];
+
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+  }
+
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
 // TÜM KULLANICILARI LİSTELE
 app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
   try {
