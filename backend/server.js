@@ -2243,7 +2243,7 @@ app.get("/master/list-detailed", async (req, res) => {
 });
 
 /* ================== DASHBOARD RESULT ================== */
-app.get("/dashboard/result", async (req, res) => {
+app.get("/dashboard/result", authMiddleware, async (req, res) => {
   const isAdmin = req.user?.role === "admin";
   const subconName = req.user?.subcon_name || null;
   try {
@@ -4704,7 +4704,7 @@ app.delete("/master/:id", async (req, res) => {
 });
 
 /* ================== PO DASHBOARD SUMMARY ================== */
-app.get("/dashboard/summary", async (req, res) => {
+app.get("/dashboard/summary", authMiddleware, async (req, res) => {
   try {
     const isAdmin = req.user?.role === "admin";
     const subconName = req.user?.subcon_name || null;
