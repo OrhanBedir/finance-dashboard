@@ -344,7 +344,7 @@ app.post("/auth/login", async (req, res) => {
 
     const result = await pool.query(
       `
-      SELECT id, name, email, password_hash, role, is_active
+      SELECT id, name, email, password_hash, role, is_active, subcon_name
       FROM users
       WHERE email = $1
       LIMIT 1
@@ -414,6 +414,9 @@ app.post("/auth/login", async (req, res) => {
       { expiresIn: "7d" },
     );
 
+    console.log("LOGIN USER DEBUG:", user);
+    console.log("LOGIN SUBCON DEBUG:", user.subcon_name);
+
     return res.json({
       ok: true,
       token,
@@ -422,7 +425,7 @@ app.post("/auth/login", async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        subcon_name: user.subcon_name
+        subcon_name: user.subcon_name,
       },
     });
   } catch (err) {
