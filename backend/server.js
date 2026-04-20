@@ -2244,13 +2244,27 @@ app.get("/master/list-detailed", async (req, res) => {
 
 /* ================== DASHBOARD RESULT ================== */
 app.get("/dashboard/result", async (req, res) => {
+  const isAdmin = req.user?.role === "admin";
+  const subconName = req.user?.subcon_name || null;
   try {
     const result = await pool.query(buildMasterJoinedQuery());
 
-    const rows = (result.rows || []).map((row) => ({
+    let rows = (result.rows || []).map((row) => ({
       ...row,
       currency: normalizeCurrency(row.currency),
     }));
+
+    if (!isAdmin && subconName) {
+      rows = rows.filter(
+        (row) =>
+          String(row.subcon_name || "")
+            .trim()
+            .toLowerCase() ===
+          String(subconName || "")
+            .trim()
+            .toLowerCase(),
+      );
+    }
 
     res.json({ ok: true, rows });
   } catch (err) {
