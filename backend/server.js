@@ -422,6 +422,7 @@ app.post("/auth/login", async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        subcon_name: user.subcon_name
       },
     });
   } catch (err) {
