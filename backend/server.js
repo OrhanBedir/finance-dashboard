@@ -4706,7 +4706,11 @@ app.delete("/master/:id", async (req, res) => {
 /* ================== PO DASHBOARD SUMMARY ================== */
 app.get("/dashboard/summary", async (req, res) => {
   try {
-    const result = await fetchData();
+    const isAdmin = req.user?.role === "admin";
+    const subconName = req.user?.subcon_name || null;
+
+    const result = await fetchData(isAdmin, subconName);
+
     res.json({ ok: true, summary: result });
   } catch (err) {
     console.error("SUMMARY ERROR:", err.message);
@@ -4714,8 +4718,16 @@ app.get("/dashboard/summary", async (req, res) => {
   }
 });
 
-async function fetchData() {
-  const result = await pool.query(buildMasterJoinedQuery("", ""));
+async function fetchData(isAdmin, subconName) {
+  let query = buildMasterJoinedQuery("", "");
+  let params = [];
+
+  if (!isAdmin && subconName) {
+    query += ` WHERE LOWER(subcon_name) = LOWER($1)`;
+    params.push(subconName);
+  }
+
+  const result = await pool.query(query, params);
 
   let totalTry = 0;
   let totalUsd = 0;
