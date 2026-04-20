@@ -4709,6 +4709,10 @@ app.get("/dashboard/summary", async (req, res) => {
     const isAdmin = req.user?.role === "admin";
     const subconName = req.user?.subcon_name || null;
 
+    console.log("SUMMARY USER DEBUG:", req.user);
+    console.log("SUMMARY ADMIN DEBUG:", isAdmin);
+    console.log("SUMMARY SUBCON DEBUG:", subconName);
+
     const result = await fetchData(isAdmin, subconName);
 
     res.json({ ok: true, summary: result });
