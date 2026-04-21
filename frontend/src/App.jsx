@@ -7276,15 +7276,23 @@ function RegionAnalysis() {
                 {detailTitle}
               </h3>
 
-              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  flexWrap: "wrap",
+                  width: "100%",
+                }}
+              >
                 <div
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "16px",
-                    marginBottom: "16px",
+                    gap: "12px",
                     flexWrap: "wrap",
+                    flex: "1 1 auto",
                   }}
                 >
                   <input
@@ -7306,86 +7314,58 @@ function RegionAnalysis() {
 
                   <div
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      flexWrap: "wrap",
-                      width: "100%",
+                      minWidth: "120px",
+                      padding: "10px 14px",
+                      borderRadius: "12px",
+                      background: "#f7f8fb",
+                      border: "1px solid #e4e7ee",
+                      textAlign: "center",
                     }}
                   >
-                    {/* INPUT */}
-                    <input
-                      type="text"
-                      value={filterText}
-                      onChange={(e) => setFilterText(e.target.value)}
-                      placeholder="Site ID ile filtrele"
-                      style={{
-                        flex: "1 1 320px",
-                        minWidth: "280px",
-                        padding: "14px 16px",
-                        borderRadius: "14px",
-                        border: "1px solid #d9dee7",
-                        fontSize: "16px",
-                        outline: "none",
-                        background: "#fff",
-                      }}
-                    />
-
-                    {/* TOPLAM SATIR */}
-                    <div
-                      style={{
-                        minWidth: "120px",
-                        padding: "10px 14px",
-                        borderRadius: "12px",
-                        background: "#f7f8fb",
-                        border: "1px solid #e4e7ee",
-                        textAlign: "center",
-                      }}
-                    >
-                      <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                        Toplam Satır
-                      </div>
-                      <div style={{ fontWeight: "700", fontSize: "20px" }}>
-                        {filteredRowCount}
-                      </div>
+                    <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Toplam Satır
                     </div>
+                    <div style={{ fontWeight: "700", fontSize: "20px" }}>
+                      {filteredRowCount}
+                    </div>
+                  </div>
 
-                    {/* TOPLAM TUTAR */}
-                    <div
-                      style={{
-                        minWidth: "150px",
-                        padding: "10px 14px",
-                        borderRadius: "12px",
-                        background: "#f7f8fb",
-                        border: "1px solid #e4e7ee",
-                        textAlign: "center",
-                      }}
-                    >
-                      <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                        Toplam Tutar
-                      </div>
-                      <div style={{ fontWeight: "700", fontSize: "20px" }}>
-                        {formatTRY(filteredRowTotal)}
-                      </div>
+                  <div
+                    style={{
+                      minWidth: "150px",
+                      padding: "10px 14px",
+                      borderRadius: "12px",
+                      background: "#f7f8fb",
+                      border: "1px solid #e4e7ee",
+                      textAlign: "center",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Toplam Tutar
+                    </div>
+                    <div style={{ fontWeight: "700", fontSize: "20px" }}>
+                      {formatTRY(filteredRowTotal)}
                     </div>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={exportDetailRowsToExcel}
-                >
-                  Excel İndir
-                </button>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="tab"
+                    onClick={exportDetailRowsToExcel}
+                  >
+                    Excel İndir
+                  </button>
 
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={() => setDetailModalOpen(false)}
-                >
-                  Kapat
-                </button>
+                  <button
+                    type="button"
+                    className="tab"
+                    onClick={() => setDetailModalOpen(false)}
+                  >
+                    Kapat
+                  </button>
+                </div>
               </div>
             </div>
 
