@@ -415,8 +415,7 @@ app.post("/auth/login", async (req, res) => {
       { expiresIn: "7d" },
     );
 
-    console.log("LOGIN USER DEBUG:", user);
-    console.log("LOGIN SUBCON DEBUG:", user.subcon_name);
+    
 
     return res.json({
       ok: true,
@@ -2247,7 +2246,7 @@ app.get("/master/list-detailed", async (req, res) => {
 app.get("/dashboard/result", authMiddleware, async (req, res) => {
   const isAdmin = req.user?.role === "admin";
   const subconName = req.user?.subcon_name || null;
-  console.log("USER DEBUG:", req.user);
+  
 
   try {
     const result = await pool.query(buildMasterJoinedQuery());
@@ -4726,7 +4725,7 @@ app.get("/dashboard/summary", authMiddleware, async (req, res) => {
 });
 
 async function fetchData(isAdmin, subconName) {
-  console.log("SUMMARY DEBUG:", { isAdmin, subconName });
+  
   let query = buildMasterJoinedQuery("", "");
   let params = [];
 
