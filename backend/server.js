@@ -439,6 +439,7 @@ app.post("/auth/login", async (req, res) => {
         email: user.email,
         role: user.role,
         subcon_name: user.subcon_name,
+        payment_rate: Number(user.payment_rate || 0.8),
       },
     });
   } catch (err) {
