@@ -6265,7 +6265,7 @@ function formatTRY(value) {
   }).format(Number(value || 0));
 }
 
-function RegionAnalysis({ isSubconUser }) {
+function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const [filterText, setFilterText] = useState("");
   const [regionSearch, setRegionSearch] = useState("");
   const [sortConfig, setSortConfig] = useState({
@@ -6820,7 +6820,8 @@ function RegionAnalysis({ isSubconUser }) {
 
     return sum + (currency === "USD" ? total * usdRate : total);
   }, 0);
-  const federalHakedisTotal = regionFilteredRowTotal * 0.8;
+  const subconHakedisTotal =
+    regionFilteredRowTotal * Number(userPaymentRate || 0.8);
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
@@ -7531,12 +7532,12 @@ function RegionAnalysis({ isSubconUser }) {
           }}
         >
           <div style={{ fontSize: "12px", color: "#6b7280" }}>
-            Federal Hakediş
+            {isSubconUser ? `${userSubconName} Hakediş` : "Federal Hakediş"}
           </div>
           <div
             style={{ fontWeight: "700", fontSize: "20px", color: "#166534" }}
           >
-            {formatTRY(federalHakedisTotal)}
+            {formatTRY(subconHakedisTotal)}
           </div>
         </div>
 
@@ -8389,7 +8390,13 @@ function App() {
         ))}
 
       {page === "executive" && <ExecutiveDashboard />}
-      {page === "region" && <RegionAnalysis isSubconUser={!isAdmin} />}
+      {page === "region" && (
+        <RegionAnalysis
+          isSubconUser={!isAdmin && !!user?.subcon_name}
+          userSubconName={user?.subcon_name || ""}
+          userPaymentRate={Number(user?.payment_rate || 0.8)}
+        />
+      )}
       {page === "entry" && <DailyEntry />}
       {page === "admin" && isAdmin && (
         <div
