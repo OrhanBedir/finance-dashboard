@@ -6813,6 +6813,7 @@ function RegionAnalysis() {
 
     return sum + (currency === "USD" ? total * usdRate : total);
   }, 0);
+  const federalHakedisTotal = regionFilteredRowTotal * 0.8;
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
@@ -7506,6 +7507,25 @@ function RegionAnalysis() {
           <div style={{ fontSize: "12px", color: "#6b7280" }}>Toplam Tutar</div>
           <div style={{ fontWeight: "700", fontSize: "20px" }}>
             {formatTRY(regionFilteredRowTotal)}
+          </div>
+        </div>
+        <div
+          style={{
+            minWidth: "170px",
+            padding: "10px 14px",
+            borderRadius: "12px",
+            background: "#f7f8fb",
+            border: "1px solid #e4e7ee",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>
+            Federal Hakediş
+          </div>
+          <div
+            style={{ fontWeight: "700", fontSize: "20px", color: "#166534" }}
+          >
+            {formatTRY(federalHakedisTotal)}
           </div>
         </div>
 
