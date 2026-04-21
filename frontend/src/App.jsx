@@ -6440,13 +6440,18 @@ function RegionAnalysis() {
       const due = Number(row.due_qty || 0);
       const diff = req - due;
 
+      const isFederal =
+        String(row.subcon_name || "")
+          .trim()
+          .toLowerCase() === "federal";
+
       return (
         rowRegion === String(regionName).toLowerCase() &&
         statusOk &&
         qcOk &&
         billedZero &&
         diff === 0 &&
-        String(row.subcon_name || "").toLowerCase() === "federal"
+        isFederal
       );
     });
   };
@@ -7149,7 +7154,7 @@ function RegionAnalysis() {
                   <div style={{ fontSize: "12px", color: "#6b7280" }}>
                     Toplam Satır
                   </div>
-                  <div style={{ fontWeight: "600" }}>{filteredRowCount}</div>
+                  <div style={{ fontWeight: "600" }}>{qcReadyModalRows.length}</div>
                 </div>
 
                 <div
@@ -7164,7 +7169,7 @@ function RegionAnalysis() {
                     Toplam Tutar ({qcReadyType}%)
                   </div>
                   <div style={{ fontWeight: "600" }}>
-                    {formatTRY(filteredRowTotal)}
+                    {formatTRY(qcReadyModalTotal)}
                   </div>
                 </div>
               </div>
