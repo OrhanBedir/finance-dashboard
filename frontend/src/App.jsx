@@ -8308,10 +8308,6 @@ function App() {
                 type="button"
                 onClick={handleLogout}
                 style={{
-                  position: "absolute",
-                  right: "0",
-                  top: "50%",
-                  transform: "translateY(-50%)",
                   background: "#dc3545",
                   color: "#fff",
                   border: "none",
@@ -8319,6 +8315,8 @@ function App() {
                   borderRadius: "8px",
                   cursor: "pointer",
                   fontWeight: "600",
+                  whiteSpace: "nowrap",
+                  marginLeft: "6px",
                 }}
               >
                 Çıkış Yap
