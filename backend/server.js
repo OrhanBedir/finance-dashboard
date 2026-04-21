@@ -359,7 +359,7 @@ app.post("/auth/login", async (req, res) => {
 
     const result = await pool.query(
       `
-      SELECT id, name, email, password_hash, role, is_active, subcon_name
+      SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate
       FROM users
       WHERE email = $1
       LIMIT 1
@@ -694,7 +694,11 @@ app.post("/finance-auth/login", async (req, res) => {
     res.json({
       ok: true,
       token,
-      user: { email },
+      user: {
+        email,
+        subcon_name: user.subcon_name,
+        payment_rate: Number(user.payment_rate || 0.8),
+      },
     });
   } catch (err) {
     console.error("FINANCE LOGIN ERROR:", err.message);
