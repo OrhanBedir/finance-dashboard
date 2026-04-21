@@ -3957,42 +3957,11 @@ function FinanceDashboard({
           flexWrap: "wrap",
         }}
       >
-        <div
-          style={{
-            maxWidth: "1200px",
-            margin: "0 auto 10px auto",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "12px",
-          }}
-        >
-          <div>
-            <h1 style={{ margin: "0 0 6px 0" }}>💰 Finance Dashboard</h1>
-            <div style={{ fontSize: "14px", color: "#6b7280" }}>
-              Giriş yapan: <b>{user?.name || financeUserEmail}</b>
-            </div>
+        <div>
+          <h1 style={{ margin: "0 0 6px 0" }}>💰 Finance Dashboard</h1>
+          <div style={{ fontSize: "14px", color: "#6b7280" }}>
+            Giriş yapan: <b>{user?.name || financeUserEmail}</b>
           </div>
-
-          {(token || financeToken) && (
-            <button
-              type="button"
-              onClick={handleLogout}
-              style={{
-                background: "#dc3545",
-                color: "#fff",
-                border: "none",
-                padding: "10px 16px",
-                borderRadius: "10px",
-                cursor: "pointer",
-                fontWeight: "600",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Çıkış Yap
-            </button>
-          )}
         </div>
       </div>
 
