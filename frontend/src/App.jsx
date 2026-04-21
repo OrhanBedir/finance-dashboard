@@ -6534,6 +6534,7 @@ function RegionAnalysis({ isSubconUser }) {
       const params = new URLSearchParams({
         region: qcReadyModalRegion || "",
         type: qcReadyType || "",
+        subcon: isSubconUser ? "Federal" : "",
       });
 
       const response = await fetch(

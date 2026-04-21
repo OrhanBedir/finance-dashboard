@@ -415,8 +415,6 @@ app.post("/auth/login", async (req, res) => {
       { expiresIn: "7d" },
     );
 
-    
-
     return res.json({
       ok: true,
       token,
@@ -2246,7 +2244,6 @@ app.get("/master/list-detailed", async (req, res) => {
 app.get("/dashboard/result", authMiddleware, async (req, res) => {
   const isAdmin = req.user?.role === "admin";
   const subconName = req.user?.subcon_name || null;
-  
 
   try {
     const result = await pool.query(buildMasterJoinedQuery());
@@ -4318,6 +4315,10 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       .toLowerCase();
     const type = String(req.query.type || "").trim(); // "80", "20_fac_ok", "20_fac_nok"
 
+    const subcon = String(req.query.subcon || "")
+      .trim()
+      .toLowerCase();
+
     const result = await pool.query(buildMasterJoinedQuery());
 
     const allRows = (result.rows || []).map((row) => ({
@@ -4331,6 +4332,12 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       ).toLowerCase();
 
       if (rowRegion !== region) return false;
+
+      const rowSubcon = String(row.subcon_name || "")
+        .trim()
+        .toLowerCase();
+
+      if (subcon && rowSubcon !== subcon) return false;
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
@@ -4725,7 +4732,6 @@ app.get("/dashboard/summary", authMiddleware, async (req, res) => {
 });
 
 async function fetchData(isAdmin, subconName) {
-  
   let query = buildMasterJoinedQuery("", "");
   let params = [];
 
