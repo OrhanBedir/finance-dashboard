@@ -4339,6 +4339,12 @@ app.get("/export/qc-ready-excel", async (req, res) => {
 
       if (subcon && rowSubcon !== subcon) return false;
 
+      const rowSubcon = String(row.subcon_name || "")
+        .trim()
+        .toLowerCase();
+
+      if (subcon && rowSubcon !== subcon) return false;
+
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
       const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
