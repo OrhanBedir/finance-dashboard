@@ -6445,7 +6445,8 @@ function RegionAnalysis() {
         statusOk &&
         qcOk &&
         billedZero &&
-        diff === 0
+        diff === 0 &&
+        String(row.subcon_name || "").toLowerCase() === "federal"
       );
     });
   };
