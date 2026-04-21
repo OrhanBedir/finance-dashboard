@@ -7619,6 +7619,8 @@ function App() {
     }
   });
   const isAdmin = user?.role === "admin";
+  const isSubconUser =
+    user?.role === "user" && String(user?.subcon_name || "").trim() !== "";
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -8074,72 +8076,113 @@ function App() {
         }}
       >
         .
-        {isAdmin && (
-          <button
-            className={page === "finance" ? "tab activeTab" : "tab"}
-            onClick={() => setPage("finance")}
-          >
-            Finance Dashboard
-          </button>
-        )}
-        {isAdmin && (
-          <button
-            className={page === "admin" ? "tab activeTab" : "tab"}
-            onClick={() => {
-              setPage("admin");
-              loadAdminUsers(); // 👉 SAYFA AÇILINCA KULLANICILARI ÇEK
-            }}
-          >
-            Admin Panel
-          </button>
-        )}
-        <button
-          className={page === "region" ? "tab activeTab" : "tab"}
-          onClick={() => setPage("region")}
-        >
-          Region Analysis
-        </button>
-        <button
-          className={page === "executive" ? "tab activeTab" : "tab"}
-          onClick={() => setPage("executive")}
-        >
-          Executive Dashboard
-        </button>
-        <button
-          className={page === "entry" ? "tab activeTab" : "tab"}
-          onClick={() => setPage("entry")}
-        >
-          Günlük İş Girişi
-        </button>
-        <button
-          type="button"
-          className="tab"
-          onClick={() =>
-            window.open("https://avans-po-sistemi.vercel.app/", "_blank")
-          }
-        >
-          Avans Talep
-        </button>
-        {(token || financeToken) && (
-          <button
-            type="button"
-            onClick={handleLogout}
-            style={{
-              position: "absolute",
-              right: "0",
-              top: "50%",
-              transform: "translateY(-50%)",
-              background: "#dc3545",
-              color: "#fff",
-              border: "none",
-              padding: "10px 16px",
-              borderRadius: "8px",
-              cursor: "pointer",
-              fontWeight: "600",
-            }}
-          >
-            Çıkış Yap
-          </button>
+        {isSubconUser ? (
+          <>
+            <button
+              className={page === "region" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("region")}
+            >
+              Region Analysis
+            </button>
+
+            {(token || financeToken) && (
+              <button
+                type="button"
+                onClick={handleLogout}
+                style={{
+                  position: "absolute",
+                  right: "0",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "#dc3545",
+                  color: "#fff",
+                  border: "none",
+                  padding: "10px 16px",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                }}
+              >
+                Çıkış Yap
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            {isAdmin && (
+              <button
+                className={page === "finance" ? "tab activeTab" : "tab"}
+                onClick={() => setPage("finance")}
+              >
+                Finance Dashboard
+              </button>
+            )}
+
+            {isAdmin && (
+              <button
+                className={page === "admin" ? "tab activeTab" : "tab"}
+                onClick={() => {
+                  setPage("admin");
+                  loadAdminUsers();
+                }}
+              >
+                Admin Panel
+              </button>
+            )}
+
+            <button
+              className={page === "region" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("region")}
+            >
+              Region Analysis
+            </button>
+
+            <button
+              className={page === "executive" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("executive")}
+            >
+              Executive Dashboard
+            </button>
+
+            <button
+              className={page === "entry" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("entry")}
+            >
+              Günlük İş Girişi
+            </button>
+
+            <button
+              type="button"
+              className="tab"
+              onClick={() =>
+                window.open("https://avans-po-sistemi.vercel.app/", "_blank")
+              }
+            >
+              Avans Talep
+            </button>
+
+            {(token || financeToken) && (
+              <button
+                type="button"
+                onClick={handleLogout}
+                style={{
+                  position: "absolute",
+                  right: "0",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "#dc3545",
+                  color: "#fff",
+                  border: "none",
+                  padding: "10px 16px",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                }}
+              >
+                Çıkış Yap
+              </button>
+            )}
+          </>
         )}
       </div>
 
