@@ -7139,7 +7139,7 @@ function RegionAnalysis() {
                     Toplam Satır
                   </div>
                   <div style={{ fontWeight: "600" }}>
-                    {qcReadyModalRows.length}
+                    {filteredRowCount}
                   </div>
                 </div>
 
@@ -7155,7 +7155,7 @@ function RegionAnalysis() {
                     Toplam Tutar ({qcReadyType}%)
                   </div>
                   <div style={{ fontWeight: "600" }}>
-                    {formatTRY(qcReadyModalTotal)}
+                    {formatTRY(filteredRowTotal)}
                   </div>
                 </div>
               </div>
