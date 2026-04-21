@@ -6265,7 +6265,7 @@ function formatTRY(value) {
   }).format(Number(value || 0));
 }
 
-function RegionAnalysis() {
+function RegionAnalysis({ isSubconUser }) {
   const [filterText, setFilterText] = useState("");
   const [regionSearch, setRegionSearch] = useState("");
   const [sortConfig, setSortConfig] = useState({
@@ -7041,20 +7041,22 @@ function RegionAnalysis() {
                     </strong>
                   </div>
 
-                  <div
-                    style={{
-                      ...regionRowStyle,
-                      cursor: "pointer",
-                    }}
-                    onClick={() => openQcReadyModal(item.region, "80")}
-                  >
-                    <span style={{ color: "#374151", textAlign: "left" }}>
-                      QC OK Fatura Kesilecek 80%
-                    </span>
-                    <strong style={{ color: "#166534", textAlign: "right" }}>
-                      {formatTRY(getQcReady80TotalByRegion(item.region))}
-                    </strong>
-                  </div>
+                  {!isSubconUser && (
+                    <div
+                      style={{
+                        ...regionRowStyle,
+                        cursor: "pointer",
+                      }}
+                      onClick={() => openQcReadyModal(item.region, "80")}
+                    >
+                      <span style={{ color: "#374151", textAlign: "left" }}>
+                        QC OK Fatura Kesilecek 80%
+                      </span>
+                      <strong style={{ color: "#166534", textAlign: "right" }}>
+                        {formatTRY(getQcReady80TotalByRegion(item.region))}
+                      </strong>
+                    </div>
+                  )}
 
                   <div
                     style={{
@@ -8386,7 +8388,7 @@ function App() {
         ))}
 
       {page === "executive" && <ExecutiveDashboard />}
-      {page === "region" && <RegionAnalysis />}
+      {page === "region" && <RegionAnalysis isSubconUser={!isAdmin} />}
       {page === "entry" && <DailyEntry />}
       {page === "admin" && isAdmin && (
         <div
