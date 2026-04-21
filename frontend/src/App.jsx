@@ -6805,6 +6805,15 @@ function RegionAnalysis() {
     return sortable;
   }, [filteredRegionRows, sortConfig]);
 
+  const regionFilteredRowCount = sortedRows.length;
+
+  const regionFilteredRowTotal = sortedRows.reduce((sum, row) => {
+    const currency = normalizeCurrency(row.currency);
+    const total = Number(row.total_done_amount || 0);
+
+    return sum + (currency === "USD" ? total * usdRate : total);
+  }, 0);
+
   const handleSort = (key) => {
     setSortConfig((prev) => ({
       key,
@@ -7446,12 +7455,12 @@ function RegionAnalysis() {
       <div
         style={{
           display: "flex",
-          justifyContent: "space-between",
           alignItems: "center",
-          margin: "30px auto 12px auto",
           gap: "12px",
           flexWrap: "wrap",
+          margin: "30px auto 12px auto",
           maxWidth: "1200px",
+          width: "100%",
         }}
       >
         <input
@@ -7460,12 +7469,45 @@ function RegionAnalysis() {
           value={regionSearch}
           onChange={(e) => setRegionSearch(e.target.value)}
           style={{
+            flex: "1 1 320px",
+            minWidth: "280px",
             padding: "10px 14px",
             borderRadius: "8px",
             border: "1px solid #d1d5db",
-            minWidth: "320px",
           }}
         />
+
+        <div
+          style={{
+            minWidth: "120px",
+            padding: "10px 14px",
+            borderRadius: "12px",
+            background: "#f7f8fb",
+            border: "1px solid #e4e7ee",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>Toplam Satır</div>
+          <div style={{ fontWeight: "700", fontSize: "20px" }}>
+            {regionFilteredRowCount}
+          </div>
+        </div>
+
+        <div
+          style={{
+            minWidth: "150px",
+            padding: "10px 14px",
+            borderRadius: "12px",
+            background: "#f7f8fb",
+            border: "1px solid #e4e7ee",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>Toplam Tutar</div>
+          <div style={{ fontWeight: "700", fontSize: "20px" }}>
+            {formatTRY(regionFilteredRowTotal)}
+          </div>
+        </div>
 
         <button type="button" className="tab" onClick={handleExportRegionExcel}>
           Excel İndir
