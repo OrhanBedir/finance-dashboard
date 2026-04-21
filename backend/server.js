@@ -164,7 +164,14 @@ app.delete(
 // YENİ KULLANICI EKLE
 app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
   try {
-    const { name, email, password, role = "user" } = req.body;
+    const {
+      name,
+      email,
+      password,
+      role = "user",
+      subcon_name = null,
+      payment_rate = null,
+    } = req.body;
 
     if (!name || !email || !password) {
       return res
@@ -176,11 +183,19 @@ app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `
-      INSERT INTO users (name, email, password_hash, role, is_active)
-      VALUES ($1, $2, $3, $4, true)
-      RETURNING id, name, email, role, is_active, created_at
+      INSERT INTO users (
+        name,
+        email,
+        password_hash,
+        role,
+        is_active,
+        subcon_name,
+        payment_rate
+      )
+      VALUES ($1, $2, $3, $4, true, $5, $6)
+      RETURNING id, name, email, role, is_active, created_at, subcon_name, payment_rate
       `,
-      [name, email, passwordHash, role],
+      [name, email, passwordHash, role, subcon_name, payment_rate],
     );
 
     res.json({ ok: true, user: result.rows[0] });
@@ -4332,12 +4347,6 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       ).toLowerCase();
 
       if (rowRegion !== region) return false;
-
-      const rowSubcon = String(row.subcon_name || "")
-        .trim()
-        .toLowerCase();
-
-      if (subcon && rowSubcon !== subcon) return false;
 
       const rowSubcon = String(row.subcon_name || "")
         .trim()
