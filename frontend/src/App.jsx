@@ -6299,6 +6299,12 @@ function RegionAnalysis() {
     ),
   );
 
+  const filteredRowCount = filteredRows.length;
+
+  const filteredRowTotal = filteredRows.reduce((sum, row) => {
+    return sum + Number(row.total_done_amount || 0);
+  }, 0);
+
   // ✅ FAC OK 20%
   const getFacOk20RowsByRegion = (regionName) => {
     return rows.filter((row) => {
@@ -7273,18 +7279,97 @@ function RegionAnalysis() {
               </h3>
 
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                <input
-                  type="text"
-                  placeholder="Detay içinde ara..."
-                  value={filterText}
-                  onChange={(e) => setFilterText(e.target.value)}
+                <div
                   style={{
-                    padding: "10px 14px",
-                    borderRadius: "8px",
-                    border: "1px solid #d1d5db",
-                    minWidth: "260px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                    marginBottom: "16px",
+                    flexWrap: "wrap",
                   }}
-                />
+                >
+                  <input
+                    type="text"
+                    value={filterText}
+                    onChange={(e) => setFilterText(e.target.value)}
+                    placeholder="Site ID ile filtrele"
+                    style={{
+                      flex: "1 1 320px",
+                      minWidth: "280px",
+                      padding: "14px 16px",
+                      borderRadius: "14px",
+                      border: "1px solid #d9dee7",
+                      fontSize: "16px",
+                      outline: "none",
+                      background: "#fff",
+                    }}
+                  />
+
+                  <div
+                    style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}
+                  >
+                    <div
+                      style={{
+                        minWidth: "120px",
+                        padding: "12px 16px",
+                        borderRadius: "14px",
+                        background: "#f7f8fb",
+                        border: "1px solid #e4e7ee",
+                        textAlign: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          color: "#6b7280",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        Toplam Satır
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "28px",
+                          fontWeight: "700",
+                          color: "#111827",
+                        }}
+                      >
+                        {filteredRowCount}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        minWidth: "170px",
+                        padding: "12px 16px",
+                        borderRadius: "14px",
+                        background: "#f7f8fb",
+                        border: "1px solid #e4e7ee",
+                        textAlign: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          color: "#6b7280",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        Toplam Tutar
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "28px",
+                          fontWeight: "700",
+                          color: "#111827",
+                        }}
+                      >
+                        {formatTRY(filteredRowTotal)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 <button
                   type="button"
