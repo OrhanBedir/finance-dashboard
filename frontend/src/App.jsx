@@ -222,7 +222,10 @@ function InvoiceEntryExcelUploadInline({ onClose, onUploaded }) {
 async function fetchJson(url, options = {}) {
   const { withAuth = true, ...fetchOptions } = options;
 
-  const token = localStorage.getItem("finance_token") || "";
+  const token =
+    localStorage.getItem("token") ||
+    localStorage.getItem("finance_token") ||
+    "";
 
   const response = await fetch(url, {
     ...fetchOptions,
