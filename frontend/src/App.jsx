@@ -4,7 +4,6 @@ import * as XLSX from "xlsx";
 import "react-datepicker/dist/react-datepicker.css";
 import DatePicker from "react-datepicker";
 
-
 function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   return (
     <div
@@ -711,8 +710,8 @@ function ExecutiveDashboard() {
       setErrorMessage("");
 
       const [summaryData, resultData] = await Promise.all([
-        fetchJson(`${API_BASE}/dashboard/summary`),
-        fetchJson(`${API_BASE}/dashboard/result`),
+        fetchJson(`${API_BASE}/dashboard/summary`, { withAuth: true }),
+        fetchJson(`${API_BASE}/dashboard/result`, { withAuth: true }),
       ]);
 
       setSummary(summaryData || null);
@@ -6407,7 +6406,9 @@ function RegionAnalysis() {
       setLoading(true);
       setErrorMessage("");
 
-      const data = await fetchJson(`${API_BASE}/dashboard/result`);
+      const data = await fetchJson(`${API_BASE}/dashboard/result`, {
+        withAuth: true,
+      });
       setRows(data.rows || []);
     } catch (err) {
       console.error("REGION RESULT ERROR:", err);
