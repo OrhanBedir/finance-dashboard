@@ -7154,7 +7154,9 @@ function RegionAnalysis() {
                   <div style={{ fontSize: "12px", color: "#6b7280" }}>
                     Toplam Satır
                   </div>
-                  <div style={{ fontWeight: "600" }}>{qcReadyModalRows.length}</div>
+                  <div style={{ fontWeight: "600" }}>
+                    {qcReadyModalRows.length}
+                  </div>
                 </div>
 
                 <div
