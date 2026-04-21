@@ -7138,9 +7138,7 @@ function RegionAnalysis() {
                   <div style={{ fontSize: "12px", color: "#6b7280" }}>
                     Toplam Satır
                   </div>
-                  <div style={{ fontWeight: "600" }}>
-                    {filteredRowCount}
-                  </div>
+                  <div style={{ fontWeight: "600" }}>{filteredRowCount}</div>
                 </div>
 
                 <div
@@ -7307,64 +7305,66 @@ function RegionAnalysis() {
                   />
 
                   <div
-                    style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      flexWrap: "wrap",
+                      width: "100%",
+                    }}
                   >
+                    {/* INPUT */}
+                    <input
+                      type="text"
+                      value={filterText}
+                      onChange={(e) => setFilterText(e.target.value)}
+                      placeholder="Site ID ile filtrele"
+                      style={{
+                        flex: "1 1 320px",
+                        minWidth: "280px",
+                        padding: "14px 16px",
+                        borderRadius: "14px",
+                        border: "1px solid #d9dee7",
+                        fontSize: "16px",
+                        outline: "none",
+                        background: "#fff",
+                      }}
+                    />
+
+                    {/* TOPLAM SATIR */}
                     <div
                       style={{
                         minWidth: "120px",
-                        padding: "12px 16px",
-                        borderRadius: "14px",
+                        padding: "10px 14px",
+                        borderRadius: "12px",
                         background: "#f7f8fb",
                         border: "1px solid #e4e7ee",
                         textAlign: "center",
                       }}
                     >
-                      <div
-                        style={{
-                          fontSize: "13px",
-                          color: "#6b7280",
-                          marginBottom: "6px",
-                        }}
-                      >
+                      <div style={{ fontSize: "12px", color: "#6b7280" }}>
                         Toplam Satır
                       </div>
-                      <div
-                        style={{
-                          fontSize: "28px",
-                          fontWeight: "700",
-                          color: "#111827",
-                        }}
-                      >
+                      <div style={{ fontWeight: "700", fontSize: "20px" }}>
                         {filteredRowCount}
                       </div>
                     </div>
 
+                    {/* TOPLAM TUTAR */}
                     <div
                       style={{
-                        minWidth: "170px",
-                        padding: "12px 16px",
-                        borderRadius: "14px",
+                        minWidth: "150px",
+                        padding: "10px 14px",
+                        borderRadius: "12px",
                         background: "#f7f8fb",
                         border: "1px solid #e4e7ee",
                         textAlign: "center",
                       }}
                     >
-                      <div
-                        style={{
-                          fontSize: "13px",
-                          color: "#6b7280",
-                          marginBottom: "6px",
-                        }}
-                      >
+                      <div style={{ fontSize: "12px", color: "#6b7280" }}>
                         Toplam Tutar
                       </div>
-                      <div
-                        style={{
-                          fontSize: "28px",
-                          fontWeight: "700",
-                          color: "#111827",
-                        }}
-                      >
+                      <div style={{ fontWeight: "700", fontSize: "20px" }}>
                         {formatTRY(filteredRowTotal)}
                       </div>
                     </div>
