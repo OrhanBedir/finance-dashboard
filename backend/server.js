@@ -408,6 +408,7 @@ app.post("/auth/login", async (req, res) => {
         email: user.email,
         role: user.role,
         name: user.name,
+        subcon_name: user.subcon_name || null,
         scope,
       },
       process.env.JWT_SECRET || "simsek_secret_degistir",
