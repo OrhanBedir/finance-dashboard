@@ -6861,12 +6861,20 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const handleExportRegionExcel = async () => {
     try {
-      const response = await fetch(`${API_BASE}/export/region-analysis`);
+      const savedToken =
+        localStorage.getItem("financeToken") || localStorage.getItem("token");
+
+      const response = await fetch(`${API_BASE}/export/region-analysis`, {
+        method: "GET",
+        headers: {
+          Authorization: savedToken ? `Bearer ${savedToken}` : "",
+        },
+      });
 
       if (!response.ok) {
-        const text = await response.text();
-        console.error("EXPORT ERROR:", text);
-        alert("Excel indirilemedi");
+        const errorText = await response.text();
+        console.error("REGION ANALYSIS EXPORT ERROR:", errorText);
+        alert(`Excel indirilemedi:\n${errorText}`);
         return;
       }
 
@@ -6875,18 +6883,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       const a = document.createElement("a");
       a.href = url;
-      a.download = `region_analysis_${new Date()
-        .toISOString()
-        .slice(0, 10)}.xlsx`;
-
+      a.download = `region_analysis_${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
 
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      console.error("EXCEL ERROR:", err);
-      alert("Excel indirilemedi");
+      console.error("REGION ANALYSIS EXCEL ERROR:", err);
+      alert(`Excel indirilemedi:\n${err.message}`);
     }
   };
 
