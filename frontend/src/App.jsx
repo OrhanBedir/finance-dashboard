@@ -6427,7 +6427,6 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       setLoading(false);
     }
   }, []);
-
   const getQcReady80RowsByRegion = (regionName) => {
     return rows.filter((row) => {
       const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
@@ -6440,18 +6439,22 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const due = Number(row.due_qty || 0);
       const diff = req - due;
 
-      const isFederal =
-        String(row.subcon_name || "")
-          .trim()
-          .toLowerCase() === "federal";
+      const rowSubcon = String(row.subcon_name || "")
+        .trim()
+        .toLowerCase();
+
+      const currentUserSubcon = String(userSubconName || "")
+        .trim()
+        .toLowerCase();
+
+      if (isSubconUser && rowSubcon !== currentUserSubcon) return false;
 
       return (
         rowRegion === String(regionName).toLowerCase() &&
         statusOk &&
         qcOk &&
         billedZero &&
-        diff === 0 &&
-        isFederal
+        diff === 0
       );
     });
   };
