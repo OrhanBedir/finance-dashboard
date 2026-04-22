@@ -7277,7 +7277,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                               {row.item_code}
                             </div>
                           </td>
-                          
+
                           <td>{row.requested_qty ?? "-"}</td>
                           <td>{row.due_qty ?? "-"}</td>
                           <td>{row.done_qty ?? "-"}</td>
@@ -7634,7 +7634,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 onClick={() => handleSort("item_code")}
                 style={{ cursor: "pointer" }}
               >
-                Item
+                Item Description
               </th>
               <th
                 onClick={() => handleSort("done_qty")}
@@ -7752,7 +7752,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   </td>
                   <td>{row.project_code || "-"}</td>
                   <td>{row.site_code || "-"}</td>
-                  <td>{row.item_code || "-"}</td>
+                  <td>
+                    <div style={{ fontWeight: "600" }}>
+                      {row.item_description || "-"}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#999" }}>
+                      {row.item_code || ""}
+                    </div>
+                  </td>
                   <td>{row.done_qty ?? "-"}</td>
                   <td>{row.requested_qty ?? "-"}</td>
                   <td>{row.billed_qty ?? "-"}</td>
