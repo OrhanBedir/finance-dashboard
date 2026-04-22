@@ -7363,23 +7363,39 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     }}
                   />
 
-                  <div
-                    style={{
-                      minWidth: "120px",
-                      padding: "10px 14px",
-                      borderRadius: "12px",
-                      background: "#f7f8fb",
-                      border: "1px solid #e4e7ee",
-                      textAlign: "center",
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                      Toplam Satır
+                  {(isSubconUser ||
+                    (searchHasValue && filteredSubconPaymentRate !== null)) && (
+                    <div
+                      style={{
+                        minWidth: "170px",
+                        padding: "10px 14px",
+                        borderRadius: "12px",
+                        background: "#f7f8fb",
+                        border: "1px solid #e4e7ee",
+                        textAlign: "center",
+                      }}
+                    >
+                      <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                        {isSubconUser
+                          ? `${userSubconName} Hakediş`
+                          : `${singleFilteredSubcon} Hakediş`}
+                      </div>
+
+                      <div
+                        style={{
+                          fontWeight: "700",
+                          fontSize: "20px",
+                          color: "#166534",
+                        }}
+                      >
+                        {formatTRY(
+                          isSubconUser
+                            ? subconHakedisTotal
+                            : filteredSubconHakedisTotal,
+                        )}
+                      </div>
                     </div>
-                    <div style={{ fontWeight: "700", fontSize: "20px" }}>
-                      {filteredRowCount}
-                    </div>
-                  </div>
+                  )}
 
                   <div
                     style={{
