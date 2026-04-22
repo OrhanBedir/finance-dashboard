@@ -6825,6 +6825,32 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   }, 0);
   const subconHakedisTotal =
     regionFilteredRowTotal * Number(userPaymentRate || 0.8);
+  const searchHasValue = regionSearch.trim() !== "";
+
+  const uniqueSubconsInFilteredRows = [
+    ...new Set(
+      sortedRows
+        .map((row) => String(row.subcon_name || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  const singleFilteredSubcon =
+    uniqueSubconsInFilteredRows.length === 1
+      ? uniqueSubconsInFilteredRows[0]
+      : "";
+
+  const filteredSubconPaymentRate =
+    singleFilteredSubcon.toLowerCase() === "federal"
+      ? 0.8
+      : singleFilteredSubcon.toLowerCase() === "ubs"
+        ? 0.75
+        : null;
+
+  const filteredSubconHakedisTotal =
+    filteredSubconPaymentRate !== null
+      ? regionFilteredRowTotal * filteredSubconPaymentRate
+      : 0;
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
