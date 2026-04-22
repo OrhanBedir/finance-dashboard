@@ -6859,41 +6859,35 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     }));
   };
 
-  const handleExportRegionExcel = () => {
-    if (!filteredRegionRows.length) {
-      alert("İndirilecek kayıt bulunamadı");
-      return;
+  const handleExportRegionExcel = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/export/region-analysis`);
+
+      if (!response.ok) {
+        const text = await response.text();
+        console.error("EXPORT ERROR:", text);
+        alert("Excel indirilemedi");
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `region_analysis_${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`;
+
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("EXCEL ERROR:", err);
+      alert("Excel indirilemedi");
     }
-
-    const excelRows = filteredRegionRows.map((row) => ({
-      Bölge: getRegion(row.site_code) || "",
-      Status: row.status || "",
-      "Project Code": row.project_code || "",
-      "Site Code": row.site_code || "",
-      "Item Code": row.item_code || "",
-      "Item Description": row.item_description || "",
-      "OnAir Date": formatDateTR(row.onair_date),
-      "Done Qty": row.done_qty ?? "",
-      "Requested Qty": row.requested_qty ?? "",
-      "Billed Qty": row.billed_qty ?? "",
-      Currency: row.currency || "",
-      "Unit Price":
-        Number(row.unit_price || 0) === 0 ? "" : Number(row.unit_price || 0),
-      "Total Done Amount":
-        Number(row.total_done_amount || 0) === 0
-          ? ""
-          : Number(row.total_done_amount || 0),
-      Subcon: row.subcon_name || "",
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Region Analysis");
-
-    XLSX.writeFile(
-      workbook,
-      `region_analysis_${new Date().toISOString().slice(0, 10)}.xlsx`,
-    );
   };
 
   if (loading) return <div className="loading">Yükleniyor...</div>;
