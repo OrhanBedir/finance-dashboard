@@ -5007,7 +5007,7 @@ app.get("/export/region-analysis", async (req, res) => {
     const worksheet = workbook.addWorksheet("Region Analysis");
 
     // Başlık
-    worksheet.mergeCells("A1:N1");
+    worksheet.mergeCells("A1:O1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = `REGION ANALYSIS RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
     titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
@@ -5040,21 +5040,33 @@ app.get("/export/region-analysis", async (req, res) => {
 
     // Header row
     const headerRow = worksheet.getRow(2);
+
     headerRow.eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.font = {
+        bold: true,
+        size: 11,
+        color: { argb: "FFFFFFFF" }, // 🔥 BEYAZ YAZI
+      };
+
+      cell.alignment = {
+        horizontal: "center",
+        vertical: "middle",
+      };
+
       cell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: "FF3E648C" },
+        fgColor: { argb: "FF203864" } // daha koyu mavi (Microsoft style)
       };
+
       cell.border = {
-        top: { style: "thin", color: { argb: "FFD9D9D9" } },
-        left: { style: "thin", color: { argb: "FFD9D9D9" } },
-        bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
-        right: { style: "thin", color: { argb: "FFD9D9D9" } },
+        top: { style: "thin", color: { argb: "FFCCCCCC" } },
+        left: { style: "thin", color: { argb: "FFCCCCCC" } },
+        bottom: { style: "thin", color: { argb: "FFCCCCCC" } },
+        right: { style: "thin", color: { argb: "FFCCCCCC" } },
       };
     });
+
     headerRow.height = 22;
 
     // Data rows
