@@ -4998,11 +4998,10 @@ app.get("/export/status-excel", async (req, res) => {
   }
 });
 
-
-
 app.get("/export/region-analysis", async (req, res) => {
   try {
-    const rows = await getRegionAnalysisRowsSomehow(); // mevcut sorgun burada kalsın
+    const result = await pool.query(buildMasterJoinedQuery());
+    const rows = result.rows || [];
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Region Analysis");
