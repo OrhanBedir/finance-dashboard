@@ -7234,7 +7234,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   <tr>
                     <th>Project</th>
                     <th>Site</th>
-                    <th>Item</th>
+                    <th>Item Description</th>
                     <th>Açıklama</th>
                     <th>Req</th>
                     <th>Due</th>
@@ -7269,8 +7269,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         <tr key={i}>
                           <td>{row.project_code || "-"}</td>
                           <td>{row.site_code || "-"}</td>
-                          <td>{row.item_code || "-"}</td>
-                          <td>{row.item_description || "-"}</td>
+                          <td>
+                            <div style={{ fontWeight: "600" }}>
+                              {row.item_description || "-"}
+                            </div>
+                            <div style={{ fontSize: "11px", color: "#999" }}>
+                              {row.item_code}
+                            </div>
+                          </td>
+                          
                           <td>{row.requested_qty ?? "-"}</td>
                           <td>{row.due_qty ?? "-"}</td>
                           <td>{row.done_qty ?? "-"}</td>
