@@ -4998,6 +4998,147 @@ app.get("/export/status-excel", async (req, res) => {
   }
 });
 
+
+
+app.get("/export/region-analysis", async (req, res) => {
+  try {
+    const rows = await getRegionAnalysisRowsSomehow(); // mevcut sorgun burada kalsın
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Region Analysis");
+
+    // Başlık
+    worksheet.mergeCells("A1:N1");
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = `REGION ANALYSIS RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
+    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1F4E78" },
+    };
+    worksheet.getRow(1).height = 24;
+
+    // Kolonlar
+    worksheet.columns = [
+      { header: "Bölge", key: "bolge", width: 14 },
+      { header: "Status", key: "status", width: 14 },
+      { header: "Analiz", key: "analiz", width: 16 },
+      { header: "Project", key: "project_code", width: 14 },
+      { header: "Site Code", key: "site_code", width: 24 },
+      { header: "Item Description", key: "item_description", width: 40 },
+      { header: "Item Code", key: "item_code", width: 18 },
+      { header: "OnAir Date", key: "onair_date", width: 16 },
+      { header: "Done Qty", key: "done_qty", width: 12 },
+      { header: "Requested Qty", key: "requested_qty", width: 14 },
+      { header: "Billed Qty", key: "billed_qty", width: 12 },
+      { header: "Currency", key: "currency", width: 10 },
+      { header: "Unit Price", key: "unit_price", width: 14 },
+      { header: "Total Done Amount", key: "total_done_amount", width: 18 },
+      { header: "Subcon", key: "subcon_name", width: 18 },
+    ];
+
+    // Header row
+    const headerRow = worksheet.getRow(2);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF3E648C" },
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFD9D9D9" } },
+        left: { style: "thin", color: { argb: "FFD9D9D9" } },
+        bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
+        right: { style: "thin", color: { argb: "FFD9D9D9" } },
+      };
+    });
+    headerRow.height = 22;
+
+    // Data rows
+    rows.forEach((row) => {
+      worksheet.addRow({
+        bolge: row.bolge || "",
+        status: row.status || "",
+        analiz: row.analiz || "",
+        project_code: row.project_code || "",
+        site_code: row.site_code || "",
+        item_description: row.item_description || "",
+        item_code: row.item_code || "",
+        onair_date: row.onair_date || "",
+        done_qty: Number(row.done_qty || 0),
+        requested_qty: Number(row.requested_qty || 0),
+        billed_qty: Number(row.billed_qty || 0),
+        currency: row.currency || "",
+        unit_price: Number(row.unit_price || 0),
+        total_done_amount: Number(row.total_done_amount || 0),
+        subcon_name: row.subcon_name || "",
+      });
+    });
+
+    // Stil
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber >= 3) {
+        row.eachCell((cell) => {
+          cell.alignment = {
+            vertical: "middle",
+            horizontal: "left",
+            wrapText: true,
+          };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFE5E5E5" } },
+            left: { style: "thin", color: { argb: "FFE5E5E5" } },
+            bottom: { style: "thin", color: { argb: "FFE5E5E5" } },
+            right: { style: "thin", color: { argb: "FFE5E5E5" } },
+          };
+        });
+
+        if (rowNumber % 2 === 0) {
+          row.eachCell((cell) => {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFF7F9FC" },
+            };
+          });
+        }
+      }
+    });
+
+    // Para kolonları
+    ["M", "N"].forEach((col) => {
+      worksheet.getColumn(col).numFmt = "#,##0.00";
+    });
+
+    // Freeze
+    worksheet.views = [{ state: "frozen", ySplit: 2 }];
+
+    // Filter
+    worksheet.autoFilter = {
+      from: "A2",
+      to: "O2",
+    };
+
+    // Response
+    const fileName = `region_analysis_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("REGION ANALYSIS EXCEL ERROR:", error);
+    res.status(500).json({ ok: false, error: "Excel oluşturulamadı" });
+  }
+});
+
 /* ================== Taşeron Hakediş Analiz ================== */
 
 const normalizeSubconName = (name) =>
