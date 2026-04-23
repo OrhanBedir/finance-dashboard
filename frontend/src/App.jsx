@@ -1999,16 +1999,7 @@ function DailyEntry() {
                 >
                   Item Code
                 </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Açıklama
-                </th>
+
                 <th
                   style={{
                     position: "sticky",
@@ -7227,18 +7218,202 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               </div>
             </div>
 
-            <div className="tableWrap" style={{ marginBottom: 0 }}>
-              <table>
+            <div
+              className="tableWrap"
+              style={{
+                marginBottom: 0,
+                maxHeight: "58vh",
+                overflowY: "auto",
+                overflowX: "auto",
+                border: "1px solid #e5e7eb",
+                borderRadius: "16px",
+                background: "#fff",
+              }}
+            >
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "separate",
+                  borderSpacing: 0,
+                }}
+              >
                 <thead>
-                  <tr>
-                    <th>Project</th>
-                    <th>Site</th>
-                    <th>Item Description</th>
-                    <th>Açıklama</th>
-                    <th>Req</th>
-                    <th>Due</th>
-                    <th>Done</th>
-                    <th>Total</th>
+                  <tr
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 5,
+                      background: "#1f2937",
+                    }}
+                  >
+                    <th
+                      style={{
+                        padding: "16px 14px",
+
+                        fontSize: "13px",
+
+                        fontWeight: "700",
+
+                        color: "#fff",
+
+                        textAlign: "left",
+
+                        borderBottom: "1px solid #374151",
+
+                        whiteSpace: "nowrap",
+
+                        background: "#1f2937",
+                      }}
+                    >
+                      Project
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px 14px",
+
+                        fontSize: "13px",
+
+                        fontWeight: "700",
+
+                        color: "#fff",
+
+                        textAlign: "left",
+
+                        borderBottom: "1px solid #374151",
+
+                        whiteSpace: "nowrap",
+
+                        background: "#1f2937",
+                      }}
+                    >
+                      Site
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px 14px",
+
+                        fontSize: "13px",
+
+                        fontWeight: "700",
+
+                        color: "#fff",
+
+                        textAlign: "left",
+
+                        borderBottom: "1px solid #374151",
+
+                        whiteSpace: "nowrap",
+
+                        background: "#1f2937",
+                      }}
+                    >
+                      Item Description
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px 14px",
+
+                        fontSize: "13px",
+
+                        fontWeight: "700",
+
+                        color: "#fff",
+
+                        textAlign: "left",
+
+                        borderBottom: "1px solid #374151",
+
+                        whiteSpace: "nowrap",
+
+                        background: "#1f2937",
+                      }}
+                    >
+                      Açıklama
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px 14px",
+
+                        fontSize: "13px",
+
+                        fontWeight: "700",
+
+                        color: "#fff",
+
+                        textAlign: "left",
+
+                        borderBottom: "1px solid #374151",
+
+                        whiteSpace: "nowrap",
+
+                        background: "#1f2937",
+                      }}
+                    >
+                      Req
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px 14px",
+
+                        fontSize: "13px",
+
+                        fontWeight: "700",
+
+                        color: "#fff",
+
+                        textAlign: "left",
+
+                        borderBottom: "1px solid #374151",
+
+                        whiteSpace: "nowrap",
+
+                        background: "#1f2937",
+                      }}
+                    >
+                      Due
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px 14px",
+
+                        fontSize: "13px",
+
+                        fontWeight: "700",
+
+                        color: "#fff",
+
+                        textAlign: "left",
+
+                        borderBottom: "1px solid #374151",
+
+                        whiteSpace: "nowrap",
+
+                        background: "#1f2937",
+                      }}
+                    >
+                      Done
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px 14px",
+
+                        fontSize: "13px",
+
+                        fontWeight: "700",
+
+                        color: "#fff",
+
+                        textAlign: "left",
+
+                        borderBottom: "1px solid #374151",
+
+                        whiteSpace: "nowrap",
+
+                        background: "#1f2937",
+                      }}
+                    >
+                      Total
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -7265,10 +7440,27 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         qcReadyType === "80" ? total80 : total20;
 
                       return (
-                        <tr key={i}>
-                          <td>{row.project_code || "-"}</td>
-                          <td>{row.site_code || "-"}</td>
-                          <td>
+                        <tr
+                          key={i}
+                          style={{
+                            background: i % 2 === 0 ? "#ffffff" : "#f9fafb",
+                            transition: "all 0.2s ease",
+                          }}
+                          onMouseEnter={(e) =>
+                            (e.currentTarget.style.background = "#eef2ff")
+                          }
+                          onMouseLeave={(e) =>
+                            (e.currentTarget.style.background =
+                              i % 2 === 0 ? "#ffffff" : "#f9fafb")
+                          }
+                        >
+                          <td style={{ padding: "14px", textAlign: "left" }}>
+                            {row.project_code || "-"}
+                          </td>
+                          <td style={{ padding: "14px", textAlign: "left" }}>
+                            {row.site_code || "-"}
+                          </td>
+                          <td style={{ padding: "14px", textAlign: "left" }}>
                             <div style={{ fontWeight: "600" }}>
                               {row.item_description || "-"}
                             </div>
@@ -7277,10 +7469,24 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                             </div>
                           </td>
 
-                          <td>{row.requested_qty ?? "-"}</td>
-                          <td>{row.due_qty ?? "-"}</td>
-                          <td>{row.done_qty ?? "-"}</td>
-                          <td>{formatTRY(shownTotal)}</td>
+                          <td style={{ padding: "14px", textAlign: "center" }}>
+                            {row.requested_qty ?? "-"}
+                          </td>
+                          <td style={{ padding: "14px", textAlign: "center" }}>
+                            {row.due_qty ?? "-"}
+                          </td>
+                          <td style={{ padding: "14px", textAlign: "center" }}>
+                            {row.done_qty ?? "-"}
+                          </td>
+                          <td
+                            style={{
+                              padding: "14px",
+                              textAlign: "right",
+                              fontWeight: "600",
+                            }}
+                          >
+                            {formatTRY(shownTotal)}
+                          </td>
                         </tr>
                       );
                     })
@@ -7322,14 +7528,20 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             <div
               style={{
                 display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "18px",
-                gap: "12px",
-                flexWrap: "wrap",
+                flexDirection: "column",
+                gap: "18px",
+                marginBottom: "20px",
               }}
             >
-              <h3 className="listTitle" style={{ margin: 0 }}>
+              <h3
+                className="listTitle"
+                style={{
+                  margin: 0,
+                  fontSize: "24px",
+                  fontWeight: "800",
+                  color: "#111827",
+                }}
+              >
                 {detailTitle}
               </h3>
 
@@ -7338,18 +7550,17 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  gap: "12px",
+                  gap: "14px",
                   flexWrap: "wrap",
-                  width: "100%",
                 }}
               >
                 <div
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: "12px",
+                    gap: "14px",
                     flexWrap: "wrap",
-                    flex: "1 1 auto",
+                    flex: "1 1 720px",
                   }}
                 >
                   <input
@@ -7358,10 +7569,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     onChange={(e) => setFilterText(e.target.value)}
                     placeholder="Site ID ile filtrele"
                     style={{
-                      flex: "1 1 320px",
-                      minWidth: "280px",
-                      padding: "14px 16px",
-                      borderRadius: "14px",
+                      flex: "1 1 520px",
+                      minWidth: "320px",
+                      padding: "16px 18px",
+                      borderRadius: "18px",
                       border: "1px solid #d9dee7",
                       fontSize: "16px",
                       outline: "none",
@@ -7369,60 +7580,38 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     }}
                   />
 
-                  {(isSubconUser ||
-                    (searchHasValue && filteredSubconPaymentRate !== null)) && (
-                    <div
-                      style={{
-                        minWidth: "170px",
-                        padding: "10px 14px",
-                        borderRadius: "12px",
-                        background: "#f7f8fb",
-                        border: "1px solid #e4e7ee",
-                        textAlign: "center",
-                      }}
-                    >
-                      <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                        {isSubconUser
-                          ? `${userSubconName} Hakediş`
-                          : `${singleFilteredSubcon} Hakediş`}
-                      </div>
-
-                      <div
-                        style={{
-                          fontWeight: "700",
-                          fontSize: "20px",
-                          color: "#166534",
-                        }}
-                      >
-                        {formatTRY(
-                          isSubconUser
-                            ? subconHakedisTotal
-                            : filteredSubconHakedisTotal,
-                        )}
-                      </div>
-                    </div>
-                  )}
-
                   <div
                     style={{
-                      minWidth: "150px",
-                      padding: "10px 14px",
-                      borderRadius: "12px",
+                      minWidth: "220px",
+                      padding: "14px 18px",
+                      borderRadius: "18px",
                       background: "#f7f8fb",
                       border: "1px solid #e4e7ee",
                       textAlign: "center",
                     }}
                   >
-                    <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                    <div
+                      style={{
+                        fontSize: "14px",
+                        color: "#6b7280",
+                        marginBottom: "6px",
+                      }}
+                    >
                       Toplam Tutar
                     </div>
-                    <div style={{ fontWeight: "700", fontSize: "20px" }}>
+                    <div
+                      style={{
+                        fontWeight: "800",
+                        fontSize: "22px",
+                        color: "#111827",
+                      }}
+                    >
                       {formatTRY(filteredRowTotal)}
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
                   <button
                     type="button"
                     className="tab"
@@ -7442,22 +7631,155 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               </div>
             </div>
 
-            <div className="tableWrap">
-              <table>
+            <div
+              style={{
+                width: "100%",
+                overflow: "auto",
+                borderRadius: "16px",
+                border: "1px solid #e5e7eb",
+              }}
+            >
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "14px",
+                }}
+              >
                 <thead>
-                  <tr>
-                    <th>Status</th>
-                    <th>Project Code</th>
-                    <th>Site Code</th>
-                    <th>Item Code</th>
-                    <th>Item Description</th>
-                    <th>Done Qty</th>
-                    <th>Requested Qty</th>
-                    <th>Billed Qty</th>
-                    <th>Currency</th>
-                    <th>Unit Price</th>
-                    <th>Total Done Amount</th>
-                    <th>Subcon</th>
+                  <tr style={{ background: "#1f2937" }}>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "left",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Status
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "left",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Project
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "left",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Site Code
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "left",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Item Code
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "left",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Item Description
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "center",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Done Qty
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "center",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Requested Qty
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "center",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Billed Qty
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "center",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Currency
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "right",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Unit Price
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "right",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Total Done Amount
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px",
+                        color: "#fff",
+                        fontWeight: "700",
+                        textAlign: "left",
+                        borderBottom: "1px solid #374151",
+                      }}
+                    >
+                      Subcon
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -7481,15 +7803,93 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         <td>
                           <StatusBadge status={row.status} />
                         </td>
-                        <td>{row.project_code || "-"}</td>
-                        <td>{row.site_code || "-"}</td>
-                        <td>{row.item_code || "-"}</td>
-                        <td>{row.item_description || "-"}</td>
-                        <td>{row.done_qty ?? "-"}</td>
-                        <td>{row.requested_qty ?? "-"}</td>
-                        <td>{row.billed_qty ?? "-"}</td>
-                        <td>{row.currency || "-"}</td>
-                        <td>
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "left",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {row.project_code || "-"}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "left",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {row.site_code || "-"}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "left",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {row.item_code || "-"}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "left",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {row.item_description || "-"}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "center",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {row.done_qty ?? "-"}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "center",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {row.requested_qty ?? "-"}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "center",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {row.billed_qty ?? "-"}
+                        </td>
+
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "center",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {row.currency || "-"}
+                        </td>
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "right",
+                            borderBottom: "1px solid #e5e7eb",
+                            fontWeight: "600",
+                          }}
+                        >
                           {Number(row.unit_price || 0) === 0
                             ? "-"
                             : formatMoneyByCurrency(
@@ -7505,7 +7905,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                                 row.currency,
                               )}
                         </td>
-                        <td>{row.subcon_name || "-"}</td>
+                        <td
+                          style={{
+                            padding: "14px",
+                            textAlign: "left",
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {row.subcon_name || "-"}
+                        </td>
                       </tr>
                     ))
                   )}
