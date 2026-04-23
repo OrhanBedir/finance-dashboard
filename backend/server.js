@@ -5006,19 +5006,6 @@ app.get("/export/region-analysis", async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Region Analysis");
 
-    // Başlık
-    worksheet.mergeCells("A1:O1");
-    const titleCell = worksheet.getCell("A1");
-    titleCell.value = `REGION ANALYSIS RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
-    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
-    titleCell.alignment = { horizontal: "center", vertical: "middle" };
-    titleCell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF1F4E78" },
-    };
-    worksheet.getRow(1).height = 24;
-
     // Kolonlar
     worksheet.columns = [
       { header: "Bölge", key: "bolge", width: 14 },
@@ -5037,6 +5024,19 @@ app.get("/export/region-analysis", async (req, res) => {
       { header: "Total Done Amount", key: "total_done_amount", width: 18 },
       { header: "Subcon", key: "subcon_name", width: 18 },
     ];
+    worksheet.spliceRows(1, 0, []);
+    // Başlık
+    worksheet.mergeCells("A1:O1");
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = `REGION ANALYSIS RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
+    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1F4E78" },
+    };
+    worksheet.getRow(1).height = 24;
 
     // Header row
     const headerRow = worksheet.getRow(2);
@@ -5056,7 +5056,7 @@ app.get("/export/region-analysis", async (req, res) => {
       cell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: "FF203864" } // daha koyu mavi (Microsoft style)
+        fgColor: { argb: "FF203864" }, // daha koyu mavi (Microsoft style)
       };
 
       cell.border = {
