@@ -6709,59 +6709,60 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     };
   }, [topSummary, regionSummary, usdRate]);
 
-  const exportDetailRowsToExcel = () => {
-    if (!detailRows.length) {
-      alert("İndirilecek kayıt bulunamadı");
-      return;
+  const exportDetailRowsToExcel = async () => {
+    try {
+      if (!detailRows.length) {
+        alert("İndirilecek kayıt bulunamadı");
+        return;
+      }
+
+      const savedToken =
+        localStorage.getItem("financeToken") || localStorage.getItem("token");
+
+      const regionName = String(detailTitle || "")
+        .split(" - ")[0]
+        .trim();
+      const exportType = detailTitle.includes("Faturalanmamış")
+        ? "NOT_INVOICED"
+        : "PO_BEKLER";
+
+      const params = new URLSearchParams({
+        region: regionName,
+        type: exportType,
+      });
+
+      const response = await fetch(
+        `${API_BASE}/export/detail-excel?${params.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: savedToken ? `Bearer ${savedToken}` : "",
+          },
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("DETAIL EXCEL EXPORT ERROR:", errorText);
+        alert(`Excel indirilemedi:\n${errorText}`);
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${regionName}_${exportType}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("DETAIL EXCEL EXPORT ERROR:", err);
+      alert(`Excel indirilemedi:\n${err.message}`);
     }
-
-    const excelRows = detailRows.map((row) => ({
-      Status: row.status || "",
-      "QC Durum": row.qc_durum || "NOK",
-      "Kabul Durum": row.kabul_durum || "NOK",
-      "Kabul Not": row.kabul_not || "",
-      "Project Code": row.project_code || "",
-      "Site Code": row.site_code || "",
-      "Item Code": row.item_code || "",
-      "Item Description": row.item_description || "",
-      "Done Qty": row.done_qty ?? "",
-      "Requested Qty": row.requested_qty ?? "",
-      "Billed Qty": row.billed_qty ?? "",
-      Subcon: row.subcon_name || "",
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Detay");
-
-    const fileDate = new Date().toISOString().slice(0, 10);
-
-    const normalizedRegion = String(detailTitle || "")
-      .split(" - ")[0]
-      .trim()
-      .replace(/İ/g, "I")
-      .replace(/I/g, "I")
-      .replace(/ı/g, "i")
-      .replace(/Ş/g, "S")
-      .replace(/ş/g, "s")
-      .replace(/Ğ/g, "G")
-      .replace(/ğ/g, "g")
-      .replace(/Ü/g, "U")
-      .replace(/ü/g, "u")
-      .replace(/Ö/g, "O")
-      .replace(/ö/g, "o")
-      .replace(/Ç/g, "C")
-      .replace(/ç/g, "c")
-      .replace(/\s+/g, "_");
-
-    const fileLabel = detailTitle.includes("Faturalanmamış")
-      ? "Faturalanmamis_Isler"
-      : "PO_Bekleyen_Isler";
-
-    XLSX.writeFile(
-      workbook,
-      `${normalizedRegion}_${fileLabel}_${fileDate}.xlsx`,
-    );
   };
 
   const filteredRegionRows = useMemo(() => {

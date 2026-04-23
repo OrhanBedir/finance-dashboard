@@ -5223,6 +5223,168 @@ app.get("/export/region-analysis", async (req, res) => {
   }
 });
 
+app.get("/export/detail-excel", async (req, res) => {
+  try {
+    const { region = "", type = "" } = req.query;
+
+    const result = await pool.query(buildMasterJoinedQuery());
+
+    let rows = (result.rows || []).map((row) => ({
+      ...row,
+      currency: normalizeCurrency(row.currency),
+    }));
+
+    if (region) {
+      rows = rows.filter(
+        (row) =>
+          String(getRegion(row.site_code) || "").toLowerCase() ===
+          String(region).toLowerCase(),
+      );
+    }
+
+    if (type === "PO_BEKLER") {
+      rows = rows.filter(
+        (row) => String(row.status || "").toUpperCase() === "PO_BEKLER",
+      );
+    }
+
+    if (type === "NOT_INVOICED") {
+      rows = rows.filter((row) => {
+        const unitPrice = Number(row.unit_price || 0);
+        const doneQty = Number(row.done_qty || 0);
+        const billedQty = Number(row.billed_qty || 0);
+
+        const completedAmount = doneQty * unitPrice;
+        const billedAmount = billedQty * unitPrice;
+
+        return completedAmount > billedAmount;
+      });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Detay");
+
+    worksheet.columns = [
+      { header: "Status", key: "status", width: 16 },
+      { header: "QC Durum", key: "qc_durum", width: 14 },
+      { header: "Kabul Durum", key: "kabul_durum", width: 14 },
+      { header: "Kabul Not", key: "kabul_not", width: 24 },
+      { header: "Project Code", key: "project_code", width: 16 },
+      { header: "Site Code", key: "site_code", width: 22 },
+      { header: "Item Code", key: "item_code", width: 18 },
+      { header: "Item Description", key: "item_description", width: 45 },
+      { header: "Done Qty", key: "done_qty", width: 12 },
+      { header: "Requested Qty", key: "requested_qty", width: 14 },
+      { header: "Billed Qty", key: "billed_qty", width: 12 },
+      { header: "Subcon", key: "subcon_name", width: 20 },
+    ];
+
+    worksheet.spliceRows(1, 0, []);
+    worksheet.mergeCells("A1:L1");
+
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = `DETAY RAPORU - ${region || "Tümü"} (${new Date().toLocaleDateString("tr-TR")})`;
+    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1F4E78" },
+    };
+    worksheet.getRow(1).height = 24;
+
+    rows.forEach((row) => {
+      worksheet.addRow({
+        status: row.status || "",
+        qc_durum: row.qc_durum || "NOK",
+        kabul_durum: row.kabul_durum || "NOK",
+        kabul_not: row.kabul_not || "",
+        project_code: row.project_code || "",
+        site_code: row.site_code || "",
+        item_code: row.item_code || "",
+        item_description: row.item_description || "",
+        done_qty: row.done_qty ?? "",
+        requested_qty: row.requested_qty ?? "",
+        billed_qty: row.billed_qty ?? "",
+        subcon_name: row.subcon_name || "",
+      });
+    });
+
+    const headerRow = worksheet.getRow(2);
+    headerRow.eachCell((cell) => {
+      cell.font = {
+        bold: true,
+        size: 11,
+        color: { argb: "FFFFFFFF" },
+      };
+      cell.alignment = {
+        horizontal: "center",
+        vertical: "middle",
+      };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF3E648C" },
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFD9D9D9" } },
+        left: { style: "thin", color: { argb: "FFD9D9D9" } },
+        bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
+        right: { style: "thin", color: { argb: "FFD9D9D9" } },
+      };
+    });
+    headerRow.height = 22;
+
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber >= 3) {
+        row.eachCell((cell) => {
+          cell.alignment = {
+            vertical: "middle",
+            horizontal: "left",
+            wrapText: true,
+          };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFE5E5E5" } },
+            left: { style: "thin", color: { argb: "FFE5E5E5" } },
+            bottom: { style: "thin", color: { argb: "FFE5E5E5" } },
+            right: { style: "thin", color: { argb: "FFE5E5E5" } },
+          };
+        });
+
+        if (rowNumber % 2 === 0) {
+          row.eachCell((cell) => {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFF7F9FC" },
+            };
+          });
+        }
+      }
+    });
+
+    worksheet.views = [{ state: "frozen", ySplit: 2 }];
+    worksheet.autoFilter = {
+      from: "A2",
+      to: "L2",
+    };
+
+    const fileName = `detail_${region || "all"}_${type || "all"}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error("DETAIL EXCEL EXPORT ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /* ================== Taşeron Hakediş Analiz ================== */
 
 const normalizeSubconName = (name) =>
