@@ -4959,6 +4959,8 @@ app.get("/export/status-excel", async (req, res) => {
       { header: "Requested Qty", key: "requested_qty", width: 14 },
       { header: "OnAir Date", key: "onair_date", width: 14 },
     ];
+    worksheet.spliceRows(1, 0, []);
+    worksheet.mergeCells("A1:H1");
 
     rows.forEach((row) => {
       worksheet.addRow({
@@ -4973,11 +4975,82 @@ app.get("/export/status-excel", async (req, res) => {
       });
     });
 
-    worksheet.getRow(1).font = { bold: true };
-    worksheet.getRow(1).alignment = {
-      vertical: "middle",
-      horizontal: "center",
+    const titleCell = worksheet.getCell("A1");
+
+    titleCell.value = `STATUS EXPORT RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
+
+    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    titleCell.fill = {
+      type: "pattern",
+
+      pattern: "solid",
+
+      fgColor: { argb: "FF1F4E78" },
     };
+
+    worksheet.getRow(1).height = 24;
+
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber >= 3) {
+        row.eachCell((cell) => {
+          cell.alignment = {
+            vertical: "middle",
+            horizontal: "left",
+            wrapText: true,
+          };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFE5E5E5" } },
+            left: { style: "thin", color: { argb: "FFE5E5E5" } },
+            bottom: { style: "thin", color: { argb: "FFE5E5E5" } },
+            right: { style: "thin", color: { argb: "FFE5E5E5" } },
+          };
+        });
+
+        if (rowNumber % 2 === 0) {
+          row.eachCell((cell) => {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFF7F9FC" },
+            };
+          });
+        }
+      }
+    });
+    worksheet.views = [{ state: "frozen", ySplit: 2 }];
+
+    worksheet.autoFilter = {
+      from: "A2",
+      to: "H2",
+    };
+
+    const headerRow = worksheet.getRow(2);
+    headerRow.eachCell((cell) => {
+      cell.font = {
+        bold: true,
+        size: 11,
+        color: { argb: "FFFFFFFF" },
+      };
+      cell.alignment = {
+        horizontal: "center",
+        vertical: "middle",
+      };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF3E648C" },
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFD9D9D9" } },
+        left: { style: "thin", color: { argb: "FFD9D9D9" } },
+        bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
+        right: { style: "thin", color: { argb: "FFD9D9D9" } },
+      };
+    });
+    headerRow.height = 22;
 
     const safeStatus = status || "ALL";
     const fileName = `dashboard_${safeStatus}_${new Date()
