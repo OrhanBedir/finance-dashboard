@@ -6293,7 +6293,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const filteredRowCount = filteredRows.length;
 
   const filteredRowTotal = filteredRows.reduce((sum, row) => {
-    return sum + Number(row.total_done_amount || 0);
+    const currency = normalizeCurrency(row.currency);
+    const total = Number(row.total_done_amount || 0);
+
+    return sum + (currency === "USD" ? total * usdRate : total);
   }, 0);
 
   // ✅ FAC OK 20%
