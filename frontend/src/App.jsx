@@ -6889,6 +6889,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   if (loading) return <div className="loading">Yükleniyor...</div>;
   if (errorMessage) return <div className="loading">{errorMessage}</div>;
+  const detailThStyle = {
+    padding: "16px",
+    color: "#ffffff",
+    background: "#1f2937",
+    fontWeight: "700",
+    textAlign: "left",
+    borderBottom: "1px solid #374151",
+    whiteSpace: "nowrap",
+  };
 
   return (
     <>
@@ -7649,138 +7658,20 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               >
                 <thead>
                   <tr style={{ background: "#1f2937" }}>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "left",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Status
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "left",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Project
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "left",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Site Code
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "left",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Item Code
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "left",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Item Description
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "center",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Done Qty
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "center",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Requested Qty
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "center",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Billed Qty
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "center",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Currency
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "right",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Unit Price
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "right",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Total Done Amount
-                    </th>
-                    <th
-                      style={{
-                        padding: "16px",
-                        color: "#fff",
-                        fontWeight: "700",
-                        textAlign: "left",
-                        borderBottom: "1px solid #374151",
-                      }}
-                    >
-                      Subcon
-                    </th>
+                    <th style={detailThStyle}>Status</th>
+                    <th style={detailThStyle}>Project</th>
+                    <th style={detailThStyle}>Site Code</th>
+                    <th style={detailThStyle}>Item Code</th>
+                    <th style={detailThStyle}>Item Description</th>
+                    <th style={detailThStyle}>Done Qty</th>
+                    <th style={detailThStyle}>Requested Qty</th>
+                    <th style={detailThStyle}>Billed Qty</th>
+                    <th style={detailThStyle}>Currency</th>
+                    <th style={detailThStyle}>Unit Price</th>
+                    <th style={detailThStyle}>Total Done Amount</th>
+                    <th style={detailThStyle}>Subcon</th>
+                  
+                    
                   </tr>
                 </thead>
                 <tbody>
