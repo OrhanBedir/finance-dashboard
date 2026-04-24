@@ -5225,7 +5225,7 @@ app.get("/export/region-analysis", async (req, res) => {
 
 app.get("/export/detail-excel", async (req, res) => {
   try {
-    const { region = "", type = "" } = req.query;
+    const { region = "", type = "", subcon = "" } = req.query;
 
     const result = await pool.query(buildMasterJoinedQuery());
 
@@ -5239,6 +5239,15 @@ app.get("/export/detail-excel", async (req, res) => {
         (row) =>
           String(getRegion(row.site_code) || "").toLowerCase() ===
           String(region).toLowerCase(),
+      );
+    }
+
+    if (subcon) {
+      rows = rows.filter(
+        (row) =>
+          String(row.subcon_name || "")
+            .trim()
+            .toLowerCase() === String(subcon).trim().toLowerCase(),
       );
     }
 
