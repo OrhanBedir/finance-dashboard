@@ -7531,7 +7531,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               width: "100%",
               maxWidth: "1400px",
               maxHeight: "85vh",
-              overflow: "auto",
+              overflow: "hidden",
               borderRadius: "20px",
               padding: "24px",
               boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
@@ -7645,11 +7645,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             </div>
 
             <div
+              className="tableWrap"
               style={{
                 width: "100%",
-                overflow: "auto",
+                maxHeight: "58vh",
+                overflowY: "auto",
+                overflowX: "auto",
                 borderRadius: "16px",
                 border: "1px solid #e5e7eb",
+                background: "#fff",
               }}
             >
               <table
