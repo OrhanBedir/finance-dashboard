@@ -5369,13 +5369,34 @@ app.get("/export/detail-excel", async (req, res) => {
       to: "L2",
     };
 
-    const fileName = `detail_${region || "all"}_${type || "all"}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const fileName = `detail_${region || "all"}_${type || "all"}_${new Date()
+      .toISOString()
+      .slice(0, 10)}.xlsx`;
+
+    const safeFileName = fileName
+      .replace(/İ/g, "I")
+      .replace(/ı/g, "i")
+      .replace(/ğ/g, "g")
+      .replace(/Ğ/g, "G")
+      .replace(/ü/g, "u")
+      .replace(/Ü/g, "U")
+      .replace(/ş/g, "s")
+      .replace(/Ş/g, "S")
+      .replace(/ö/g, "o")
+      .replace(/Ö/g, "O")
+      .replace(/ç/g, "c")
+      .replace(/Ç/g, "C")
+      .replace(/[^\x20-\x7E]/g, "");
 
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    );
 
     await workbook.xlsx.write(res);
     res.end();
