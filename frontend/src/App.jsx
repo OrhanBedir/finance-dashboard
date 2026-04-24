@@ -7880,25 +7880,27 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             {formatTRY(regionFilteredRowTotal)}
           </div>
         </div>
-        <div
-          style={{
-            minWidth: "170px",
-            padding: "10px 14px",
-            borderRadius: "12px",
-            background: "#f7f8fb",
-            border: "1px solid #e4e7ee",
-            textAlign: "center",
-          }}
-        >
-          <div style={{ fontSize: "12px", color: "#6b7280" }}>
-            {isSubconUser ? `${userSubconName} Hakediş` : "Federal Hakediş"}
-          </div>
+        {isSubconUser && (
           <div
-            style={{ fontWeight: "700", fontSize: "20px", color: "#166534" }}
+            style={{
+              minWidth: "170px",
+              padding: "10px 14px",
+              borderRadius: "12px",
+              background: "#f7f8fb",
+              border: "1px solid #e4e7ee",
+              textAlign: "center",
+            }}
           >
-            {formatTRY(subconHakedisTotal)}
+            <div style={{ fontSize: "12px", color: "#6b7280" }}>
+              {`${userSubconName} Hakediş`}
+            </div>
+            <div
+              style={{ fontWeight: "700", fontSize: "20px", color: "#166534" }}
+            >
+              {formatTRY(subconHakedisTotal)}
+            </div>
           </div>
-        </div>
+        )}
 
         <button type="button" className="tab" onClick={handleExportRegionExcel}>
           Excel İndir
