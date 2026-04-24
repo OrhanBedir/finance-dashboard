@@ -6732,6 +6732,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const params = new URLSearchParams({
         region: regionName,
         type: exportType,
+        subcon: isSubconUser ? userSubconName : "",
       });
 
       const response = await fetch(
