@@ -6890,6 +6890,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   if (loading) return <div className="loading">Yükleniyor...</div>;
   if (errorMessage) return <div className="loading">{errorMessage}</div>;
   const detailThStyle = {
+    position: "sticky",
+    top: 0,
+    zIndex: 5,
     padding: "16px",
     color: "#ffffff",
     background: "#1f2937",
@@ -7670,8 +7673,6 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     <th style={detailThStyle}>Unit Price</th>
                     <th style={detailThStyle}>Total Done Amount</th>
                     <th style={detailThStyle}>Subcon</th>
-                  
-                    
                   </tr>
                 </thead>
                 <tbody>
