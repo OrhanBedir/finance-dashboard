@@ -1688,7 +1688,11 @@ function buildMasterJoinedQuery(
         ELSE COALESCE(item_po.unit_price, 0)
       END AS unit_price,
 
-      COALESCE(best_boq.currency, 'TRY') AS currency,
+      CASE
+        WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.currency, best_boq.currency, 'TRY')
+        WHEN item_po.id IS NOT NULL THEN COALESCE(item_po.currency, best_boq.currency, 'TRY')
+        ELSE COALESCE(best_boq.currency, 'TRY')
+      END AS currency,
 
       CASE
         WHEN COALESCE(m.done_qty, 0) = 0 THEN 'CANCEL'
