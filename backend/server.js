@@ -1483,6 +1483,20 @@ function normalizeCurrency(value) {
 
   return raw || "TRY";
 }
+function inferCurrencyByItemAndPrice(itemCode, currency, unitPrice) {
+  const code = String(itemCode || "").trim();
+  const curr = normalizeCurrency(currency);
+  const price = Number(unitPrice || 0);
+
+  // 7,2m LPRT pole özel kuralı:
+  // Eski PO'larda 42.379 TL, yeni PO'larda 947/986 USD geliyor.
+  if (code === "8818278098") {
+    if (price >= 10000) return "TRY";
+    if (price > 0) return "USD";
+  }
+
+  return curr;
+}
 
 function detectSiteTypeFromSiteCode(siteCode) {
   const code = String(siteCode || "")
@@ -3909,6 +3923,11 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
       const unitPrice = getCell(r, ["Unit Price", "Price", "Birim Fiyat"]);
 
       const currency = getCell(r, ["Currency", "Curr", "Para Birimi"]);
+      const finalCurrency = inferCurrencyByItemAndPrice(
+        itemCode,
+        currency,
+        parseNumber(unitPrice),
+      );
       const poNo = getCell(r, ["PO No", "PO", "Purchase Order", "PO Number"]);
 
       if (!projectCode && !siteCode && !itemCode && !itemDescription) continue;
@@ -3937,7 +3956,7 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
           itemCode ? String(itemCode).trim() : null,
           itemDescription ? String(itemDescription).trim() : null,
           parseNumber(unitPrice),
-          normalizeCurrency(currency),
+          finalCurrency,
           parseNumber(requestedQty),
           parseNumber(billedQty),
           parseNumber(dueQty),
