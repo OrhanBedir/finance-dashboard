@@ -664,6 +664,103 @@ function HWPoUploadInline({ onClose, onUploaded }) {
   );
 }
 
+function RolloutUploadInline({ onClose, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleUpload = async () => {
+    if (!file) {
+      setMessage("❌ Lütfen bir Excel dosyası seç");
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setMessage("");
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`${API_BASE}/rollout/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Rollout upload sırasında hata oluştu");
+      }
+
+      setMessage("✅ Rollout data başarıyla yüklendi");
+      setFile(null);
+
+      const input = document.getElementById("rollout-upload-input");
+      if (input) input.value = "";
+
+      if (onUploaded) {
+        await onUploaded();
+      }
+    } catch (err) {
+      console.error("ROLLOUT UPLOAD ERROR:", err);
+      setMessage(`❌ ${err.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="entryPanel" style={{ marginBottom: "18px" }}>
+      <div className="entryForm">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "14px",
+            gap: "12px",
+            flexWrap: "wrap",
+          }}
+        >
+          <h3 className="listTitle" style={{ margin: 0 }}>
+            📡 Rollout Excel Yükle
+          </h3>
+
+          <button type="button" className="tab" onClick={onClose}>
+            Kapat
+          </button>
+        </div>
+
+        <div className="formGrid">
+          <div className="formGroup formGroupWide">
+            <label>Rollout / Huawei Atanan Sahalar Excel Dosyası</label>
+            <input
+              id="rollout-upload-input"
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+          </div>
+        </div>
+
+        <div className="entryActions">
+          <button
+            type="button"
+            className="saveButton"
+            onClick={handleUpload}
+            disabled={uploading}
+          >
+            {uploading ? "Yükleniyor..." : "Rollout Excel Yükle"}
+          </button>
+        </div>
+
+        {message && <div className="entryMessage">{message}</div>}
+      </div>
+    </div>
+  );
+}
+
 function formatDateTR(date) {
   if (!date) return "";
   const d = new Date(date);
@@ -1031,6 +1128,7 @@ function DailyEntry() {
   const [projectCodes, setProjectCodes] = useState([]);
   const [itemOptions, setItemOptions] = useState([]);
   const [poRows, setPoRows] = useState([]);
+  const [showRolloutUpload, setShowRolloutUpload] = useState(false);
 
   const normalizeCurrency = (value) => {
     const raw = String(value || "")
@@ -1640,6 +1738,13 @@ function DailyEntry() {
           >
             BoQ Yükle
           </button>
+          <button
+            type="button"
+            className="tab"
+            onClick={() => setShowRolloutUpload(true)}
+          >
+            Rollout Yükle
+          </button>
 
           <button
             type="button"
@@ -1687,6 +1792,12 @@ function DailyEntry() {
       {showHwPoUpload && (
         <HWPoUploadInline
           onClose={() => setShowHwPoUpload(false)}
+          onUploaded={refreshAll}
+        />
+      )}
+      {showRolloutUpload && (
+        <RolloutUploadInline
+          onClose={() => setShowRolloutUpload(false)}
           onUploaded={refreshAll}
         />
       )}

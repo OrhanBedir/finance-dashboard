@@ -1773,7 +1773,7 @@ app.get("/setup-db", async (req, res) => {
       );
     `);
     await pool.query(`
-       CREATE TABLE IF NOT EXISTS master_works (
+        CREATE TABLE IF NOT EXISTS master_works (
        id SERIAL PRIMARY KEY,
        site_type TEXT,
        project_code TEXT,
@@ -1790,6 +1790,83 @@ app.get("/setup-db", async (req, res) => {
        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rollout_sites (
+        id SERIAL PRIMARY KEY,
+        site_type TEXT,
+        project_code TEXT,
+        project_name TEXT,
+        site_code TEXT NOT NULL,
+        city TEXT,
+        region TEXT,
+        malzeme_status TEXT,
+        hw_status TEXT,
+        qc_durum TEXT,
+        qc_aciklama TEXT,
+        source_sheet TEXT,
+        upload_batch TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(project_code, site_code, site_type)
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rollout_progress (
+        id SERIAL PRIMARY KEY,
+        site_code TEXT NOT NULL,
+        site_type TEXT,
+
+        rf_subcon TEXT,
+        rf_started_date DATE,
+        rf_finished_date DATE,
+        rf_note TEXT,
+
+        tss_subcon TEXT,
+        tss_prepared_date DATE,
+        tssr_subcon TEXT,
+        tssr_sent_hw_date DATE,
+        tssr_approved_date DATE,
+
+        los_subcon TEXT,
+        los_approved_date DATE,
+
+        btk_subcon TEXT,
+        btk_applied_date DATE,
+        btk_approved_date DATE,
+
+        gs_status TEXT,
+        atlas_status TEXT,
+        asbuilt_status TEXT,
+        asbuilt_finished_date DATE,
+        acceptance_docs TEXT,
+        pac TEXT,
+
+        survey_note TEXT,
+        hakedis TEXT,
+        btk_anten TEXT,
+        montaj_anten TEXT,
+
+        onair_date DATE,
+        general_note TEXT,
+
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(site_code, site_type)
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rollout_files (
+        id SERIAL PRIMARY KEY,
+        site_code TEXT NOT NULL,
+        site_type TEXT,
+        file_type TEXT NOT NULL,
+        original_name TEXT,
+        file_path TEXT NOT NULL,
+        uploaded_by TEXT,
+        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS po_rows (
@@ -3981,6 +4058,69 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
   } catch (err) {
     console.error("HW PO UPLOAD ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+app.post("/rollout/upload", upload.single("file"), async (req, res) => {
+  try {
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+    for (const r of rows) {
+      const siteType = r["Site Type"] || null;
+      const projectCode = r["Project Code"] || null;
+      const projectName = r["Project Name"] || null;
+      const siteCode = r["Site Code"] || null;
+      const city = r["İL"] || null;
+
+      if (!siteCode) continue;
+
+      await pool.query(
+        `
+        INSERT INTO rollout_sites (
+          site_type,
+          project_code,
+          project_name,
+          site_code,
+          city,
+          region,
+          malzeme_status,
+          hw_status,
+          qc_durum,
+          qc_aciklama,
+          source_sheet,
+          upload_batch
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        ON CONFLICT (project_code, site_code, site_type)
+        DO UPDATE SET
+          city = EXCLUDED.city,
+          malzeme_status = EXCLUDED.malzeme_status,
+          qc_durum = EXCLUDED.qc_durum,
+          qc_aciklama = EXCLUDED.qc_aciklama,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [
+          siteType,
+          projectCode,
+          projectName,
+          siteCode,
+          city,
+          city, // şimdilik region = city
+          r["Malzeme Status"] || null,
+          null,
+          r["QC DURUM"] || null,
+          r["QC ACIKLAMA"] || null,
+          sheetName,
+          req.file.filename,
+        ],
+      );
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Upload failed" });
   }
 });
 
