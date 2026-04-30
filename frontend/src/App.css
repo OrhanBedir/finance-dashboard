@@ -690,3 +690,734 @@ input[type="file"] {
 .react-datepicker__input-container {
   width: 100%;
 }
+.tableWrap {
+  width: 100%;
+  overflow-x: auto;   /* 👉 sağa kaydırma */
+}
+
+table {
+  min-width: 1800px;  /* 👉 geniş tablo zorla */
+  border-collapse: collapse;
+}
+
+th {
+  white-space: nowrap;   /* 👉 başlık tek satır */
+  padding: 10px 12px;
+  background: #f5f6fa;
+  font-weight: 600;
+  font-size: 13px;
+  text-align: left;
+  border-bottom: 2px solid #ddd;
+}
+
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+}
+
+tr:hover {
+  background: #f9fafb;
+}
+th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+th {
+  background: #eef2ff;
+  color: #222;
+}
+td {
+  white-space: nowrap;
+}
+.rolloutTitle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.rolloutTitle img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+.rolloutTitle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.rolloutTitle img {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.summarySection {
+  margin: 30px auto;
+  max-width: 1180px;
+}
+
+.summaryMainTitle {
+  text-align: center;
+  font-size: 24px;
+  margin-bottom: 20px;
+}
+
+.summaryBlock {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 18px;
+  margin-bottom: 22px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.summaryBlockTitle {
+  background: #f59e0b;
+  color: #111827;
+  font-weight: 800;
+  text-align: center;
+  padding: 10px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.summaryTopLine {
+  display: flex;
+  justify-content: space-between;
+  background: #fef3c7;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.summaryMiniCard {
+  background: #f9fafb;
+  border-radius: 14px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+}
+
+.summaryMiniLabel {
+  font-weight: 700;
+  font-size: 13px;
+  min-height: 34px;
+}
+
+.summaryMiniValue {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 8px 0;
+}
+
+.summaryBar {
+  height: 9px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.summaryBar div {
+  height: 100%;
+  background: #3b82f6;
+}
+
+.summaryPercent {
+  text-align: right;
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 5px;
+}
+
+
+
+
+.summaryMainTitle {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  margin: 10px 0 18px;
+}
+
+.excelSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px 26px;
+  width: 100%;
+}
+
+.excelSummaryBox {
+  width: 100%;
+  overflow: visible;
+}
+
+.excelSummaryTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.excelSummaryTable th,
+.excelSummaryTable td {
+  border: 1.5px solid #111;
+  padding: 3px 4px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+
+
+
+
+.excelTitle {
+  background: #f59e0b;
+  color: #000;
+  font-size: 10.5px;
+  font-weight: 900;
+  height: 18px;
+}
+
+.excelHeader th {
+  background: #333399;
+  color: #fff;
+  font-size: 10px;
+  height: 18px;
+}
+
+.excelHeader th:nth-child(2),
+.excelHeader th:nth-child(3) {
+  background: #c084fc;
+  color: #000;
+}
+
+.excelTypeRow th {
+  background: #f4c542;
+  color: #000;
+  font-size: 10px;
+  height: 18px;
+}
+
+.excelStatusTitle {
+  background: #f7c995;
+  color: #000;
+  font-size: 10px;
+  height: 18px;
+}
+
+.excelLabel {
+  background: #ffff99;
+  text-align: left !important;
+  font-size: 9.5px;
+}
+
+.excelActual {
+  background: #f3e2d2;
+}
+
+.excelDelta {
+  background: #5b82bd;
+  color: #fff;
+}
+
+
+.excelSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(620px, 1fr));
+  gap: 18px 28px;
+  width: 100%;
+}
+
+.excelSummaryTable {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.excelSummaryTable th,
+.excelSummaryTable td {
+  border: 1.3px solid #111;
+  padding: 2px 3px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+
+.excelSummaryGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+  width: 100%;
+}
+
+.excelSummaryBox {
+  width: 100%;
+  overflow: visible;
+}
+
+.excelSummaryTable {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+.excelSummaryTable {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+/* 🔥 kolon genişlikleri */
+.excelSummarySection {
+  max-width: 1050px;   /* 🔥 daha dar */
+  margin: 0 auto;
+}
+
+.excelSummaryTable {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+/* 🔥 KOLONLARI SIKIŞTIR */
+.excelSummaryTable col:nth-child(1) {
+  width: 32%;
+}
+
+.excelSummaryTable col:nth-child(2) { width: 9%; }
+.excelSummaryTable col:nth-child(3) { width: 9%; }
+.excelSummaryTable col:nth-child(4) { width: 9%; }
+.excelSummaryTable col:nth-child(5) { width: 9%; }
+.excelSummaryTable col:nth-child(6) { width: 9%; }
+.excelSummaryTable col:nth-child(7) { width: 8%; }
+
+/* 🔥 FONT VE BOYUT */
+.excelSummaryTable th,
+.excelSummaryTable td {
+  border: 1.6px solid #111;
+  padding: 3px 5px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  font-weight: 900;
+  color: #000;
+}
+
+/* 🔥 BAŞLIKLARI DA SIKIŞTIR */
+.excelTitle {
+  font-size: 10px;
+  height: 18px;
+}
+
+.excelHeader th {
+  font-size: 9px;
+  height: 18px;
+}
+
+.excelTypeRow th {
+  font-size: 9px;
+}
+
+.excelStatusTitle {
+  font-size: 9px;
+}
+
+/* 🔥 LABEL SATIRI */
+.excelLabel {
+  font-size: 9px;
+}
+.excelSummarySection {
+  max-width: 980px;   /* 🔥 1050 → 980 */
+}
+
+/* 🔥 kolonları biraz daha sıkıştır */
+.excelSummaryTable col:nth-child(1) {
+  width: 34%;
+}
+
+.excelSummaryTable col:nth-child(2),
+.excelSummaryTable col:nth-child(3),
+.excelSummaryTable col:nth-child(4),
+.excelSummaryTable col:nth-child(5),
+.excelSummaryTable col:nth-child(6),
+.excelSummaryTable col:nth-child(7) {
+  width: 9%;
+}
+
+/* 🔥 minicik font dokunuşu */
+.excelSummaryTable th,
+.excelSummaryTable td {
+  font-size: 8.8px;
+  padding: 2px 2px;
+}
+
+.excelSummarySection {
+  max-width: 1380px;
+  margin: 0 auto 30px;
+}
+
+.excelSummaryBox {
+  width: 100%;
+  overflow-x: auto;
+  margin-bottom: 18px;
+}
+
+.excelSummaryTable {
+  min-width: 500px;
+  width: 500px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.excelSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr); /* 🔥 2 sütun */
+  gap: 10px 12px; 
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.excelSummaryTable {
+  width: 100%;
+  max-width: 550px;   /* 🔥 yan yana sığması için */
+}
+.excelSummaryTable {
+  font-size: 11px;
+  font-weight: 700;   /* 🔥 genel bold */
+  color: #000;        /* 🔥 siyah */
+}
+.excelTitle {
+  font-weight: 900;
+  color: #000;
+}
+
+.excelHeader th {
+  font-weight: 900;
+  color: #fff;
+}
+
+.excelTypeRow th {
+  font-weight: 900;
+  color: #000;
+}
+
+.excelStatusTitle {
+  font-weight: 900;
+  color: #000;
+}
+.excelLabel {
+  font-weight: 800;
+  color: #000;
+}
+.tableContainer {
+  width: 100%;
+  overflow-x: auto;
+}
+
+
+
+th {
+  white-space: nowrap;
+}
+
+th {
+  white-space: nowrap;
+  padding: 8px 14px;   /* 🔥 genişlik kazandırır */
+}
+td {
+  white-space: nowrap;
+  padding: 6px 12px;
+}
+.tableContainer {
+  width: 100%;
+  overflow-x: auto;
+}
+.tableWrap td.rfNoteCell,
+.tableWrap th.rfNoteCell {
+  min-width: 220px;
+  max-width: 260px;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+.tableContainer {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.tableWrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+table {
+  width: max-content;   /* 🔥 scroll için şart */
+  min-width: 100%;
+  border-collapse: collapse;
+}
+
+/* HEADER */
+th {
+  white-space: nowrap;
+  padding: 8px 14px;
+  font-weight: 600;
+}
+
+/* DATA */
+td {
+  white-space: nowrap;
+  padding: 6px 12px;
+}
+
+/* RF NOT özel alan */
+.rfNoteCell {
+  min-width: 220px;
+  max-width: 260px;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+/* QC + BUTON BLOĞU */
+.qcActionBox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 130px;
+}
+
+.qcActionBox .select,
+.qcActionBox .saveButton {
+  width: 100%;
+}
+.qcActionBox {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+  width: auto;
+}
+
+.qcActionBox .select {
+  width: 140px;
+}
+
+.qcActionBox .saveButton {
+  width: 110px;
+  height: 36px;
+}
+.qcActionBox .saveButton {
+  width: 100px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+}
+thead th {
+  position: sticky;
+  top: 0;
+  background: #e5e7eb;
+  z-index: 2;
+}
+tbody tr:hover {
+  background-color: #f3f4f6;
+  transition: 0.2s;
+}
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.rolloutModal {
+  width: min(1200px, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.modalHeader button {
+  border: none;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.modalGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.modalField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.modalField input,
+.modalField select {
+  height: 38px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+.excelSummaryTable col:nth-child(1) {
+  width: 210px;
+}
+
+.excelSummaryTable col:nth-child(2),
+.excelSummaryTable col:nth-child(3),
+.excelSummaryTable col:nth-child(4),
+.excelSummaryTable col:nth-child(5),
+.excelSummaryTable col:nth-child(6),
+.excelSummaryTable col:nth-child(7) {
+  width: 64px;
+}
+
+.excelSummaryBox {
+  width: 600px;
+}
+/* ✅ ROLLOUT EXCEL SUMMARY - FINAL */
+.excelSummarySection {
+  max-width: 1250px !important;
+  margin: 0 auto 30px !important;
+}
+
+.excelSummaryGrid {
+  display: grid !important;
+  grid-template-columns: repeat(2, 680px) !important;
+  gap: 18px 24px !important;
+  justify-content: center !important;
+}
+
+.excelSummaryBox {
+  width: 680px !important;
+  overflow: hidden !important;
+}
+
+.excelSummaryTable {
+  width: 680px !important;
+  min-width: 680px !important;
+  max-width: 680px !important;
+}
+
+.excelSummaryTable col:nth-child(1) {
+  width: 285px !important;
+}
+
+.excelSummaryTable col:nth-child(2),
+.excelSummaryTable col:nth-child(3),
+.excelSummaryTable col:nth-child(4),
+.excelSummaryTable col:nth-child(5),
+.excelSummaryTable col:nth-child(6),
+.excelSummaryTable col:nth-child(7) {
+  width: 61px !important;
+}
+
+.excelSummaryTable th,
+.excelSummaryTable td {
+  border: 1.5px solid #111 !important;
+  padding: 3px 4px !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+  font-weight: 900 !important;
+  color: #000 !important;
+  line-height: 1.05 !important;
+}
+
+.excelLabel {
+  text-align: left !important;
+  background: #ffff99 !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+}
+
+.excelTitle {
+  background: #f59e0b !important;
+  font-size: 10.5px !important;
+  font-weight: 900 !important;
+}
+
+.excelHeader th {
+  background: #333399 !important;
+  color: #fff !important;
+  font-size: 10px !important;
+}
+
+.excelHeader th:nth-child(2),
+.excelHeader th:nth-child(3) {
+  background: #c084fc !important;
+  color: #000 !important;
+}
+
+.excelTypeRow th {
+  background: #f4c542 !important;
+}
+
+.excelStatusTitle {
+  background: #f7c995 !important;
+}
+
+.excelActual {
+  background: #f3e2d2 !important;
+}
+
+.excelDelta {
+  background: #5b82bd !important;
+  color: #fff !important;
+}

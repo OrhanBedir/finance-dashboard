@@ -9,6 +9,7 @@ const path = require("path");
 const fs = require("fs");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const { detectRegion } = require("./utils/regionHelper");
 
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -41,6 +42,12 @@ function requireAdmin(req, res, next) {
     return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
   }
   next();
+}
+
+function getWeekNumber(date) {
+  const d = new Date(date);
+  const oneJan = new Date(d.getFullYear(), 0, 1);
+  return Math.ceil(((d - oneJan) / 86400000 + oneJan.getDay() + 1) / 7);
 }
 
 app.use((req, res, next) => {
@@ -451,6 +458,93 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
+app.get("/rollout/mismatch-check", async (req, res) => {
+  try {
+    const masterResult = await pool.query(buildMasterJoinedQuery());
+    const rolloutResult = await pool.query(`SELECT * FROM rollout_progress`);
+
+    const rolloutSites = new Set(
+      (rolloutResult.rows || []).map((r) =>
+        String(r.site_code || "")
+          .trim()
+          .toUpperCase(),
+      ),
+    );
+
+    const masterSitesMap = new Map();
+
+    (masterResult.rows || []).forEach((row) => {
+      const siteCode = String(row.site_code || "")
+        .trim()
+        .toUpperCase();
+      const doneQty = Number(row.done_qty || 0);
+
+      if (!siteCode || doneQty <= 0) return;
+
+      if (!masterSitesMap.has(siteCode)) {
+        masterSitesMap.set(siteCode, {
+          site_code: row.site_code,
+          project_code: row.project_code,
+          site_type: row.site_type,
+          subcon_name: row.subcon_name,
+          done_qty: doneQty,
+          onair_date: row.onair_date,
+          status: row.status,
+        });
+      }
+    });
+
+    const masterSites = new Set(masterSitesMap.keys());
+
+    const missingInRollout = [...masterSitesMap.values()].filter((row) => {
+      const code = String(row.site_code || "")
+        .trim()
+        .toUpperCase();
+      return !rolloutSites.has(code);
+    });
+
+    const rolloutWithoutWork = (rolloutResult.rows || []).filter((row) => {
+      const code = String(row.site_code || "")
+        .trim()
+        .toUpperCase();
+      return code && !masterSites.has(code);
+    });
+
+    res.json({
+      ok: true,
+      missingInRollout,
+      rolloutWithoutWork,
+      counts: {
+        missingInRollout: missingInRollout.length,
+        rolloutWithoutWork: rolloutWithoutWork.length,
+      },
+    });
+  } catch (err) {
+    console.error("ROLLOUT MISMATCH CHECK ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+app.get("/rollout/missing-sites", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT
+        cw.site_code,
+        cw.site_type,
+        cw.project_code
+      FROM completed_works cw
+      LEFT JOIN rollout_sites rs
+        ON UPPER(TRIM(rs.site_code)) = UPPER(TRIM(cw.site_code))
+      WHERE rs.id IS NULL
+      ORDER BY cw.site_code
+    `);
+
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) {
+    console.error("MISSING ROLLOUT SITES ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
@@ -598,16 +692,56 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i] || [];
 
-      const siteId = row[1]; // B kolonu = DU ID / Site ID
+      const siteId = row[2]; // B kolonu = DU ID / Site ID
       const statusRaw = row[7]; // H kolonu = status
       const templateName = row[15]; // P kolonu = Template Name
+      const qcCloseTimeRaw = row[27]; // AB kolonu = Actual Task Close Time
 
       const siteCode = String(siteId || "")
         .trim()
         .toUpperCase();
       const qcDurum = normalizeStatus(statusRaw);
 
-      if (!siteCode || !qcDurum || !templateName) {
+      function parseExcelDate(value) {
+        if (!value) return null;
+
+        // Eğer number gelirse (Excel serial)
+        if (typeof value === "number") {
+          const excelEpoch = new Date(1899, 11, 30);
+          return new Date(excelEpoch.getTime() + value * 86400000);
+        }
+
+        // string gelirse
+        const d = new Date(value.replace(" ", "T"));
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+
+      const qcClosedDate = parseExcelDate(qcCloseTimeRaw);
+
+      const qcClosedDateOnly =
+        qcClosedDate && !Number.isNaN(qcClosedDate.getTime())
+          ? qcClosedDate.toISOString().slice(0, 10)
+          : null;
+
+      if (!siteCode || !qcDurum) {
+        continue;
+      }
+
+      /* 🔥 Rollout Data QC otomatik güncelleme */
+      await pool.query(
+        `
+        UPDATE rollout_progress
+        SET
+          qc_durum = $2,
+          qc_closed_date = $3,
+          updated_at = NOW()
+        WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1
+        `,
+        [siteCode, qcDurum, qcClosedDateOnly],
+      );
+
+      /* Eski master_works kuralı aynen devam */
+      if (!templateName) {
         continue;
       }
 
@@ -616,7 +750,6 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       if (!rule) {
         continue;
       }
-
       if (rule.type === "ONLY_8818274546") {
         const result = await pool.query(
           `
@@ -1684,15 +1817,20 @@ function buildMasterJoinedQuery(
       COALESCE(site_po.po_no, '') AS po_no,
 
       CASE
+        WHEN TRIM(COALESCE(m.item_code, '')) = '8818278098' THEN 986.23
         WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.unit_price, 0)
         ELSE COALESCE(item_po.unit_price, 0)
       END AS unit_price,
 
       CASE
-        WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.currency, best_boq.currency, 'TRY')
-        WHEN item_po.id IS NOT NULL THEN COALESCE(item_po.currency, best_boq.currency, 'TRY')
-        ELSE COALESCE(best_boq.currency, 'TRY')
-      END AS currency,
+        WHEN COALESCE(TRIM(best_boq.currency), '') <> ''
+         THEN best_boq.currency
+        WHEN site_po.id IS NOT NULL
+         THEN COALESCE(site_po.currency, 'TRY')
+        WHEN item_po.id IS NOT NULL
+         THEN COALESCE(item_po.currency, 'TRY')
+        ELSE 'TRY'
+      END AS currency, 
 
       CASE
         WHEN COALESCE(m.done_qty, 0) = 0 THEN 'CANCEL'
@@ -2569,6 +2707,7 @@ app.get("/finance/salary/export-excel", async (req, res) => {
 
     worksheet.mergeCells("A1:M1");
     const titleCell = worksheet.getCell("A1");
+
     titleCell.value = `MAAŞ & AVANS RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
     titleCell.font = { bold: true, size: 16, color: { argb: "FFFFFFFF" } };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
@@ -2713,6 +2852,176 @@ app.get("/finance/supplier-advances", async (req, res) => {
       error: "Taşeron avansları alınırken hata oluştu",
       detail: err.message,
     });
+  }
+});
+app.post("/rollout/auto-sync-targets", async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const masterResult = await pool.query(buildMasterJoinedQuery());
+
+    const targetItemCodes = {
+      "5G": ["8818274542", "8818274543", "8812184609", "8812184598"],
+      LTE: ["8818274542", "8818274543", "8812184609", "8812184598"],
+      DSS: ["88123MGE", "8818270797", "8812184697"],
+      STANDALONE: ["8812184591", "8812184592"],
+    };
+
+    const detectType = (row) => {
+      const siteCode = String(row.site_code || "").toUpperCase();
+      const rowType = String(row.site_type || "").toUpperCase();
+
+      if (
+        rowType === "5G" ||
+        siteCode.includes("_5GEXP_") ||
+        siteCode.includes("NR3500")
+      )
+        return "5G";
+      if (rowType === "DSS" || siteCode.includes("_DSS_")) return "DSS";
+
+      if (
+        rowType === "LTE" ||
+        siteCode.includes("L800") ||
+        siteCode.includes("L1800") ||
+        siteCode.includes("L2600") ||
+        siteCode.includes("L2100") ||
+        siteCode.includes("NR700") ||
+        siteCode.includes("TRP")
+      )
+        return "LTE";
+
+      if (rowType === "STANDALONE") return "STANDALONE";
+
+      return rowType || "";
+    };
+
+    const candidateMap = new Map();
+
+    for (const row of masterResult.rows || []) {
+      const siteCode = String(row.site_code || "").trim();
+      const itemCode = String(row.item_code || "").trim();
+      const doneQty = Number(row.done_qty || 0);
+
+      if (!siteCode || doneQty <= 0) continue;
+
+      const siteType = detectType(row);
+      const validCodes = targetItemCodes[siteType] || [];
+
+      if (!validCodes.includes(itemCode)) continue;
+
+      if (!candidateMap.has(siteCode)) {
+        candidateMap.set(siteCode, {
+          site_code: siteCode,
+          site_type: siteType,
+          project_code: row.project_code || "",
+          il: row.il || row.city || "",
+          bolge: row.bolge || row.region || "",
+          rf_subcon: row.subcon_name || "",
+          onair_date: row.onair_date || null,
+          plan_start_date: row.onair_date || today,
+        });
+      }
+    }
+
+    const candidates = [...candidateMap.values()];
+
+    let inserted = 0;
+    let updated = 0;
+
+    for (const row of candidates) {
+      const existing = await client.query(
+        `
+        SELECT id, plan_start_date, onair_date
+        FROM rollout_progress
+        WHERE UPPER(site_code) = UPPER($1)
+        LIMIT 1
+        `,
+        [row.site_code],
+      );
+
+      if (existing.rows.length === 0) {
+        await client.query(
+          `
+          INSERT INTO rollout_progress (
+            site_code,
+            site_type,
+            project_code,
+            il,
+            bolge,
+            rf_subcon,
+            plan_start_date,
+            onair_date,
+            malzeme_status
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          `,
+          [
+            row.site_code,
+            row.site_type,
+            row.project_code,
+            row.il,
+            row.bolge,
+            row.rf_subcon,
+            row.plan_start_date,
+            row.onair_date,
+            "OK",
+          ],
+        );
+
+        inserted += 1;
+      } else {
+        const old = existing.rows[0];
+
+        if (!old.plan_start_date) {
+          await client.query(
+            `
+            UPDATE rollout_progress
+            SET plan_start_date = $1,
+                onair_date = COALESCE(onair_date, $2),
+                site_type = COALESCE(NULLIF(site_type, ''), $3),
+                project_code = COALESCE(NULLIF(project_code, ''), $4),
+                bolge = COALESCE(NULLIF(bolge, ''), $5),
+                il = COALESCE(NULLIF(il, ''), $6),
+                rf_subcon = COALESCE(NULLIF(rf_subcon, ''), $7),
+                malzeme_status = COALESCE(NULLIF(malzeme_status, ''), 'OK'),
+                updated_at = NOW()
+            WHERE id = $8
+            `,
+            [
+              row.plan_start_date,
+              row.onair_date,
+              row.site_type,
+              row.project_code,
+              row.bolge,
+              row.il,
+              row.rf_subcon,
+              old.id,
+            ],
+          );
+
+          updated += 1;
+        }
+      }
+    }
+
+    await client.query("COMMIT");
+
+    res.json({
+      ok: true,
+      scanned: masterResult.rows.length,
+      targetSites: candidates.length,
+      inserted,
+      updated,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("ROLLOUT AUTO SYNC ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -3765,6 +4074,51 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 /* ================== IMPORT COMPLETED WORKS ================== */
 app.post("/import/completed-works", upload.single("file"), async (req, res) => {
   try {
+    // ✅ completed_works'e kayıt atmadan önce rollout_sites kontrolü
+    const normalizedSiteCode = String(site_code || "").trim();
+
+    if (normalizedSiteCode) {
+      const rolloutCheck = await pool.query(
+        `
+    SELECT id
+    FROM rollout_sites
+    WHERE UPPER(TRIM(site_code)) = UPPER(TRIM($1))
+    LIMIT 1
+    `,
+        [normalizedSiteCode],
+      );
+
+      if (rolloutCheck.rowCount === 0) {
+        await pool.query(
+          `
+          INSERT INTO rollout_sites (
+            site_code,
+            site_type,
+            project_code,
+            bolge,
+            il,
+            qc_durum,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, NOW())
+          `,
+          [
+            normalizedSiteCode,
+            site_type || null,
+            project_code || null,
+            getRegion(normalizedSiteCode) || null,
+            il || null,
+            "NOK",
+          ],
+        );
+
+        console.log(
+          "✅ Rollout site otomatik oluşturuldu:",
+          normalizedSiteCode,
+        );
+      }
+    }
+
     if (!req.file) {
       return res.status(400).json({ ok: false, error: "Dosya yok" });
     }
@@ -4060,68 +4414,1099 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
 app.post("/rollout/upload", upload.single("file"), async (req, res) => {
   try {
     const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-    for (const r of rows) {
-      const siteType = r["Site Type"] || null;
-      const projectCode = r["Project Code"] || null;
-      const projectName = r["Project Name"] || null;
-      const siteCode = r["Site Code"] || null;
-      const city = r["İL"] || null;
+    const get = (row, ...keys) => {
+      for (const key of keys) {
+        if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+          return row[key];
+        }
+      }
+      return null;
+    };
 
-      if (!siteCode) continue;
+    function parseDateSafe(value) {
+      if (!value) return null;
+      if (typeof value === "string") {
+        const v = value.trim();
+        if (!v || v.toUpperCase() === "OK" || v === "00.00.00") return null;
+      }
+      if (typeof value === "number") {
+        const excelDate = new Date(Math.round((value - 25569) * 86400 * 1000));
+        return isNaN(excelDate) ? null : excelDate;
+      }
+      const d = new Date(value);
+      return isNaN(d) ? null : d;
+    }
 
+    const allRows = [];
+    const allowedSheets = ["5G", "DSS", "Standalone", "LTE"];
+
+    workbook.SheetNames.forEach((sheetName) => {
+      const sheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+      data.forEach((row) => {
+        const siteCode = get(row, "site_code", "Site Code");
+        const autoRegion = detectRegion(siteCode);
+        if (!siteCode) return;
+
+        allRows.push({
+          bolge: get(row, "bolge", "Bölge") || autoRegion,
+          site_type: get(row, "site_type", "Site Type") || sheetName,
+          project_code: get(row, "project_code", "Project Code"),
+          site_code: siteCode,
+          il: get(row, "il", "İl", "IL", "İL"),
+          malzeme_status: get(row, "malzeme_status", "Malzeme Status"),
+
+          rf_subcon: get(row, "rf_subcon", "RF Subcon"),
+          plan_start_date: parseDateSafe(
+            get(row, "plan_start_date", "Plan Start Date"),
+          ),
+          installation_actual_start_date: parseDateSafe(
+            get(
+              row,
+              "installation_actual_start_date",
+              "Installation Actual Start Date",
+              "install_start_date",
+              "Install Start",
+            ),
+          ),
+          installation_actual_end_date: parseDateSafe(
+            get(
+              row,
+              "installation_actual_end_date",
+              "Installation Actual End Date",
+              "install_end_date",
+              "Install End",
+            ),
+          ),
+          onair_date: parseDateSafe(
+            get(row, "onair_date", "OnAir Date", "OnAir"),
+          ),
+          rf_not: get(row, "rf_not", "RF Not"),
+
+          los_subcon: get(row, "los_subcon", "LOS Subcon"),
+          los_plan_date: parseDateSafe(
+            get(row, "los_plan_date", "LOS Plan Date"),
+          ),
+          los_actual_end_date: parseDateSafe(
+            get(row, "los_actual_end_date", "LOS Actual End Date"),
+          ),
+
+          tss_subcon: get(row, "tss_subcon", "TSS Subcon"),
+          tss_plan_start_date: parseDateSafe(
+            get(row, "tss_plan_start_date", "TSS Plan Start Date"),
+          ),
+          tss_actual_end_date: parseDateSafe(
+            get(row, "tss_actual_end_date", "TSS Actual End Date"),
+          ),
+
+          tssr_subcon: get(row, "tssr_subcon", "TSSR Subcon"),
+          tssr_plan_start_date: parseDateSafe(
+            get(row, "tssr_plan_start_date", "TSSR Plan Start Date"),
+          ),
+          tssr_actual_end_date: parseDateSafe(
+            get(row, "tssr_actual_end_date", "TSSR Actual End Date"),
+          ),
+
+          btk_subcon: get(row, "btk_subcon", "BTK Subcon"),
+          btk_plan_start_date: parseDateSafe(
+            get(row, "btk_plan_start_date", "BTK Plan Start Date"),
+          ),
+          btk_actual_end_date: parseDateSafe(
+            get(row, "btk_actual_end_date", "BTK Actual End Date"),
+          ),
+          btk_approved: parseDateSafe(
+            get(row, "btk_approved", "BTK Approved by BTK"),
+          ),
+          btk_file_submit: parseDateSafe(
+            get(row, "btk_file_submit", "BTK FILE SUBMIT TO IFIS"),
+          ),
+          btk_certificate_date: parseDateSafe(
+            get(row, "btk_certificate_date", "BTK Certificate Date"),
+          ),
+
+          asbuilt_subcon: get(row, "asbuilt_subcon", "As-Built Subcon"),
+          asbuilt_actual_end_date: parseDateSafe(
+            get(row, "asbuilt_actual_end_date", "As-Built Actual End Date"),
+          ),
+
+          survey_note: get(row, "survey_note", "Survey Note"),
+
+          emr_plan_start_date: parseDateSafe(
+            get(row, "emr_plan_start_date", "EMR Plan Start Date"),
+          ),
+          emr_actual_end_date: parseDateSafe(
+            get(row, "emr_actual_end_date", "EMR Actual End Date"),
+          ),
+
+          trs_subcon: get(row, "trs_subcon", "TRS Subcon"),
+          trs_plan_start_date: parseDateSafe(
+            get(row, "trs_plan_start_date", "TRS Plan Start Date"),
+          ),
+          trs_actual_end_date: parseDateSafe(
+            get(row, "trs_actual_end_date", "TRS Actual End Date"),
+          ),
+          trs_not: get(row, "trs_not", "TRS Not"),
+
+          enh_subcon: get(row, "enh_subcon", "ENH Subcon"),
+          enh_plan_start_date: parseDateSafe(
+            get(row, "enh_plan_start_date", "ENH Plan Start Date"),
+          ),
+          enh_actual_end_date: parseDateSafe(
+            get(row, "enh_actual_end_date", "ENH Actual End Date"),
+          ),
+          enh_not: get(row, "enh_not", "ENH Not"),
+
+          power_subcon: get(row, "power_subcon", "POWER Project Subcon"),
+          power_plan_start_date: parseDateSafe(
+            get(row, "power_plan_start_date", "POWER Project Plan Start Date"),
+          ),
+          power_actual_end_date: parseDateSafe(
+            get(row, "power_actual_end_date", "POWER Project Actual End Date"),
+          ),
+
+          abonelik_end_date: parseDateSafe(
+            get(row, "abonelik_end_date", "Abonelik Belgesi Actual End Date"),
+          ),
+          tt_horizon_end_date: parseDateSafe(
+            get(row, "tt_horizon_end_date", "TT Horizon Actual End Date"),
+          ),
+          pac_end_date: parseDateSafe(
+            get(row, "pac_end_date", "PAC Actual End Date"),
+          ),
+        });
+      });
+    });
+
+    for (const r of allRows) {
       await pool.query(
         `
-        INSERT INTO rollout_sites (
-          site_type,
-          project_code,
-          project_name,
-          site_code,
-          city,
-          region,
-          malzeme_status,
-          hw_status,
-          qc_durum,
-          qc_aciklama,
-          source_sheet,
-          upload_batch
-        )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-        ON CONFLICT (project_code, site_code, site_type)
-        DO UPDATE SET
-          city = EXCLUDED.city,
+        INSERT INTO rollout_progress(
+          bolge, site_type, project_code, site_code, il, malzeme_status,
+          rf_subcon, plan_start_date, installation_actual_start_date, installation_actual_end_date, onair_date, rf_not,
+          los_subcon, los_plan_date, los_actual_end_date,
+          tss_subcon, tss_plan_start_date, tss_actual_end_date,
+          tssr_subcon, tssr_plan_start_date, tssr_actual_end_date,
+          btk_subcon, btk_plan_start_date, btk_actual_end_date, btk_approved, btk_file_submit, btk_certificate_date,
+          asbuilt_subcon, asbuilt_actual_end_date,
+          survey_note,
+          emr_plan_start_date, emr_actual_end_date,
+          trs_subcon, trs_plan_start_date, trs_actual_end_date, trs_not,
+          enh_subcon, enh_plan_start_date, enh_actual_end_date, enh_not,
+          power_subcon, power_plan_start_date, power_actual_end_date,
+          abonelik_end_date, tt_horizon_end_date, pac_end_date
+        ) VALUES(
+          $1,$2,$3,$4,$5,$6,
+          $7,$8,$9,$10,$11,$12,
+          $13,$14,$15,
+          $16,$17,$18,
+          $19,$20,$21,
+          $22,$23,$24,$25,$26,$27,
+          $28,$29,
+          $30,
+          $31,$32,
+          $33,$34,$35,$36,
+          $37,$38,$39,$40,
+          $41,$42,$43,
+          $44,$45,$46
+       )
+       ON CONFLICT (site_code, site_type)
+       DO UPDATE SET
+          bolge = EXCLUDED.bolge,
+          project_code = EXCLUDED.project_code,
+          il = EXCLUDED.il,
           malzeme_status = EXCLUDED.malzeme_status,
-          qc_durum = EXCLUDED.qc_durum,
-          qc_aciklama = EXCLUDED.qc_aciklama,
-          updated_at = CURRENT_TIMESTAMP
+          rf_subcon = EXCLUDED.rf_subcon,
+          plan_start_date = EXCLUDED.plan_start_date,
+          installation_actual_start_date = EXCLUDED.installation_actual_start_date,
+          installation_actual_end_date = EXCLUDED.installation_actual_end_date,
+          onair_date = EXCLUDED.onair_date,
+          rf_not = EXCLUDED.rf_not,
+          los_subcon = EXCLUDED.los_subcon,
+          los_plan_date = EXCLUDED.los_plan_date,
+          los_actual_end_date = EXCLUDED.los_actual_end_date,
+          tss_subcon = EXCLUDED.tss_subcon,
+          tss_plan_start_date = EXCLUDED.tss_plan_start_date,
+          tss_actual_end_date = EXCLUDED.tss_actual_end_date,
+          tssr_subcon = EXCLUDED.tssr_subcon,
+          tssr_plan_start_date = EXCLUDED.tssr_plan_start_date,
+          tssr_actual_end_date = EXCLUDED.tssr_actual_end_date,
+          btk_subcon = EXCLUDED.btk_subcon,
+          btk_plan_start_date = EXCLUDED.btk_plan_start_date,
+          btk_actual_end_date = EXCLUDED.btk_actual_end_date,
+          btk_approved = EXCLUDED.btk_approved,
+          btk_file_submit = EXCLUDED.btk_file_submit,
+          btk_certificate_date = EXCLUDED.btk_certificate_date,
+          asbuilt_subcon = EXCLUDED.asbuilt_subcon,
+          asbuilt_actual_end_date = EXCLUDED.asbuilt_actual_end_date,
+          survey_note = EXCLUDED.survey_note,
+          emr_plan_start_date = EXCLUDED.emr_plan_start_date,
+          emr_actual_end_date = EXCLUDED.emr_actual_end_date,
+          trs_subcon = EXCLUDED.trs_subcon,
+          trs_plan_start_date = EXCLUDED.trs_plan_start_date,
+          trs_actual_end_date = EXCLUDED.trs_actual_end_date,
+          trs_not = EXCLUDED.trs_not,
+          enh_subcon = EXCLUDED.enh_subcon,
+          enh_plan_start_date = EXCLUDED.enh_plan_start_date,
+          enh_actual_end_date = EXCLUDED.enh_actual_end_date,
+          enh_not = EXCLUDED.enh_not,
+          power_subcon = EXCLUDED.power_subcon,
+          power_plan_start_date = EXCLUDED.power_plan_start_date,
+          power_actual_end_date = EXCLUDED.power_actual_end_date,
+          abonelik_end_date = EXCLUDED.abonelik_end_date,
+          tt_horizon_end_date = EXCLUDED.tt_horizon_end_date,
+          pac_end_date = EXCLUDED.pac_end_date
         `,
-        [
-          siteType,
-          projectCode,
-          projectName,
-          siteCode,
-          city,
-          city, // şimdilik region = city
-          r["Malzeme Status"] || null,
-          null,
-          r["QC DURUM"] || null,
-          r["QC ACIKLAMA"] || null,
-          sheetName,
-          req.file.filename,
-        ],
+        Object.values(r),
       );
     }
 
-    res.json({ success: true });
+    res.json({ ok: true, count: allRows.length });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Upload failed" });
+    console.error("ROLLOUT UPLOAD ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
+});
+
+function getRegionFromSiteCode(siteCode) {
+  const code = String(siteCode || "")
+    .toUpperCase()
+    .trim();
+
+  if (
+    code.startsWith("ES") ||
+    code.startsWith("BO") ||
+    code.startsWith("ZO") ||
+    code.startsWith("KA")
+  ) {
+    return "Ankara";
+  }
+
+  if (
+    code.startsWith("IZ") ||
+    code.startsWith("MU") ||
+    code.startsWith("US") ||
+    code.startsWith("MN") ||
+    code.startsWith("DE") ||
+    code.startsWith("AI")
+  ) {
+    return "İzmir";
+  }
+
+  if (
+    code.startsWith("AT") ||
+    code.startsWith("IP") ||
+    code.startsWith("AF") ||
+    code.startsWith("BU")
+  ) {
+    return "Antalya";
+  }
+
+  return "";
+}
+
+app.post("/import/completed-works", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ ok: false, error: "Dosya yok" });
+    }
+
+    const workbook = XLSX.readFile(req.file.path);
+    const firstSheetName = workbook.SheetNames[0];
+
+    if (!firstSheetName) {
+      return res.status(400).json({
+        ok: false,
+        error: "Excel içinde sheet bulunamadı",
+      });
+    }
+
+    const sheet = workbook.Sheets[firstSheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+    if (!rows.length) {
+      return res.status(400).json({
+        ok: false,
+        error: "Excel içinde veri bulunamadı",
+      });
+    }
+
+    let inserted = 0;
+    let updated = 0;
+    let rolloutCreated = 0;
+
+    for (const r of rows) {
+      const siteType =
+        getCell(r, ["Site Type", "site_type", "Saha Türü"]) || "5G";
+
+      const projectCode = getCell(r, [
+        "Project Code",
+        "project_code",
+        "Proje Kodu",
+      ]);
+
+      const siteCode = getCell(r, ["Site Code", "site_code", "Saha Kodu"]);
+
+      const itemCode = getCell(r, ["Item Code", "item_code", "Kalem Kodu"]);
+
+      const itemDescription = getCell(r, [
+        "Item Description",
+        "item_description",
+        "Kalem Açıklaması",
+      ]);
+
+      const doneQty = getCell(r, ["Done Qty", "done_qty", "Tamamlanan Miktar"]);
+
+      const subconName = getCell(r, ["Subcon Name", "subcon_name", "Taşeron"]);
+
+      const onAirDate = getCell(r, ["OnAir Date", "onair_date", "Tarih"]);
+      const note = getCell(r, ["Not", "Note", "note"]);
+
+      const qcDurum = getCell(r, ["QC Durum", "qc_durum"]);
+      const kabulDurum = getCell(r, ["Kabul Durum", "kabul_durum"]);
+      const kabulNot = getCell(r, ["Kabul Not", "kabul_not"]);
+
+      const normalizedSiteCode = siteCode
+        ? String(siteCode).trim().toUpperCase()
+        : "";
+
+      const normalizedItemCode = itemCode ? String(itemCode).trim() : "";
+
+      if (!normalizedSiteCode || !normalizedItemCode) continue;
+
+      // ✅ completed work içindeki saha rollout_sites içinde yoksa otomatik oluştur
+      const rolloutCheck = await pool.query(
+        `
+        SELECT id
+        FROM rollout_sites
+        WHERE UPPER(TRIM(site_code)) = UPPER(TRIM($1))
+        LIMIT 1
+        `,
+        [normalizedSiteCode],
+      );
+
+      if (rolloutCheck.rowCount === 0) {
+        await pool.query(
+          `
+          INSERT INTO rollout_sites (
+            site_code,
+            site_type,
+            project_code,
+            bolge,
+            il,
+            qc_durum,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, NOW())
+          `,
+          [
+            normalizedSiteCode,
+            siteType ? String(siteType).trim() : "5G",
+            projectCode ? String(projectCode).trim() : null,
+            getRegionFromSiteCode(normalizedSiteCode),
+            null,
+            "NOK",
+          ],
+        );
+
+        rolloutCreated++;
+        console.log(
+          "✅ Rollout site otomatik oluşturuldu:",
+          normalizedSiteCode,
+        );
+      }
+
+      const duplicateCheck = await pool.query(
+        `
+        SELECT id
+        FROM master_works
+        WHERE project_code = $1
+          AND site_code = $2
+          AND item_code = $3
+        LIMIT 1
+        `,
+        [
+          projectCode ? String(projectCode).trim() : null,
+          normalizedSiteCode,
+          normalizedItemCode,
+        ],
+      );
+
+      if (duplicateCheck.rows.length > 0) {
+        await pool.query(
+          `
+          UPDATE master_works
+          SET
+            site_type = $1,
+            item_description = $2,
+            done_qty = $3,
+            subcon_name = $4,
+            onair_date = $5,
+            qc_durum = $6,
+            kabul_durum = $7,
+            kabul_not = $8,
+            note = $9
+          WHERE
+            project_code = $10
+            AND site_code = $11
+            AND item_code = $12
+          `,
+          [
+            siteType ? String(siteType).trim() : "5G",
+            itemDescription ? String(itemDescription).trim() : null,
+            parseNumber(doneQty),
+            subconName ? String(subconName).trim() : null,
+            parseExcelDate(onAirDate),
+            qcDurum || "NOK",
+            kabulDurum || "NOK",
+            kabulNot ? String(kabulNot).trim() : null,
+            note ? String(note).trim() : null,
+            projectCode ? String(projectCode).trim() : null,
+            normalizedSiteCode,
+            normalizedItemCode,
+          ],
+        );
+
+        updated++;
+        continue;
+      }
+
+      await pool.query(
+        `
+        INSERT INTO master_works
+        (
+          site_type,
+          project_code,
+          site_code,
+          item_code,
+          item_description,
+          done_qty,
+          subcon_name,
+          onair_date,
+          note,
+          qc_durum,
+          kabul_durum,
+          kabul_not
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        `,
+        [
+          siteType ? String(siteType).trim() : "5G",
+          projectCode ? String(projectCode).trim() : null,
+          normalizedSiteCode,
+          normalizedItemCode,
+          itemDescription ? String(itemDescription).trim() : null,
+          parseNumber(doneQty),
+          subconName ? String(subconName).trim() : null,
+          parseExcelDate(onAirDate),
+          note ? String(note).trim() : null,
+          qcDurum || "NOK",
+          kabulDurum || "NOK",
+          kabulNot ? String(kabulNot).trim() : null,
+        ],
+      );
+
+      inserted++;
+    }
+
+    res.json({
+      ok: true,
+      inserted,
+      updated,
+      rolloutCreated,
+      sheet_name: firstSheetName,
+      message: "Geçmiş işler başarıyla yüklendi",
+    });
+  } catch (err) {
+    console.error("IMPORT COMPLETED WORKS ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+function getSiteTypeFromSiteCode(siteCode) {
+  const code = String(siteCode || "")
+    .toUpperCase()
+    .trim();
+
+  // DSS
+  if (code.includes("_DSS_")) return "DSS";
+
+  // LTE
+  if (
+    code.includes("_L1800_") ||
+    code.includes("_L2600_") ||
+    code.includes("_L800_") ||
+    code.includes("_LC1800_") ||
+    code.includes("_L2100_") ||
+    code.includes("_L900_") ||
+    code.includes("_LTE_")
+  ) {
+    return "LTE";
+  }
+
+  // 5G
+  if (
+    code.includes("_NR3500_") ||
+    code.includes("_NR700_") ||
+    code.includes("_TRP_") ||
+    code.includes("5GEXP")
+  ) {
+    return "5G";
+  }
+
+  // STANDALONE
+  if (code.includes("_NS_")) return "STANDALONE";
+
+  return "";
+}
+function getCityFromSiteCode(siteCode) {
+  const code = String(siteCode || "")
+    .toUpperCase()
+    .trim();
+
+  if (code.startsWith("BO")) return "BOLU";
+  if (code.startsWith("ES")) return "ESKİŞEHİR";
+  if (code.startsWith("ZO")) return "ZONGULDAK";
+  if (code.startsWith("KA")) return "KARABÜK";
+  if (code.startsWith("BI")) return "BARTIN";
+
+  if (code.startsWith("IZ")) return "İZMİR";
+  if (code.startsWith("MU")) return "MUĞLA";
+  if (code.startsWith("US")) return "UŞAK";
+  if (code.startsWith("MN")) return "MANİSA";
+  if (code.startsWith("DE")) return "DENİZLİ";
+  if (code.startsWith("AI")) return "AYDIN";
+
+  if (code.startsWith("AT")) return "ANTALYA";
+  if (code.startsWith("IP")) return "ISPARTA";
+  if (code.startsWith("AF")) return "AFYON";
+  if (code.startsWith("BU")) return "BURDUR";
+
+  return "";
+}
+
+app.post("/rollout/add-site", async (req, res) => {
+  try {
+    const { site_code, project_code, site_type } = req.body;
+
+    if (!site_code) {
+      return res.status(400).json({ ok: false, error: "site_code zorunlu" });
+    }
+
+    const normalizedSiteCode = String(site_code).trim().toUpperCase();
+
+    const exists = await pool.query(
+      `
+      SELECT id
+      FROM rollout_progress
+      WHERE UPPER(TRIM(site_code)) = $1
+      LIMIT 1
+      `,
+      [normalizedSiteCode],
+    );
+
+    if (exists.rowCount > 0) {
+      return res.json({ ok: true, message: "Zaten var" });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO rollout_progress (
+        site_code,
+        site_type,
+        project_code,
+        bolge,
+        il,
+        qc_durum,
+        updated_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,NOW())
+      `,
+      [
+        normalizedSiteCode,
+        site_type || getSiteTypeFromSiteCode(normalizedSiteCode) || "5G",
+        project_code || null,
+        getRegionFromSiteCode(normalizedSiteCode) || null,
+        getCityFromSiteCode(normalizedSiteCode) || null,
+        "NOK",
+      ],
+    );
+
+    res.json({ ok: true, message: "Site rollout'a eklendi" });
+  } catch (err) {
+    console.error("ROLLOUT ADD SITE ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/rollout/update", authMiddleware, async (req, res) => {
+  try {
+    const data = req.body || {};
+    const autoRegion = getRegionFromSiteCode(data.site_code);
+    const autoSiteType = getSiteTypeFromSiteCode(data.site_code);
+    const autoCity = getCityFromSiteCode(data.site_code);
+
+    if (!data.site_code) {
+      return res.status(400).json({ error: "site_code zorunlu" });
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO rollout_progress (
+        site_code,
+        site_type,
+        bolge,
+        il,
+        site_physical_type,
+        enh_site_type,
+        atlas_status,
+        gs_status,
+        rf_not,
+        survey_note,
+        enh_not,
+        qc_closed_date
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+      )
+      ON CONFLICT (site_code)
+      DO UPDATE SET
+        site_type = EXCLUDED.site_type,
+        bolge = EXCLUDED.bolge,
+        il = EXCLUDED.il,
+        site_physical_type = EXCLUDED.site_physical_type,
+        enh_site_type = EXCLUDED.enh_site_type,
+        atlas_status = EXCLUDED.atlas_status,
+        gs_status = EXCLUDED.gs_status,
+        rf_not = EXCLUDED.rf_not,
+        survey_note = EXCLUDED.survey_note,
+        enh_not = EXCLUDED.enh_not,
+        qc_closed_date = EXCLUDED.qc_closed_date,
+        updated_at = NOW()
+      RETURNING *
+      `,
+      [
+        data.site_code,
+        autoSiteType,
+        autoRegion,
+        autoCity,
+        data.site_physical_type || null,
+        data.enh_site_type || null,
+        data.atlas_status || null,
+        data.gs_status || null,
+        data.rf_not || null,
+        data.survey_note || null,
+        data.enh_not || null,
+        data.qc_closed_date || null,
+      ],
+    );
+
+    res.json({ ok: true, row: result.rows[0] });
+  } catch (err) {
+    console.error("ROLLOUT UPDATE ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/export/excel", async (req, res) => {
+  try {
+    const { region } = req.query;
+
+    let query = `SELECT * FROM rollout_progress`;
+    let values = [];
+
+    if (region && region !== "ALL" && region !== "Tüm Bölgeler") {
+      query += ` WHERE bolge = $1`;
+      values.push(region);
+    }
+
+    query += ` ORDER BY bolge ASC, site_type ASC, site_code ASC`;
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).send("Data yok");
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Rollout Data");
+
+    worksheet.columns = [
+      { header: "Bölge", key: "bolge", width: 16 },
+      { header: "Site Type", key: "site_type", width: 14 },
+      { header: "Site Fiziksel Tip", key: "site_physical_type", width: 20 },
+      { header: "Project Code", key: "project_code", width: 18 },
+      { header: "Site Code", key: "site_code", width: 24 },
+      { header: "Malzeme Status", key: "malzeme_status", width: 18 },
+      { header: "İl", key: "il", width: 16 },
+      { header: "RF Subcon", key: "rf_subcon", width: 22 },
+      { header: "Plan Start Date", key: "plan_start_date", width: 18 },
+      {
+        header: "Installation Start Date",
+        key: "installation_actual_start_date",
+        width: 24,
+      },
+      {
+        header: "Installation End Date",
+        key: "installation_actual_end_date",
+        width: 24,
+      },
+      { header: "OnAir Date", key: "onair_date", width: 18 },
+      { header: "QC Closed Date", key: "qc_closed_date", width: 18 },
+      { header: "RF Not", key: "rf_not", width: 35 },
+      { header: "LOS Subcon", key: "los_subcon", width: 22 },
+      { header: "LOS Plan Date", key: "los_plan_date", width: 18 },
+      { header: "LOS Actual End Date", key: "los_actual_end_date", width: 22 },
+      { header: "TSS Subcon", key: "tss_subcon", width: 22 },
+      { header: "TSS Plan Start Date", key: "tss_plan_start_date", width: 22 },
+      { header: "TSS Actual End Date", key: "tss_actual_end_date", width: 22 },
+      { header: "TSSR Subcon", key: "tssr_subcon", width: 22 },
+      {
+        header: "TSSR Plan Start Date",
+        key: "tssr_plan_start_date",
+        width: 22,
+      },
+      {
+        header: "TSSR Actual End Date",
+        key: "tssr_actual_end_date",
+        width: 22,
+      },
+      { header: "BTK Subcon", key: "btk_subcon", width: 22 },
+      { header: "BTK Plan Start Date", key: "btk_plan_start_date", width: 22 },
+      { header: "BTK Actual End Date", key: "btk_actual_end_date", width: 22 },
+      { header: "BTK Approved by BTK", key: "btk_approved", width: 22 },
+      { header: "GS Status", key: "gs_status", width: 18 },
+      { header: "Survey Note", key: "survey_note", width: 35 },
+      { header: "ENH Subcon", key: "enh_subcon", width: 22 },
+      { header: "ENH Site Type", key: "enh_site_type", width: 18 },
+      { header: "ENH Plan Start Date", key: "enh_plan_start_date", width: 22 },
+      { header: "ENH Actual End Date", key: "enh_actual_end_date", width: 22 },
+      { header: "ENH Not", key: "enh_not", width: 35 },
+      { header: "Power Subcon", key: "power_subcon", width: 22 },
+      {
+        header: "Power Plan Start Date",
+        key: "power_plan_start_date",
+        width: 24,
+      },
+      {
+        header: "Power Actual End Date",
+        key: "power_actual_end_date",
+        width: 24,
+      },
+      {
+        header: "Abonelik Actual End Date",
+        key: "abonelik_end_date",
+        width: 24,
+      },
+      {
+        header: "Horizon Actual End Date",
+        key: "tt_horizon_end_date",
+        width: 24,
+      },
+      { header: "PAC Actual End Date", key: "pac_end_date", width: 24 },
+    ];
+
+    worksheet.spliceRows(1, 0, []);
+
+    const lastCol = worksheet.getColumn(worksheet.columns.length).letter;
+
+    worksheet.mergeCells(`A1:${lastCol}1`);
+    const titleCell = worksheet.getCell("A1");
+
+    titleCell.value = `ROLLOUT DATA RAPORU - ${
+      region && region !== "ALL" ? region : "Tüm Bölgeler"
+    } (${new Date().toLocaleDateString("tr-TR")})`;
+
+    titleCell.font = {
+      bold: true,
+      size: 16,
+      color: { argb: "FFFFFFFF" },
+    };
+
+    titleCell.alignment = {
+      horizontal: "center",
+      vertical: "middle",
+    };
+
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "1F4E78" },
+    };
+
+    worksheet.getRow(1).height = 28;
+
+    const headerRow = worksheet.getRow(2);
+
+    worksheet.columns.forEach((col, index) => {
+      const cell = headerRow.getCell(index + 1);
+      cell.value = col.header;
+
+      cell.font = {
+        bold: true,
+        color: { argb: "FFFFFFFF" },
+      };
+
+      cell.alignment = {
+        horizontal: "center",
+        vertical: "middle",
+        wrapText: true,
+      };
+
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "2F5D8A" },
+      };
+
+      cell.border = {
+        top: { style: "thin", color: { argb: "D9D9D9" } },
+        left: { style: "thin", color: { argb: "D9D9D9" } },
+        bottom: { style: "thin", color: { argb: "D9D9D9" } },
+        right: { style: "thin", color: { argb: "D9D9D9" } },
+      };
+    });
+
+    headerRow.height = 24;
+
+    result.rows.forEach((row) => {
+      worksheet.addRow({
+        ...row,
+        site_type: getSiteTypeFromSiteCode(row.site_code),
+      });
+    });
+
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber < 3) return;
+
+      row.eachCell((cell) => {
+        const headerCell = worksheet.getRow(2).getCell(cell.col).value;
+        const header =
+          typeof headerCell === "object"
+            ? headerCell?.richText?.[0]?.text || headerCell?.text
+            : headerCell;
+
+        if (header === "Site Type") {
+          const value = String(cell.value || "").toUpperCase();
+
+          if (value === "DSS") {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFFDE9D9" },
+            };
+            cell.font = { bold: true };
+          }
+
+          if (value === "LTE") {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFDDEBF7" },
+            };
+            cell.font = { bold: true };
+          }
+
+          if (value === "5G") {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFE2EFDA" },
+            };
+            cell.font = { bold: true };
+          }
+        }
+      });
+    });
+
+    worksheet.views = [
+      {
+        state: "frozen",
+        ySplit: 2,
+        showGridLines: false,
+      },
+    ];
+
+    worksheet.autoFilter = {
+      from: "A2",
+      to: `${lastCol}2`,
+    };
+
+    const safeRegion =
+      region && region !== "ALL" && region !== "Tüm Bölgeler" ? region : "ALL";
+
+    const fileName = `rollout_${safeRegion}_${new Date()
+      .toISOString()
+      .slice(0, 10)}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    // 🔥 Tüm Excel alanını tablo gibi çiz
+    for (let i = 1; i <= worksheet.rowCount; i++) {
+      const row = worksheet.getRow(i);
+
+      for (let j = 1; j <= worksheet.columnCount; j++) {
+        const cell = row.getCell(j);
+
+        if (cell.value === null || cell.value === undefined) {
+          cell.value = "";
+        }
+
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFD9D9D9" } },
+          left: { style: "thin", color: { argb: "FFD9D9D9" } },
+          bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
+          right: { style: "thin", color: { argb: "FFD9D9D9" } },
+        };
+      }
+    }
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error("EXPORT ERROR:", err);
+    res.status(500).send("Export hatası: " + err.message);
+  }
+});
+
+app.get("/rollout/list", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM rollout_progress
+      ORDER BY site_type ASC, site_code ASC
+    `);
+    const rows = (result.rows || []).map((r) => {
+      const qcClosedDate = r.qc_closed_date || null;
+
+      const installEnd =
+        r.installation_actual_end_date || r.onair_date || qcClosedDate || null;
+
+      const installStart =
+        r.installation_actual_start_date || installEnd || qcClosedDate || null;
+
+      const onairDate =
+        r.onair_date || r.installation_actual_end_date || qcClosedDate || null;
+
+      const malzemeStatus =
+        onairDate || installEnd || installStart || qcClosedDate ? "OK" : null;
+      const normalizedSiteType =
+        getSiteTypeFromSiteCode(r.site_code) || r.site_type;
+      const passiveValue =
+        normalizedSiteType === "5G" || normalizedSiteType === "LTE"
+          ? "N/A"
+          : null;
+
+      return {
+        ...r,
+        site_type: normalizedSiteType,
+        bolge: getRegionFromSiteCode(r.site_code) || r.bolge,
+
+        installation_actual_start_date: installStart,
+        installation_actual_end_date: installEnd,
+        onair_date: onairDate,
+        qc_closed_date: qcClosedDate,
+        malzeme_status: malzemeStatus,
+        los_subcon: passiveValue || r.los_subcon,
+        los_plan_date: passiveValue || r.los_plan_date,
+        los_actual_end_date: passiveValue || r.los_actual_end_date,
+
+        trs_subcon: passiveValue || r.trs_subcon,
+        trs_plan_start_date: passiveValue || r.trs_plan_start_date,
+        trs_actual_end_date: passiveValue || r.trs_actual_end_date,
+        trs_not: passiveValue || r.trs_not,
+
+        enh_site_type: passiveValue || r.enh_site_type,
+        enh_subcon: passiveValue || r.enh_subcon,
+        enh_plan_start_date: passiveValue || r.enh_plan_start_date,
+        enh_actual_end_date: passiveValue || r.enh_actual_end_date,
+        enh_not: passiveValue || r.enh_not,
+
+        power_subcon: passiveValue || r.power_subcon,
+        power_plan_start_date: passiveValue || r.power_plan_start_date,
+        power_actual_end_date: passiveValue || r.power_actual_end_date,
+
+        plan_week: r.plan_start_date ? getWeekNumber(r.plan_start_date) : null,
+        install_week: installStart ? getWeekNumber(installStart) : null,
+        onair_week: onairDate ? getWeekNumber(onairDate) : null,
+      };
+    });
+
+    res.json({
+      ok: true,
+      rows,
+    });
+  } catch (err) {
+    console.error("ROLLOUT LIST ERROR:", err);
+    res.status(500).json({
+      ok: false,
+      error: err.message || "Rollout listesi alınamadı",
+    });
+  }
+});
+
+app.get("/rollout/summary", async (req, res) => {
+  try {
+    const region = req.query.region || "ALL";
+
+    const whereRegion =
+      region === "ALL" ? "" : "WHERE LOWER(COALESCE(bolge, '')) = LOWER($1)";
+
+    const params = region === "ALL" ? [] : [region];
+
+    const result = await pool.query(
+      `
+      SELECT
+        COALESCE(site_type, 'UNKNOWN') AS site_type,
+        COUNT(*)::int AS target,
+
+        COUNT(*) FILTER (WHERE malzeme_status IS NOT NULL AND malzeme_status <> '')::int AS rf_equipment_received,
+        COUNT(*) FILTER (WHERE installation_actual_start_date IS NOT NULL)::int AS rf_installation_started,
+        COUNT(*) FILTER (WHERE installation_actual_end_date IS NOT NULL)::int AS rf_installation_finished,
+        COUNT(*) FILTER (WHERE installation_actual_end_date IS NOT NULL)::int AS qc_closed,
+        COUNT(*) FILTER (WHERE pac_end_date IS NOT NULL OR abonelik_end_date IS NOT NULL)::int AS acceptance,
+
+        COUNT(*) FILTER (WHERE tssr_plan_start_date IS NOT NULL)::int AS tssr_plan_start,
+        COUNT(*) FILTER (WHERE tssr_actual_end_date IS NOT NULL)::int AS tssr_actual_end,
+        COUNT(*) FILTER (WHERE btk_plan_start_date IS NOT NULL)::int AS btk_plan_start,
+        COUNT(*) FILTER (WHERE btk_actual_end_date IS NOT NULL)::int AS btk_actual_end,
+        COUNT(*) FILTER (WHERE btk_approved IS NOT NULL)::int AS btk_approved,
+        COUNT(*) FILTER (WHERE btk_certificate_date IS NOT NULL)::int AS btk_certificate_date,
+
+        COUNT(*) FILTER (WHERE power_plan_start_date IS NOT NULL)::int AS power_plan_start,
+        COUNT(*) FILTER (WHERE power_actual_end_date IS NOT NULL)::int AS power_actual_end,
+        COUNT(*) FILTER (WHERE enh_plan_start_date IS NOT NULL)::int AS enh_plan_start,
+        COUNT(*) FILTER (WHERE enh_actual_end_date IS NOT NULL)::int AS enh_actual_end,
+        COUNT(*) FILTER (WHERE abonelik_end_date IS NOT NULL)::int AS abonelik_end
+
+      FROM rollout_progress
+      ${whereRegion}
+      GROUP BY COALESCE(site_type, 'UNKNOWN')
+      ORDER BY site_type
+      `,
+      params,
+    );
+
+    res.json({ ok: true, rows: result.rows || [] });
+  } catch (err) {
+    console.error("ROLLOUT SUMMARY ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// silinecek test //
+app.get("/test", (req, res) => {
+  res.send("OK");
 });
 
 app.post("/update-row-note", async (req, res) => {
@@ -5123,6 +6508,35 @@ app.get("/export/status-excel", async (req, res) => {
       { header: "OnAir Date", key: "onair_date", width: 14 },
     ];
     worksheet.spliceRows(1, 0, []);
+
+    // 🔥 ÜST BAŞLIK
+    const title = `DETAY RAPORU - ${region || "Tüm Bölgeler"} (${new Date().toLocaleDateString("tr-TR")})`;
+
+    worksheet.mergeCells("A1:H1");
+
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = title;
+
+    titleCell.font = {
+      size: 14,
+      bold: true,
+      color: { argb: "FFFFFFFF" },
+    };
+
+    titleCell.alignment = {
+      vertical: "middle",
+      horizontal: "center",
+    };
+
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1F4E78" },
+    };
+
+    worksheet.getRow(1).height = 25;
+
+    worksheet.spliceRows(1, 0, []);
     worksheet.mergeCells("A1:H1");
 
     rows.forEach((row) => {
@@ -5137,22 +6551,6 @@ app.get("/export/status-excel", async (req, res) => {
         onair_date: row.onair_date || "",
       });
     });
-
-    const titleCell = worksheet.getCell("A1");
-
-    titleCell.value = `STATUS EXPORT RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
-
-    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
-
-    titleCell.alignment = { horizontal: "center", vertical: "middle" };
-
-    titleCell.fill = {
-      type: "pattern",
-
-      pattern: "solid",
-
-      fgColor: { argb: "FF1F4E78" },
-    };
 
     worksheet.getRow(1).height = 24;
 
@@ -5264,6 +6662,7 @@ app.get("/export/region-analysis", async (req, res) => {
     // Başlık
     worksheet.mergeCells("A1:O1");
     const titleCell = worksheet.getCell("A1");
+
     titleCell.value = `REGION ANALYSIS RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
     titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
@@ -5453,8 +6852,8 @@ app.get("/export/detail-excel", async (req, res) => {
 
     worksheet.spliceRows(1, 0, []);
     worksheet.mergeCells("A1:L1");
-
     const titleCell = worksheet.getCell("A1");
+
     titleCell.value = `DETAY RAPORU - ${region || "Tümü"} (${new Date().toLocaleDateString("tr-TR")})`;
     titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };

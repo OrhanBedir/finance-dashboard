@@ -3,6 +3,7 @@ import "./App.css";
 import * as XLSX from "xlsx";
 import "react-datepicker/dist/react-datepicker.css";
 import DatePicker from "react-datepicker";
+import towerIcon from "./assets/tower.svg";
 
 function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   return (
@@ -767,250 +768,418 @@ function formatDateTR(date) {
   return d.toLocaleDateString("tr-TR");
 }
 
-function ExecutiveDashboard() {
-  const [summary, setSummary] = useState(null);
+function RolloutDashboard() {
+  const exportExcel = () => {
+    const regionParam =
+      selectedRegion && selectedRegion !== "Tüm Bölgeler"
+        ? selectedRegion
+        : "ALL";
+
+    const url = `http://localhost:5001/export/excel?region=${regionParam}`;
+
+    window.open(url, "_blank");
+  };
+  const formatDate = (dateStr) => {
+    if (!dateStr) return "";
+
+    // 🔥 EKLE BURAYI
+    if (dateStr === "N/A") return "N/A";
+
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return "";
+
+    return d.toLocaleDateString("tr-TR");
+  };
+  const renderDate = (value) => (
+    <span style={{ color: value === "N/A" ? "#999" : "inherit" }}>
+      {formatDate(value)}
+    </span>
+  );
+
   const [rows, setRows] = useState([]);
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [summaryRows, setSummaryRows] = useState([]);
+  const [search, setSearch] = useState("");
+  const [regionFilter, setRegionFilter] = useState("ALL");
+  const [typeFilter, setTypeFilter] = useState("ALL");
+  const [qcFilter, setQcFilter] = useState("ALL");
   const [errorMessage, setErrorMessage] = useState("");
+  const [showRolloutEntryModal, setShowRolloutEntryModal] = useState(false);
+  const [selectedRolloutSite, setSelectedRolloutSite] = useState("");
 
-  const handleExportStatus = async (status) => {
-    try {
-      const response = await fetch(
-        `${API_BASE}/export/status-excel?status=${encodeURIComponent(status)}`,
-      );
+  const handleExportExcel = () => {
+    const region = regionFilter || "ALL";
 
-      if (!response.ok) {
-        throw new Error("Excel indirilemedi");
-      }
+    const url = `${API_BASE}/export/excel?region=${encodeURIComponent(region)}`;
 
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `dashboard_${status}_${new Date()
-        .toISOString()
-        .slice(0, 10)}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("EXPORT ERROR:", err);
-      alert("Excel indirilemedi");
-    }
+    window.open(url, "_blank");
   };
 
-  const loadDashboard = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setErrorMessage("");
 
-      const [summaryData, resultData] = await Promise.all([
-        fetchJson(`${API_BASE}/dashboard/summary`, { withAuth: true }),
-        fetchJson(`${API_BASE}/dashboard/result`, { withAuth: true }),
-      ]);
+      const data = await fetchJson(`${API_BASE}/rollout/list`, {
+        withAuth: true,
+      });
 
-      setSummary(summaryData || null);
-      setRows(resultData.rows || []);
+      setRows(data.rows || []);
+      const summaryData = await fetchJson(
+        `${API_BASE}/rollout/summary?region=${encodeURIComponent(regionFilter)}`,
+        { withAuth: true },
+      );
+      setSummaryRows(summaryData.rows || []);
     } catch (err) {
-      console.error("DASHBOARD LOAD ERROR:", err);
-      setSummary(null);
+      console.error("ROLLOUT LOAD ERROR:", err);
       setRows([]);
-      setErrorMessage(err.message || "Veri alınamadı");
+      setErrorMessage(err.message || "Rollout data alınamadı");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [regionFilter]);
 
   useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
+    loadData();
+  }, [regionFilter]);
 
   const filteredRows = useMemo(() => {
-    const lowerSearch = search.toLowerCase().trim();
+    const q = search.toLowerCase().trim();
 
     return rows.filter((row) => {
-      const statusOk =
-        statusFilter === "ALL" ? true : String(row.status) === statusFilter;
+      const rowRegion = row.bolge || row.region || "";
 
-      const text =
-        `${row.project_code || ""} ${row.site_code || ""} ${row.item_code || ""} ${
-          row.item_description || ""
-        } ${row.subcon_name || ""}`.toLowerCase();
+      const regionOk =
+        regionFilter === "ALL" ||
+        rowRegion.toLowerCase().trim() === regionFilter.toLowerCase().trim();
 
-      const searchOk = lowerSearch ? text.includes(lowerSearch) : true;
-      return statusOk && searchOk;
+      const typeOk =
+        typeFilter === "ALL"
+          ? true
+          : String(row.site_type || "").toUpperCase() === typeFilter;
+
+      const qcOk =
+        qcFilter === "ALL"
+          ? true
+          : String(row.qc_durum || "").toUpperCase() === qcFilter;
+
+      const text = `
+        ${row.site_type || ""}
+        ${row.project_code || ""}
+        ${row.project_name || ""}
+        ${row.site_code || ""}
+        ${row.city || ""}
+        ${row.bolge || ""}
+        ${row.region || ""}
+        ${row.malzeme_status || ""}
+        ${row.hw_status || ""}
+        ${row.qc_durum || ""}
+        ${row.qc_aciklama || ""}
+      `.toLowerCase();
+
+      const searchOk = q ? text.includes(q) : true;
+
+      return regionOk && typeOk && qcOk && searchOk;
     });
-  }, [rows, statusFilter, search]);
+  }, [rows, search, regionFilter, typeFilter, qcFilter]);
+
+  const summary = useMemo(() => {
+    const total = filteredRows.length;
+    const completed = filteredRows.filter(
+      (r) =>
+        String(r.hw_status || "")
+          .toUpperCase()
+          .includes("DONE") ||
+        String(r.hw_status || "")
+          .toUpperCase()
+          .includes("OK") ||
+        String(r.onair_date || "").trim(),
+    ).length;
+
+    const materialReady = filteredRows.filter((r) =>
+      String(r.malzeme_status || "")
+        .toLowerCase()
+        .includes("bekler")
+        ? false
+        : String(r.malzeme_status || "").trim(),
+    ).length;
+
+    const qcOk = filteredRows.filter(
+      (r) => String(r.qc_durum || "").toUpperCase() === "OK",
+    ).length;
+
+    const standalone = filteredRows.filter(
+      (r) => String(r.site_type || "").toUpperCase() === "STANDALONE",
+    ).length;
+
+    return { total, completed, materialReady, qcOk, standalone };
+  }, [filteredRows]);
 
   if (loading) return <div className="loading">Yükleniyor...</div>;
 
-  if (!summary) {
-    return (
-      <div className="loading">
-        {errorMessage ? `Veri alınamadı: ${errorMessage}` : "Veri alınamadı."}
-      </div>
-    );
-  }
-
   return (
     <>
-      <h1>📊 PO Dashboard</h1>
+      <h1 className="rolloutTitle">
+        <img src={towerIcon} alt="Baz istasyonu" />
+        <span>Rollout Data</span>
+      </h1>
 
-      {summary && (
-        <div
-          style={{
-            padding: "20px",
-            background: "#111",
-            color: "#fff",
-            borderRadius: "8px",
-          }}
-        >
-          <h2>📊 Finance Summary</h2>
-
-          <p>Total Collections: {summary.total_collections || 0}</p>
-          <p>This Month: {summary.this_month_collections || 0}</p>
-          <p>Expense Count: {summary.expense_count || 0}</p>
+      {errorMessage && (
+        <div className="entryMessage" style={{ color: "#b91c1c" }}>
+          {errorMessage}
         </div>
       )}
 
-      <div className="cards">
-        <div
-          className="card ok"
-          onClick={() => handleExportStatus("OK")}
-          style={{ cursor: "pointer" }}
-          title="OK kayıtlarını Excel indir"
-        >
-          OK: {summary.ok_count || 0}
-        </div>
+      <RolloutSummaryTables
+        summaryRows={summaryRows}
+        rows={rows}
+        regionFilter={regionFilter}
+      />
 
-        <div
-          className="card bekler"
-          onClick={() => handleExportStatus("PO_BEKLER")}
-          style={{ cursor: "pointer" }}
-          title="PO Bekler kayıtlarını Excel indir"
-        >
-          PO Bekler: {summary.po_bekler_count || 0}
-        </div>
-
-        <div
-          className="card cancel"
-          onClick={() => handleExportStatus("CANCEL")}
-          style={{ cursor: "pointer" }}
-          title="Cancel kayıtlarını Excel indir"
-        >
-          Cancel: {summary.cancel_count || 0}
-        </div>
-
-        <div
-          className="card partial"
-          onClick={() => handleExportStatus("PARTIAL")}
-          style={{ cursor: "pointer" }}
-          title="Partial kayıtlarını Excel indir"
-        >
-          Partial: {summary.partial_count || 0}
-        </div>
-      </div>
-
-      <div className="financeTopGrid"></div>
-
-      <div className="toolbar">
+      <div
+        style={{
+          display: "flex",
+          gap: "12px",
+          flexWrap: "wrap",
+          margin: "20px 0",
+          alignItems: "center",
+        }}
+      >
         <input
           className="search"
-          placeholder="Proje, site, item, açıklama, taşeron ara"
+          placeholder="Site, proje, il, durum ara..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: "1 1 320px" }}
         />
-
-        <button
-          type="button"
-          className="tab"
-          onClick={() => handleExportStatus("ALL")}
-        >
-          Tümünü Excel İndir
-        </button>
 
         <select
           className="select"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          value={regionFilter}
+          onChange={(e) => setRegionFilter(e.target.value)}
         >
-          <option value="ALL">Tümü</option>
-          <option value="OK">OK</option>
-          <option value="PO_BEKLER">PO Bekler</option>
-          <option value="CANCEL">Cancel</option>
-          <option value="PARTIAL">Partial</option>
+          <option value="ALL">Tüm Bölgeler</option>
+          <option value="İzmir">İzmir</option>
+          <option value="Antalya">Antalya</option>
+          <option value="Ankara">Ankara</option>
         </select>
+
+        <select
+          className="select"
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+        >
+          <option value="ALL">Tüm Site Tipleri</option>
+          <option value="STANDALONE">Standalone</option>
+          <option value="LTE">LTE</option>
+          <option value="5G">5G</option>
+          <option value="DSS">DSS</option>
+        </select>
+
+        <div className="qcActionBox">
+          <button
+            className="saveButton"
+            onClick={() => {
+              const site = search.trim();
+
+              if (!site) {
+                alert("Lütfen önce Site Code giriniz");
+                return;
+              }
+
+              setSelectedRolloutSite(site);
+              setShowRolloutEntryModal(true);
+            }}
+          >
+            Veri Gir
+          </button>
+          <button
+            onClick={handleExportExcel}
+            style={{
+              background: "#2e7d32",
+              color: "#fff",
+              border: "none",
+              padding: "10px 16px",
+              borderRadius: "8px",
+              marginLeft: "10px",
+              cursor: "pointer",
+              fontWeight: "700",
+            }}
+          >
+            Excel İndir
+          </button>
+        </div>
       </div>
 
       <div className="tableWrap">
         <table>
           <thead>
             <tr>
-              <th>Status</th>
+              <th colSpan="7">GENEL</th>
+
+              <th colSpan="7">RF</th>
+
+              <th colSpan="3">LOS</th>
+
+              <th colSpan="3">TSS</th>
+
+              <th colSpan="3">TSSR</th>
+
+              <th colSpan="7">BTK</th>
+
+              <th colSpan="3">EMR</th>
+
+              <th colSpan="4">TRS</th>
+
+              <th colSpan="5">ENH</th>
+
+              <th colSpan="4">POWER</th>
+
+              <th colSpan="4">KABUL</th>
+            </tr>
+            <tr>
+              <th>Bölge</th>
+              <th>Site Type</th>
+              <th>Site Fiziksel Tip</th>
               <th>Project Code</th>
               <th>Site Code</th>
-              <th>Item Code</th>
-              <th>Item Description</th>
-              <th>Done Qty</th>
-              <th>Requested Qty</th>
-              <th>Billed Qty</th>
-              <th>Due Qty</th>
-              <th>Currency</th>
-              <th>Unit Price</th>
-              <th>Total Done Amount</th>
-              <th>Subcon</th>
+              <th>Malzeme Status</th>
+              <th>İl</th>
+
+              <th>RF Subcon</th>
+              <th>Plan Start Date</th>
+              <th>Installation Start Date</th>
+              <th>Installation End Date</th>
+              <th>OnAir Date</th>
+              <th>QC Closed Date</th>
+              <th className="rfNoteCell">RF Not</th>
+
+              <th>LOS Subcon</th>
+              <th>LOS Plan Start Date</th>
+              <th>LOS Actual End Date</th>
+
+              <th>TSS Subcon</th>
+              <th>TSS Plan Start Date</th>
+              <th>TSS Actual End Date</th>
+
+              <th>TSSR Subcon</th>
+              <th>TSSR Planned Start Date</th>
+              <th>TSSR Actual End Date</th>
+
+              <th>BTK Subcon</th>
+              <th>BTK Planned Start Date</th>
+              <th>BTK Actual End Date</th>
+              <th>BTK Approval Status</th>
+              <th>GS Status</th>
+              <th>Atlas Status</th>
+
+              <th>Survey Note</th>
+
+              <th>EMR Plan Start Date</th>
+              <th>EMR Actual End Date</th>
+
+              <th>TRS Subcon</th>
+              <th>TRS Plan Start Date</th>
+              <th>TRS Actual End Date</th>
+              <th>TRS Not</th>
+
+              <th>ENH Site Type</th>
+              <th>ENH Subcon</th>
+              <th>ENH Planned Start Date</th>
+              <th>ENH Actual End Date</th>
+              <th>ENH Not</th>
+
+              <th>Power Subcon</th>
+              <th>Power Project Planned Start Date</th>
+              <th>Power Project Actual End Date</th>
+
+              <th>Abonelik</th>
+              <th>Horizon</th>
+              <th>PAC</th>
             </tr>
           </thead>
+
           <tbody>
             {filteredRows.length === 0 ? (
-              <EmptyRow colSpan={13} />
+              <EmptyRow colSpan={44} text="Rollout kaydı bulunamadı" />
             ) : (
               filteredRows.map((row, index) => (
-                <tr
-                  key={
-                    row.id ??
-                    `${row.project_code}-${row.site_code}-${row.item_code}-${index}`
-                  }
-                >
-                  <td>
-                    <StatusBadge status={row.status} />
-                  </td>
-                  <td>{row.project_code || "-"}</td>
-                  <td>{row.site_code || "-"}</td>
-                  <td>{row.item_code || "-"}</td>
-                  <td title={row.item_description}>
-                    <div className="desc-cell">{row.item_description}</div>
-                  </td>
-                  <td>{row.done_qty ?? "-"}</td>
-                  <td>{row.requested_qty ?? "-"}</td>
-                  <td>{row.billed_qty ?? "-"}</td>
-                  <td>{row.due_qty ?? "-"}</td>
-                  <td>{row.currency || "-"}</td>
-                  <td>
-                    {Number(row.unit_price || 0) === 0
-                      ? "-"
-                      : formatMoneyByCurrency(row.unit_price, row.currency)}
-                  </td>
-                  <td>
-                    {Number(row.total_done_amount || 0) === 0
-                      ? "-"
-                      : formatMoneyByCurrency(
-                          row.total_done_amount,
-                          row.currency,
-                        )}
-                  </td>
-                  <td>{row.subcon_name || "-"}</td>
+                <tr key={row.id}>
+                  <td>{row.bolge}</td>
+                  <td>{row.site_type}</td>
+                  <td>{row.site_physical_type}</td>
+                  <td>{row.project_code}</td>
+                  <td>{row.site_code}</td>
+                  <td>{row.malzeme_status}</td>
+                  <td>{row.il}</td>
+
+                  <td>{row.rf_subcon}</td>
+                  <td>{formatDate(row.inst_plan_start_date)}</td>
+                  <td>{formatDate(row.installation_actual_start_date)}</td>
+                  <td>{formatDate(row.installation_actual_end_date)}</td>
+                  <td>{formatDate(row.onair_date)}</td>
+                  <td>{formatDate(row.qc_closed_date)}</td>
+                  <td className="rfNoteCell">{row.rf_not}</td>
+
+                  <td>{row.los_subcon}</td>
+                  <td>{renderDate(row.los_plan_date)}</td>
+                  <td>{renderDate(row.los_actual_end_date)}</td>
+
+                  <td>{row.tss_subcon}</td>
+                  <td>{formatDate(row.tss_plan_start_date)}</td>
+                  <td>{formatDate(row.tss_actual_end_date)}</td>
+
+                  <td>{row.tssr_subcon}</td>
+                  <td>{formatDate(row.tssr_plan_start_date)}</td>
+                  <td>{formatDate(row.tssr_actual_end_date)}</td>
+
+                  <td>{row.btk_subcon}</td>
+                  <td>{formatDate(row.btk_plan_start_date)}</td>
+                  <td>{formatDate(row.btk_actual_end_date)}</td>
+                  <td>{formatDate(row.btk_approved)}</td>
+                  <td>{row.gs_status}</td>
+                  <td>{row.atlas_status}</td>
+
+                  <td>{row.survey_note}</td>
+
+                  <td>{formatDate(row.emr_plan_start_date)}</td>
+                  <td>{formatDate(row.emr_actual_end_date)}</td>
+
+                  <td>{row.trs_subcon}</td>
+                  <td>{renderDate(row.trs_plan_start_date)}</td>
+                  <td>{renderDate(row.trs_actual_end_date)}</td>
+                  <td>{row.trs_not}</td>
+
+                  <td>{row.enh_site_type}</td>
+                  <td>{row.enh_subcon}</td>
+                  <td>{renderDate(row.enh_plan_start_date)}</td>
+                  <td>{renderDate(row.enh_actual_end_date)}</td>
+                  <td>{row.enh_not}</td>
+
+                  <td>{row.power_subcon}</td>
+                  <td>{renderDate(row.power_plan_start_date)}</td>
+                  <td>{renderDate(row.power_actual_end_date)}</td>
+
+                  <td>{renderDate(row.abonelik_actual_end_date)}</td>
+                  <td>{renderDate(row.tt_horizon_actual_end_date)}</td>
+                  <td>{renderDate(row.pac_actual_end_date)}</td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
+      {showRolloutEntryModal && (
+        <RolloutEntryModal
+          siteCode={selectedRolloutSite}
+          rows={rows}
+          onClose={() => setShowRolloutEntryModal(false)}
+          onSaved={() => {
+            setShowRolloutEntryModal(false);
+            loadData();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1694,6 +1863,55 @@ function DailyEntry() {
     setItemCodeSearch(item.item_code || "");
     setItemDescriptionSearch(item.item_description || "");
     setShowItemDescriptionList(false);
+  };
+
+  const handleAddSiteAndOpenModal = async () => {
+    const siteCode = String(siteSearchCode || "")
+      .trim()
+      .toUpperCase();
+
+    if (!siteCode) {
+      alert("Site Code giriniz");
+      return;
+    }
+
+    try {
+      const checkRes = await fetch(
+        `http://localhost:5001/rollout/by-site?site_code=${encodeURIComponent(siteCode)}`,
+      );
+
+      const checkData = await checkRes.json();
+
+      if (!checkData?.row) {
+        const confirmAdd = window.confirm(
+          "Bu saha Rollout Data içinde bulunamadı. Rollout Data'ya ekleyelim mi?",
+        );
+
+        if (!confirmAdd) return;
+
+        const addRes = await fetch("http://localhost:5001/rollout/add-site", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            site_code: siteCode,
+          }),
+        });
+
+        const addData = await addRes.json();
+
+        if (!addRes.ok) {
+          alert(addData?.error || "Rollout site eklenemedi");
+          return;
+        }
+      }
+
+      handleOpenEntryModal();
+    } catch (err) {
+      console.error(err);
+      alert("İşlem sırasında hata oluştu");
+    }
   };
 
   return (
@@ -6405,9 +6623,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const filteredRowTotal = filteredRows.reduce((sum, row) => {
     const currency = normalizeCurrency(row.currency);
-    const total = Number(row.total_done_amount || 0);
+    const unitPrice = Number(row.unit_price || 0);
+    const doneQty = Number(row.done_qty || 0);
+    const billedQty = Number(row.billed_qty || 0);
 
-    return sum + (currency === "USD" ? total * usdRate : total);
+    const rawTotal = doneQty * unitPrice;
+
+    return sum + (currency === "USD" ? rawTotal * usdRate : rawTotal);
   }, 0);
 
   // ✅ FAC OK 20%
@@ -6724,10 +6946,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       if (!base[region]) return;
 
       const currency = normalizeCurrency(row.currency);
-      const amount = Number(row.total_done_amount || 0);
+      const unitPrice = Number(row.unit_price || 0);
+      const doneQty = Number(row.done_qty || 0);
+      const amount = doneQty * unitPrice;
 
       const billedQty = Number(row.billed_qty || 0);
-      const unitPrice = Number(row.unit_price || 0);
+
       const billedAmount = billedQty * unitPrice;
 
       base[region].total_records += 1;
@@ -6793,22 +7017,38 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   }, [rows]);
 
   const executiveSummary = useMemo(() => {
-    const completed =
-      Number(topSummary.completedTRY || 0) +
-      Number(topSummary.completedUSD || 0) * usdRate;
+    const completed = regionSummary.reduce((sum, r) => {
+      return (
+        sum + Number(r.total_try || 0) + Number(r.total_usd || 0) * usdRate
+      );
+    }, 0);
 
-    const invoiced =
-      Number(topSummary.invoicedTRY || 0) +
-      Number(topSummary.invoicedUSD || 0) * usdRate;
+    const invoiced = regionSummary.reduce((sum, r) => {
+      return (
+        sum + Number(r.billed_try || 0) + Number(r.billed_usd || 0) * usdRate
+      );
+    }, 0);
 
-    const totalPO = regionSummary.reduce((sum, r) => {
-      const poTRY =
+    const poOpened = regionSummary.reduce((sum, r) => {
+      return sum + Number(r.ok_try || 0) + Number(r.ok_usd || 0) * usdRate;
+    }, 0);
+
+    const noPO = regionSummary.reduce((sum, r) => {
+      return (
+        sum +
         Number(r.po_bekler_try || 0) +
-        Number(r.po_bekler_usd || 0) * usdRate +
-        Number(r.ok_try || 0) +
-        Number(r.ok_usd || 0) * usdRate;
+        Number(r.po_bekler_usd || 0) * usdRate
+      );
+    }, 0);
 
-      return sum + poTRY;
+    const notInvoiced = regionSummary.reduce((sum, r) => {
+      const regionCompleted =
+        Number(r.total_try || 0) + Number(r.total_usd || 0) * usdRate;
+
+      const regionBilled =
+        Number(r.billed_try || 0) + Number(r.billed_usd || 0) * usdRate;
+
+      return sum + Math.max(regionCompleted - regionBilled, 0);
     }, 0);
 
     const ratio = completed > 0 ? (invoiced / completed) * 100 : 0;
@@ -6817,11 +7057,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       completed,
       invoiced,
       ratio,
-      notInvoiced: Math.max(completed - invoiced, 0),
-      poOpenedNotInvoiced: Math.max(totalPO - invoiced, 0),
-      noPO: Math.max(completed - totalPO, 0),
+      notInvoiced,
+      poOpenedNotInvoiced: Math.max(poOpened - invoiced, 0),
+      noPO,
     };
-  }, [topSummary, regionSummary, usdRate]);
+  }, [regionSummary, usdRate]);
 
   const exportDetailRowsToExcel = async () => {
     try {
@@ -6926,9 +7166,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const regionFilteredRowTotal = sortedRows.reduce((sum, row) => {
     const currency = normalizeCurrency(row.currency);
-    const total = Number(row.total_done_amount || 0);
+    const unitPrice = Number(row.unit_price || 0);
+    const doneQty = Number(row.done_qty || 0);
 
-    return sum + (currency === "USD" ? total * usdRate : total);
+    const rawTotal = doneQty * unitPrice;
+
+    return sum + (currency === "USD" ? rawTotal * usdRate : rawTotal);
   }, 0);
   const subconHakedisTotal =
     regionFilteredRowTotal * Number(userPaymentRate || 0.8);
@@ -7910,12 +8153,18 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                               )}
                         </td>
                         <td>
-                          {Number(row.total_done_amount || 0) === 0
-                            ? "-"
-                            : formatMoneyByCurrency(
-                                row.total_done_amount,
-                                row.currency,
-                              )}
+                          {(() => {
+                            const unitPrice = Number(row.unit_price || 0);
+                            const doneQty = Number(row.done_qty || 0);
+
+                            const rawTotal =
+                              Number(row.total_done_amount || 0) ||
+                              doneQty * unitPrice;
+
+                            return rawTotal === 0
+                              ? "-"
+                              : formatMoneyByCurrency(rawTotal, row.currency);
+                          })()}
                         </td>
                         <td
                           style={{
@@ -8763,7 +9012,7 @@ function App() {
               className={page === "executive" ? "tab activeTab" : "tab"}
               onClick={() => setPage("executive")}
             >
-              Executive Dashboard
+              Rollout Data
             </button>
 
             <button
@@ -8867,7 +9116,7 @@ function App() {
           </div>
         ))}
 
-      {page === "executive" && <ExecutiveDashboard />}
+      {page === "executive" && <RolloutDashboard />}
       {page === "region" && (
         <RegionAnalysis
           isSubconUser={!isAdmin && !!user?.subcon_name}
@@ -9074,6 +9323,616 @@ function QCUploadInline({ onClose, onUploaded }) {
         <button onClick={onClose} className="tab">
           Kapat
         </button>
+      </div>
+    </div>
+  );
+}
+function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
+  if (!summaryRows || summaryRows.length === 0) return null;
+
+  const regionTitle = regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter;
+
+  const getWeekNumber = (dateValue) => {
+    if (!dateValue) return null;
+    const d = new Date(dateValue);
+    if (Number.isNaN(d.getTime())) return null;
+
+    const oneJan = new Date(d.getFullYear(), 0, 1);
+    return Math.ceil(((d - oneJan) / 86400000 + oneJan.getDay() + 1) / 7);
+  };
+
+  const getRow = (type) =>
+    summaryRows.find(
+      (r) => String(r.site_type || "").toUpperCase() === type.toUpperCase(),
+    ) || {};
+  const calcActualFromRows = (type, dateField) => {
+    return getRowsByType(type).filter((r) => {
+      if (!dateField) return true;
+      return String(r[dateField] || "").trim() !== "";
+    }).length;
+  };
+
+  const getActualValue = (type, item, data) => {
+    const backendValue = Number(data[item.key] || 0);
+
+    if (item.key === "rf_equipment_received") {
+      return getRowsByType(type).filter((r) => {
+        const status = String(r.malzeme_status || "")
+          .toUpperCase()
+          .trim();
+        return status === "OK";
+      }).length;
+    }
+    if (
+      ["5G", "DSS", "LTE", "STANDALONE"].includes(type) &&
+      item.key === "target"
+    ) {
+      const uniqueSites = new Set();
+
+      getRowsByType(type).forEach((r) => {
+        const siteCode = String(r.site_code || "")
+          .trim()
+          .toUpperCase();
+        const planStart = String(getEffectivePlanStartDate(r) || "").trim();
+
+        if (siteCode && planStart) {
+          uniqueSites.add(siteCode);
+        }
+      });
+
+      return uniqueSites.size;
+    }
+
+    const calculatedValue = item.dateField
+      ? calcActualFromRows(type, item.dateField)
+      : backendValue;
+
+    return calculatedValue;
+  };
+  const getEffectivePlanStartDate = (row) => {
+    return (
+      row.plan_start_date ||
+      row.inst_plan_start_date ||
+      row.rf_plan_start_date ||
+      row.onair_date ||
+      ""
+    );
+  };
+
+  const getRowsByType = (type) =>
+    rows.filter((r) => {
+      const rowType = String(r.site_type || "")
+        .toUpperCase()
+        .trim();
+      const siteCode = String(r.site_code || "")
+        .toUpperCase()
+        .trim();
+
+      const detectedRegion =
+        String(r.bolge || r.region || "").trim() ||
+        getRegion(r.site_code) ||
+        "";
+
+      const regionOk =
+        regionFilter === "ALL" ||
+        detectedRegion.toLowerCase().trim() ===
+          String(regionFilter).toLowerCase().trim();
+
+      if (!regionOk) return false;
+
+      if (type === "5G") {
+        return rowType === "5G" || siteCode.includes("_5GEXP_");
+      }
+
+      if (type === "DSS") {
+        return rowType === "DSS" || siteCode.includes("_DSS_");
+      }
+      if (type === "LTE") {
+        return (
+          rowType === "LTE" ||
+          siteCode.includes("L800") ||
+          siteCode.includes("L1800") ||
+          siteCode.includes("L2600") ||
+          siteCode.includes("L2100") ||
+          siteCode.includes("NR700") ||
+          siteCode.includes("TRP")
+        );
+      }
+
+      if (type === "STANDALONE") {
+        return rowType === "STANDALONE";
+      }
+
+      return rowType === type;
+    });
+
+  const pct = (actual, target) =>
+    target > 0
+      ? `${Math.round((Number(actual || 0) / Number(target || 0)) * 100)}%`
+      : "0%";
+
+  const currentWeek = getWeekNumber(new Date());
+  const previousWeek = currentWeek - 1;
+
+  const weekCount = (type, item, weekNo) => {
+    const typeRows = getRowsByType(type);
+
+    if (!item.dateField) return Number(getRow(type)[item.key] || 0);
+
+    return typeRows.filter((r) => {
+      const value =
+        item.dateField === "plan_start_date"
+          ? getEffectivePlanStartDate(r)
+          : r[item.dateField];
+
+      const week = getWeekNumber(value);
+      return week && week <= weekNo;
+    }).length;
+  };
+
+  const makeTable = (title, type, statusTitle, items) => {
+    const data = getRow(type);
+
+    const target = getActualValue(type, { key: "target" }, data);
+
+    return (
+      <div className="excelSummaryBox" key={title}>
+        <table className="excelSummaryTable">
+          <colgroup>
+            <col className="excelColLabel" />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+          </colgroup>
+
+          <thead></thead>
+
+          <thead>
+            <tr>
+              <th colSpan="7" className="excelTitle">
+                {title}
+              </th>
+            </tr>
+
+            <tr className="excelHeader">
+              <th></th>
+              <th>Target</th>
+              <th>Actual</th>
+              <th>%</th>
+              <th>Week{previousWeek}</th>
+              <th>Week{currentWeek}</th>
+              <th>Δ</th>
+            </tr>
+
+            <tr className="excelTypeRow">
+              <th>{type}</th>
+              <th>{target}</th>
+              <th></th>
+              <th></th>
+              <th></th>
+              <th></th>
+              <th></th>
+            </tr>
+
+            <tr>
+              <th colSpan="7" className="excelStatusTitle">
+                {statusTitle || "RF STATUS"}
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {items.map((item) => {
+              const actual = getActualValue(type, item, data);
+              const week13 = weekCount(type, item, previousWeek);
+              const week14 = weekCount(type, item, currentWeek);
+              const delta = week14 - week13;
+
+              return (
+                <tr key={item.label}>
+                  <td className="excelLabel">{item.label}</td>
+                  <td>{target}</td>
+                  <td className="excelActual">{actual}</td>
+                  <td>{pct(actual, target)}</td>
+                  <td>{week13}</td>
+                  <td>{week14}</td>
+                  <td className="excelDelta">{delta}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  return (
+    <div className="excelSummarySection">
+      <h2 className="summaryMainTitle">📊 {regionTitle} Genel Durum</h2>
+
+      <div className="excelSummaryGrid">
+        {makeTable(`${regionTitle} 5G PLAN TOTAL`, "5G", "RF STATUS", [
+          {
+            label: "RF Equipment (BTS@DBS) Received",
+            key: "rf_equipment_received",
+          },
+          {
+            label: "RF Installation Started",
+            key: "rf_installation_started",
+            dateField: "installation_actual_start_date",
+          },
+          {
+            label: "RF Installation Finished",
+            key: "rf_installation_finished",
+            dateField: "installation_actual_end_date",
+          },
+          {
+            label: "QC(Closed)",
+            key: "qc_closed",
+            dateField: "qc_closed_date",
+          },
+          {
+            label: "Acceptance",
+            key: "acceptance",
+            dateField: "pac_actual_end_date",
+          },
+        ])}
+
+        {makeTable(
+          `${regionTitle} STANDALONE PLAN TOTAL`,
+          "STANDALONE",
+          "RF STATUS",
+          [
+            {
+              label: "RF Equipment (BTS@DBS) Received",
+              key: "rf_equipment_received",
+            },
+            {
+              label: "RF Installation Started",
+              key: "rf_installation_started",
+              dateField: "installation_actual_start_date",
+            },
+            {
+              label: "RF Installation Finished",
+              key: "rf_installation_finished",
+              dateField: "installation_actual_end_date",
+            },
+            {
+              label: "Acceptance",
+              key: "acceptance",
+              dateField: "pac_actual_end_date",
+            },
+            { label: "PO Status(Closed)", key: "po_closed" },
+          ],
+        )}
+
+        {makeTable(`${regionTitle} DSS PLAN TOTAL`, "DSS", "RF STATUS", [
+          {
+            label: "RF Equipment (BTS@DBS) Received",
+            key: "rf_equipment_received",
+          },
+          {
+            label: "RF Installation Started",
+            key: "rf_installation_started",
+            dateField: "installation_actual_start_date",
+          },
+          {
+            label: "RF Installation Finished",
+            key: "rf_installation_finished",
+            dateField: "installation_actual_end_date",
+          },
+          {
+            label: "QC(Closed)",
+            key: "qc_closed",
+            dateField: "qc_closed_date",
+          },
+          {
+            label: "Acceptance",
+            key: "acceptance",
+            dateField: "pac_actual_end_date",
+          },
+        ])}
+
+        {makeTable(`${regionTitle} LTE PLAN TOTAL`, "LTE", "RF STATUS", [
+          {
+            label: "RF Equipment (BTS@DBS) Received",
+            key: "rf_equipment_received",
+          },
+          {
+            label: "RF Installation Started",
+            key: "rf_installation_started",
+            dateField: "installation_actual_start_date",
+          },
+          {
+            label: "RF Installation Finished",
+            key: "rf_installation_finished",
+            dateField: "installation_actual_end_date",
+          },
+          {
+            label: "Acceptance",
+            key: "acceptance",
+            dateField: "pac_actual_end_date",
+          },
+          { label: "PO Status(Closed)", key: "po_closed" },
+        ])}
+
+        {makeTable(`${regionTitle} Survey&BTK PLAN TOTAL`, "DSS", "", [
+          {
+            label: "TSSR Plan Start Date",
+            key: "tssr_plan_start",
+            dateField: "tssr_plan_start_date",
+          },
+          {
+            label: "TSSR Actual End Date",
+            key: "tssr_actual_end",
+            dateField: "tssr_actual_end_date",
+          },
+          {
+            label: "BTK Plan Start Date",
+            key: "btk_plan_start",
+            dateField: "btk_plan_start_date",
+          },
+          {
+            label: "BTK Actual End Date",
+            key: "btk_actual_end",
+            dateField: "btk_actual_end_date",
+          },
+          { label: "BTK Approved by BTK", key: "btk_approved" },
+          { label: "BTK Certificate Date", key: "btk_certificate_date" },
+        ])}
+
+        {makeTable(`${regionTitle} POWER PLAN TOTAL`, "DSS", "", [
+          {
+            label: "POWER Project Plan Start Date",
+            key: "power_plan_start",
+            dateField: "power_plan_start_date",
+          },
+          {
+            label: "POWER Project Actual End Date",
+            key: "power_actual_end",
+            dateField: "power_actual_end_date",
+          },
+          {
+            label: "ENH Plan Start Date",
+            key: "enh_plan_start",
+            dateField: "enh_plan_start_date",
+          },
+          {
+            label: "ENH Actual End Date",
+            key: "enh_actual_end",
+            dateField: "enh_actual_end_date",
+          },
+          {
+            label: "Abonelik Belgesi Actual End Date",
+            key: "abonelik_end",
+            dateField: "abonelik_actual_end_date",
+          },
+        ])}
+      </div>
+    </div>
+  );
+}
+function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
+  const existingRow =
+    rows.find(
+      (r) =>
+        String(r.site_code || "").toUpperCase() ===
+        String(siteCode || "").toUpperCase(),
+    ) || {};
+
+  const [form, setForm] = useState({
+    site_code: siteCode || existingRow.site_code || "",
+    site_type: existingRow.site_type || "",
+    site_physical_type: existingRow.site_physical_type || "",
+    project_code: existingRow.project_code || "",
+    malzeme_status: existingRow.malzeme_status || "",
+    il: existingRow.il || "",
+
+    rf_subcon: existingRow.rf_subcon || "",
+    plan_start_date: existingRow.plan_start_date || "",
+    installation_actual_start_date:
+      existingRow.installation_actual_start_date || "",
+    installation_actual_end_date:
+      existingRow.installation_actual_end_date || "",
+    onair_date: existingRow.onair_date || "",
+    rf_not: existingRow.rf_not || "",
+    atlas_status: existingRow.atlas_status || "",
+
+    los_subcon: existingRow.los_subcon || "",
+    los_plan_date: existingRow.los_plan_date || "",
+    los_actual_end_date: existingRow.los_actual_end_date || "",
+
+    tss_subcon: existingRow.tss_subcon || "",
+    tss_plan_start_date: existingRow.tss_plan_start_date || "",
+    tss_actual_end_date: existingRow.tss_actual_end_date || "",
+
+    tssr_subcon: existingRow.tssr_subcon || "",
+    tssr_plan_start_date: existingRow.tssr_plan_start_date || "",
+    tssr_actual_end_date: existingRow.tssr_actual_end_date || "",
+
+    btk_subcon: existingRow.btk_subcon || "",
+    btk_plan_start_date: existingRow.btk_plan_start_date || "",
+    btk_actual_end_date: existingRow.btk_actual_end_date || "",
+    btk_approved: existingRow.btk_approved || "",
+    gs_status: existingRow.gs_status || "",
+    survey_note: existingRow.survey_note || "",
+
+    emr_plan_start_date: existingRow.emr_plan_start_date || "",
+    emr_actual_end_date: existingRow.emr_actual_end_date || "",
+
+    trs_subcon: existingRow.trs_subcon || "",
+    trs_plan_start_date: existingRow.trs_plan_start_date || "",
+    trs_actual_end_date: existingRow.trs_actual_end_date || "",
+    trs_not: existingRow.trs_not || "",
+
+    enh_subcon: existingRow.enh_subcon || "",
+    enh_site_type: existingRow.enh_site_type || "",
+    enh_plan_start_date: existingRow.enh_plan_start_date || "",
+    enh_actual_end_date: existingRow.enh_actual_end_date || "",
+    enh_not: existingRow.enh_not || "",
+
+    power_subcon: existingRow.power_subcon || "",
+    power_plan_start_date: existingRow.power_plan_start_date || "",
+    power_actual_end_date: existingRow.power_actual_end_date || "",
+
+    abonelik_actual_end_date: existingRow.abonelik_actual_end_date || "",
+    tt_horizon_actual_end_date: existingRow.tt_horizon_actual_end_date || "",
+    pac_actual_end_date: existingRow.pac_actual_end_date || "",
+  });
+
+  const handleChange = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const save = async () => {
+    try {
+      if (!form.site_code.trim()) {
+        alert("Site Code zorunlu");
+        return;
+      }
+
+      const result = await fetchJson(`${API_BASE}/rollout/update`, {
+        method: "POST",
+        withAuth: true,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(form),
+      });
+
+      console.log("ROLLOUT SAVE RESULT:", result);
+      alert("Kayıt başarıyla kaydedildi");
+
+      onSaved();
+    } catch (err) {
+      console.error("ROLLOUT SAVE ERROR:", err);
+      alert(err.message || "Kayıt sırasında hata oluştu");
+    }
+  };
+
+  const input = (label, field, type = "text") => (
+    <label className="modalField">
+      <span>{label}</span>
+      <input
+        type={type}
+        value={form[field] || ""}
+        onChange={(e) => handleChange(field, e.target.value)}
+      />
+    </label>
+  );
+
+  const select = (label, field, options) => (
+    <label className="modalField">
+      <span>{label}</span>
+      <select
+        value={form[field] || ""}
+        onChange={(e) => handleChange(field, e.target.value)}
+      >
+        <option value="">Seçiniz</option>
+        {options.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
+  return (
+    <div className="modalOverlay" onClick={onClose}>
+      <div className="rolloutModal" onClick={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <h2>Rollout Veri Girişi</h2>
+          <button onClick={onClose}>✕</button>
+        </div>
+
+        <div className="modalGrid">
+          {input("Site Code", "site_code")}
+          {select("Site Type", "site_type", ["5G", "DSS", "LTE", "STANDALONE"])}
+          {select("Site Fiziksel Tip", "site_physical_type", [
+            "Rooftop",
+            "Kule",
+            "Gizleme",
+            "VF Katılım",
+            "TT Katılım",
+          ])}
+          {input("Project Code", "project_code")}
+          {input("Malzeme Status", "malzeme_status")}
+          {input("İl", "il")}
+
+          {input("RF Subcon", "rf_subcon")}
+          {input("Plan Start Date", "plan_start_date", "date")}
+          {input(
+            "Installation Start Date",
+            "installation_actual_start_date",
+            "date",
+          )}
+          {input(
+            "Installation End Date",
+            "installation_actual_end_date",
+            "date",
+          )}
+          {input("OnAir Date", "onair_date", "date")}
+          {input("RF Not", "rf_not")}
+          {input("Atlas Status", "atlas_status")}
+
+          {input("LOS Subcon", "los_subcon")}
+          {input("LOS Plan Date", "los_plan_date", "date")}
+          {input("LOS Actual End Date", "los_actual_end_date", "date")}
+
+          {input("TSS Subcon", "tss_subcon")}
+          {input("TSS Plan Start Date", "tss_plan_start_date", "date")}
+          {input("TSS Actual End Date", "tss_actual_end_date", "date")}
+
+          {input("TSSR Subcon", "tssr_subcon")}
+          {input("TSSR Plan Start Date", "tssr_plan_start_date", "date")}
+          {input("TSSR Actual End Date", "tssr_actual_end_date", "date")}
+
+          {input("BTK Subcon", "btk_subcon")}
+          {input("BTK Plan Start Date", "btk_plan_start_date", "date")}
+          {input("BTK Actual End Date", "btk_actual_end_date", "date")}
+          {input("BTK Approval Status", "btk_approved")}
+          {input("GS Status", "gs_status")}
+          {input("Survey Note", "survey_note")}
+
+          {input("ENH Subcon", "enh_subcon")}
+          {select("ENH Site Type", "enh_site_type", [
+            "Abone",
+            "Süzme",
+            "Abone + Süzme",
+          ])}
+          {input("ENH Plan Start Date", "enh_plan_start_date", "date")}
+          {input("ENH Actual End Date", "enh_actual_end_date", "date")}
+          {input("ENH Not", "enh_not")}
+
+          {input("Power Subcon", "power_subcon")}
+          {input("Power Plan Start Date", "power_plan_start_date", "date")}
+          {input("Power Actual End Date", "power_actual_end_date", "date")}
+
+          {input(
+            "Abonelik Actual End Date",
+            "abonelik_actual_end_date",
+            "date",
+          )}
+          {input(
+            "Horizon Actual End Date",
+            "tt_horizon_actual_end_date",
+            "date",
+          )}
+          {input("PAC Actual End Date", "pac_actual_end_date", "date")}
+        </div>
+
+        <div className="modalActions">
+          <button className="tab" onClick={onClose}>
+            Kapat
+          </button>
+          <button className="saveButton" onClick={save}>
+            Kaydet
+          </button>
+        </div>
       </div>
     </div>
   );
