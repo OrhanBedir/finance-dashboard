@@ -1236,6 +1236,7 @@ function useUsdRate() {
 }
 
 function DailyEntry() {
+  
   const usdRate = useUsdRate();
   function getTodayTR() {
     const d = new Date();
@@ -1866,53 +1867,47 @@ function DailyEntry() {
   };
 
   const handleAddSiteAndOpenModal = async () => {
-    const siteCode = String(siteSearchCode || "")
-      .trim()
-      .toUpperCase();
+  const siteCode = String(siteSearchCode || "")
+    .trim()
+    .toUpperCase();
 
-    if (!siteCode) {
-      alert("Site Code giriniz");
+  if (!siteCode) {
+    alert("Site Code giriniz");
+    return;
+  }
+
+  try {
+    const addRes = await fetch(`/rollout/add-site`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        site_code: siteCode,
+      }),
+    });
+
+    const addData = await addRes.json();
+
+    if (!addRes.ok) {
+      alert(addData?.error || "Rollout site eklenemedi");
       return;
     }
 
-    try {
-      const checkRes = await fetch(
-        `http://localhost:5001/rollout/by-site?site_code=${encodeURIComponent(siteCode)}`,
-      );
+    // ✅ önce formu doldur
+    setForm((prev) => ({
+      ...prev,
+      site_code: siteCode,
+    }));
 
-      const checkData = await checkRes.json();
+    // ✅ sonra modal aç
+    handleOpenEntryModal();
 
-      if (!checkData?.row) {
-        const confirmAdd = window.confirm(
-          "Bu saha Rollout Data içinde bulunamadı. Rollout Data'ya ekleyelim mi?",
-        );
-
-        if (!confirmAdd) return;
-
-        const addRes = await fetch("http://localhost:5001/rollout/add-site", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            site_code: siteCode,
-          }),
-        });
-
-        const addData = await addRes.json();
-
-        if (!addRes.ok) {
-          alert(addData?.error || "Rollout site eklenemedi");
-          return;
-        }
-      }
-
-      handleOpenEntryModal();
-    } catch (err) {
-      console.error(err);
-      alert("İşlem sırasında hata oluştu");
-    }
-  };
+  } catch (err) {
+    console.error(err);
+    alert("İşlem sırasında hata oluştu");
+  }
+};
 
   return (
     <>
