@@ -1941,7 +1941,9 @@ function DailyEntry() {
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           <button
             type="button"
-            className={showQcUpload ? "tab uploadTab activeTab" : "tab uploadTab"}
+            className={
+              showQcUpload ? "tab uploadTab activeTab" : "tab uploadTab"
+            }
             onClick={() => {
               setShowQcUpload((prev) => !prev);
               setShowBoqUpload(false);
@@ -1954,7 +1956,9 @@ function DailyEntry() {
 
           <button
             type="button"
-            className={showBoqUpload ? "tab uploadTab activeTab" : "tab uploadTab"}
+            className={
+              showBoqUpload ? "tab uploadTab activeTab" : "tab uploadTab"
+            }
             onClick={() => {
               setShowBoqUpload((prev) => !prev);
               setShowQcUpload(false);
@@ -1974,7 +1978,9 @@ function DailyEntry() {
 
           <button
             type="button"
-            className={showHwPoUpload ? "tab uploadTab activeTab" : "tab uploadTab"}
+            className={
+              showHwPoUpload ? "tab uploadTab activeTab" : "tab uploadTab"
+            }
             onClick={() => {
               setShowHwPoUpload((prev) => !prev);
               setShowBoqUpload(false);
@@ -1987,7 +1993,9 @@ function DailyEntry() {
 
           <button
             type="button"
-            className={showCompletedImport ? "tab uploadTab activeTab" : "tab uploadTab"}
+            className={
+              showCompletedImport ? "tab uploadTab activeTab" : "tab uploadTab"
+            }
             onClick={() => {
               setShowCompletedImport((prev) => !prev);
               setShowBoqUpload(false);
@@ -7342,16 +7350,17 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               <Row
                 label="Faturalandırma Oranı"
                 value={executiveSummary.ratio}
+                isPercent
               />
               <Row
                 label="Faturalanmamış İş"
-                value={executiveSummary.not_invoiced}
+                value={executiveSummary.notInvoiced}
               />
               <Row
                 label="PO Açılmış Ama Faturalanmamış"
-                value={executiveSummary.po_open}
+                value={executiveSummary.poOpenedNotInvoiced}
               />
-              <Row label="PO Açılmamış İş" value={executiveSummary.po_bekler} />
+              <Row label="PO Açılmamış İş" value={executiveSummary.noPO} />
             </>
           )}
         </div>
