@@ -8952,7 +8952,7 @@ function App() {
 
           {/* SAĞ */}
           <div style={{ color: "#666", fontSize: "14px" }}>
-            Rollout Dashboard
+            OHTS | Operasyon ve Hakediş Takip Sistemi
           </div>
         </div>
 
