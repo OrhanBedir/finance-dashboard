@@ -6732,9 +6732,13 @@ async function fetchData(isAdmin, subconName) {
   const poOpenedButNotInvoiced = Math.max(okAmount - totalBilled, 0);
 
   const paymentRate =
-    String(subconName || "").trim().toLowerCase() === "federal"
+    String(subconName || "")
+      .trim()
+      .toLowerCase() === "federal"
       ? 0.8
-      : String(subconName || "").trim().toLowerCase() === "ubs"
+      : String(subconName || "")
+            .trim()
+            .toLowerCase() === "ubs"
         ? 0.75
         : 1;
 
@@ -8161,6 +8165,23 @@ app.get("/finance/overdue-invoices", async (req, res) => {
   }
 });
 const PORT = process.env.PORT || 5001;
+
+app.get("/test-db", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT NOW() as now");
+    res.json({
+      ok: true,
+      message: "Local DB bağlantısı başarılı",
+      time: result.rows[0].now,
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      message: "DB bağlantı hatası",
+      error: err.message,
+    });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server çalışıyor: ${PORT}`);

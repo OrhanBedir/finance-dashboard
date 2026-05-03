@@ -1,21 +1,25 @@
-require("dotenv").config();
 const { Pool } = require("pg");
 
-console.log("DB MODE:", process.env.DATABASE_URL ? "DATABASE_URL" : "LOCAL_DB");
-console.log("DATABASE_URL EXISTS:", !!process.env.DATABASE_URL);
+const isRailway = !!process.env.DATABASE_URL;
 
-const pool = process.env.DATABASE_URL
-  ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-    })
-  : new Pool({
-      user: process.env.DB_USER,
-      host: process.env.DB_HOST,
-      database: process.env.DB_NAME,
-      password: process.env.DB_PASSWORD || "",
-      port: Number(process.env.DB_PORT || 5432),
-      ssl: false,
-    });
+const localConfig = {
+  host: process.env.DB_HOST || "localhost",
+  port: Number(process.env.DB_PORT || 5432),
+  user: process.env.DB_USER || "postgres",
+  database: process.env.DB_NAME || "postgres",
+};
+
+if (process.env.DB_PASSWORD && process.env.DB_PASSWORD !== "") {
+  localConfig.password = process.env.DB_PASSWORD;
+}
+
+const pool = new Pool(
+  isRailway
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+      }
+    : localConfig
+);
 
 module.exports = pool;
