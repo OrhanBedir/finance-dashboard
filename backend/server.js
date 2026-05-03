@@ -546,6 +546,20 @@ app.get("/rollout/mismatch-check", async (req, res) => {
     });
   }
 });
+
+app.get("/create-admin", async (req, res) => {
+  const bcrypt = require("bcrypt");
+
+  const hash = await bcrypt.hash("123456", 10);
+
+  await pool.query(
+    `INSERT INTO users (name, email, password_hash, role, is_active)
+     VALUES ($1, $2, $3, $4, $5)`,
+    ["Orhan", "orhan.bedir@simsektel.com", hash, "admin", true],
+  );
+
+  res.send("ADMIN CREATED");
+});
 app.get("/rollout/missing-sites", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(`
