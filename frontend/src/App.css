@@ -1493,7 +1493,7 @@ body {
 }
 
 #root::before {
-  content: "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi";
+  content: "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi";
   position: fixed;
   top: -200px;
   left: -200px;
@@ -1502,12 +1502,12 @@ body {
   z-index: -1;
   pointer-events: none;
 
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   color: rgba(31, 41, 55, 0.06);
   transform: rotate(-25deg);
   white-space: pre-wrap;
-  line-height: 110px;
+  line-height: 70px;
 }
 
 .container,
