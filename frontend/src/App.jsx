@@ -775,7 +775,7 @@ function RolloutDashboard() {
         ? selectedRegion
         : "ALL";
 
-    const url = `http://localhost:5001/export/excel?region=${regionParam}`;
+    const url = `${API_BASE}/export/excel?region=${regionParam}`;
 
     window.open(url, "_blank");
   };
