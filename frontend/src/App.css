@@ -1421,3 +1421,54 @@ tbody tr:hover {
   background: #5b82bd !important;
   color: #fff !important;
 }
+.upload-btn {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.upload-btn:hover {
+  background: #e5e7eb;
+}
+.uploadTab {
+  background: #eef4ff !important;
+  color: #2f5fd0 !important;
+  border: 1px solid #d6e4ff !important;
+  font-size: 13px !important;
+  padding: 7px 13px !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+}
+
+.uploadTab:hover {
+  background: #dbe7ff !important;
+}
+
+.uploadTab.activeTab {
+  background: #2f5fd0 !important;
+  color: white !important;
+  border-color: #2f5fd0 !important;
+}
+.excelBtn {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #c8e6c9;
+  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.excelBtn:hover {
+  background: #c8e6c9;
+  transform: translateY(-1px);
+}
+
+.excelBtn:active {
+  transform: scale(0.98);
+}

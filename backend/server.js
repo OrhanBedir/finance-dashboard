@@ -10,6 +10,7 @@ const fs = require("fs");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { detectRegion } = require("./utils/regionHelper");
+const { applyPremiumExcelStyle } = require("./utils/excelStyle");
 
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -29,6 +30,24 @@ function authMiddleware(req, res, next) {
   } catch {
     return res.status(401).json({ error: "Geçersiz token" });
   }
+}
+
+function applySubconFilter(req, rows) {
+  const userRole = String(req.user?.role || "").toLowerCase();
+  const userSubcon = String(req.user?.subcon_name || "")
+    .trim()
+    .toLowerCase();
+
+  if (userRole !== "subcon" || !userSubcon) {
+    return rows || [];
+  }
+
+  return (rows || []).filter(
+    (row) =>
+      String(row.subcon_name || "")
+        .trim()
+        .toLowerCase() === userSubcon,
+  );
 }
 
 const pool = require("./db");
@@ -590,6 +609,59 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
 
     const sheet = workbook.Sheets[firstSheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    const headers = rows[0] || [];
+
+    function findColIndex(names, fallbackIndex) {
+      const normalizedNames = names.map((x) =>
+        String(x || "")
+          .trim()
+          .toUpperCase(),
+      );
+
+      const index = headers.findIndex((h) =>
+        normalizedNames.includes(
+          String(h || "")
+            .trim()
+            .toUpperCase(),
+        ),
+      );
+
+      return index >= 0 ? index : fallbackIndex;
+    }
+
+    const COL_SITE_ID = findColIndex(["DU ID", "SITE ID", "Site ID"], 2);
+    const COL_STATUS = findColIndex(["Status", "Task Status"], 7);
+    const COL_TEMPLATE = findColIndex(["Template Name"], 15);
+    const COL_FIRST_SUBMIT = findColIndex(
+      ["First Submit to Approval Time", "First Submit Time"],
+      26,
+    );
+    const COL_CLOSE_TIME = findColIndex(
+      ["Actual Task Close Time", "Task Close Time"],
+      27,
+    );
+
+    function parseQcExcelDate(value) {
+      if (!value) return null;
+
+      if (typeof value === "number") {
+        const excelEpoch = new Date(1899, 11, 30);
+        return new Date(excelEpoch.getTime() + value * 86400000);
+      }
+
+      const str = String(value).trim();
+      if (!str) return null;
+
+      const d = new Date(str.replace(" ", "T"));
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    function toDateOnly(value) {
+      const d = parseQcExcelDate(value);
+      return d && !Number.isNaN(d.getTime())
+        ? d.toISOString().slice(0, 10)
+        : null;
+    }
 
     if (!rows.length) {
       return res
@@ -692,52 +764,61 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i] || [];
 
-      const siteId = row[2]; // B kolonu = DU ID / Site ID
-      const statusRaw = row[7]; // H kolonu = status
-      const templateName = row[15]; // P kolonu = Template Name
-      const qcCloseTimeRaw = row[27]; // AB kolonu = Actual Task Close Time
+      const siteId = row[COL_SITE_ID];
+      const statusRaw = row[COL_STATUS];
+      const templateName = row[COL_TEMPLATE];
+
+      const firstSubmitRaw = row[COL_FIRST_SUBMIT];
+      const qcCloseTimeRaw = row[COL_CLOSE_TIME];
 
       const siteCode = String(siteId || "")
         .trim()
         .toUpperCase();
       const qcDurum = normalizeStatus(statusRaw);
 
-      function parseExcelDate(value) {
-        if (!value) return null;
-
-        // Eğer number gelirse (Excel serial)
-        if (typeof value === "number") {
-          const excelEpoch = new Date(1899, 11, 30);
-          return new Date(excelEpoch.getTime() + value * 86400000);
-        }
-
-        // string gelirse
-        const d = new Date(value.replace(" ", "T"));
-        return Number.isNaN(d.getTime()) ? null : d;
-      }
-
-      const qcClosedDate = parseExcelDate(qcCloseTimeRaw);
-
-      const qcClosedDateOnly =
-        qcClosedDate && !Number.isNaN(qcClosedDate.getTime())
-          ? qcClosedDate.toISOString().slice(0, 10)
-          : null;
+      const firstSubmitDateOnly = toDateOnly(firstSubmitRaw);
+      const qcClosedDateOnly = toDateOnly(qcCloseTimeRaw);
 
       if (!siteCode || !qcDurum) {
         continue;
       }
 
       /* 🔥 Rollout Data QC otomatik güncelleme */
+      /* 🔥 Rollout Data QC otomatik güncelleme */
       await pool.query(
         `
         UPDATE rollout_progress
         SET
           qc_durum = $2,
-          qc_closed_date = $3,
+
+          plan_start_date = COALESCE(plan_start_date, $3),
+          installation_actual_start_date = COALESCE(installation_actual_start_date, $3),
+
+          installation_actual_end_date = CASE
+            WHEN $2 = 'OK' THEN COALESCE(installation_actual_end_date, $4)
+            ELSE installation_actual_end_date
+          END,
+
+          onair_date = CASE
+            WHEN $2 = 'OK' THEN COALESCE(onair_date, $4)
+            ELSE onair_date
+          END,
+
+          qc_closed_date = CASE
+            WHEN $2 = 'OK' THEN COALESCE(qc_closed_date, $4)
+            ELSE qc_closed_date
+          END,
+
+          malzeme_status = CASE
+            WHEN $2 = 'OK' AND COALESCE(malzeme_status, '') = ''
+            THEN 'OK'
+            ELSE malzeme_status
+          END,
+
           updated_at = NOW()
         WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1
         `,
-        [siteCode, qcDurum, qcClosedDateOnly],
+        [siteCode, qcDurum, firstSubmitDateOnly, qcClosedDateOnly],
       );
 
       /* Eski master_works kuralı aynen devam */
@@ -1893,7 +1974,30 @@ app.get("/debug/current-db", async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+app.get("/debug/counts", async (req, res) => {
+  try {
+    const tables = [
+      "master_works",
+      "po_rows",
+      "boq_items",
+      "rollout_progress",
+      "invoice_entries",
+      "hw_payment_rows",
+      "hw_invoice_rows",
+    ];
 
+    const counts = {};
+
+    for (const table of tables) {
+      const r = await pool.query(`SELECT COUNT(*)::int AS total FROM ${table}`);
+      counts[table] = r.rows[0].total;
+    }
+
+    res.json({ ok: true, counts });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 /* ================== DB SETUP ================== */
 app.get("/setup-db", async (req, res) => {
   try {
@@ -2499,24 +2603,22 @@ app.get("/dashboard/result", authMiddleware, async (req, res) => {
   const subconName = req.user?.subcon_name || null;
 
   try {
-    const result = await pool.query(buildMasterJoinedQuery());
+    const userRole = String(req.user?.role || "").toLowerCase();
+    const userSubcon = String(req.user?.subcon_name || "").trim();
+
+    const extraWhere =
+      userRole === "subcon" && userSubcon
+        ? "WHERE LOWER(TRIM(COALESCE(m.subcon_name, ''))) = LOWER(TRIM($1))"
+        : "";
+
+    const params = userRole === "subcon" && userSubcon ? [userSubcon] : [];
+
+    const result = await pool.query(buildMasterJoinedQuery(extraWhere), params);
 
     let rows = (result.rows || []).map((row) => ({
       ...row,
       currency: normalizeCurrency(row.currency),
     }));
-
-    if (!isAdmin && subconName) {
-      rows = rows.filter(
-        (row) =>
-          String(row.subcon_name || "")
-            .trim()
-            .toLowerCase() ===
-          String(subconName || "")
-            .trim()
-            .toLowerCase(),
-      );
-    }
 
     res.json({ ok: true, rows });
   } catch (err) {
@@ -2809,6 +2911,13 @@ app.get("/finance/salary/export-excel", async (req, res) => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    applyPremiumExcelStyle(worksheet, {
+      headerRowNumber: 2,
+      freezeRow: 2,
+      filterFrom: "A2",
+      filterTo: "P2",
+      statusColumn: "B",
+    });
 
     await workbook.xlsx.write(res);
     res.end();
@@ -2854,14 +2963,39 @@ app.get("/finance/supplier-advances", async (req, res) => {
     });
   }
 });
-app.post("/rollout/auto-sync-targets", async (req, res) => {
+
+async function syncRolloutTargets(siteCodesFilter = []) {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
+    console.log("SYNC START");
+
+    const filterSites = (siteCodesFilter || [])
+      .map((x) =>
+        String(x || "")
+          .trim()
+          .toUpperCase(),
+      )
+      .filter(Boolean);
+
+    const baseQuery = buildMasterJoinedQuery().replace(/;+\s*$/, "");
+
+    const masterResult =
+      filterSites.length > 0
+        ? await client.query(
+            `
+        SELECT *
+        FROM (${baseQuery}) AS mw
+        WHERE UPPER(TRIM(COALESCE(mw.site_code, ''))) = ANY($1::text[])
+        `,
+            [filterSites],
+          )
+        : await client.query(baseQuery);
+
+    console.log("MASTER RESULT GELDI:", masterResult.rows.length);
 
     const today = new Date().toISOString().slice(0, 10);
-    const masterResult = await pool.query(buildMasterJoinedQuery());
 
     const targetItemCodes = {
       "5G": ["8818274542", "8818274543", "8812184609", "8812184598"],
@@ -2880,6 +3014,7 @@ app.post("/rollout/auto-sync-targets", async (req, res) => {
         siteCode.includes("NR3500")
       )
         return "5G";
+
       if (rowType === "DSS" || siteCode.includes("_DSS_")) return "DSS";
 
       if (
@@ -2901,7 +3036,9 @@ app.post("/rollout/auto-sync-targets", async (req, res) => {
     const candidateMap = new Map();
 
     for (const row of masterResult.rows || []) {
-      const siteCode = String(row.site_code || "").trim();
+      const siteCode = String(row.site_code || "")
+        .trim()
+        .toUpperCase();
       const itemCode = String(row.item_code || "").trim();
       const doneQty = Number(row.done_qty || 0);
 
@@ -2918,7 +3055,8 @@ app.post("/rollout/auto-sync-targets", async (req, res) => {
           site_type: siteType,
           project_code: row.project_code || "",
           il: row.il || row.city || "",
-          bolge: row.bolge || row.region || "",
+          bolge:
+            row.bolge || row.region || getRegionFromSiteCode(siteCode) || "",
           rf_subcon: row.subcon_name || "",
           onair_date: row.onair_date || null,
           plan_start_date: row.onair_date || today,
@@ -2936,7 +3074,7 @@ app.post("/rollout/auto-sync-targets", async (req, res) => {
         `
         SELECT id, plan_start_date, onair_date
         FROM rollout_progress
-        WHERE UPPER(site_code) = UPPER($1)
+        WHERE UPPER(TRIM(site_code)) = UPPER(TRIM($1))
         LIMIT 1
         `,
         [row.site_code],
@@ -2975,53 +3113,64 @@ app.post("/rollout/auto-sync-targets", async (req, res) => {
       } else {
         const old = existing.rows[0];
 
-        if (!old.plan_start_date) {
-          await client.query(
-            `
-            UPDATE rollout_progress
-            SET plan_start_date = $1,
-                onair_date = COALESCE(onair_date, $2),
-                site_type = COALESCE(NULLIF(site_type, ''), $3),
-                project_code = COALESCE(NULLIF(project_code, ''), $4),
-                bolge = COALESCE(NULLIF(bolge, ''), $5),
-                il = COALESCE(NULLIF(il, ''), $6),
-                rf_subcon = COALESCE(NULLIF(rf_subcon, ''), $7),
-                malzeme_status = COALESCE(NULLIF(malzeme_status, ''), 'OK'),
-                updated_at = NOW()
-            WHERE id = $8
-            `,
-            [
-              row.plan_start_date,
-              row.onair_date,
-              row.site_type,
-              row.project_code,
-              row.bolge,
-              row.il,
-              row.rf_subcon,
-              old.id,
-            ],
-          );
+        await client.query(
+          `
+          UPDATE rollout_progress
+          SET
+            plan_start_date = COALESCE(plan_start_date, $1),
+            onair_date = COALESCE(onair_date, $2),
+            site_type = COALESCE(NULLIF(site_type, ''), $3),
+            project_code = COALESCE(NULLIF(project_code, ''), $4),
+            bolge = COALESCE(NULLIF(bolge, ''), $5),
+            il = COALESCE(NULLIF(il, ''), $6),
+            rf_subcon = COALESCE(NULLIF(rf_subcon, ''), $7),
+            malzeme_status = COALESCE(NULLIF(malzeme_status, ''), 'OK'),
+            updated_at = NOW()
+          WHERE id = $8
+          `,
+          [
+            row.plan_start_date,
+            row.onair_date,
+            row.site_type,
+            row.project_code,
+            row.bolge,
+            row.il,
+            row.rf_subcon,
+            old.id,
+          ],
+        );
 
-          updated += 1;
-        }
+        updated += 1;
       }
     }
 
     await client.query("COMMIT");
 
-    res.json({
-      ok: true,
+    return {
       scanned: masterResult.rows.length,
       targetSites: candidates.length,
       inserted,
       updated,
-    });
+    };
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("ROLLOUT AUTO SYNC ERROR:", err);
-    res.status(500).json({ ok: false, error: err.message });
+    throw err;
   } finally {
     client.release();
+  }
+}
+
+app.post("/rollout/auto-sync-targets", async (req, res) => {
+  try {
+    const result = await syncRolloutTargets();
+
+    res.json({
+      ok: true,
+      ...result,
+    });
+  } catch (err) {
+    console.error("ROLLOUT AUTO SYNC ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -3868,6 +4017,13 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    applyPremiumExcelStyle(worksheet, {
+      headerRowNumber: 2,
+      freezeRow: 2,
+      filterFrom: "A2",
+      filterTo: "P2",
+      statusColumn: "B",
+    });
 
     await workbook.xlsx.write(res);
     res.end();
@@ -4072,211 +4228,6 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 });
 
 /* ================== IMPORT COMPLETED WORKS ================== */
-app.post("/import/completed-works", upload.single("file"), async (req, res) => {
-  try {
-    // ✅ completed_works'e kayıt atmadan önce rollout_sites kontrolü
-    const normalizedSiteCode = String(site_code || "").trim();
-
-    if (normalizedSiteCode) {
-      const rolloutCheck = await pool.query(
-        `
-    SELECT id
-    FROM rollout_sites
-    WHERE UPPER(TRIM(site_code)) = UPPER(TRIM($1))
-    LIMIT 1
-    `,
-        [normalizedSiteCode],
-      );
-
-      if (rolloutCheck.rowCount === 0) {
-        await pool.query(
-          `
-          INSERT INTO rollout_sites (
-            site_code,
-            site_type,
-            project_code,
-            bolge,
-            il,
-            qc_durum,
-            updated_at
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, NOW())
-          `,
-          [
-            normalizedSiteCode,
-            site_type || null,
-            project_code || null,
-            getRegion(normalizedSiteCode) || null,
-            il || null,
-            "NOK",
-          ],
-        );
-
-        console.log(
-          "✅ Rollout site otomatik oluşturuldu:",
-          normalizedSiteCode,
-        );
-      }
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ ok: false, error: "Dosya yok" });
-    }
-
-    const workbook = XLSX.readFile(req.file.path);
-    const firstSheetName = workbook.SheetNames[0];
-
-    if (!firstSheetName) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Excel içinde sheet bulunamadı" });
-    }
-
-    const sheet = workbook.Sheets[firstSheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
-
-    if (!rows.length) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Excel içinde veri bulunamadı" });
-    }
-
-    let inserted = 0;
-
-    for (const r of rows) {
-      const terms = getCell(r, [
-        "Terms",
-        "Payment Terms",
-        "Ödeme Şartı",
-        "Term",
-      ]);
-
-      const siteType =
-        getCell(r, ["Site Type", "site_type", "Saha Türü"]) || "5G";
-
-      const projectCode = getCell(r, [
-        "Project Code",
-        "project_code",
-        "Proje Kodu",
-      ]);
-
-      const siteCode = getCell(r, ["Site Code", "site_code", "Saha Kodu"]);
-      const itemCode = getCell(r, ["Item Code", "item_code", "Kalem Kodu"]);
-      const itemDescription = getCell(r, [
-        "Item Description",
-        "item_description",
-        "Kalem Açıklaması",
-      ]);
-      const doneQty = getCell(r, ["Done Qty", "done_qty", "Tamamlanan Miktar"]);
-      const subconName = getCell(r, ["Subcon Name", "subcon_name", "Taşeron"]);
-      const onAirDate = getCell(r, ["OnAir Date", "onair_date", "Tarih"]);
-      const note = getCell(r, ["Not", "Note", "note"]);
-
-      const qcDurum = getCell(r, ["QC Durum", "qc_durum"]);
-      const kabulDurum = getCell(r, ["Kabul Durum", "kabul_durum"]);
-      const kabulNot = getCell(r, ["Kabul Not", "kabul_not"]);
-
-      const normalizedSiteCode = siteCode
-        ? String(siteCode).trim().toUpperCase()
-        : "";
-
-      const normalizedItemCode = itemCode ? String(itemCode).trim() : "";
-
-      if (!normalizedSiteCode || !normalizedItemCode) continue;
-
-      const duplicateCheck = await pool.query(
-        `
-        SELECT id
-        FROM master_works
-        WHERE project_code = $1
-          AND site_code = $2
-          AND item_code = $3
-        LIMIT 1
-        `,
-        [projectCode, normalizedSiteCode, normalizedItemCode],
-      );
-
-      if (duplicateCheck.rows.length > 0) {
-        await pool.query(
-          `
-          UPDATE master_works
-          SET
-            subcon_name = $1,
-            onair_date = $2,
-            qc_durum = $3,
-            kabul_durum = $4,
-            kabul_not = $5,
-            note = $6
-          WHERE
-            project_code = $7
-            AND site_code = $8
-            AND item_code = $9
-          `,
-          [
-            subconName ? String(subconName).trim() : null,
-            parseExcelDate(onAirDate),
-            qcDurum || "NOK",
-            kabulDurum || "NOK",
-            kabulNot ? String(kabulNot).trim() : null,
-            note ? String(note).trim() : null,
-            projectCode ? String(projectCode).trim() : null,
-            normalizedSiteCode,
-            normalizedItemCode,
-          ],
-        );
-
-        continue;
-      }
-
-      await pool.query(
-        `
-        INSERT INTO master_works
-        (
-          site_type,
-          project_code,
-          site_code,
-          item_code,
-          item_description,
-          done_qty,
-          subcon_name,
-          onair_date,
-          note,
-          qc_durum,
-          kabul_durum,
-          kabul_not
-        )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-        `,
-        [
-          siteType ? String(siteType).trim() : "5G",
-          projectCode ? String(projectCode).trim() : null,
-          normalizedSiteCode,
-          normalizedItemCode,
-          itemDescription ? String(itemDescription).trim() : null,
-          parseNumber(doneQty),
-          subconName ? String(subconName).trim() : null,
-          parseExcelDate(onAirDate),
-          note ? String(note).trim() : null,
-          qcDurum || "NOK",
-          kabulDurum || "NOK",
-          kabulNot ? String(kabulNot).trim() : null,
-        ],
-      );
-
-      inserted++;
-    }
-
-    res.json({
-      ok: true,
-      inserted,
-      sheet_name: firstSheetName,
-      message: "Geçmiş işler başarıyla yüklendi",
-    });
-  } catch (err) {
-    console.error("IMPORT COMPLETED WORKS ERROR:", err.message);
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 /* ================== HW PO UPLOAD ================== */
 app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
@@ -4419,12 +4370,31 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
   try {
     const workbook = XLSX.readFile(req.file.path);
 
+    const normalizeHeader = (value) =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+
     const get = (row, ...keys) => {
+      const normalizedRow = {};
+
+      Object.keys(row || {}).forEach((key) => {
+        normalizedRow[normalizeHeader(key)] = row[key];
+      });
+
       for (const key of keys) {
-        if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
-          return row[key];
+        const value = normalizedRow[normalizeHeader(key)];
+
+        if (
+          value !== undefined &&
+          value !== null &&
+          String(value).trim() !== ""
+        ) {
+          return value;
         }
       }
+
       return null;
     };
 
@@ -4450,13 +4420,27 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
       const data = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
       data.forEach((row) => {
-        const siteCode = get(row, "site_code", "Site Code");
+        const siteCode = get(
+          row,
+          "site_code",
+          "Site Code",
+          "SITE CODE",
+          "Site ID",
+          "Saha Kodu",
+        );
         const autoRegion = detectRegion(siteCode);
         if (!siteCode) return;
 
         allRows.push({
-          bolge: get(row, "bolge", "Bölge") || autoRegion,
-          site_type: get(row, "site_type", "Site Type") || sheetName,
+          bolge: get(row, "Bölge", "Bolge", "bolge", "region") || autoRegion,
+          site_type:
+            String(get(row, "site_type", "Site Type", "Saha Türü") || sheetName)
+              .trim()
+              .toUpperCase() === "STANDALONE"
+              ? "Standalone"
+              : String(
+                  get(row, "site_type", "Site Type", "Saha Türü") || sheetName,
+                ).trim(),
           project_code: get(row, "project_code", "Project Code"),
           site_code: siteCode,
           il: get(row, "il", "İl", "IL", "İL"),
@@ -4615,7 +4599,7 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
           $41,$42,$43,
           $44,$45,$46
        )
-       ON CONFLICT (site_code, site_type)
+       ON CONFLICT (site_code)
        DO UPDATE SET
           bolge = EXCLUDED.bolge,
           project_code = EXCLUDED.project_code,
@@ -4780,46 +4764,6 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
       if (!normalizedSiteCode || !normalizedItemCode) continue;
 
       // ✅ completed work içindeki saha rollout_sites içinde yoksa otomatik oluştur
-      const rolloutCheck = await pool.query(
-        `
-        SELECT id
-        FROM rollout_sites
-        WHERE UPPER(TRIM(site_code)) = UPPER(TRIM($1))
-        LIMIT 1
-        `,
-        [normalizedSiteCode],
-      );
-
-      if (rolloutCheck.rowCount === 0) {
-        await pool.query(
-          `
-          INSERT INTO rollout_sites (
-            site_code,
-            site_type,
-            project_code,
-            bolge,
-            il,
-            qc_durum,
-            updated_at
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, NOW())
-          `,
-          [
-            normalizedSiteCode,
-            siteType ? String(siteType).trim() : "5G",
-            projectCode ? String(projectCode).trim() : null,
-            getRegionFromSiteCode(normalizedSiteCode),
-            null,
-            "NOK",
-          ],
-        );
-
-        rolloutCreated++;
-        console.log(
-          "✅ Rollout site otomatik oluşturuldu:",
-          normalizedSiteCode,
-        );
-      }
 
       const duplicateCheck = await pool.query(
         `
@@ -4914,6 +4858,8 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
       inserted++;
     }
 
+    const syncResult = await syncRolloutTargets();
+
     res.json({
       ok: true,
       inserted,
@@ -4921,6 +4867,7 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
       rolloutCreated,
       sheet_name: firstSheetName,
       message: "Geçmiş işler başarıyla yüklendi",
+      rolloutSync: syncResult,
     });
   } catch (err) {
     console.error("IMPORT COMPLETED WORKS ERROR:", err);
@@ -4998,7 +4945,7 @@ app.post("/rollout/add-site", async (req, res) => {
       return res.status(400).json({ ok: false, error: "site_code zorunlu" });
     }
 
-    const normalizedSiteCode = String(site_code).trim().toUpperCase();
+    const normalizedSiteCode = String(siteCode).trim().toUpperCase();
 
     const exists = await pool.query(
       `
@@ -5110,6 +5057,86 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("ROLLOUT UPDATE ERROR:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+app.delete("/rollout/:id", authMiddleware, async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const result = await pool.query(
+      `
+      DELETE FROM rollout_progress
+      WHERE id = $1
+      RETURNING *
+      `,
+      [id],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        ok: false,
+        error: "Silinecek rollout kaydı bulunamadı",
+      });
+    }
+
+    res.json({
+      ok: true,
+      message: "Rollout kaydı silindi",
+      deleted: result.rows[0],
+    });
+  } catch (err) {
+    console.error("ROLLOUT DELETE ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+// silinecek geçici yüklendi//
+app.get("/debug/rollout-last", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id, bolge, site_type, project_code, site_code, il,
+        malzeme_status,
+        plan_start_date,
+        installation_actual_start_date,
+        installation_actual_end_date,
+        onair_date,
+        tssr_plan_start_date,
+        tssr_actual_end_date,
+        btk_plan_start_date,
+        btk_actual_end_date,
+        btk_approved,
+        btk_certificate_date,
+        power_plan_start_date,
+        power_actual_end_date,
+        enh_plan_start_date,
+        enh_actual_end_date,
+        abonelik_end_date,
+        tt_horizon_end_date,
+        pac_end_date,
+        updated_at
+      FROM rollout_progress
+      ORDER BY id DESC
+      LIMIT 50
+    `);
+
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+// silinecek geçici yüklendi//
+app.get("/debug/rollout-summary-raw", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT bolge, site_type, COUNT(*)::int AS count
+      FROM rollout_progress
+      GROUP BY bolge, site_type
+      ORDER BY bolge, site_type
+    `);
+
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -5370,7 +5397,13 @@ app.get("/export/excel", async (req, res) => {
         };
       }
     }
-
+    applyPremiumExcelStyle(worksheet, {
+      headerRowNumber: 2,
+      freezeRow: 2,
+      filterFrom: "A2",
+      filterTo: "P2",
+      statusColumn: "B",
+    });
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
@@ -5386,22 +5419,33 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
       FROM rollout_progress
       ORDER BY site_type ASC, site_code ASC
     `);
+
     const rows = (result.rows || []).map((r) => {
-      const qcClosedDate = r.qc_closed_date || null;
-
-      const installEnd =
-        r.installation_actual_end_date || r.onair_date || qcClosedDate || null;
-
-      const installStart =
-        r.installation_actual_start_date || installEnd || qcClosedDate || null;
-
-      const onairDate =
-        r.onair_date || r.installation_actual_end_date || qcClosedDate || null;
-
-      const malzemeStatus =
-        onairDate || installEnd || installStart || qcClosedDate ? "OK" : null;
       const normalizedSiteType =
         getSiteTypeFromSiteCode(r.site_code) || r.site_type;
+
+      const qcOk = String(r.qc_durum || "").toUpperCase() === "OK";
+
+      const qcClosedDate = qcOk
+        ? r.qc_closed_date || null
+        : r.qc_closed_date || null;
+
+      const installStart =
+        r.installation_actual_start_date || r.plan_start_date || null;
+
+      const installEnd = qcOk
+        ? r.installation_actual_end_date || r.onair_date || qcClosedDate || null
+        : r.installation_actual_end_date || null;
+
+      const onairDate = qcOk
+        ? r.onair_date || r.installation_actual_end_date || qcClosedDate || null
+        : r.onair_date || null;
+
+      const malzemeStatus =
+        qcOk || onairDate || installEnd || installStart
+          ? r.malzeme_status || "OK"
+          : r.malzeme_status || null;
+
       const passiveValue =
         normalizedSiteType === "5G" || normalizedSiteType === "LTE"
           ? "N/A"
@@ -5417,6 +5461,7 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
         onair_date: onairDate,
         qc_closed_date: qcClosedDate,
         malzeme_status: malzemeStatus,
+
         los_subcon: passiveValue || r.los_subcon,
         los_plan_date: passiveValue || r.los_plan_date,
         los_actual_end_date: passiveValue || r.los_actual_end_date,
@@ -5442,10 +5487,7 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
       };
     });
 
-    res.json({
-      ok: true,
-      rows,
-    });
+    res.json({ ok: true, rows });
   } catch (err) {
     console.error("ROLLOUT LIST ERROR:", err);
     res.status(500).json({
@@ -5467,14 +5509,45 @@ app.get("/rollout/summary", async (req, res) => {
     const result = await pool.query(
       `
       SELECT
-        COALESCE(site_type, 'UNKNOWN') AS site_type,
+        CASE
+          WHEN UPPER(COALESCE(site_type, '')) = 'STANDALONE' THEN 'Standalone'
+          ELSE COALESCE(site_type, 'UNKNOWN')
+        END AS site_type,
+
         COUNT(*)::int AS target,
 
-        COUNT(*) FILTER (WHERE malzeme_status IS NOT NULL AND malzeme_status <> '')::int AS rf_equipment_received,
-        COUNT(*) FILTER (WHERE installation_actual_start_date IS NOT NULL)::int AS rf_installation_started,
-        COUNT(*) FILTER (WHERE installation_actual_end_date IS NOT NULL)::int AS rf_installation_finished,
-        COUNT(*) FILTER (WHERE installation_actual_end_date IS NOT NULL)::int AS qc_closed,
-        COUNT(*) FILTER (WHERE pac_end_date IS NOT NULL OR abonelik_end_date IS NOT NULL)::int AS acceptance,
+        COUNT(*) FILTER (
+          WHERE COALESCE(malzeme_status, '') <> ''
+             OR qc_durum = 'OK'
+             OR installation_actual_start_date IS NOT NULL
+             OR installation_actual_end_date IS NOT NULL
+             OR onair_date IS NOT NULL
+             OR qc_closed_date IS NOT NULL
+        )::int AS rf_equipment_received,
+
+        COUNT(*) FILTER (
+          WHERE installation_actual_start_date IS NOT NULL
+             OR plan_start_date IS NOT NULL
+        )::int AS rf_installation_started,
+
+        COUNT(*) FILTER (
+          WHERE installation_actual_end_date IS NOT NULL
+             OR onair_date IS NOT NULL
+             OR qc_closed_date IS NOT NULL
+             OR qc_durum = 'OK'
+        )::int AS rf_installation_finished,
+
+        COUNT(*) FILTER (
+          WHERE qc_closed_date IS NOT NULL
+             OR qc_durum = 'OK'
+        )::int AS qc_closed,
+
+        COUNT(*) FILTER (
+          WHERE pac_actual_end_date IS NOT NULL
+             OR pac_end_date IS NOT NULL
+             OR abonelik_actual_end_date IS NOT NULL
+             OR abonelik_end_date IS NOT NULL
+        )::int AS acceptance,
 
         COUNT(*) FILTER (WHERE tssr_plan_start_date IS NOT NULL)::int AS tssr_plan_start,
         COUNT(*) FILTER (WHERE tssr_actual_end_date IS NOT NULL)::int AS tssr_actual_end,
@@ -5487,11 +5560,18 @@ app.get("/rollout/summary", async (req, res) => {
         COUNT(*) FILTER (WHERE power_actual_end_date IS NOT NULL)::int AS power_actual_end,
         COUNT(*) FILTER (WHERE enh_plan_start_date IS NOT NULL)::int AS enh_plan_start,
         COUNT(*) FILTER (WHERE enh_actual_end_date IS NOT NULL)::int AS enh_actual_end,
-        COUNT(*) FILTER (WHERE abonelik_end_date IS NOT NULL)::int AS abonelik_end
+        COUNT(*) FILTER (
+          WHERE abonelik_actual_end_date IS NOT NULL
+             OR abonelik_end_date IS NOT NULL
+        )::int AS abonelik_end
 
       FROM rollout_progress
       ${whereRegion}
-      GROUP BY COALESCE(site_type, 'UNKNOWN')
+      GROUP BY
+        CASE
+          WHEN UPPER(COALESCE(site_type, '')) = 'STANDALONE' THEN 'Standalone'
+          ELSE COALESCE(site_type, 'UNKNOWN')
+        END
       ORDER BY site_type
       `,
       params,
@@ -5533,6 +5613,233 @@ app.post("/update-row-note", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "update error" });
+  }
+});
+
+app.post("/import/archive-restore", upload.single("file"), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    if (!req.file) {
+      return res.status(400).json({ ok: false, error: "Dosya yok" });
+    }
+
+    const workbook = XLSX.readFile(req.file.path, { cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+    if (!rows.length) {
+      return res.status(400).json({ ok: false, error: "Excel boş" });
+    }
+
+    await client.query("BEGIN");
+
+    let masterInserted = 0;
+    let masterUpdated = 0;
+    let poInserted = 0;
+
+    for (const r of rows) {
+      const siteType =
+        getCell(r, ["Saha Türü", "Site Type", "site_type"]) || "5G";
+      const projectCode = getCell(r, ["Project Code", "project_code"]);
+      const siteCode = getCell(r, ["Site Code", "site_code"]);
+      const itemCode = getCell(r, ["Item Code", "item_code"]);
+      const itemDescription = getCell(r, [
+        "Item Description",
+        "item_description",
+      ]);
+      const doneQty = getCell(r, ["Done Qty", "done_qty"]);
+      const requestedQty = getCell(r, ["Requested Qty", "requested_qty"]);
+      const dueQty = getCell(r, ["Due Qty", "due_qty"]);
+      const billedQty = getCell(r, [
+        "Billed Quantity",
+        "Billed Qty",
+        "billed_qty",
+      ]);
+      const qcDurum = getCell(r, ["QC Durum", "qc_durum"]) || "NOK";
+      const onAirDate = getCell(r, ["OnAir Date", "onair_date"]);
+      const subconName = getCell(r, ["Subcon Name", "subcon_name", "Taşeron"]);
+      const note = getCell(r, ["RF Not", "Not", "Note", "note"]);
+      const kabulNot = getCell(r, ["Kabul Not", "kabul_not"]);
+
+      const normalizedSiteCode = siteCode
+        ? String(siteCode).trim().toUpperCase()
+        : "";
+      const normalizedItemCode = itemCode ? String(itemCode).trim() : "";
+      const normalizedProjectCode = projectCode
+        ? String(projectCode).trim()
+        : "";
+
+      if (!normalizedSiteCode || !normalizedItemCode) continue;
+
+      const existingMaster = await client.query(
+        `
+        SELECT id
+        FROM master_works
+        WHERE TRIM(COALESCE(project_code, '')) = TRIM($1)
+          AND UPPER(TRIM(COALESCE(site_code, ''))) = UPPER(TRIM($2))
+          AND TRIM(COALESCE(item_code, '')) = TRIM($3)
+        LIMIT 1
+        `,
+        [normalizedProjectCode, normalizedSiteCode, normalizedItemCode],
+      );
+
+      if (existingMaster.rowCount > 0) {
+        await client.query(
+          `
+          UPDATE master_works
+          SET
+            site_type = $1,
+            item_description = $2,
+            done_qty = $3,
+            subcon_name = $4,
+            onair_date = $5,
+            qc_durum = $6,
+            note = $7,
+            kabul_not = $8
+          WHERE id = $9
+          `,
+          [
+            String(siteType).trim(),
+            itemDescription ? String(itemDescription).trim() : null,
+            parseNumber(doneQty),
+            subconName ? String(subconName).trim() : null,
+            parseExcelDate(onAirDate),
+            String(qcDurum).trim(),
+            note ? String(note).trim() : null,
+            kabulNot ? String(kabulNot).trim() : null,
+            existingMaster.rows[0].id,
+          ],
+        );
+
+        masterUpdated++;
+      } else {
+        await client.query(
+          `
+          INSERT INTO master_works (
+            site_type,
+            project_code,
+            site_code,
+            item_code,
+            item_description,
+            done_qty,
+            subcon_name,
+            onair_date,
+            qc_durum,
+            note,
+            kabul_not
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+          `,
+          [
+            String(siteType).trim(),
+            normalizedProjectCode || null,
+            normalizedSiteCode,
+            normalizedItemCode,
+            itemDescription ? String(itemDescription).trim() : null,
+            parseNumber(doneQty),
+            subconName ? String(subconName).trim() : null,
+            parseExcelDate(onAirDate),
+            String(qcDurum).trim(),
+            note ? String(note).trim() : null,
+            kabulNot ? String(kabulNot).trim() : null,
+          ],
+        );
+
+        masterInserted++;
+      }
+
+      const hasPoData =
+        Number(parseNumber(requestedQty)) > 0 ||
+        Number(parseNumber(dueQty)) > 0 ||
+        Number(parseNumber(billedQty)) > 0;
+
+      if (hasPoData) {
+        const existingPo = await client.query(
+          `
+          SELECT id
+          FROM po_rows
+          WHERE TRIM(COALESCE(project_code, '')) = TRIM($1)
+            AND UPPER(TRIM(COALESCE(site_code, ''))) = UPPER(TRIM($2))
+            AND TRIM(COALESCE(item_code, '')) = TRIM($3)
+          LIMIT 1
+          `,
+          [normalizedProjectCode, normalizedSiteCode, normalizedItemCode],
+        );
+
+        if (existingPo.rowCount > 0) {
+          await client.query(
+            `
+            UPDATE po_rows
+            SET
+              item_description = $1,
+              requested_qty = $2,
+              due_qty = $3,
+              billed_qty = $4
+            WHERE id = $5
+            `,
+            [
+              itemDescription ? String(itemDescription).trim() : null,
+              parseNumber(requestedQty),
+              parseNumber(dueQty),
+              parseNumber(billedQty),
+              existingPo.rows[0].id,
+            ],
+          );
+        } else {
+          await client.query(
+            `
+            INSERT INTO po_rows (
+              project_code,
+              site_code,
+              item_code,
+              item_description,
+              requested_qty,
+              due_qty,
+              billed_qty,
+              currency,
+              unit_price,
+              upload_batch
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            `,
+            [
+              normalizedProjectCode || null,
+              normalizedSiteCode,
+              normalizedItemCode,
+              itemDescription ? String(itemDescription).trim() : null,
+              parseNumber(requestedQty),
+              parseNumber(dueQty),
+              parseNumber(billedQty),
+              "TRY",
+              0,
+              req.file.filename,
+            ],
+          );
+
+          poInserted++;
+        }
+      }
+    }
+
+    await client.query("COMMIT");
+
+    res.json({
+      ok: true,
+      sheet_name: sheetName,
+      masterInserted,
+      masterUpdated,
+      poInserted,
+      message: "Arşiv Excel güvenli şekilde geri yüklendi",
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("ARCHIVE RESTORE ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -5846,7 +6153,13 @@ app.get("/export/site-entry-excel-all", async (req, res) => {
       "Content-Disposition",
       `attachment; filename=site_entries_all_${new Date().toISOString().slice(0, 10)}.xlsx`,
     );
-
+    applyPremiumExcelStyle(sheet, {
+      headerRowNumber: 1,
+      freezeRow: 1,
+      filterFrom: "A1",
+      filterTo: "Q1",
+      statusColumn: "C",
+    });
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
@@ -6011,7 +6324,13 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-
+    applyPremiumExcelStyle(sheet, {
+      headerRowNumber: 2,
+      freezeRow: 2,
+      filterFrom: "A2",
+      filterTo: "P2",
+      statusColumn: "B",
+    });
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
@@ -6024,6 +6343,20 @@ app.post("/master/add", async (req, res) => {
   try {
     const m = req.body;
 
+    console.log("MASTER ADD GELDI:", {
+      project_code: m.project_code,
+      site_code: m.site_code,
+      item_code: m.item_code,
+    });
+
+    const projectCode = String(m.project_code || "").trim();
+    const siteCode = String(m.site_code || "")
+      .trim()
+      .toUpperCase();
+    const itemCode = String(m.item_code || "").trim();
+
+    console.log("DUPLICATE CHECK BASLIYOR");
+
     const duplicateCheck = await pool.query(
       `
       SELECT id
@@ -6033,14 +6366,10 @@ app.post("/master/add", async (req, res) => {
         AND item_code = $3
       LIMIT 1
       `,
-      [
-        String(m.project_code || "").trim(),
-        String(m.site_code || "")
-          .trim()
-          .toUpperCase(),
-        String(m.item_code || "").trim(),
-      ],
+      [projectCode, siteCode, itemCode],
     );
+
+    console.log("DUPLICATE CHECK BITTI:", duplicateCheck.rows.length);
 
     if (duplicateCheck.rows.length > 0) {
       await pool.query(
@@ -6067,11 +6396,9 @@ app.post("/master/add", async (req, res) => {
           m.kabul_durum || "NOK",
           m.kabul_not ? String(m.kabul_not).trim() : null,
           m.note ? String(m.note).trim() : null,
-          String(m.project_code || "").trim(),
-          String(m.site_code || "")
-            .trim()
-            .toUpperCase(),
-          String(m.item_code || "").trim(),
+          projectCode,
+          siteCode,
+          itemCode,
         ],
       );
 
@@ -6103,11 +6430,9 @@ app.post("/master/add", async (req, res) => {
       `,
       [
         m.site_type || "5G",
-        String(m.project_code || "").trim(),
-        String(m.site_code || "")
-          .trim()
-          .toUpperCase(),
-        String(m.item_code || "").trim(),
+        projectCode,
+        siteCode,
+        itemCode,
         m.item_description ? String(m.item_description).trim() : null,
         parseNumber(m.done_qty),
         m.subcon_name ? String(m.subcon_name).trim() : null,
@@ -6119,7 +6444,25 @@ app.post("/master/add", async (req, res) => {
       ],
     );
 
-    res.json({ ok: true, data: result.rows[0] });
+    setImmediate(async () => {
+      try {
+        const syncResult = await syncRolloutTargets([siteCode]);
+        console.log("BACKGROUND ROLLOUT SYNC OK:", syncResult);
+      } catch (err) {
+        console.error("BACKGROUND ROLLOUT SYNC ERROR:", err.message);
+      }
+    });
+
+    const syncResult = {
+      background: true,
+      site_code: siteCode,
+    };
+
+    res.json({
+      ok: true,
+      data: result.rows[0],
+      rolloutSync: syncResult,
+    });
   } catch (err) {
     console.error("MASTER ADD ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -6304,7 +6647,7 @@ async function fetchData(isAdmin, subconName) {
   let params = [];
 
   if (!isAdmin && subconName) {
-    query += ` WHERE LOWER(subcon_name) = LOWER($1)`;
+    query += ` WHERE LOWER(TRIM(COALESCE(m.subcon_name, ''))) = LOWER(TRIM($1))`;
     params.push(subconName);
   }
 
@@ -6347,6 +6690,25 @@ async function fetchData(isAdmin, subconName) {
     }
   });
 
+  const completed = totalTry + totalUsd;
+  const po_bekler = beklerTry + beklerUsd;
+  const okAmount = okTry + okUsd;
+
+  const paymentRate =
+    String(subconName || "")
+      .trim()
+      .toLowerCase() === "federal"
+      ? 0.8
+      : String(subconName || "")
+            .trim()
+            .toLowerCase() === "ubs"
+        ? 0.75
+        : 1;
+
+  const subcon_hakedis = completed * paymentRate;
+  const po_bekler_hakedis = po_bekler * paymentRate;
+  const not_invoiced_hakedis = Math.max(okAmount * paymentRate, 0);
+
   return {
     total_done_amount_try: totalTry,
     total_done_amount_usd: totalUsd,
@@ -6358,6 +6720,11 @@ async function fetchData(isAdmin, subconName) {
     partial_count: partial,
     cancel_count: cancel,
     po_bekler_count: bekler,
+
+    subcon_hakedis,
+    po_bekler_hakedis,
+    not_invoiced_hakedis,
+    payment_rate: paymentRate,
   };
 }
 
@@ -6470,7 +6837,13 @@ app.get("/export/site-entry-excel", async (req, res) => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-
+    applyPremiumExcelStyle(worksheet, {
+      headerRowNumber: 2,
+      freezeRow: 2,
+      filterFrom: "A2",
+      filterTo: "P2",
+      statusColumn: "B",
+    });
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
@@ -6623,7 +6996,13 @@ app.get("/export/status-excel", async (req, res) => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-
+    applyPremiumExcelStyle(worksheet, {
+      headerRowNumber: 2,
+      freezeRow: 2,
+      filterFrom: "A2",
+      filterTo: "P2",
+      statusColumn: "B",
+    });
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
@@ -6632,10 +7011,11 @@ app.get("/export/status-excel", async (req, res) => {
   }
 });
 
-app.get("/export/region-analysis", async (req, res) => {
+app.get("/export/region-analysis", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(buildMasterJoinedQuery());
-    const rows = result.rows || [];
+
+    const rows = applySubconFilter(req, result.rows || []);
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Region Analysis");
@@ -6655,15 +7035,22 @@ app.get("/export/region-analysis", async (req, res) => {
       { header: "Billed Qty", key: "billed_qty", width: 12 },
       { header: "Currency", key: "currency", width: 10 },
       { header: "Unit Price", key: "unit_price", width: 14 },
-      { header: "Total Done Amount", key: "total_done_amount", width: 18 },
+      { header: "Şimşek Toplam Hakediş", key: "total_done_amount", width: 18 },
+      { header: "Federal Toplam Hakediş", key: "subcon_hakedis", width: 22 },
       { header: "Subcon", key: "subcon_name", width: 18 },
     ];
     worksheet.spliceRows(1, 0, []);
     // Başlık
-    worksheet.mergeCells("A1:O1");
+    worksheet.mergeCells("A1:P1");
     const titleCell = worksheet.getCell("A1");
 
-    titleCell.value = `REGION ANALYSIS RAPORU (${new Date().toLocaleDateString("tr-TR")})`;
+    const subconName = String(req.user?.subcon_name || "").trim();
+
+    const titlePrefix = subconName
+      ? `${subconName.toUpperCase()} REGION REPORT`
+      : "GLOBAL REGION REPORT";
+
+    titleCell.value = `${titlePrefix} (${new Date().toLocaleDateString("en-GB")})`;
     titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
     titleCell.fill = {
@@ -6706,6 +7093,15 @@ app.get("/export/region-analysis", async (req, res) => {
 
     // Data rows
     rows.forEach((row) => {
+      const subconName = String(row.subcon_name || "")
+        .trim()
+        .toLowerCase();
+
+      const subconRate =
+        subconName === "federal" ? 0.8 : subconName === "ubs" ? 0.75 : 1;
+
+      const totalDoneAmount = Number(row.total_done_amount || 0);
+      const subconHakedis = totalDoneAmount * subconRate;
       worksheet.addRow({
         bolge: row.bolge || "",
         status: row.status || "",
@@ -6721,6 +7117,7 @@ app.get("/export/region-analysis", async (req, res) => {
         currency: row.currency || "",
         unit_price: Number(row.unit_price || 0),
         total_done_amount: Number(row.total_done_amount || 0),
+        subcon_hakedis: subconHakedis,
         subcon_name: row.subcon_name || "",
       });
     });
@@ -6741,31 +7138,34 @@ app.get("/export/region-analysis", async (req, res) => {
             right: { style: "thin", color: { argb: "FFE5E5E5" } },
           };
         });
-
-        if (rowNumber % 2 === 0) {
-          row.eachCell((cell) => {
-            cell.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFF7F9FC" },
-            };
-          });
-        }
+        worksheet.views = [
+          {
+            state: "frozen",
+            ySplit: 2,
+            showGridLines: false,
+          },
+        ];
       }
     });
 
     // Para kolonları
-    ["M", "N"].forEach((col) => {
+    ["M", "N", "O"].forEach((col) => {
       worksheet.getColumn(col).numFmt = "#,##0.00";
     });
 
     // Freeze
-    worksheet.views = [{ state: "frozen", ySplit: 2 }];
+    worksheet.views = [
+      {
+        state: "frozen",
+        ySplit: 2,
+        showGridLines: false,
+      },
+    ];
 
     // Filter
     worksheet.autoFilter = {
       from: "A2",
-      to: "O2",
+      to: "P2",
     };
 
     // Response
@@ -6776,6 +7176,13 @@ app.get("/export/region-analysis", async (req, res) => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    applyPremiumExcelStyle(worksheet, {
+      headerRowNumber: 2,
+      freezeRow: 2,
+      filterFrom: "A2",
+      filterTo: "P2",
+      statusColumn: "B",
+    });
 
     await workbook.xlsx.write(res);
     res.end();
@@ -6785,13 +7192,14 @@ app.get("/export/region-analysis", async (req, res) => {
   }
 });
 
-app.get("/export/detail-excel", async (req, res) => {
+app.get("/export/detail-excel", authMiddleware, async (req, res) => {
   try {
     const { region = "", type = "", subcon = "" } = req.query;
 
     const result = await pool.query(buildMasterJoinedQuery());
 
-    let rows = (result.rows || []).map((row) => ({
+    const filteredRows = applySubconFilter(req, result.rows || []);
+    let rows = filteredRows.map((row) => ({
       ...row,
       currency: normalizeCurrency(row.currency),
     }));
@@ -6804,7 +7212,7 @@ app.get("/export/detail-excel", async (req, res) => {
       );
     }
 
-    if (subcon) {
+    if (subcon && String(req.user?.role).toLowerCase() !== "subcon") {
       rows = rows.filter(
         (row) =>
           String(row.subcon_name || "")
@@ -6880,6 +7288,25 @@ app.get("/export/detail-excel", async (req, res) => {
         subcon_name: row.subcon_name || "",
       });
     });
+
+    const totalRows = worksheet.rowCount + 20;
+    const totalCols = worksheet.columnCount;
+
+    for (let i = 1; i <= totalRows; i++) {
+      const row = worksheet.getRow(i);
+
+      for (let j = 1; j <= totalCols; j++) {
+        const cell = row.getCell(j);
+
+        if (!cell.value) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF3F4F6" }, // 👈 çok premium açık gri
+          };
+        }
+      }
+    }
 
     const headerRow = worksheet.getRow(2);
     headerRow.eachCell((cell) => {
@@ -6968,7 +7395,13 @@ app.get("/export/detail-excel", async (req, res) => {
       "Content-Disposition",
       `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
     );
-
+    applyPremiumExcelStyle(worksheet, {
+      headerRowNumber: 2,
+      freezeRow: 2,
+      filterFrom: "A2",
+      filterTo: "P2",
+      statusColumn: "B",
+    });
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {

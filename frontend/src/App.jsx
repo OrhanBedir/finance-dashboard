@@ -843,6 +843,19 @@ function RolloutDashboard() {
     loadData();
   }, [regionFilter]);
 
+  useEffect(() => {
+    const handleDataUpdate = () => {
+      console.log("DATA UPDATED EVENT ALINDI");
+      loadData();
+    };
+
+    window.addEventListener("dataUpdated", handleDataUpdate);
+
+    return () => {
+      window.removeEventListener("dataUpdated", handleDataUpdate);
+    };
+  }, [loadData]);
+
   const filteredRows = useMemo(() => {
     const q = search.toLowerCase().trim();
 
@@ -1236,7 +1249,6 @@ function useUsdRate() {
 }
 
 function DailyEntry() {
-  
   const usdRate = useUsdRate();
   function getTodayTR() {
     const d = new Date();
@@ -1794,6 +1806,7 @@ function DailyEntry() {
           },
           body: JSON.stringify(payload),
         });
+        window.dispatchEvent(new Event("dataUpdated"));
 
         setMessage("✅ Kayıt başarıyla güncellendi");
       } else {
@@ -1804,6 +1817,7 @@ function DailyEntry() {
           },
           body: JSON.stringify(payload),
         });
+        window.dispatchEvent(new Event("dataUpdated"));
 
         setMessage("✅ Kayıt başarıyla eklendi");
       }
@@ -1867,47 +1881,46 @@ function DailyEntry() {
   };
 
   const handleAddSiteAndOpenModal = async () => {
-  const siteCode = String(siteSearchCode || "")
-    .trim()
-    .toUpperCase();
+    const siteCode = String(siteSearchCode || "")
+      .trim()
+      .toUpperCase();
 
-  if (!siteCode) {
-    alert("Site Code giriniz");
-    return;
-  }
-
-  try {
-    const addRes = await fetch(`/rollout/add-site`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        site_code: siteCode,
-      }),
-    });
-
-    const addData = await addRes.json();
-
-    if (!addRes.ok) {
-      alert(addData?.error || "Rollout site eklenemedi");
+    if (!siteCode) {
+      alert("Site Code giriniz");
       return;
     }
 
-    // ✅ önce formu doldur
-    setForm((prev) => ({
-      ...prev,
-      site_code: siteCode,
-    }));
+    try {
+      const addRes = await fetch(`/rollout/add-site`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          site_code: siteCode,
+        }),
+      });
 
-    // ✅ sonra modal aç
-    handleOpenEntryModal();
+      const addData = await addRes.json();
 
-  } catch (err) {
-    console.error(err);
-    alert("İşlem sırasında hata oluştu");
-  }
-};
+      if (!addRes.ok) {
+        alert(addData?.error || "Rollout site eklenemedi");
+        return;
+      }
+
+      // ✅ önce formu doldur
+      setForm((prev) => ({
+        ...prev,
+        site_code: siteCode,
+      }));
+
+      // ✅ sonra modal aç
+      handleOpenEntryModal();
+    } catch (err) {
+      console.error(err);
+      alert("İşlem sırasında hata oluştu");
+    }
+  };
 
   return (
     <>
@@ -1928,7 +1941,7 @@ function DailyEntry() {
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           <button
             type="button"
-            className={showQcUpload ? "tab activeTab" : "tab"}
+            className={showQcUpload ? "tab uploadTab activeTab" : "tab uploadTab"}
             onClick={() => {
               setShowQcUpload((prev) => !prev);
               setShowBoqUpload(false);
@@ -1941,7 +1954,7 @@ function DailyEntry() {
 
           <button
             type="button"
-            className={showBoqUpload ? "tab activeTab" : "tab"}
+            className={showBoqUpload ? "tab uploadTab activeTab" : "tab uploadTab"}
             onClick={() => {
               setShowBoqUpload((prev) => !prev);
               setShowQcUpload(false);
@@ -1953,7 +1966,7 @@ function DailyEntry() {
           </button>
           <button
             type="button"
-            className="tab"
+            className="tab uploadTab"
             onClick={() => setShowRolloutUpload(true)}
           >
             Rollout Yükle
@@ -1961,7 +1974,7 @@ function DailyEntry() {
 
           <button
             type="button"
-            className={showHwPoUpload ? "tab activeTab" : "tab"}
+            className={showHwPoUpload ? "tab uploadTab activeTab" : "tab uploadTab"}
             onClick={() => {
               setShowHwPoUpload((prev) => !prev);
               setShowBoqUpload(false);
@@ -1974,7 +1987,7 @@ function DailyEntry() {
 
           <button
             type="button"
-            className={showCompletedImport ? "tab activeTab" : "tab"}
+            className={showCompletedImport ? "tab uploadTab activeTab" : "tab uploadTab"}
             onClick={() => {
               setShowCompletedImport((prev) => !prev);
               setShowBoqUpload(false);
@@ -1987,7 +2000,7 @@ function DailyEntry() {
 
           <button
             type="button"
-            className="tab"
+            className="excelBtn"
             onClick={handleExportAllEntriesExcel}
           >
             Tüm İşleri Excel İndir
@@ -6348,7 +6361,7 @@ function FinanceDashboard({
                 >
                   <button
                     type="button"
-                    className="tab"
+                    className="excelBtn"
                     onClick={handleExportFilteredSubconExcel}
                   >
                     Excel İndir
@@ -7255,6 +7268,19 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     whiteSpace: "nowrap",
   };
 
+  const subconRate =
+    String(userSubconName || "").toLowerCase() === "federal"
+      ? 0.8
+      : String(userSubconName || "").toLowerCase() === "ubs"
+        ? 0.75
+        : 1;
+
+  const subconSummary = {
+    hakedis: executiveSummary.completed * subconRate,
+    poBeklerHakedis: executiveSummary.noPO * subconRate,
+    notInvoicedHakedis: executiveSummary.notInvoiced * subconRate,
+  };
+
   return (
     <>
       <h1 style={{ marginBottom: "10px", textAlign: "center" }}>
@@ -7281,37 +7307,53 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             textAlign: "center",
           }}
         >
-          GENEL ÖZET
+          {isSubconUser ? `${userSubconName} GENEL ÖZET` : "GENEL ÖZET"}
         </div>
 
         <div style={{ background: "#f9fafb" }}>
-          <Row
-            label="Tamamlanan İş Tutarı"
-            value={executiveSummary.completed}
-          />
-          <Row
-            label="Kesilen Fatura Tutarı"
-            value={executiveSummary.invoiced}
-          />
-          <Row
-            label="Faturalandırma Oranı"
-            value={executiveSummary.ratio}
-            isPercent
-          />
-          <Row
-            label="Faturalandırılmamış İş"
-            value={executiveSummary.notInvoiced}
-            isNegativeHighlight
-          />
-          <Row
-            label="PO Açılmış Ama Faturalanmamış"
-            value={executiveSummary.poOpenedNotInvoiced}
-          />
-          <Row
-            label="PO Açılmamış İş"
-            value={executiveSummary.noPO}
-            isNegativeHighlight
-          />
+          {isSubconUser ? (
+            <>
+              <Row label="Toplam Hakediş" value={subconSummary.hakedis} />
+
+              <Row label="Hakediş Oranı" value={subconRate * 100} isPercent />
+
+              <Row label="Hakediş Tutarı" value={subconSummary.hakedis} />
+
+              <Row
+                label="PO Bekleyen Hakediş"
+                value={subconSummary.poBeklerHakedis}
+              />
+
+              <Row
+                label="Faturalanmamış Hakediş"
+                value={subconSummary.notInvoicedHakedis}
+              />
+            </>
+          ) : (
+            <>
+              <Row
+                label="Tamamlanan İş Tutarı"
+                value={executiveSummary.completed}
+              />
+              <Row
+                label="Kesilen Fatura Tutarı"
+                value={executiveSummary.invoiced}
+              />
+              <Row
+                label="Faturalandırma Oranı"
+                value={executiveSummary.ratio}
+              />
+              <Row
+                label="Faturalanmamış İş"
+                value={executiveSummary.not_invoiced}
+              />
+              <Row
+                label="PO Açılmış Ama Faturalanmamış"
+                value={executiveSummary.po_open}
+              />
+              <Row label="PO Açılmamış İş" value={executiveSummary.po_bekler} />
+            </>
+          )}
         </div>
       </div>
 
@@ -7363,119 +7405,178 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 </div>
 
                 <div style={{ background: "#f9fafb" }}>
-                  <div style={regionRowStyle}>
-                    <span style={{ color: "#374151", textAlign: "left" }}>
-                      Toplam İş
-                    </span>
-                    <strong style={{ textAlign: "right" }}>
-                      {formatTRY(completed)}
-                    </strong>
-                  </div>
+                  {isSubconUser ? (
+                    <>
+                      <div style={regionRowStyle}>
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          Hakediş
+                        </span>
+                        <strong style={{ textAlign: "right" }}>
+                          {formatTRY(completed * subconRate)}
+                        </strong>
+                      </div>
 
-                  <div style={regionRowStyle}>
-                    <span style={{ color: "#374151", textAlign: "left" }}>
-                      Kesilen Fatura
-                    </span>
-                    <strong style={{ textAlign: "right" }}>
-                      {formatTRY(billed)}
-                    </strong>
-                  </div>
+                      <div
+                        style={{ ...regionRowStyle, cursor: "pointer" }}
+                        onClick={() =>
+                          openRegionDetail(item.region, "PO_BEKLER")
+                        }
+                      >
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          PO Bekleyen Hakediş
+                        </span>
+                        <strong
+                          style={{ color: "#dc2626", textAlign: "right" }}
+                        >
+                          {formatTRY(poBekler * subconRate)}
+                        </strong>
+                      </div>
 
-                  <div style={regionRowStyle}>
-                    <span style={{ color: "#374151", textAlign: "left" }}>
-                      Faturalandırma Oranı
-                    </span>
-                    <strong style={{ textAlign: "right" }}>
-                      %{ratio.toFixed(1)}
-                    </strong>
-                  </div>
+                      <div
+                        style={{
+                          ...regionRowStyle,
+                          cursor: "pointer",
+                          borderBottom: "none",
+                        }}
+                        onClick={() =>
+                          openRegionDetail(item.region, "NOT_INVOICED")
+                        }
+                      >
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          Faturalanmamış Hakediş
+                        </span>
+                        <strong
+                          style={{ color: "#dc2626", textAlign: "right" }}
+                        >
+                          {formatTRY(notBilled * subconRate)}
+                        </strong>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={regionRowStyle}>
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          Toplam İş
+                        </span>
+                        <strong style={{ textAlign: "right" }}>
+                          {formatTRY(completed)}
+                        </strong>
+                      </div>
 
-                  <div style={regionRowStyle}>
-                    <span style={{ color: "#374151", textAlign: "left" }}>
-                      PO Açılmış
-                    </span>
-                    <strong style={{ textAlign: "right" }}>
-                      {formatTRY(okAmount)}
-                    </strong>
-                  </div>
+                      <div style={regionRowStyle}>
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          Kesilen Fatura
+                        </span>
+                        <strong style={{ textAlign: "right" }}>
+                          {formatTRY(billed)}
+                        </strong>
+                      </div>
 
-                  <div
-                    style={{ ...regionRowStyle, cursor: "pointer" }}
-                    onClick={() => openRegionDetail(item.region, "PO_BEKLER")}
-                  >
-                    <span style={{ color: "#374151", textAlign: "left" }}>
-                      PO Açılmamış
-                    </span>
-                    <strong style={{ color: "#dc2626", textAlign: "right" }}>
-                      {formatTRY(poBekler)}
-                    </strong>
-                  </div>
+                      <div style={regionRowStyle}>
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          Faturalandırma Oranı
+                        </span>
+                        <strong style={{ textAlign: "right" }}>
+                          %{ratio.toFixed(1)}
+                        </strong>
+                      </div>
 
-                  <div
-                    style={{
-                      ...regionRowStyle,
-                      cursor: "pointer",
-                    }}
-                    onClick={() =>
-                      openRegionDetail(item.region, "NOT_INVOICED")
-                    }
-                  >
-                    <span style={{ color: "#374151", textAlign: "left" }}>
-                      Faturalanmamış İş
-                    </span>
-                    <strong style={{ color: "#dc2626", textAlign: "right" }}>
-                      {formatTRY(notBilled)}
-                    </strong>
-                  </div>
+                      <div style={regionRowStyle}>
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          PO Açılmış
+                        </span>
+                        <strong style={{ textAlign: "right" }}>
+                          {formatTRY(okAmount)}
+                        </strong>
+                      </div>
 
-                  {!isSubconUser && (
-                    <div
-                      style={{
-                        ...regionRowStyle,
-                        cursor: "pointer",
-                      }}
-                      onClick={() => openQcReadyModal(item.region, "80")}
-                    >
-                      <span style={{ color: "#374151", textAlign: "left" }}>
-                        QC OK Fatura Kesilecek 80%
-                      </span>
-                      <strong style={{ color: "#166534", textAlign: "right" }}>
-                        {formatTRY(getQcReady80TotalByRegion(item.region))}
-                      </strong>
-                    </div>
+                      <div
+                        style={{ ...regionRowStyle, cursor: "pointer" }}
+                        onClick={() =>
+                          openRegionDetail(item.region, "PO_BEKLER")
+                        }
+                      >
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          PO Açılmamış
+                        </span>
+                        <strong
+                          style={{ color: "#dc2626", textAlign: "right" }}
+                        >
+                          {formatTRY(poBekler)}
+                        </strong>
+                      </div>
+
+                      <div
+                        style={{ ...regionRowStyle, cursor: "pointer" }}
+                        onClick={() =>
+                          openRegionDetail(item.region, "NOT_INVOICED")
+                        }
+                      >
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          Faturalanmamış İş
+                        </span>
+                        <strong
+                          style={{ color: "#dc2626", textAlign: "right" }}
+                        >
+                          {formatTRY(notBilled)}
+                        </strong>
+                      </div>
+
+                      <div
+                        style={{ ...regionRowStyle, cursor: "pointer" }}
+                        onClick={() => openQcReadyModal(item.region, "80")}
+                      >
+                        <span style={{ color: "#374151", textAlign: "left" }}>
+                          QC OK Fatura Kesilecek 80%
+                        </span>
+                        <strong
+                          style={{ color: "#166534", textAlign: "right" }}
+                        >
+                          {formatTRY(getQcReady80TotalByRegion(item.region))}
+                        </strong>
+                      </div>
+
+                      <div
+                        style={{
+                          ...regionRowStyle,
+                          cursor: "pointer",
+                          borderBottom: "none",
+                        }}
+                        onClick={() =>
+                          openQcReadyModal(item.region, "20_fac_ok")
+                        }
+                      >
+                        <span style={{ color: "#16a34a", textAlign: "left" }}>
+                          FAC OK Fatura Bekler 20%
+                        </span>
+                        <strong
+                          style={{ color: "#16a34a", textAlign: "right" }}
+                        >
+                          {formatTRY(getFacOk20TotalByRegion(item.region))}
+                        </strong>
+                      </div>
+
+                      <div
+                        style={{
+                          ...regionRowStyle,
+                          cursor: "pointer",
+                          borderBottom: "none",
+                        }}
+                        onClick={() =>
+                          openQcReadyModal(item.region, "20_fac_nok")
+                        }
+                      >
+                        <span style={{ color: "#dc2626", textAlign: "left" }}>
+                          FAC NOK Fatura Bekler 20%
+                        </span>
+                        <strong
+                          style={{ color: "#dc2626", textAlign: "right" }}
+                        >
+                          {formatTRY(getFacNok20TotalByRegion(item.region))}
+                        </strong>
+                      </div>
+                    </>
                   )}
-
-                  <div
-                    style={{
-                      ...regionRowStyle,
-                      cursor: "pointer",
-                      borderBottom: "none",
-                    }}
-                    onClick={() => openQcReadyModal(item.region, "20_fac_ok")}
-                  >
-                    <span style={{ color: "#16a34a", textAlign: "left" }}>
-                      FAC OK Fatura Bekler 20%
-                    </span>
-                    <strong style={{ color: "#16a34a", textAlign: "right" }}>
-                      {formatTRY(getFacOk20TotalByRegion(item.region))}
-                    </strong>
-                  </div>
-
-                  <div
-                    style={{
-                      ...regionRowStyle,
-                      cursor: "pointer",
-                      borderBottom: "none",
-                    }}
-                    onClick={() => openQcReadyModal(item.region, "20_fac_nok")}
-                  >
-                    <span style={{ color: "#dc2626", textAlign: "left" }}>
-                      FAC NOK Fatura Bekler 20%
-                    </span>
-                    <strong style={{ color: "#dc2626", textAlign: "right" }}>
-                      {formatTRY(getFacNok20TotalByRegion(item.region))}
-                    </strong>
-                  </div>
                 </div>
               </div>
             );
@@ -8486,7 +8587,8 @@ function App() {
   });
   const isAdmin = user?.role === "admin";
   const isSubconUser =
-    user?.role === "user" && String(user?.subcon_name || "").trim() !== "";
+    String(user?.role || "").toLowerCase() === "subcon" ||
+    String(user?.subcon_name || "").trim() !== "";
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -9346,6 +9448,121 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       return String(r[dateField] || "").trim() !== "";
     }).length;
   };
+  const getSmartDateValue = (row, dateField) => {
+    const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
+
+    const materialOk =
+      String(row.malzeme_status || "").toUpperCase() === "OK" ||
+      String(row.malzeme_status || "").trim() !== "";
+
+    const installationStart =
+      row.installation_actual_start_date ||
+      row.inst_actual_start_date ||
+      row.install_start_date ||
+      row.plan_start_date ||
+      row.inst_plan_start_date ||
+      row.rf_plan_start_date ||
+      "";
+
+    const installationEnd =
+      row.installation_actual_end_date ||
+      row.inst_actual_end_date ||
+      row.install_end_date ||
+      row.onair_date ||
+      "";
+
+    const onAir =
+      row.onair_date ||
+      row.installation_actual_end_date ||
+      row.inst_actual_end_date ||
+      row.install_end_date ||
+      "";
+
+    if (dateField === "plan_start_date") {
+      return (
+        row.plan_start_date ||
+        row.inst_plan_start_date ||
+        row.rf_plan_start_date ||
+        installationStart ||
+        installationEnd ||
+        onAir ||
+        (qcOk ? "SMART_OK" : "")
+      );
+    }
+
+    if (dateField === "installation_actual_start_date") {
+      return (
+        row.installation_actual_start_date ||
+        row.inst_actual_start_date ||
+        row.install_start_date ||
+        installationEnd ||
+        onAir ||
+        (qcOk ? "SMART_OK" : "")
+      );
+    }
+
+    if (dateField === "installation_actual_end_date") {
+      return (
+        row.installation_actual_end_date ||
+        row.inst_actual_end_date ||
+        row.install_end_date ||
+        row.onair_date ||
+        (qcOk ? "SMART_OK" : "")
+      );
+    }
+
+    if (dateField === "qc_closed_date") {
+      return (
+        row.qc_closed_date || row.qc_close_date || (qcOk ? "SMART_OK" : "")
+      );
+    }
+
+    if (dateField === "pac_actual_end_date") {
+      return row.pac_actual_end_date || row.pac_end_date || "";
+    }
+
+    if (dateField === "btk_approved" || dateField === "btk_certificate_date") {
+      return row.btk_approved || row.btk_certificate_date || "";
+    }
+
+    if (dateField === "tssr_plan_start_date") {
+      return row.tssr_plan_start_date || row.tssr_plan_date || "";
+    }
+
+    if (dateField === "tssr_actual_end_date") {
+      return row.tssr_actual_end_date || row.tssr_end_date || "";
+    }
+
+    if (dateField === "btk_plan_start_date") {
+      return row.btk_plan_start_date || row.btk_plan_date || "";
+    }
+
+    if (dateField === "btk_actual_end_date") {
+      return row.btk_actual_end_date || row.btk_end_date || "";
+    }
+
+    if (dateField === "power_plan_start_date") {
+      return row.power_plan_start_date || row.power_start_date || "";
+    }
+
+    if (dateField === "power_actual_end_date") {
+      return row.power_actual_end_date || row.power_end_date || "";
+    }
+
+    if (dateField === "enh_plan_start_date") {
+      return row.enh_plan_start_date || "";
+    }
+
+    if (dateField === "enh_actual_end_date") {
+      return row.enh_actual_end_date || "";
+    }
+
+    if (dateField === "abonelik_actual_end_date") {
+      return row.abonelik_actual_end_date || row.abonelik_end_date || "";
+    }
+
+    return row[dateField] || "";
+  };
 
   const getActualValue = (type, item, data) => {
     const backendValue = Number(data[item.key] || 0);
@@ -9368,19 +9585,21 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
         const siteCode = String(r.site_code || "")
           .trim()
           .toUpperCase();
-        const planStart = String(getEffectivePlanStartDate(r) || "").trim();
 
-        if (siteCode && planStart) {
+        if (siteCode) {
           uniqueSites.add(siteCode);
         }
       });
 
       return uniqueSites.size;
     }
-
     const calculatedValue = item.dateField
-      ? calcActualFromRows(type, item.dateField)
-      : backendValue;
+      ? getRowsByType(type).filter((r) => {
+          const value = getSmartDateValue(r, item.dateField);
+
+          return String(value || "").trim() !== "";
+        }).length
+      : getRowsByType(type).length;
 
     return calculatedValue;
   };
@@ -9404,14 +9623,13 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
         .trim();
 
       const detectedRegion =
-        String(r.bolge || r.region || "").trim() ||
         getRegion(r.site_code) ||
+        String(r.bolge || r.region || "").trim() ||
         "";
+      console.log("REGION TEST:", r.site_code, detectedRegion, regionFilter);
 
       const regionOk =
-        regionFilter === "ALL" ||
-        detectedRegion.toLowerCase().trim() ===
-          String(regionFilter).toLowerCase().trim();
+        regionFilter === "ALL" || detectedRegion === regionFilter;
 
       if (!regionOk) return false;
 
@@ -9457,9 +9675,9 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
     return typeRows.filter((r) => {
       const value =
         item.dateField === "plan_start_date"
-          ? getEffectivePlanStartDate(r)
-          : r[item.dateField];
-
+          ? getSmartDateValue(r, "plan_start_date")
+          : getSmartDateValue(r, item.dateField);
+      if (value === "SMART_OK") return false;
       const week = getWeekNumber(value);
       return week && week <= weekNo;
     }).length;
@@ -9808,6 +10026,32 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     }
   };
 
+  const deleteRollout = async () => {
+    if (!existingRow.id) {
+      alert("Bu kayıt henüz database içinde yok");
+      return;
+    }
+
+    const ok = window.confirm(
+      `${form.site_code} rollout kaydını silmek istediğine emin misin?`,
+    );
+
+    if (!ok) return;
+
+    try {
+      await fetchJson(`${API_BASE}/rollout/${existingRow.id}`, {
+        method: "DELETE",
+        withAuth: true,
+      });
+
+      alert("Kayıt silindi");
+      onSaved();
+    } catch (err) {
+      console.error("ROLLOUT DELETE FRONT ERROR:", err);
+      alert(err.message || "Kayıt silinemedi");
+    }
+  };
+
   const input = (label, field, type = "text") => (
     <label className="modalField">
       <span>{label}</span>
@@ -9924,6 +10168,21 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           <button className="tab" onClick={onClose}>
             Kapat
           </button>
+
+          {existingRow.id && (
+            <button
+              className="tab"
+              onClick={deleteRollout}
+              style={{
+                background: "#fee2e2",
+                color: "#991b1b",
+                fontWeight: "700",
+              }}
+            >
+              Kaydı Sil
+            </button>
+          )}
+
           <button className="saveButton" onClick={save}>
             Kaydet
           </button>
