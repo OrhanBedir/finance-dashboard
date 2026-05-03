@@ -1503,10 +1503,7 @@ body {
   background-repeat: repeat;
   background-size: 260px 120px;
 }
-#root > * {
-  position: relative;
-  z-index: 1;
-}
+
 
 .container,
 .entryPanel,
