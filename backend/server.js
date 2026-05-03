@@ -6682,6 +6682,9 @@ async function fetchData(isAdmin, subconName) {
   let beklerTry = 0;
   let beklerUsd = 0;
 
+  let billedTry = 0;
+  let billedUsd = 0;
+
   let ok = 0;
   let partial = 0;
   let cancel = 0;
@@ -6690,12 +6693,20 @@ async function fetchData(isAdmin, subconName) {
   (result.rows || []).forEach((row) => {
     const done = Number(row.done_qty || 0);
     const req = Number(row.requested_qty || 0);
+    const billed = Number(row.billed_qty || 0);
     const price = Number(row.unit_price || 0);
     const currency = normalizeCurrency(row.currency);
-    const amount = done * price;
 
-    if (currency === "USD") totalUsd += amount;
-    else totalTry += amount;
+    const amount = done * price;
+    const billedAmount = billed * price;
+
+    if (currency === "USD") {
+      totalUsd += amount;
+      billedUsd += billedAmount;
+    } else {
+      totalTry += amount;
+      billedTry += billedAmount;
+    }
 
     if (req === 0) {
       bekler++;
@@ -6713,23 +6724,23 @@ async function fetchData(isAdmin, subconName) {
   });
 
   const completed = totalTry + totalUsd;
+  const totalBilled = billedTry + billedUsd;
   const po_bekler = beklerTry + beklerUsd;
   const okAmount = okTry + okUsd;
 
+  const notInvoiced = Math.max(completed - totalBilled, 0);
+  const poOpenedButNotInvoiced = Math.max(okAmount - totalBilled, 0);
+
   const paymentRate =
-    String(subconName || "")
-      .trim()
-      .toLowerCase() === "federal"
+    String(subconName || "").trim().toLowerCase() === "federal"
       ? 0.8
-      : String(subconName || "")
-            .trim()
-            .toLowerCase() === "ubs"
+      : String(subconName || "").trim().toLowerCase() === "ubs"
         ? 0.75
         : 1;
 
   const subcon_hakedis = completed * paymentRate;
   const po_bekler_hakedis = po_bekler * paymentRate;
-  const not_invoiced_hakedis = Math.max(okAmount * paymentRate, 0);
+  const not_invoiced_hakedis = notInvoiced * paymentRate;
 
   return {
     total_done_amount_try: totalTry,
@@ -6738,6 +6749,12 @@ async function fetchData(isAdmin, subconName) {
     total_ok_amount_usd: okUsd,
     total_po_bekler_amount_try: beklerTry,
     total_po_bekler_amount_usd: beklerUsd,
+
+    total_billed_amount_try: billedTry,
+    total_billed_amount_usd: billedUsd,
+    not_invoiced_amount: notInvoiced,
+    po_opened_not_invoiced_amount: poOpenedButNotInvoiced,
+
     ok_count: ok,
     partial_count: partial,
     cancel_count: cancel,
