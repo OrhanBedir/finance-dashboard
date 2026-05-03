@@ -539,8 +539,11 @@ app.get("/rollout/mismatch-check", async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("ROLLOUT MISMATCH CHECK ERROR:", err);
-    res.status(500).json({ ok: false, error: err.message });
+    console.error("AUTH LOGIN ERROR:", err.message);
+    return res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
   }
 });
 app.get("/rollout/missing-sites", authMiddleware, async (req, res) => {
@@ -6621,6 +6624,11 @@ app.delete("/master/:id", async (req, res) => {
     console.error("MASTER DELETE ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// geçici silinecek
+app.get("/test-login", (req, res) => {
+  res.json({ ok: true, message: "login endpoint çalışıyor" });
 });
 
 /* ================== PO DASHBOARD SUMMARY ================== */
