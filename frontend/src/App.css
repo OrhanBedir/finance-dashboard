@@ -1493,24 +1493,31 @@ body {
 }
 
 #root::before {
-  content: "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi";
-  
+  content:
+    "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi \A"
+    "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi \A"
+    "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi \A"
+    "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi \A"
+    "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi \A"
+    "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi \A"
+    "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi \A"
+    "OHTS / Operasyon ve Hakediş Takip Sistemi   OHTS / Operasyon ve Hakediş Takip Sistemi";
+
   position: fixed;
-  top: -150px;
-  left: -150px;
-  width: 200%;
-  height: 200%;
+  top: -180px;
+  left: -280px;
+  width: 240%;
+  height: 240%;
   z-index: -1;
   pointer-events: none;
 
-  font-size: 22px;          /* biraz büyüttük */
-  font-weight: 800;         /* daha net */
-  color: rgba(31, 41, 55, 0.075);  /* 🔥 biraz daha belirgin */
-
+  font-size: 22px;
+  font-weight: 800;
+  color: rgba(31, 41, 55, 0.075);
   transform: rotate(-25deg);
-  white-space: pre-wrap;
-  line-height: 60px;        /* 🔥 daha sık */
-  letter-spacing: 0.5px;    /* 🔥 daha şık spacing */
+  white-space: pre;
+  line-height: 70px;
+  letter-spacing: 0.5px;
 }
 
 .container,
