@@ -9660,11 +9660,12 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       const rowType = String(r.site_type || "")
         .toUpperCase()
         .trim();
+
       const siteCode = String(r.site_code || "")
         .toUpperCase()
         .trim();
 
-      
+      const detectedRegion = getRowRegion(r);
 
       const regionOk =
         regionFilter === "ALL" ||
