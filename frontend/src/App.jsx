@@ -9649,7 +9649,11 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
 
     return String(r.bolge || r.region || "").trim();
   };
- 
+
+  const normalizeRegionName = (value) =>
+    String(value || "")
+      .trim()
+      .toLocaleLowerCase("tr-TR");
 
   const getRowsByType = (type) =>
     rows.filter((r) => {
@@ -9659,12 +9663,13 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       const siteCode = String(r.site_code || "")
         .toUpperCase()
         .trim();
-      const detectedRegion = getRowRegion(r);  
+
+      
 
       const regionOk =
         regionFilter === "ALL" ||
-        detectedRegion.toLocaleLowerCase("tr-TR") ===
-          String(regionFilter).toLocaleLowerCase("tr-TR");
+        normalizeRegionName(detectedRegion) ===
+          normalizeRegionName(regionFilter);
 
       if (!regionOk) return false;
 
@@ -9675,6 +9680,7 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       if (type === "DSS") {
         return rowType === "DSS" || siteCode.includes("_DSS_");
       }
+
       if (type === "LTE") {
         return (
           rowType === "LTE" ||
