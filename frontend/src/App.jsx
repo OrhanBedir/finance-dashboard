@@ -323,18 +323,12 @@ function getRegion(siteCode = "", projectCode = "") {
     .trim()
     .toUpperCase();
 
-  if (project === "56A0SJC") {
-    if (code.endsWith("_IZM")) return "İzmir";
-    if (code.endsWith("_KON")) return "Konya";
-    if (code.endsWith("_ANT")) return "Antalya";
-    if (code.endsWith("_ANK")) return "Ankara";
-  }
-
   if (
     code.startsWith("ES") ||
     code.startsWith("BO") ||
     code.startsWith("ZO") ||
     code.startsWith("KA") ||
+    code.startsWith("BI") ||
     code.startsWith("AN") ||
     code.includes("_ANK")
   ) {
@@ -347,8 +341,7 @@ function getRegion(siteCode = "", projectCode = "") {
     code.startsWith("MU") ||
     code.startsWith("MN") ||
     code.startsWith("AI") ||
-    code.startsWith("DE") ||
-    code.includes("_IZM")
+    code.startsWith("DE")
   ) {
     return "İzmir";
   }
@@ -357,13 +350,15 @@ function getRegion(siteCode = "", projectCode = "") {
     code.startsWith("AT") ||
     code.startsWith("IP") ||
     code.startsWith("BU") ||
-    code.startsWith("AF") ||
-    code.includes("_ANT")
+    code.startsWith("AF")
   ) {
     return "Antalya";
   }
 
-  if (code.includes("_KON")) return "Konya";
+  // Project code üzerinden yedek bölge tahmini
+  if (project.includes("ANK")) return "Ankara";
+  if (project.includes("IZM") || project.includes("IZ")) return "İzmir";
+  if (project.includes("ANT")) return "Antalya";
 
   return "Tanımsız";
 }
@@ -6665,7 +6660,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // ✅ FAC OK 20%
   const getFacOk20RowsByRegion = (regionName) => {
     return rows.filter((row) => {
-      const rowRegion = String(getRegion(row.site_code, row.project_code) || "").toLowerCase();
+      const rowRegion = String(
+        getRegion(row.site_code, row.project_code) || "",
+      ).toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
@@ -6686,7 +6683,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // ❌ FAC NOK 20%
   const getFacNok20RowsByRegion = (regionName) => {
     return rows.filter((row) => {
-      const rowRegion = String(getRegion(row.site_code, row.project_code) || "").toLowerCase();
+      const rowRegion = String(
+        getRegion(row.site_code, row.project_code) || "",
+      ).toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
@@ -6737,7 +6736,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const openRegionDetail = (regionName, type) => {
     const filtered = rows.filter((row) => {
-      const sameRegion = getRegion(row.site_code, row.project_code) === regionName;
+      const sameRegion =
+        getRegion(row.site_code, row.project_code) === regionName;
       if (!sameRegion) return false;
 
       const unitPrice = Number(row.unit_price || 0);
@@ -6786,7 +6786,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   }, []);
   const getQcReady80RowsByRegion = (regionName) => {
     return rows.filter((row) => {
-      const rowRegion = String(getRegion(row.site_code, row.project_code) || "").toLowerCase();
+      const rowRegion = String(
+        getRegion(row.site_code, row.project_code) || "",
+      ).toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
@@ -6818,7 +6820,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const getQcReady20RowsByRegion = (regionName) => {
     return rows.filter((row) => {
-      const rowRegion = String(getRegion(row.site_code, row.project_code)|| "").toLowerCase();
+      const rowRegion = String(
+        getRegion(row.site_code, row.project_code) || "",
+      ).toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
