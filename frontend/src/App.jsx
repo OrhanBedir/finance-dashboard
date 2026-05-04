@@ -9640,6 +9640,17 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
     );
   };
 
+  const getRowRegion = (r) => {
+    const detected = getRegion(r.site_code);
+
+    if (detected && detected !== "Tanımsız") {
+      return detected;
+    }
+
+    return String(r.bolge || r.region || "").trim();
+  };
+ 
+
   const getRowsByType = (type) =>
     rows.filter((r) => {
       const rowType = String(r.site_type || "")
@@ -9648,15 +9659,12 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       const siteCode = String(r.site_code || "")
         .toUpperCase()
         .trim();
-
-      const detectedRegion =
-        getRegion(r.site_code) ||
-        String(r.bolge || r.region || "").trim() ||
-        "";
-      console.log("REGION TEST:", r.site_code, detectedRegion, regionFilter);
+      const detectedRegion = getRowRegion(r);  
 
       const regionOk =
-        regionFilter === "ALL" || detectedRegion === regionFilter;
+        regionFilter === "ALL" ||
+        detectedRegion.toLocaleLowerCase("tr-TR") ===
+          String(regionFilter).toLocaleLowerCase("tr-TR");
 
       if (!regionOk) return false;
 
