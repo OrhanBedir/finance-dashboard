@@ -4584,6 +4584,22 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
       });
     });
 
+    const regions = [...new Set(allRows.map((r) => r.bolge).filter(Boolean))];
+
+    if (!regions.length) {
+      console.log("⚠️ Bölge bulunamadı, delete yapılmadı");
+    } else {
+      console.log("Silinecek bölgeler:", regions);
+
+      for (const region of regions) {
+        await pool.query("DELETE FROM rollout_progress WHERE bolge = $1", [
+          region,
+        ]);
+      }
+    }
+
+    console.log("Yüklenecek kayıt sayısı:", allRows.length);
+
     for (const r of allRows) {
       await pool.query(
         `
