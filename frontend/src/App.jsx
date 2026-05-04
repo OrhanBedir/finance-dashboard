@@ -315,18 +315,28 @@ function getQtyAnalysis(doneQty, requestedQty) {
   };
 }
 
-function getRegion(siteCode = "") {
+function getRegion(siteCode = "", projectCode = "") {
   const code = String(siteCode || "")
     .trim()
     .toUpperCase();
+  const project = String(projectCode || "")
+    .trim()
+    .toUpperCase();
+
+  if (project === "56A0SJC") {
+    if (code.endsWith("_IZM")) return "İzmir";
+    if (code.endsWith("_KON")) return "Konya";
+    if (code.endsWith("_ANT")) return "Antalya";
+    if (code.endsWith("_ANK")) return "Ankara";
+  }
 
   if (
     code.startsWith("ES") ||
     code.startsWith("BO") ||
     code.startsWith("ZO") ||
     code.startsWith("KA") ||
-    code.includes("_ANK") ||
-    code.startsWith("AN")
+    code.startsWith("AN") ||
+    code.includes("_ANK")
   ) {
     return "Ankara";
   }
@@ -337,7 +347,8 @@ function getRegion(siteCode = "") {
     code.startsWith("MU") ||
     code.startsWith("MN") ||
     code.startsWith("AI") ||
-    code.startsWith("DE")
+    code.startsWith("DE") ||
+    code.includes("_IZM")
   ) {
     return "İzmir";
   }
@@ -346,10 +357,13 @@ function getRegion(siteCode = "") {
     code.startsWith("AT") ||
     code.startsWith("IP") ||
     code.startsWith("BU") ||
-    code.startsWith("AF")
+    code.startsWith("AF") ||
+    code.includes("_ANT")
   ) {
     return "Antalya";
   }
+
+  if (code.includes("_KON")) return "Konya";
 
   return "Tanımsız";
 }
@@ -3422,7 +3436,7 @@ function FinanceDashboard({
         curr === "USD" ? rawTotal * Number(usdTryRate || 0) : rawTotal;
 
       return {
-        Bölge: getRegion(row.site_code) || "",
+        Bölge: getRegion(row.site_code, row.project_code) || "",
         Status: row.status || "",
         Project: row.project_code || "",
         Site: row.site_code || "",
@@ -6651,7 +6665,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // ✅ FAC OK 20%
   const getFacOk20RowsByRegion = (regionName) => {
     return rows.filter((row) => {
-      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+      const rowRegion = String(getRegion(row.site_code, row.project_code) || "").toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
@@ -6672,7 +6686,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // ❌ FAC NOK 20%
   const getFacNok20RowsByRegion = (regionName) => {
     return rows.filter((row) => {
-      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+      const rowRegion = String(getRegion(row.site_code, row.project_code) || "").toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
@@ -6723,7 +6737,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const openRegionDetail = (regionName, type) => {
     const filtered = rows.filter((row) => {
-      const sameRegion = getRegion(row.site_code) === regionName;
+      const sameRegion = getRegion(row.site_code, row.project_code) === regionName;
       if (!sameRegion) return false;
 
       const unitPrice = Number(row.unit_price || 0);
@@ -6772,7 +6786,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   }, []);
   const getQcReady80RowsByRegion = (regionName) => {
     return rows.filter((row) => {
-      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+      const rowRegion = String(getRegion(row.site_code, row.project_code) || "").toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
@@ -6804,7 +6818,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const getQcReady20RowsByRegion = (regionName) => {
     return rows.filter((row) => {
-      const rowRegion = String(getRegion(row.site_code) || "").toLowerCase();
+      const rowRegion = String(getRegion(row.site_code, row.project_code)|| "").toLowerCase();
 
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
@@ -6958,7 +6972,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     };
 
     rows.forEach((row) => {
-      const region = getRegion(row.site_code);
+      const region = getRegion(row.site_code, row.project_code);
       if (!base[region]) return;
 
       const currency = normalizeCurrency(row.currency);
@@ -7140,14 +7154,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     const q = regionSearch.toLowerCase().trim();
 
     const cleanRows = rows.filter(
-      (row) => getRegion(row.site_code) !== "Tanımsız",
+      (row) => getRegion(row.site_code, row.project_code) !== "Tanımsız",
     );
 
     if (!q) return cleanRows;
 
     return cleanRows.filter((row) => {
       const text = `
-        ${getRegion(row.site_code) || ""}
+        ${getRegion(row.site_code, row.project_code) || ""}
         ${row.status || ""}
         ${row.project_code || ""}
         ${row.site_code || ""}
@@ -8478,7 +8492,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     `${row.project_code}-${row.site_code}-${row.item_code}-${index}`
                   }
                 >
-                  <td>{getRegion(row.site_code)}</td>
+                  <td>{getRegion(row.site_code, row.project_code)}</td>
                   <td>
                     <span
                       style={{
