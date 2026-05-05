@@ -4515,10 +4515,25 @@ function FinanceDashboard({
         <h3 className="listTitle">Gelecek Tahsilat Planı</h3>
 
         <div className="cards" style={{ marginBottom: "18px" }}>
-          <div className="card ok statCard">
-            <div className="statLabel">Bugün Gelecek</div>
-            <div className="statValue">
-              {formatMoneyByCurrency(upcomingSummary.today_total || 0, "TRY")}
+          <div
+            style={{
+              background: "#4caf50",
+              color: "#fff",
+              padding: "22px",
+              borderRadius: "14px",
+              minWidth: "260px",
+              textAlign: "center",
+              fontWeight: 700,
+            }}
+          >
+            <div style={{ fontSize: "16px", marginBottom: "10px" }}>
+              Bugün Tahsil Edilen
+            </div>
+            <div style={{ fontSize: "22px" }}>
+              {formatMoneyByCurrency(
+                upcomingSummary.today_received_total || 0,
+                "TRY",
+              )}
             </div>
           </div>
 
