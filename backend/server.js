@@ -1234,14 +1234,14 @@ async function buildUpcomingCollectionsData() {
       p.invoice_no,
       p.due_date,
       p.payment_date,
-      COALESCE(p.invoice_amount, 0) - COALESCE(p.payment_amount, 0) AS remaining_amount,
+      COALESCE(p.remaining_amount, 0) AS remaining_amount,
       COALESCE(p.currency, 'TRY') AS currency,
       i.invoice_date,
       COALESCE(i.terms, '') AS terms
     FROM hw_payment_rows p
     LEFT JOIN hw_invoice_rows i
       ON TRIM(COALESCE(i.invoice_no, '')) = TRIM(COALESCE(p.invoice_no, ''))
-    WHERE COALESCE(p.invoice_amount, 0) - COALESCE(p.payment_amount, 0) > 0
+    WHERE COALESCE(p.remaining_amount, 0) > 0
     ORDER BY p.id ASC
   `);
 
@@ -6358,11 +6358,11 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     applyPremiumExcelStyle(sheet, {
-      headerRowNumber: 2,
-      freezeRow: 2,
-      filterFrom: "A2",
-      filterTo: "P2",
-      statusColumn: "B",
+      headerRowNumber: 1,
+      freezeRow: 1,
+      filterFrom: "A1",
+      filterTo: "Q1",
+      statusColumn: "J",
     });
     await workbook.xlsx.write(res);
     res.end();
