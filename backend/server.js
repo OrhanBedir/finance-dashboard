@@ -1233,17 +1233,13 @@ async function buildUpcomingCollectionsData() {
     SELECT
       p.invoice_no,
       p.due_date,
-      p.payment_date,
       COALESCE(p.remaining_amount, 0) AS remaining_amount,
-      COALESCE(p.currency, 'TRY') AS currency,
-      i.invoice_date,
-      COALESCE(i.terms, '') AS terms
+      COALESCE(p.currency, 'TRY') AS currency
     FROM hw_payment_rows p
-    LEFT JOIN hw_invoice_rows i
-      ON TRIM(COALESCE(i.invoice_no, '')) = TRIM(COALESCE(p.invoice_no, ''))
     WHERE COALESCE(p.remaining_amount, 0) > 0
-    AND p.payment_date IS NULL
-    ORDER BY p.id ASC
+      AND p.payment_date IS NULL
+      AND p.due_date IS NOT NULL
+    ORDER BY p.due_date ASC
   `);
 
   const today = new Date();
@@ -1255,9 +1251,7 @@ async function buildUpcomingCollectionsData() {
   endOfWeek.setDate(endOfWeek.getDate() + diffToSunday);
   endOfWeek.setHours(23, 59, 59, 999);
 
-  const rows = [];
   const monthlyUpcoming = {};
-
   for (let i = 1; i <= 12; i += 1) {
     monthlyUpcoming[i] = 0;
   }
@@ -1272,69 +1266,38 @@ async function buildUpcomingCollectionsData() {
     const amount = Number(row.remaining_amount || 0);
     if (amount <= 0) continue;
 
-    let effectiveDueDate = null;
+    const dueDate = new Date(row.due_date);
+    dueDate.setHours(0, 0, 0, 0);
 
-    // Önce payment tablosundaki due_date'i kullan
-    if (row.due_date) {
-      effectiveDueDate = new Date(row.due_date);
-      effectiveDueDate.setHours(0, 0, 0, 0);
-    }
+    if (Number.isNaN(dueDate.getTime())) continue;
 
-    // due_date yoksa invoice_date + terms ile hesapla
-    if (!effectiveDueDate && row.invoice_date) {
-      const invoiceDateObj = new Date(row.invoice_date);
-      invoiceDateObj.setHours(0, 0, 0, 0);
-
-      const addDays = getTermDays(row.terms);
-      const calculatedDue = new Date(invoiceDateObj);
-      calculatedDue.setDate(calculatedDue.getDate() + addDays);
-      calculatedDue.setHours(0, 0, 0, 0);
-
-      effectiveDueDate = calculatedDue;
-    }
-
-    // Eğer invoice tarafı yoksa payment tablosundaki due_date'e düş
-    if (!effectiveDueDate && row.due_date) {
-      effectiveDueDate = new Date(row.due_date);
-      effectiveDueDate.setHours(0, 0, 0, 0);
-    }
-
-    if (!effectiveDueDate || Number.isNaN(effectiveDueDate.getTime())) {
-      continue;
-    }
-
-    const dueMonth = effectiveDueDate.getMonth() + 1;
-
-    if (effectiveDueDate.getTime() < today.getTime()) {
+    if (dueDate < today) {
       overdueTotal += amount;
       continue;
     }
 
-    monthlyUpcoming[dueMonth] += amount;
+    const monthNo = dueDate.getMonth() + 1;
+    monthlyUpcoming[monthNo] += amount;
 
-    const dayNameEn = effectiveDueDate.toLocaleDateString("en-US", {
+    if (dueDate.getTime() === today.getTime()) {
+      todayTotal += amount;
+    }
+
+    if (dueDate >= today && dueDate <= endOfWeek) {
+      weekTotal += amount;
+    }
+
+    const yyyy = dueDate.getFullYear();
+    const mm = String(dueDate.getMonth() + 1).padStart(2, "0");
+    const dd = String(dueDate.getDate()).padStart(2, "0");
+    const key = `${yyyy}-${mm}-${dd}`;
+
+    const dayName = dueDate.toLocaleDateString("tr-TR", {
       weekday: "long",
     });
 
     const day_name =
-      dayNameEn === "Monday"
-        ? "Pazartesi"
-        : dayNameEn === "Tuesday"
-          ? "Salı"
-          : dayNameEn === "Wednesday"
-            ? "Çarşamba"
-            : dayNameEn === "Thursday"
-              ? "Perşembe"
-              : dayNameEn === "Friday"
-                ? "Cuma"
-                : dayNameEn === "Saturday"
-                  ? "Cumartesi"
-                  : "Pazar";
-
-    const yyyy = effectiveDueDate.getFullYear();
-    const mm = String(effectiveDueDate.getMonth() + 1).padStart(2, "0");
-    const dd = String(effectiveDueDate.getDate()).padStart(2, "0");
-    const key = `${yyyy}-${mm}-${dd}`;
+      dayName.charAt(0).toLocaleUpperCase("tr-TR") + dayName.slice(1);
 
     if (!groupedMap.has(key)) {
       groupedMap.set(key, {
@@ -1345,23 +1308,12 @@ async function buildUpcomingCollectionsData() {
       });
     }
 
-    const current = groupedMap.get(key);
-    current.amount += amount;
-
-    if (effectiveDueDate.getTime() === today.getTime()) {
-      todayTotal += amount;
-    }
-
-    if (effectiveDueDate >= today && effectiveDueDate <= endOfWeek) {
-      weekTotal += amount;
-    }
+    groupedMap.get(key).amount += amount;
   }
 
-  groupedMap.forEach((value) => {
-    rows.push(value);
-  });
-
-  rows.sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+  const rows = [...groupedMap.values()].sort(
+    (a, b) => new Date(a.due_date) - new Date(b.due_date),
+  );
 
   return {
     rows,
@@ -2393,7 +2345,7 @@ app.get("/finance/summary", async (req, res) => {
         [year],
       ),
 
-            pool.query(
+      pool.query(
         `
         SELECT SUM(COALESCE(payment_amount, 0)) AS total_collections
         FROM hw_payment_rows
@@ -2413,8 +2365,6 @@ app.get("/finance/summary", async (req, res) => {
         `,
         [year, month],
       ),
-
-     
 
       pool.query(`
         SELECT COUNT(*) AS expense_count
