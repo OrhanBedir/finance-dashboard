@@ -1326,108 +1326,35 @@ async function buildUpcomingCollectionsData() {
 }
 
 async function buildOverdueInvoicesData() {
-  await ensureHwInvoiceTable();
-
-  const invoiceResult = await pool.query(`
+  const result = await pool.query(`
     SELECT
       invoice_no,
-      invoice_date,
-      COALESCE(terms, '') AS terms,
-      COALESCE(invoice_status, '') AS invoice_status
-    FROM hw_invoice_rows
-    WHERE invoice_no IS NOT NULL
-      AND invoice_date IS NOT NULL
-    ORDER BY invoice_date ASC, id ASC
-  `);
-
-  const paymentResult = await pool.query(`
-    SELECT
-      COALESCE(invoice_no, '') AS invoice_no,
-      COALESCE(invoice_amount, 0) - COALESCE(payment_amount, 0) AS remaining_amount,
-      COALESCE(currency, 'TRY') AS currency,
-      payment_date,
       due_date,
-      COALESCE(customer_name, '') AS customer_name,
-      COALESCE(payment_method, '') AS payment_method,
-      COALESCE(supplier_name, '') AS supplier_name
+      COALESCE(remaining_amount, 0) AS remaining_amount,
+      COALESCE(currency, 'TRY') AS currency,
+      customer_name,
+      payment_method,
+      supplier_name
     FROM hw_payment_rows
+    WHERE due_date IS NOT NULL
+      AND COALESCE(remaining_amount, 0) > 0
+      AND due_date < CURRENT_DATE
+    ORDER BY due_date ASC
   `);
 
-  const paymentMap = new Map();
+  const rows = result.rows.map((row) => ({
+    invoice_no: row.invoice_no,
+    expected_payment_date: row.due_date,
+    amount: Number(row.remaining_amount || 0),
+    currency: row.currency || "TRY",
+    customer_name: row.customer_name || "",
+    payment_method: row.payment_method || "",
+    supplier_name: row.supplier_name || "",
+  }));
 
-  paymentResult.rows.forEach((row) => {
-    const key = String(row.invoice_no || "").trim();
-    if (!key) return;
-    paymentMap.set(key, row);
-  });
+  const total = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const overdueRows = [];
-  let overdueTotal = 0;
-
-  for (const inv of invoiceResult.rows) {
-    const invoiceNo = String(inv.invoice_no || "").trim();
-    if (!invoiceNo) continue;
-
-    const paymentInfo = findPaymentInfoByInvoiceNo(
-      paymentMap,
-      invoiceNo,
-      inv.currency,
-    );
-    if (!paymentInfo) continue;
-
-    const remainingAmount = Number(paymentInfo.remaining_amount || 0);
-    if (remainingAmount <= 0) continue;
-
-    const invoiceStatus = String(inv.invoice_status || "")
-      .trim()
-      .toUpperCase();
-
-    // Sadece tamamen ödenmiş olanları çıkar
-    if (invoiceStatus === "PAID BY HUAWEI") continue;
-
-    const invoiceDateObj = new Date(inv.invoice_date);
-    invoiceDateObj.setHours(0, 0, 0, 0);
-
-    const addDays = getTermDays(inv.terms);
-    const expectedDateObj = new Date(invoiceDateObj);
-    expectedDateObj.setDate(expectedDateObj.getDate() + addDays);
-    expectedDateObj.setHours(0, 0, 0, 0);
-
-    // Termin henüz gelmemişse gecikmiş değildir
-    if (expectedDateObj.getTime() > today.getTime()) continue;
-
-    const yyyy = expectedDateObj.getFullYear();
-    const mm = String(expectedDateObj.getMonth() + 1).padStart(2, "0");
-    const dd = String(expectedDateObj.getDate()).padStart(2, "0");
-    const expectedPaymentDate = `${yyyy}-${mm}-${dd}`;
-    overdueTotal += remainingAmount;
-
-    overdueRows.push({
-      invoice_no: invoiceNo,
-      invoice_date: inv.invoice_date,
-      expected_payment_date: expectedPaymentDate,
-      terms: inv.terms || "-",
-      amount: remainingAmount,
-      currency: paymentInfo.currency || "TRY",
-      customer_name: paymentInfo.customer_name || "",
-      payment_method: paymentInfo.payment_method || "",
-      supplier_name: paymentInfo.supplier_name || "",
-    });
-  }
-
-  overdueRows.sort((a, b) => {
-    return (
-      new Date(a.expected_payment_date) - new Date(b.expected_payment_date)
-    );
-  });
-
-  return {
-    rows: overdueRows,
-    total: overdueTotal,
-  };
+  return { rows, total };
 }
 
 function calculateExpectedPaymentDate(invoiceDate, terms) {
