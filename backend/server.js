@@ -7044,6 +7044,7 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
     const result = await pool.query(buildMasterJoinedQuery());
 
     const rows = applySubconFilter(req, result.rows || []);
+    const exportSubconName = String(req.user?.subcon_name || "").trim();
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Region Analysis");
@@ -7065,7 +7066,7 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
       { header: "Unit Price", key: "unit_price", width: 14 },
       { header: "Şimşek Toplam Hakediş", key: "total_done_amount", width: 18 },
       {
-        header: `${subconName || "Taşeron"} Toplam Hakediş`,
+        header: `${exportSubconName || "Taşeron"} Toplam Hakediş`,
         key: "subcon_hakedis",
         width: 22,
       },
@@ -7076,7 +7077,9 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
     worksheet.mergeCells("A1:P1");
     const titleCell = worksheet.getCell("A1");
 
-    const subconName = String(req.user?.subcon_name || "").trim();
+    const titlePrefix = exportSubconName
+      ? `${exportSubconName.toUpperCase()} REGION REPORT`
+      : "GLOBAL REGION REPORT";
 
     const titlePrefix = subconName
       ? `${subconName.toUpperCase()} REGION REPORT`
@@ -7138,7 +7141,6 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
       } else if (subconName === "ubs") {
         subconRate = ubsSpecial90Items.has(itemCode) ? 0.9 : 0.75;
       }
-      
 
       const totalDoneAmount = Number(row.total_done_amount || 0);
       const subconHakedis = totalDoneAmount * subconRate;
@@ -7313,6 +7315,10 @@ app.get("/export/detail-excel", authMiddleware, async (req, res) => {
     worksheet.getRow(1).height = 24;
 
     rows.forEach((row) => {
+      if (!row.item_code) {
+        row.item_code = "";
+      }
+
       worksheet.addRow({
         status: row.status || "",
         qc_durum: row.qc_durum || "NOK",
