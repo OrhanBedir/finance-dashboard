@@ -1237,7 +1237,6 @@ async function buildUpcomingCollectionsData() {
       COALESCE(p.currency, 'TRY') AS currency
     FROM hw_payment_rows p
     WHERE COALESCE(p.remaining_amount, 0) > 0
-      AND p.payment_date IS NULL
       AND p.due_date IS NOT NULL
     ORDER BY p.due_date ASC
   `);
