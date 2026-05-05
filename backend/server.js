@@ -7025,6 +7025,20 @@ app.get("/export/status-excel", async (req, res) => {
   }
 });
 
+const ubsSpecial90Items = new Set([
+  "8818168510",
+  "8812184642",
+  "8818274259",
+  "8812184631",
+  "8812184632",
+  "8812184633",
+  "8812184634",
+  "8812184635",
+  "8818168492",
+  "8818168493",
+  "8812184641",
+]);
+
 app.get("/export/region-analysis", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(buildMasterJoinedQuery());
@@ -7050,7 +7064,11 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
       { header: "Currency", key: "currency", width: 10 },
       { header: "Unit Price", key: "unit_price", width: 14 },
       { header: "Şimşek Toplam Hakediş", key: "total_done_amount", width: 18 },
-      { header: `${subconName || "Taşeron"} Toplam Hakediş`, key: "subcon_hakedis", width: 22 },
+      {
+        header: `${subconName || "Taşeron"} Toplam Hakediş`,
+        key: "subcon_hakedis",
+        width: 22,
+      },
       { header: "Subcon", key: "subcon_name", width: 18 },
     ];
     worksheet.spliceRows(1, 0, []);
@@ -7111,8 +7129,16 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
         .trim()
         .toLowerCase();
 
-      const subconRate =
-        subconName === "federal" ? 0.8 : subconName === "ubs" ? 0.75 : 1;
+      const itemCode = String(row.item_code || "").trim();
+
+      let subconRate = 1;
+
+      if (subconName === "federal") {
+        subconRate = 0.8;
+      } else if (subconName === "ubs") {
+        subconRate = ubsSpecial90Items.has(itemCode) ? 0.9 : 0.75;
+      }
+      
 
       const totalDoneAmount = Number(row.total_done_amount || 0);
       const subconHakedis = totalDoneAmount * subconRate;
