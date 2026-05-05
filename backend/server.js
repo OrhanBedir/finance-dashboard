@@ -7081,10 +7081,6 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
       ? `${exportSubconName.toUpperCase()} REGION REPORT`
       : "GLOBAL REGION REPORT";
 
-    const titlePrefix = subconName
-      ? `${subconName.toUpperCase()} REGION REPORT`
-      : "GLOBAL REGION REPORT";
-
     titleCell.value = `${titlePrefix} (${new Date().toLocaleDateString("en-GB")})`;
     titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
