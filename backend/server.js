@@ -7050,7 +7050,7 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
       { header: "Currency", key: "currency", width: 10 },
       { header: "Unit Price", key: "unit_price", width: 14 },
       { header: "Şimşek Toplam Hakediş", key: "total_done_amount", width: 18 },
-      { header: "Federal Toplam Hakediş", key: "subcon_hakedis", width: 22 },
+      { header: `${subconName || "Taşeron"} Toplam Hakediş`, key: "subcon_hakedis", width: 22 },
       { header: "Subcon", key: "subcon_name", width: 18 },
     ];
     worksheet.spliceRows(1, 0, []);
