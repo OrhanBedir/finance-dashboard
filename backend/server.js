@@ -1242,6 +1242,7 @@ async function buildUpcomingCollectionsData() {
     LEFT JOIN hw_invoice_rows i
       ON TRIM(COALESCE(i.invoice_no, '')) = TRIM(COALESCE(p.invoice_no, ''))
     WHERE COALESCE(p.remaining_amount, 0) > 0
+    AND p.payment_date IS NULL
     ORDER BY p.id ASC
   `);
 
