@@ -4515,11 +4515,12 @@ function FinanceDashboard({
         <h3 className="listTitle">Gelecek Tahsilat Planı</h3>
 
         <div className="cards" style={{ marginBottom: "18px" }}>
-          <div className="card ok statCard">
-            <div className="statLabel">Bugün Gelecek</div>
-            <div className="statValue">
-              {formatMoneyByCurrency(upcomingSummary.today_total || 0, "TRY")}
-            </div>
+          <div className="statLabel">Bugün Tahsil Edilen</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(
+              upcomingSummary.today_received_total || 0,
+              "TRY",
+            )}
           </div>
 
           <div className="card bekler statCard">

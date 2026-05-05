@@ -7939,12 +7939,22 @@ app.get("/finance/upcoming-payments", async (req, res) => {
     const upcomingData = await buildUpcomingCollectionsData();
     const overdueData = await buildOverdueInvoicesData();
 
+    const todayReceivedResult = await pool.query(`
+      SELECT COALESCE(SUM(COALESCE(payment_amount, 0)), 0) AS today_received_total
+      FROM hw_payment_rows
+      WHERE payment_date IS NOT NULL
+        AND payment_date::date = CURRENT_DATE
+    `);
+
     res.json({
       ok: true,
       rows: upcomingData.rows,
       overdue_rows: overdueData.rows,
       summary: {
         ...upcomingData.summary,
+        today_received_total: Number(
+          todayReceivedResult.rows[0]?.today_received_total || 0,
+        ),
         overdue_total: overdueData.total,
       },
     });
