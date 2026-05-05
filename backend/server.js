@@ -2393,14 +2393,14 @@ app.get("/finance/summary", async (req, res) => {
         [year],
       ),
 
-      pool.query(
+            pool.query(
         `
         SELECT SUM(COALESCE(payment_amount, 0)) AS total_collections
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
-          AND payment_date IS NOT NULL     
+          AND payment_date IS NOT NULL
         `,
-        [year, month],
+        [year],
       ),
 
       pool.query(
@@ -2411,7 +2411,7 @@ app.get("/finance/summary", async (req, res) => {
           AND EXTRACT(MONTH FROM payment_date) = $2
           AND payment_date IS NOT NULL
         `,
-        [year],
+        [year, month],
       ),
 
      
