@@ -4909,6 +4909,7 @@ function getCityFromSiteCode(siteCode) {
   if (code.startsWith("ZO")) return "ZONGULDAK";
   if (code.startsWith("KA")) return "KARABÜK";
   if (code.startsWith("BI")) return "BARTIN";
+  if (code.startsWith("CN")) return "BARTIN";
 
   if (code.startsWith("IZ")) return "İZMİR";
   if (code.startsWith("MU")) return "MUĞLA";
