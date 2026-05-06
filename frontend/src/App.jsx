@@ -330,6 +330,7 @@ function getRegion(siteCode = "", projectCode = "") {
     code.startsWith("KA") ||
     code.startsWith("BI") ||
     code.startsWith("AN") ||
+    code.startsWith("CN") ||
     code.includes("_ANK")
   ) {
     return "Ankara";
