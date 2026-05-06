@@ -7214,17 +7214,56 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const regionFilteredRowCount = sortedRows.length;
 
-  const regionFilteredRowTotal = sortedRows.reduce((sum, row) => {
+  const ubsSpecial90Items = new Set([
+    "8818168510",
+    "8812184642",
+    "8818274259",
+    "8812184631",
+    "8812184632",
+    "8812184633",
+    "8812184634",
+    "8812184635",
+    "8818168492",
+    "8818168493",
+    "8812184641",
+  ]);
+
+  const getSubconRateByRow = (row) => {
+    const subconName = String(row.subcon_name || userSubconName || "")
+      .trim()
+      .toLowerCase();
+
+    const itemCode = String(row.item_code || "").trim();
+
+    if (subconName === "federal") return 0.8;
+
+    if (subconName === "ubs") {
+      return ubsSpecial90Items.has(itemCode) ? 0.9 : 0.75;
+    }
+
+    return Number(userPaymentRate || 1);
+  };
+
+  const getRowTotalTRY = (row) => {
     const currency = normalizeCurrency(row.currency);
     const unitPrice = Number(row.unit_price || 0);
     const doneQty = Number(row.done_qty || 0);
 
-    const rawTotal = doneQty * unitPrice;
+    const rawTotal = Number(row.total_done_amount || 0) || doneQty * unitPrice;
 
-    return sum + (currency === "USD" ? rawTotal * usdRate : rawTotal);
+    return currency === "USD" ? rawTotal * usdRate : rawTotal;
+  };
+
+  const regionFilteredRowTotal = sortedRows.reduce((sum, row) => {
+    return sum + getRowTotalTRY(row);
   }, 0);
-  const subconHakedisTotal =
-    regionFilteredRowTotal * Number(userPaymentRate || 0.8);
+
+  const subconHakedisTotal = sortedRows.reduce((sum, row) => {
+    const rowTotal = getRowTotalTRY(row);
+    const rate = getSubconRateByRow(row);
+
+    return sum + rowTotal * rate;
+  }, 0);
   const searchHasValue = regionSearch.trim() !== "";
 
   const uniqueSubconsInFilteredRows = [
@@ -7240,17 +7279,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       ? uniqueSubconsInFilteredRows[0]
       : "";
 
-  const filteredSubconPaymentRate =
-    singleFilteredSubcon.toLowerCase() === "federal"
-      ? 0.8
-      : singleFilteredSubcon.toLowerCase() === "ubs"
-        ? 0.75
-        : null;
-
-  const filteredSubconHakedisTotal =
-    filteredSubconPaymentRate !== null
-      ? regionFilteredRowTotal * filteredSubconPaymentRate
-      : 0;
+ 
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
