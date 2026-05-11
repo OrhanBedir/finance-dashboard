@@ -208,6 +208,7 @@ app.use((req, res, next) => {
     "http://localhost:3000",
     "https://finance-dashboard-topaz-three.vercel.app",
     "https://finance-dashboard.vercel.app",
+    "https://finance-dashboard-3yns.vercel.app",
   ];
 
   if (origin && allowedOrigins.includes(origin)) {
@@ -482,6 +483,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "https://finance-dashboard-topaz-three.vercel.app",
   "https://finance-dashboard.vercel.app",
+  "https://finance-dashboard-3yns.vercel.app",
 ];
 
 app.use((req, res, next) => {
