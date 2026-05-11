@@ -11183,14 +11183,12 @@ function App() {
 
   const inputStyle = {
     width: "100%",
-
-    padding: "12px",
-
-    marginBottom: "15px",
-
+    padding: "14px 16px",
+    marginBottom: "16px",
     borderRadius: "8px",
-
     border: "1px solid #ddd",
+    fontSize: "15px",
+    boxSizing: "border-box",
   };
 
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
@@ -11571,9 +11569,9 @@ function App() {
             onSubmit={handleFinanceLogin}
             style={{
               background: "#fff",
-              padding: "clamp(20px, 5vw, 40px)",
+              padding: "clamp(32px, 5vw, 56px)",
               borderRadius: "16px",
-              width: "min(360px, calc(100vw - 32px))",
+              width: "min(480px, calc(100vw - 32px))",
               boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
               position: "relative",
               zIndex: 20,
@@ -11613,12 +11611,13 @@ function App() {
               type="submit"
               style={{
                 width: "100%",
-                padding: "12px",
+                padding: "15px",
                 background: "#e53935",
                 color: "#fff",
                 border: "none",
                 borderRadius: "8px",
                 fontWeight: "bold",
+                fontSize: "16px",
                 cursor: "pointer",
               }}
             >
