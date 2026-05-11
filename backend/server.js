@@ -12,6 +12,7 @@ const jwt = require("jsonwebtoken");
 const { createWorker } = require("tesseract.js");
 const { detectRegion } = require("./utils/regionHelper");
 const { applyPremiumExcelStyle } = require("./utils/excelStyle");
+const { uploadToStorage, deleteFromStorage } = require("./supabase-storage");
 
 // ─── OCR HELPER ──────────────────────────────────────────────────────────────
 
@@ -716,28 +717,10 @@ app.get("/health", (req, res) => {
 });
 
 /* ================== UPLOAD ================== */
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+const upload = multer({ storage: multer.memoryStorage() });
 
-const faturaBelgeDir = path.join(__dirname, "uploads", "fatura-belgeler");
-if (!fs.existsSync(faturaBelgeDir)) fs.mkdirSync(faturaBelgeDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
-});
-
-const upload = multer({ storage });
-
-const faturaBelgeStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, faturaBelgeDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `fatura-${req.params.id}-${Date.now()}${ext}`);
-  },
-});
 const uploadFaturaBelge = multer({
-  storage: faturaBelgeStorage,
+  storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
     const allowed = [".jpg", ".jpeg", ".png", ".pdf", ".heic", ".heif"];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -765,7 +748,7 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ ok: false, error: "Dosya yok" });
     }
 
-    const workbook = XLSX.readFile(req.file.path);
+    const workbook = XLSX.read(req.file.buffer);
     const firstSheetName = workbook.SheetNames[0];
 
     if (!firstSheetName) {
@@ -3644,7 +3627,7 @@ app.post(
         return res.status(400).json({ ok: false, error: "Dosya yok" });
       }
 
-      const workbook = XLSX.readFile(req.file.path, { cellDates: true });
+      const workbook = XLSX.read(req.file.buffer, { cellDates: true });
       const firstSheetName = workbook.SheetNames[0];
 
       if (!firstSheetName) {
@@ -4358,7 +4341,7 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ ok: false, error: "Dosya yok" });
     }
 
-    const workbook = XLSX.readFile(req.file.path);
+    const workbook = XLSX.read(req.file.buffer);
     const firstSheetName = workbook.SheetNames[0];
 
     if (!firstSheetName) {
@@ -4499,7 +4482,7 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
 
 app.post("/rollout/upload", upload.single("file"), async (req, res) => {
   try {
-    const workbook = XLSX.readFile(req.file.path);
+    const workbook = XLSX.read(req.file.buffer);
 
     const normalizeHeader = (value) =>
       String(value || "")
@@ -4847,7 +4830,7 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
       return res.status(400).json({ ok: false, error: "Dosya yok" });
     }
 
-    const workbook = XLSX.readFile(req.file.path);
+    const workbook = XLSX.read(req.file.buffer);
     const firstSheetName = workbook.SheetNames[0];
 
     if (!firstSheetName) {
@@ -5772,7 +5755,7 @@ app.post("/import/archive-restore", upload.single("file"), async (req, res) => {
       return res.status(400).json({ ok: false, error: "Dosya yok" });
     }
 
-    const workbook = XLSX.readFile(req.file.path, { cellDates: true });
+    const workbook = XLSX.read(req.file.buffer, { cellDates: true });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
 
@@ -6009,7 +5992,7 @@ app.post("/boq/upload", upload.single("file"), async (req, res) => {
       );
     `);
 
-    const workbook = XLSX.readFile(req.file.path);
+    const workbook = XLSX.read(req.file.buffer);
 
     const sheetName =
       workbook.SheetNames.find(
@@ -6107,7 +6090,7 @@ app.post(
         return res.status(400).json({ ok: false, error: "Dosya yok" });
       }
 
-      const workbook = XLSX.readFile(req.file.path);
+      const workbook = XLSX.read(req.file.buffer);
       const firstSheetName = workbook.SheetNames[0];
 
       if (!firstSheetName) {
@@ -7760,7 +7743,7 @@ app.post(
         return res.status(400).json({ ok: false, error: "Dosya yok" });
       }
 
-      const workbook = XLSX.readFile(req.file.path);
+      const workbook = XLSX.read(req.file.buffer);
       const firstSheetName = workbook.SheetNames[0];
 
       if (!firstSheetName) {
@@ -7944,7 +7927,7 @@ app.post(
         return res.status(400).json({ ok: false, error: "Dosya yok" });
       }
 
-      const workbook = XLSX.readFile(req.file.path);
+      const workbook = XLSX.read(req.file.buffer);
       const firstSheetName = workbook.SheetNames[0];
 
       if (!firstSheetName) {
@@ -8354,8 +8337,6 @@ app.get("/test-db", async (req, res) => {
 
 /* ===== FATURA BELGE UPLOAD & VIEW ===== */
 
-app.use("/fatura-belgeler", express.static(faturaBelgeDir));
-
 // DB kolonu ekle (idempotent)
 pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS belge_path TEXT`).catch(() => {});
 
@@ -8368,42 +8349,39 @@ app.post(
     if (!file) return res.status(400).json({ error: "Dosya gelmedi" });
 
     const PDFDocument = require("pdfkit");
-    const ext = path.extname(file.filename).toLowerCase();
+    const ext = path.extname(file.originalname).toLowerCase();
     const pdfFilename = `fatura-${id}-${Date.now()}.pdf`;
-    const pdfPath = path.join(faturaBelgeDir, pdfFilename);
 
     try {
+      let pdfBuffer;
       if (ext === ".pdf") {
-        // Zaten PDF — sadece yeniden adlandır
-        fs.renameSync(file.path, pdfPath);
+        pdfBuffer = file.buffer;
       } else {
-        // Resmi PDF'e göm
-        await new Promise((resolve, reject) => {
+        pdfBuffer = await new Promise((resolve, reject) => {
           const doc = new PDFDocument({ autoFirstPage: false, margin: 20 });
-          const out = fs.createWriteStream(pdfPath);
-          doc.pipe(out);
+          const chunks = [];
+          doc.on("data", c => chunks.push(c));
+          doc.on("end", () => resolve(Buffer.concat(chunks)));
           doc.on("error", reject);
-          out.on("finish", resolve);
 
-          // Sayfa boyutunu resme göre ayarla (A4 max)
-          const img = doc.openImage(file.path);
+          const img = doc.openImage(file.buffer);
           const maxW = 555, maxH = 802;
           const ratio = Math.min(maxW / img.width, maxH / img.height);
           const w = img.width * ratio, h = img.height * ratio;
 
           doc.addPage({ size: [w + 40, h + 40] });
-          doc.image(file.path, 20, 20, { width: w, height: h });
+          doc.image(file.buffer, 20, 20, { width: w, height: h });
           doc.end();
         });
-        fs.unlinkSync(file.path); // Orijinal resmi sil
       }
 
+      const { url } = await uploadToStorage("fatura-belgeler", pdfFilename, pdfBuffer, "application/pdf");
       await pool.query(
         "UPDATE invoice_entries SET belge_path = $1 WHERE id = $2",
-        [pdfFilename, id]
+        [url, id]
       );
 
-      res.json({ ok: true, filename: pdfFilename });
+      res.json({ ok: true, filename: pdfFilename, url });
     } catch (err) {
       console.error("Belge upload hatası:", err.message);
       res.status(500).json({ error: err.message });
@@ -8416,10 +8394,7 @@ app.delete("/invoice-entries/:id/belge", async (req, res) => {
   try {
     const r = await pool.query("SELECT belge_path FROM invoice_entries WHERE id=$1", [id]);
     const belge = r.rows[0]?.belge_path;
-    if (belge) {
-      const fp = path.join(faturaBelgeDir, belge);
-      if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    }
+    if (belge) await deleteFromStorage(belge);
     await pool.query("UPDATE invoice_entries SET belge_path = NULL WHERE id=$1", [id]);
     res.json({ ok: true });
   } catch (err) {
@@ -8429,33 +8404,8 @@ app.delete("/invoice-entries/:id/belge", async (req, res) => {
 
 /* ===== HR MODULE - PERSONEL + ISG + PUANTAJ + AVANS ===== */
 
-// Personel belgeleri klasörü
-const personelBelgeDir = path.join(__dirname, "uploads", "personel-belgeler");
-if (!fs.existsSync(personelBelgeDir)) fs.mkdirSync(personelBelgeDir, { recursive: true });
-
-const puantajBelgeDir = path.join(__dirname, "uploads", "puantaj-belgeler");
-if (!fs.existsSync(puantajBelgeDir)) fs.mkdirSync(puantajBelgeDir, { recursive: true });
-
-const personelBelgeStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, personelBelgeDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `personel-${req.params.id}-${req.params.tur}-${Date.now()}${ext}`);
-  },
-});
-const uploadPersonelBelge = multer({ storage: personelBelgeStorage, limits: { fileSize: 25 * 1024 * 1024 } });
-
-app.use("/personel-belgeler", express.static(personelBelgeDir));
-app.use("/puantaj-belgeler", express.static(puantajBelgeDir));
-
-const puantajBelgeStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, puantajBelgeDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `puantaj_${Date.now()}${ext}`);
-  },
-});
-const uploadPuantajBelge = multer({ storage: puantajBelgeStorage, limits: { fileSize: 25 * 1024 * 1024 } });
+const uploadPersonelBelge = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const uploadPuantajBelge = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 // ISG eğitim türleri (sabit liste)
 const ISG_EGITIM_TURLERI = [
@@ -8595,16 +8545,16 @@ app.post("/hr/personel/:id/belge/:tur", uploadPersonelBelge.single("dosya"), asy
   try {
     const { id, tur } = req.params;
     if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
-    // Aynı türde eski belgeyi sil
     const old = await pool.query("SELECT dosya_yolu FROM personel_belgeler WHERE personel_id=$1 AND belge_turu=$2", [id, tur]);
     if (old.rows[0]) {
-      const fp = path.join(personelBelgeDir, old.rows[0].dosya_yolu);
-      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      await deleteFromStorage(old.rows[0].dosya_yolu);
       await pool.query("DELETE FROM personel_belgeler WHERE personel_id=$1 AND belge_turu=$2", [id, tur]);
     }
+    const fname = `personel-${id}-${tur}-${Date.now()}${path.extname(req.file.originalname).toLowerCase()}`;
+    const { url } = await uploadToStorage("personel-belgeler", fname, req.file.buffer, req.file.mimetype);
     await pool.query("INSERT INTO personel_belgeler (personel_id,belge_turu,dosya_yolu) VALUES ($1,$2,$3)",
-      [id, tur, req.file.filename]);
-    res.json({ ok: true, dosya: req.file.filename });
+      [id, tur, url]);
+    res.json({ ok: true, dosya: url });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -8648,8 +8598,10 @@ app.delete("/hr/personel/:id/isg/:isgId", async (req, res) => {
 app.post("/hr/personel/:id/isg/:isgId/belge", uploadPersonelBelge.single("dosya"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
-    await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [req.file.filename, req.params.isgId]);
-    res.json({ ok: true, dosya: req.file.filename });
+    const fname = `isg-${req.params.isgId}-${Date.now()}${path.extname(req.file.originalname).toLowerCase()}`;
+    const { url } = await uploadToStorage("isg-belgeler", fname, req.file.buffer, req.file.mimetype);
+    await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
+    res.json({ ok: true, dosya: url });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -8686,9 +8638,10 @@ app.put("/hr/puantaj/:id/not", uploadPuantajBelge.single("belge"), async (req, r
   try {
     const { id } = req.params;
     const { not_aciklama } = req.body;
-    const belge_yolu = req.file ? req.file.filename : undefined;
-    if (belge_yolu) {
-      await pool.query("UPDATE puantaj SET not_aciklama=$1, belge_yolu=$2 WHERE id=$3", [not_aciklama||"", belge_yolu, id]);
+    if (req.file) {
+      const fname = `puantaj_${Date.now()}${path.extname(req.file.originalname)}`;
+      const { url } = await uploadToStorage("puantaj-belgeler", fname, req.file.buffer, req.file.mimetype);
+      await pool.query("UPDATE puantaj SET not_aciklama=$1, belge_yolu=$2 WHERE id=$3", [not_aciklama||"", url, id]);
     } else {
       await pool.query("UPDATE puantaj SET not_aciklama=$1 WHERE id=$2", [not_aciklama||"", id]);
     }
@@ -8703,10 +8656,7 @@ app.delete("/hr/puantaj/:id/not", async (req, res) => {
     const { id } = req.params;
     const row = await pool.query("SELECT belge_yolu FROM puantaj WHERE id=$1", [id]);
     const belge = row.rows[0]?.belge_yolu;
-    if (belge) {
-      const fp = path.join(puantajBelgeDir, belge);
-      if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    }
+    if (belge) await deleteFromStorage(belge);
     await pool.query("UPDATE puantaj SET not_aciklama=NULL, belge_yolu=NULL WHERE id=$1", [id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -9224,14 +9174,8 @@ app.get("/hr/is-avans/excel", async (req, res) => {
 
 // ─── MASRAF FORMU ────────────────────────────────────────────────────────────
 
-const masrafBelgeDir = path.join(__dirname, "uploads", "masraf-belgeler");
-if (!fs.existsSync(masrafBelgeDir)) fs.mkdirSync(masrafBelgeDir, { recursive: true });
-
 const masrafUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, masrafBelgeDir),
-    filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
-  }),
+  storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
     const ok = /\.(jpg|jpeg|png|gif|webp|heic|pdf)$/i.test(file.originalname);
     cb(null, ok);
@@ -9358,17 +9302,13 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
     if (!kalem.rows[0]) return res.status(404).json({ error: "Kalem bulunamadı" });
     const { form_id, kategori } = kalem.rows[0];
 
-    // Run OCR in background — don't block response
-    const filePath = path.join(masrafBelgeDir, req.file.filename);
-    const { amount: ocrTutar, plaka: ocrPlaka, rawPlates } = await ocrFis(filePath);
+    const { amount: ocrTutar, plaka: ocrPlaka, rawPlates } = await ocrFis(req.file.buffer);
 
-    // Check plate against fleet — fuzzy match (1 char tolerance for OCR errors)
     let ocrPlakaEslesti = null;
     let matchedPlaka = ocrPlaka;
     if (kategori === "YAKIT" && (ocrPlaka || rawPlates?.length)) {
       const fleet = await pool.query("SELECT plaka FROM araclar WHERE aktif=true");
       const dbPlakalar = fleet.rows.map(r => r.plaka);
-      // Try all candidate plates from OCR
       const candidates = rawPlates?.length ? rawPlates : [ocrPlaka];
       for (const cand of candidates) {
         const found = plakaEsles(cand, dbPlakalar);
@@ -9377,10 +9317,13 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
       if (ocrPlakaEslesti === null) ocrPlakaEslesti = false;
     }
 
+    const fname = `${Date.now()}-${req.file.originalname}`;
+    const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype);
+
     const { rows } = await pool.query(
       `INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu, ocr_tutar, ocr_plaka, ocr_plaka_eslesti)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [kalemId, form_id, req.file.originalname, req.file.filename, ocrTutar, matchedPlaka||ocrPlaka, ocrPlakaEslesti]
+      [kalemId, form_id, req.file.originalname, url, ocrTutar, matchedPlaka||ocrPlaka, ocrPlakaEslesti]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -9390,40 +9333,24 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
 app.delete("/hr/masraf-belge/:id", async (req, res) => {
   try {
     const b = await pool.query("SELECT dosya_yolu FROM masraf_belge WHERE id=$1", [req.params.id]);
-    if (b.rows[0]) {
-      const fp = path.join(masrafBelgeDir, b.rows[0].dosya_yolu);
-      if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    }
+    if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);
     await pool.query("DELETE FROM masraf_belge WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Serve masraf belge files
-app.get("/hr/masraf-belge/file/:filename", (req, res) => {
-  const fp = path.join(masrafBelgeDir, req.params.filename);
-  if (!fs.existsSync(fp)) return res.status(404).json({ error: "Dosya yok" });
-  res.sendFile(fp);
+// Redirect masraf belge file requests (dosya_yolu is now a full Supabase URL)
+app.get("/hr/masraf-belge/file/:filename", async (req, res) => {
+  try {
+    const b = await pool.query("SELECT dosya_yolu FROM masraf_belge WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
+    if (b.rows[0]?.dosya_yolu?.startsWith("http")) return res.redirect(b.rows[0].dosya_yolu);
+    res.status(404).json({ error: "Dosya yok" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── ARAÇ FİLOSU ─────────────────────────────────────────────────────────────
-const aracBelgeDir = path.join(__dirname, "uploads", "arac-belgeler");
-if (!fs.existsSync(aracBelgeDir)) fs.mkdirSync(aracBelgeDir, { recursive: true });
-const ofisDir = path.join(__dirname, "uploads", "ofis-belgeler");
-if (!fs.existsSync(ofisDir)) fs.mkdirSync(ofisDir, { recursive: true });
-
-const aracUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, aracBelgeDir),
-    filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
-  })
-});
-const ofisUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, ofisDir),
-    filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
-  })
-});
+const aracUpload = multer({ storage: multer.memoryStorage() });
+const ofisUpload = multer({ storage: multer.memoryStorage() });
 
 app.get("/hr/araclar", async (req, res) => {
   const { rows } = await pool.query(`
@@ -9487,31 +9414,36 @@ app.post("/hr/araclar/:id/belge", aracUpload.single("dosya"), async (req, res) =
   try {
     const { belge_turu, aciklama } = req.body;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
-    // Remove old if same type (overwrite semantics for fixed slots)
     if (["SOZLESME","RUHSAT","SIGORTA","MUAYENE"].includes(belge_turu)) {
       const old = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE arac_id=$1 AND belge_turu=$2", [req.params.id, belge_turu]);
-      for (const r of old.rows) { const fp = path.join(aracBelgeDir, r.dosya_yolu); if (fs.existsSync(fp)) fs.unlinkSync(fp); }
+      for (const r of old.rows) await deleteFromStorage(r.dosya_yolu);
       await pool.query("DELETE FROM arac_belgeler WHERE arac_id=$1 AND belge_turu=$2", [req.params.id, belge_turu]);
     }
+    const fname = `${Date.now()}-${req.file.originalname}`;
+    const { url } = await uploadToStorage("arac-belgeler", fname, req.file.buffer, req.file.mimetype);
     const { rows } = await pool.query(
       "INSERT INTO arac_belgeler (arac_id,belge_turu,dosya_adi,dosya_yolu,aciklama) VALUES ($1,$2,$3,$4,$5) RETURNING *",
-      [req.params.id, belge_turu, req.file.originalname, req.file.filename, aciklama||null]
+      [req.params.id, belge_turu, req.file.originalname, url, aciklama||null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete("/hr/arac-belge/:id", async (req, res) => {
-  const b = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE id=$1", [req.params.id]);
-  if (b.rows[0]) { const fp = path.join(aracBelgeDir, b.rows[0].dosya_yolu); if (fs.existsSync(fp)) fs.unlinkSync(fp); }
-  await pool.query("DELETE FROM arac_belgeler WHERE id=$1", [req.params.id]);
-  res.json({ ok: true });
+  try {
+    const b = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE id=$1", [req.params.id]);
+    if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);
+    await pool.query("DELETE FROM arac_belgeler WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/hr/arac-belge/file/:filename", (req, res) => {
-  const fp = path.join(aracBelgeDir, req.params.filename);
-  if (!fs.existsSync(fp)) return res.status(404).json({ error: "Dosya yok" });
-  res.download(fp, req.query.name || req.params.filename);
+app.get("/hr/arac-belge/file/:filename", async (req, res) => {
+  try {
+    const b = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
+    if (b.rows[0]?.dosya_yolu?.startsWith("http")) return res.redirect(b.rows[0].dosya_yolu);
+    res.status(404).json({ error: "Dosya yok" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── OFİS & DEPO ─────────────────────────────────────────────────────────────
@@ -9566,28 +9498,34 @@ app.post("/hr/ofis/:id/belge", ofisUpload.single("dosya"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
     if (belge_turu === "SOZLESME") {
       const old = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE ofis_id=$1 AND belge_turu='SOZLESME'", [req.params.id]);
-      for (const r of old.rows) { const fp = path.join(ofisDir, r.dosya_yolu); if (fs.existsSync(fp)) fs.unlinkSync(fp); }
+      for (const r of old.rows) await deleteFromStorage(r.dosya_yolu);
       await pool.query("DELETE FROM ofis_belgeler WHERE ofis_id=$1 AND belge_turu='SOZLESME'", [req.params.id]);
     }
+    const fname = `${Date.now()}-${req.file.originalname}`;
+    const { url } = await uploadToStorage("ofis-belgeler", fname, req.file.buffer, req.file.mimetype);
     const { rows } = await pool.query(
       "INSERT INTO ofis_belgeler (ofis_id,belge_turu,dosya_adi,dosya_yolu,aciklama) VALUES ($1,$2,$3,$4,$5) RETURNING *",
-      [req.params.id, belge_turu||'DIGER', req.file.originalname, req.file.filename, aciklama||null]
+      [req.params.id, belge_turu||'DIGER', req.file.originalname, url, aciklama||null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete("/hr/ofis-belge/:id", async (req, res) => {
-  const b = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE id=$1", [req.params.id]);
-  if (b.rows[0]) { const fp = path.join(ofisDir, b.rows[0].dosya_yolu); if (fs.existsSync(fp)) fs.unlinkSync(fp); }
-  await pool.query("DELETE FROM ofis_belgeler WHERE id=$1", [req.params.id]);
-  res.json({ ok: true });
+  try {
+    const b = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE id=$1", [req.params.id]);
+    if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);
+    await pool.query("DELETE FROM ofis_belgeler WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/hr/ofis-belge/file/:filename", (req, res) => {
-  const fp = path.join(ofisDir, req.params.filename);
-  if (!fs.existsSync(fp)) return res.status(404).json({ error: "Dosya yok" });
-  res.download(fp, req.query.name || req.params.filename);
+app.get("/hr/ofis-belge/file/:filename", async (req, res) => {
+  try {
+    const b = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
+    if (b.rows[0]?.dosya_yolu?.startsWith("http")) return res.redirect(b.rows[0].dosya_yolu);
+    res.status(404).json({ error: "Dosya yok" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // PUT submit for approval (TASLAK → PM_BEKLE) — form_no ata
@@ -9882,19 +9820,29 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
     // Trim each image and collect buffers + dimensions
     const trimmed = [];
     for (const img of imgFiles) {
-      const fp = path.join(masrafBelgeDir, img.dosya_yolu);
-      if (!fs.existsSync(fp)) continue;
       try {
-        const buf = await sharp(fp)
+        let rawBuf;
+        if (img.dosya_yolu.startsWith("http")) {
+          const fetch = require("node-fetch");
+          const resp = await fetch(img.dosya_yolu);
+          rawBuf = Buffer.from(await resp.arrayBuffer());
+        } else {
+          continue; // Skip old local files in production
+        }
+        const buf = await sharp(rawBuf)
           .trim({ threshold: 120 })
           .jpeg({ quality: 92 })
           .toBuffer({ resolveWithObject: true });
         trimmed.push({ buf: buf.data, w: buf.info.width, h: buf.info.height, meta: img });
       } catch {
         try {
-          const raw = fs.readFileSync(fp);
-          const info = await sharp(raw).metadata();
-          trimmed.push({ buf: raw, w: info.width || 400, h: info.height || 600, meta: img });
+          if (img.dosya_yolu.startsWith("http")) {
+            const fetch = require("node-fetch");
+            const resp = await fetch(img.dosya_yolu);
+            const rawBuf = Buffer.from(await resp.arrayBuffer());
+            const info = await sharp(rawBuf).metadata();
+            trimmed.push({ buf: rawBuf, w: info.width || 400, h: info.height || 600, meta: img });
+          }
         } catch {}
       }
     }
@@ -10133,8 +10081,10 @@ app.get("/hr/masraf-form/donem/:donem/excel", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server çalışıyor: ${PORT}`);
-});
+if (process.env.NODE_ENV !== "production" || process.env.LOCAL_SERVER) {
+  app.listen(PORT, () => {
+    console.log(`Server çalışıyor: ${PORT}`);
+  });
+}
 
-/* ================== START ================== */
+module.exports = app;
