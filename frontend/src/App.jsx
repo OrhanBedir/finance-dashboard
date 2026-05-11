@@ -9852,7 +9852,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   return (
     <>
       <h1 style={{ marginBottom: "10px", textAlign: "center" }}>
-        🗺️ Region Analysis
+        🗺️ Bölge Analizi
       </h1>
 
       <div
@@ -11694,7 +11694,7 @@ function App() {
               className={page === "region" ? "tab activeTab" : "tab"}
               onClick={() => setPage("region")}
             >
-              Region Analysis
+              Bölge Analizi
             </button>
 
             {(token || financeToken) && (
@@ -11734,7 +11734,7 @@ function App() {
               className={page === "region" ? "tab activeTab" : "tab"}
               onClick={() => setPage("region")}
             >
-              Region Analysis
+              Bölge Analizi
             </button>
 
             <button
