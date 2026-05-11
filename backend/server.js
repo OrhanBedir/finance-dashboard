@@ -9,8 +9,138 @@ const path = require("path");
 const fs = require("fs");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const { createWorker } = require("tesseract.js");
 const { detectRegion } = require("./utils/regionHelper");
 const { applyPremiumExcelStyle } = require("./utils/excelStyle");
+
+// ─── OCR HELPER ──────────────────────────────────────────────────────────────
+
+// Türkçe/OCR para formatı dönüştürücü
+// Desteklenen: 3.000,00 | 3,000,00 (OCR) | 500,00 | 3.000 | 3000
+function parseTrNumber(str) {
+  if (!str) return 0;
+  let s = str.trim().replace(/[*+]/g, "").trim();
+  if (!s) return 0;
+
+  const dotCount   = (s.match(/\./g) || []).length;
+  const commaCount = (s.match(/,/g)  || []).length;
+
+  // 3.000,00 → nokta=binlik, virgül=ondalık
+  if (dotCount >= 1 && commaCount === 1) {
+    return parseFloat(s.replace(/\./g, "").replace(",", ".")) || 0;
+  }
+
+  // 3,000,00 → OCR nokta yerine virgül koymuş: virgül(ler)=binlik, son virgül=ondalık
+  if (commaCount >= 2) {
+    const parts    = s.split(",");
+    const lastPart = parts[parts.length - 1];  // ondalık kısım
+    const whole    = parts.slice(0, -1).join(""); // binlik virgülleri sil
+    return parseFloat(whole + "." + lastPart) || 0;
+  }
+
+  // 500,00 → tek virgül, 2 basamak → ondalık
+  if (commaCount === 1) {
+    const dec = s.split(",")[1] || "";
+    if (dec.length <= 2) return parseFloat(s.replace(",", ".")) || 0;
+    // 44,640 gibi → muhtemelen litre, ondalık say
+    return parseFloat(s.replace(",", ".")) || 0;
+  }
+
+  // 3.000 → tek nokta, 3 basamak sonra → binlik
+  if (dotCount === 1) {
+    const dec = s.split(".")[1] || "";
+    if (dec.length === 3) return parseFloat(s.replace(".", "")) || 0;
+    return parseFloat(s) || 0;
+  }
+
+  // Birden fazla nokta: 1.000.000 → binlik
+  if (dotCount >= 2) {
+    return parseFloat(s.replace(/\./g, "")) || 0;
+  }
+
+  return parseFloat(s) || 0;
+}
+
+// Türkçe/OCR para sayısı regex: 3.000,00 | 3,000,00 | 500,00 | 3.000 | 3000
+const TR_NUM_RE = /[*+]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?(?!\d)/g;
+
+function formatAd(ad) {
+  const parts = (ad || "").trim().split(/\s+/);
+  if (parts.length < 2) return (ad || "").toUpperCase();
+  return parts.slice(0, -1).join(" ") + " " + parts[parts.length - 1].toUpperCase();
+}
+
+// DB'deki plakayı OCR okunmuş plakaya fuzzy eşleştir (1 karakter tolerans)
+function plakaEsles(ocrRaw, dbPlakalar) {
+  const normalize = (s) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const ocr = normalize(ocrRaw);
+  // Tam eşleşme önce
+  const exact = dbPlakalar.find(p => normalize(p) === ocr);
+  if (exact) return exact;
+  // 1 karakter farkı tolerans (OCR hataları için)
+  return dbPlakalar.find(p => {
+    const db = normalize(p);
+    if (Math.abs(db.length - ocr.length) > 1) return false;
+    let diff = 0;
+    const maxLen = Math.max(db.length, ocr.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (db[i] !== ocr[i]) diff++;
+      if (diff > 1) return false;
+    }
+    return true;
+  }) || null;
+}
+
+async function ocrFis(filePath) {
+  try {
+    const worker = await createWorker("tur+eng", 1, { logger: () => {} });
+    const { data: { text } } = await worker.recognize(filePath);
+    await worker.terminate();
+
+    const lines = text.split("\n");
+    let amount = null;
+
+    // 1. Geçiş: TOPLAM / NAKİT / TUTAR ile başlayan satırlar (en güvenilir)
+    for (const line of lines) {
+      if (/^[\s*]*(TOPLAM|NAK[İI]T|TUTAR|GENEL TOPLAM|TOTAL)/i.test(line)) {
+        const nums = (line.match(TR_NUM_RE) || [])
+          .map(parseTrNumber).filter(n => n >= 100 && n <= 999999);
+        if (nums.length) { amount = Math.max(...nums); break; }
+      }
+    }
+
+    // 2. Geçiş: Satır içinde geçiyor
+    if (!amount) {
+      for (const line of lines) {
+        if (/TOPLAM|NAK[İI]T|TUTAR|TOTAL/i.test(line)) {
+          const nums = (line.match(TR_NUM_RE) || [])
+            .map(parseTrNumber).filter(n => n >= 100 && n <= 999999);
+          if (nums.length) { amount = Math.max(...nums); break; }
+        }
+      }
+    }
+
+    // 3. Fallback: tüm metindeki en büyük makul para değeri (100–999999 arası)
+    if (!amount) {
+      const allNums = (text.match(TR_NUM_RE) || [])
+        .map(parseTrNumber).filter(n => n >= 100 && n <= 999999);
+      if (allNums.length) amount = Math.max(...allNums);
+    }
+
+    // Türk plakası — OCR hatası toleranslı: 16GB307, 34 ABC 1234
+    const plateRe = /\b(\d{2})\s*([A-ZÇŞĞÜÖİ0-9]{1,4})\s*(\d{2,4})\b/gi;
+    const rawPlates = [...text.matchAll(plateRe)]
+      .map(m => (m[1] + m[2] + m[3]).toUpperCase().replace(/[^A-Z0-9]/g, ""))
+      .filter(p => p.length >= 5 && p.length <= 9);
+    const plaka = rawPlates.length ? rawPlates[0] : null;
+
+    console.log("[OCR] amount:", amount, "| plaka:", plaka, "| lines:", lines.filter(l => /TOPLAM|NAK[İI]T/i.test(l)));
+    return { amount: amount || null, plaka, rawPlates };
+  } catch (e) {
+    console.error("[OCR error]", e.message);
+    return { amount: null, plaka: null, rawPlates: [] };
+  }
+}
 
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -589,12 +719,32 @@ app.get("/health", (req, res) => {
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
+const faturaBelgeDir = path.join(__dirname, "uploads", "fatura-belgeler");
+if (!fs.existsSync(faturaBelgeDir)) fs.mkdirSync(faturaBelgeDir, { recursive: true });
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
 });
 
 const upload = multer({ storage });
+
+const faturaBelgeStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, faturaBelgeDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `fatura-${req.params.id}-${Date.now()}${ext}`);
+  },
+});
+const uploadFaturaBelge = multer({
+  storage: faturaBelgeStorage,
+  fileFilter: (req, file, cb) => {
+    const allowed = [".jpg", ".jpeg", ".png", ".pdf", ".heic", ".heif"];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowed.includes(ext));
+  },
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
 
 /* ================== HELPERS ================== */
 
@@ -4290,6 +4440,15 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
 
       if (!projectCode && !siteCode && !itemCode && !itemDescription) continue;
 
+      // Sadece izin verilen proje kodları
+      const IZINLI_PROJELER = ['56A0SJC', '56A0QEF', '56A0NCD', '56A0TCT', '56A0819'];
+      const pcTrimmed = projectCode ? String(projectCode).trim().toUpperCase() : '';
+      if (!IZINLI_PROJELER.includes(pcTrimmed)) continue;
+
+      // CANCELLED olan PO'ları alma
+      const poStatus = getCell(r, ['PO Status', 'Status', 'po_status', 'Durum']);
+      if (poStatus && String(poStatus).trim().toUpperCase() === 'CANCELLED') continue;
+
       await pool.query(
         `
         INSERT INTO po_rows
@@ -7483,12 +7642,12 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
 
     const invoiceResult = await pool.query(`
       SELECT
-        TRIM(COALESCE(rf_montaj_firma, '')) AS subcon_name,
+        TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS subcon_name,
         SUM(COALESCE(toplam_tutar, 0)) AS total_fatura,
         SUM(COALESCE(odenen_tutar, 0)) AS total_odenen
       FROM invoice_entries
-      WHERE COALESCE(TRIM(rf_montaj_firma), '') <> ''
-      GROUP BY TRIM(COALESCE(rf_montaj_firma, ''))
+      WHERE COALESCE(TRIM(NULLIF(rf_montaj_firma,'') ), TRIM(tedarikci), '') <> ''
+      GROUP BY TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, ''))
     `);
 
     const map = new Map();
@@ -8191,6 +8350,1787 @@ app.get("/test-db", async (req, res) => {
       error: err.message,
     });
   }
+});
+
+/* ===== FATURA BELGE UPLOAD & VIEW ===== */
+
+app.use("/fatura-belgeler", express.static(faturaBelgeDir));
+
+// DB kolonu ekle (idempotent)
+pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS belge_path TEXT`).catch(() => {});
+
+app.post(
+  "/invoice-entries/:id/belge",
+  uploadFaturaBelge.single("belge"),
+  async (req, res) => {
+    const { id } = req.params;
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: "Dosya gelmedi" });
+
+    const PDFDocument = require("pdfkit");
+    const ext = path.extname(file.filename).toLowerCase();
+    const pdfFilename = `fatura-${id}-${Date.now()}.pdf`;
+    const pdfPath = path.join(faturaBelgeDir, pdfFilename);
+
+    try {
+      if (ext === ".pdf") {
+        // Zaten PDF — sadece yeniden adlandır
+        fs.renameSync(file.path, pdfPath);
+      } else {
+        // Resmi PDF'e göm
+        await new Promise((resolve, reject) => {
+          const doc = new PDFDocument({ autoFirstPage: false, margin: 20 });
+          const out = fs.createWriteStream(pdfPath);
+          doc.pipe(out);
+          doc.on("error", reject);
+          out.on("finish", resolve);
+
+          // Sayfa boyutunu resme göre ayarla (A4 max)
+          const img = doc.openImage(file.path);
+          const maxW = 555, maxH = 802;
+          const ratio = Math.min(maxW / img.width, maxH / img.height);
+          const w = img.width * ratio, h = img.height * ratio;
+
+          doc.addPage({ size: [w + 40, h + 40] });
+          doc.image(file.path, 20, 20, { width: w, height: h });
+          doc.end();
+        });
+        fs.unlinkSync(file.path); // Orijinal resmi sil
+      }
+
+      await pool.query(
+        "UPDATE invoice_entries SET belge_path = $1 WHERE id = $2",
+        [pdfFilename, id]
+      );
+
+      res.json({ ok: true, filename: pdfFilename });
+    } catch (err) {
+      console.error("Belge upload hatası:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+app.delete("/invoice-entries/:id/belge", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const r = await pool.query("SELECT belge_path FROM invoice_entries WHERE id=$1", [id]);
+    const belge = r.rows[0]?.belge_path;
+    if (belge) {
+      const fp = path.join(faturaBelgeDir, belge);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    }
+    await pool.query("UPDATE invoice_entries SET belge_path = NULL WHERE id=$1", [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ===== HR MODULE - PERSONEL + ISG + PUANTAJ + AVANS ===== */
+
+// Personel belgeleri klasörü
+const personelBelgeDir = path.join(__dirname, "uploads", "personel-belgeler");
+if (!fs.existsSync(personelBelgeDir)) fs.mkdirSync(personelBelgeDir, { recursive: true });
+
+const puantajBelgeDir = path.join(__dirname, "uploads", "puantaj-belgeler");
+if (!fs.existsSync(puantajBelgeDir)) fs.mkdirSync(puantajBelgeDir, { recursive: true });
+
+const personelBelgeStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, personelBelgeDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `personel-${req.params.id}-${req.params.tur}-${Date.now()}${ext}`);
+  },
+});
+const uploadPersonelBelge = multer({ storage: personelBelgeStorage, limits: { fileSize: 25 * 1024 * 1024 } });
+
+app.use("/personel-belgeler", express.static(personelBelgeDir));
+app.use("/puantaj-belgeler", express.static(puantajBelgeDir));
+
+const puantajBelgeStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, puantajBelgeDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `puantaj_${Date.now()}${ext}`);
+  },
+});
+const uploadPuantajBelge = multer({ storage: puantajBelgeStorage, limits: { fileSize: 25 * 1024 * 1024 } });
+
+// ISG eğitim türleri (sabit liste)
+const ISG_EGITIM_TURLERI = [
+  { tur: "Temel İSG Eğitimi", gecerlilik_yil: 2 },
+  { tur: "İlk Yardım Eğitimi", gecerlilik_yil: 3 },
+  { tur: "Yangın Söndürme ve Tahliye Eğitimi", gecerlilik_yil: 1 },
+  { tur: "Yüksekte Çalışma Eğitimi", gecerlilik_yil: 3 },
+  { tur: "Elektrik İş Güvenliği Eğitimi", gecerlilik_yil: 3 },
+  { tur: "KKD Kullanımı Eğitimi", gecerlilik_yil: 2 },
+  { tur: "Elle Taşıma İşleri Eğitimi", gecerlilik_yil: 2 },
+  { tur: "Ergonomi Eğitimi", gecerlilik_yil: 2 },
+  { tur: "Acil Durum ve Tahliye Eğitimi", gecerlilik_yil: 1 },
+  { tur: "Kimyasal Maddeler Eğitimi", gecerlilik_yil: 2 },
+  { tur: "Gürültü ve Titreşim Eğitimi", gecerlilik_yil: 2 },
+  { tur: "Anten ve Baz İstasyonu Güvenliği", gecerlilik_yil: 2 },
+  { tur: "İş Ekipmanları Kullanımı Eğitimi", gecerlilik_yil: 3 },
+  { tur: "Kazı ve Zemin Güvenliği Eğitimi", gecerlilik_yil: 2 },
+  { tur: "Trafik ve Karayolu Güvenliği", gecerlilik_yil: 2 },
+  { tur: "Stres ve Zorbalık Önleme Eğitimi", gecerlilik_yil: 2 },
+  { tur: "Ortam Ölçümleri Bilgilendirme", gecerlilik_yil: 2 },
+  { tur: "İş Kazası ve Ramak Kala Bildirimi", gecerlilik_yil: 2 },
+];
+
+app.get("/hr/isg-egitim-turleri", (req, res) => res.json(ISG_EGITIM_TURLERI));
+
+// DB tablolarını oluştur (idempotent)
+pool.query(`
+  CREATE TABLE IF NOT EXISTS personel (
+    id SERIAL PRIMARY KEY,
+    ad_soyad TEXT NOT NULL,
+    tc_no TEXT,
+    dogum_tarihi DATE,
+    telefon TEXT,
+    email TEXT,
+    unvan TEXT,
+    bolge TEXT,
+    ise_giris_tarihi DATE,
+    isten_ayrilma_tarihi DATE,
+    net_maas NUMERIC DEFAULT 0,
+    bankadan_gosterilen NUMERIC DEFAULT 0,
+    elden_verilen NUMERIC DEFAULT 0,
+    iban TEXT,
+    banka_adi TEXT,
+    banka_hesap_no TEXT,
+    aktif BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS personel_belgeler (
+    id SERIAL PRIMARY KEY,
+    personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE,
+    belge_turu TEXT NOT NULL,
+    dosya_yolu TEXT NOT NULL,
+    yuklenme_tarihi TIMESTAMP DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS personel_isg (
+    id SERIAL PRIMARY KEY,
+    personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE,
+    egitim_turu TEXT NOT NULL,
+    egitim_tarihi DATE,
+    gecerlilik_yil INTEGER DEFAULT 2,
+    bitis_tarihi DATE,
+    belge_yolu TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS puantaj (
+    id SERIAL PRIMARY KEY,
+    personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE,
+    tarih DATE NOT NULL,
+    durum TEXT NOT NULL DEFAULT 'CALISDI',
+    created_by TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(personel_id, tarih)
+  );
+  CREATE TABLE IF NOT EXISTS avans (
+    id SERIAL PRIMARY KEY,
+    personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE,
+    tarih DATE NOT NULL,
+    tutar NUMERIC DEFAULT 0,
+    aciklama TEXT,
+    odendi BOOLEAN DEFAULT false,
+    odeme_tarihi DATE,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+  ALTER TABLE avans ADD COLUMN IF NOT EXISTS avans_turu TEXT DEFAULT 'MAAS';
+`).catch(e => console.error("HR tablo hatası:", e.message));
+
+// ---- PERSONEL CRUD ----
+app.get("/hr/personel", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM personel ORDER BY aktif DESC, ad_soyad ASC");
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/hr/personel", async (req, res) => {
+  try {
+    const { ad_soyad, tc_no, dogum_tarihi, telefon, email, unvan, bolge, ise_giris_tarihi,
+      net_maas, bankadan_gosterilen, elden_verilen, iban, banka_adi, banka_hesap_no } = req.body;
+    const r = await pool.query(
+      `INSERT INTO personel (ad_soyad,tc_no,dogum_tarihi,telefon,email,unvan,bolge,ise_giris_tarihi,
+        net_maas,bankadan_gosterilen,elden_verilen,iban,banka_adi,banka_hesap_no)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [ad_soyad,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
+       net_maas||0,bankadan_gosterilen||0,elden_verilen||0,iban,banka_adi,banka_hesap_no]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/hr/personel/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ad_soyad, tc_no, dogum_tarihi, telefon, email, unvan, bolge, ise_giris_tarihi,
+      isten_ayrilma_tarihi, net_maas, bankadan_gosterilen, elden_verilen, iban, banka_adi,
+      banka_hesap_no, aktif } = req.body;
+    const r = await pool.query(
+      `UPDATE personel SET ad_soyad=$1,tc_no=$2,dogum_tarihi=$3,telefon=$4,email=$5,unvan=$6,
+        bolge=$7,ise_giris_tarihi=$8,isten_ayrilma_tarihi=$9,net_maas=$10,bankadan_gosterilen=$11,
+        elden_verilen=$12,iban=$13,banka_adi=$14,banka_hesap_no=$15,aktif=$16 WHERE id=$17 RETURNING *`,
+      [ad_soyad,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
+       isten_ayrilma_tarihi||null,net_maas||0,bankadan_gosterilen||0,elden_verilen||0,
+       iban,banka_adi,banka_hesap_no,aktif!==undefined?aktif:true,id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/personel/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM personel WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- PERSONEL BELGE ----
+app.post("/hr/personel/:id/belge/:tur", uploadPersonelBelge.single("dosya"), async (req, res) => {
+  try {
+    const { id, tur } = req.params;
+    if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
+    // Aynı türde eski belgeyi sil
+    const old = await pool.query("SELECT dosya_yolu FROM personel_belgeler WHERE personel_id=$1 AND belge_turu=$2", [id, tur]);
+    if (old.rows[0]) {
+      const fp = path.join(personelBelgeDir, old.rows[0].dosya_yolu);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      await pool.query("DELETE FROM personel_belgeler WHERE personel_id=$1 AND belge_turu=$2", [id, tur]);
+    }
+    await pool.query("INSERT INTO personel_belgeler (personel_id,belge_turu,dosya_yolu) VALUES ($1,$2,$3)",
+      [id, tur, req.file.filename]);
+    res.json({ ok: true, dosya: req.file.filename });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/hr/personel/:id/belgeler", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM personel_belgeler WHERE personel_id=$1", [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- ISG EĞİTİMLER ----
+app.get("/hr/personel/:id/isg", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM personel_isg WHERE personel_id=$1 ORDER BY egitim_tarihi DESC", [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/hr/personel/:id/isg", async (req, res) => {
+  try {
+    const { egitim_turu, egitim_tarihi, gecerlilik_yil } = req.body;
+    const bitis = new Date(egitim_tarihi);
+    bitis.setFullYear(bitis.getFullYear() + parseInt(gecerlilik_yil));
+    const r = await pool.query(
+      `INSERT INTO personel_isg (personel_id,egitim_turu,egitim_tarihi,gecerlilik_yil,bitis_tarihi)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [req.params.id, egitim_turu, egitim_tarihi, gecerlilik_yil, bitis.toISOString().split("T")[0]]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/personel/:id/isg/:isgId", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM personel_isg WHERE id=$1 AND personel_id=$2", [req.params.isgId, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ISG belge yükleme
+app.post("/hr/personel/:id/isg/:isgId/belge", uploadPersonelBelge.single("dosya"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
+    await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [req.file.filename, req.params.isgId]);
+    res.json({ ok: true, dosya: req.file.filename });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- PUANTAJ ----
+app.get("/hr/puantaj", async (req, res) => {
+  try {
+    const { ay, yil } = req.query;
+    const r = await pool.query(
+      `SELECT p.*, per.ad_soyad, per.unvan, per.net_maas, per.bankadan_gosterilen, per.elden_verilen, per.aktif
+       FROM puantaj p JOIN personel per ON p.personel_id = per.id
+       WHERE EXTRACT(MONTH FROM p.tarih)=$1 AND EXTRACT(YEAR FROM p.tarih)=$2
+       ORDER BY per.ad_soyad, p.tarih`,
+      [ay, yil]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/hr/puantaj", async (req, res) => {
+  try {
+    const { personel_id, tarih, durum, created_by } = req.body;
+    const r = await pool.query(
+      `INSERT INTO puantaj (personel_id,tarih,durum,created_by)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (personel_id,tarih) DO UPDATE SET durum=$3, created_by=$4 RETURNING *`,
+      [personel_id, tarih, durum||"CALISDI", created_by||""]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Puantaj not + belge güncelle
+app.put("/hr/puantaj/:id/not", uploadPuantajBelge.single("belge"), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { not_aciklama } = req.body;
+    const belge_yolu = req.file ? req.file.filename : undefined;
+    if (belge_yolu) {
+      await pool.query("UPDATE puantaj SET not_aciklama=$1, belge_yolu=$2 WHERE id=$3", [not_aciklama||"", belge_yolu, id]);
+    } else {
+      await pool.query("UPDATE puantaj SET not_aciklama=$1 WHERE id=$2", [not_aciklama||"", id]);
+    }
+    const r = await pool.query("SELECT * FROM puantaj WHERE id=$1", [id]);
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Puantaj not sil
+app.delete("/hr/puantaj/:id/not", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await pool.query("SELECT belge_yolu FROM puantaj WHERE id=$1", [id]);
+    const belge = row.rows[0]?.belge_yolu;
+    if (belge) {
+      const fp = path.join(puantajBelgeDir, belge);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    }
+    await pool.query("UPDATE puantaj SET not_aciklama=NULL, belge_yolu=NULL WHERE id=$1", [id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ay özeti: her personel için hakediş hesabı
+app.get("/hr/puantaj/ozet", async (req, res) => {
+  try {
+    const { ay, yil } = req.query;
+    const personelList = await pool.query("SELECT * FROM personel WHERE aktif=true OR isten_ayrilma_tarihi IS NOT NULL ORDER BY ad_soyad");
+    const puantajRows = await pool.query(
+      `SELECT personel_id, durum, COUNT(*) as gun_sayisi FROM puantaj
+       WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2
+       GROUP BY personel_id, durum`, [ay, yil]
+    );
+    const avansList = await pool.query(
+      `SELECT personel_id, SUM(tutar) as toplam FROM avans
+       WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2 AND avans_turu='MAAS' GROUP BY personel_id`, [ay, yil]
+    );
+
+    const totalDays = new Date(yil, ay, 0).getDate();
+
+    const ozet = personelList.rows.map(p => {
+      const pRows = puantajRows.rows.filter(r => r.personel_id === p.id);
+      const calisdi = pRows.find(r => r.durum === "CALISDI");
+      const calisilan = parseInt(calisdi?.gun_sayisi || 0);
+      const hakedilen = Math.round((calisilan / totalDays) * p.net_maas);
+      const bankadan = Math.round((calisilan / totalDays) * p.bankadan_gosterilen);
+      const elden = Math.round((calisilan / totalDays) * p.elden_verilen);
+      const avansRow = avansList.rows.find(a => a.personel_id === p.id);
+      const avans = Number(avansRow?.toplam || 0);
+      return {
+        personel_id: p.id, ad_soyad: p.ad_soyad, unvan: p.unvan, aktif: p.aktif,
+        net_maas: p.net_maas, bankadan_gosterilen: p.bankadan_gosterilen, elden_verilen: p.elden_verilen,
+        calisilan_gun: calisilan, toplam_gun: totalDays,
+        hakedilen_maas: hakedilen, bankadan, elden, avans,
+        kalan: hakedilen - avans,
+      };
+    }).filter(p => p.aktif);
+
+    res.json(ozet);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- AVANS ----
+app.get("/hr/avans", async (req, res) => {
+  try {
+    const { personel_id, turu } = req.query;
+    const conditions = [];
+    const params = [];
+    if (personel_id) { params.push(personel_id); conditions.push(`a.personel_id=$${params.length}`); }
+    if (turu) { params.push(turu); conditions.push(`a.avans_turu=$${params.length}`); }
+    const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
+    const r = await pool.query(
+      `SELECT a.*, p.ad_soyad FROM avans a JOIN personel p ON a.personel_id=p.id ${where} ORDER BY a.tarih DESC`,
+      params
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/hr/avans", async (req, res) => {
+  try {
+    const { personel_id, tarih, tutar, aciklama, avans_turu = "MAAS" } = req.body;
+    const r = await pool.query(
+      "INSERT INTO avans (personel_id,tarih,tutar,aciklama,avans_turu) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [personel_id, tarih, tutar, aciklama, avans_turu]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/hr/avans/:id", async (req, res) => {
+  try {
+    const { odendi, odeme_tarihi } = req.body;
+    const r = await pool.query(
+      "UPDATE avans SET odendi=$1, odeme_tarihi=$2 WHERE id=$3 RETURNING *",
+      [odendi, odeme_tarihi||null, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/avans/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM avans WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ISG uyarı özeti (süresi biten/bitecek eğitimler)
+app.get("/hr/isg/uyarilar", async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT i.*, p.ad_soyad, p.unvan,
+        CASE WHEN i.bitis_tarihi < NOW() THEN 'SURESI_DOLDU'
+             WHEN i.bitis_tarihi < NOW() + INTERVAL '30 days' THEN 'YAKLASAN'
+             ELSE 'GECERLI' END AS durum
+      FROM personel_isg i JOIN personel p ON i.personel_id=p.id
+      WHERE p.aktif=true AND (i.bitis_tarihi < NOW() + INTERVAL '30 days')
+      ORDER BY i.bitis_tarihi ASC
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- HR EXCEL EXPORTS ----
+app.get("/hr/excel/puantaj", async (req, res) => {
+  try {
+    const { ay, yil } = req.query;
+    const ExcelJS = require("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Puantaj");
+
+    const totalDays = new Date(Number(yil), Number(ay), 0).getDate();
+    const personelList = await pool.query("SELECT * FROM personel WHERE aktif=true ORDER BY ad_soyad");
+    const puantajRows = await pool.query(
+      `SELECT id, personel_id, tarih, durum, not_aciklama, belge_yolu FROM puantaj
+       WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2`, [ay, yil]
+    );
+    const avansList = await pool.query(
+      `SELECT personel_id, SUM(tutar) as toplam FROM avans
+       WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2 GROUP BY personel_id`, [ay, yil]
+    );
+
+    const ayGunleri = Array.from({ length: totalDays }, (_, i) => i + 1);
+    const headers = ["Personel", "Unvan", ...ayGunleri.map(g => String(g)), "Çalışılan", "Net Maaş", "Hakediş", "Banka", "Elden", "Avans", "Kalan"];
+    const headerRow = ws.addRow(headers);
+    headerRow.eachCell(cell => {
+      cell.font = { bold: true, size: 11 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.alignment = { horizontal: "center" };
+    });
+
+    const DURUM_LABEL = { CALISDI: "✅", IZIN: "🏖", RAPOR: "☪️", TATIL: "⭕", GELMEDI: "❌" };
+    const DURUM_COLOR = { CALISDI: "FFD1FAE5", IZIN: "FFDBEAFE", RAPOR: "FFFEF3C7", TATIL: "FFF9FAFB", GELMEDI: "FFFEE2E2" };
+
+    // Notlar sayfası
+    const wsNot = wb.addWorksheet("Notlar");
+    const notHeaders = wsNot.addRow(["Personel", "Tarih", "Durum", "Not", "Belge"]);
+    notHeaders.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF991B1B" } };
+    });
+    wsNot.columns = [{ width: 22 }, { width: 14 }, { width: 12 }, { width: 50 }, { width: 30 }];
+
+    for (const p of personelList.rows) {
+      const rowData = [p.ad_soyad, p.unvan || ""];
+      let calisilan = 0;
+      const cellNotMap = {}; // col index -> note text
+
+      for (const g of ayGunleri) {
+        const tarih = `${yil}-${String(ay).padStart(2,"0")}-${String(g).padStart(2,"0")}`;
+        const pr = puantajRows.rows.find(x => x.personel_id === p.id && x.tarih?.toISOString?.().startsWith(tarih));
+        const durum = pr?.durum || "TATIL";
+        if (durum === "CALISDI") calisilan++;
+        rowData.push(DURUM_LABEL[durum] || "");
+        if (pr?.not_aciklama || pr?.belge_yolu) {
+          cellNotMap[g + 1] = pr; // g+1 for 1-based col offset after Personel+Unvan cols
+          // Notlar sayfasına ekle
+          const notRow = wsNot.addRow([
+            p.ad_soyad,
+            tarih,
+            durum,
+            pr.not_aciklama || "",
+            pr.belge_yolu ? `http://localhost:5001/puantaj-belgeler/${pr.belge_yolu}` : "",
+          ]);
+          notRow.getCell(4).alignment = { wrapText: true };
+          if (durum === "GELMEDI") notRow.eachCell(c => { c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFFEE2E2" } }; });
+          if (durum === "RAPOR")   notRow.eachCell(c => { c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFFEF3C7" } }; });
+          if (durum === "IZIN")    notRow.eachCell(c => { c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFDBEAFE" } }; });
+        }
+      }
+
+      const hakediş = Math.round((calisilan / totalDays) * (p.net_maas || 0));
+      const bankadan = Math.round((calisilan / totalDays) * (p.bankadan_gosterilen || 0));
+      const elden = Math.round((calisilan / totalDays) * (p.elden_verilen || 0));
+      const avansRow = avansList.rows.find(a => a.personel_id === p.id);
+      const avans = Number(avansRow?.toplam || 0);
+      rowData.push(calisilan, p.net_maas || 0, hakediş, bankadan, elden, avans, hakediş - avans);
+      const excelRow = ws.addRow(rowData);
+      excelRow.getCell(1).font = { bold: true };
+
+      // Hücre renklendirme + not yorumu
+      for (const g of ayGunleri) {
+        const tarih = `${yil}-${String(ay).padStart(2,"0")}-${String(g).padStart(2,"0")}`;
+        const pr = puantajRows.rows.find(x => x.personel_id === p.id && x.tarih?.toISOString?.().startsWith(tarih));
+        const durum = pr?.durum || "TATIL";
+        const cell = excelRow.getCell(g + 2); // +2 = Personel + Unvan
+        cell.alignment = { horizontal: "center" };
+        const bg = DURUM_COLOR[durum] || "FFF9FAFB";
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+        if (pr?.not_aciklama) {
+          cell.note = { texts: [{ text: pr.not_aciklama }] };
+        }
+      }
+    }
+
+    ws.columns.forEach((col, i) => { col.width = i < 2 ? 20 : i < 2 + totalDays ? 5 : 14; });
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=puantaj_${yil}_${String(ay).padStart(2,"0")}.xlsx`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/hr/excel/isg", async (req, res) => {
+  try {
+    const ExcelJS = require("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("ISG Eğitimleri");
+
+    const personelList = await pool.query("SELECT * FROM personel WHERE aktif=true ORDER BY ad_soyad");
+    const isgList = await pool.query(`
+      SELECT i.*, p.ad_soyad, p.unvan FROM personel_isg i
+      JOIN personel p ON i.personel_id=p.id
+      WHERE p.aktif=true ORDER BY p.ad_soyad, i.egitim_turu
+    `);
+
+    const headers = ["Personel", "Unvan", "Eğitim Türü", "Başlangıç", "Bitiş", "Durum"];
+    const hr = ws.addRow(headers);
+    hr.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
+      cell.alignment = { horizontal: "center" };
+    });
+
+    const now = new Date();
+    const soon = new Date(Date.now() + 30 * 86400000);
+
+    for (const eg of isgList.rows) {
+      const bitis = new Date(eg.bitis_tarihi);
+      const expired = bitis < now;
+      const expiring = bitis < soon && !expired;
+      const durum = expired ? "SÜRESİ DOLDU" : expiring ? "YAKLAŞIYOR (30 gün)" : "Geçerli";
+      const r = ws.addRow([
+        eg.ad_soyad, eg.unvan || "",
+        eg.egitim_turu,
+        eg.egitim_tarihi?.toISOString?.().split("T")[0] || "",
+        eg.bitis_tarihi?.toISOString?.().split("T")[0] || "",
+        durum,
+      ]);
+      if (expired) {
+        r.eachCell(cell => { cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFFEE2E2" } }; });
+        r.getCell(6).font = { bold: true, color: { argb: "FF991B1B" } };
+      } else if (expiring) {
+        r.eachCell(cell => { cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFFFFBEB" } }; });
+        r.getCell(6).font = { bold: true, color: { argb: "FF92400E" } };
+      }
+    }
+
+    ws.columns.forEach((col, i) => { col.width = [22, 16, 36, 14, 14, 22][i] || 16; });
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=isg_egitimler.xlsx`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================================
+// İŞ AVANSI TALEPLERİ
+// ============================================================
+pool.query(`
+  CREATE TABLE IF NOT EXISTS is_avans_talep (
+    id SERIAL PRIMARY KEY,
+    personel_id INTEGER REFERENCES personel(id) ON DELETE SET NULL,
+    talep_eden_email TEXT NOT NULL,
+    talep_eden_ad TEXT NOT NULL,
+    tutar NUMERIC NOT NULL,
+    aciklama TEXT,
+    not_aciklama TEXT,
+    durum TEXT DEFAULT 'TALEP',
+    tarih DATE NOT NULL,
+    pm_onay_tarihi DATE,
+    direktor_onay_tarihi DATE,
+    muhasebe_onay_tarihi DATE,
+    odeme_tarihi DATE,
+    reddeden_email TEXT,
+    red_aciklama TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS gider_turu TEXT;
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS bolge TEXT;
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS proje TEXT;
+`).catch(e => console.error("is_avans_talep tablo hatası:", e.message));
+
+app.get("/hr/is-avans", async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT t.*, p.ad_soyad as personel_ad
+      FROM is_avans_talep t
+      LEFT JOIN personel p ON t.personel_id = p.id
+      ORDER BY t.created_at DESC
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/hr/is-avans", async (req, res) => {
+  try {
+    const { personel_id, talep_eden_email, talep_eden_ad, tutar, aciklama, not_aciklama, tarih, gider_turu, bolge, proje } = req.body;
+    const r = await pool.query(
+      `INSERT INTO is_avans_talep (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [personel_id || null, talep_eden_email, talep_eden_ad, tutar, aciklama, not_aciklama, tarih, gider_turu || null, bolge || null, proje || null]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/hr/is-avans/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { personel_id, tutar, aciklama, not_aciklama, tarih, gider_turu, bolge, proje } = req.body;
+    const check = await pool.query("SELECT durum FROM is_avans_talep WHERE id=$1", [id]);
+    if (!check.rows[0] || check.rows[0].durum !== "TALEP") {
+      return res.status(400).json({ error: "Sadece TALEP durumundaki kayıtlar düzenlenebilir" });
+    }
+    const r = await pool.query(
+      `UPDATE is_avans_talep SET personel_id=$1,tutar=$2,aciklama=$3,not_aciklama=$4,tarih=$5,gider_turu=$6,bolge=$7,proje=$8 WHERE id=$9 RETURNING *`,
+      [personel_id || null, tutar, aciklama, not_aciklama, tarih, gider_turu || null, bolge || null, proje || null, id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/is-avans/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("DELETE FROM is_avans_talep WHERE id=$1", [id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/hr/is-avans/:id/onayla", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
+    if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
+    const talep = row.rows[0];
+    const today = new Date().toISOString().split("T")[0];
+    let updateSql, updateParams;
+
+    if (talep.durum === "TALEP") {
+      updateSql = "UPDATE is_avans_talep SET durum='PM_ONAY', pm_onay_tarihi=$1 WHERE id=$2 RETURNING *";
+      updateParams = [today, id];
+    } else if (talep.durum === "PM_ONAY") {
+      updateSql = "UPDATE is_avans_talep SET durum='DIREKTOR_ONAY', direktor_onay_tarihi=$1 WHERE id=$2 RETURNING *";
+      updateParams = [today, id];
+    } else if (talep.durum === "DIREKTOR_ONAY") {
+      updateSql = "UPDATE is_avans_talep SET durum='TAMAMLANDI', muhasebe_onay_tarihi=$1, odeme_tarihi=$1 WHERE id=$2 RETURNING *";
+      updateParams = [today, id];
+      const updated = await pool.query(updateSql, updateParams);
+      // Insert into avans table
+      if (talep.personel_id) {
+        await pool.query(
+          `INSERT INTO avans (personel_id,tarih,tutar,aciklama,avans_turu,odendi,odeme_tarihi)
+           VALUES ($1,$2,$3,$4,'IS',true,$5)`,
+          [talep.personel_id, talep.tarih, talep.tutar, talep.aciklama || "İş Avansı", today]
+        );
+      }
+      return res.json(updated.rows[0]);
+    } else {
+      return res.status(400).json({ error: "Bu durumda onay yapılamaz" });
+    }
+
+    const updated = await pool.query(updateSql, updateParams);
+    res.json(updated.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/hr/is-avans/:id/reddet", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { red_aciklama, reddeden_email } = req.body;
+    const r = await pool.query(
+      "UPDATE is_avans_talep SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 RETURNING *",
+      [red_aciklama, reddeden_email, id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/hr/is-avans/excel", async (req, res) => {
+  try {
+    const ExcelJS = require("exceljs");
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "ERC Sistem";
+
+    const ws = wb.addWorksheet("İş Avansı Talepleri");
+
+    const list = await pool.query(`
+      SELECT t.*, p.ad_soyad as personel_ad
+      FROM is_avans_talep t
+      LEFT JOIN personel p ON t.personel_id = p.id
+      ORDER BY t.tarih DESC, t.created_at DESC
+    `);
+
+    // Title row
+    ws.mergeCells("A1:M1");
+    const titleCell = ws.getCell("A1");
+    titleCell.value = "İŞ AVANSI TALEP RAPORU";
+    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" }, name: "Arial" };
+    titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    ws.getRow(1).height = 28;
+
+    // Header row
+    const colDefs = [
+      { header: "Kayıt No",         key: "id",         width: 10 },
+      { header: "Tarih",            key: "tarih",       width: 13 },
+      { header: "Talep Eden",       key: "talep_eden",  width: 20 },
+      { header: "Personel",         key: "personel",    width: 20 },
+      { header: "Gider Türü",       key: "gider",       width: 16 },
+      { header: "Bölge",            key: "bolge",       width: 13 },
+      { header: "Proje",            key: "proje",       width: 18 },
+      { header: "Tutar (₺)",        key: "tutar",       width: 13 },
+      { header: "Açıklama",         key: "aciklama",    width: 28 },
+      { header: "Not",              key: "not",         width: 22 },
+      { header: "Durum",            key: "durum",       width: 18 },
+      { header: "Onay Tarihi",      key: "onay",        width: 14 },
+      { header: "Ödeme Tarihi",     key: "odeme",       width: 14 },
+    ];
+
+    const headerRow = ws.getRow(2);
+    colDefs.forEach((col, i) => {
+      const cell = headerRow.getCell(i + 1);
+      cell.value = col.header;
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2563EB" } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = { bottom: { style: "thin", color: { argb: "FF1D4ED8" } } };
+      ws.getColumn(i + 1).width = col.width;
+    });
+    headerRow.height = 22;
+
+    const durumLabels = {
+      TALEP: "Talep Edildi", PM_ONAY: "PM Onayında", DIREKTOR_ONAY: "Direktör Onayında",
+      TAMAMLANDI: "Tamamlandı ✓", REDDEDILDI: "Reddedildi ✗"
+    };
+
+    const fmtDate = v => v ? (v.toISOString?.().split("T")[0] || String(v).split("T")[0]) : "";
+
+    list.rows.forEach((t, idx) => {
+      const rowNum = idx + 3;
+      const row = ws.getRow(rowNum);
+      const isEven = idx % 2 === 0;
+
+      const values = [
+        t.id,
+        fmtDate(t.tarih),
+        t.talep_eden_ad || "",
+        t.personel_ad || "",
+        t.gider_turu || "",
+        t.bolge || "",
+        t.proje || "",
+        Number(t.tutar),
+        t.aciklama || "",
+        t.not_aciklama || "",
+        durumLabels[t.durum] || t.durum,
+        fmtDate(t.direktor_onay_tarihi || t.pm_onay_tarihi),
+        fmtDate(t.odeme_tarihi),
+      ];
+
+      values.forEach((val, ci) => {
+        const cell = row.getCell(ci + 1);
+        cell.value = val;
+        cell.font = { name: "Arial", size: 10 };
+        cell.alignment = { vertical: "middle", wrapText: ci === 8 || ci === 9 };
+
+        // Row background
+        let bg = isEven ? "FFFFFFFF" : "FFF0F4FF";
+        if (t.durum === "TAMAMLANDI") bg = isEven ? "FFD1FAE5" : "FFBCF0DA";
+        else if (t.durum === "REDDEDILDI") bg = isEven ? "FFFEE2E2" : "FFFECACA";
+        else if (t.durum === "PM_ONAY" || t.durum === "DIREKTOR_ONAY") bg = isEven ? "FFFEF3C7" : "FFFDE68A";
+
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+        cell.border = { bottom: { style: "hair", color: { argb: "FFE2E8F0" } } };
+
+        if (ci === 7) { // Tutar column
+          cell.numFmt = '#,##0.00 ₺';
+          cell.alignment = { horizontal: "right", vertical: "middle" };
+          cell.font = { name: "Arial", size: 10, bold: true };
+        }
+        if (ci === 10) cell.alignment = { horizontal: "center", vertical: "middle" }; // Durum
+        if (ci === 0) cell.alignment = { horizontal: "center", vertical: "middle" };  // ID
+      });
+
+      row.height = 18;
+    });
+
+    // Totals row
+    const totRow = ws.getRow(list.rows.length + 3);
+    totRow.getCell(7).value = "TOPLAM:";
+    totRow.getCell(7).font = { bold: true, name: "Arial" };
+    totRow.getCell(7).alignment = { horizontal: "right" };
+    totRow.getCell(8).value = { formula: `SUM(H3:H${list.rows.length + 2})` };
+    totRow.getCell(8).numFmt = '#,##0.00 ₺';
+    totRow.getCell(8).font = { bold: true, name: "Arial", color: { argb: "FF166534" } };
+    totRow.getCell(8).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } };
+    totRow.height = 20;
+
+    // Freeze panes: freeze title + header
+    ws.views = [{ state: "frozen", xSplit: 0, ySplit: 2, topLeftCell: "A3" }];
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=is_avans_talepleri.xlsx`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── MASRAF FORMU ────────────────────────────────────────────────────────────
+
+const masrafBelgeDir = path.join(__dirname, "uploads", "masraf-belgeler");
+if (!fs.existsSync(masrafBelgeDir)) fs.mkdirSync(masrafBelgeDir, { recursive: true });
+
+const masrafUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, masrafBelgeDir),
+    filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+  }),
+  fileFilter: (req, file, cb) => {
+    const ok = /\.(jpg|jpeg|png|gif|webp|heic|pdf)$/i.test(file.originalname);
+    cb(null, ok);
+  }
+});
+
+// GET all forms (with totals)
+app.get("/hr/masraf-form", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT mf.*, p.ad_soyad as personel_ad,
+        COALESCE(SUM(mk.tutar),0) as genel_toplam
+      FROM masraf_form mf
+      LEFT JOIN personel p ON p.id = mf.personel_id
+      LEFT JOIN masraf_kalem mk ON mk.form_id = mf.id
+      GROUP BY mf.id, p.ad_soyad
+      ORDER BY mf.created_at DESC
+    `);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET personel masraf bakiye — MUST be before /:id to avoid "bakiye" being matched as an id
+app.get("/hr/masraf-form/bakiye/:personelId", async (req, res) => {
+  try {
+    const pid = req.params.personelId;
+    const avansRes = await pool.query(
+      `SELECT COALESCE(SUM(tutar),0) as toplam FROM avans WHERE personel_id=$1 AND avans_turu='IS'`,
+      [pid]
+    );
+    const masrafRes = await pool.query(
+      `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
+       JOIN masraf_form mf ON mf.id = mk.form_id
+       WHERE mf.personel_id=$1 AND mf.durum='TAMAMLANDI'`,
+      [pid]
+    );
+    const avans = Number(avansRes.rows[0].toplam);
+    const masraf = Number(masrafRes.rows[0].toplam);
+    res.json({ avans, masraf, bakiye: avans - masraf });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET single form with items and files
+app.get("/hr/masraf-form/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const form = await pool.query(`
+      SELECT mf.*, p.ad_soyad as personel_ad FROM masraf_form mf
+      LEFT JOIN personel p ON p.id = mf.personel_id WHERE mf.id=$1`, [id]);
+    if (!form.rows[0]) return res.status(404).json({ error: "Bulunamadı" });
+    const kalemler = await pool.query(`
+      SELECT mk.*, COALESCE(json_agg(mb.*) FILTER (WHERE mb.id IS NOT NULL), '[]') as belgeler
+      FROM masraf_kalem mk
+      LEFT JOIN masraf_belge mb ON mb.kalem_id = mk.id
+      WHERE mk.form_id=$1 GROUP BY mk.id ORDER BY mk.tarih, mk.id`, [id]);
+    res.json({ ...form.rows[0], kalemler: kalemler.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST create form
+app.post("/hr/masraf-form", async (req, res) => {
+  try {
+    const { personel_id, talep_eden_email, talep_eden_ad, donem } = req.body;
+    const { rows } = await pool.query(
+      `INSERT INTO masraf_form (personel_id,talep_eden_email,talep_eden_ad,donem)
+       VALUES ($1,$2,$3,$4) RETURNING *`,
+      [personel_id, talep_eden_email, talep_eden_ad, donem]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE form
+app.delete("/hr/masraf-form/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM masraf_form WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST add kalem
+app.post("/hr/masraf-kalem", async (req, res) => {
+  try {
+    const { form_id, kategori, tarih, belge_no, belge_aciklama, aciklama, tutar, fis_var, fis_olmadan_aciklama } = req.body;
+    const { rows } = await pool.query(
+      `INSERT INTO masraf_kalem (form_id,kategori,tarih,belge_no,belge_aciklama,aciklama,tutar,fis_var,fis_olmadan_aciklama)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [form_id, kategori, tarih, belge_no||null, belge_aciklama||null, aciklama||null, tutar, fis_var!==false, fis_olmadan_aciklama||null]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT update kalem (fis_var, tutar_uyari_aciklama etc)
+app.put("/hr/masraf-kalem/:id", async (req, res) => {
+  try {
+    const { fis_var, fis_olmadan_aciklama, tutar_uyari_aciklama } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE masraf_kalem
+       SET fis_var = COALESCE($1, fis_var),
+           fis_olmadan_aciklama = COALESCE($2, fis_olmadan_aciklama),
+           tutar_uyari_aciklama = COALESCE($3, tutar_uyari_aciklama)
+       WHERE id=$4 RETURNING *`,
+      [fis_var ?? null, fis_olmadan_aciklama||null, tutar_uyari_aciklama||null, req.params.id]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE kalem
+app.delete("/hr/masraf-kalem/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM masraf_kalem WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST upload belge for kalem
+app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, res) => {
+  try {
+    const { kalemId } = req.params;
+    if (!req.file) return res.status(400).json({ error: "Dosya yok" });
+    const kalem = await pool.query("SELECT form_id, kategori FROM masraf_kalem WHERE id=$1", [kalemId]);
+    if (!kalem.rows[0]) return res.status(404).json({ error: "Kalem bulunamadı" });
+    const { form_id, kategori } = kalem.rows[0];
+
+    // Run OCR in background — don't block response
+    const filePath = path.join(masrafBelgeDir, req.file.filename);
+    const { amount: ocrTutar, plaka: ocrPlaka, rawPlates } = await ocrFis(filePath);
+
+    // Check plate against fleet — fuzzy match (1 char tolerance for OCR errors)
+    let ocrPlakaEslesti = null;
+    let matchedPlaka = ocrPlaka;
+    if (kategori === "YAKIT" && (ocrPlaka || rawPlates?.length)) {
+      const fleet = await pool.query("SELECT plaka FROM araclar WHERE aktif=true");
+      const dbPlakalar = fleet.rows.map(r => r.plaka);
+      // Try all candidate plates from OCR
+      const candidates = rawPlates?.length ? rawPlates : [ocrPlaka];
+      for (const cand of candidates) {
+        const found = plakaEsles(cand, dbPlakalar);
+        if (found) { matchedPlaka = found; ocrPlakaEslesti = true; break; }
+      }
+      if (ocrPlakaEslesti === null) ocrPlakaEslesti = false;
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu, ocr_tutar, ocr_plaka, ocr_plaka_eslesti)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [kalemId, form_id, req.file.originalname, req.file.filename, ocrTutar, matchedPlaka||ocrPlaka, ocrPlakaEslesti]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE belge
+app.delete("/hr/masraf-belge/:id", async (req, res) => {
+  try {
+    const b = await pool.query("SELECT dosya_yolu FROM masraf_belge WHERE id=$1", [req.params.id]);
+    if (b.rows[0]) {
+      const fp = path.join(masrafBelgeDir, b.rows[0].dosya_yolu);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    }
+    await pool.query("DELETE FROM masraf_belge WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Serve masraf belge files
+app.get("/hr/masraf-belge/file/:filename", (req, res) => {
+  const fp = path.join(masrafBelgeDir, req.params.filename);
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: "Dosya yok" });
+  res.sendFile(fp);
+});
+
+// ─── ARAÇ FİLOSU ─────────────────────────────────────────────────────────────
+const aracBelgeDir = path.join(__dirname, "uploads", "arac-belgeler");
+if (!fs.existsSync(aracBelgeDir)) fs.mkdirSync(aracBelgeDir, { recursive: true });
+const ofisDir = path.join(__dirname, "uploads", "ofis-belgeler");
+if (!fs.existsSync(ofisDir)) fs.mkdirSync(ofisDir, { recursive: true });
+
+const aracUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, aracBelgeDir),
+    filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+  })
+});
+const ofisUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, ofisDir),
+    filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+  })
+});
+
+app.get("/hr/araclar", async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT a.*, json_agg(b ORDER BY b.belge_turu) FILTER (WHERE b.id IS NOT NULL) as belgeler
+    FROM araclar a
+    LEFT JOIN arac_belgeler b ON b.arac_id = a.id
+    GROUP BY a.id ORDER BY a.plaka
+  `);
+  res.json(rows);
+});
+
+app.post("/hr/araclar", async (req, res) => {
+  try {
+    const { plaka, marka, model, yil, tip, kiralama_firmasi, sozlesme_no,
+            kira_baslangic, kira_bitis, aylik_kira, bolge, surucu,
+            sigorta_bitis, muayene_bitis, durum, notlar } = req.body;
+    const norm = (plaka || "").replace(/\s+/g, "").toUpperCase();
+    const { rows } = await pool.query(
+      `INSERT INTO araclar (plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
+        kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,sigorta_bitis,muayene_bitis,durum,notlar,aktif)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true)
+       ON CONFLICT (plaka) DO UPDATE SET
+         marka=$2,model=$3,yil=$4,tip=$5,kiralama_firmasi=$6,sozlesme_no=$7,
+         kira_baslangic=$8,kira_bitis=$9,aylik_kira=$10,bolge=$11,surucu=$12,
+         sigorta_bitis=$13,muayene_bitis=$14,durum=$15,notlar=$16,aktif=true
+       RETURNING *`,
+      [norm,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
+       kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
+       sigorta_bitis||null,muayene_bitis||null,durum||'AKTİF',notlar]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/hr/araclar/:id", async (req, res) => {
+  try {
+    const { plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
+            kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,
+            sigorta_bitis,muayene_bitis,durum,notlar,aktif } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE araclar SET plaka=COALESCE($2,plaka),marka=$3,model=$4,yil=$5,tip=$6,
+        kiralama_firmasi=$7,sozlesme_no=$8,kira_baslangic=$9,kira_bitis=$10,
+        aylik_kira=$11,bolge=$12,surucu=$13,sigorta_bitis=$14,muayene_bitis=$15,
+        durum=$16,notlar=$17,aktif=COALESCE($18,aktif) WHERE id=$1 RETURNING *`,
+      [req.params.id,plaka?plaka.replace(/\s+/g,"").toUpperCase():null,
+       marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
+       kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
+       sigorta_bitis||null,muayene_bitis||null,durum,notlar,aktif??null]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/araclar/:id", async (req, res) => {
+  await pool.query("UPDATE araclar SET aktif=false WHERE id=$1", [req.params.id]);
+  res.json({ ok: true });
+});
+
+// Araç belge upload — turu: SOZLESME | RUHSAT | SIGORTA | MUAYENE | DIGER
+app.post("/hr/araclar/:id/belge", aracUpload.single("dosya"), async (req, res) => {
+  try {
+    const { belge_turu, aciklama } = req.body;
+    if (!req.file) return res.status(400).json({ error: "Dosya yok" });
+    // Remove old if same type (overwrite semantics for fixed slots)
+    if (["SOZLESME","RUHSAT","SIGORTA","MUAYENE"].includes(belge_turu)) {
+      const old = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE arac_id=$1 AND belge_turu=$2", [req.params.id, belge_turu]);
+      for (const r of old.rows) { const fp = path.join(aracBelgeDir, r.dosya_yolu); if (fs.existsSync(fp)) fs.unlinkSync(fp); }
+      await pool.query("DELETE FROM arac_belgeler WHERE arac_id=$1 AND belge_turu=$2", [req.params.id, belge_turu]);
+    }
+    const { rows } = await pool.query(
+      "INSERT INTO arac_belgeler (arac_id,belge_turu,dosya_adi,dosya_yolu,aciklama) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [req.params.id, belge_turu, req.file.originalname, req.file.filename, aciklama||null]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/arac-belge/:id", async (req, res) => {
+  const b = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE id=$1", [req.params.id]);
+  if (b.rows[0]) { const fp = path.join(aracBelgeDir, b.rows[0].dosya_yolu); if (fs.existsSync(fp)) fs.unlinkSync(fp); }
+  await pool.query("DELETE FROM arac_belgeler WHERE id=$1", [req.params.id]);
+  res.json({ ok: true });
+});
+
+app.get("/hr/arac-belge/file/:filename", (req, res) => {
+  const fp = path.join(aracBelgeDir, req.params.filename);
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: "Dosya yok" });
+  res.download(fp, req.query.name || req.params.filename);
+});
+
+// ─── OFİS & DEPO ─────────────────────────────────────────────────────────────
+app.get("/hr/ofis", async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT o.*, json_agg(b ORDER BY b.created_at) FILTER (WHERE b.id IS NOT NULL) as belgeler
+    FROM ofis_depo o
+    LEFT JOIN ofis_belgeler b ON b.ofis_id = o.id
+    GROUP BY o.id ORDER BY o.ad
+  `);
+  res.json(rows);
+});
+
+app.post("/hr/ofis", async (req, res) => {
+  try {
+    const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
+            aylik_kira,metrekare,kat,sorumlu,durum,notlar } = req.body;
+    const { rows } = await pool.query(
+      `INSERT INTO ofis_depo (tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,
+        kira_bitis,aylik_kira,metrekare,kat,sorumlu,durum,notlar)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [tur||'OFİS',ad,bolge,adres,kiraya_veren,sozlesme_no,
+       kira_baslangic||null,kira_bitis||null,aylik_kira||null,metrekare||null,kat,sorumlu,durum||'AKTİF',notlar]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/hr/ofis/:id", async (req, res) => {
+  try {
+    const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
+            aylik_kira,metrekare,kat,sorumlu,durum,notlar } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE ofis_depo SET tur=$2,ad=$3,bolge=$4,adres=$5,kiraya_veren=$6,sozlesme_no=$7,
+        kira_baslangic=$8,kira_bitis=$9,aylik_kira=$10,metrekare=$11,kat=$12,
+        sorumlu=$13,durum=$14,notlar=$15 WHERE id=$1 RETURNING *`,
+      [req.params.id,tur,ad,bolge,adres,kiraya_veren,sozlesme_no,
+       kira_baslangic||null,kira_bitis||null,aylik_kira||null,metrekare||null,kat,sorumlu,durum,notlar]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/ofis/:id", async (req, res) => {
+  await pool.query("UPDATE ofis_depo SET durum='PASİF' WHERE id=$1", [req.params.id]);
+  res.json({ ok: true });
+});
+
+app.post("/hr/ofis/:id/belge", ofisUpload.single("dosya"), async (req, res) => {
+  try {
+    const { belge_turu, aciklama } = req.body;
+    if (!req.file) return res.status(400).json({ error: "Dosya yok" });
+    if (belge_turu === "SOZLESME") {
+      const old = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE ofis_id=$1 AND belge_turu='SOZLESME'", [req.params.id]);
+      for (const r of old.rows) { const fp = path.join(ofisDir, r.dosya_yolu); if (fs.existsSync(fp)) fs.unlinkSync(fp); }
+      await pool.query("DELETE FROM ofis_belgeler WHERE ofis_id=$1 AND belge_turu='SOZLESME'", [req.params.id]);
+    }
+    const { rows } = await pool.query(
+      "INSERT INTO ofis_belgeler (ofis_id,belge_turu,dosya_adi,dosya_yolu,aciklama) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [req.params.id, belge_turu||'DIGER', req.file.originalname, req.file.filename, aciklama||null]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/ofis-belge/:id", async (req, res) => {
+  const b = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE id=$1", [req.params.id]);
+  if (b.rows[0]) { const fp = path.join(ofisDir, b.rows[0].dosya_yolu); if (fs.existsSync(fp)) fs.unlinkSync(fp); }
+  await pool.query("DELETE FROM ofis_belgeler WHERE id=$1", [req.params.id]);
+  res.json({ ok: true });
+});
+
+app.get("/hr/ofis-belge/file/:filename", (req, res) => {
+  const fp = path.join(ofisDir, req.params.filename);
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: "Dosya yok" });
+  res.download(fp, req.query.name || req.params.filename);
+});
+
+// PUT submit for approval (TASLAK → PM_BEKLE) — form_no ata
+app.put("/hr/masraf-form/:id/submit", async (req, res) => {
+  try {
+    // Bir sonraki form numarasını bul (TASLAK olmayanların sayısı + 1)
+    const { rows: numRows } = await pool.query(
+      `SELECT COALESCE(MAX(form_no), 0) + 1 AS next_no FROM masraf_form WHERE form_no IS NOT NULL`
+    );
+    const nextNo = numRows[0].next_no;
+    const { rows } = await pool.query(
+      `UPDATE masraf_form SET durum='PM_BEKLE', form_no=$2 WHERE id=$1 AND durum='TASLAK' RETURNING *`,
+      [req.params.id, nextNo]
+    );
+    if (!rows[0]) return res.status(422).json({ error: "Form taslak durumunda değil veya bulunamadı" });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT PM onayla (PM_BEKLE → PM_ONAY)
+app.put("/hr/masraf-form/:id/pm-onayla", async (req, res) => {
+  try {
+    const { pm_not } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE masraf_form SET durum='DIREKTOR_BEKLE', pm_not=$1, pm_onay_tarihi=NOW() WHERE id=$2 RETURNING *`,
+      [pm_not||null, req.params.id]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT PM reddet
+app.put("/hr/masraf-form/:id/pm-reddet", async (req, res) => {
+  try {
+    const { red_aciklama, reddeden_email } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE masraf_form SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 RETURNING *`,
+      [red_aciklama, reddeden_email, req.params.id]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT Direktör onayla (DIREKTOR_BEKLE → TAMAMLANDI) + avans düş
+app.put("/hr/masraf-form/:id/direktor-onayla", async (req, res) => {
+  try {
+    const { direktor_not } = req.body;
+    const formRes = await pool.query(
+      `UPDATE masraf_form SET durum='TAMAMLANDI', direktor_not=$1, direktor_onay_tarihi=NOW() WHERE id=$2 RETURNING *`,
+      [direktor_not||null, req.params.id]
+    );
+    const form = formRes.rows[0];
+    res.json(form);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT Direktör reddet
+app.put("/hr/masraf-form/:id/direktor-reddet", async (req, res) => {
+  try {
+    const { red_aciklama, reddeden_email } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE masraf_form SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 RETURNING *`,
+      [red_aciklama, reddeden_email, req.params.id]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET masraf-form Excel (single form)
+app.get("/hr/masraf-form/:id/excel", async (req, res) => {
+  try {
+    const formRes = await pool.query(`
+      SELECT mf.*, p.ad_soyad as personel_ad FROM masraf_form mf
+      LEFT JOIN personel p ON p.id = mf.personel_id WHERE mf.id=$1`, [req.params.id]);
+    if (!formRes.rows[0]) return res.status(404).json({ error: "Bulunamadı" });
+    const form = formRes.rows[0];
+    const kalemler = await pool.query("SELECT * FROM masraf_kalem WHERE form_id=$1 ORDER BY tarih,id", [form.id]);
+    const rows = kalemler.rows;
+
+    const KATS = [
+      { key: "YEMEK", label: "YİYECEK VE İÇECEK GİDERLERİ", aciklamaLabel: "AÇIKLAMA (PROJE VEYA İŞ ADI)" },
+      { key: "YAKIT", label: "ARAÇ YAKIT VE BAKIM GİDERLERİ", aciklamaLabel: "AÇIKLAMA (ARAÇ PLAKA NO)" },
+      { key: "KONAKLAMA", label: "KONAKLAMA GİDERLERİ", aciklamaLabel: "AÇIKLAMA (KAÇ GECE, KİŞİ SAYISI)" },
+      { key: "ULASIM", label: "ULAŞIM GİDERLERİ", aciklamaLabel: "AÇIKLAMA (BİNİŞ SAATİ, GÜZERGAH)" },
+      { key: "KOPRU", label: "KÖPRÜ / OTOYOL GEÇİŞ GİDERLERİ", aciklamaLabel: "AÇIKLAMA (GEÇİŞ DETAYI)" },
+      { key: "MALZEME", label: "MALZEME GİDERLERİ", aciklamaLabel: "AÇIKLAMA (MALZEME DETAYI)" },
+      { key: "DIGER", label: "DİĞER GİDERLER", aciklamaLabel: "AÇIKLAMA (İŞİN DETAYI)" },
+    ];
+
+    const ExcelJS = require("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Masraf Formu");
+
+    ws.columns = [
+      { width: 3 }, { width: 13 }, { width: 12 }, { width: 30 }, { width: 40 }, { width: 5 }, { width: 16 }
+    ];
+
+    const navy = "FF1E3A5F", white = "FFFFFFFF", headerBlue = "FF2563EB";
+    const boldWhite = { bold: true, color: { argb: white }, name: "Arial", size: 11 };
+    const boldNavy = { bold: true, color: { argb: "FF1E3A5F" }, name: "Arial", size: 10 };
+    const thinLine = { style: "thin", color: { argb: "FFB0B8C1" } };
+    const cellBorder = { top: thinLine, left: thinLine, bottom: thinLine, right: thinLine };
+
+    const mergeAndStyle = (r, c1, c2, val, fill, font, align = "center") => {
+      if (c1 !== c2) ws.mergeCells(r, c1, r, c2);
+      const cell = ws.getCell(r, c1);
+      cell.value = val;
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill || white } };
+      if (font) cell.font = font;
+      cell.alignment = { horizontal: align, vertical: "middle", wrapText: true };
+      cell.border = cellBorder;
+    };
+
+    const applyBorder = (r, cols) => {
+      cols.forEach(c => { ws.getCell(r, c).border = cellBorder; });
+    };
+
+    // Row 1: Title
+    ws.addRow([]);
+    ws.getRow(1).height = 30;
+    mergeAndStyle(1, 2, 5, "MASRAF FORMU", navy, { bold: true, color: { argb: white }, name: "Arial", size: 14 });
+    mergeAndStyle(1, 7, 7, `Doküman Kodu: ${String(form.form_no || form.id || 1).padStart(3,'0')}`, null, boldNavy, "right");
+
+    // Row 2: donem + date + rev
+    ws.addRow([]);
+    ws.getRow(2).height = 18;
+    mergeAndStyle(2, 2, 5, `Dönem: ${form.donem}`, null, boldNavy, "left");
+    mergeAndStyle(2, 7, 7, `Oluşturma: ${new Date(form.created_at).toLocaleDateString("tr-TR")}`, null, { name: "Arial", size: 9, italic: true }, "right");
+
+    // Row 3: Personel
+    ws.addRow([]);
+    ws.getRow(3).height = 18;
+    mergeAndStyle(3, 2, 5, `Personel: ${formatAd(form.personel_ad || form.talep_eden_ad)}`, null, boldNavy, "left");
+
+    let currentRow = 4;
+    const totals = {};
+
+    for (const kat of KATS) {
+      const katRows = rows.filter(r => r.kategori === kat.key);
+      totals[kat.key] = katRows.reduce((s, r) => s + Number(r.tutar), 0);
+
+      // Category header
+      ws.getRow(currentRow).height = 20;
+      mergeAndStyle(currentRow, 2, 7, kat.label, headerBlue, boldWhite);
+      currentRow++;
+
+      // Column headers
+      ws.getRow(currentRow).height = 18;
+      const colHeaders = ["TARİH", "BELGE NO", "BELGE AÇIKLAMASI", kat.aciklamaLabel, "", "MASRAF TUTARI"];
+      [2, 3, 4, 5, 6, 7].forEach((col, i) => {
+        const cell = ws.getCell(currentRow, col);
+        cell.value = colHeaders[i];
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD1D5DB" } };
+        cell.font = { bold: true, name: "Arial", size: 9 };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.border = cellBorder;
+      });
+      currentRow++;
+
+      if (katRows.length === 0) {
+        ws.mergeCells(currentRow, 2, currentRow, 6);
+        ws.getCell(currentRow, 2).value = "—";
+        ws.getCell(currentRow, 2).alignment = { horizontal: "center" };
+        ws.getCell(currentRow, 2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: white } };
+        ws.getCell(currentRow, 7).value = 0;
+        ws.getCell(currentRow, 7).numFmt = "#,##0.00 ₺";
+        ws.getCell(currentRow, 7).alignment = { horizontal: "right" };
+        ws.getCell(currentRow, 7).fill = { type: "pattern", pattern: "solid", fgColor: { argb: white } };
+        applyBorder(currentRow, [2, 7]);
+        currentRow++;
+      } else {
+        for (const kalem of katRows) {
+          ws.getRow(currentRow).height = 16;
+          ws.getCell(currentRow, 2).value = kalem.tarih ? new Date(kalem.tarih).toLocaleDateString("tr-TR") : "";
+          ws.getCell(currentRow, 3).value = kalem.belge_no || "";
+          ws.getCell(currentRow, 4).value = kalem.belge_aciklama || "";
+          ws.mergeCells(currentRow, 5, currentRow, 6);
+          ws.getCell(currentRow, 5).value = kalem.aciklama || "";
+          ws.getCell(currentRow, 5).alignment = { wrapText: true };
+          ws.getCell(currentRow, 7).value = Number(kalem.tutar);
+          ws.getCell(currentRow, 7).numFmt = "#,##0.00 ₺";
+          ws.getCell(currentRow, 7).alignment = { horizontal: "right" };
+          if (!kalem.fis_var) {
+            ws.getCell(currentRow, 2).font = { color: { argb: "FFDC2626" }, italic: true, name: "Arial", size: 9 };
+          }
+          [2, 3, 4, 5, 7].forEach(c => {
+            ws.getCell(currentRow, c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: white } };
+            ws.getCell(currentRow, c).border = cellBorder;
+          });
+          currentRow++;
+        }
+      }
+
+      // Subtotal row
+      ws.getRow(currentRow).height = 18;
+      mergeAndStyle(currentRow, 2, 6, `${kat.label.replace("GİDERLERİ","").trim()} Toplamı`, "FFF3F4F6", boldNavy, "right");
+      ws.getCell(currentRow, 7).value = totals[kat.key];
+      ws.getCell(currentRow, 7).numFmt = "#,##0.00 ₺";
+      ws.getCell(currentRow, 7).font = { bold: true, name: "Arial", size: 10 };
+      ws.getCell(currentRow, 7).alignment = { horizontal: "right" };
+      ws.getCell(currentRow, 7).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
+      ws.getCell(currentRow, 7).border = cellBorder;
+      currentRow++;
+    }
+
+    // ICMAL
+    ws.getRow(currentRow).height = 22;
+    mergeAndStyle(currentRow, 2, 7, "İCMAL / SONUÇ", navy, boldWhite);
+    currentRow++;
+
+    const genToplam = Object.values(totals).reduce((s, v) => s + v, 0);
+    for (const kat of KATS) {
+      ws.getRow(currentRow).height = 16;
+      mergeAndStyle(currentRow, 2, 6, kat.label, null, { name: "Arial", size: 9 }, "left");
+      ws.getCell(currentRow, 7).value = totals[kat.key];
+      ws.getCell(currentRow, 7).numFmt = "#,##0.00 ₺";
+      ws.getCell(currentRow, 7).alignment = { horizontal: "right" };
+      ws.getCell(currentRow, 7).fill = { type: "pattern", pattern: "solid", fgColor: { argb: white } };
+      ws.getCell(currentRow, 7).border = cellBorder;
+      currentRow++;
+    }
+
+    // Genel Toplam
+    ws.getRow(currentRow).height = 20;
+    mergeAndStyle(currentRow, 2, 6, "GENEL TOPLAM", navy, boldWhite, "right");
+    ws.getCell(currentRow, 7).value = genToplam;
+    ws.getCell(currentRow, 7).numFmt = "#,##0.00 ₺";
+    ws.getCell(currentRow, 7).font = { bold: true, color: { argb: white }, name: "Arial", size: 11 };
+    ws.getCell(currentRow, 7).fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } };
+    ws.getCell(currentRow, 7).alignment = { horizontal: "right", vertical: "middle" };
+    ws.getCell(currentRow, 7).border = cellBorder;
+    currentRow += 2;
+
+    // İmza alanı
+    ws.getRow(currentRow).height = 18;
+    mergeAndStyle(currentRow, 2, 3, "HARCAMAYI YAPAN", "FFE0F2FE", { bold: true, name: "Arial", size: 9 });
+    mergeAndStyle(currentRow, 4, 5, "BİRİM YÖNETİCİSİ (PM)", "FFD1FAE5", { bold: true, name: "Arial", size: 9 });
+    mergeAndStyle(currentRow, 6, 7, "GENEL MÜDÜR", "FFFEF3C7", { bold: true, name: "Arial", size: 9 });
+    currentRow++;
+
+    ws.getRow(currentRow).height = 30;
+    mergeAndStyle(currentRow, 2, 3, form.talep_eden_ad, null, { name: "Arial", size: 10 });
+    const pmAd = form.pm_onay_tarihi ? `Orhan Bedir\n${new Date(form.pm_onay_tarihi).toLocaleDateString("tr-TR")}` : "—";
+    const dirAd = form.direktor_onay_tarihi ? `Düzgün Şimşek\n${new Date(form.direktor_onay_tarihi).toLocaleDateString("tr-TR")}` : "—";
+    mergeAndStyle(currentRow, 4, 5, pmAd, null, { name: "Arial", size: 10 });
+    mergeAndStyle(currentRow, 6, 7, dirAd, null, { name: "Arial", size: 10 });
+    currentRow++;
+
+    ws.getRow(currentRow).height = 18;
+    mergeAndStyle(currentRow, 2, 3, "Tarih / İmza", null, { italic: true, color: { argb: "FF9CA3AF" }, name: "Arial", size: 8 });
+    mergeAndStyle(currentRow, 4, 5, form.pm_not || "", null, { italic: true, color: { argb: "FF374151" }, name: "Arial", size: 8 });
+    mergeAndStyle(currentRow, 6, 7, form.direktor_not || "", null, { italic: true, color: { argb: "FF374151" }, name: "Arial", size: 8 });
+
+    // Frozen panes
+    ws.views = [{ state: "frozen", xSplit: 0, ySplit: 3, topLeftCell: "A4", showGridLines: false }];
+
+    const donemSafe = form.donem.replace(/[^0-9\-]/g, "");
+    const adSafe = (form.talep_eden_ad||"masraf").replace(/[^a-zA-Z0-9_\-]/g, "_");
+    const fname = `masraf_formu_${adSafe}_${donemSafe}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${fname}"; filename*=UTF-8''${encodeURIComponent(fname)}`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET PDF of all receipts for a form
+app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
+  try {
+    const PDFDocument = require("pdfkit");
+    const belgeler = await pool.query(
+      `SELECT mb.*, mk.kategori, mk.tutar, mk.tarih FROM masraf_belge mb
+       JOIN masraf_kalem mk ON mk.id = mb.kalem_id
+       WHERE mb.form_id=$1 ORDER BY mk.tarih, mb.id`, [req.params.id]
+    );
+    const formRes = await pool.query("SELECT * FROM masraf_form WHERE id=$1", [req.params.id]);
+    const form = formRes.rows[0];
+
+    const doc = new PDFDocument({ size: "A4", margin: 20, layout: "landscape" });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="masraf_fisleri_${req.params.id}.pdf"`);
+    doc.pipe(res);
+
+    const imgFiles = belgeler.rows.filter(b => /\.(jpg|jpeg|png|gif|webp|heic)$/i.test(b.dosya_yolu));
+    const sharp = require("sharp");
+    const margin = 20;
+    const gap = 16;
+    const labelH = 18;
+    const pageW = doc.page.width;
+    const pageH = doc.page.height;
+
+    // Trim each image and collect buffers + dimensions
+    const trimmed = [];
+    for (const img of imgFiles) {
+      const fp = path.join(masrafBelgeDir, img.dosya_yolu);
+      if (!fs.existsSync(fp)) continue;
+      try {
+        const buf = await sharp(fp)
+          .trim({ threshold: 120 })
+          .jpeg({ quality: 92 })
+          .toBuffer({ resolveWithObject: true });
+        trimmed.push({ buf: buf.data, w: buf.info.width, h: buf.info.height, meta: img });
+      } catch {
+        try {
+          const raw = fs.readFileSync(fp);
+          const info = await sharp(raw).metadata();
+          trimmed.push({ buf: raw, w: info.width || 400, h: info.height || 600, meta: img });
+        } catch {}
+      }
+    }
+
+    // Layout: 2 per page, side by side, respecting receipt aspect ratio
+    const availW = pageW - margin * 2;
+    const slotW = (availW - gap) / 2;
+    const maxImgH = pageH - margin * 2 - labelH;
+
+    let firstPage = true;
+    for (let i = 0; i < trimmed.length; i++) {
+      const col = i % 2;
+      if (col === 0) {
+        if (!firstPage) doc.addPage();
+        firstPage = false;
+      }
+      const { buf, w, h, meta } = trimmed[i];
+      // Scale to fit within slot, preserving aspect ratio
+      const scale = Math.min(slotW / w, maxImgH / h, 1); // never upscale
+      const imgW = Math.round(w * scale);
+      const imgH = Math.round(h * scale);
+      const x = margin + col * (slotW + gap) + (slotW - imgW) / 2;
+      const y = margin;
+      try {
+        doc.image(buf, x, y, { width: imgW, height: imgH });
+        doc.fontSize(8).font("Helvetica").fillColor("#555")
+           .text(
+             `${meta.kategori} · ₺${Number(meta.tutar).toLocaleString("tr-TR")} · ${new Date(meta.tarih).toLocaleDateString("tr-TR")}`,
+             x, y + imgH + 4, { width: imgW, align: "center" }
+           );
+      } catch {}
+    }
+
+    if (trimmed.length === 0) {
+      doc.fontSize(14).text("Bu forma ait fiş fotoğrafı bulunamadı.", margin, 100, { align: "center" });
+    }
+    doc.end();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT arsivle
+app.put("/hr/masraf-form/:id/arsivle", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE masraf_form SET durum='ARSIVLENDI' WHERE id=$1 AND durum='TAMAMLANDI' RETURNING *`,
+      [req.params.id]
+    );
+    res.json(rows[0] || { error: "Güncellenemedi" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET dönem bazlı toplu Excel (Muhasebe için)
+app.get("/hr/masraf-form/donem/:donem/excel", async (req, res) => {
+  try {
+    const { donem } = req.params;
+    const formsRes = await pool.query(`
+      SELECT mf.*, p.ad_soyad as personel_ad FROM masraf_form mf
+      LEFT JOIN personel p ON p.id = mf.personel_id
+      WHERE mf.donem=$1 AND mf.durum IN ('TAMAMLANDI','ARSIVLENDI')
+      ORDER BY mf.talep_eden_ad, mf.id`, [donem]);
+    const forms = formsRes.rows;
+
+    const ExcelJS = require("exceljs");
+    const wb = new ExcelJS.Workbook();
+
+    if (forms.length === 0) {
+      const ws = wb.addWorksheet("Boş");
+      ws.getCell("A1").value = `${donem} döneminde onaylanmış masraf formu yok.`;
+    }
+
+    for (const form of forms) {
+      const kalemler = await pool.query(
+        "SELECT * FROM masraf_kalem WHERE form_id=$1 ORDER BY tarih,id", [form.id]
+      );
+      const rows = kalemler.rows;
+      const sheetName = `${form.talep_eden_ad.slice(0,15)}_${form.id}`.replace(/[\\/*?:\[\]]/g,"");
+      const ws = wb.addWorksheet(sheetName);
+
+      ws.columns = [
+        { width: 3 }, { width: 13 }, { width: 12 }, { width: 30 }, { width: 38 }, { width: 5 }, { width: 16 }
+      ];
+
+      const navy = "FF1E3A5F", white = "FFFFFFFF", headerBlue = "FF2563EB";
+      const boldWhite = { bold: true, color: { argb: white }, name: "Arial", size: 11 };
+      const boldNavy = { bold: true, color: { argb: navy }, name: "Arial", size: 10 };
+      const thinLine2 = { style: "thin", color: { argb: "FFB0B8C1" } };
+      const cellBorder2 = { top: thinLine2, left: thinLine2, bottom: thinLine2, right: thinLine2 };
+
+      const mergeAndStyle = (r, c1, c2, val, fill, font, align = "center") => {
+        if (c1 !== c2) ws.mergeCells(r, c1, r, c2);
+        const cell = ws.getCell(r, c1);
+        cell.value = val;
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill || white } };
+        if (font) cell.font = font;
+        cell.alignment = { horizontal: align, vertical: "middle", wrapText: true };
+        cell.border = cellBorder2;
+      };
+
+      const applyBorder2 = (r, cols) => {
+        cols.forEach(c => {
+          ws.getCell(r, c).border = cellBorder2;
+          ws.getCell(r, c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: white } };
+        });
+      };
+
+      ws.addRow([]); ws.getRow(1).height = 30;
+      mergeAndStyle(1, 2, 5, "MASRAF FORMU", navy, { bold: true, color: { argb: white }, name: "Arial", size: 14 });
+      mergeAndStyle(1, 7, 7, `Doküman Kodu: ${String(form.form_no || form.id || 1).padStart(3,'0')}`, null, boldNavy, "right");
+      ws.addRow([]); ws.getRow(2).height = 18;
+      mergeAndStyle(2, 2, 5, `Dönem: ${form.donem}`, null, boldNavy, "left");
+      mergeAndStyle(2, 7, 7, `Oluşturma: ${new Date(form.created_at).toLocaleDateString("tr-TR")}`, null, { name:"Arial", size:9, italic:true }, "right");
+      ws.addRow([]); ws.getRow(3).height = 18;
+      mergeAndStyle(3, 2, 5, `Personel: ${formatAd(form.personel_ad || form.talep_eden_ad)}`, null, boldNavy, "left");
+
+      const KATS = [
+        { key:"YEMEK", label:"YİYECEK VE İÇECEK GİDERLERİ", aciklamaLabel:"AÇIKLAMA (PROJE VEYA İŞ ADI)" },
+        { key:"YAKIT", label:"ARAÇ YAKIT VE BAKIM GİDERLERİ", aciklamaLabel:"AÇIKLAMA (ARAÇ PLAKA NO)" },
+        { key:"KONAKLAMA", label:"KONAKLAMA GİDERLERİ", aciklamaLabel:"AÇIKLAMA (KAÇ GECE, KİŞİ SAYISI)" },
+        { key:"ULASIM", label:"ULAŞIM GİDERLERİ", aciklamaLabel:"AÇIKLAMA (BİNİŞ SAATİ, GÜZERGAH)" },
+        { key:"KOPRU", label:"KÖPRÜ / OTOYOL GEÇİŞ GİDERLERİ", aciklamaLabel:"AÇIKLAMA (GEÇİŞ DETAYI)" },
+        { key:"MALZEME", label:"MALZEME GİDERLERİ", aciklamaLabel:"AÇIKLAMA (MALZEME DETAYI)" },
+        { key:"DIGER", label:"DİĞER GİDERLER", aciklamaLabel:"AÇIKLAMA (İŞİN DETAYI)" },
+      ];
+
+      let currentRow = 4;
+      const totals = {};
+
+      for (const kat of KATS) {
+        const katRows = rows.filter(r => r.kategori === kat.key);
+        totals[kat.key] = katRows.reduce((s, r) => s + Number(r.tutar), 0);
+
+        ws.getRow(currentRow).height = 20;
+        mergeAndStyle(currentRow, 2, 7, kat.label, headerBlue, boldWhite);
+        currentRow++;
+
+        ws.getRow(currentRow).height = 16;
+        ["TARİH","BELGE NO","BELGE AÇIKLAMASI",kat.aciklamaLabel,"","MASRAF TUTARI"].forEach((h,i)=>{
+          const col = [2,3,4,5,6,7][i];
+          const cell = ws.getCell(currentRow, col);
+          cell.value = h;
+          cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFD1D5DB" } };
+          cell.font = { bold:true, name:"Arial", size:9 };
+          cell.alignment = { horizontal:"center", vertical:"middle" };
+          cell.border = cellBorder2;
+        });
+        currentRow++;
+
+        if (katRows.length === 0) {
+          ws.mergeCells(currentRow, 2, currentRow, 6);
+          ws.getCell(currentRow, 2).value = "—";
+          ws.getCell(currentRow, 2).alignment = { horizontal:"center" };
+          ws.getCell(currentRow, 7).value = 0;
+          ws.getCell(currentRow, 7).numFmt = "#,##0.00 ₺";
+          applyBorder2(currentRow, [2, 7]);
+          currentRow++;
+        } else {
+          for (const kalem of katRows) {
+            ws.getRow(currentRow).height = 16;
+            ws.getCell(currentRow,2).value = kalem.tarih ? new Date(kalem.tarih).toLocaleDateString("tr-TR") : "";
+            ws.getCell(currentRow,3).value = kalem.belge_no||"";
+            ws.getCell(currentRow,4).value = kalem.belge_aciklama||"";
+            ws.mergeCells(currentRow, 5, currentRow, 6);
+            ws.getCell(currentRow,5).value = kalem.aciklama||"";
+            ws.getCell(currentRow,5).alignment = { wrapText:true };
+            ws.getCell(currentRow,7).value = Number(kalem.tutar);
+            ws.getCell(currentRow,7).numFmt = "#,##0.00 ₺";
+            ws.getCell(currentRow,7).alignment = { horizontal:"right" };
+            if (!kalem.fis_var) ws.getCell(currentRow,2).font = { color:{ argb:"FFDC2626" }, italic:true, name:"Arial", size:9 };
+            [2,3,4,5,7].forEach(c => {
+              ws.getCell(currentRow,c).border = cellBorder2;
+              ws.getCell(currentRow,c).fill = { type:"pattern", pattern:"solid", fgColor:{ argb:white } };
+            });
+            currentRow++;
+          }
+        }
+
+        ws.getRow(currentRow).height = 18;
+        mergeAndStyle(currentRow, 2, 6, `${kat.label.split(" GİDERLER")[0]} Toplamı`, "FFF3F4F6", boldNavy, "right");
+        ws.getCell(currentRow,7).value = totals[kat.key];
+        ws.getCell(currentRow,7).numFmt = "#,##0.00 ₺";
+        ws.getCell(currentRow,7).font = { bold:true, name:"Arial", size:10 };
+        ws.getCell(currentRow,7).alignment = { horizontal:"right" };
+        ws.getCell(currentRow,7).fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFF3F4F6" } };
+        ws.getCell(currentRow,7).border = cellBorder2;
+        currentRow++;
+      }
+
+      const genToplam = Object.values(totals).reduce((s,v)=>s+v,0);
+      ws.getRow(currentRow).height = 22;
+      mergeAndStyle(currentRow, 2, 7, "İCMAL / SONUÇ", navy, boldWhite);
+      currentRow++;
+      for (const kat of KATS) {
+        mergeAndStyle(currentRow, 2, 6, kat.label, null, { name:"Arial", size:9 }, "left");
+        ws.getCell(currentRow,7).value = totals[kat.key];
+        ws.getCell(currentRow,7).numFmt = "#,##0.00 ₺";
+        ws.getCell(currentRow,7).alignment = { horizontal:"right" };
+        ws.getCell(currentRow,7).fill = { type:"pattern", pattern:"solid", fgColor:{ argb:white } };
+        ws.getCell(currentRow,7).border = cellBorder2;
+        currentRow++;
+      }
+      ws.getRow(currentRow).height = 20;
+      mergeAndStyle(currentRow, 2, 6, "GENEL TOPLAM", navy, boldWhite, "right");
+      ws.getCell(currentRow,7).value = genToplam;
+      ws.getCell(currentRow,7).numFmt = "#,##0.00 ₺";
+      ws.getCell(currentRow,7).font = { bold:true, color:{ argb:white }, name:"Arial", size:11 };
+      ws.getCell(currentRow,7).fill = { type:"pattern", pattern:"solid", fgColor:{ argb:navy } };
+      ws.getCell(currentRow,7).alignment = { horizontal:"right", vertical:"middle" };
+      ws.getCell(currentRow,7).border = cellBorder2;
+      currentRow += 2;
+
+      ws.getRow(currentRow).height = 18;
+      mergeAndStyle(currentRow, 2, 3, "HARCAMAYI YAPAN", "FFE0F2FE", { bold:true, name:"Arial", size:9 });
+      mergeAndStyle(currentRow, 4, 5, "BİRİM YÖNETİCİSİ (PM)", "FFD1FAE5", { bold:true, name:"Arial", size:9 });
+      mergeAndStyle(currentRow, 6, 7, "GENEL MÜDÜR", "FFFEF3C7", { bold:true, name:"Arial", size:9 });
+      currentRow++;
+      ws.getRow(currentRow).height = 30;
+      mergeAndStyle(currentRow, 2, 3, form.talep_eden_ad, null, { name:"Arial", size:10 });
+      const pmAd = form.pm_onay_tarihi ? `Orhan Bedir\n${new Date(form.pm_onay_tarihi).toLocaleDateString("tr-TR")}` : "—";
+      const dirAd = form.direktor_onay_tarihi ? `Düzgün Şimşek\n${new Date(form.direktor_onay_tarihi).toLocaleDateString("tr-TR")}` : "—";
+      mergeAndStyle(currentRow, 4, 5, pmAd, null, { name:"Arial", size:10 });
+      mergeAndStyle(currentRow, 6, 7, dirAd, null, { name:"Arial", size:10 });
+      currentRow++;
+      ws.getRow(currentRow).height = 18;
+      mergeAndStyle(currentRow, 2, 3, "Tarih / İmza", null, { italic:true, color:{ argb:"FF9CA3AF" }, name:"Arial", size:8 });
+      mergeAndStyle(currentRow, 4, 5, form.pm_not||"", null, { italic:true, color:{ argb:"FF374151" }, name:"Arial", size:8 });
+      mergeAndStyle(currentRow, 6, 7, form.direktor_not||"", null, { italic:true, color:{ argb:"FF374151" }, name:"Arial", size:8 });
+
+      ws.views = [{ state:"frozen", xSplit:0, ySplit:3, topLeftCell:"A4", showGridLines: false }];
+    }
+
+    const donemSafe = donem.replace(/[^0-9\-]/g,"");
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="masraf_formlar_${donemSafe}.xlsx"; filename*=UTF-8''masraf_formlar_${donemSafe}.xlsx`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.listen(PORT, () => {

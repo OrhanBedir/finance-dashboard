@@ -10,10 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "fdir": "^6.5.0",
     "react": "^19.2.4",
-    "react-datepicker": "^9.1.0",
+    "react-datepicker": "^7.6.0",
     "react-dom": "^19.2.4",
-    "recharts": "^3.8.0"
+    "recharts": "^3.8.0",
+    "tinyglobby": "^0.2.16"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

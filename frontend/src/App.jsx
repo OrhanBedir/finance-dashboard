@@ -1384,6 +1384,7 @@ function DailyEntry() {
   const [message, setMessage] = useState("");
   const [showBoqUpload, setShowBoqUpload] = useState(false);
   const [showHwPoUpload, setShowHwPoUpload] = useState(false);
+  const [showDailyIslemlerMenu, setShowDailyIslemlerMenu] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [showCompletedImport, setShowCompletedImport] = useState(false);
   const [itemCodeSearch, setItemCodeSearch] = useState("");
@@ -1948,73 +1949,97 @@ function DailyEntry() {
           📋 Günlük İş Girişi
         </h1>
 
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={
-              showQcUpload ? "tab uploadTab activeTab" : "tab uploadTab"
-            }
-            onClick={() => {
-              setShowQcUpload((prev) => !prev);
-              setShowBoqUpload(false);
-              setShowHwPoUpload(false);
-              setShowCompletedImport(false);
-            }}
-          >
-            QC Yükle
-          </button>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <button
+              type="button"
+              className={showDailyIslemlerMenu ? "tab uploadTab activeTab" : "tab uploadTab"}
+              onClick={() => setShowDailyIslemlerMenu((prev) => !prev)}
+              style={{ display: "flex", alignItems: "center", gap: "6px" }}
+            >
+              ⚡ İşlemler {showDailyIslemlerMenu ? "▲" : "▼"}
+            </button>
 
-          <button
-            type="button"
-            className={
-              showBoqUpload ? "tab uploadTab activeTab" : "tab uploadTab"
-            }
-            onClick={() => {
-              setShowBoqUpload((prev) => !prev);
-              setShowQcUpload(false);
-              setShowHwPoUpload(false);
-              setShowCompletedImport(false);
-            }}
-          >
-            BoQ Yükle
-          </button>
-          <button
-            type="button"
-            className="tab uploadTab"
-            onClick={() => setShowRolloutUpload(true)}
-          >
-            Rollout Yükle
-          </button>
-
-          <button
-            type="button"
-            className={
-              showHwPoUpload ? "tab uploadTab activeTab" : "tab uploadTab"
-            }
-            onClick={() => {
-              setShowHwPoUpload((prev) => !prev);
-              setShowBoqUpload(false);
-              setShowQcUpload(false);
-              setShowCompletedImport(false);
-            }}
-          >
-            HW PO Yükle
-          </button>
-
-          <button
-            type="button"
-            className={
-              showCompletedImport ? "tab uploadTab activeTab" : "tab uploadTab"
-            }
-            onClick={() => {
-              setShowCompletedImport((prev) => !prev);
-              setShowBoqUpload(false);
-              setShowQcUpload(false);
-              setShowHwPoUpload(false);
-            }}
-          >
-            Tamamlanan Import
-          </button>
+            {showDailyIslemlerMenu && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  right: 0,
+                  background: "#fff",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "10px",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                  zIndex: 999,
+                  minWidth: "200px",
+                  overflow: "hidden",
+                }}
+              >
+                {[
+                  {
+                    label: "📊 QC Yükle",
+                    action: () => {
+                      setShowQcUpload((prev) => !prev);
+                      setShowBoqUpload(false);
+                      setShowHwPoUpload(false);
+                      setShowCompletedImport(false);
+                      setShowDailyIslemlerMenu(false);
+                    },
+                  },
+                  {
+                    label: "📋 BoQ Yükle",
+                    action: () => {
+                      setShowBoqUpload((prev) => !prev);
+                      setShowQcUpload(false);
+                      setShowHwPoUpload(false);
+                      setShowCompletedImport(false);
+                      setShowDailyIslemlerMenu(false);
+                    },
+                  },
+                  {
+                    label: "🚀 Rollout Yükle",
+                    action: () => {
+                      setShowRolloutUpload(true);
+                      setShowDailyIslemlerMenu(false);
+                    },
+                  },
+                  {
+                    label: "✅ Tamamlanan Import",
+                    action: () => {
+                      setShowCompletedImport((prev) => !prev);
+                      setShowBoqUpload(false);
+                      setShowQcUpload(false);
+                      setShowHwPoUpload(false);
+                      setShowDailyIslemlerMenu(false);
+                    },
+                  },
+                ].map((item, i, arr) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={item.action}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "11px 16px",
+                      background: "transparent",
+                      border: "none",
+                      borderBottom: i < arr.length - 1 ? "1px solid #f3f4f6" : "none",
+                      fontSize: "14px",
+                      color: "#1f2937",
+                      cursor: "pointer",
+                      fontWeight: "500",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <button
             type="button"
@@ -2897,6 +2922,84 @@ function DailyEntry() {
   );
 }
 
+function InvoiceBelgeUploader({ invoiceId, currentBelge }) {
+  const [belge, setBelge] = useState(currentBelge || null);
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const fileRef = useRef();
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!invoiceId) {
+      setPreview({ file, name: file.name });
+      return;
+    }
+    setUploading(true);
+    const fd = new FormData();
+    fd.append("belge", file);
+    try {
+      const r = await fetch(`${API_BASE}/invoice-entries/${invoiceId}/belge`, { method: "POST", body: fd });
+      const d = await r.json();
+      if (d.ok) setBelge(d.filename);
+      else alert("Yükleme hatası: " + d.error);
+    } catch (err) {
+      alert("Hata: " + err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!invoiceId || !belge) return;
+    if (!window.confirm("Belge silinsin mi?")) return;
+    await fetch(`${API_BASE}/invoice-entries/${invoiceId}/belge`, { method: "DELETE" });
+    setBelge(null);
+  };
+
+  if (!invoiceId) {
+    return (
+      <div style={{ color: "#9ca3af", fontSize: "13px", padding: "16px", textAlign: "center", border: "2px dashed #e5e7eb", borderRadius: "10px" }}>
+        Faturayı kaydettikten sonra belge ekleyebilirsiniz.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {belge ? (
+        <div style={{ border: "1.5px solid #d1fae5", borderRadius: "10px", padding: "14px 16px", background: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "28px" }}>📄</span>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "13px", color: "#166534" }}>Belge Mevcut</div>
+              <div style={{ fontSize: "11px", color: "#9ca3af" }}>{belge}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <a href={`${API_BASE.replace("/api", "")}/fatura-belgeler/${belge}`} target="_blank" rel="noreferrer"
+              style={{ padding: "6px 12px", background: "#166534", color: "#fff", borderRadius: "8px", fontSize: "12px", fontWeight: 600, textDecoration: "none" }}>
+              Görüntüle
+            </a>
+            <button onClick={handleDelete} style={{ padding: "6px 12px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
+              Sil
+            </button>
+          </div>
+        </div>
+      ) : (
+        <label style={{ display: "block", border: "2px dashed #d1d5db", borderRadius: "10px", padding: "24px", textAlign: "center", cursor: "pointer", background: uploading ? "#f9fafb" : "#fff", transition: "border-color 0.2s" }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = "#6b7280"}
+          onMouseLeave={e => e.currentTarget.style.borderColor = "#d1d5db"}>
+          <input ref={fileRef} type="file" accept="image/*,.pdf" capture="environment" onChange={handleFile} style={{ display: "none" }} />
+          <div style={{ fontSize: "32px", marginBottom: "8px" }}>{uploading ? "⏳" : "📸"}</div>
+          <div style={{ fontWeight: 600, fontSize: "14px", color: "#374151" }}>{uploading ? "Yükleniyor..." : "Fatura Fotoğrafı / PDF Ekle"}</div>
+          <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "4px" }}>Kameradan çek veya dosya seç</div>
+        </label>
+      )}
+    </div>
+  );
+}
+
 function FinanceUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -3157,6 +3260,10 @@ function FinanceDashboard({
   handleApplyAdvance,
   supplierAdvances,
   supplierAdvanceTotal,
+  onGoToAdmin,
+  onGoToHr,
+  onGoToAraclar,
+  onGoToOfis,
 }) {
   function parseDateTR(dateStr) {
     const [day, month, year] = dateStr.split(".");
@@ -3243,6 +3350,8 @@ function FinanceDashboard({
   const [showInvoiceFormPanel, setShowInvoiceFormPanel] = useState(false);
   const [showInvoiceEntryModal, setShowInvoiceEntryModal] = useState(false);
   const [showSalaryModal, setShowSalaryModal] = useState(false);
+  const [showFinanceIslemlerMenu, setShowFinanceIslemlerMenu] = useState(false);
+  const [showFinanceHwPoUpload, setShowFinanceHwPoUpload] = useState(false);
 
   const [salaryFilterMonth, setSalaryFilterMonth] = useState(
     String(new Date().getMonth() + 1).padStart(2, "0"),
@@ -3521,6 +3630,7 @@ function FinanceDashboard({
     odenen_tutar: "",
     kalan_borc: "",
     note: "",
+    belge_path: "",
   });
 
   const [salaryForm, setSalaryForm] = useState({
@@ -4304,102 +4414,153 @@ function FinanceDashboard({
         }}
       >
         <div>
-          <h1 style={{ margin: "0 0 6px 0" }}>💰 Finance Dashboard</h1>
+          <h1 style={{ margin: "0 0 6px 0" }}>🏗️ ERC Dashboard</h1>
           <div style={{ fontSize: "14px", color: "#6b7280" }}>
             Giriş yapan: <b>{user?.name || financeUserEmail}</b>
           </div>
         </div>
+
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={onGoToAdmin}
+          >
+            👑 Admin Panel
+          </button>
+
+          <button
+            type="button"
+            className={showInvoiceEntryModal ? "tab activeTab smallTab" : "tab smallTab"}
+            onClick={() => {
+              setShowInvoiceEntryModal(true);
+              setShowInvoiceFormPanel(false);
+              setShowInvoiceUpload(false);
+              setShowUpload(false);
+              setEditingInvoiceId(null);
+              setInvoiceForm({
+                bolge: "", proje: "", proje_kodu: "", fatura_no: "",
+                fatura_tarihi: "", tedarikci: "", rf_montaj_firma: "",
+                fatura_kalemi: "", is_kalemi: "", po_no: "", site_id: "",
+                tutar: "", kdv: "", toplam_tutar: "", odenen_tutar: "",
+                kalan_borc: "", note: "",
+              });
+            }}
+          >
+            🧾 Fatura Girişi
+          </button>
+
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={onGoToHr}
+          >
+            👤 Maaş & Avans
+          </button>
+
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={onGoToAraclar}
+          >
+            🚗 Araçlar
+          </button>
+
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={onGoToOfis}
+          >
+            🏢 Ofis & Depo
+          </button>
+
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={handleShowSubconSummary}
+          >
+            🏗️ Taşeron Hakediş
+          </button>
+
+          <div style={{ position: "relative", display: "inline-block" }}>
+          <button
+            type="button"
+            className={showFinanceIslemlerMenu ? "tab activeTab smallTab" : "tab smallTab"}
+            onClick={() => setShowFinanceIslemlerMenu((prev) => !prev)}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            ⚡ İşlemler {showFinanceIslemlerMenu ? "▲" : "▼"}
+          </button>
+
+          {showFinanceIslemlerMenu && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                left: 0,
+                background: "#fff",
+                border: "1px solid #e5e7eb",
+                borderRadius: "10px",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                zIndex: 999,
+                minWidth: "200px",
+                overflow: "hidden",
+              }}
+            >
+              {[
+                {
+                  label: "📤 HW Payment Yükle",
+                  action: () => {
+                    setShowUpload((prev) => !prev);
+                    if (showInvoiceUpload) setShowInvoiceUpload(false);
+                    setShowFinanceIslemlerMenu(false);
+                  },
+                },
+                {
+                  label: "🧾 HW Fatura Yükle",
+                  action: () => {
+                    setShowInvoiceUpload((prev) => !prev);
+                    if (showUpload) setShowUpload(false);
+                    setShowFinanceIslemlerMenu(false);
+                  },
+                },
+                {
+                  label: "🔩 HW PO Yükle",
+                  action: () => {
+                    setShowFinanceHwPoUpload((prev) => !prev);
+                    setShowFinanceIslemlerMenu(false);
+                  },
+                },
+              ].map((item, i, arr) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={item.action}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "11px 16px",
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: i < arr.length - 1 ? "1px solid #f3f4f6" : "none",
+                    fontSize: "14px",
+                    color: "#1f2937",
+                    cursor: "pointer",
+                    fontWeight: "500",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+          </div>
+        </div>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          gap: "10px",
-          flexWrap: "wrap",
-          justifyContent: "flex-start",
-          alignItems: "center",
-        }}
-      >
-        {/* BUTONLAR AYNI KALACAK */}
-        <button
-          type="button"
-          className={showUpload ? "tab activeTab smallTab" : "tab smallTab"}
-          onClick={() => {
-            setShowUpload((prev) => !prev);
-            if (showInvoiceUpload) setShowInvoiceUpload(false);
-          }}
-        >
-          HW Payment Yükle
-        </button>
-
-        <button
-          type="button"
-          className={
-            showInvoiceUpload ? "tab activeTab smallTab" : "tab smallTab"
-          }
-          onClick={() => {
-            setShowInvoiceUpload((prev) => !prev);
-            if (showUpload) setShowUpload(false);
-          }}
-        >
-          HW Fatura Yükle
-        </button>
-
-        <button
-          type="button"
-          className={
-            showInvoiceEntryModal ? "tab activeTab smallTab" : "tab smallTab"
-          }
-          onClick={() => {
-            setShowInvoiceEntryModal(true);
-            setShowInvoiceFormPanel(false);
-            setShowInvoiceUpload(false);
-            setShowUpload(false);
-            setEditingInvoiceId(null);
-
-            setInvoiceForm({
-              bolge: "",
-              proje: "",
-              proje_kodu: "",
-              fatura_no: "",
-              fatura_tarihi: "",
-              tedarikci: "",
-              rf_montaj_firma: "",
-              fatura_kalemi: "",
-              is_kalemi: "",
-              po_no: "",
-              site_id: "",
-              tutar: "",
-              kdv: "",
-              toplam_tutar: "",
-              odenen_tutar: "",
-              kalan_borc: "",
-              note: "",
-            });
-          }}
-        >
-          Fatura Girişi
-        </button>
-
-        <button
-          type="button"
-          className={
-            showSalaryModal ? "tab activeTab smallTab" : "tab smallTab"
-          }
-          onClick={handleMaasAvansClick}
-        >
-          Maaş & Avans
-        </button>
-        <button
-          type="button"
-          className="tab smallTab"
-          onClick={() => {
-            handleShowSubconSummary();
-          }}
-        >
-          Taşeron Hakediş
-        </button>
-      </div>
 
       {showUpload && (
         <FinanceUploadInline
@@ -4418,6 +4579,13 @@ function FinanceDashboard({
       {showInvoiceUpload && (
         <FinanceInvoiceUploadInline
           onClose={() => setShowInvoiceUpload(false)}
+          onUploaded={loadFinance}
+        />
+      )}
+
+      {showFinanceHwPoUpload && (
+        <HWPoUploadInline
+          onClose={() => setShowFinanceHwPoUpload(false)}
           onUploaded={loadFinance}
         />
       )}
@@ -5019,6 +5187,27 @@ function FinanceDashboard({
                           <td>{formatTRY(row.kalan_borc || 0)}</td>
                           <td>
                             <div style={{ display: "flex", gap: "8px" }}>
+                              {row.belge_path && (
+                                <a
+                                  href={`http://localhost:5001/fatura-belgeler/${row.belge_path}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{
+                                    padding: "5px 10px",
+                                    background: "#f0fdf4",
+                                    color: "#166534",
+                                    border: "1px solid #bbf7d0",
+                                    borderRadius: "6px",
+                                    fontSize: "12px",
+                                    fontWeight: 600,
+                                    textDecoration: "none",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  📄 Belge
+                                </a>
+                              )}
+
                               <button
                                 type="button"
                                 className="tab"
@@ -5087,218 +5276,108 @@ function FinanceDashboard({
                   </button>
                 </div>
 
-                <div
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    overflowY: "auto",
-                    padding: "24px",
-                  }}
-                >
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px", background: "#f8fafc" }}>
                   <form onSubmit={handleSaveManualInvoice}>
-                    <div className="formGrid">
-                      <div className="formGroup">
-                        <label>Bölge</label>
-                        <input
-                          name="bolge"
-                          value={invoiceForm.bolge}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="Antalya / İzmir / Ankara"
-                        />
-                      </div>
 
-                      <div className="formGroup">
-                        <label>Proje</label>
-                        <input
-                          name="proje"
-                          value={invoiceForm.proje}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="TT / TC"
-                        />
+                    {/* BÖLÜM 1: Proje Bilgileri */}
+                    <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />
+                        Proje Bilgileri
                       </div>
-
-                      <div className="formGroup">
-                        <label>Proje Kodu</label>
-                        <input
-                          name="proje_kodu"
-                          value={invoiceForm.proje_kodu}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="56A0QEF"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>Fatura No</label>
-                        <input
-                          name="fatura_no"
-                          value={invoiceForm.fatura_no}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="Fatura no"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>Fatura Tarihi</label>
-                        <input
-                          type="date"
-                          name="fatura_tarihi"
-                          value={invoiceForm.fatura_tarihi}
-                          onChange={handleInvoiceFormChange}
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>Tedarikçi</label>
-                        <input
-                          name="tedarikci"
-                          value={invoiceForm.tedarikci}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="Firma / Tedarikçi"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>Fatura Kalemi</label>
-                        <input
-                          name="fatura_kalemi"
-                          value={invoiceForm.fatura_kalemi}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="Örn: Oda/Room (Konaklama)"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>İş Kalemi</label>
-                        <input
-                          name="is_kalemi"
-                          value={invoiceForm.is_kalemi}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="Örn: KONAKLAMA / PROJE"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>PO No</label>
-                        <input
-                          name="po_no"
-                          value={invoiceForm.po_no}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="PO numarası"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>Site ID</label>
-                        <input
-                          name="site_id"
-                          value={invoiceForm.site_id}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="BU8944"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>Tutar (₺)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          name="tutar"
-                          value={invoiceForm.tutar}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="0"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>KDV (₺)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          name="kdv"
-                          value={invoiceForm.kdv}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="0"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>Toplam Tutar (₺)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          name="toplam_tutar"
-                          value={invoiceForm.toplam_tutar}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="0"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>Ödenen Tutar (₺)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          name="odenen_tutar"
-                          value={invoiceForm.odenen_tutar}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="0"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>Kalan Borç (₺)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          name="kalan_borc"
-                          value={invoiceForm.kalan_borc}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="0"
-                        />
-                      </div>
-
-                      <div className="formGroup">
-                        <label>RF Montaj Firma</label>
-                        <input
-                          name="rf_montaj_firma"
-                          value={invoiceForm.rf_montaj_firma}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="Subcon Name ile aynı firma adı"
-                        />
-                      </div>
-
-                      <div className="formGroup formGroupWide">
-                        <label>Not</label>
-                        <textarea
-                          name="note"
-                          value={invoiceForm.note}
-                          onChange={handleInvoiceFormChange}
-                          placeholder="Not"
-                          rows={3}
-                        />
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                        {[
+                          { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara" },
+                          { label: "Proje", name: "proje", placeholder: "TT / TC" },
+                          { label: "Proje Kodu", name: "proje_kodu", placeholder: "56A0QEF" },
+                        ].map(f => (
+                          <div key={f.name}>
+                            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                            <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
+                              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                          </div>
+                        ))}
                       </div>
                     </div>
 
-                    <div
-                      className="entryActions"
-                      style={{
-                        justifyContent: "flex-end",
-                        display: "flex",
-                        gap: "10px",
-                        marginTop: "16px",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="tab"
-                        onClick={() => {
-                          setShowInvoiceFormPanel(false);
-                          setEditingInvoiceId(null);
-                        }}
-                      >
+                    {/* BÖLÜM 2: Fatura Bilgileri */}
+                    <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#8b5cf6", display: "inline-block" }} />
+                        Fatura Bilgileri
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                        {[
+                          { label: "Fatura No *", name: "fatura_no", placeholder: "ABC2025/001" },
+                          { label: "Tedarikçi *", name: "tedarikci", placeholder: "Firma adı" },
+                          { label: "RF Montaj Firma", name: "rf_montaj_firma", placeholder: "Subcon firma adı" },
+                          { label: "Fatura Kalemi", name: "fatura_kalemi", placeholder: "Malzeme / Hizmet" },
+                          { label: "İş Kalemi", name: "is_kalemi", placeholder: "KONAKLAMA / PROJE" },
+                          { label: "PO No", name: "po_no", placeholder: "PO numarası" },
+                          { label: "Site ID", name: "site_id", placeholder: "BU8944" },
+                        ].map(f => (
+                          <div key={f.name}>
+                            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                            <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
+                              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                          </div>
+                        ))}
+                        <div>
+                          <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>Fatura Tarihi</label>
+                          <input type="date" name="fatura_tarihi" value={invoiceForm.fatura_tarihi} onChange={handleInvoiceFormChange}
+                            style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* BÖLÜM 3: Finansal Bilgiler */}
+                    <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
+                        Finansal Bilgiler
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "14px" }}>
+                        {[
+                          { label: "Tutar (₺)", name: "tutar" },
+                          { label: "KDV (₺)", name: "kdv" },
+                          { label: "Toplam Tutar (₺) *", name: "toplam_tutar" },
+                          { label: "Ödenen Tutar (₺)", name: "odenen_tutar" },
+                          { label: "Kalan Borç (₺)", name: "kalan_borc" },
+                        ].map(f => (
+                          <div key={f.name}>
+                            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                            <input type="number" step="0.01" name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder="0"
+                              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* BÖLÜM 4: Not + Fatura Fotoğrafı */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                      <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
+                          Not / Açıklama
+                        </div>
+                        <textarea name="note" value={invoiceForm.note} onChange={handleInvoiceFormChange} placeholder="Ödeme planı, açıklama, notlar..." rows={5}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", resize: "vertical", boxSizing: "border-box" }} />
+                      </div>
+
+                      <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
+                          Fatura Belgesi (PDF / Fotoğraf)
+                        </div>
+                        <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                      <button type="button" className="tab"
+                        onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}>
                         Vazgeç
                       </button>
-
                       <button type="submit" className="saveButton">
                         {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
                       </button>
@@ -6624,6 +6703,2424 @@ function formatTRY(value) {
     currency: "TRY",
     maximumFractionDigits: 0,
   }).format(Number(value || 0));
+}
+
+/* ============================================================
+   PUANTAJ PANEL - Sadece Rollout Müdürü için (maaş bilgisi yok)
+   ============================================================ */
+function PuantajPanel({ currentUser, onBack }) {
+  const [puantajAy, setPuantajAy] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  });
+  const [personelList, setPersonelList] = useState([]);
+  const [puantajData, setPuantajData] = useState([]);
+  const [notModal, setNotModal] = useState(null);
+  const [notText, setNotText] = useState("");
+  const [notFile, setNotFile] = useState(null);
+  const [notSaving, setNotSaving] = useState(false);
+  const [personelFilter, setPersonelFilter] = useState(""); // "" = hepsi
+
+  const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
+  const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
+  const canEditAny = isPM || isDirektor;
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  const [yilStr, ayStr] = puantajAy.split("-");
+  const ayGunleri = Array.from({ length: new Date(Number(yilStr), Number(ayStr), 0).getDate() }, (_, i) => i+1);
+
+  const DURUMLAR = [
+    { key:"CALISDI", label:"✅" },
+    { key:"GELMEDI", label:"❌" },
+    { key:"IZIN",    label:"🏖" },
+    { key:"RAPOR",   label:"☪️" },
+    { key:"TATIL",   label:"⭕" },
+  ];
+  const DURUM_COLOR = { CALISDI:"#dcfce7", IZIN:"#dbeafe", RAPOR:"#fef3c7", TATIL:"transparent", GELMEDI:"#fee2e2" };
+
+  const loadPersonel = async () => {
+    const r = await fetch(`${API_BASE}/hr/personel`);
+    setPersonelList((await r.json()).filter(p => p.aktif));
+  };
+  const loadPuantaj = async () => {
+    const [yil, ay] = puantajAy.split("-");
+    const r = await fetch(`${API_BASE}/hr/puantaj?ay=${ay}&yil=${yil}`);
+    setPuantajData(await r.json());
+  };
+
+  useEffect(() => { loadPersonel(); }, []);
+  useEffect(() => { loadPuantaj(); }, [puantajAy]);
+
+  const getPuantaj = (personelId, gun) => {
+    const tarih = `${puantajAy}-${String(gun).padStart(2,"0")}`;
+    return puantajData.find(p => p.personel_id === personelId && (p.tarih||"").startsWith(tarih));
+  };
+  const nextDurum = (current) => {
+    const keys = DURUMLAR.map(d=>d.key);
+    const idx = keys.indexOf(current||"TATIL");
+    return keys[(idx+1)%keys.length];
+  };
+
+  const handlePuantaj = (personelId, tarih, durum) => {
+    setPuantajData(prev => {
+      const idx = prev.findIndex(p => p.personel_id===personelId && (p.tarih||"").startsWith(tarih));
+      if (idx>=0) { const u=[...prev]; u[idx]={...u[idx],durum}; return u; }
+      return [...prev, { personel_id:personelId, tarih:tarih+"T00:00:00.000Z", durum }];
+    });
+    fetch(`${API_BASE}/hr/puantaj`, { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ personel_id:personelId, tarih, durum, created_by: currentUser?.email||"" }) })
+      .then(r=>r.json())
+      .then(saved => {
+        setPuantajData(prev => {
+          const idx = prev.findIndex(p => p.personel_id===personelId && (p.tarih||"").startsWith(tarih));
+          if (idx>=0) { const u=[...prev]; u[idx]={...u[idx], id:saved.id, not_aciklama:saved.not_aciklama, belge_yolu:saved.belge_yolu}; return u; }
+          return prev;
+        });
+      })
+      .catch(console.error);
+  };
+
+  const openNotModal = (row, personelAd, tarih) => { setNotModal({row,personelAd,tarih}); setNotText(row?.not_aciklama||""); setNotFile(null); };
+  const handleSaveNot = async () => {
+    if (!notModal?.row?.id) return;
+    setNotSaving(true);
+    const fd = new FormData(); fd.append("not_aciklama", notText); if (notFile) fd.append("belge", notFile);
+    const r = await fetch(`${API_BASE}/hr/puantaj/${notModal.row.id}/not`, { method:"PUT", body:fd });
+    const updated = await r.json();
+    setPuantajData(prev => prev.map(p => p.id===updated.id ? {...p, not_aciklama:updated.not_aciklama, belge_yolu:updated.belge_yolu} : p));
+    setNotSaving(false); setNotModal(null);
+  };
+  const handleDeleteNot = async () => {
+    if (!notModal?.row?.id) return;
+    await fetch(`${API_BASE}/hr/puantaj/${notModal.row.id}/not`, { method:"DELETE" });
+    setPuantajData(prev => prev.map(p => p.id===notModal.row.id ? {...p, not_aciklama:null, belge_yolu:null} : p));
+    setNotModal(null);
+  };
+
+  return (
+    <div style={{ maxWidth:"1400px", margin:"0 auto" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"16px", flexWrap:"wrap" }}>
+        {onBack && <button onClick={onBack} style={{ background:"#f3f4f6", border:"1px solid #d1d5db", borderRadius:"8px", padding:"7px 14px", fontSize:"13px", fontWeight:600, color:"#374151", cursor:"pointer" }}>← Geri</button>}
+        <h2 style={{ margin:0, fontSize:"22px", fontWeight:700, color:"#1f2937" }}>📋 Puantaj Girişi</h2>
+
+        {/* Yıl seçici */}
+        <select value={yilStr} onChange={e=>setPuantajAy(`${e.target.value}-${ayStr}`)}
+          style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px" }}>
+          {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
+        </select>
+
+        {/* Ay seçici */}
+        <select value={ayStr} onChange={e=>setPuantajAy(`${yilStr}-${e.target.value}`)}
+          style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px" }}>
+          {["01","02","03","04","05","06","07","08","09","10","11","12"].map((m,i)=>(
+            <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
+          ))}
+        </select>
+
+        {/* Personel filtresi */}
+        <select value={personelFilter} onChange={e=>setPersonelFilter(e.target.value)}
+          style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", minWidth:"160px" }}>
+          <option value="">👥 Tüm Personel</option>
+          {personelList.map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+        </select>
+
+        <span style={{ fontSize:"12px", color:"#9ca3af" }}>Tıkla: ✅→❌→🏖→☪️→⭕</span>
+
+        <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`}
+          style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none", marginLeft:"auto" }}>
+          📥 Excel İndir
+        </a>
+      </div>
+
+      {personelFilter && (() => {
+        const sp = personelList.find(p => String(p.id) === String(personelFilter));
+        if (!sp) return null;
+        const sc = {};
+        ayGunleri.forEach(g => { const durum = getPuantaj(sp.id,g)?.durum||"TATIL"; sc[durum]=(sc[durum]||0)+1; });
+        const cal = sc["CALISDI"]||0;
+        const hak = Math.round((cal/ayGunleri.length)*(sp.net_maas||0));
+        return (
+          <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"16px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
+            <div style={{ minWidth:"110px" }}>
+              <div style={{ fontWeight:700, fontSize:"15px" }}>{sp.ad_soyad}</div>
+              <div style={{ fontSize:"12px", color:"#9ca3af", marginTop:"2px" }}>{sp.unvan}</div>
+            </div>
+            <div style={{ display:"flex", gap:"10px", flex:1, flexWrap:"wrap" }}>
+              {[
+                { label:"Çalışılan", emoji:"✅", val:cal, bg:"#dcfce7", tc:"#166534" },
+                { label:"Gelmedi",   emoji:"❌", val:sc["GELMEDI"]||0, bg:"#fee2e2", tc:"#991b1b" },
+                { label:"İzin",      emoji:"🏖", val:sc["IZIN"]||0,    bg:"#dbeafe", tc:"#1d4ed8" },
+                { label:"Rapor",     emoji:"☪️", val:sc["RAPOR"]||0,   bg:"#fef3c7", tc:"#92400e" },
+                { label:"Tatil",     emoji:"⭕", val:sc["TATIL"]||0,   bg:"#f1f5f9", tc:"#64748b" },
+              ].map(s=>(
+                <div key={s.label} style={{ background:s.bg, borderRadius:"12px", padding:"10px 14px", textAlign:"center", minWidth:"70px" }}>
+                  <div style={{ fontSize:"22px", fontWeight:800, color:s.tc }}>{s.val}</div>
+                  <div style={{ fontSize:"10px", fontWeight:600, color:s.tc, marginTop:"2px" }}>{s.emoji} {s.label}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"14px", padding:"16px 22px", textAlign:"center", color:"#fff", minWidth:"140px" }}>
+              <div style={{ fontSize:"11px", fontWeight:600, opacity:0.8, marginBottom:"4px" }}>Bu Ay Hakediş</div>
+              <div style={{ fontSize:"26px", fontWeight:800, letterSpacing:"-0.5px" }}>₺{hak.toLocaleString("tr-TR")}</div>
+              <div style={{ fontSize:"11px", opacity:0.7, marginTop:"4px" }}>{cal} / {ayGunleri.length} gün</div>
+            </div>
+          </div>
+        );
+      })()}
+
+      <div style={{ overflowX:"auto", borderRadius:"14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+        <table style={{ borderCollapse:"collapse", width:"100%", background:"#fff", borderRadius:"14px", overflow:"hidden" }}>
+          <thead>
+            <tr style={{ background:"#f8fafc" }}>
+              <th style={{ padding:"10px 14px", textAlign:"left", fontSize:"13px", fontWeight:700, position:"sticky", left:0, background:"#f8fafc", zIndex:2, minWidth:"150px", borderRight:"2px solid #e5e7eb" }}>Personel</th>
+              {ayGunleri.map(g => {
+                const d = new Date(Number(yilStr), Number(ayStr)-1, g).getDay();
+                return (
+                  <th key={g} style={{ padding:"4px 2px", fontSize:"11px", fontWeight:700, textAlign:"center", minWidth:"36px", width:"36px", color: d===0||d===6?"#ef4444":"#374151" }}>
+                    <div>{g}</div>
+                    {d===0 && <div style={{ fontSize:"9px", fontWeight:500, color:"#ef4444", lineHeight:1 }}>Paz</div>}
+                    {d===6 && <div style={{ fontSize:"9px", fontWeight:500, color:"#ef4444", lineHeight:1 }}>Cmt</div>}
+                  </th>
+                );
+              })}
+              <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"90px", borderLeft:"2px solid #e5e7eb" }}>Çalışılan</th>
+            </tr>
+          </thead>
+          <tbody>
+            {personelList.filter(p => !personelFilter || String(p.id) === String(personelFilter)).map((p, pi) => {
+              const calisilan = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="CALISDI").length;
+              const rowBg = pi%2===0?"#fff":"#fafafa";
+              return (
+                <tr key={p.id} style={{ borderTop:"1px solid #f3f4f6", background:rowBg }}>
+                  <td style={{ padding:"10px 14px", fontWeight:600, fontSize:"13px", position:"sticky", left:0, background:rowBg, zIndex:1, borderRight:"2px solid #e5e7eb" }}>
+                    {p.ad_soyad}<br/><span style={{ fontSize:"11px", color:"#9ca3af", fontWeight:400 }}>{p.unvan}</span>
+                  </td>
+                  {ayGunleri.map(g => {
+                    const row = getPuantaj(p.id, g);
+                    const durum = row?.durum || "TATIL";
+                    const label = DURUMLAR.find(x=>x.key===durum)?.label || "";
+                    const tarih = `${puantajAy}-${String(g).padStart(2,"0")}`;
+                    const isWeekend = [0,6].includes(new Date(Number(yilStr), Number(ayStr)-1, g).getDay());
+                    const cellBg = DURUM_COLOR[durum] || (isWeekend?"#f1f5f9":"transparent");
+                    const hasNot = !!(row?.not_aciklama || row?.belge_yolu);
+                    const showNot = durum!=="CALISDI" && durum!=="TATIL" && row?.id;
+                    const cellEditable = canEditAny || tarih === todayStr;
+                    return (
+                      <td key={g} style={{ padding:"0", background:cellBg, border:"1px solid #f0f0f0", minWidth:"36px", width:"36px", userSelect:"none" }}>
+                        <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
+                          <div onClick={()=>{ if(!cellEditable) return; handlePuantaj(p.id, tarih, nextDurum(row?.durum)); }}
+                            title={!cellEditable ? "Geçmiş tarihe müdahale yetkisi yok" : ""}
+                            style={{ flex:1, minHeight: showNot?"30px":"44px", display:"flex", alignItems:"center", justifyContent:"center", cursor: cellEditable?"pointer":"not-allowed", fontSize:"18px", opacity: cellEditable?1:0.6 }}>
+                            {label}
+                          </div>
+                          {showNot && (
+                            <div onClick={()=>openNotModal(row, p.ad_soyad, tarih)}
+                              title={hasNot ? (row.not_aciklama||"Belge var") : "Not ekle"}
+                              style={{ height:"14px", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:"11px", background: hasNot?"#fef3c7":"rgba(0,0,0,0.04)", borderTop:"1px solid rgba(0,0,0,0.06)" }}>
+                              {hasNot?"📝":"+ not"}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    );
+                  })}
+                  <td style={{ padding:"8px", textAlign:"center", fontWeight:700, color:"#1f2937", borderLeft:"2px solid #e5e7eb", fontSize:"14px" }}>
+                    {calisilan}<span style={{ color:"#9ca3af", fontWeight:400, fontSize:"11px" }}>/{ayGunleri.length}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Not Modalı */}
+      {notModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center" }}
+          onClick={()=>setNotModal(null)}>
+          <div style={{ background:"#fff", borderRadius:"16px", padding:"24px", width:"440px", boxShadow:"0 20px 50px rgba(0,0,0,0.2)" }}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{ fontWeight:700, fontSize:"16px", marginBottom:"4px" }}>📝 Devamsızlık Notu</div>
+            <div style={{ fontSize:"13px", color:"#6b7280", marginBottom:"16px" }}>
+              {notModal.personelAd} — {notModal.tarih}
+              {notModal.row?.durum && <span style={{ marginLeft:8, fontWeight:600, color:"#374151" }}>({notModal.row.durum})</span>}
+            </div>
+            <div style={{ marginBottom:"12px" }}>
+              <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"6px" }}>Açıklama</label>
+              <textarea value={notText} onChange={e=>setNotText(e.target.value)}
+                placeholder="Sebebi yazın..." rows={3}
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", resize:"vertical", boxSizing:"border-box" }} />
+            </div>
+            <div style={{ marginBottom:"16px" }}>
+              <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"6px" }}>Belge / E-posta Eki</label>
+              <input type="file" onChange={e=>setNotFile(e.target.files[0])} style={{ fontSize:"13px" }} />
+              {notModal.row?.belge_yolu && !notFile && (
+                <div style={{ marginTop:"6px", fontSize:"12px" }}>
+                  <a href={`http://localhost:5001/puantaj-belgeler/${notModal.row.belge_yolu}`} target="_blank" rel="noreferrer" style={{ color:"#1d4ed8", fontWeight:600 }}>Mevcut belge →</a>
+                </div>
+              )}
+            </div>
+            <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
+              {(notModal.row?.not_aciklama || notModal.row?.belge_yolu) && (
+                <button type="button" onClick={handleDeleteNot}
+                  style={{ padding:"8px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Notu Sil</button>
+              )}
+              <button type="button" onClick={()=>setNotModal(null)}
+                style={{ padding:"8px 14px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Vazgeç</button>
+              <button type="button" onClick={handleSaveNot} disabled={notSaving}
+                style={{ padding:"8px 16px", background:"#1f2937", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>
+                {notSaving?"Kaydediliyor...":"Kaydet"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   HR DASHBOARD - Personel / Puantaj / Avans / ISG
+   ============================================================ */
+function HrDashboard({ onBack, currentUser }) {
+  const [tab, setTab] = useState("personel");
+  const [personelList, setPersonelList] = useState([]);
+  const [isgTurleri, setIsgTurleri] = useState([]);
+  const [isgUyarilar, setIsgUyarilar] = useState([]);
+  const [selectedPersonel, setSelectedPersonel] = useState(null);
+  const [showPersonelForm, setShowPersonelForm] = useState(false);
+  const [editingPersonel, setEditingPersonel] = useState(null);
+  const [personelIsg, setPersonelIsg] = useState([]);
+  const [personelBelgeler, setPersonelBelgeler] = useState([]);
+  const [showIsgForm, setShowIsgForm] = useState(false);
+  const [puantajAy, setPuantajAy] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  });
+  const [hrPersonelFilter, setHrPersonelFilter] = useState("");
+  const [puantajData, setPuantajData] = useState([]);
+  const [ozet, setOzet] = useState([]);
+  const [avansList, setAvansList] = useState([]);
+  const [avansForm, setAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
+  const [isAvansList, setIsAvansList] = useState([]);
+  const [isAvansForm, setIsAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
+  const [pForm, setPForm] = useState({
+    ad_soyad:"", tc_no:"", dogum_tarihi:"", telefon:"", email:"", unvan:"", bolge:"",
+    ise_giris_tarihi:"", isten_ayrilma_tarihi:"", net_maas:"", bankadan_gosterilen:"",
+    elden_verilen:"", iban:"", banka_adi:"", banka_hesap_no:"", aktif: true,
+  });
+  const [isgForm, setIsgForm] = useState({ egitim_turu:"", egitim_tarihi:"", gecerlilik_yil:2 });
+  const [notModal, setNotModal] = useState(null); // { puantajRow, personelAd, tarih }
+  const [notText, setNotText] = useState("");
+  const [notFile, setNotFile] = useState(null);
+  const [notSaving, setNotSaving] = useState(false);
+
+  const loadPersonel = async () => {
+    const r = await fetch(`${API_BASE}/hr/personel`);
+    setPersonelList(await r.json());
+  };
+  const loadIsgUyarilar = async () => {
+    const r = await fetch(`${API_BASE}/hr/isg/uyarilar`);
+    setIsgUyarilar(await r.json());
+  };
+  const loadIsgTurleri = async () => {
+    const r = await fetch(`${API_BASE}/hr/isg-egitim-turleri`);
+    setIsgTurleri(await r.json());
+  };
+  const loadPuantaj = async () => {
+    const [yil, ay] = puantajAy.split("-");
+    const r = await fetch(`${API_BASE}/hr/puantaj?ay=${ay}&yil=${yil}`);
+    setPuantajData(await r.json());
+  };
+  const loadOzet = async () => {
+    const [yil, ay] = puantajAy.split("-");
+    const r = await fetch(`${API_BASE}/hr/puantaj/ozet?ay=${ay}&yil=${yil}`);
+    setOzet(await r.json());
+  };
+  const loadAvans = async () => {
+    const r = await fetch(`${API_BASE}/hr/avans?turu=MAAS`);
+    setAvansList(await r.json());
+  };
+  const loadIsAvans = async () => {
+    const r = await fetch(`${API_BASE}/hr/avans?turu=IS`);
+    setIsAvansList(await r.json());
+  };
+  const loadPersonelDetail = async (p) => {
+    setSelectedPersonel(p);
+    const [bi, isg] = await Promise.all([
+      fetch(`${API_BASE}/hr/personel/${p.id}/belgeler`).then(r=>r.json()),
+      fetch(`${API_BASE}/hr/personel/${p.id}/isg`).then(r=>r.json()),
+    ]);
+    setPersonelBelgeler(bi);
+    setPersonelIsg(isg);
+  };
+
+  useEffect(() => { loadPersonel(); loadIsgTurleri(); loadIsgUyarilar(); }, []);
+  useEffect(() => { if (tab==="puantaj" || tab==="personel") { loadPuantaj(); loadOzet(); } }, [tab, puantajAy]);
+  useEffect(() => { if (tab==="personel") { loadAvans(); loadIsAvans(); } }, [tab, puantajAy]);
+  useEffect(() => { if (tab==="maas_avans") loadAvans(); }, [tab]);
+  useEffect(() => { if (tab==="is_avans") loadIsAvans(); }, [tab]);
+
+  const handleSavePersonel = async (e) => {
+    e.preventDefault();
+    const method = editingPersonel ? "PUT" : "POST";
+    const url = editingPersonel ? `${API_BASE}/hr/personel/${editingPersonel.id}` : `${API_BASE}/hr/personel`;
+    await fetch(url, { method, headers: { "Content-Type":"application/json" }, body: JSON.stringify(pForm) });
+    setShowPersonelForm(false); setEditingPersonel(null);
+    loadPersonel();
+  };
+  const handleEditPersonel = (p) => {
+    setEditingPersonel(p);
+    setPForm({ ...p, dogum_tarihi: p.dogum_tarihi?.split("T")[0]||"", ise_giris_tarihi: p.ise_giris_tarihi?.split("T")[0]||"", isten_ayrilma_tarihi: p.isten_ayrilma_tarihi?.split("T")[0]||"" });
+    setShowPersonelForm(true);
+  };
+  const handleToggleAktif = async (p) => {
+    await fetch(`${API_BASE}/hr/personel/${p.id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...p, aktif: !p.aktif}) });
+    loadPersonel();
+  };
+  const handleDeletePersonel = async (p) => {
+    if (!window.confirm(`${p.ad_soyad} silinsin mi?`)) return;
+    await fetch(`${API_BASE}/hr/personel/${p.id}`, { method:"DELETE" });
+    loadPersonel();
+  };
+  const handleBelgeUpload = async (personelId, tur, file) => {
+    const fd = new FormData(); fd.append("dosya", file);
+    await fetch(`${API_BASE}/hr/personel/${personelId}/belge/${tur}`, { method:"POST", body: fd });
+    loadPersonelDetail(selectedPersonel);
+  };
+  const handleSaveIsg = async (e) => {
+    e.preventDefault();
+    const tur = isgTurleri.find(t=>t.tur===isgForm.egitim_turu);
+    await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({...isgForm, gecerlilik_yil: tur?.gecerlilik_yil || isgForm.gecerlilik_yil})
+    });
+    setShowIsgForm(false);
+    loadPersonelDetail(selectedPersonel);
+    loadIsgUyarilar();
+  };
+  const handleDeleteIsg = async (isgId) => {
+    if (!window.confirm("Silinsin mi?")) return;
+    await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgId}`, { method:"DELETE" });
+    loadPersonelDetail(selectedPersonel);
+    loadIsgUyarilar();
+  };
+  const handlePuantaj = (personelId, tarih, durum) => {
+    // Optimistic update — anında göster
+    setPuantajData(prev => {
+      const idx = prev.findIndex(p => p.personel_id === personelId && (p.tarih || "").startsWith(tarih));
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], durum };
+        return updated;
+      }
+      return [...prev, { personel_id: personelId, tarih: tarih + "T00:00:00.000Z", durum }];
+    });
+    // Arka planda kaydet — dönen id ile state'i güncelle
+    fetch(`${API_BASE}/hr/puantaj`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ personel_id:personelId, tarih, durum }) })
+      .then(r => r.json())
+      .then(saved => {
+        setPuantajData(prev => {
+          const idx = prev.findIndex(p => p.personel_id === personelId && (p.tarih || "").startsWith(tarih));
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], id: saved.id, not_aciklama: saved.not_aciklama, belge_yolu: saved.belge_yolu };
+            return updated;
+          }
+          return prev;
+        });
+        loadOzet();
+      })
+      .catch(console.error);
+  };
+  const openNotModal = (row, personelAd, tarih) => {
+    setNotModal({ row, personelAd, tarih });
+    setNotText(row?.not_aciklama || "");
+    setNotFile(null);
+  };
+  const handleSaveNot = async () => {
+    if (!notModal?.row?.id) return;
+    setNotSaving(true);
+    const fd = new FormData();
+    fd.append("not_aciklama", notText);
+    if (notFile) fd.append("belge", notFile);
+    const r = await fetch(`${API_BASE}/hr/puantaj/${notModal.row.id}/not`, { method:"PUT", body: fd });
+    const updated = await r.json();
+    setPuantajData(prev => prev.map(p => p.id === updated.id ? { ...p, not_aciklama: updated.not_aciklama, belge_yolu: updated.belge_yolu } : p));
+    setNotSaving(false);
+    setNotModal(null);
+  };
+  const handleDeleteNot = async () => {
+    if (!notModal?.row?.id) return;
+    await fetch(`${API_BASE}/hr/puantaj/${notModal.row.id}/not`, { method:"DELETE" });
+    setPuantajData(prev => prev.map(p => p.id === notModal.row.id ? { ...p, not_aciklama: null, belge_yolu: null } : p));
+    setNotModal(null);
+  };
+
+  const handleSaveAvans = async (e) => {
+    e.preventDefault();
+    await fetch(`${API_BASE}/hr/avans`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ...avansForm, avans_turu:"MAAS" }) });
+    setAvansForm({ personel_id:"", tarih: new Date().toISOString().split("T")[0], tutar:"", aciklama:"" });
+    loadAvans();
+  };
+  const handleSaveIsAvans = async (e) => {
+    e.preventDefault();
+    await fetch(`${API_BASE}/hr/avans`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ...isAvansForm, avans_turu:"IS" }) });
+    setIsAvansForm({ personel_id:"", tarih: new Date().toISOString().split("T")[0], tutar:"", aciklama:"" });
+    loadIsAvans();
+  };
+
+  // Puantaj yardımcıları
+  const [yilStr, ayStr] = puantajAy.split("-");
+  const ayGunleri = Array.from({ length: new Date(Number(yilStr), Number(ayStr), 0).getDate() }, (_, i) => i+1);
+  const DURUMLAR = [
+    { key:"CALISDI", label:"✅", color:"#22c55e" },
+    { key:"GELMEDI", label:"❌", color:"#ef4444" },
+    { key:"IZIN",    label:"🏖", color:"#3b82f6" },
+    { key:"RAPOR",   label:"☪️", color:"#f59e0b" },
+    { key:"TATIL",   label:"⭕", color:"#9ca3af" },
+  ];
+  const getPuantaj = (personelId, gun) => {
+    const tarih = `${puantajAy}-${String(gun).padStart(2,"0")}`;
+    return puantajData.find(p => p.personel_id===personelId && p.tarih?.startsWith(tarih));
+  };
+  const nextDurum = (current) => {
+    const keys = DURUMLAR.map(d=>d.key);
+    const idx = keys.indexOf(current||"TATIL");
+    return keys[(idx+1)%keys.length];
+  };
+
+  const BELGE_TURLERI = [
+    { key:"fotograf", label:"📷 Fotoğraf" },
+    { key:"tc_kimlik", label:"🪪 TC Kimlik" },
+    { key:"ehliyet", label:"🚗 Ehliyet" },
+    { key:"saglik_raporu", label:"🏥 Sağlık Raporu" },
+    { key:"sgk_bildirge", label:"📋 SGK Bildirge" },
+    { key:"diger", label:"📎 Diğer Belge" },
+  ];
+
+  const inputSt = { padding:"9px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", width:"100%", boxSizing:"border-box" };
+  const labelSt = { display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"5px" };
+  const secSt = { background:"#fff", borderRadius:"14px", padding:"20px 24px", marginBottom:"16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" };
+
+  return (
+    <div style={{ maxWidth:"1400px", margin:"0 auto" }}>
+      {/* Başlık + Geri */}
+      <div style={{ display:"flex", alignItems:"center", gap:"16px", marginBottom:"20px" }}>
+        {onBack && (
+          <button className="tab" onClick={onBack} style={{ fontSize:"13px" }}>← Finance</button>
+        )}
+        <h2 style={{ margin:0, fontSize:"22px", fontWeight:700, color:"#1f2937" }}>👤 İnsan Kaynakları Modülü</h2>
+      </div>
+      {/* ISG Uyarı Bandı */}
+      {isgUyarilar.length > 0 && (
+        <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:"12px", padding:"12px 20px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
+          <span style={{ fontSize:"20px" }}>🚨</span>
+          <span style={{ fontWeight:700, color:"#991b1b", fontSize:"14px" }}>ISG Eğitim Uyarısı:</span>
+          {isgUyarilar.map((u,i) => (
+            <span key={i} style={{ background: u.durum==="SURESI_DOLDU"?"#fee2e2":"#fef3c7", color: u.durum==="SURESI_DOLDU"?"#991b1b":"#92400e", padding:"3px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:600 }}>
+              {u.ad_soyad} — {u.egitim_turu} {u.durum==="SURESI_DOLDU"?"(SÜRESİ DOLDU!)":"(30 gün kaldı)"}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Sekmeler */}
+      <div style={{ display:"flex", gap:"8px", marginBottom:"20px" }}>
+        {[["personel","👤 Personel"],["puantaj","📋 Puantaj"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["isg","🎓 ISG Eğitimler"]].map(([k,l]) => (
+          <button key={k} onClick={()=>setTab(k)} className={tab===k?"tab activeTab":"tab"} style={{ fontSize:"14px" }}>{l}</button>
+        ))}
+      </div>
+
+      {/* ===== PERSONEL SEKMESİ ===== */}
+      {tab==="personel" && (
+        <div>
+          {selectedPersonel ? (
+            /* Personel Detay */
+            <div>
+              <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"20px" }}>
+                <button className="tab" onClick={()=>setSelectedPersonel(null)}>← Geri</button>
+                <h2 style={{ margin:0, fontSize:"20px" }}>👤 {selectedPersonel.ad_soyad}</h2>
+                <span style={{ background: selectedPersonel.aktif?"#dcfce7":"#f3f4f6", color: selectedPersonel.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>
+                  {selectedPersonel.aktif?"Aktif":"Pasif"}
+                </span>
+              </div>
+
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"16px" }}>
+                {/* Belgeler */}
+                <div style={secSt}>
+                  <div style={{ fontWeight:700, marginBottom:"14px", color:"#374151" }}>📂 Personel Belgeleri</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+                    {BELGE_TURLERI.map(bt => {
+                      const mevcut = personelBelgeler.find(b=>b.belge_turu===bt.key);
+                      return (
+                        <div key={bt.key} style={{ border:"1.5px solid #e5e7eb", borderRadius:"10px", padding:"10px 12px", background: mevcut?"#f0fdf4":"#fafafa" }}>
+                          <div style={{ fontSize:"13px", fontWeight:600, color:"#374151", marginBottom:"8px" }}>{bt.label}</div>
+                          {mevcut ? (
+                            <a href={`http://localhost:5001/personel-belgeler/${mevcut.dosya_yolu}`} target="_blank" rel="noreferrer"
+                              style={{ fontSize:"12px", color:"#166534", fontWeight:600 }}>Görüntüle →</a>
+                          ) : (
+                            <label style={{ fontSize:"12px", color:"#6b7280", cursor:"pointer" }}>
+                              <input type="file" style={{display:"none"}} onChange={e=>handleBelgeUpload(selectedPersonel.id,bt.key,e.target.files[0])} />
+                              + Yükle
+                            </label>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ISG Eğitimleri */}
+                <div style={secSt}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
+                    <div style={{ fontWeight:700, color:"#374151" }}>🎓 ISG Eğitimleri</div>
+                    <button className="tab" onClick={()=>setShowIsgForm(true)} style={{ fontSize:"12px" }}>+ Eğitim Ekle</button>
+                  </div>
+                  {showIsgForm && (
+                    <form onSubmit={handleSaveIsg} style={{ background:"#f8fafc", borderRadius:"10px", padding:"14px", marginBottom:"12px" }}>
+                      <div style={{ marginBottom:"8px" }}>
+                        <label style={labelSt}>Eğitim Türü</label>
+                        <select value={isgForm.egitim_turu} onChange={e=>{const t=isgTurleri.find(x=>x.tur===e.target.value); setIsgForm(f=>({...f,egitim_turu:e.target.value,gecerlilik_yil:t?.gecerlilik_yil||2}));}} style={inputSt} required>
+                          <option value="">Seç...</option>
+                          {isgTurleri.map(t=><option key={t.tur} value={t.tur}>{t.tur} ({t.gecerlilik_yil} yıl)</option>)}
+                        </select>
+                      </div>
+                      <div style={{ marginBottom:"8px" }}>
+                        <label style={labelSt}>Eğitim Tarihi</label>
+                        <input type="date" value={isgForm.egitim_tarihi} onChange={e=>setIsgForm(f=>({...f,egitim_tarihi:e.target.value}))} style={inputSt} required />
+                      </div>
+                      <div style={{ display:"flex", gap:"8px" }}>
+                        <button type="submit" className="saveButton" style={{ flex:1 }}>Kaydet</button>
+                        <button type="button" className="tab" onClick={()=>setShowIsgForm(false)}>İptal</button>
+                      </div>
+                    </form>
+                  )}
+                  {personelIsg.length===0 ? <div style={{ color:"#9ca3af", fontSize:"13px" }}>Henüz eğitim girilmemiş</div> : (
+                    personelIsg.map(eg => {
+                      const suresi = new Date(eg.bitis_tarihi) < new Date() ? "DOLDU" : new Date(eg.bitis_tarihi) < new Date(Date.now()+30*864e5) ? "YAKLASAN" : "OK";
+                      return (
+                        <div key={eg.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", borderRadius:"8px", marginBottom:"6px", background: suresi==="DOLDU"?"#fef2f2": suresi==="YAKLASAN"?"#fffbeb":"#f0fdf4" }}>
+                          <div>
+                            <div style={{ fontWeight:600, fontSize:"13px" }}>{eg.egitim_turu}</div>
+                            <div style={{ fontSize:"11px", color:"#9ca3af" }}>
+                              {eg.egitim_tarihi?.split("T")[0]} → {eg.bitis_tarihi?.split("T")[0]}
+                              {suresi==="DOLDU" && <span style={{ color:"#dc2626", fontWeight:700 }}> ⚠️ SÜRESİ DOLDU</span>}
+                              {suresi==="YAKLASAN" && <span style={{ color:"#d97706", fontWeight:700 }}> ⚠️ YAKLAŞIYOR</span>}
+                            </div>
+                          </div>
+                          <button onClick={()=>handleDeleteIsg(eg.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Personel Listesi */
+            <div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px", flexWrap:"wrap", gap:"12px" }}>
+                <h2 style={{ margin:0, fontSize:"20px" }}>👤 Personel Listesi</h2>
+                <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+                  <select value={yilStr} onChange={e=>setPuantajAy(`${e.target.value}-${ayStr}`)}
+                    style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px" }}>
+                    {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
+                  </select>
+                  <select value={ayStr} onChange={e=>setPuantajAy(`${yilStr}-${e.target.value}`)}
+                    style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px" }}>
+                    {["01","02","03","04","05","06","07","08","09","10","11","12"].map((m,i)=>(
+                      <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
+                    ))}
+                  </select>
+                  <select value={hrPersonelFilter} onChange={e=>setHrPersonelFilter(e.target.value)}
+                    style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", minWidth:"150px" }}>
+                    <option value="">👥 Tüm Personel</option>
+                    {personelList.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+                  </select>
+                  <button className="saveButton" onClick={()=>{ setEditingPersonel(null); setPForm({ ad_soyad:"",tc_no:"",dogum_tarihi:"",telefon:"",email:"",unvan:"",bolge:"",ise_giris_tarihi:"",isten_ayrilma_tarihi:"",net_maas:"",bankadan_gosterilen:"",elden_verilen:"",iban:"",banka_adi:"",banka_hesap_no:"",aktif:true }); setShowPersonelForm(true); }}>
+                    + Personel Ekle
+                  </button>
+                </div>
+              </div>
+
+              {hrPersonelFilter && (() => {
+                const sp = personelList.find(p => String(p.id) === String(hrPersonelFilter));
+                if (!sp) return null;
+                const sc = {};
+                ayGunleri.forEach(g => { const durum = getPuantaj(sp.id,g)?.durum||"TATIL"; sc[durum]=(sc[durum]||0)+1; });
+                const cal = sc["CALISDI"]||0;
+                const hak = Math.round((cal/ayGunleri.length)*(sp.net_maas||0));
+                const maasAvans = avansList
+                  .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy))
+                  .reduce((s,a)=>s+Number(a.tutar||0), 0);
+                const isAvans = isAvansList
+                  .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy))
+                  .reduce((s,a)=>s+Number(a.tutar||0), 0);
+                const net = hak - maasAvans;
+                return (
+                  <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"20px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
+                    <div style={{ minWidth:"130px" }}>
+                      <div style={{ fontWeight:700, fontSize:"15px" }}>{sp.ad_soyad}</div>
+                      <div style={{ fontSize:"12px", color:"#9ca3af", marginTop:"2px" }}>{sp.unvan}</div>
+                      <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"4px" }}>Net Maaş: <b>₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}</b></div>
+                    </div>
+                    <div style={{ display:"flex", gap:"10px", flex:1, flexWrap:"wrap" }}>
+                      {[
+                        { label:"Çalışılan", emoji:"✅", val:cal, bg:"#dcfce7", tc:"#166534" },
+                        { label:"Gelmedi",   emoji:"❌", val:sc["GELMEDI"]||0, bg:"#fee2e2", tc:"#991b1b" },
+                        { label:"İzin",      emoji:"🏖", val:sc["IZIN"]||0,    bg:"#dbeafe", tc:"#1d4ed8" },
+                        { label:"Rapor",     emoji:"☪️", val:sc["RAPOR"]||0,   bg:"#fef3c7", tc:"#92400e" },
+                        { label:"Tatil",     emoji:"⭕", val:sc["TATIL"]||0,   bg:"#f1f5f9", tc:"#64748b" },
+                      ].map(s=>(
+                        <div key={s.label} style={{ background:s.bg, borderRadius:"12px", padding:"10px 14px", textAlign:"center", minWidth:"70px" }}>
+                          <div style={{ fontSize:"22px", fontWeight:800, color:s.tc }}>{s.val}</div>
+                          <div style={{ fontSize:"10px", fontWeight:600, color:s.tc, marginTop:"2px" }}>{s.emoji} {s.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:"8px", minWidth:"160px" }}>
+                      <div style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"12px", padding:"12px 18px", textAlign:"center", color:"#fff" }}>
+                        <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>Bu Ay Hakediş</div>
+                        <div style={{ fontSize:"22px", fontWeight:800 }}>₺{hak.toLocaleString("tr-TR")}</div>
+                        <div style={{ fontSize:"10px", opacity:0.7 }}>{cal} / {ayGunleri.length} gün</div>
+                      </div>
+                      {maasAvans > 0 && (
+                        <div style={{ background:"#fef3c7", borderRadius:"12px", padding:"8px 18px", textAlign:"center" }}>
+                          <div style={{ fontSize:"10px", fontWeight:600, color:"#92400e" }}>Maaş Avansı</div>
+                          <div style={{ fontSize:"18px", fontWeight:800, color:"#92400e" }}>-₺{maasAvans.toLocaleString("tr-TR")}</div>
+                        </div>
+                      )}
+                      {isAvans > 0 && (
+                        <div style={{ background:"#f3e8ff", borderRadius:"12px", padding:"8px 18px", textAlign:"center" }}>
+                          <div style={{ fontSize:"10px", fontWeight:600, color:"#7e22ce" }}>İş Avansı</div>
+                          <div style={{ fontSize:"18px", fontWeight:800, color:"#7e22ce" }}>₺{isAvans.toLocaleString("tr-TR")}</div>
+                        </div>
+                      )}
+                      {maasAvans > 0 && (
+                        <div style={{ background:"linear-gradient(135deg,#1d4ed8,#2563eb)", borderRadius:"12px", padding:"8px 18px", textAlign:"center", color:"#fff" }}>
+                          <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>Net Ödenecek</div>
+                          <div style={{ fontSize:"20px", fontWeight:800 }}>₺{net.toLocaleString("tr-TR")}</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {showPersonelForm && (
+                <div style={{ ...secSt, marginBottom:"20px", background:"#f8fafc", border:"1.5px solid #e5e7eb" }}>
+                  <div style={{ fontWeight:700, fontSize:"15px", marginBottom:"16px" }}>{editingPersonel?"✏️ Personel Düzenle":"➕ Yeni Personel"}</div>
+                  <form onSubmit={handleSavePersonel}>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"12px", marginBottom:"12px" }}>
+                      {[["Ad Soyad *","ad_soyad"],["TC No","tc_no"],["Telefon","telefon"],["E-posta","email"],
+                        ["Unvan","unvan"],["Bölge","bolge"],["IBAN","iban"],["Banka Adı","banka_adi"],["Banka Hesap No","banka_hesap_no"]
+                      ].map(([l,n])=>(
+                        <div key={n}>
+                          <label style={labelSt}>{l}</label>
+                          <input value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} required={n==="ad_soyad"} />
+                        </div>
+                      ))}
+                      {[["Doğum Tarihi","dogum_tarihi"],["İşe Giriş","ise_giris_tarihi"],["İşten Ayrılma","isten_ayrilma_tarihi"]].map(([l,n])=>(
+                        <div key={n}>
+                          <label style={labelSt}>{l}</label>
+                          <input type="date" value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} />
+                        </div>
+                      ))}
+                      {[["Net Maaş (₺)","net_maas"],["Bankadan Gösterilen (₺)","bankadan_gosterilen"],["Elden Verilen (₺)","elden_verilen"]].map(([l,n])=>(
+                        <div key={n}>
+                          <label style={labelSt}>{l}</label>
+                          <input type="number" value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} />
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
+                      <button type="button" className="tab" onClick={()=>setShowPersonelForm(false)}>Vazgeç</button>
+                      <button type="submit" className="saveButton">Kaydet</button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              <div style={{ display:"grid", gap:"10px" }}>
+                {personelList.map(p => (
+                  <div key={p.id} style={{ background:"#fff", borderRadius:"14px", padding:"16px 20px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"grid", gridTemplateColumns:"44px 1fr auto auto auto", alignItems:"center", gap:"16px", opacity: p.aktif?1:0.6 }}>
+                    <div style={{ width:44, height:44, borderRadius:"12px", background: p.aktif?"linear-gradient(135deg,#60a5fa,#3b82f6)":"#e5e7eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"18px", fontWeight:700, color:"#fff" }}>
+                      {p.ad_soyad.charAt(0)}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight:700, fontSize:"15px" }}>{p.ad_soyad}</div>
+                      <div style={{ fontSize:"12px", color:"#9ca3af" }}>{p.unvan} {p.bolge && `· ${p.bolge}`}</div>
+                      <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"2px" }}>Net: <b>₺{Number(p.net_maas||0).toLocaleString("tr-TR")}</b> · Banka: ₺{Number(p.bankadan_gosterilen||0).toLocaleString("tr-TR")} · Elden: ₺{Number(p.elden_verilen||0).toLocaleString("tr-TR")}</div>
+                    </div>
+                    <span style={{ background:p.aktif?"#dcfce7":"#f3f4f6", color:p.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{p.aktif?"Aktif":"Pasif"}</span>
+                    <div style={{ display:"flex", gap:"6px" }}>
+                      <button onClick={()=>loadPersonelDetail(p)} style={{ padding:"6px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Detay / Belgeler</button>
+                      <button onClick={()=>handleEditPersonel(p)} style={{ padding:"6px 12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
+                      <button onClick={()=>handleToggleAktif(p)} style={{ padding:"6px 12px", background:p.aktif?"#fef3c7":"#f0fdf4", color:p.aktif?"#92400e":"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
+                        {p.aktif?"Pasife Al":"Aktif Et"}
+                      </button>
+                    </div>
+                    <button onClick={()=>handleDeletePersonel(p)} style={{ padding:"6px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
+                  </div>
+                ))}
+                {personelList.length===0 && <div style={{ ...secSt, textAlign:"center", color:"#9ca3af" }}>Henüz personel eklenmemiş. "Personel Ekle" butonuna tıklayın.</div>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== PUANTAJ SEKMESİ ===== */}
+      {tab==="puantaj" && (
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:"16px", marginBottom:"20px", flexWrap:"wrap" }}>
+            <h2 style={{ margin:0 }}>📋 Puantaj</h2>
+            <select value={yilStr} onChange={e=>setPuantajAy(`${e.target.value}-${ayStr}`)}
+              style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px" }}>
+              {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
+            </select>
+            <select value={ayStr} onChange={e=>setPuantajAy(`${yilStr}-${e.target.value}`)}
+              style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px" }}>
+              {["01","02","03","04","05","06","07","08","09","10","11","12"].map((m,i)=>(
+                <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
+              ))}
+            </select>
+            <div style={{ fontSize:"13px", color:"#6b7280" }}>Hücreye tıkla: ✅→🏖→☪️→⭕→❌→✅</div>
+            <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`}
+              style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>
+              📥 Excel İndir
+            </a>
+          </div>
+
+          {/* Legend */}
+          <div style={{ display:"flex", gap:"10px", marginBottom:"16px", flexWrap:"wrap" }}>
+            {DURUMLAR.map(d=><span key={d.key} style={{ fontSize:"13px" }}>{d.label} {d.key}</span>)}
+          </div>
+
+          <div style={{ overflowX:"auto", borderRadius:"14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+            <table style={{ borderCollapse:"collapse", width:"100%", background:"#fff", borderRadius:"14px", overflow:"hidden" }}>
+              <thead>
+                <tr style={{ background:"#f8fafc" }}>
+                  <th style={{ padding:"10px 14px", textAlign:"left", fontSize:"13px", fontWeight:700, position:"sticky", left:0, background:"#f8fafc", zIndex:2, minWidth:"150px" }}>Personel</th>
+                  {ayGunleri.map(g=>{
+                    const d = new Date(Number(yilStr), Number(ayStr)-1, g).getDay();
+                    return (
+                      <th key={g} style={{ padding:"4px 2px", fontSize:"11px", fontWeight:700, textAlign:"center", minWidth:"36px", width:"36px", color: d===0||d===6?"#ef4444":"#374151" }}>
+                        <div>{g}</div>
+                        {d===0 && <div style={{ fontSize:"9px", fontWeight:500, color:"#ef4444", lineHeight:1 }}>Paz</div>}
+                        {d===6 && <div style={{ fontSize:"9px", fontWeight:500, color:"#ef4444", lineHeight:1 }}>Cmt</div>}
+                      </th>
+                    );
+                  })}
+                  <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"80px" }}>Çalışılan</th>
+                  <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"110px" }}>Hakediş</th>
+                </tr>
+              </thead>
+              <tbody>
+                {personelList.filter(p=>p.aktif && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
+                  const calisilan = ayGunleri.filter(g=>{
+                    const row = getPuantaj(p.id, g);
+                    return row?.durum==="CALISDI";
+                  }).length;
+                  const hakedilen = Math.round((calisilan/ayGunleri.length)*p.net_maas);
+                  const rowBg = pi%2===0?"#fff":"#fafafa";
+                  return (
+                    <tr key={p.id} style={{ borderTop:"1px solid #f3f4f6", background: rowBg }}>
+                      <td style={{ padding:"8px 14px", fontWeight:600, fontSize:"13px", position:"sticky", left:0, background: rowBg, zIndex:1, borderRight:"2px solid #e5e7eb" }}>
+                        {p.ad_soyad}<br/><span style={{ fontSize:"11px", color:"#9ca3af", fontWeight:400 }}>{p.unvan}</span>
+                      </td>
+                      {ayGunleri.map(g=>{
+                        const row = getPuantaj(p.id, g);
+                        const durum = row?.durum || "TATIL";
+                        const d = DURUMLAR.find(x=>x.key===durum);
+                        const tarih = `${puantajAy}-${String(g).padStart(2,"0")}`;
+                        const isWeekend = new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0 || new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 6;
+                        const cellBg = durum==="CALISDI" ? "#dcfce7" : durum==="GELMEDI" ? "#fee2e2" : durum==="IZIN" ? "#dbeafe" : durum==="RAPOR" ? "#fef3c7" : isWeekend ? "#f1f5f9" : "transparent";
+                        const hasNot = !!(row?.not_aciklama || row?.belge_yolu);
+                        const showNot2 = durum !== "CALISDI" && durum !== "TATIL" && row?.id;
+                        return (
+                          <td key={g} style={{ padding:"0", background: cellBg, border:"1px solid #f0f0f0", minWidth:"36px", width:"36px", userSelect:"none" }}>
+                            <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
+                              <div
+                                onClick={()=>handlePuantaj(p.id, tarih, nextDurum(row?.durum))}
+                                style={{ flex:1, minHeight: showNot2?"30px":"42px", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:"18px" }}
+                              >
+                                {d?.label||""}
+                              </div>
+                              {showNot2 && (
+                                <div
+                                  onClick={()=>openNotModal(row, p.ad_soyad, tarih)}
+                                  title={hasNot ? (row.not_aciklama || "Belge var") : "Not ekle"}
+                                  style={{ height:"14px", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:"11px", background: hasNot?"#fef3c7":"rgba(0,0,0,0.04)", borderTop:"1px solid rgba(0,0,0,0.06)" }}
+                                >
+                                  {hasNot ? "📝" : "+ not"}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
+                      <td style={{ padding:"8px", textAlign:"center", fontWeight:700, color:"#1f2937", borderLeft:"2px solid #e5e7eb" }}>{calisilan}/{ayGunleri.length}</td>
+                      <td style={{ padding:"8px", textAlign:"right", fontWeight:700, color:"#166534", fontSize:"13px" }}>₺{hakedilen.toLocaleString("tr-TR")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Ay Özeti */}
+          {ozet.length > 0 && (
+            <div style={{ marginTop:"24px" }}>
+              <h3 style={{ marginBottom:"12px" }}>💰 Ay Özeti</h3>
+              <div style={{ display:"grid", gap:"8px" }}>
+                {ozet.map(o => (
+                  <div key={o.personel_id} style={{ background:"#fff", borderRadius:"12px", padding:"12px 18px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"grid", gridTemplateColumns:"1fr auto auto auto auto auto", gap:"16px", alignItems:"center" }}>
+                    <div style={{ fontWeight:600 }}>{o.ad_soyad}</div>
+                    <div style={{ fontSize:"13px" }}>{o.calisilan_gun}/{o.toplam_gun} gün</div>
+                    <div style={{ fontSize:"13px" }}>Hakediş: <b>₺{o.hakedilen_maas.toLocaleString("tr-TR")}</b></div>
+                    <div style={{ fontSize:"13px", color:"#3b82f6" }}>Banka: ₺{o.bankadan.toLocaleString("tr-TR")}</div>
+                    <div style={{ fontSize:"13px", color:"#f59e0b" }}>Elden: ₺{o.elden.toLocaleString("tr-TR")}</div>
+                    <div style={{ fontSize:"13px", color: o.avans>0?"#ef4444":"#9ca3af" }}>Avans: ₺{o.avans.toLocaleString("tr-TR")}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Not Modalı */}
+          {notModal && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center" }}
+              onClick={()=>setNotModal(null)}>
+              <div style={{ background:"#fff", borderRadius:"16px", padding:"24px", width:"440px", boxShadow:"0 20px 50px rgba(0,0,0,0.2)" }}
+                onClick={e=>e.stopPropagation()}>
+                <div style={{ fontWeight:700, fontSize:"16px", marginBottom:"4px" }}>📝 Devamsızlık Notu</div>
+                <div style={{ fontSize:"13px", color:"#6b7280", marginBottom:"16px" }}>
+                  {notModal.personelAd} — {notModal.tarih}
+                  {notModal.row?.durum && <span style={{ marginLeft:8, fontWeight:600, color:"#374151" }}>({notModal.row.durum})</span>}
+                </div>
+                <div style={{ marginBottom:"12px" }}>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"6px" }}>Açıklama</label>
+                  <textarea
+                    value={notText}
+                    onChange={e=>setNotText(e.target.value)}
+                    placeholder="Sebebi yazın... (izin belgesi, rapor no, vs.)"
+                    rows={3}
+                    style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", resize:"vertical", boxSizing:"border-box" }}
+                  />
+                </div>
+                <div style={{ marginBottom:"16px" }}>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"6px" }}>Belge / E-posta Eki</label>
+                  <input type="file" onChange={e=>setNotFile(e.target.files[0])}
+                    style={{ fontSize:"13px" }} />
+                  {notModal.row?.belge_yolu && !notFile && (
+                    <div style={{ marginTop:"6px", fontSize:"12px" }}>
+                      Mevcut belge: <a href={`http://localhost:5001/puantaj-belgeler/${notModal.row.belge_yolu}`} target="_blank" rel="noreferrer" style={{ color:"#1d4ed8", fontWeight:600 }}>Görüntüle →</a>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
+                  {(notModal.row?.not_aciklama || notModal.row?.belge_yolu) && (
+                    <button type="button" onClick={handleDeleteNot}
+                      style={{ padding:"8px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>
+                      Notu Sil
+                    </button>
+                  )}
+                  <button type="button" onClick={()=>setNotModal(null)}
+                    style={{ padding:"8px 14px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>
+                    Vazgeç
+                  </button>
+                  <button type="button" onClick={handleSaveNot} disabled={notSaving}
+                    style={{ padding:"8px 16px", background:"#1f2937", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>
+                    {notSaving ? "Kaydediliyor..." : "Kaydet"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== İŞ AVANSI SEKMESİ ===== */}
+      {tab==="is_avans" && <IsAvansPanel currentUser={currentUser} onPendingCount={()=>{}} />}
+
+      {/* ===== AVANS SEKMESİ ===== */}
+      {(tab==="maas_avans") && (() => {
+        const isMaas = tab === "maas_avans";
+        const list = isMaas ? avansList : isAvansList;
+        const form = isMaas ? avansForm : isAvansForm;
+        const setForm = isMaas ? setAvansForm : setIsAvansForm;
+        const onSave = isMaas ? handleSaveAvans : handleSaveIsAvans;
+        const reload = isMaas ? loadAvans : loadIsAvans;
+        return (
+        <div>
+          <div style={{ display:"grid", gridTemplateColumns:"340px 1fr", gap:"20px", alignItems:"start" }}>
+            <div style={secSt}>
+              <div style={{ fontWeight:700, fontSize:"15px", marginBottom:"16px" }}>
+                {isMaas ? "➕ Maaş Avansı Girişi" : "➕ İş Avansı Girişi"}
+              </div>
+              {!isMaas && <div style={{ fontSize:"12px", color:"#6b7280", marginBottom:"12px", background:"#f0fdf4", padding:"8px 12px", borderRadius:"8px" }}>İş avansı maaştan kesilmez. Ayrı takip edilir.</div>}
+              <form onSubmit={onSave}>
+                <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+                  <div>
+                    <label style={labelSt}>Personel</label>
+                    <select value={form.personel_id} onChange={e=>setForm(f=>({...f,personel_id:e.target.value}))} style={inputSt} required>
+                      <option value="">Seç...</option>
+                      {personelList.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={labelSt}>Tarih</label>
+                    <input type="date" value={form.tarih} onChange={e=>setForm(f=>({...f,tarih:e.target.value}))} style={inputSt} required />
+                  </div>
+                  <div>
+                    <label style={labelSt}>Tutar (₺)</label>
+                    <input type="number" value={form.tutar} onChange={e=>setForm(f=>({...f,tutar:e.target.value}))} style={inputSt} required />
+                  </div>
+                  <div>
+                    <label style={labelSt}>Açıklama</label>
+                    <input value={form.aciklama} onChange={e=>setForm(f=>({...f,aciklama:e.target.value}))} style={inputSt} />
+                  </div>
+                  <button type="submit" className="saveButton">Kaydet</button>
+                </div>
+              </form>
+            </div>
+
+            <div style={{ ...secSt, padding:0, overflow:"hidden" }}>
+              <div style={{ padding:"16px 20px", borderBottom:"1px solid #f3f4f6", fontWeight:700 }}>
+                {isMaas ? "💰 Maaş Avansı Kayıtları" : "🏗 İş Avansı Kayıtları"}
+              </div>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                  <thead>
+                    <tr style={{ background:"#f8fafc" }}>
+                      {["Personel","Tarih","Tutar","Açıklama","Durum",""].map(h=>(
+                        <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontSize:"12px", fontWeight:700, color:"#6b7280" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.map((a,i) => (
+                      <tr key={a.id} style={{ borderTop:"1px solid #f3f4f6", background: i%2===0?"#fff":"#fafafa" }}>
+                        <td style={{ padding:"10px 14px", fontWeight:600, fontSize:"14px" }}>{a.ad_soyad}</td>
+                        <td style={{ padding:"10px 14px", fontSize:"13px" }}>{a.tarih?.split("T")[0]}</td>
+                        <td style={{ padding:"10px 14px", fontWeight:700, color:"#1f2937" }}>₺{Number(a.tutar).toLocaleString("tr-TR")}</td>
+                        <td style={{ padding:"10px 14px", fontSize:"13px", color:"#6b7280" }}>{a.aciklama}</td>
+                        <td style={{ padding:"10px 14px" }}>
+                          <span style={{ background:a.odendi?"#dcfce7":"#fef3c7", color:a.odendi?"#166534":"#92400e", padding:"3px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:600 }}>
+                            {a.odendi?"Ödendi":"Bekliyor"}
+                          </span>
+                        </td>
+                        <td style={{ padding:"10px 14px" }}>
+                          {!a.odendi && (
+                            <button onClick={async()=>{ await fetch(`${API_BASE}/hr/avans/${a.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({odendi:true,odeme_tarihi:new Date().toISOString().split("T")[0]})}); reload(); }}
+                              style={{ padding:"4px 10px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
+                              Ödendi İşaretle
+                            </button>
+                          )}
+                          <button onClick={async()=>{ if(!window.confirm("Silinsin mi?"))return; await fetch(`${API_BASE}/hr/avans/${a.id}`,{method:"DELETE"}); reload(); }}
+                            style={{ marginLeft:"6px", padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", fontSize:"12px", cursor:"pointer" }}>
+                            Sil
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {list.length===0 && <tr><td colSpan={6} style={{ padding:"24px", textAlign:"center", color:"#9ca3af" }}>Kayıt yok</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* ===== ISG SEKMESİ ===== */}
+      {tab==="isg" && (
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:"16px", marginBottom:"16px" }}>
+            <h2 style={{ margin:0 }}>🎓 ISG Eğitim Takibi</h2>
+            <a href={`${API_BASE}/hr/excel/isg`}
+              style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>
+              📥 ISG Excel İndir
+            </a>
+          </div>
+          {isgUyarilar.length > 0 ? (
+            <div>
+              <div style={{ marginBottom:"16px", fontWeight:700, color:"#991b1b" }}>⚠️ Dikkat Gerektiren Eğitimler</div>
+              <div style={{ display:"grid", gap:"8px" }}>
+                {isgUyarilar.map(u => (
+                  <div key={u.id} style={{ background: u.durum==="SURESI_DOLDU"?"#fef2f2":"#fffbeb", borderRadius:"12px", padding:"12px 18px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontWeight:700, color: u.durum==="SURESI_DOLDU"?"#991b1b":"#92400e" }}>{u.ad_soyad} — {u.egitim_turu}</div>
+                      <div style={{ fontSize:"12px", color:"#9ca3af", marginTop:"2px" }}>Bitiş: {u.bitis_tarihi?.split("T")[0]}</div>
+                    </div>
+                    <span style={{ background: u.durum==="SURESI_DOLDU"?"#fee2e2":"#fef3c7", color: u.durum==="SURESI_DOLDU"?"#991b1b":"#92400e", padding:"4px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>
+                      {u.durum==="SURESI_DOLDU"?"🔴 SÜRESİ DOLDU":"🟡 30 GÜN KALDI"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ ...secSt, textAlign:"center", color:"#166534", background:"#f0fdf4" }}>
+              ✅ Tüm ISG eğitimleri güncel, sorun yok.
+            </div>
+          )}
+          <div style={{ marginTop:"20px", color:"#6b7280", fontSize:"13px" }}>
+            Personel eğitimlerini düzenlemek için <b>👤 Personel</b> sekmesinden personeli seçin → Detay / Belgeler.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const GIDER_TURLERI = ["Yol","Konaklama","Akşam Yemeği","Yakıt","Malzeme","Ekipman","Diğer"];
+const BOLGELER = ["İzmir","Antalya","Ankara"];
+const PROJELER = ["TT - Türk Telekom","TC - Türkcell","VF - Vodafone"];
+
+const MASRAF_KATEGORILER = [
+  { key: "YEMEK",     label: "🍽 Yiyecek / İçecek",       aciklamaPlaceholder: "Proje veya iş adı" },
+  { key: "YAKIT",     label: "⛽ Araç Yakıt / Bakım",      aciklamaPlaceholder: "Araç plaka no" },
+  { key: "KONAKLAMA", label: "🏨 Konaklama",               aciklamaPlaceholder: "Kaç gece, kişi sayısı, otel adı" },
+  { key: "ULASIM",    label: "🚌 Ulaşım",                  aciklamaPlaceholder: "Güzergah, kişi sayısı, neden" },
+  { key: "KOPRU",     label: "🛣 Köprü / Otoyol Geçişi",   aciklamaPlaceholder: "Geçiş detayı, plaka" },
+  { key: "MALZEME",   label: "🔧 Malzeme / Ekipman",       aciklamaPlaceholder: "Malzeme detayı" },
+  { key: "DIGER",     label: "📦 Diğer",                   aciklamaPlaceholder: "İşin detayı" },
+];
+
+function MasrafFormuPanel({ currentUser, onPendingCount }) {
+  const isPM       = currentUser?.email === "orhan.bedir@simsektel.com";
+  const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
+  const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
+  const isApprover = isPM || isDirektor || isMuhasebe;
+  const isMobile   = typeof window !== "undefined" && window.innerWidth < 768;
+
+  const [list, setList]           = useState([]);
+  const [personelList, setPersonelList] = useState([]);
+  const [bakiye, setBakiye]       = useState(null);
+  const [viewForm, setViewForm]   = useState(null); // form detail view
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [filterDurum, setFilterDurum] = useState("");
+  const [notModal, setNotModal]   = useState(null); // {id, action}
+  const [notText, setNotText]     = useState("");
+  const [redModal, setRedModal]   = useState(null);
+  const [redText, setRedText]     = useState("");
+
+  // New form state
+  const today = new Date().toISOString().split("T")[0];
+  const thisMonth = today.slice(0,7);
+  const [nfPersonelId, setNfPersonelId] = useState("");
+  const [nfDonem, setNfDonem]     = useState(thisMonth);
+  const [activeForm, setActiveForm] = useState(null); // saved form being edited
+  const [kalemForm, setKalemForm] = useState({ kategori:"YEMEK", tarih:today, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"" });
+  const [openKats, setOpenKats] = useState(new Set()); // collapsed by default
+  const toggleKat = (key) => setOpenKats(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
+  const [kalemler, setKalemler]   = useState([]);
+  const [fotoModal, setFotoModal] = useState(null); // kalem id waiting for photo after new kalem add
+  const [extraFotoModal, setExtraFotoModal] = useState(null);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [fisOlmadanAciklama, setFisOlmadanAciklama] = useState("");
+  const [pendingKalemTutar, setPendingKalemTutar] = useState(null); // entered amount for OCR comparison
+  const [pendingKalemKategori, setPendingKalemKategori] = useState(null);
+  const [ocrResult, setOcrResult] = useState(null); // {ocr_tutar, ocr_plaka, ocr_plaka_eslesti, belgeId}
+  const [tutarUyariAciklama, setTutarUyariAciklama] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+
+  const load = async () => {
+    const r = await fetch(`${API_BASE}/hr/masraf-form`);
+    const data = await r.json();
+    setList(data);
+    if (onPendingCount) {
+      let cnt = 0;
+      if (isPM)       cnt = data.filter(f => f.durum === "PM_BEKLE").length;
+      if (isDirektor) cnt = data.filter(f => f.durum === "DIREKTOR_BEKLE").length;
+      if (isMuhasebe) cnt = data.filter(f => f.durum === "TAMAMLANDI").length;
+      onPendingCount(cnt);
+    }
+  };
+
+  const loadDetail = async (id) => {
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${id}`);
+    const data = await r.json();
+    setViewForm(data);
+  };
+
+  const loadPersonel = async () => {
+    const r = await fetch(`${API_BASE}/hr/personel`);
+    setPersonelList(await r.json());
+  };
+
+  const loadBakiye = async (pid) => {
+    if (!pid) return setBakiye(null);
+    const r = await fetch(`${API_BASE}/hr/masraf-form/bakiye/${pid}`);
+    setBakiye(await r.json());
+  };
+
+  useEffect(() => { load(); loadPersonel(); }, []);
+  useEffect(() => { if (nfPersonelId) loadBakiye(nfPersonelId); }, [nfPersonelId]);
+
+  // Reload kalemler when activeForm changes
+  const refreshActive = async (fid) => {
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${fid}`);
+    const data = await r.json();
+    setActiveForm(data);
+    setKalemler(data.kalemler || []);
+  };
+
+  const handleCreateForm = async () => {
+    if (!nfPersonelId) return alert("Personel seçin");
+    try {
+      const pid = personelList.find(p => p.id == nfPersonelId);
+      const r = await fetch(`${API_BASE}/hr/masraf-form`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+          personel_id: nfPersonelId,
+          talep_eden_email: currentUser?.email,
+          talep_eden_ad: pid?.ad_soyad || currentUser?.ad || currentUser?.email,
+          donem: nfDonem
+        })
+      });
+      if (!r.ok) { const e = await r.json(); return alert("Hata: " + (e.error||r.status)); }
+      const form = await r.json();
+      if (!form.id) return alert("Form oluşturulamadı, backend'i yeniden başlatın.");
+      setActiveForm(form);
+      setKalemler([]);
+      loadBakiye(nfPersonelId);
+      setShowNewForm(false);
+      load();
+    } catch(e) {
+      alert("Bağlantı hatası — backend çalışıyor mu? node server.js");
+    }
+  };
+
+  const handleAddKalem = async () => {
+    if (!kalemForm.tutar || !kalemForm.tarih) return alert("Tarih ve tutar zorunlu");
+    if (!activeForm) return alert("Önce form oluşturun");
+    const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true })
+    });
+    const saved = await r.json();
+    // Ask for photo upload
+    setFotoModal(saved.id);
+    setPendingKalemTutar(Number(kalemForm.tutar));
+    setPendingKalemKategori(kalemForm.kategori);
+    setOcrResult(null);
+    setTutarUyariAciklama("");
+    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"" }));
+    refreshActive(activeForm.id);
+  };
+
+  const handleDeleteKalem = async (kid) => {
+    if (!window.confirm("Bu kalemi silmek istediğinize emin misiniz?")) return;
+    await fetch(`${API_BASE}/hr/masraf-kalem/${kid}`, { method:"DELETE" });
+    refreshActive(activeForm.id);
+  };
+
+  const closeFotoModal = () => {
+    setFotoModal(null);
+    setUploadFile(null);
+    setOcrResult(null);
+    setTutarUyariAciklama("");
+    setFisOlmadanAciklama("");
+  };
+
+  const handleUploadFoto = async (kalemId, file, fis_var, fisAciklama, tutarUyariAciklamaOverride) => {
+    if (!fis_var) {
+      // Fişsiz ilerleme
+      await fetch(`${API_BASE}/hr/masraf-kalem/${kalemId}`, {
+        method: "PUT",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ fis_var: false, fis_olmadan_aciklama: fisAciklama })
+      }).catch(()=>{});
+      closeFotoModal();
+      refreshActive(activeForm.id);
+      return;
+    }
+
+    // Upload file and get OCR results
+    setIsUploading(true);
+    const fd = new FormData();
+    fd.append("dosya", file);
+    let belge;
+    try {
+      const r = await fetch(`${API_BASE}/hr/masraf-belge/${kalemId}`, { method:"POST", body:fd });
+      belge = await r.json();
+    } finally {
+      setIsUploading(false);
+    }
+
+    const { ocr_tutar, ocr_plaka, ocr_plaka_eslesti } = belge;
+
+    // Check tutar mismatch (>5% fark veya 10 TL'den fazla)
+    const entered = pendingKalemTutar || 0;
+    const ocrAmt = ocr_tutar ? Number(ocr_tutar) : null;
+    const hasMismatch = ocrAmt && entered &&
+      (Math.abs(ocrAmt - entered) > Math.max(entered * 0.05, 10));
+
+    // Check plate for YAKIT
+    const hasPlateWarning = pendingKalemKategori === "YAKIT" && ocr_plaka && ocr_plaka_eslesti === false;
+
+    if (hasMismatch && !tutarUyariAciklamaOverride) {
+      // Show mismatch warning — keep modal open in "uyari" state
+      setOcrResult({ ocr_tutar: ocrAmt, ocr_plaka, ocr_plaka_eslesti, belgeId: belge.id });
+      return; // Modal switches to warning UI
+    }
+
+    if (hasPlateWarning) {
+      setOcrResult({ ocr_tutar: ocrAmt, ocr_plaka, ocr_plaka_eslesti, belgeId: belge.id });
+      return; // Modal switches to plate warning UI
+    }
+
+    // Save tutar warning note if provided
+    if (tutarUyariAciklamaOverride && belge.id) {
+      await fetch(`${API_BASE}/hr/masraf-kalem/${kalemId}`, {
+        method: "PUT",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ tutar_uyari_aciklama: tutarUyariAciklamaOverride })
+      }).catch(()=>{});
+    }
+
+    closeFotoModal();
+    refreshActive(activeForm.id);
+  };
+
+  const handleTutarUyariDevam = async () => {
+    if (!tutarUyariAciklama.trim()) return alert("Fark için açıklama zorunlu.");
+    // Check plate warning after tutar approved
+    if (pendingKalemKategori === "YAKIT" && ocrResult?.ocr_plaka && ocrResult?.ocr_plaka_eslesti === false) {
+      // Stay in plate warning phase — mark tutar as ok
+      setOcrResult(r => ({ ...r, tutarOk: true, tutarAciklama: tutarUyariAciklama }));
+      return;
+    }
+    await fetch(`${API_BASE}/hr/masraf-kalem/${fotoModal}`, {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ tutar_uyari_aciklama: tutarUyariAciklama })
+    }).catch(()=>{});
+    closeFotoModal();
+    refreshActive(activeForm.id);
+  };
+
+  const handlePlakaUyariDevam = async () => {
+    if (ocrResult?.tutarAciklama) {
+      await fetch(`${API_BASE}/hr/masraf-kalem/${fotoModal}`, {
+        method: "PUT",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ tutar_uyari_aciklama: ocrResult.tutarAciklama })
+      }).catch(()=>{});
+    }
+    closeFotoModal();
+    refreshActive(activeForm.id);
+  };
+
+  const handleSubmit = async () => {
+    if (!activeForm) return;
+    if (kalemler.length === 0) return alert("En az bir masraf kalemi ekleyin");
+    if (!window.confirm("Masraf formunu PM onayına göndermek istediğinize emin misiniz?")) return;
+    await fetch(`${API_BASE}/hr/masraf-form/${activeForm.id}/submit`, { method:"PUT" });
+    setActiveForm(null);
+    setKalemler([]);
+    load();
+  };
+
+  const handlePMOnayla = async () => {
+    await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/pm-onayla`, {
+      method:"PUT", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ pm_not: notText })
+    });
+    setNotModal(null); setNotText(""); load();
+    if (viewForm?.id === notModal.id) loadDetail(notModal.id);
+  };
+
+  const handleDirektorOnayla = async () => {
+    await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/direktor-onayla`, {
+      method:"PUT", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ direktor_not: notText })
+    });
+    setNotModal(null); setNotText(""); load();
+    if (viewForm?.id === notModal.id) loadDetail(notModal.id);
+  };
+
+  const handleReddet = async () => {
+    if (!redText.trim()) return alert("Red açıklaması zorunlu");
+    const ep = isPM ? "pm-reddet" : "direktor-reddet";
+    await fetch(`${API_BASE}/hr/masraf-form/${redModal}/pm-reddet`.replace("pm-reddet", ep), {
+      method:"PUT", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email })
+    });
+    setRedModal(null); setRedText(""); load();
+    if (viewForm?.id === redModal) loadDetail(redModal);
+  };
+
+  const durumBadge = (durum) => {
+    const map = {
+      TASLAK:         { bg:"#f3f4f6", color:"#374151", label:"Taslak" },
+      PM_BEKLE:       { bg:"#fef9c3", color:"#713f12", label:"PM Onayı Bekleniyor" },
+      DIREKTOR_BEKLE: { bg:"#fed7aa", color:"#92400e", label:"Direktör Onayında" },
+      TAMAMLANDI:     { bg:"#dcfce7", color:"#166534", label:"Onaylandı ✓" },
+      ARSIVLENDI:     { bg:"#ede9fe", color:"#5b21b6", label:"🗂 Arşivlendi" },
+      REDDEDILDI:     { bg:"#fee2e2", color:"#991b1b", label:"Reddedildi" },
+    };
+    const s = map[durum] || { bg:"#f3f4f6", color:"#6b7280", label: durum };
+    return <span style={{ background:s.bg, color:s.color, borderRadius:"20px", padding:"3px 12px", fontSize:12, fontWeight:600, whiteSpace:"nowrap" }}>{s.label}</span>;
+  };
+
+  const myPending = isPM ? list.filter(f=>f.durum==="PM_BEKLE").length
+    : isDirektor ? list.filter(f=>f.durum==="DIREKTOR_BEKLE").length
+    : isMuhasebe ? list.filter(f=>f.durum==="TAMAMLANDI").length : 0;
+
+  const visibleList = list.filter(f => {
+    if (!isApprover && f.talep_eden_email !== currentUser?.email) return false;
+    if (filterDurum && f.durum !== filterDurum) return false;
+    return true;
+  });
+
+  const totalKalem = kalemler.reduce((s,k)=>s+Number(k.tutar),0);
+  const cardSt = { background:"#fff", borderRadius:"16px", boxShadow:"0 4px 20px rgba(0,0,0,0.07)", border:"1px solid #f3f4f6", padding:"24px" };
+
+  // ── Detail view ──
+  if (viewForm) {
+    const vToplam = (viewForm.kalemler||[]).reduce((s,k)=>s+Number(k.tutar),0);
+    const needsPMAction = isPM && viewForm.durum === "PM_BEKLE";
+    const needsDirektorAction = isDirektor && viewForm.durum === "DIREKTOR_BEKLE";
+    const isOwner = currentUser?.email === viewForm.talep_eden_email;
+    const canDelete = (isOwner || isPM) && viewForm.durum !== "TAMAMLANDI";
+
+    const handleDeleteView = async () => {
+      if (!window.confirm("Bu masraf formu silinecek. Emin misiniz?")) return;
+      await fetch(`${API_BASE}/hr/masraf-form/${viewForm.id}`, { method: "DELETE" });
+      setViewForm(null);
+      load();
+    };
+
+    return (
+      <div style={{ maxWidth:"900px", margin:"24px auto" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px" }}>
+          <button onClick={()=>setViewForm(null)} style={{ background:"#f3f4f6", border:"1px solid #d1d5db", cursor:"pointer", color:"#374151", fontSize:"13px", fontWeight:600, padding:"7px 16px", borderRadius:"8px" }}>← Listeye Dön</button>
+          {canDelete && (
+            <button onClick={handleDeleteView} style={{ background:"#fee2e2", border:"1px solid #fca5a5", cursor:"pointer", color:"#dc2626", fontSize:"13px", fontWeight:600, padding:"7px 16px", borderRadius:"8px" }}>🗑 Formu Sil</button>
+          )}
+        </div>
+        <div style={{ ...cardSt, marginBottom:"16px" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+            <div>
+              <h2 style={{ margin:"0 0 4px", fontSize:"20px" }}>🧾 Masraf Formu #{viewForm.id}</h2>
+              <div style={{ color:"#6b7280", fontSize:"14px" }}>{viewForm.talep_eden_ad} · {viewForm.donem} · {viewForm.personel_ad}</div>
+            </div>
+            <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+              {durumBadge(viewForm.durum)}
+              <a href={`${API_BASE}/hr/masraf-form/${viewForm.id}/excel`} style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>📥 Excel</a>
+              {(viewForm.kalemler||[]).some(k=>(k.belgeler||[]).length>0) && (
+                <a href={`${API_BASE}/hr/masraf-form/${viewForm.id}/pdf`} style={{ padding:"8px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>📄 PDF Fişler</a>
+              )}
+            </div>
+          </div>
+          {viewForm.red_aciklama && <div style={{ marginTop:"12px", background:"#fee2e2", borderRadius:"8px", padding:"10px 14px", color:"#991b1b", fontSize:"13px" }}>❌ Red: {viewForm.red_aciklama}</div>}
+          {viewForm.pm_not && <div style={{ marginTop:"8px", background:"#fef9c3", borderRadius:"8px", padding:"8px 12px", color:"#713f12", fontSize:"13px" }}>PM Notu: {viewForm.pm_not}</div>}
+          {viewForm.direktor_not && <div style={{ marginTop:"8px", background:"#d1fae5", borderRadius:"8px", padding:"8px 12px", color:"#065f46", fontSize:"13px" }}>Direktör Notu: {viewForm.direktor_not}</div>}
+        </div>
+
+        {/* Kalemler */}
+        <div style={{ ...cardSt, marginBottom:"16px" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+            <thead>
+              <tr style={{ background:"#f9fafb" }}>
+                {["Kategori","Tarih","Belge No","Açıklama","Tutar","Fiş"].map(h=>(
+                  <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"2px solid #e5e7eb" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(viewForm.kalemler||[]).map((k,i)=>{
+                const kat = MASRAF_KATEGORILER.find(m=>m.key===k.kategori);
+                return (
+                  <tr key={k.id} style={{ background: !k.fis_var?"#fff7ed": i%2===0?"#fff":"#fafafa", borderBottom:"1px solid #f3f4f6" }}>
+                    <td style={{ padding:"10px 12px" }}>{kat?.label||k.kategori}</td>
+                    <td style={{ padding:"10px 12px", whiteSpace:"nowrap" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR") : ""}</td>
+                    <td style={{ padding:"10px 12px" }}>{k.belge_no||"—"}</td>
+                    <td style={{ padding:"10px 12px" }}>{k.aciklama||k.belge_aciklama||"—"}{!k.fis_var&&<div style={{ fontSize:"11px",color:"#dc2626" }}>Fişsiz: {k.fis_olmadan_aciklama}</div>}</td>
+                    <td style={{ padding:"10px 12px", fontWeight:700 }}>₺{Number(k.tutar).toLocaleString("tr-TR")}</td>
+                    <td style={{ padding:"10px 12px" }}>
+                      {(k.belgeler||[]).length > 0
+                        ? <div style={{ display:"flex", gap:"4px", flexWrap:"wrap" }}>
+                            {k.belgeler.map(b=>(
+                              <a key={b.id} href={`${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`} target="_blank" rel="noreferrer"
+                                 style={{ fontSize:"11px", background:"#eff6ff", color:"#1d4ed8", padding:"2px 8px", borderRadius:"6px", textDecoration:"none" }}>
+                                📷 Fiş
+                              </a>
+                            ))}
+                          </div>
+                        : <span style={{ color:"#f59e0b", fontSize:"12px" }}>—</span>
+                      }
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ background:"#1e3a5f" }}>
+                <td colSpan={4} style={{ padding:"12px", fontWeight:700, color:"#fff", textAlign:"right" }}>TOPLAM</td>
+                <td style={{ padding:"12px", fontWeight:700, color:"#fff", fontSize:"16px" }}>₺{vToplam.toLocaleString("tr-TR")}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        {/* Onay aksiyonları */}
+        {(needsPMAction || needsDirektorAction) && (
+          <div style={{ display:"flex", gap:"12px" }}>
+            <button onClick={()=>{ setNotModal({ id: viewForm.id, action: needsPMAction?"pm":"dir" }); setNotText(""); }}
+              style={{ padding:"12px 24px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}>
+              ✅ Onayla {needsPMAction?"(PM)":"(Direktör)"}
+            </button>
+            <button onClick={()=>{ setRedModal(viewForm.id); setRedText(""); }}
+              style={{ padding:"12px 24px", background:"#dc2626", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}>
+              ❌ Reddet
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── New / Edit form (TASLAK only) ──
+  if (activeForm) {
+    const canDownload = isPM || isDirektor || isMuhasebe;
+    const isLocked = activeForm.durum !== "TASLAK";
+    const inp = { width:"100%", padding:"8px 10px", borderRadius:"8px", border:"1.5px solid #d1d5db", fontSize:"13px", boxSizing:"border-box", background:"#fff" };
+    return (
+      <div style={{ maxWidth:"860px", margin:"0 auto", padding:"16px" }}>
+        {/* Üst başlık - Excel tarzı */}
+        <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:"12px", marginBottom:"12px", overflow:"hidden" }}>
+          <div style={{ background:"#1e3a5f", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ color:"#fff" }}>
+              <div style={{ fontWeight:800, fontSize:"18px", letterSpacing:"1px" }}>MASRAF FORMU</div>
+              <div style={{ fontSize:"12px", opacity:0.8, marginTop:"2px" }}>{activeForm.personel_ad || activeForm.talep_eden_ad} · Dönem: {activeForm.donem}</div>
+            </div>
+            <div style={{ textAlign:"right", color:"#93c5fd", fontSize:"11px" }}>
+              <div>Doküman Kodu: FR.69</div>
+              <div>Rev No: 0 · Rev. Tarihi: -</div>
+              {bakiye !== null && (
+                <div style={{ marginTop:"6px", color:"#fff" }}>
+                  <span style={{ fontWeight:700, fontSize:"16px" }}>İş Avansı: ₺{Number(bakiye.bakiye).toLocaleString("tr-TR")}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div style={{ padding:"10px 20px", background:"#f9fafb", display:"flex", gap:"16px", alignItems:"center", borderTop:"1px solid #e5e7eb" }}>
+            <button onClick={()=>{ setActiveForm(null); setKalemler([]); load(); }}
+              style={{ padding:"6px 14px", background:"none", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"13px", cursor:"pointer", color:"#374151" }}>← Geri</button>
+            {isLocked && <span style={{ fontSize:"12px", color:"#dc2626", fontWeight:600 }}>🔒 Onaya gönderildi — düzenleme kapalı</span>}
+            <div style={{ marginLeft:"auto", display:"flex", gap:"8px" }}>
+              {canDownload && <a href={`${API_BASE}/hr/masraf-form/${activeForm.id}/excel`} style={{ padding:"7px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>📥 Excel</a>}
+              {canDownload && <a href={`${API_BASE}/hr/masraf-form/${activeForm.id}/pdf`} style={{ padding:"7px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>📄 PDF Fişler</a>}
+            </div>
+          </div>
+        </div>
+
+        {/* Kategori bölümleri - Excel sütun formatı */}
+        {MASRAF_KATEGORILER.map(kat => {
+          const katKalemler = kalemler.filter(k => k.kategori === kat.key);
+          const katToplam = katKalemler.reduce((s,k)=>s+Number(k.tutar),0);
+          const isAdding = !isLocked && kalemForm.kategori === kat.key;
+          const isOpen = openKats.has(kat.key) || isAdding;
+          return (
+            <div key={kat.key} style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:"10px", marginBottom:"10px", overflow:"hidden" }}>
+              {/* Bölüm başlığı — tıklanabilir */}
+              <div onClick={()=>toggleKat(kat.key)} style={{ background:"#2563eb", padding:"9px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", userSelect:"none" }}>
+                <span style={{ color:"#fff", fontWeight:700, fontSize:"13px", textTransform:"uppercase" }}>{kat.label}</span>
+                <div style={{ display:"flex", gap:"12px", alignItems:"center" }}>
+                  {katToplam > 0 && <span style={{ color:"#bfdbfe", fontWeight:700, fontSize:"13px" }}>₺{katToplam.toLocaleString("tr-TR")}</span>}
+                  {katKalemler.length > 0 && <span style={{ background:"rgba(255,255,255,0.2)", color:"#fff", borderRadius:"10px", fontSize:"11px", padding:"1px 7px", fontWeight:700 }}>{katKalemler.length}</span>}
+                  <span style={{ color:"#bfdbfe", fontSize:"14px" }}>{isOpen ? "▲" : "▼"}</span>
+                </div>
+              </div>
+
+              {!isOpen && null}
+              {isOpen && <>
+              {/* Sütun başlıkları */}
+              <div style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background:"#dbeafe", borderBottom:"1px solid #bfdbfe" }}>
+                {["TARİH","BELGE NO","BELGE AÇIKLAMASI",`AÇIKLAMA (${kat.aciklamaPlaceholder.toUpperCase()})`, "MASRAF TUTARI",""].map((h,i)=>(
+                  <div key={i} style={{ padding:"5px 8px", fontSize:"10px", fontWeight:800, color:"#1e40af" }}>{h}</div>
+                ))}
+              </div>
+
+              {/* Kayıtlı satırlar */}
+              {katKalemler.length === 0 && !isAdding && (
+                <div style={{ padding:"10px 16px", fontSize:"12px", color:"#9ca3af", fontStyle:"italic" }}>Henüz kayıt yok</div>
+              )}
+              {katKalemler.map((k,i)=>(
+                <div key={k.id} style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background: i%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6", alignItems:"start" }}>
+                  <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR"):""}</div>
+                  <div style={{ padding:"8px 8px", fontSize:"12px", color:"#6b7280" }}>{k.belge_no||"—"}</div>
+                  <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.belge_aciklama||"—"}</div>
+                  <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>
+                    {k.aciklama||"—"}
+                    {!k.fis_var && <div style={{ fontSize:"10px",color:"#dc2626",marginTop:"2px" }}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</div>}
+                    {(k.belgeler||[]).length>0 && <div style={{ fontSize:"10px",color:"#059669",marginTop:"2px" }}>📷 {k.belgeler.length} fiş</div>}
+                  </div>
+                  <div style={{ padding:"8px 8px", fontWeight:700, fontSize:"12px", textAlign:"right" }}>₺{Number(k.tutar).toLocaleString("tr-TR")}</div>
+                  <div style={{ padding:"6px 6px", display:"flex", gap:"3px", justifyContent:"center" }}>
+                    <button onClick={()=>{ setExtraFotoModal(k.id); setUploadFile(null); }} title="Fiş fotoğrafı ekle"
+                      style={{ padding:"4px 7px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>📷</button>
+                    {!isLocked && <button onClick={()=>handleDeleteKalem(k.id)} title="Sil"
+                      style={{ padding:"4px 7px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>✕</button>}
+                  </div>
+                </div>
+              ))}
+
+              {/* Toplam satırı */}
+              {katKalemler.length > 0 && (
+                <div style={{ display:"flex", justifyContent:"flex-end", padding:"6px 16px", background:"#eff6ff", borderTop:"1px solid #bfdbfe" }}>
+                  <span style={{ fontSize:"11px", color:"#1e40af", marginRight:"8px", fontWeight:600 }}>
+                    {kat.label.split(" GİDER")[0]} Toplamı:
+                  </span>
+                  <span style={{ fontWeight:800, fontSize:"13px", color:"#1e3a5f" }}>₺{katToplam.toLocaleString("tr-TR")}</span>
+                </div>
+              )}
+
+              {/* Satır ekleme formu */}
+              {!isLocked && (
+                isAdding ? (
+                  <div style={{ padding:"14px 16px", background:"#f0f9ff", borderTop:"2px solid #2563eb" }}>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginBottom:"10px" }}>
+                      <div>
+                        <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>TARİH *</div>
+                        <input type="date" value={kalemForm.tarih} onChange={e=>setKalemForm(k=>({...k,tarih:e.target.value}))} style={inp} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>BELGE NO</div>
+                        <input value={kalemForm.belge_no} onChange={e=>setKalemForm(k=>({...k,belge_no:e.target.value}))} placeholder="Fatura / fiş no" style={inp} />
+                      </div>
+                    </div>
+                    <div style={{ marginBottom:"10px" }}>
+                      <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>BELGE AÇIKLAMASI</div>
+                      <input value={kalemForm.belge_aciklama} onChange={e=>setKalemForm(k=>({...k,belge_aciklama:e.target.value}))} placeholder="Yakıt Bedeli, Otel Faturası..." style={inp} />
+                    </div>
+                    <div style={{ marginBottom:"10px" }}>
+                      <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>AÇIKLAMA — {kat.aciklamaPlaceholder}</div>
+                      <input value={kalemForm.aciklama} onChange={e=>setKalemForm(k=>({...k,aciklama:e.target.value}))} placeholder={kat.aciklamaPlaceholder} style={inp} />
+                    </div>
+                    <div style={{ marginBottom:"12px" }}>
+                      <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>MASRAF TUTARI (₺) *</div>
+                      <input type="number" value={kalemForm.tutar} onChange={e=>setKalemForm(k=>({...k,tutar:e.target.value}))} placeholder="0.00"
+                        style={{ ...inp, fontSize:"18px", fontWeight:700, border:"2px solid #2563eb" }} />
+                    </div>
+                    <div style={{ display:"flex", gap:"8px" }}>
+                      <button onClick={handleAddKalem}
+                        style={{ flex:1, padding:"11px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer" }}>
+                        ✓ Ekle + Fiş Fotoğrafı Yükle
+                      </button>
+                      <button onClick={()=>setKalemForm(k=>({...k,kategori:""}))}
+                        style={{ padding:"11px 16px", background:"#f3f4f6", border:"none", borderRadius:"8px", cursor:"pointer", fontSize:"13px" }}>İptal</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={()=>{ setKalemForm(k=>({...k, kategori:kat.key, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"" })); setOpenKats(prev=>{ const s=new Set(prev); s.add(kat.key); return s; }); }}
+                    style={{ width:"100%", padding:"9px", background:"#f0f9ff", border:"none", borderTop:"1px dashed #93c5fd", color:"#2563eb", fontWeight:600, fontSize:"13px", cursor:"pointer", textAlign:"center" }}>
+                    + Bu Bölüme Satır Ekle
+                  </button>
+                )
+              )}
+              </>}
+            </div>
+          );
+        })}
+
+        {/* İCMAL / GENEL TOPLAM */}
+        <div style={{ background:"#1e3a5f", borderRadius:"10px", padding:"16px 20px", marginBottom:"14px" }}>
+          <div style={{ color:"#93c5fd", fontSize:"11px", fontWeight:700, marginBottom:"10px", letterSpacing:"1px" }}>İCMAL / SONUÇ</div>
+          {MASRAF_KATEGORILER.map(kat=>{
+            const t = kalemler.filter(k=>k.kategori===kat.key).reduce((s,k)=>s+Number(k.tutar),0);
+            return t>0 ? (
+              <div key={kat.key} style={{ display:"flex", justifyContent:"space-between", color:"#bfdbfe", fontSize:"13px", marginBottom:"4px" }}>
+                <span>{kat.label}</span><span style={{ fontWeight:600 }}>₺{t.toLocaleString("tr-TR")}</span>
+              </div>
+            ) : null;
+          })}
+          <div style={{ borderTop:"1px solid #3b5a8a", marginTop:"10px", paddingTop:"10px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span style={{ color:"#fff", fontWeight:800, fontSize:"15px" }}>GENEL TOPLAM</span>
+            <span style={{ color:"#fff", fontWeight:800, fontSize:"24px" }}>₺{totalKalem.toLocaleString("tr-TR")}</span>
+          </div>
+        </div>
+
+        {/* Alt butonlar */}
+        {!isLocked && (
+          <div style={{ display:"flex", gap:"12px" }}>
+            <button onClick={()=>{ setActiveForm(null); setKalemler([]); load(); }}
+              style={{ padding:"13px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, fontSize:"14px", cursor:"pointer" }}>
+              💾 Kaydet (Taslak)
+            </button>
+            <button onClick={handleSubmit}
+              style={{ padding:"13px 24px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer", flex:1 }}>
+              🚀 Birim Müdürü Onayına İlet
+            </button>
+          </div>
+        )}
+
+        {/* Fiş fotoğrafı upload modal */}
+        {fotoModal && (() => {
+          const showTutarUyari = ocrResult && !ocrResult.tutarOk && !ocrResult.tutarSkipped;
+          const showPlakaUyari = ocrResult && (ocrResult.tutarOk || ocrResult.tutarSkipped || !showTutarUyari) && ocrResult.ocr_plaka && ocrResult.ocr_plaka_eslesti === false && !ocrResult.plakaOnaylandi;
+
+          if (showPlakaUyari) return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+              <div style={{ background:"#fff", borderRadius:"16px", padding:"28px 24px", width:"90%", maxWidth:"400px" }}>
+                <h3 style={{ margin:"0 0 12px", fontSize:"18px" }}>⚠️ Plaka Sistemde Kayıtlı Değil</h3>
+                <p style={{ fontSize:"14px", color:"#374151", margin:"0 0 8px" }}>
+                  Fişte okunan plaka: <strong style={{ color:"#dc2626" }}>{ocrResult.ocr_plaka}</strong>
+                </p>
+                <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 20px" }}>
+                  Bu plaka firma araç filonuzda bulunmuyor. Yine de ilerletmek istiyor musunuz?
+                </p>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                  <button onClick={handlePlakaUyariDevam}
+                    style={{ padding:"12px", background:"#f59e0b", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>
+                    Yine de Devam Et
+                  </button>
+                  <button onClick={closeFotoModal}
+                    style={{ padding:"12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
+                    İptal
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+
+          if (showTutarUyari) return (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+              <div style={{ background:"#fff", borderRadius:"16px", padding:"28px 24px", width:"90%", maxWidth:"420px" }}>
+                <h3 style={{ margin:"0 0 12px", fontSize:"18px" }}>⚠️ Tutar Farkı Tespit Edildi</h3>
+                <div style={{ background:"#fef9c3", border:"1px solid #fde047", borderRadius:"10px", padding:"12px 16px", marginBottom:"16px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"4px" }}>
+                    <span style={{ fontSize:"13px", color:"#713f12" }}>Girdiğiniz tutar</span>
+                    <strong style={{ color:"#92400e" }}>₺{Number(pendingKalemTutar||0).toLocaleString("tr-TR")}</strong>
+                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between" }}>
+                    <span style={{ fontSize:"13px", color:"#713f12" }}>Fişteki tutar (OCR)</span>
+                    <strong style={{ color:"#dc2626" }}>₺{Number(ocrResult.ocr_tutar||0).toLocaleString("tr-TR")}</strong>
+                  </div>
+                </div>
+                <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 8px" }}>Farkı açıklar mısınız? (zorunlu)</p>
+                <input
+                  value={tutarUyariAciklama}
+                  onChange={e => setTutarUyariAciklama(e.target.value)}
+                  placeholder="Örn: Fiş üzerinde KDV hariç yazıyor, gerçek tutar doğru"
+                  style={{ width:"100%", padding:"10px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", marginBottom:"16px", boxSizing:"border-box" }}
+                />
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                  <button onClick={handleTutarUyariDevam}
+                    style={{ padding:"12px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>
+                    Açıklamayla Devam Et
+                  </button>
+                  <button onClick={closeFotoModal}
+                    style={{ padding:"12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
+                    İptal
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+
+          // Default: file selector
+          return (
+            <div onClick={closeFotoModal} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:1000 }}>
+              <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"28px 24px", width:"100%", maxWidth:"480px", position:"relative" }}>
+                <button onClick={closeFotoModal}
+                  style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"30px", height:"30px", fontSize:"16px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+                <h3 style={{ margin:"0 0 8px", fontSize:"18px" }}>📷 Fiş Fotoğrafı Yükle</h3>
+                <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 16px" }}>Fişi çekin veya dosya seçin. Sistem tutarı otomatik okuyacak.</p>
+                <input type="file" accept="image/*,application/pdf" capture="environment" onChange={e=>setUploadFile(e.target.files[0])}
+                  style={{ marginBottom:"16px", width:"100%", fontSize:"14px" }} />
+                {uploadFile && !isUploading && (
+                  <p style={{ fontSize:"12px", color:"#166534", background:"#dcfce7", padding:"8px 12px", borderRadius:"8px", margin:"0 0 12px" }}>
+                    ✅ Dosya seçildi — yüklemeye hazır.
+                  </p>
+                )}
+                {isUploading && (
+                  <p style={{ fontSize:"13px", color:"#1d4ed8", background:"#dbeafe", padding:"10px 14px", borderRadius:"8px", margin:"0 0 12px" }}>
+                    🔍 Fiş okunuyor, lütfen bekleyin...
+                  </p>
+                )}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                  <button disabled={isUploading} onClick={()=>{ if(uploadFile) handleUploadFoto(fotoModal,uploadFile,true,null); else { const a=prompt("Neden fiş yükleyemediniz?"); if(a!==null) handleUploadFoto(fotoModal,null,false,a); } }}
+                    style={{ padding:"12px", background: isUploading ? "#9ca3af" : "#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor: isUploading ? "not-allowed" : "pointer" }}>
+                    {isUploading ? "Okunuyor..." : "Yükle ve Devam Et"}
+                  </button>
+                  <button disabled={isUploading} onClick={()=>{ const a=prompt("Fiş olmadan ilerlemek için açıklama giriniz:"); if(a!==null) handleUploadFoto(fotoModal,null,false,a); }}
+                    style={{ padding:"12px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
+                    Fişsiz İlerlet
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Ek fiş fotoğrafı */}
+        {extraFotoModal && (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:1000 }}>
+            <div style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"28px 24px", width:"100%", maxWidth:"480px" }}>
+              <h3 style={{ margin:"0 0 16px" }}>📷 Ek Fiş Fotoğrafı</h3>
+              <input type="file" accept="image/*,application/pdf" capture="environment" onChange={e=>setUploadFile(e.target.files[0])} style={{ marginBottom:"16px", width:"100%" }} />
+              <div style={{ display:"flex", gap:"8px" }}>
+                <button onClick={async()=>{ if(uploadFile){ const fd=new FormData(); fd.append("dosya",uploadFile); await fetch(`${API_BASE}/hr/masraf-belge/${extraFotoModal}`,{method:"POST",body:fd}); } setExtraFotoModal(null); setUploadFile(null); refreshActive(activeForm.id); }}
+                  style={{ flex:1, padding:"12px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Yükle</button>
+                <button onClick={()=>{setExtraFotoModal(null);setUploadFile(null);}}
+                  style={{ padding:"12px 20px", background:"#f3f4f6", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── List view ──
+  return (
+    <div style={{ maxWidth:"1100px", margin:"24px auto" }}>
+      {myPending > 0 && (
+        <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:"12px", padding:"12px 18px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
+          <span style={{ fontSize:"20px" }}>⏳</span>
+          <span style={{ fontWeight:700, color:"#92400e", fontSize:"14px" }}>{myPending} adet masraf formu onayınızı bekliyor</span>
+          <span style={{ fontSize:"12px", color:"#78350f" }}>— Aşağıdaki listeden inceleyebilirsiniz</span>
+        </div>
+      )}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"20px" }}>
+        <h2 style={{ margin:0, fontSize:"22px", fontWeight:700 }}>🧾 Masraf Formları</h2>
+        {!isMuhasebe && (
+          <button onClick={()=>setShowNewForm(true)} style={{ padding:"10px 18px", background:"#1f2937", color:"#fff", border:"none", borderRadius:"10px", fontWeight:600, fontSize:"14px", cursor:"pointer" }}>
+            + Yeni Masraf Formu
+          </button>
+        )}
+      </div>
+
+      {/* Filters + Muhasebe toplu indir */}
+      <div style={{ background:"#fff", borderRadius:"12px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)", padding:"14px 18px", marginBottom:"16px", display:"flex", gap:"12px", alignItems:"center", flexWrap:"wrap" }}>
+        <select value={filterDurum} onChange={e=>setFilterDurum(e.target.value)}
+          style={{ padding:"8px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px" }}>
+          <option value="">Tüm Durumlar</option>
+          <option value="TASLAK">Taslak</option>
+          <option value="PM_BEKLE">PM Onayı Bekleniyor</option>
+          <option value="DIREKTOR_BEKLE">Direktör Onayında</option>
+          <option value="TAMAMLANDI">Onaylandı</option>
+          <option value="ARSIVLENDI">Arşivlendi</option>
+          <option value="REDDEDILDI">Reddedildi</option>
+        </select>
+        {filterDurum && <button onClick={()=>setFilterDurum("")} style={{ padding:"8px 12px", background:"#f3f4f6", border:"none", borderRadius:"8px", cursor:"pointer", fontSize:"13px" }}>Temizle</button>}
+        {isMuhasebe && (() => {
+          const [dlDonem, setDlDonem] = [nfDonem, setNfDonem];
+          return (
+            <div style={{ display:"flex", gap:"8px", alignItems:"center", marginLeft:"auto" }}>
+              <input type="month" value={nfDonem} onChange={e=>setNfDonem(e.target.value)}
+                style={{ padding:"8px 10px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"13px" }} />
+              <a href={`${API_BASE}/hr/masraf-form/donem/${nfDonem}/excel`}
+                style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"10px", fontSize:"13px", fontWeight:700, textDecoration:"none", whiteSpace:"nowrap" }}>
+                📥 Dönem Excel ({nfDonem})
+              </a>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* List */}
+      <div style={{ background:"#fff", borderRadius:"16px", boxShadow:"0 4px 20px rgba(0,0,0,0.07)", overflow:"hidden" }}>
+        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+          <thead>
+            <tr style={{ background:"#f9fafb" }}>
+              {["#","Personel","Dönem","Toplam","Oluşturma","Durum","İşlemler"].map(h=>(
+                <th key={h} style={{ padding:"12px 16px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"2px solid #e5e7eb" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visibleList.length === 0 && (
+              <tr><td colSpan={7} style={{ padding:"40px", textAlign:"center", color:"#9ca3af" }}>Kayıt bulunamadı</td></tr>
+            )}
+            {visibleList.map((f,i)=>{
+              const needsMyAction = (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE");
+              const myPendingRow = !isApprover && f.talep_eden_email===currentUser?.email && ["PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum);
+              return (
+                <tr key={f.id} style={{ borderBottom:"1px solid #f3f4f6", background: needsMyAction?"#fffbeb": myPendingRow?"#fef2f2": i%2===0?"#fff":"#fafafa", borderLeft: needsMyAction?"4px solid #f59e0b": myPendingRow?"4px solid #f87171":"4px solid transparent" }}>
+                  <td style={{ padding:"12px 16px", color:"#9ca3af" }}>#{f.id}</td>
+                  <td style={{ padding:"12px 16px", fontWeight:600 }}>{f.personel_ad || f.talep_eden_ad}</td>
+                  <td style={{ padding:"12px 16px" }}>{f.donem}</td>
+                  <td style={{ padding:"12px 16px", fontWeight:700 }}>₺{Number(f.genel_toplam||0).toLocaleString("tr-TR")}</td>
+                  <td style={{ padding:"12px 16px", color:"#6b7280" }}>{f.created_at ? new Date(f.created_at).toLocaleDateString("tr-TR") : ""}</td>
+                  <td style={{ padding:"12px 16px" }}>
+                    {durumBadge(f.durum)}
+                    {needsMyAction && <div style={{ fontSize:"10px", fontWeight:700, color:"#92400e", marginTop:"4px" }}>⏳ Onayınızı bekliyor</div>}
+                    {myPendingRow && <div style={{ fontSize:"10px", fontWeight:700, color:"#b91c1c", marginTop:"4px" }}>🕐 {f.durum==="PM_BEKLE"?"PM onayı bekleniyor":"Direktör onayı bekleniyor"}</div>}
+                  </td>
+                  <td style={{ padding:"12px 16px" }}>
+                    <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                      <button onClick={()=>loadDetail(f.id)} style={{ padding:"4px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>İncele</button>
+                      {f.durum==="TASLAK" && f.talep_eden_email===currentUser?.email && (
+                        <button onClick={async()=>{ const r=await fetch(`${API_BASE}/hr/masraf-form/${f.id}`); const d=await r.json(); setActiveForm(d); setKalemler(d.kalemler||[]); loadBakiye(d.personel_id); }}
+                          style={{ padding:"4px 12px", background:"#d1fae5", color:"#065f46", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
+                      )}
+                      {needsMyAction && (
+                        <>
+                          <button onClick={()=>{ setNotModal({id:f.id,action:isPM?"pm":"dir"}); setNotText(""); }}
+                            style={{ padding:"4px 10px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
+                          <button onClick={()=>{ setRedModal(f.id); setRedText(""); }}
+                            style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
+                        </>
+                      )}
+                      {(isPM || isDirektor || isMuhasebe) && <a href={`${API_BASE}/hr/masraf-form/${f.id}/excel`} style={{ padding:"4px 10px", background:"#f0fdf4", color:"#166534", borderRadius:"6px", fontSize:"12px", fontWeight:600, textDecoration:"none" }}>Excel</a>}
+                      {isMuhasebe && f.durum==="TAMAMLANDI" && (
+                        <button onClick={async()=>{ if(window.confirm("Bu formu arşivlendi olarak işaretleyeceksiniz. Emin misiniz?")){ await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`,{method:"PUT"}); load(); } }}
+                          style={{ padding:"4px 10px", background:"#ede9fe", color:"#5b21b6", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>🗂 Arşivle</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* New form modal */}
+      {showNewForm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:isMobile?"flex-end":"center", justifyContent:"center", zIndex:1000 }}>
+          <div style={{ background:"#fff", borderRadius:isMobile?"16px 16px 0 0":"16px", padding:isMobile?"20px 16px 32px":"28px", width:"100%", maxWidth:isMobile?"100%":"420px", maxHeight:"90vh", overflowY:"auto" }}>
+            <h3 style={{ margin:"0 0 20px", fontSize:"18px", fontWeight:700 }}>🧾 Yeni Masraf Formu</h3>
+            <div style={{ display:"grid", gap:"14px" }}>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, display:"block", marginBottom:"4px" }}>Personel</label>
+                <select value={nfPersonelId} onChange={e=>setNfPersonelId(e.target.value)}
+                  style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px" }}>
+                  <option value="">Personel seçin...</option>
+                  {personelList.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, display:"block", marginBottom:"4px" }}>Dönem</label>
+                <input type="month" value={nfDonem} onChange={e=>setNfDonem(e.target.value)}
+                  style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box" }} />
+              </div>
+              {bakiye !== null && (
+                <div style={{ background:"#f0fdf4", borderRadius:"10px", padding:"12px 16px", textAlign:"center" }}>
+                  <div style={{ fontSize:"12px", color:"#6b7280" }}>İş Avansı Bakiye</div>
+                  <div style={{ fontSize:"24px", fontWeight:800, color: bakiye.bakiye>=0?"#166534":"#dc2626" }}>₺{Number(bakiye.bakiye).toLocaleString("tr-TR")}</div>
+                </div>
+              )}
+              <div style={{ display:"flex", gap:"10px" }}>
+                <button onClick={handleCreateForm} style={{ flex:1, padding:"12px", background:"#1f2937", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Oluştur</button>
+                <button onClick={()=>setShowNewForm(false)} style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Onay not modal */}
+      {notModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+          <div style={{ background:"#fff", borderRadius:"16px", padding:"28px", width:"90%", maxWidth:"420px" }}>
+            <h3 style={{ margin:"0 0 16px" }}>✅ Onay Notu (opsiyonel)</h3>
+            <textarea value={notText} onChange={e=>setNotText(e.target.value)} rows={3} placeholder="Not eklemek ister misiniz?"
+              style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box", resize:"vertical" }} />
+            <div style={{ display:"flex", gap:"10px", marginTop:"14px" }}>
+              <button onClick={notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
+                style={{ flex:1, padding:"12px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Onayla</button>
+              <button onClick={()=>{setNotModal(null);setNotText("");}}
+                style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Red modal */}
+      {redModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+          <div style={{ background:"#fff", borderRadius:"16px", padding:"28px", width:"90%", maxWidth:"420px" }}>
+            <h3 style={{ margin:"0 0 16px" }}>❌ Red Nedeni</h3>
+            <textarea value={redText} onChange={e=>setRedText(e.target.value)} rows={3} placeholder="Red nedenini açıklayın (zorunlu)"
+              style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box", resize:"vertical" }} />
+            <div style={{ display:"flex", gap:"10px", marginTop:"14px" }}>
+              <button onClick={handleReddet} style={{ flex:1, padding:"12px", background:"#dc2626", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Reddet</button>
+              <button onClick={()=>{setRedModal(null);setRedText("");}} style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IsAvansPanel({ currentUser, onPendingCount }) {
+  const [list, setList] = useState([]);
+  const [personelList, setPersonelList] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState({
+    personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0],
+    aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: ""
+  });
+  const [searchText, setSearchText] = useState("");
+  const [filterDurum, setFilterDurum] = useState("");
+  const [filterGider, setFilterGider] = useState("");
+  const [filterBolge, setFilterBolge] = useState("");
+  const [filterProje, setFilterProje] = useState("");
+  const [filterBaslangic, setFilterBaslangic] = useState("");
+  const [filterBitis, setFilterBitis] = useState("");
+  const [redModal, setRedModal] = useState(null);
+  const [redText, setRedText] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
+  const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
+  const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
+  const isRequester = !isPM && !isDirektor && !isMuhasebe;
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+
+  const load = async () => {
+    const r = await fetch(`${API_BASE}/hr/is-avans`);
+    const data = await r.json();
+    setList(data);
+    if (onPendingCount) {
+      const email = currentUser?.email;
+      let cnt = 0;
+      if (email === "orhan.bedir@simsektel.com") cnt = data.filter(t => t.durum === "TALEP").length;
+      else if (email === "duzgun.simsek@simsektel.com") cnt = data.filter(t => t.durum === "PM_ONAY").length;
+      else if (email === "muhasebe@simsektel.com") cnt = data.filter(t => t.durum === "DIREKTOR_ONAY").length;
+      onPendingCount(cnt);
+    }
+  };
+
+  const loadPersonel = async () => {
+    const r = await fetch(`${API_BASE}/hr/personel`);
+    setPersonelList(await r.json());
+  };
+
+  useEffect(() => { load(); loadPersonel(); }, []);
+
+  const visibleList = list.filter(t => {
+    if (searchText) {
+      const s = searchText.toLowerCase();
+      if (!t.talep_eden_ad?.toLowerCase().includes(s) && !t.personel_ad?.toLowerCase().includes(s) && !t.aciklama?.toLowerCase().includes(s)) return false;
+    }
+    if (filterDurum && t.durum !== filterDurum) return false;
+    if (filterGider && t.gider_turu !== filterGider) return false;
+    if (filterBolge && t.bolge !== filterBolge) return false;
+    if (filterProje && t.proje !== filterProje) return false;
+    if (filterBaslangic && t.tarih?.split("T")[0] < filterBaslangic) return false;
+    if (filterBitis && t.tarih?.split("T")[0] > filterBitis) return false;
+    return true;
+  });
+
+  const openNew = () => {
+    setEditingId(null);
+    setForm({ personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0], aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: "" });
+    setShowModal(true);
+  };
+
+  const openEdit = (t) => {
+    setEditingId(t.id);
+    setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "" });
+    setShowModal(true);
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const body = {
+        ...form,
+        talep_eden_email: currentUser?.email,
+        talep_eden_ad: currentUser?.name || currentUser?.email,
+      };
+      if (editingId) {
+        await fetch(`${API_BASE}/hr/is-avans/${editingId}`, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+      } else {
+        await fetch(`${API_BASE}/hr/is-avans`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+      }
+      setShowModal(false);
+      load();
+    } catch (err) { alert(err.message); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Bu talebi silmek istediğinize emin misiniz?")) return;
+    await fetch(`${API_BASE}/hr/is-avans/${id}`, { method: "DELETE" });
+    load();
+  };
+
+  const handleOnayla = async (id) => {
+    await fetch(`${API_BASE}/hr/is-avans/${id}/onayla`, { method: "PUT" });
+    load();
+  };
+
+  const handleReddet = async () => {
+    if (!redText.trim()) { alert("Red açıklaması zorunlu"); return; }
+    await fetch(`${API_BASE}/hr/is-avans/${redModal}/reddet`, {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email })
+    });
+    setRedModal(null);
+    setRedText("");
+    load();
+  };
+
+  const durumBadge = (durum) => {
+    const map = {
+      TALEP: { bg: "#e5e7eb", color: "#374151", label: "Talep Edildi" },
+      PM_ONAY: { bg: "#fed7aa", color: "#92400e", label: "Direktör Onayında" },
+      DIREKTOR_ONAY: { bg: "#dcfce7", color: "#166534", label: "Onaylandı · Ödeme Bekler" },
+      MUHASEBE_ONAY: { bg: "#fef9c3", color: "#713f12", label: "Muhasebe Onayında" },
+      TAMAMLANDI: { bg: "#dcfce7", color: "#166534", label: "Tamamlandı" },
+      REDDEDILDI: { bg: "#fee2e2", color: "#991b1b", label: "Reddedildi" },
+    };
+    const s = map[durum] || { bg: "#f3f4f6", color: "#6b7280", label: durum };
+    return <span style={{ background: s.bg, color: s.color, borderRadius: "20px", padding: "3px 12px", fontSize: 12, fontWeight: 600 }}>{s.label}</span>;
+  };
+
+  const cardSt = { background: "#fff", borderRadius: "16px", boxShadow: "0 4px 20px rgba(0,0,0,0.07)", border: "1px solid #f3f4f6", padding: "24px" };
+
+  const myPendingCount =
+    isPM ? list.filter(t => t.durum === "TALEP").length :
+    isDirektor ? list.filter(t => t.durum === "PM_ONAY").length :
+    isMuhasebe ? list.filter(t => t.durum === "DIREKTOR_ONAY").length : 0;
+
+  return (
+    <div style={{ maxWidth: "1100px", margin: "24px auto" }}>
+      {myPendingCount > 0 && (
+        <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:"12px", padding:"12px 18px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
+          <span style={{ fontSize:"20px" }}>⏳</span>
+          <span style={{ fontWeight:700, color:"#92400e", fontSize:"14px" }}>
+            {myPendingCount} adet talep onayınızı bekliyor
+          </span>
+          <span style={{ fontSize:"12px", color:"#78350f" }}>— Aşağıdaki sarı satırlara bakın</span>
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı</h2>
+        <div style={{ display: "flex", gap: "8px" }}>
+          {!isMobile && <a href={`${API_BASE}/hr/is-avans/excel`} style={{ padding: "10px 16px", background: "#166534", color: "#fff", borderRadius: "10px", fontWeight: 600, fontSize: "14px", textDecoration: "none" }}>📥 Excel</a>}
+          {!isMuhasebe && (
+            <button onClick={openNew} style={{ padding: isMobile?"10px 16px":"10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 600, fontSize: "14px", cursor: "pointer" }}>
+              + Yeni Talep
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div style={{ ...cardSt, padding: "16px 20px", marginBottom: "16px", display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+        <input
+          placeholder="Ara (isim, personel, açıklama...)"
+          value={searchText}
+          onChange={e => setSearchText(e.target.value)}
+          style={{ padding: "8px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", minWidth: "200px" }}
+        />
+        <input type="date" value={filterBaslangic} onChange={e => setFilterBaslangic(e.target.value)}
+          style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px" }} />
+        <span style={{ color: "#9ca3af" }}>—</span>
+        <input type="date" value={filterBitis} onChange={e => setFilterBitis(e.target.value)}
+          style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px" }} />
+        <select value={filterGider} onChange={e => setFilterGider(e.target.value)}
+          style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff" }}>
+          <option value="">Tüm Gider Türleri</option>
+          {GIDER_TURLERI.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+        <select value={filterBolge} onChange={e => setFilterBolge(e.target.value)}
+          style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff" }}>
+          <option value="">Tüm Bölgeler</option>
+          {BOLGELER.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select value={filterProje} onChange={e => setFilterProje(e.target.value)}
+          style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff" }}>
+          <option value="">Tüm Projeler</option>
+          {PROJELER.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select value={filterDurum} onChange={e => setFilterDurum(e.target.value)}
+          style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff" }}>
+          <option value="">Tüm Durumlar</option>
+          <option value="TALEP">Talep Edildi</option>
+          <option value="PM_ONAY">Direktör Onayında</option>
+          <option value="DIREKTOR_ONAY">Onaylandı · Ödeme Bekler</option>
+          <option value="TAMAMLANDI">Tamamlandı</option>
+          <option value="REDDEDILDI">Reddedildi</option>
+        </select>
+        {(searchText || filterDurum || filterGider || filterBolge || filterProje || filterBaslangic || filterBitis) && (
+          <button onClick={() => { setSearchText(""); setFilterDurum(""); setFilterGider(""); setFilterBolge(""); setFilterProje(""); setFilterBaslangic(""); setFilterBitis(""); }}
+            style={{ padding: "8px 14px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "10px", cursor: "pointer", fontSize: "13px" }}>
+            Temizle
+          </button>
+        )}
+      </div>
+
+      {/* List — kart (mobile) veya tablo (desktop) */}
+      {isMobile ? (
+        <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+          {visibleList.length === 0 && <div style={{ textAlign:"center", color:"#9ca3af", padding:"32px" }}>Kayıt bulunamadı</div>}
+          {visibleList.map(t => {
+            const needsMyAction = (isPM && t.durum==="TALEP") || (isDirektor && t.durum==="PM_ONAY") || (isMuhasebe && t.durum==="DIREKTOR_ONAY");
+            const myPendingRequest = t.talep_eden_email===currentUser?.email && ["TALEP","PM_ONAY","DIREKTOR_ONAY"].includes(t.durum);
+            const cardBorder = needsMyAction ? "3px solid #f59e0b" : myPendingRequest ? "3px solid #f87171" : "3px solid #e5e7eb";
+            const cardBg = needsMyAction ? "#fffbeb" : myPendingRequest ? "#fef2f2" : "#fff";
+            return (
+              <div key={t.id} style={{ background:cardBg, border:cardBorder, borderRadius:"12px", padding:"14px 16px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:"14px" }}>{t.talep_eden_ad}</div>
+                    <div style={{ fontSize:"12px", color:"#6b7280" }}>{formatDateOnly(t.tarih)}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    {durumBadge(t.durum)}
+                    <div style={{ fontWeight:800, fontSize:"16px", color:"#1e3a5f", marginTop:"4px" }}>₺{Number(t.tutar).toLocaleString("tr-TR")}</div>
+                  </div>
+                </div>
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginBottom:"8px" }}>
+                  {t.gider_turu && <span style={{ background:"#eff6ff", color:"#1d4ed8", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:600 }}>{t.gider_turu}</span>}
+                  {t.bolge && <span style={{ background:"#f3f4f6", color:"#374151", padding:"2px 10px", borderRadius:"20px", fontSize:"12px" }}>{t.bolge}</span>}
+                  {t.proje && <span style={{ background:"#f0fdf4", color:"#166534", padding:"2px 10px", borderRadius:"20px", fontSize:"12px" }}>{t.proje}</span>}
+                </div>
+                {t.aciklama && <div style={{ fontSize:"13px", color:"#6b7280", marginBottom:"8px" }}>{t.aciklama}</div>}
+                {t.red_aciklama && <div style={{ fontSize:"12px", color:"#dc2626", marginBottom:"8px" }}>Red: {t.red_aciklama}</div>}
+                {needsMyAction && <div style={{ fontSize:"12px", fontWeight:700, color:"#92400e", marginBottom:"8px" }}>⏳ Onayınızı bekliyor</div>}
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                  {t.talep_eden_email===currentUser?.email && t.durum==="TALEP" && (
+                    <button onClick={()=>openEdit(t)} style={{ padding:"6px 14px", background:"#e0f2fe", color:"#0369a1", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
+                  )}
+                  {t.talep_eden_email===currentUser?.email && t.durum==="REDDEDILDI" && (
+                    <button onClick={()=>handleDelete(t.id)} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Sil</button>
+                  )}
+                  {isPM && t.durum!=="DIREKTOR_ONAY" && t.durum!=="TAMAMLANDI" && (
+                    <button onClick={()=>handleDelete(t.id)} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Sil</button>
+                  )}
+                  {isPM && t.durum==="TALEP" && (
+                    <>
+                      <button onClick={()=>handleOnayla(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
+                      <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
+                    </>
+                  )}
+                  {isDirektor && t.durum==="PM_ONAY" && (
+                    <>
+                      <button onClick={()=>handleOnayla(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
+                      <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
+                    </>
+                  )}
+                  {isMuhasebe && t.durum==="DIREKTOR_ONAY" && (
+                    <>
+                      <button onClick={()=>{if(window.confirm("Tamamlandı olarak işaretlensin mi?"))handleOnayla(t.id);}} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Ödendi</button>
+                      <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+      <div style={{ ...cardSt, padding: 0, overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#f8fafc" }}>
+                {["Tarih","Talep Eden","Gider Türü","Bölge","Proje","Personel","Tutar","Açıklama","Durum","İşlemler"].map(h => (
+                  <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#6b7280", whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleList.length === 0 && (
+                <tr><td colSpan={10} style={{ padding: "32px", textAlign: "center", color: "#9ca3af" }}>Kayıt bulunamadı</td></tr>
+              )}
+              {visibleList.map((t, i) => {
+                const needsMyAction =
+                  (isPM && t.durum === "TALEP") ||
+                  (isDirektor && t.durum === "PM_ONAY") ||
+                  (isMuhasebe && t.durum === "DIREKTOR_ONAY");
+                const myPendingRequest =
+                  t.talep_eden_email === currentUser?.email &&
+                  (t.durum === "TALEP" || t.durum === "PM_ONAY" || t.durum === "DIREKTOR_ONAY");
+                const rowBg = needsMyAction ? "#fffbeb" : myPendingRequest ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#fafafa";
+                const rowBorder = needsMyAction ? "4px solid #f59e0b" : myPendingRequest ? "4px solid #f87171" : "4px solid transparent";
+                return (
+                <tr key={t.id} style={{ borderTop: "1px solid #f3f4f6", background: rowBg, borderLeft: rowBorder }}>
+                  <td style={{ padding: "12px 16px", fontSize: "13px", whiteSpace: "nowrap" }}>{formatDateOnly(t.tarih)}</td>
+                  <td style={{ padding: "12px 16px", fontWeight: 600, fontSize: "14px" }}>{t.talep_eden_ad}</td>
+                  <td style={{ padding: "12px 16px", fontSize: "13px" }}>
+                    {t.gider_turu ? <span style={{ background:"#eff6ff", color:"#1d4ed8", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:600 }}>{t.gider_turu}</span> : "—"}
+                  </td>
+                  <td style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280" }}>{t.bolge || "—"}</td>
+                  <td style={{ padding: "12px 16px", fontSize: "13px", color: "#374151", fontWeight: 600 }}>{t.proje || "—"}</td>
+                  <td style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280" }}>{t.personel_ad || "—"}</td>
+                  <td style={{ padding: "12px 16px", fontWeight: 700, fontSize: "14px", whiteSpace: "nowrap" }}>₺{Number(t.tutar).toLocaleString("tr-TR")}</td>
+                  <td style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280", maxWidth: "180px" }}>
+                    <div title={t.aciklama}>{t.aciklama ? (t.aciklama.length > 35 ? t.aciklama.slice(0, 35) + "…" : t.aciklama) : "—"}</div>
+                    {t.red_aciklama && <div style={{ color: "#dc2626", fontSize: "11px" }}>Red: {t.red_aciklama}</div>}
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    {durumBadge(t.durum)}
+                    {needsMyAction && <div style={{ fontSize:"10px", fontWeight:700, color:"#92400e", marginTop:"4px" }}>⏳ Onayınızı bekliyor</div>}
+                    {myPendingRequest && !needsMyAction && (
+                      <div style={{ fontSize:"10px", fontWeight:700, color:"#b91c1c", marginTop:"4px" }}>
+                        🕐 {t.durum === "TALEP" ? "PM onayı bekleniyor" : t.durum === "PM_ONAY" ? "Direktör onayı bekleniyor" : "Ödeme bekleniyor"}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                      {t.talep_eden_email === currentUser?.email && t.durum === "TALEP" && (
+                        <button onClick={() => openEdit(t)} style={{ padding: "4px 10px", background: "#e0f2fe", color: "#0369a1", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Düzenle</button>
+                      )}
+                      {t.talep_eden_email === currentUser?.email && t.durum === "REDDEDILDI" && (
+                        <button onClick={() => handleDelete(t.id)} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Sil</button>
+                      )}
+                      {isPM && t.durum !== "DIREKTOR_ONAY" && t.durum !== "TAMAMLANDI" && (
+                        <button onClick={() => handleDelete(t.id)} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Sil</button>
+                      )}
+                      {isPM && t.durum === "TALEP" && (
+                        <>
+                          <button onClick={() => handleOnayla(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
+                          <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
+                        </>
+                      )}
+                      {isDirektor && t.durum === "PM_ONAY" && (
+                        <>
+                          <button onClick={() => handleOnayla(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
+                          <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
+                        </>
+                      )}
+                      {isMuhasebe && t.durum === "DIREKTOR_ONAY" && (
+                        <>
+                          <button onClick={() => { if (window.confirm("Bu talebi tamamlandı olarak işaretleyeceksiniz. Onaylıyor musunuz?")) handleOnayla(t.id); }} style={{ padding: "4px 12px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Ödendi / Tamamla</button>
+                          <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      )}
+
+      {/* New/Edit Modal */}
+      {showModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: isMobile?"flex-end":"center", justifyContent: "center" }}
+          onClick={() => setShowModal(false)}>
+          <div style={{ background: "#fff", borderRadius: isMobile?"16px 16px 0 0":"16px", padding: isMobile?"20px 16px 32px":"28px", width: "100%", maxWidth: isMobile?"100%":"480px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight:"90vh", overflowY:"auto" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>{editingId ? "Talebi Düzenle" : "Yeni İş Avansı Talebi"}</h3>
+              <button onClick={() => setShowModal(false)} style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer", color: "#6b7280" }}>✕</button>
+            </div>
+            <form onSubmit={handleSave}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                  Personel
+                  <select value={form.personel_id} onChange={e => setForm(f => ({...f, personel_id: e.target.value}))}
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", background: "#fff" }}>
+                    <option value="">Seçiniz (opsiyonel)</option>
+                    {personelList.filter(p => p.aktif).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                  Gider Türü <span style={{ color: "#dc2626" }}>*</span>
+                  <select required value={form.gider_turu} onChange={e => setForm(f => ({...f, gider_turu: e.target.value}))}
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", background: "#fff" }}>
+                    <option value="">Seçiniz...</option>
+                    {GIDER_TURLERI.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                    Bölge <span style={{ color: "#dc2626" }}>*</span>
+                    <select required value={form.bolge} onChange={e => setForm(f => ({...f, bolge: e.target.value}))}
+                      style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", background: "#fff", boxSizing: "border-box" }}>
+                      <option value="">Seçiniz...</option>
+                      {BOLGELER.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                    Proje <span style={{ color: "#dc2626" }}>*</span>
+                    <select required value={form.proje} onChange={e => setForm(f => ({...f, proje: e.target.value}))}
+                      style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", background: "#fff", boxSizing: "border-box" }}>
+                      <option value="">Seçiniz...</option>
+                      {PROJELER.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                  Tutar (₺) <span style={{ color: "#dc2626" }}>*</span>
+                  <input type="number" min="1" required value={form.tutar} onChange={e => setForm(f => ({...f, tutar: e.target.value}))}
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box" }} />
+                </label>
+                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                  Tarih <span style={{ color: "#dc2626" }}>*</span>
+                  <input type="date" required value={form.tarih} onChange={e => setForm(f => ({...f, tarih: e.target.value}))}
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box" }} />
+                </label>
+                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                  Açıklama
+                  <input value={form.aciklama} onChange={e => setForm(f => ({...f, aciklama: e.target.value}))}
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box" }} />
+                </label>
+                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                  Not (opsiyonel)
+                  <textarea value={form.not_aciklama} onChange={e => setForm(f => ({...f, not_aciklama: e.target.value}))} rows={3}
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", resize: "vertical" }} />
+                </label>
+                <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+                  <button type="button" onClick={() => setShowModal(false)}
+                    style={{ flex: 1, padding: "11px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "10px", fontWeight: 600, cursor: "pointer" }}>
+                    İptal
+                  </button>
+                  <button type="submit" disabled={saving}
+                    style={{ flex: 2, padding: "11px", background: "#1f2937", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer" }}>
+                    {saving ? "Kaydediliyor..." : "Kaydet"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Red Modal */}
+      {redModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setRedModal(null)}>
+          <div style={{ background: "#fff", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: 700, color: "#991b1b" }}>Talebi Reddet</h3>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+              Red Açıklaması <span style={{ color: "#dc2626" }}>*</span>
+              <textarea value={redText} onChange={e => setRedText(e.target.value)} rows={4} placeholder="Ret gerekçesini yazınız..."
+                style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "6px", boxSizing: "border-box", resize: "vertical" }} />
+            </label>
+            <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
+              <button onClick={() => setRedModal(null)}
+                style={{ flex: 1, padding: "11px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "10px", fontWeight: 600, cursor: "pointer" }}>
+                İptal
+              </button>
+              <button onClick={handleReddet}
+                style={{ flex: 1, padding: "11px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer" }}>
+                Reddet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
@@ -8658,6 +11155,8 @@ function App() {
     }
   });
   const isAdmin = user?.role === "admin";
+  const isRollout = user?.role === "rollout" || user?.role === "admin";
+  const isPersonel = user?.role === "user";
   const isSubconUser =
     String(user?.role || "").toLowerCase() === "subcon" ||
     String(user?.subcon_name || "").trim() !== "";
@@ -8711,7 +11210,43 @@ function App() {
   const [supplierAdvances, setSupplierAdvances] = useState([]);
   const [supplierAdvanceTotal, setSupplierAdvanceTotal] = useState(0);
 
-  const [page, setPage] = useState("finance");
+  const [page, setPage] = useState(() => {
+    const u = (() => { try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; } })();
+    return u?.role === "user" ? "masraf" : "finance";
+  });
+  const [pendingAvansCount, setPendingAvansCount] = useState(0);
+  const [pendingMasrafCount, setPendingMasrafCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchPending = async () => {
+      try {
+        // İş avansı bekleyenleri say
+        const r = await fetch(`${API_BASE}/hr/is-avans`);
+        const data = await r.json();
+        if (Array.isArray(data)) {
+          const email = user.email;
+          let count = 0;
+          if (email === "orhan.bedir@simsektel.com") count = data.filter(t => t.durum === "TALEP").length;
+          else if (email === "duzgun.simsek@simsektel.com") count = data.filter(t => t.durum === "PM_ONAY").length;
+          else if (email === "muhasebe@simsektel.com") count = data.filter(t => t.durum === "DIREKTOR_ONAY").length;
+          setPendingAvansCount(count);
+        }
+        // Masraf formu bekleyenleri say
+        const mr = await fetch(`${API_BASE}/hr/masraf-form`);
+        const mdata = await mr.json();
+        if (Array.isArray(mdata)) {
+          const email = user.email;
+          let mc = 0;
+          if (email === "orhan.bedir@simsektel.com") mc = mdata.filter(f => f.durum === "PM_BEKLE").length;
+          else if (email === "duzgun.simsek@simsektel.com") mc = mdata.filter(f => f.durum === "DIREKTOR_BEKLE").length;
+          else if (email === "muhasebe@simsektel.com") mc = mdata.filter(f => f.durum === "TAMAMLANDI").length;
+          setPendingMasrafCount(mc);
+        }
+      } catch {}
+    };
+    fetchPending();
+  }, [user]);
 
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
@@ -8995,27 +11530,29 @@ function App() {
 
   if (!financeToken) {
     return (
-      <div style={{ height: "100vh", background: "#f3f4f6" }}>
+      <div style={{ height: "100vh", background: "transparent" }}>
         {/* 🔹 HEADER */}
         <div
           style={{
             height: "60px",
-            background: "#fff",
+            background: "#ffffff",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
             padding: "0 30px",
             borderBottom: "1px solid #eee",
+            position: "relative",
+            zIndex: 5,
           }}
         >
           {/* SOL */}
           <div style={{ fontWeight: "bold", fontSize: "18px" }}>
-            Şimşek Haberleşme
+            ERC Mühendislik
           </div>
 
           {/* SAĞ */}
           <div style={{ color: "#666", fontSize: "14px" }}>
-            OHTS | Operasyon ve Hakediş Takip Sistemi
+            ERC | Operasyon ve Hakediş Takip Sistemi
           </div>
         </div>
 
@@ -9023,6 +11560,8 @@ function App() {
         <div
           style={{
             height: "calc(100vh - 60px)",
+            position: "relative",
+            zIndex: 10,
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
@@ -9032,10 +11571,12 @@ function App() {
             onSubmit={handleFinanceLogin}
             style={{
               background: "#fff",
-              padding: "40px",
+              padding: "clamp(20px, 5vw, 40px)",
               borderRadius: "16px",
-              width: "360px",
+              width: "min(360px, calc(100vw - 32px))",
               boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
+              position: "relative",
+              zIndex: 20,
             }}
           >
             <h2 style={{ textAlign: "center", marginBottom: "10px" }}>
@@ -9101,6 +11642,37 @@ function App() {
     );
   }
 
+  if (isPersonel) {
+    return (
+      <div style={{ minHeight:"100vh", background:"#f8fafc" }}>
+        {/* Mobile top bar */}
+        <div style={{ background:"#1e3a5f", color:"#fff", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 8px rgba(0,0,0,0.2)" }}>
+          <span style={{ fontWeight:700, fontSize:"16px" }}>ERC Mühendislik</span>
+          <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+            <span style={{ fontSize:"12px", opacity:0.8 }}>{user?.name || user?.email}</span>
+            <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.3)", color:"#fff", borderRadius:"8px", padding:"6px 12px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Çıkış</button>
+          </div>
+        </div>
+        {/* Bottom navigation */}
+        <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:100, background:"#fff", borderTop:"1px solid #e5e7eb", display:"flex", height:"64px", boxShadow:"0 -2px 10px rgba(0,0,0,0.08)" }}>
+          <button onClick={()=>setPage("is_avans")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color: page==="is_avans"?"#1e3a5f":"#9ca3af", fontWeight: page==="is_avans"?700:400, fontSize:"11px" }}>
+            <span style={{ fontSize:"22px" }}>💳</span>İş Avansı
+            {pendingAvansCount>0 && <span style={{ position:"absolute", top:"8px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingAvansCount}</span>}
+          </button>
+          <button onClick={()=>setPage("masraf")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color: page==="masraf"?"#1e3a5f":"#9ca3af", fontWeight: page==="masraf"?700:400, fontSize:"11px" }}>
+            <span style={{ fontSize:"22px" }}>🧾</span>Masraf Formu
+            {pendingMasrafCount>0 && <span style={{ position:"absolute", top:"8px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingMasrafCount}</span>}
+          </button>
+        </div>
+        {/* Content area */}
+        <div style={{ padding:"12px 12px 80px" }}>
+          {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
+          {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container">
       <div
@@ -9113,6 +11685,7 @@ function App() {
           flexWrap: "wrap",
           marginBottom: "24px",
           position: "relative",
+          paddingRight: "130px",
         }}
       >
         .
@@ -9158,18 +11731,6 @@ function App() {
               </button>
             )}
 
-            {isAdmin && (
-              <button
-                className={page === "admin" ? "tab activeTab" : "tab"}
-                onClick={() => {
-                  setPage("admin");
-                  loadAdminUsers();
-                }}
-              >
-                Admin Panel
-              </button>
-            )}
-
             <button
               className={page === "region" ? "tab activeTab" : "tab"}
               onClick={() => setPage("region")}
@@ -9191,14 +11752,39 @@ function App() {
               Günlük İş Girişi
             </button>
 
+            {isRollout && (
+              <button
+                className={page === "puantaj" ? "tab activeTab" : "tab"}
+                onClick={() => setPage("puantaj")}
+              >
+                📋 Puantaj
+              </button>
+            )}
+
             <button
-              type="button"
-              className="tab"
-              onClick={() =>
-                window.open("https://avans-po-sistemi.vercel.app/", "_blank")
-              }
+              className={page === "is_avans" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("is_avans")}
+              style={{ position: "relative" }}
             >
-              Avans Talep
+              İş Avansı
+              {pendingAvansCount > 0 && (
+                <span style={{ position:"absolute", top:"-6px", right:"-6px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"11px", fontWeight:700, minWidth:"18px", height:"18px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", lineHeight:1 }}>
+                  {pendingAvansCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              className={page === "masraf" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("masraf")}
+              style={{ position: "relative" }}
+            >
+              🧾 Masraf Formu
+              {pendingMasrafCount > 0 && (
+                <span style={{ position:"absolute", top:"-6px", right:"-6px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"11px", fontWeight:700, minWidth:"18px", height:"18px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", lineHeight:1 }}>
+                  {pendingMasrafCount}
+                </span>
+              )}
             </button>
 
             {(token || financeToken) && (
@@ -9206,6 +11792,10 @@ function App() {
                 type="button"
                 onClick={handleLogout}
                 style={{
+                  position: "absolute",
+                  right: 0,
+                  top: "50%",
+                  transform: "translateY(-50%)",
                   background: "#dc3545",
                   color: "#fff",
                   border: "none",
@@ -9214,7 +11804,6 @@ function App() {
                   cursor: "pointer",
                   fontWeight: "600",
                   whiteSpace: "nowrap",
-                  marginLeft: "6px",
                 }}
               >
                 Çıkış Yap
@@ -9223,6 +11812,30 @@ function App() {
           </>
         )}
       </div>
+
+      {pendingAvansCount > 0 && page !== "is_avans" && (
+        <div onClick={() => setPage("is_avans")} style={{ margin:"0 0 0 0", padding:"12px 24px", background:"#fef2f2", borderBottom:"2px solid #fca5a5", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer" }}>
+          <span style={{ fontSize:"20px" }}>🔔</span>
+          <div>
+            <span style={{ fontWeight:700, color:"#991b1b", fontSize:"14px" }}>
+              {pendingAvansCount} adet iş avansı talebi onayınızı bekliyor
+            </span>
+            <span style={{ color:"#dc2626", fontSize:"13px", marginLeft:"8px" }}>→ İş Avansı'na git</span>
+          </div>
+        </div>
+      )}
+
+      {pendingMasrafCount > 0 && page !== "masraf" && (
+        <div onClick={() => setPage("masraf")} style={{ margin:"0 0 0 0", padding:"12px 24px", background:"#fff7ed", borderBottom:"2px solid #fed7aa", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer" }}>
+          <span style={{ fontSize:"20px" }}>🧾</span>
+          <div>
+            <span style={{ fontWeight:700, color:"#92400e", fontSize:"14px" }}>
+              {pendingMasrafCount} adet masraf formu onayınızı bekliyor
+            </span>
+            <span style={{ color:"#b45309", fontSize:"13px", marginLeft:"8px" }}>→ Masraf Formu'na git</span>
+          </div>
+        </div>
+      )}
 
       {page === "finance" &&
         isAdmin &&
@@ -9239,6 +11852,10 @@ function App() {
             handleApplyAdvance={handleApplyAdvance}
             supplierAdvances={supplierAdvances}
             supplierAdvanceTotal={supplierAdvanceTotal}
+            onGoToAdmin={() => { setPage("admin"); loadAdminUsers(); }}
+            onGoToHr={() => setPage("hr")}
+            onGoToAraclar={() => setPage("araclar")}
+            onGoToOfis={() => setPage("ofis")}
           />
         ) : (
           <div
@@ -9285,6 +11902,12 @@ function App() {
           </div>
         ))}
 
+      {page === "hr" && <HrDashboard onBack={() => setPage("finance")} currentUser={user} />}
+      {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
+      {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
+      {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
+      {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
+      {page === "puantaj" && isRollout && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
       {page === "executive" && <RolloutDashboard />}
       {page === "region" && (
         <RegionAnalysis
@@ -9295,140 +11918,221 @@ function App() {
       )}
       {page === "entry" && <DailyEntry />}
       {page === "admin" && isAdmin && (
-        <div
-          style={{
-            maxWidth: "1200px",
-            margin: "24px auto",
-            background: "#fff",
-            borderRadius: "20px",
-            padding: "24px",
-            boxShadow: "0 8px 30px rgba(0,0,0,0.08)",
-          }}
-        >
-          <h2 style={{ marginBottom: "16px" }}>👑 Admin Panel</h2>
-          <div style={{ marginBottom: "20px" }}>
-            <h3>Yeni Kullanıcı</h3>
-
-            <input
-              placeholder="Ad"
-              value={newUser.name}
-              onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-            />
-
-            <input
-              placeholder="Email"
-              value={newUser.email}
-              onChange={(e) =>
-                setNewUser({ ...newUser, email: e.target.value })
-              }
-            />
-
-            <input
-              placeholder="Şifre"
-              type="password"
-              value={newUser.password}
-              onChange={(e) =>
-                setNewUser({ ...newUser, password: e.target.value })
-              }
-            />
-
-            <select
-              value={newUser.role}
-              onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-            >
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-
-            <button onClick={handleCreateUser}>Ekle</button>
+        <div style={{ maxWidth: "1100px", margin: "24px auto" }}>
+          {/* Header */}
+          <div style={{
+            background: "linear-gradient(135deg, #1f2937 0%, #374151 100%)",
+            borderRadius: "16px",
+            padding: "28px 32px",
+            marginBottom: "24px",
+            display: "flex",
+            alignItems: "center",
+            gap: "16px",
+            color: "#fff",
+          }}>
+            <div style={{ fontSize: "40px" }}>👑</div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: "24px", fontWeight: 700 }}>Admin Panel</h2>
+              <p style={{ margin: "4px 0 0", color: "#9ca3af", fontSize: "14px" }}>
+                Kullanıcı yönetimi ve sistem ayarları
+              </p>
+            </div>
+            <div style={{ marginLeft: "auto", textAlign: "right" }}>
+              <div style={{ fontSize: "28px", fontWeight: 700 }}>{adminUsers.length}</div>
+              <div style={{ fontSize: "12px", color: "#9ca3af" }}>Toplam Kullanıcı</div>
+            </div>
           </div>
 
-          {adminLoading && <p>Kullanıcılar yükleniyor...</p>}
+          <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: "20px", alignItems: "start" }}>
+            {/* Yeni Kullanıcı Formu */}
+            <div style={{
+              background: "#fff",
+              borderRadius: "16px",
+              padding: "24px",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.07)",
+              border: "1px solid #f3f4f6",
+            }}>
+              <h3 style={{ margin: "0 0 20px", fontSize: "16px", fontWeight: 700, color: "#1f2937", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ background: "#f3f4f6", borderRadius: "8px", padding: "6px 8px" }}>➕</span>
+                Yeni Kullanıcı
+              </h3>
 
-          {adminError && (
-            <p style={{ color: "#b91c1c", fontWeight: 600 }}>{adminError}</p>
-          )}
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <input
+                  placeholder="Ad Soyad"
+                  value={newUser.name}
+                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", outline: "none" }}
+                />
+                <input
+                  placeholder="E-posta adresi"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", outline: "none" }}
+                />
+                <input
+                  placeholder="Şifre"
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", outline: "none" }}
+                />
+                <select
+                  value={newUser.role}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff", cursor: "pointer" }}
+                >
+                  <option value="user">👤 User</option>
+                  <option value="admin">👑 Admin</option>
+                </select>
+                <button
+                  onClick={handleCreateUser}
+                  style={{
+                    padding: "11px",
+                    background: "#1f2937",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "10px",
+                    fontWeight: "700",
+                    fontSize: "14px",
+                    cursor: "pointer",
+                    marginTop: "4px",
+                  }}
+                >
+                  Kullanıcı Ekle
+                </button>
+              </div>
 
-          {!adminLoading && !adminError && (
-            <div style={{ overflowX: "auto" }}>
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  marginTop: "12px",
-                }}
-              >
-                <thead>
-                  <tr style={{ background: "#f3f4f6" }}>
-                    <th style={thStyle}>ID</th>
-                    <th style={thStyle}>Ad</th>
-                    <th style={thStyle}>Email</th>
-                    <th style={thStyle}>Rol</th>
-                    <th style={thStyle}>Aktif</th>
-                    <th style={thStyle}>İşlem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adminUsers.map((u) => (
-                    <tr key={u.id}>
-                      <td style={tdStyle}>{u.id}</td>
-                      <td style={tdStyle}>{u.name}</td>
-                      <td style={tdStyle}>{u.email}</td>
-                      <td style={tdStyle}>{u.role}</td>
-                      <td style={tdStyle}>{u.is_active ? "✅" : "❌"}</td>
+              {adminError && (
+                <div style={{ marginTop: "12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "10px 14px", color: "#b91c1c", fontSize: "13px", fontWeight: 600 }}>
+                  {adminError}
+                </div>
+              )}
+            </div>
 
-                      <td style={tdStyle}>
+            {/* Kullanıcı Listesi */}
+            <div style={{
+              background: "#fff",
+              borderRadius: "16px",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.07)",
+              border: "1px solid #f3f4f6",
+              overflow: "hidden",
+            }}>
+              <div style={{ padding: "20px 24px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1f2937" }}>
+                  Kullanıcılar
+                </h3>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <span style={{ background: "#dcfce7", color: "#166534", fontSize: "12px", fontWeight: 600, padding: "4px 10px", borderRadius: "20px" }}>
+                    {adminUsers.filter(u => u.is_active).length} Aktif
+                  </span>
+                  <span style={{ background: "#fee2e2", color: "#991b1b", fontSize: "12px", fontWeight: 600, padding: "4px 10px", borderRadius: "20px" }}>
+                    {adminUsers.filter(u => !u.is_active).length} Pasif
+                  </span>
+                </div>
+              </div>
+
+              {adminLoading ? (
+                <div style={{ padding: "40px", textAlign: "center", color: "#9ca3af" }}>Yükleniyor...</div>
+              ) : (
+                <div>
+                  {adminUsers.map((u, i) => (
+                    <div key={u.id} style={{
+                      display: "grid",
+                      gridTemplateColumns: "44px 1fr auto auto",
+                      alignItems: "center",
+                      gap: "16px",
+                      padding: "14px 24px",
+                      borderBottom: i < adminUsers.length - 1 ? "1px solid #f9fafb" : "none",
+                      background: "#fff",
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#f9fafb"}
+                    onMouseLeave={e => e.currentTarget.style.background = "#fff"}
+                    >
+                      {/* Avatar */}
+                      <div style={{
+                        width: "44px", height: "44px",
+                        borderRadius: "12px",
+                        background: u.role === "admin" ? "linear-gradient(135deg,#fbbf24,#f59e0b)" : "linear-gradient(135deg,#60a5fa,#3b82f6)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: "18px", fontWeight: 700, color: "#fff",
+                        flexShrink: 0,
+                      }}>
+                        {u.name.charAt(0)}
+                      </div>
+
+                      {/* Info */}
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: "14px", color: "#1f2937" }}>{u.name}</div>
+                        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>{u.email}</div>
+                      </div>
+
+                      {/* Badges */}
+                      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                        <span style={{
+                          background: u.role === "admin" ? "#fef3c7" : "#eff6ff",
+                          color: u.role === "admin" ? "#92400e" : "#1e40af",
+                          fontSize: "11px", fontWeight: 700, padding: "3px 10px",
+                          borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.05em",
+                        }}>
+                          {u.role === "admin" ? "👑 Admin" : "👤 User"}
+                        </span>
+                        <span style={{
+                          background: u.is_active ? "#dcfce7" : "#f3f4f6",
+                          color: u.is_active ? "#166534" : "#6b7280",
+                          fontSize: "11px", fontWeight: 700, padding: "3px 10px",
+                          borderRadius: "20px",
+                        }}>
+                          {u.is_active ? "Aktif" : "Pasif"}
+                        </span>
+                      </div>
+
+                      {/* Actions */}
+                      <div style={{ display: "flex", gap: "6px" }}>
                         <button
                           onClick={() => handleToggleActive(u.id)}
                           style={{
-                            padding: "6px 10px",
-                            marginRight: "8px",
-                            background: u.is_active ? "#f59e0b" : "#6b7280",
-                            color: "#fff",
-                            border: "none",
-                            borderRadius: "6px",
-                            cursor: "pointer",
+                            padding: "6px 12px",
+                            background: u.is_active ? "#fef3c7" : "#f0fdf4",
+                            color: u.is_active ? "#92400e" : "#166534",
+                            border: "none", borderRadius: "8px",
+                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
                           }}
                         >
                           {u.is_active ? "Pasife Al" : "Aktif Et"}
                         </button>
-
-                        {u.role === "admin" ? (
-                          <button
-                            onClick={() => handleAdminRoleChange(u.id, "user")}
-                            style={{
-                              padding: "6px 10px",
-                              background: "#ef4444",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "6px",
-                              cursor: "pointer",
-                            }}
-                          >
-                            Admin → User
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleAdminRoleChange(u.id, "admin")}
-                            style={{
-                              padding: "6px 10px",
-                              background: "#10b981",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "6px",
-                              cursor: "pointer",
-                            }}
-                          >
-                            User → Admin
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                        <button
+                          onClick={() => handleAdminRoleChange(u.id, u.role === "admin" ? "user" : "admin")}
+                          style={{
+                            padding: "6px 12px",
+                            background: u.role === "admin" ? "#fee2e2" : "#f0fdf4",
+                            color: u.role === "admin" ? "#991b1b" : "#166534",
+                            border: "none", borderRadius: "8px",
+                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                          }}
+                        >
+                          {u.role === "admin" ? "→ User" : "→ Admin"}
+                        </button>
+                        <button
+                          onClick={() => deleteUser(u.id)}
+                          style={{
+                            padding: "6px 12px",
+                            background: "#fee2e2",
+                            color: "#991b1b",
+                            border: "none", borderRadius: "8px",
+                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                          }}
+                        >
+                          🗑 Sil
+                        </button>
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>
@@ -10278,6 +12982,711 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     </div>
   );
 }
-// TEST ORHAN 123
+const ARAC_MARKALAR = {
+  "Dacia":         ["Duster","Sandero","Logan","Jogger","Spring"],
+  "Fiat":          ["Doblo","Fiorino","Egea","Tipo","Panda","500","Ducato","Scudo"],
+  "Ford":          ["Transit","Transit Custom","Transit Connect","Focus","Fiesta","Ranger","Kuga","Puma","Tourneo"],
+  "Hyundai":       ["i10","i20","i30","Tucson","Santa Fe","Kona","Ioniq","H-1","H350"],
+  "Isuzu":         ["D-Max","N35","N75","NLR","NPR"],
+  "Kia":           ["Picanto","Rio","Ceed","Sportage","Sorento","Stonic","Niro","Carnival"],
+  "Mercedes-Benz": ["Sprinter","Vito","Citan","A Serisi","C Serisi","E Serisi","GLA","GLC","Axor","Actros"],
+  "Mitsubishi":    ["L200","Outlander","ASX","Eclipse Cross","Colt","Pajero"],
+  "Nissan":        ["Navara","NV200","NV400","Qashqai","Juke","Micra","X-Trail"],
+  "Opel":          ["Combo","Vivaro","Movano","Astra","Corsa","Insignia","Crossland","Mokka"],
+  "Peugeot":       ["Boxer","Partner","Expert","208","308","3008","5008","2008"],
+  "Renault":       ["Master","Trafic","Kangoo","Clio","Megane","Captur","Duster","Taliant","Zoe"],
+  "Skoda":         ["Octavia","Fabia","Karoq","Kodiaq","Superb","Scala"],
+  "Suzuki":        ["Swift","Vitara","S-Cross","Jimny","Ignis"],
+  "Toyota":        ["HiAce","ProAce","Land Cruiser","RAV4","C-HR","Corolla","Yaris","Hilux","Proace City"],
+  "Volkswagen":    ["Transporter","Caravelle","Crafter","Caddy","Polo","Golf","Passat","Tiguan","T-Roc","T-Cross"],
+  "Volvo":         ["FH","FM","FMX","FE","FL","XC60","XC90"],
+  "Citroen":       ["Berlingo","Dispatch","Jumper","Jumpy","C3","C4","C5"],
+  "Iveco":         ["Daily","Eurocargo","Stralis","S-Way"],
+  "MAN":           ["TGE","TGL","TGM","TGS","TGX"],
+  "Diger":         ["Diger"],
+};
+const ARAC_YIL = Array.from({length: 25}, (_, i) => 2026 - i);
+
+// ─── ARAÇLAR PANELİ ───────────────────────────────────────────────────────────
+function AraclarPanel({ currentUser, onBack }) {
+  const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
+  const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
+  const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
+  const canEdit = isPM || isDirektor || isMuhasebe;
+
+  const [araclar, setAraclar] = useState([]);
+  const [selected, setSelected] = useState(null); // detail/edit araç
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({
+    plaka:"", marka:"", model:"", yil:"", tip:"Binek",
+    kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
+    aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
+    durum:"AKTİF", notlar:""
+  });
+  const [belgeUpload, setBelgeUpload] = useState({ turu:null, file:null }); // {turu, file}
+  const [filter, setFilter] = useState("TUMU"); // TUMU | AKTİF | PASİF
+
+  const load = async () => {
+    const r = await fetch(`${API_BASE}/hr/araclar`);
+    setAraclar(await r.json());
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const today = new Date();
+  const dayDiff = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
+
+  const expiryColor = (d) => {
+    const diff = dayDiff(d);
+    if (diff === null) return "#9ca3af";
+    if (diff < 0) return "#dc2626";
+    if (diff <= 30) return "#f59e0b";
+    return "#166534";
+  };
+  const expiryBg = (d) => {
+    const diff = dayDiff(d);
+    if (diff === null) return "#f3f4f6";
+    if (diff < 0) return "#fee2e2";
+    if (diff <= 30) return "#fef9c3";
+    return "#dcfce7";
+  };
+
+  const openNew = () => {
+    setForm({ plaka:"", marka:"", model:"", yil:"", tip:"Binek",
+      kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
+      aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
+      durum:"AKTİF", notlar:"" });
+    setSelected(null);
+    setShowForm(true);
+  };
+
+  const openEdit = (a) => {
+    const fmt = (d) => d ? d.slice(0,10) : "";
+    setForm({
+      plaka: a.plaka||"", marka: a.marka||"", model: a.model||"", yil: a.yil||"",
+      tip: a.tip||"Binek", kiralama_firmasi: a.kiralama_firmasi||"",
+      sozlesme_no: a.sozlesme_no||"",
+      kira_baslangic: fmt(a.kira_baslangic), kira_bitis: fmt(a.kira_bitis),
+      aylik_kira: a.aylik_kira||"", bolge: a.bolge||"", surucu: a.surucu||"",
+      sigorta_bitis: fmt(a.sigorta_bitis), muayene_bitis: fmt(a.muayene_bitis),
+      durum: a.durum||"AKTİF", notlar: a.notlar||""
+    });
+    setSelected(a);
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.plaka) return alert("Plaka zorunlu");
+    const method = selected ? "PUT" : "POST";
+    const url = selected ? `${API_BASE}/hr/araclar/${selected.id}` : `${API_BASE}/hr/araclar`;
+    const r = await fetch(url, { method, headers:{"Content-Type":"application/json"}, body: JSON.stringify(form) });
+    if (!r.ok) { const e = await r.json(); return alert(e.error); }
+    setShowForm(false);
+    load();
+  };
+
+  const handleBelgeUpload = async (aracId, turu, file) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("dosya", file);
+    fd.append("belge_turu", turu);
+    await fetch(`${API_BASE}/hr/araclar/${aracId}/belge`, { method:"POST", body:fd });
+    load();
+    setBelgeUpload({ turu:null, file:null });
+  };
+
+  const handleBelgeSil = async (belgeId) => {
+    if (!window.confirm("Bu belgeyi silmek istediğinizden emin misiniz?")) return;
+    await fetch(`${API_BASE}/hr/arac-belge/${belgeId}`, { method:"DELETE" });
+    load();
+  };
+
+  const getBelge = (arac, turu) => (arac.belgeler||[]).find(b => b.belge_turu === turu);
+
+  const filtered = araclar.filter(a => filter === "TUMU" ? true : a.durum === filter);
+
+  const TIPLER = ["Binek","Pickup","Minibüs","Panelvan","Kamyon","Motosiklet","Diğer"];
+  const DURUMLAR = ["AKTİF","PASİF","SERVİSTE"];
+  const aracModeller = ARAC_MARKALAR[form.marka] || [];
+  const aSelSt = { width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box", background:"#fff" };
+  const aInpSt = { width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" };
+
+  const BELGE_YUVALARI = [
+    { turu:"SOZLESME", label:"📄 Kira Sözleşmesi" },
+    { turu:"RUHSAT",   label:"📋 Ruhsat" },
+    { turu:"SIGORTA",  label:"🛡 Sigorta Poliçesi" },
+    { turu:"MUAYENE",  label:"🔧 Muayene Belgesi" },
+  ];
+
+  const detailArac = selected && araclar.find(a => a.id === selected.id);
+
+  return (
+    <div style={{ maxWidth:"1100px", margin:"0 auto", padding:"24px 16px" }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"24px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:"14px" }}>
+          {onBack && <button onClick={onBack} style={{ background:"#f3f4f6", border:"none", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>←</button>}
+          <div>
+            <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>🚗 Araç Filosu</h2>
+            <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>{araclar.filter(a=>a.durum==="AKTİF").length} aktif araç</p>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+          {["TUMU","AKTİF","PASİF","SERVİSTE"].map(f => (
+            <button key={f} onClick={()=>setFilter(f)}
+              style={{ padding:"6px 14px", borderRadius:"20px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:600,
+                background: filter===f ? "#1e3a5f" : "#f3f4f6", color: filter===f ? "#fff" : "#374151" }}>
+              {f}
+            </button>
+          ))}
+          {canEdit && (
+            <button onClick={openNew}
+              style={{ padding:"9px 18px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+              ＋ Araç Ekle
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Expiry warnings summary */}
+      {(() => {
+        const expiring = araclar.filter(a => {
+          const sd = dayDiff(a.sigorta_bitis);
+          const md = dayDiff(a.muayene_bitis);
+          const kd = dayDiff(a.kira_bitis);
+          return (sd !== null && sd <= 30) || (md !== null && md <= 30) || (kd !== null && kd <= 30);
+        });
+        if (!expiring.length) return null;
+        return (
+          <div style={{ background:"#fef9c3", border:"1px solid #fde047", borderRadius:"12px", padding:"12px 16px", marginBottom:"20px" }}>
+            <strong style={{ color:"#713f12", fontSize:"13px" }}>⚠️ Yaklaşan Bitiş Tarihleri ({expiring.length} araç)</strong>
+            <div style={{ marginTop:"6px", display:"flex", flexWrap:"wrap", gap:"6px" }}>
+              {expiring.map(a => (
+                <span key={a.id} onClick={()=>openEdit(a)} style={{ background:"#fff", border:"1px solid #fde047", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", color:"#92400e", fontWeight:600 }}>
+                  {a.plaka}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Araç kartları */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(320px, 1fr))", gap:"16px" }}>
+        {filtered.map(a => {
+          const sd = dayDiff(a.sigorta_bitis);
+          const md = dayDiff(a.muayene_bitis);
+          const kd = dayDiff(a.kira_bitis);
+          return (
+            <div key={a.id} style={{ background:"#fff", borderRadius:"14px", boxShadow:"0 1px 6px rgba(0,0,0,0.08)", overflow:"hidden" }}>
+              {/* Card header */}
+              <div style={{ background: a.durum==="AKTİF" ? "#1e3a5f" : a.durum==="SERVİSTE" ? "#92400e" : "#6b7280", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div>
+                  <div style={{ color:"#fff", fontWeight:900, fontSize:"20px", letterSpacing:"1px" }}>{a.plaka}</div>
+                  <div style={{ color:"#bfdbfe", fontSize:"13px" }}>{a.marka} {a.model} {a.yil ? `(${a.yil})` : ""} · {a.tip}</div>
+                </div>
+                <span style={{ background:"rgba(255,255,255,0.15)", color:"#fff", borderRadius:"20px", padding:"4px 10px", fontSize:"12px", fontWeight:700 }}>{a.durum}</span>
+              </div>
+              {/* Card body */}
+              <div style={{ padding:"14px 16px" }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"10px" }}>
+                  {a.kiralama_firmasi && <div style={{ fontSize:"12px", color:"#6b7280" }}>🏢 {a.kiralama_firmasi}</div>}
+                  {a.bolge && <div style={{ fontSize:"12px", color:"#6b7280" }}>📍 {a.bolge}</div>}
+                  {a.surucu && <div style={{ fontSize:"12px", color:"#6b7280" }}>👤 {a.surucu}</div>}
+                  {a.aylik_kira && <div style={{ fontSize:"12px", color:"#6b7280" }}>💰 ₺{Number(a.aylik_kira).toLocaleString("tr-TR")}/ay</div>}
+                </div>
+                {/* Expiry badges */}
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginBottom:"10px" }}>
+                  {a.kira_bitis && (
+                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background:expiryBg(a.kira_bitis), color:expiryColor(a.kira_bitis) }}>
+                      📅 Kira: {new Date(a.kira_bitis).toLocaleDateString("tr-TR")}
+                      {kd !== null && kd <= 60 && ` (${kd < 0 ? "GEÇTİ" : kd+" gün"})`}
+                    </span>
+                  )}
+                  {a.sigorta_bitis && (
+                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background:expiryBg(a.sigorta_bitis), color:expiryColor(a.sigorta_bitis) }}>
+                      🛡 Sigorta: {new Date(a.sigorta_bitis).toLocaleDateString("tr-TR")}
+                      {sd !== null && sd <= 60 && ` (${sd < 0 ? "GEÇTİ" : sd+" gün"})`}
+                    </span>
+                  )}
+                  {a.muayene_bitis && (
+                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background:expiryBg(a.muayene_bitis), color:expiryColor(a.muayene_bitis) }}>
+                      🔧 Muayene: {new Date(a.muayene_bitis).toLocaleDateString("tr-TR")}
+                      {md !== null && md <= 60 && ` (${md < 0 ? "GEÇTİ" : md+" gün"})`}
+                    </span>
+                  )}
+                </div>
+                {/* Belge durumu */}
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                  {BELGE_YUVALARI.map(({ turu, label }) => {
+                    const b = getBelge(a, turu);
+                    return b ? (
+                      <a key={turu} href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
+                        style={{ fontSize:"11px", background:"#dcfce7", color:"#166534", padding:"3px 8px", borderRadius:"6px", textDecoration:"none", fontWeight:600 }}>
+                        ✓ {label.replace(/^[^ ]+ /,"")}
+                      </a>
+                    ) : (
+                      <span key={turu} style={{ fontSize:"11px", background:"#f3f4f6", color:"#9ca3af", padding:"3px 8px", borderRadius:"6px" }}>
+                        — {label.replace(/^[^ ]+ /,"")}
+                      </span>
+                    );
+                  })}
+                </div>
+                {/* Actions */}
+                {canEdit && (
+                  <button onClick={()=>openEdit(a)}
+                    style={{ marginTop:"12px", width:"100%", padding:"8px", background:"#f3f4f6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer", color:"#374151" }}>
+                    ✏️ Düzenle / Belge Yükle
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div style={{ gridColumn:"1/-1", textAlign:"center", padding:"60px 0", color:"#9ca3af" }}>
+            Henüz araç kaydı yok
+          </div>
+        )}
+      </div>
+
+      {/* Form / Detail Modal */}
+      {showForm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:500, overflowY:"auto", padding:"20px 16px" }}>
+          <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"640px", padding:"28px 24px", position:"relative" }}>
+            <button onClick={()=>setShowForm(false)}
+              style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"32px", height:"32px", fontSize:"18px", cursor:"pointer" }}>✕</button>
+            <h3 style={{ margin:"0 0 20px", fontSize:"18px", fontWeight:800, color:"#1e3a5f" }}>
+              {selected ? `✏️ ${form.plaka}` : "🚗 Yeni Araç"}
+            </h3>
+
+            {/* Form fields */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"16px" }}>
+              <div style={{ gridColumn:"1/-1" }}>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Plaka *</label>
+                <input value={form.plaka||""} onChange={e=>setForm(f=>({...f,plaka:e.target.value.toUpperCase()}))} style={aInpSt} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Marka</label>
+                <select value={form.marka||""} onChange={e=>setForm(f=>({...f,marka:e.target.value,model:""}))} style={aSelSt}>
+                  <option value="">Seçin</option>
+                  {Object.keys(ARAC_MARKALAR).map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Model</label>
+                {aracModeller.length > 0
+                  ? <select value={form.model||""} onChange={e=>setForm(f=>({...f,model:e.target.value}))} style={aSelSt}>
+                      <option value="">Seçin</option>
+                      {aracModeller.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  : <input value={form.model||""} onChange={e=>setForm(f=>({...f,model:e.target.value}))} placeholder="Model" style={aInpSt} />
+                }
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Yıl</label>
+                <select value={form.yil||""} onChange={e=>setForm(f=>({...f,yil:e.target.value}))} style={aSelSt}>
+                  <option value="">Seçin</option>
+                  {ARAC_YIL.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Kiralama Firması</label>
+                <input value={form.kiralama_firmasi||""} onChange={e=>setForm(f=>({...f,kiralama_firmasi:e.target.value}))} style={aInpSt} />
+              </div>
+              <div style={{ gridColumn:"1/-1" }}>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Sözleşme No</label>
+                <input value={form.sozlesme_no||""} onChange={e=>setForm(f=>({...f,sozlesme_no:e.target.value}))} style={aInpSt} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Aylık Kira (₺)</label>
+                <input type="number" value={form.aylik_kira||""} onChange={e=>setForm(f=>({...f,aylik_kira:e.target.value}))} style={aInpSt} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Sürücü / Kullanan</label>
+                <input value={form.surucu||""} onChange={e=>setForm(f=>({...f,surucu:e.target.value}))} style={aInpSt} />
+              </div>
+              <div style={{ gridColumn:"1/-1" }}>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Atandığı Bölge / Saha</label>
+                <input value={form.bolge||""} onChange={e=>setForm(f=>({...f,bolge:e.target.value}))} style={aInpSt} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Kira Başlangıç</label>
+                <input type="date" value={form.kira_baslangic||""} onChange={e=>setForm(f=>({...f,kira_baslangic:e.target.value}))} style={aInpSt} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Kira Bitiş</label>
+                <input type="date" value={form.kira_bitis||""} onChange={e=>setForm(f=>({...f,kira_bitis:e.target.value}))} style={aInpSt} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Sigorta Bitiş</label>
+                <input type="date" value={form.sigorta_bitis||""} onChange={e=>setForm(f=>({...f,sigorta_bitis:e.target.value}))} style={aInpSt} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Muayene Bitiş</label>
+                <input type="date" value={form.muayene_bitis||""} onChange={e=>setForm(f=>({...f,muayene_bitis:e.target.value}))} style={aInpSt} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Araç Tipi</label>
+                <select value={form.tip} onChange={e=>setForm(f=>({...f,tip:e.target.value}))}
+                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px" }}>
+                  {TIPLER.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Durum</label>
+                <select value={form.durum} onChange={e=>setForm(f=>({...f,durum:e.target.value}))}
+                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px" }}>
+                  {DURUMLAR.map(d => <option key={d}>{d}</option>)}
+                </select>
+              </div>
+              <div style={{ gridColumn:"1 / -1" }}>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Notlar</label>
+                <textarea value={form.notlar||""} onChange={e=>setForm(f=>({...f,notlar:e.target.value}))} rows={2}
+                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", resize:"vertical", boxSizing:"border-box" }} />
+              </div>
+            </div>
+
+            <button onClick={handleSave}
+              style={{ width:"100%", padding:"13px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"15px", cursor:"pointer", marginBottom: selected ? "24px" : 0 }}>
+              💾 Kaydet
+            </button>
+
+            {/* Belge yükleme — sadece düzenleme modunda */}
+            {selected && detailArac && (
+              <div style={{ borderTop:"1px solid #e5e7eb", paddingTop:"20px" }}>
+                <h4 style={{ margin:"0 0 14px", fontSize:"15px", fontWeight:700, color:"#1e3a5f" }}>📁 Belgeler</h4>
+                <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+                  {BELGE_YUVALARI.map(({ turu, label }) => {
+                    const b = getBelge(detailArac, turu);
+                    return (
+                      <div key={turu} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px" }}>
+                        <span style={{ fontWeight:700, fontSize:"13px", color:"#374151", minWidth:"150px" }}>{label}</span>
+                        {b ? (
+                          <>
+                            <a href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
+                              style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>
+                              📥 {b.dosya_adi}
+                            </a>
+                            {canEdit && (
+                              <button onClick={()=>handleBelgeSil(b.id)}
+                                style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>
+                                Sil
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <span style={{ fontSize:"12px", color:"#9ca3af", flex:1 }}>— Henüz yüklenmedi</span>
+                        )}
+                        {canEdit && (
+                          <label style={{ background:"#dbeafe", color:"#1d4ed8", borderRadius:"6px", padding:"5px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600, whiteSpace:"nowrap" }}>
+                            {b ? "Güncelle" : "Yükle"}
+                            <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }}
+                              onChange={async e => { if(e.target.files[0]) await handleBelgeUpload(selected.id, turu, e.target.files[0]); e.target.value=""; }} />
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* Diğer belgeler */}
+                  {(detailArac.belgeler||[]).filter(b=>b.belge_turu==="DIGER").map(b => (
+                    <div key={b.id} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px" }}>
+                      <span style={{ fontSize:"12px", color:"#6b7280", minWidth:"150px" }}>📎 Ek Belge</span>
+                      <a href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
+                        style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>📥 {b.dosya_adi}</a>
+                      {canEdit && (
+                        <button onClick={()=>handleBelgeSil(b.id)}
+                          style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>Sil</button>
+                      )}
+                    </div>
+                  ))}
+                  {canEdit && (
+                    <label style={{ background:"#f0fdf4", border:"1px dashed #86efac", borderRadius:"10px", padding:"12px", textAlign:"center", cursor:"pointer", color:"#166534", fontSize:"13px", fontWeight:600 }}>
+                      ➕ Ek Belge Yükle
+                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }}
+                        onChange={async e => { if(e.target.files[0]) await handleBelgeUpload(selected.id, "DIGER", e.target.files[0]); e.target.value=""; }} />
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── OFİS & DEPO PANELİ ──────────────────────────────────────────────────────
+function OfisDepoPanel({ currentUser, onBack }) {
+  const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
+  const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
+  const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
+  const canEdit = isPM || isDirektor || isMuhasebe;
+
+  const [liste, setListe] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({
+    tur:"OFİS", ad:"", bolge:"", adres:"", kiraya_veren:"", sozlesme_no:"",
+    kira_baslangic:"", kira_bitis:"", aylik_kira:"", metrekare:"", kat:"",
+    sorumlu:"", durum:"AKTİF", notlar:""
+  });
+  const [filter, setFilter] = useState("TUMU");
+
+  const load = async () => {
+    const r = await fetch(`${API_BASE}/hr/ofis`);
+    setListe(await r.json());
+  };
+  useEffect(() => { load(); }, []);
+
+  const today = new Date();
+  const dayDiff = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
+  const expiryColor = (d) => { const n=dayDiff(d); if(n===null)return"#9ca3af"; if(n<0)return"#dc2626"; if(n<=30)return"#f59e0b"; return"#166534"; };
+  const expiryBg = (d) => { const n=dayDiff(d); if(n===null)return"#f3f4f6"; if(n<0)return"#fee2e2"; if(n<=30)return"#fef9c3"; return"#dcfce7"; };
+
+  const openNew = () => {
+    setForm({ tur:"OFİS", ad:"", bolge:"", adres:"", kiraya_veren:"", sozlesme_no:"",
+      kira_baslangic:"", kira_bitis:"", aylik_kira:"", metrekare:"", kat:"",
+      sorumlu:"", durum:"AKTİF", notlar:"" });
+    setSelected(null); setShowForm(true);
+  };
+  const openEdit = (o) => {
+    const fmt = (d) => d ? d.slice(0,10) : "";
+    setForm({ tur:o.tur||"OFİS", ad:o.ad||"", bolge:o.bolge||"", adres:o.adres||"",
+      kiraya_veren:o.kiraya_veren||"", sozlesme_no:o.sozlesme_no||"",
+      kira_baslangic:fmt(o.kira_baslangic), kira_bitis:fmt(o.kira_bitis),
+      aylik_kira:o.aylik_kira||"", metrekare:o.metrekare||"", kat:o.kat||"",
+      sorumlu:o.sorumlu||"", durum:o.durum||"AKTİF", notlar:o.notlar||""
+    });
+    setSelected(o); setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.ad) return alert("Ad zorunlu");
+    const method = selected ? "PUT" : "POST";
+    const url = selected ? `${API_BASE}/hr/ofis/${selected.id}` : `${API_BASE}/hr/ofis`;
+    const r = await fetch(url, { method, headers:{"Content-Type":"application/json"}, body: JSON.stringify(form) });
+    if (!r.ok) { const e = await r.json(); return alert(e.error); }
+    setShowForm(false); load();
+  };
+
+  const handleBelgeUpload = async (ofisId, turu, file) => {
+    if (!file) return;
+    const fd = new FormData(); fd.append("dosya", file); fd.append("belge_turu", turu);
+    await fetch(`${API_BASE}/hr/ofis/${ofisId}/belge`, { method:"POST", body:fd });
+    load();
+  };
+  const handleBelgeSil = async (id) => {
+    if (!window.confirm("Bu belgeyi silmek istediğinizden emin misiniz?")) return;
+    await fetch(`${API_BASE}/hr/ofis-belge/${id}`, { method:"DELETE" }); load();
+  };
+  const getSozlesme = (o) => (o.belgeler||[]).find(b=>b.belge_turu==="SOZLESME");
+  const getEkler = (o) => (o.belgeler||[]).filter(b=>b.belge_turu!=="SOZLESME");
+
+  const turIcon = { "OFİS":"🏢", "DEPO":"🏭", "OFİS+DEPO":"🏗" };
+  const filtered = liste.filter(o => filter==="TUMU" ? true : o.durum===filter);
+  const detailOfis = selected && liste.find(o => o.id === selected.id);
+
+  return (
+    <div style={{ maxWidth:"1100px", margin:"0 auto", padding:"24px 16px" }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"24px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:"14px" }}>
+          {onBack && <button onClick={onBack} style={{ background:"#f3f4f6", border:"none", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>←</button>}
+          <div>
+            <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>🏢 Ofis & Depo</h2>
+            <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>{liste.filter(o=>o.durum==="AKTİF").length} aktif konum</p>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+          {["TUMU","AKTİF","PASİF"].map(f => (
+            <button key={f} onClick={()=>setFilter(f)}
+              style={{ padding:"6px 14px", borderRadius:"20px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:600,
+                background: filter===f ? "#1e3a5f" : "#f3f4f6", color: filter===f ? "#fff" : "#374151" }}>
+              {f}
+            </button>
+          ))}
+          {canEdit && (
+            <button onClick={openNew}
+              style={{ padding:"9px 18px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+              ＋ Ekle
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Kira bitiş uyarıları */}
+      {(() => {
+        const exp = liste.filter(o => { const d=dayDiff(o.kira_bitis); return d!==null && d<=30; });
+        if (!exp.length) return null;
+        return (
+          <div style={{ background:"#fef9c3", border:"1px solid #fde047", borderRadius:"12px", padding:"12px 16px", marginBottom:"20px" }}>
+            <strong style={{ color:"#713f12", fontSize:"13px" }}>⚠️ Kira Bitiş Yaklaşıyor ({exp.length} konum)</strong>
+            <div style={{ marginTop:"6px", display:"flex", flexWrap:"wrap", gap:"6px" }}>
+              {exp.map(o => (
+                <span key={o.id} onClick={()=>openEdit(o)}
+                  style={{ background:"#fff", border:"1px solid #fde047", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", color:"#92400e", fontWeight:600 }}>
+                  {o.ad}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))", gap:"16px" }}>
+        {filtered.map(o => (
+          <div key={o.id} style={{ background:"#fff", borderRadius:"14px", boxShadow:"0 1px 6px rgba(0,0,0,0.08)", overflow:"hidden" }}>
+            <div style={{ background: o.durum==="AKTİF" ? "#1e3a5f" : "#6b7280", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div>
+                <div style={{ color:"#fff", fontWeight:800, fontSize:"17px" }}>{turIcon[o.tur]||"🏢"} {o.ad}</div>
+                <div style={{ color:"#bfdbfe", fontSize:"12px" }}>{o.tur} · {o.bolge}</div>
+              </div>
+              <span style={{ background:"rgba(255,255,255,0.15)", color:"#fff", borderRadius:"20px", padding:"3px 9px", fontSize:"11px", fontWeight:700 }}>{o.durum}</span>
+            </div>
+            <div style={{ padding:"14px 16px" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px", marginBottom:"10px" }}>
+                {o.adres && <div style={{ fontSize:"12px", color:"#6b7280", gridColumn:"1/-1" }}>📍 {o.adres}</div>}
+                {o.kiraya_veren && <div style={{ fontSize:"12px", color:"#6b7280" }}>🏘 {o.kiraya_veren}</div>}
+                {o.sorumlu && <div style={{ fontSize:"12px", color:"#6b7280" }}>👤 {o.sorumlu}</div>}
+                {o.aylik_kira && <div style={{ fontSize:"12px", color:"#6b7280" }}>💰 ₺{Number(o.aylik_kira).toLocaleString("tr-TR")}/ay</div>}
+                {o.metrekare && <div style={{ fontSize:"12px", color:"#6b7280" }}>📐 {o.metrekare} m²{o.kat ? ` · ${o.kat}. Kat` : ""}</div>}
+              </div>
+              <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginBottom:"10px" }}>
+                {o.kira_bitis && (
+                  <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background:expiryBg(o.kira_bitis), color:expiryColor(o.kira_bitis) }}>
+                    📅 Kira: {new Date(o.kira_bitis).toLocaleDateString("tr-TR")}
+                    {dayDiff(o.kira_bitis) !== null && dayDiff(o.kira_bitis) <= 60 && ` (${dayDiff(o.kira_bitis) < 0 ? "GEÇTİ" : dayDiff(o.kira_bitis)+" gün"})`}
+                  </span>
+                )}
+              </div>
+              <div style={{ display:"flex", gap:"6px" }}>
+                {getSozlesme(o) ? (
+                  <a href={`${API_BASE}/hr/ofis-belge/file/${getSozlesme(o).dosya_yolu}?name=${encodeURIComponent(getSozlesme(o).dosya_adi)}`}
+                    style={{ fontSize:"11px", background:"#dcfce7", color:"#166534", padding:"3px 8px", borderRadius:"6px", textDecoration:"none", fontWeight:600 }}>
+                    ✓ Sözleşme
+                  </a>
+                ) : (
+                  <span style={{ fontSize:"11px", background:"#f3f4f6", color:"#9ca3af", padding:"3px 8px", borderRadius:"6px" }}>— Sözleşme yok</span>
+                )}
+                {getEkler(o).length > 0 && (
+                  <span style={{ fontSize:"11px", background:"#dbeafe", color:"#1d4ed8", padding:"3px 8px", borderRadius:"6px", fontWeight:600 }}>
+                    +{getEkler(o).length} ek belge
+                  </span>
+                )}
+              </div>
+              {canEdit && (
+                <button onClick={()=>openEdit(o)}
+                  style={{ marginTop:"12px", width:"100%", padding:"8px", background:"#f3f4f6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer", color:"#374151" }}>
+                  ✏️ Düzenle / Belge Yükle
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <div style={{ gridColumn:"1/-1", textAlign:"center", padding:"60px 0", color:"#9ca3af" }}>Henüz kayıt yok</div>
+        )}
+      </div>
+
+      {/* Form / Detail Modal */}
+      {showForm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:500, overflowY:"auto", padding:"20px 16px" }}>
+          <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"620px", padding:"28px 24px", position:"relative" }}>
+            <button onClick={()=>setShowForm(false)}
+              style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"32px", height:"32px", fontSize:"18px", cursor:"pointer" }}>✕</button>
+            <h3 style={{ margin:"0 0 20px", fontSize:"18px", fontWeight:800, color:"#1e3a5f" }}>
+              {selected ? `✏️ ${form.ad}` : "🏢 Yeni Konum"}
+            </h3>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"16px" }}>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Tür</label>
+                <select value={form.tur} onChange={e=>setForm(f=>({...f,tur:e.target.value}))}
+                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px" }}>
+                  {["OFİS","DEPO","OFİS+DEPO"].map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Durum</label>
+                <select value={form.durum} onChange={e=>setForm(f=>({...f,durum:e.target.value}))}
+                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px" }}>
+                  {["AKTİF","PASİF"].map(d=><option key={d}>{d}</option>)}
+                </select>
+              </div>
+              {[
+                ["ad","Ad / Tanım *","text","1/-1"],["bolge","Bölge / Şehir","text","auto"],
+                ["kiraya_veren","Kiraya Veren","text","auto"],["sozlesme_no","Sözleşme No","text","auto"],
+                ["kira_baslangic","Kira Başlangıç","date","auto"],["kira_bitis","Kira Bitiş","date","auto"],
+                ["aylik_kira","Aylık Kira (₺)","number","auto"],["metrekare","Alan (m²)","number","auto"],
+                ["kat","Kat","text","auto"],["sorumlu","Sorumlu Kişi","text","auto"],
+                ["adres","Adres","text","1/-1"],
+              ].map(([k,l,t,gc]) => (
+                <div key={k} style={{ gridColumn:gc }}>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>{l}</label>
+                  <input type={t} value={form[k]||""} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}
+                    style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+                </div>
+              ))}
+              <div style={{ gridColumn:"1/-1" }}>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Notlar</label>
+                <textarea value={form.notlar||""} onChange={e=>setForm(f=>({...f,notlar:e.target.value}))} rows={2}
+                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", resize:"vertical", boxSizing:"border-box" }} />
+              </div>
+            </div>
+            <button onClick={handleSave}
+              style={{ width:"100%", padding:"13px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"15px", cursor:"pointer", marginBottom: selected ? "24px" : 0 }}>
+              💾 Kaydet
+            </button>
+
+            {selected && detailOfis && (
+              <div style={{ borderTop:"1px solid #e5e7eb", paddingTop:"20px" }}>
+                <h4 style={{ margin:"0 0 14px", fontSize:"15px", fontWeight:700, color:"#1e3a5f" }}>📁 Belgeler</h4>
+                {/* Kira sözleşmesi */}
+                {(() => {
+                  const b = getSozlesme(detailOfis);
+                  return (
+                    <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
+                      <span style={{ fontWeight:700, fontSize:"13px", color:"#374151", minWidth:"160px" }}>📄 Kira Sözleşmesi</span>
+                      {b ? (
+                        <>
+                          <a href={`${API_BASE}/hr/ofis-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
+                            style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>📥 {b.dosya_adi}</a>
+                          {canEdit && <button onClick={()=>handleBelgeSil(b.id)} style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>}
+                        </>
+                      ) : <span style={{ fontSize:"12px", color:"#9ca3af", flex:1 }}>— Henüz yüklenmedi</span>}
+                      {canEdit && (
+                        <label style={{ background:"#dbeafe", color:"#1d4ed8", borderRadius:"6px", padding:"5px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>
+                          {b ? "Güncelle" : "Yükle"}
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }}
+                            onChange={async e => { if(e.target.files[0]) await handleBelgeUpload(selected.id,"SOZLESME",e.target.files[0]); e.target.value=""; }} />
+                        </label>
+                      )}
+                    </div>
+                  );
+                })()}
+                {/* Ek belgeler */}
+                {getEkler(detailOfis).map(b => (
+                  <div key={b.id} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
+                    <span style={{ fontSize:"12px", color:"#6b7280", minWidth:"160px" }}>📎 {b.aciklama||b.dosya_adi}</span>
+                    <a href={`${API_BASE}/hr/ofis-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
+                      style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>📥 {b.dosya_adi}</a>
+                    {canEdit && <button onClick={()=>handleBelgeSil(b.id)} style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>}
+                  </div>
+                ))}
+                {canEdit && (
+                  <label style={{ display:"block", background:"#f0fdf4", border:"1px dashed #86efac", borderRadius:"10px", padding:"12px", textAlign:"center", cursor:"pointer", color:"#166534", fontSize:"13px", fontWeight:600 }}>
+                    ➕ Ek Belge Yükle
+                    <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }}
+                      onChange={async e => { if(e.target.files[0]) await handleBelgeUpload(selected.id,"DIGER",e.target.files[0]); e.target.value=""; }} />
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default App;
