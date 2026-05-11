@@ -8705,6 +8705,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   useEffect(() => { load(); loadPersonel(); }, []);
 
   const visibleList = list.filter(t => {
+    if (isRequester && t.talep_eden_email !== currentUser?.email) return false;
     if (searchText) {
       const s = searchText.toLowerCase();
       if (!t.talep_eden_ad?.toLowerCase().includes(s) && !t.personel_ad?.toLowerCase().includes(s) && !t.aciklama?.toLowerCase().includes(s)) return false;
