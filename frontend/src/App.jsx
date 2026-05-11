@@ -11726,7 +11726,7 @@ function App() {
                 className={page === "finance" ? "tab activeTab" : "tab"}
                 onClick={() => setPage("finance")}
               >
-                Finance Dashboard
+                Finans Paneli
               </button>
             )}
 
