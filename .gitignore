@@ -11,5 +11,8 @@ frontend/node_modules/
 # uploads (local only)
 backend/uploads/
 
+# accidental copies
+frontend/backend/
+
 # build output
 frontend/dist/
