@@ -8680,7 +8680,8 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
-  const isRequester = !isPM && !isDirektor && !isMuhasebe;
+  const isRolloutMudur = currentUser?.email === "nurcan.kus@simsektel.com";
+  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isRolloutMudur;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const load = async () => {
