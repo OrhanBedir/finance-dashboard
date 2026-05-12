@@ -8954,6 +8954,27 @@ pool.query(`
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS red_aciklama TEXT;
 `).catch(e => console.error("is_avans_talep tablo hatası:", e.message));
 
+// GET iş avansı bakiye for a personel by email
+app.get("/hr/is-avans/bakiye", async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ error: "email gerekli" });
+    const avansRes = await pool.query(
+      `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep WHERE talep_eden_email=$1 AND durum='TAMAMLANDI'`,
+      [email]
+    );
+    const masrafRes = await pool.query(
+      `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
+       JOIN masraf_form mf ON mf.id = mk.form_id
+       WHERE mf.talep_eden_email=$1 AND mf.durum='ARSIVLENDI'`,
+      [email]
+    );
+    const avans = Number(avansRes.rows[0].toplam);
+    const masraf = Number(masrafRes.rows[0].toplam);
+    res.json({ avans, masraf, bakiye: avans - masraf });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/hr/is-avans", async (req, res) => {
   try {
     const r = await pool.query(`

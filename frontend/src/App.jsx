@@ -8874,6 +8874,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [redText, setRedText] = useState("");
   const [saving, setSaving] = useState(false);
   const [notTooltip, setNotTooltip] = useState({ visible: false, x: 0, y: 0, aciklama: "", not_aciklama: "" });
+  const [avansBakiye, setAvansBakiye] = useState(null);
 
   const _email = (currentUser?.email || "").toLowerCase();
   const isPM = _email === "orhan.bedir@simsektel.com";
@@ -8882,6 +8883,12 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const isRolloutMudur = _email === "nurcan.kus@simsektel.com" || _email === "serdar.altinova@simsektel.com" || (currentUser?.role || "").toLowerCase() === "rollout_mudur";
   const isRequester = !isPM && !isDirektor && !isMuhasebe && !isRolloutMudur;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+
+  const loadBakiye = async () => {
+    if (!currentUser?.email) return;
+    const r = await fetch(`${API_BASE}/hr/is-avans/bakiye?email=${encodeURIComponent(currentUser.email)}`);
+    if (r.ok) setAvansBakiye(await r.json());
+  };
 
   const load = async () => {
     const r = await fetch(`${API_BASE}/hr/is-avans`);
@@ -8902,7 +8909,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     setPersonelList(await r.json());
   };
 
-  useEffect(() => { load(); loadPersonel(); }, []);
+  useEffect(() => { load(); loadPersonel(); loadBakiye(); }, []);
 
   const visibleList = list.filter(t => {
     if (isRequester && t.talep_eden_email !== currentUser?.email) return false;
@@ -8959,7 +8966,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const handleOnayla = async (id) => {
     await fetch(`${API_BASE}/hr/is-avans/${id}/onayla`, { method: "PUT" });
-    load();
+    load(); loadBakiye();
   };
 
   const handleReddet = async () => {
@@ -8976,7 +8983,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
       }
       setRedModal(null);
       setRedText("");
-      load();
+      load(); loadBakiye();
     } catch (err) {
       alert("Reddetme işlemi başarısız: " + err.message);
     }
@@ -9038,6 +9045,21 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
           <span style={{ fontSize:"12px", color:"#78350f" }}>— Aşağıdaki sarı satırlara bakın</span>
         </div>
       )}
+      {/* Bakiye kutusu */}
+      {avansBakiye !== null && (
+        <div style={{ display:"flex", gap:"10px", marginBottom:"16px", flexWrap:"wrap" }}>
+          <div style={{ flex:1, minWidth:"140px", background: avansBakiye.bakiye >= 0 ? "#f0fdf4" : "#fef2f2", border:`2px solid ${avansBakiye.bakiye >= 0 ? "#16a34a" : "#dc2626"}`, borderRadius:"14px", padding:"14px 20px" }}>
+            <div style={{ fontSize:"11px", fontWeight:700, color: avansBakiye.bakiye >= 0 ? "#15803d" : "#b91c1c", letterSpacing:"0.5px", marginBottom:"4px" }}>İŞ AVANSI BAKİYE</div>
+            <div style={{ fontSize: isMobile?"22px":"28px", fontWeight:800, color: avansBakiye.bakiye >= 0 ? "#15803d" : "#b91c1c" }}>
+              {avansBakiye.bakiye < 0 ? "-" : ""}₺{Math.abs(avansBakiye.bakiye).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+            </div>
+            <div style={{ fontSize:"11px", color:"#6b7280", marginTop:"4px" }}>
+              Toplam avans: ₺{Number(avansBakiye.avans).toLocaleString("tr-TR")} · Arşivlenen masraf: ₺{Number(avansBakiye.masraf).toLocaleString("tr-TR")}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı</h2>
         <div style={{ display: "flex", gap: "8px" }}>
