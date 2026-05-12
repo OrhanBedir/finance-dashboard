@@ -8640,6 +8640,38 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
         )}
       </div>
 
+      {/* Kişisel masraf özeti (personel için) */}
+      {!isApprover && (() => {
+        const myForms = list.filter(f => f.talep_eden_email === currentUser?.email);
+        if (!myForms.length) return null;
+        const total = myForms.reduce((s, f) => s + Number(f.toplam_tutar || 0), 0);
+        const counts = {
+          TASLAK: myForms.filter(f => f.durum === "TASLAK").length,
+          BEKLEMEDE: myForms.filter(f => ["PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum)).length,
+          TAMAMLANDI: myForms.filter(f => f.durum === "TAMAMLANDI").length,
+          ARSIVLENDI: myForms.filter(f => f.durum === "ARSIVLENDI").length,
+          REDDEDILDI: myForms.filter(f => f.durum === "REDDEDILDI").length,
+        };
+        return (
+          <div style={{ display:"flex", gap:"10px", marginBottom:"16px", flexWrap:"wrap", alignItems:"stretch" }}>
+            <div style={{ flex:"1 1 180px", background:"#f0f9ff", border:"2px solid #0ea5e9", borderRadius:"14px", padding:"14px 20px" }}>
+              <div style={{ fontSize:"11px", fontWeight:800, color:"#0369a1", letterSpacing:"0.5px", marginBottom:"4px" }}>TOPLAM MASRAF</div>
+              <div style={{ fontSize: isMobile?"20px":"26px", fontWeight:800, color:"#0c4a6e" }}>
+                ₺{total.toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+              </div>
+              <div style={{ fontSize:"11px", color:"#6b7280", marginTop:"4px" }}>{myForms.length} form</div>
+            </div>
+            <div style={{ flex:"2 1 320px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"14px", padding:"14px 20px", display:"flex", gap:"18px", alignItems:"center", flexWrap:"wrap" }}>
+              {counts.TASLAK > 0 && <div style={{ textAlign:"center" }}><div style={{ fontSize:"18px", fontWeight:800, color:"#6b7280" }}>{counts.TASLAK}</div><div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:600 }}>Taslak</div></div>}
+              {counts.BEKLEMEDE > 0 && <div style={{ textAlign:"center" }}><div style={{ fontSize:"18px", fontWeight:800, color:"#d97706" }}>{counts.BEKLEMEDE}</div><div style={{ fontSize:"10px", color:"#d97706", fontWeight:600 }}>Onay Bekliyor</div></div>}
+              {counts.TAMAMLANDI > 0 && <div style={{ textAlign:"center" }}><div style={{ fontSize:"18px", fontWeight:800, color:"#16a34a" }}>{counts.TAMAMLANDI}</div><div style={{ fontSize:"10px", color:"#16a34a", fontWeight:600 }}>Onaylandı</div></div>}
+              {counts.ARSIVLENDI > 0 && <div style={{ textAlign:"center" }}><div style={{ fontSize:"18px", fontWeight:800, color:"#059669" }}>{counts.ARSIVLENDI}</div><div style={{ fontSize:"10px", color:"#059669", fontWeight:600 }}>Arşivlendi</div></div>}
+              {counts.REDDEDILDI > 0 && <div style={{ textAlign:"center" }}><div style={{ fontSize:"18px", fontWeight:800, color:"#dc2626" }}>{counts.REDDEDILDI}</div><div style={{ fontSize:"10px", color:"#dc2626", fontWeight:600 }}>Reddedildi</div></div>}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Filters + Muhasebe toplu indir */}
       <div style={{ background:"#fff", borderRadius:"12px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)", padding:"14px 18px", marginBottom:"16px", display:"flex", gap:"12px", alignItems:"center", flexWrap:"wrap" }}>
         <select value={filterDurum} onChange={e=>setFilterDurum(e.target.value)}
