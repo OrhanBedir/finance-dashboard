@@ -9341,9 +9341,9 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
   try {
     const { kalemId } = req.params;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
-    const kalem = await pool.query("SELECT form_id, kategori FROM masraf_kalem WHERE id=$1", [kalemId]);
+    const kalem = await pool.query("SELECT form_id, kategori, aciklama FROM masraf_kalem WHERE id=$1", [kalemId]);
     if (!kalem.rows[0]) return res.status(404).json({ error: "Kalem bulunamadı" });
-    const { form_id, kategori } = kalem.rows[0];
+    const { form_id, kategori, aciklama: kalemAciklama } = kalem.rows[0];
 
     // 1. Upload first — guaranteed regardless of OCR
     const fname = `${Date.now()}-${req.file.originalname}`;
@@ -9366,14 +9366,19 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
       let ocrPlaka = ocrResult.plaka;
       const rawPlates = ocrResult.rawPlates || [];
       if (kategori === "YAKIT" && (ocrPlaka || rawPlates.length)) {
-        const fleet = await pool.query("SELECT plaka FROM araclar WHERE aktif=true");
-        const dbPlakalar = fleet.rows.map(r => r.plaka);
+        const enteredPlaka = (kalemAciklama || "").replace(/^Site ID:\s*[^|]+\|\s*/i, "").trim();
         const candidates = rawPlates.length ? rawPlates : [ocrPlaka];
-        for (const cand of candidates) {
-          const found = plakaEsles(cand, dbPlakalar);
-          if (found) { matchedPlaka = found; ocrPlakaEslesti = true; break; }
+        if (enteredPlaka) {
+          for (const cand of candidates) {
+            const found = plakaEsles(cand, [enteredPlaka]);
+            if (found) { matchedPlaka = found; ocrPlakaEslesti = true; break; }
+          }
+          if (ocrPlakaEslesti === null) { matchedPlaka = ocrPlaka; ocrPlakaEslesti = false; }
+        } else {
+          // No entered plate — skip plate check
+          matchedPlaka = ocrPlaka;
+          ocrPlakaEslesti = null;
         }
-        if (ocrPlakaEslesti === null) { matchedPlaka = ocrPlaka; ocrPlakaEslesti = false; }
       }
     }
 

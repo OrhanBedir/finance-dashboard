@@ -7985,7 +7985,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
 
     if (hasMismatch && !tutarUyariAciklamaOverride) {
       // Show mismatch warning — keep modal open in "uyari" state
-      setOcrResult({ ocr_tutar: ocrAmt, ocr_plaka, ocr_plaka_eslesti, belgeId: belge.id });
+      setOcrResult({ ocr_tutar: ocrAmt, ocr_plaka, ocr_plaka_eslesti, belgeId: belge.id, hasTutarUyari: true });
       return; // Modal switches to warning UI
     }
 
@@ -8437,7 +8437,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
 
         {/* Fiş fotoğrafı upload modal */}
         {fotoModal && (() => {
-          const showTutarUyari = ocrResult && !ocrResult.tutarOk && !ocrResult.tutarSkipped;
+          const showTutarUyari = ocrResult?.hasTutarUyari && !ocrResult.tutarOk && !ocrResult.tutarSkipped;
           const showPlakaUyari = ocrResult && (ocrResult.tutarOk || ocrResult.tutarSkipped || !showTutarUyari) && ocrResult.ocr_plaka && ocrResult.ocr_plaka_eslesti === false && !ocrResult.plakaOnaylandi;
 
           if (showPlakaUyari) return (
