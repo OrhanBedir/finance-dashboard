@@ -92,51 +92,55 @@ function plakaEsles(ocrRaw, dbPlakalar) {
   }) || null;
 }
 
-async function ocrFis(filePath) {
-  try {
-    const worker = await createWorker("tur+eng", 1, { logger: () => {} });
-    const { data: { text } } = await worker.recognize(filePath);
-    await worker.terminate();
-
-    const lines = text.split("\n");
-    let amount = null;
-
-    // 1. Geçiş: TOPLAM / NAKİT / TUTAR ile başlayan satırlar (en güvenilir)
+function parseOcrText(text) {
+  const lines = text.split("\n");
+  let amount = null;
+  for (const line of lines) {
+    if (/^[\s*]*(TOPLAM|NAK[İI]T|TUTAR|GENEL TOPLAM|TOTAL)/i.test(line)) {
+      const nums = (line.match(TR_NUM_RE) || []).map(parseTrNumber).filter(n => n >= 1 && n <= 999999);
+      if (nums.length) { amount = Math.max(...nums); break; }
+    }
+  }
+  if (!amount) {
     for (const line of lines) {
-      if (/^[\s*]*(TOPLAM|NAK[İI]T|TUTAR|GENEL TOPLAM|TOTAL)/i.test(line)) {
-        const nums = (line.match(TR_NUM_RE) || [])
-          .map(parseTrNumber).filter(n => n >= 100 && n <= 999999);
+      if (/TOPLAM|NAK[İI]T|TUTAR|TOTAL/i.test(line)) {
+        const nums = (line.match(TR_NUM_RE) || []).map(parseTrNumber).filter(n => n >= 1 && n <= 999999);
         if (nums.length) { amount = Math.max(...nums); break; }
       }
     }
+  }
+  if (!amount) {
+    const allNums = (text.match(TR_NUM_RE) || []).map(parseTrNumber).filter(n => n >= 1 && n <= 999999);
+    if (allNums.length) amount = Math.max(...allNums);
+  }
+  const plateRe = /\b(\d{2})\s*([A-ZÇŞĞÜÖİ0-9]{1,4})\s*(\d{2,4})\b/gi;
+  const rawPlates = [...text.matchAll(plateRe)]
+    .map(m => (m[1] + m[2] + m[3]).toUpperCase().replace(/[^A-Z0-9]/g, ""))
+    .filter(p => p.length >= 5 && p.length <= 9);
+  return { amount: amount || null, plaka: rawPlates[0] || null, rawPlates };
+}
 
-    // 2. Geçiş: Satır içinde geçiyor
-    if (!amount) {
-      for (const line of lines) {
-        if (/TOPLAM|NAK[İI]T|TUTAR|TOTAL/i.test(line)) {
-          const nums = (line.match(TR_NUM_RE) || [])
-            .map(parseTrNumber).filter(n => n >= 100 && n <= 999999);
-          if (nums.length) { amount = Math.max(...nums); break; }
-        }
-      }
-    }
-
-    // 3. Fallback: tüm metindeki en büyük makul para değeri (100–999999 arası)
-    if (!amount) {
-      const allNums = (text.match(TR_NUM_RE) || [])
-        .map(parseTrNumber).filter(n => n >= 100 && n <= 999999);
-      if (allNums.length) amount = Math.max(...allNums);
-    }
-
-    // Türk plakası — OCR hatası toleranslı: 16GB307, 34 ABC 1234
-    const plateRe = /\b(\d{2})\s*([A-ZÇŞĞÜÖİ0-9]{1,4})\s*(\d{2,4})\b/gi;
-    const rawPlates = [...text.matchAll(plateRe)]
-      .map(m => (m[1] + m[2] + m[3]).toUpperCase().replace(/[^A-Z0-9]/g, ""))
-      .filter(p => p.length >= 5 && p.length <= 9);
-    const plaka = rawPlates.length ? rawPlates[0] : null;
-
-    console.log("[OCR] amount:", amount, "| plaka:", plaka, "| lines:", lines.filter(l => /TOPLAM|NAK[İI]T/i.test(l)));
-    return { amount: amount || null, plaka, rawPlates };
+async function ocrFis(fileBuffer) {
+  try {
+    const apiKey = process.env.OCR_SPACE_KEY || "helloworld";
+    const base64 = fileBuffer.toString("base64");
+    const body = new URLSearchParams({
+      base64Image: `data:image/jpeg;base64,${base64}`,
+      language: "tur",
+      isOverlayRequired: "false",
+      detectOrientation: "true",
+      scale: "true",
+      OCREngine: "2",
+    });
+    const resp = await fetch("https://api.ocr.space/parse/image", {
+      method: "POST",
+      headers: { apikey: apiKey, "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+    const json = await resp.json();
+    const text = json?.ParsedResults?.[0]?.ParsedText || "";
+    console.log("[OCR.space] text snippet:", text.slice(0, 200));
+    return parseOcrText(text);
   } catch (e) {
     console.error("[OCR error]", e.message);
     return { amount: null, plaka: null, rawPlates: [] };
@@ -9847,11 +9851,35 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
           rawBuf = Buffer.from(await resp.arrayBuffer());
         } else { continue; }
 
-        // Trim whitespace then rotate landscape to portrait
-        let pipeline = sharp(rawBuf).trim({ threshold: 120 });
+        // Smart crop: find bounding box of bright (receipt paper) pixels
         const meta0 = await sharp(rawBuf).metadata();
-        const w0 = meta0.width || 1, h0 = meta0.height || 1;
-        if (w0 > h0) pipeline = pipeline.rotate(90); // landscape → portrait
+        const origW = meta0.width || 800, origH = meta0.height || 1200;
+        const SCAN_W = 400;
+        const scaleF = SCAN_W / origW;
+        const scanH = Math.round(origH * scaleF);
+        const { data: grayData } = await sharp(rawBuf)
+          .resize(SCAN_W, scanH, { fit: "fill" })
+          .greyscale().raw().toBuffer({ resolveWithObject: true });
+        const BRIGHT = 160;
+        let minX = SCAN_W, maxX = 0, minY = scanH, maxY = 0;
+        for (let y = 0; y < scanH; y++) {
+          for (let x = 0; x < SCAN_W; x++) {
+            if (grayData[y * SCAN_W + x] > BRIGHT) {
+              if (x < minX) minX = x; if (x > maxX) maxX = x;
+              if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+          }
+        }
+        const PAD = 8;
+        const cropLeft   = Math.max(0, Math.floor(minX / scaleF) - PAD);
+        const cropTop    = Math.max(0, Math.floor(minY / scaleF) - PAD);
+        const cropWidth  = Math.min(origW - cropLeft, Math.ceil((maxX - minX) / scaleF) + PAD * 2);
+        const cropHeight = Math.min(origH - cropTop,  Math.ceil((maxY - minY) / scaleF) + PAD * 2);
+        let pipeline = (cropWidth > 20 && cropHeight > 20)
+          ? sharp(rawBuf).extract({ left: cropLeft, top: cropTop, width: cropWidth, height: cropHeight })
+          : sharp(rawBuf);
+        if ((cropWidth > 20 ? cropWidth : origW) > (cropHeight > 20 ? cropHeight : origH))
+          pipeline = pipeline.rotate(90);
 
         const buf = await pipeline.jpeg({ quality: 88 }).toBuffer({ resolveWithObject: true });
         trimmed.push({ buf: buf.data, w: buf.info.width, h: buf.info.height, meta: img });
