@@ -8105,6 +8105,18 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const totalKalem = kalemler.reduce((s,k)=>s+Number(k.tutar),0);
   const cardSt = { background:"#fff", borderRadius:"16px", boxShadow:"0 4px 20px rgba(0,0,0,0.07)", border:"1px solid #f3f4f6", padding:"24px" };
 
+  // Tutar farkı kontrolü: OCR tutarı ile girilen tutar arasında %5 veya ₺10'dan fazla fark var mı?
+  const tutarFarkiVar = (k) => {
+    if (!k.belgeler?.length) return null;
+    for (const b of k.belgeler) {
+      if (!b.ocr_tutar) continue;
+      const ocr = Number(b.ocr_tutar);
+      const giris = Number(k.tutar);
+      if (Math.abs(ocr - giris) > Math.max(giris * 0.05, 10)) return ocr;
+    }
+    return null;
+  };
+
   // ── Detail view ──
   if (viewForm) {
     const vToplam = (viewForm.kalemler||[]).reduce((s,k)=>s+Number(k.tutar),0);
@@ -8160,13 +8172,25 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
             <tbody>
               {(viewForm.kalemler||[]).map((k,i)=>{
                 const kat = MASRAF_KATEGORILER.find(m=>m.key===k.kategori);
+                const ocrFark = tutarFarkiVar(k);
+                const rowBg = ocrFark ? "#fef2f2" : !k.fis_var ? "#fff7ed" : i%2===0 ? "#fff" : "#fafafa";
                 return (
-                  <tr key={k.id} style={{ background: !k.fis_var?"#fff7ed": i%2===0?"#fff":"#fafafa", borderBottom:"1px solid #f3f4f6" }}>
+                  <tr key={k.id} style={{ background: rowBg, borderBottom:"1px solid #f3f4f6", borderLeft: ocrFark ? "4px solid #dc2626" : "4px solid transparent" }}>
                     <td style={{ padding:"10px 12px" }}>{kat?.label||k.kategori}</td>
                     <td style={{ padding:"10px 12px", whiteSpace:"nowrap" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR") : ""}</td>
                     <td style={{ padding:"10px 12px" }}>{k.belge_no||"—"}</td>
                     <td style={{ padding:"10px 12px" }}>{k.aciklama||k.belge_aciklama||"—"}{!k.fis_var&&<div style={{ fontSize:"11px",color:"#dc2626" }}>Fişsiz: {k.fis_olmadan_aciklama}</div>}</td>
-                    <td style={{ padding:"10px 12px", fontWeight:700 }}>₺{Number(k.tutar).toLocaleString("tr-TR")}</td>
+                    <td style={{ padding:"10px 12px", fontWeight:700 }}>
+                      ₺{Number(k.tutar).toLocaleString("tr-TR")}
+                      {ocrFark && (
+                        <div style={{ marginTop:"4px", background:"#dc2626", color:"#fff", borderRadius:"5px", padding:"2px 7px", fontSize:"10px", fontWeight:700, display:"inline-block" }}>
+                          ⚠ Fiş: ₺{Number(ocrFark).toLocaleString("tr-TR")}
+                        </div>
+                      )}
+                      {ocrFark && k.tutar_uyari_aciklama && (
+                        <div style={{ fontSize:"10px", color:"#dc2626", marginTop:"2px", fontStyle:"italic" }}>"{k.tutar_uyari_aciklama}"</div>
+                      )}
+                    </td>
                     <td style={{ padding:"10px 12px" }}>
                       {(k.belgeler||[]).length > 0
                         ? <div style={{ display:"flex", gap:"4px", flexWrap:"wrap" }}>
@@ -8288,11 +8312,16 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                   {katKalemler.length === 0 && !isAdding && (
                     <div style={{ padding:"10px 16px", fontSize:"12px", color:"#9ca3af", fontStyle:"italic" }}>Henüz kayıt yok</div>
                   )}
-                  {katKalemler.map(k=>(
-                    <div key={k.id} style={{ padding:"10px 14px", borderBottom:"1px solid #f3f4f6", background:"#fff" }}>
+                  {katKalemler.map(k=>{
+                    const ocrFarkM = tutarFarkiVar(k);
+                    return (
+                    <div key={k.id} style={{ padding:"10px 14px", borderBottom:"1px solid #f3f4f6", background: ocrFarkM ? "#fef2f2" : "#fff", borderLeft: ocrFarkM ? "3px solid #dc2626" : "3px solid transparent" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"4px" }}>
                         <div style={{ fontSize:"12px", color:"#6b7280" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR"):""}{k.belge_no ? ` · #${k.belge_no}`:""}</div>
-                        <div style={{ fontWeight:800, fontSize:"14px", color:"#1e3a5f" }}>₺{Number(k.tutar).toLocaleString("tr-TR")}</div>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ fontWeight:800, fontSize:"14px", color:"#1e3a5f" }}>₺{Number(k.tutar).toLocaleString("tr-TR")}</div>
+                          {ocrFarkM && <div style={{ background:"#dc2626", color:"#fff", borderRadius:"4px", padding:"1px 6px", fontSize:"10px", fontWeight:700, marginTop:"2px" }}>⚠ Fiş: ₺{Number(ocrFarkM).toLocaleString("tr-TR")}</div>}
+                        </div>
                       </div>
                       {k.belge_aciklama && <div style={{ fontSize:"13px", color:"#374151", marginBottom:"2px" }}>{k.belge_aciklama}</div>}
                       {k.aciklama && <div style={{ fontSize:"12px", color:"#6b7280" }}>{k.aciklama}</div>}
@@ -8305,7 +8334,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                           style={{ padding:"6px 12px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>✕ Sil</button>}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </>
               ) : (
                 <>
@@ -8318,8 +8348,10 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                 {katKalemler.length === 0 && !isAdding && (
                   <div style={{ padding:"10px 16px", fontSize:"12px", color:"#9ca3af", fontStyle:"italic" }}>Henüz kayıt yok</div>
                 )}
-                {katKalemler.map((k,i)=>(
-                  <div key={k.id} style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background: i%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6", alignItems:"start" }}>
+                {katKalemler.map((k,i)=>{
+                  const ocrFarkD = tutarFarkiVar(k);
+                  return (
+                  <div key={k.id} style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background: ocrFarkD ? "#fef2f2" : i%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6", alignItems:"start", borderLeft: ocrFarkD ? "3px solid #dc2626" : "3px solid transparent" }}>
                     <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR"):""}</div>
                     <div style={{ padding:"8px 8px", fontSize:"12px", color:"#6b7280" }}>{k.belge_no||"—"}</div>
                     <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.belge_aciklama||"—"}</div>
@@ -8328,7 +8360,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                       {!k.fis_var && <div style={{ fontSize:"10px",color:"#dc2626",marginTop:"2px" }}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</div>}
                       {(k.belgeler||[]).length>0 && <div style={{ fontSize:"10px",color:"#059669",marginTop:"2px" }}>📷 {k.belgeler.length} fiş</div>}
                     </div>
-                    <div style={{ padding:"8px 8px", fontWeight:700, fontSize:"12px", textAlign:"right" }}>₺{Number(k.tutar).toLocaleString("tr-TR")}</div>
+                    <div style={{ padding:"8px 8px", fontWeight:700, fontSize:"12px", textAlign:"right" }}>
+                      ₺{Number(k.tutar).toLocaleString("tr-TR")}
+                      {ocrFarkD && (
+                        <div style={{ marginTop:"3px", background:"#dc2626", color:"#fff", borderRadius:"4px", padding:"1px 5px", fontSize:"9px", fontWeight:700 }}>
+                          ⚠ Fiş: ₺{Number(ocrFarkD).toLocaleString("tr-TR")}
+                        </div>
+                      )}
+                    </div>
                     <div style={{ padding:"6px 6px", display:"flex", gap:"3px", justifyContent:"center" }}>
                       <button onClick={()=>{ setExtraFotoModal(k.id); setUploadFile(null); }} title="Fiş fotoğrafı ekle"
                         style={{ padding:"4px 7px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>📷</button>
@@ -8336,7 +8375,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                         style={{ padding:"4px 7px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>✕</button>}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 </>
               )}
 
