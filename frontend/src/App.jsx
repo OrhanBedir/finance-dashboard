@@ -8874,6 +8874,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [redText, setRedText] = useState("");
   const [saving, setSaving] = useState(false);
   const [avansBakiye, setAvansBakiye] = useState(null);
+  const [notTooltip, setNotTooltip] = useState({ visible: false, x: 0, y: 0, aciklama: "", not_aciklama: "" });
 
   const _email = (currentUser?.email || "").toLowerCase();
   const isPM = _email === "orhan.bedir@simsektel.com";
@@ -9008,8 +9009,32 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     isDirektor ? list.filter(t => t.durum === "PM_ONAY").length :
     isMuhasebe ? list.filter(t => t.durum === "DIREKTOR_ONAY").length : 0;
 
+  const NotTooltipEl = notTooltip.visible ? (() => {
+    const TW = 300;
+    const showRight = notTooltip.x + TW + 24 <= window.innerWidth;
+    const left = Math.max(8, showRight ? notTooltip.x + 16 : notTooltip.x - TW - 16);
+    const top = Math.max(8, Math.min(notTooltip.y - 8, window.innerHeight - 320));
+    return (
+      <div style={{ position:"fixed", zIndex:9999, left, top, width:`${TW}px`, background:"#fff", borderRadius:"14px", boxShadow:"0 4px 6px -1px rgba(0,0,0,0.1),0 10px 30px rgba(0,0,0,0.18)", border:"1px solid #e2e8f0", pointerEvents:"none", overflow:"hidden" }}>
+        {notTooltip.aciklama && (
+          <div style={{ padding:"12px 16px", borderBottom: notTooltip.not_aciklama ? "1px solid #f1f5f9" : "none" }}>
+            <div style={{ fontSize:"10px", fontWeight:800, color:"#3b82f6", letterSpacing:"0.8px", textTransform:"uppercase", marginBottom:"5px" }}>● Açıklama</div>
+            <div style={{ fontSize:"13px", color:"#1e293b", lineHeight:"1.6", whiteSpace:"pre-wrap" }}>{notTooltip.aciklama}</div>
+          </div>
+        )}
+        {notTooltip.not_aciklama && (
+          <div style={{ padding:"12px 16px", background: notTooltip.aciklama ? "#fafafa" : "#fff" }}>
+            <div style={{ fontSize:"10px", fontWeight:800, color:"#d97706", letterSpacing:"0.8px", textTransform:"uppercase", marginBottom:"5px" }}>● Not</div>
+            <div style={{ fontSize:"13px", color:"#374151", lineHeight:"1.6", whiteSpace:"pre-wrap" }}>{notTooltip.not_aciklama}</div>
+          </div>
+        )}
+      </div>
+    );
+  })() : null;
+
   return (
     <div style={{ maxWidth: "1100px", margin: "24px auto" }}>
+      {NotTooltipEl}
       {myPendingCount > 0 && (
         <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:"12px", padding:"12px 18px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
           <span style={{ fontSize:"20px" }}>⏳</span>
@@ -9200,17 +9225,20 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   <td style={{ padding: "12px 16px", fontSize: "13px", color: "#374151", fontWeight: 600 }}>{t.proje || "—"}</td>
                   <td style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280" }}>{t.personel_ad || "—"}</td>
                   <td style={{ padding: "12px 16px", fontWeight: 700, fontSize: "14px", whiteSpace: "nowrap" }}>₺{Number(t.tutar).toLocaleString("tr-TR")}</td>
-                  <td style={{ padding: "12px 16px", fontSize: "13px", color: "#374151", minWidth: "220px", maxWidth: "320px" }}>
-                    {t.aciklama
-                      ? <div style={{ lineHeight: "1.5", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{t.aciklama}</div>
-                      : <span style={{ color: "#d1d5db" }}>—</span>}
+                  <td
+                    style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280", maxWidth: "200px", cursor: (t.aciklama || t.not_aciklama) ? "pointer" : "default" }}
+                    onMouseEnter={e => { if (t.aciklama || t.not_aciklama) setNotTooltip({ visible: true, x: e.clientX, y: e.clientY, aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "" }); }}
+                    onMouseLeave={() => setNotTooltip(p => ({ ...p, visible: false }))}
+                  >
+                    <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {t.aciklama ? t.aciklama : <span style={{ color:"#d1d5db" }}>—</span>}
+                    </div>
                     {t.not_aciklama && (
-                      <div style={{ marginTop: "6px", paddingTop: "6px", borderTop: "1px solid #f1f5f9" }}>
-                        <span style={{ fontSize: "10px", fontWeight: 700, color: "#d97706", letterSpacing: "0.5px", textTransform: "uppercase" }}>Not · </span>
-                        <span style={{ fontSize: "12px", color: "#6b7280", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{t.not_aciklama}</span>
+                      <div style={{ fontSize:"11px", color:"#d97706", marginTop:"2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        📝 {t.not_aciklama.split(/\s+/)[0]}…
                       </div>
                     )}
-                    {t.red_aciklama && <div style={{ color: "#dc2626", fontSize: "11px", marginTop: "4px" }}>Red: {t.red_aciklama}</div>}
+                    {t.red_aciklama && <div style={{ color:"#dc2626", fontSize:"11px", marginTop:"2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Red: {t.red_aciklama}</div>}
                   </td>
                   <td style={{ padding: "12px 16px" }}>
                     {durumBadge(t.durum)}
