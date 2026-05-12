@@ -12130,7 +12130,7 @@ function App() {
 
             {(token || financeToken) && (
               <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", display:"flex", alignItems:"center", gap:"10px" }}>
-                {user?.name && (
+                {user?.name && !isAdmin && !localStorage.getItem("financeToken") && (
                   <span style={{ fontSize:"13px", fontWeight:600, color:"#1e3a5f", background:"#f0f4ff", border:"1px solid #c7d7fc", borderRadius:"8px", padding:"7px 13px", whiteSpace:"nowrap" }}>
                     👤 {user.name}
                   </span>
