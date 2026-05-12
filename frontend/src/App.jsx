@@ -7835,6 +7835,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [completedCrop, setCompletedCrop] = useState(null);
   const cropImgRef = useRef(null);
   const cropCanvasRef = useRef(null);
+  const [listLoading, setListLoading] = useState(false);
 
   const load = async () => {
     const r = await fetch(`${API_BASE}/hr/masraf-form`);
@@ -8621,6 +8622,58 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
       </div>
 
       {/* List */}
+      {isMobile ? (
+        <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+          {visibleList.length === 0 && <div style={{ textAlign:"center", color:"#9ca3af", padding:"32px" }}>Kayıt bulunamadı</div>}
+          {visibleList.map(f => {
+            const needsMyAction = (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE");
+            const myPendingRow = !isApprover && f.talep_eden_email===currentUser?.email && ["PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum);
+            const cardBorder = needsMyAction ? "3px solid #f59e0b" : myPendingRow ? "3px solid #f87171" : "3px solid #e5e7eb";
+            const cardBg = needsMyAction ? "#fffbeb" : myPendingRow ? "#fef2f2" : "#fff";
+            return (
+              <div key={f.id} style={{ background:cardBg, border:cardBorder, borderRadius:"12px", padding:"14px 16px", boxShadow:"0 2px 8px rgba(0,0,0,0.05)" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:"15px" }}>{f.personel_ad || f.talep_eden_ad}</div>
+                    <div style={{ fontSize:"12px", color:"#6b7280" }}>#{f.id} · {f.donem}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    {durumBadge(f.durum)}
+                    <div style={{ fontWeight:800, fontSize:"16px", color:"#1e3a5f", marginTop:"4px" }}>₺{Number(f.genel_toplam||0).toLocaleString("tr-TR")}</div>
+                  </div>
+                </div>
+                {needsMyAction && <div style={{ fontSize:"12px", fontWeight:700, color:"#92400e", marginBottom:"8px" }}>⏳ Onayınızı bekliyor</div>}
+                {myPendingRow && <div style={{ fontSize:"12px", fontWeight:700, color:"#b91c1c", marginBottom:"8px" }}>🕐 {f.durum==="PM_BEKLE"?"PM onayı bekleniyor":"Direktör onayı bekleniyor"}</div>}
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                  <button onClick={()=>loadDetail(f.id)}
+                    style={{ padding:"7px 14px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>İncele</button>
+                  {f.durum==="TASLAK" && f.talep_eden_email===currentUser?.email && (
+                    <button disabled={listLoading} onClick={async()=>{
+                      setListLoading(true);
+                      try { const r=await fetch(`${API_BASE}/hr/masraf-form/${f.id}`); const d=await r.json(); setActiveForm(d); setKalemler(d.kalemler||[]); loadBakiye(d.personel_id); }
+                      finally { setListLoading(false); }
+                    }} style={{ padding:"7px 14px", background: listLoading?"#9ca3af":"#d1fae5", color: listLoading?"#fff":"#065f46", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor: listLoading?"not-allowed":"pointer" }}>
+                      {listLoading ? "Yükleniyor..." : "✏️ Düzenle"}
+                    </button>
+                  )}
+                  {needsMyAction && (
+                    <>
+                      <button onClick={()=>{ setNotModal({id:f.id,action:isPM?"pm":"dir"}); setNotText(""); }}
+                        style={{ padding:"7px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
+                      <button onClick={()=>{ setRedModal(f.id); setRedText(""); }}
+                        style={{ padding:"7px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
+                    </>
+                  )}
+                  {isMuhasebe && f.durum==="TAMAMLANDI" && (
+                    <button onClick={async()=>{ if(window.confirm("Arşivlensin mi?")){ await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`,{method:"PUT"}); load(); } }}
+                      style={{ padding:"7px 14px", background:"#ede9fe", color:"#5b21b6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>🗂 Arşivle</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
       <div style={{ background:"#fff", borderRadius:"16px", boxShadow:"0 4px 20px rgba(0,0,0,0.07)", overflow:"hidden" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
           <thead>
@@ -8653,8 +8706,13 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                     <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
                       <button onClick={()=>loadDetail(f.id)} style={{ padding:"4px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>İncele</button>
                       {f.durum==="TASLAK" && f.talep_eden_email===currentUser?.email && (
-                        <button onClick={async()=>{ const r=await fetch(`${API_BASE}/hr/masraf-form/${f.id}`); const d=await r.json(); setActiveForm(d); setKalemler(d.kalemler||[]); loadBakiye(d.personel_id); }}
-                          style={{ padding:"4px 12px", background:"#d1fae5", color:"#065f46", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
+                        <button disabled={listLoading} onClick={async()=>{
+                          setListLoading(true);
+                          try { const r=await fetch(`${API_BASE}/hr/masraf-form/${f.id}`); const d=await r.json(); setActiveForm(d); setKalemler(d.kalemler||[]); loadBakiye(d.personel_id); }
+                          finally { setListLoading(false); }
+                        }} style={{ padding:"4px 12px", background: listLoading?"#9ca3af":"#d1fae5", color: listLoading?"#fff":"#065f46", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor: listLoading?"not-allowed":"pointer" }}>
+                          {listLoading ? "Yükleniyor..." : "Düzenle"}
+                        </button>
                       )}
                       {needsMyAction && (
                         <>
@@ -8677,6 +8735,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* New form modal */}
       {showNewForm && (
