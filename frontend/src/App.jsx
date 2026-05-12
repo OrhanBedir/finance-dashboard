@@ -11518,7 +11518,9 @@ function App() {
     const u = (() => { try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; } })();
     const bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"];
     const isBolge = bolgeMudurEmails.includes(u?.email) || ["rollout_mudur","bolge_mudur"].includes((u?.role||"").toLowerCase());
-    return (u?.role === "user" && !isBolge) ? "masraf" : "finance";
+    if (u?.role === "user" && !isBolge) return "masraf";
+    if (isBolge) return "region";
+    return "finance";
   });
   const [pendingAvansCount, setPendingAvansCount] = useState(0);
   const [pendingMasrafCount, setPendingMasrafCount] = useState(0);
