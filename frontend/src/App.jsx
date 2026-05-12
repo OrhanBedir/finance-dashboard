@@ -8563,9 +8563,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                         ↩ Yeniden Seç
                       </button>
                     </div>
-                    <div style={{ maxHeight:"320px", overflowY:"auto", background:"#f9fafb", borderRadius:"8px", padding:"8px" }}>
-                      <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)} style={{ maxWidth:"100%" }}>
-                        <img ref={cropImgRef} src={cropSrc} alt="fiş" style={{ maxWidth:"100%", display:"block" }}
+                    <div style={{ background:"#f9fafb", borderRadius:"8px", padding:"8px" }}>
+                      <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)} style={{ width:"100%" }}>
+                        <img ref={cropImgRef} src={cropSrc} alt="fiş" style={{ width:"100%", height:"auto", display:"block" }}
                           onLoad={e => {
                             const { width, height } = e.currentTarget;
                             const c = centerCrop(makeAspectCrop({ unit:"%", width:90 }, width/height, width, height), width, height);
@@ -8581,7 +8581,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                     🔍 Fiş okunuyor, lütfen bekleyin...
                   </p>
                 )}
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", position:"sticky", bottom:0, background:"#fff", paddingTop:"12px", marginTop:"4px" }}>
                   <button disabled={isUploading || !cropSrc} onClick={async () => {
                     if (!cropSrc) return;
                     let fileToUpload;
