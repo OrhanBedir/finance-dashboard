@@ -9280,10 +9280,12 @@ app.get("/hr/masraf-form/:id", async (req, res) => {
 app.post("/hr/masraf-form", async (req, res) => {
   try {
     const { personel_id, talep_eden_email, talep_eden_ad, donem } = req.body;
+    const noRes = await pool.query(`SELECT COALESCE(MAX(form_no), 0) + 1 AS next_no FROM masraf_form`);
+    const nextNo = noRes.rows[0].next_no;
     const { rows } = await pool.query(
-      `INSERT INTO masraf_form (personel_id,talep_eden_email,talep_eden_ad,donem)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [personel_id, talep_eden_email, talep_eden_ad, donem]
+      `INSERT INTO masraf_form (personel_id,talep_eden_email,talep_eden_ad,donem,form_no)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [personel_id, talep_eden_email, talep_eden_ad, donem, nextNo]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -9586,17 +9588,12 @@ app.get("/hr/ofis-belge/file/:filename", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT submit for approval (TASLAK → PM_BEKLE) — form_no ata
+// PUT submit for approval (TASLAK → PM_BEKLE)
 app.put("/hr/masraf-form/:id/submit", async (req, res) => {
   try {
-    // Bir sonraki form numarasını bul (TASLAK olmayanların sayısı + 1)
-    const { rows: numRows } = await pool.query(
-      `SELECT COALESCE(MAX(form_no), 0) + 1 AS next_no FROM masraf_form WHERE form_no IS NOT NULL`
-    );
-    const nextNo = numRows[0].next_no;
     const { rows } = await pool.query(
-      `UPDATE masraf_form SET durum='PM_BEKLE', form_no=$2 WHERE id=$1 AND durum='TASLAK' RETURNING *`,
-      [req.params.id, nextNo]
+      `UPDATE masraf_form SET durum='PM_BEKLE' WHERE id=$1 AND durum='TASLAK' RETURNING *`,
+      [req.params.id]
     );
     if (!rows[0]) return res.status(422).json({ error: "Form taslak durumunda değil veya bulunamadı" });
     res.json(rows[0]);
@@ -9705,7 +9702,7 @@ app.get("/hr/masraf-form/:id/excel", async (req, res) => {
     ws.addRow([]);
     ws.getRow(1).height = 30;
     mergeAndStyle(1, 2, 5, "MASRAF FORMU", navy, { bold: true, color: { argb: white }, name: "Arial", size: 14 });
-    mergeAndStyle(1, 7, 7, `Doküman Kodu: ${String(form.form_no || form.id || 1).padStart(3,'0')}`, null, boldNavy, "right");
+    mergeAndStyle(1, 7, 7, `Doküman Kodu: MF.${String(form.form_no || form.id).padStart(3,"0")}`, null, boldNavy, "right");
 
     // Row 2: donem + date + rev
     ws.addRow([]);
@@ -10019,7 +10016,7 @@ app.get("/hr/masraf-form/donem/:donem/excel", async (req, res) => {
 
       ws.addRow([]); ws.getRow(1).height = 30;
       mergeAndStyle(1, 2, 5, "MASRAF FORMU", navy, { bold: true, color: { argb: white }, name: "Arial", size: 14 });
-      mergeAndStyle(1, 7, 7, `Doküman Kodu: ${String(form.form_no || form.id || 1).padStart(3,'0')}`, null, boldNavy, "right");
+      mergeAndStyle(1, 7, 7, `Doküman Kodu: MF.${String(form.form_no || form.id).padStart(3,"0")}`, null, boldNavy, "right");
       ws.addRow([]); ws.getRow(2).height = 18;
       mergeAndStyle(2, 2, 5, `Dönem: ${form.donem}`, null, boldNavy, "left");
       mergeAndStyle(2, 7, 7, `Oluşturma: ${new Date(form.created_at).toLocaleDateString("tr-TR")}`, null, { name:"Arial", size:9, italic:true }, "right");

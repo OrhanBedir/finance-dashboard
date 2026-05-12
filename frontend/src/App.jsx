@@ -8242,7 +8242,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
               <div style={{ fontSize:"12px", opacity:0.8, marginTop:"2px" }}>{activeForm.personel_ad || activeForm.talep_eden_ad} · Dönem: {activeForm.donem}</div>
             </div>
             <div style={{ textAlign:"right", color:"#93c5fd", fontSize:"11px" }}>
-              <div>Doküman Kodu: FR.69</div>
+              <div>Doküman Kodu: MF.{String(activeForm.form_no || activeForm.id).padStart(3, "0")}</div>
               <div>Rev No: 0 · Rev. Tarihi: -</div>
               {bakiye !== null && (
                 <div style={{ marginTop:"6px", color:"#fff" }}>
