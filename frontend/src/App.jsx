@@ -7850,7 +7850,12 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
-    setPersonelList(await r.json());
+    const data = await r.json();
+    setPersonelList(data);
+    if (!isApprover && currentUser?.email) {
+      const match = data.find(p => (p.email || "").toLowerCase() === currentUser.email.toLowerCase());
+      if (match) setNfPersonelId(String(match.id));
+    }
   };
 
   const loadBakiye = async (pid) => {
@@ -8597,7 +8602,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
               <div>
                 <label style={{ fontSize:"12px", fontWeight:600, display:"block", marginBottom:"4px" }}>Personel</label>
                 <select value={nfPersonelId} onChange={e=>setNfPersonelId(e.target.value)}
-                  style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px" }}>
+                  disabled={!isApprover}
+                  style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", background: !isApprover ? "#f9fafb" : "#fff" }}>
                   <option value="">Personel seçin...</option>
                   {personelList.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
                 </select>

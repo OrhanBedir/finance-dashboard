@@ -9304,7 +9304,8 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
     if (!kalem.rows[0]) return res.status(404).json({ error: "Kalem bulunamadı" });
     const { form_id, kategori } = kalem.rows[0];
 
-    const { amount: ocrTutar, plaka: ocrPlaka, rawPlates } = await ocrFis(req.file.buffer);
+    const ocrTimeout = new Promise(resolve => setTimeout(() => resolve({ amount: null, plaka: null, rawPlates: [] }), 7000));
+    const { amount: ocrTutar, plaka: ocrPlaka, rawPlates } = await Promise.race([ocrFis(req.file.buffer), ocrTimeout]);
 
     let ocrPlakaEslesti = null;
     let matchedPlaka = ocrPlaka;
