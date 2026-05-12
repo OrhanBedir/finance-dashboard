@@ -7935,6 +7935,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   };
 
   const closeFotoModal = () => {
+    if (cropSrc?.startsWith("blob:")) URL.revokeObjectURL(cropSrc);
     setFotoModal(null);
     setUploadFile(null);
     setOcrResult(null);
@@ -8447,16 +8448,36 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
           // Default: file selector
           return (
             <div onClick={closeFotoModal} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:1000 }}>
-              <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"28px 24px", width:"100%", maxWidth:"480px", position:"relative" }}>
+              <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"28px 24px", width:"100%", maxWidth:"480px", position:"relative", maxHeight:"90vh", overflowY:"auto" }}>
                 <button onClick={closeFotoModal}
                   style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"30px", height:"30px", fontSize:"16px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
                 <h3 style={{ margin:"0 0 8px", fontSize:"18px" }}>📷 Fiş Fotoğrafı Yükle</h3>
                 <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 12px" }}>Fişi çekin veya dosya seçin. Kırpma yapabilirsiniz.</p>
                 {/* Gizli inputlar */}
-                <input id="fis-camera-input" type="file" accept="image/*" capture="environment" style={{ display:"none" }}
-                  onChange={e => { const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>{setCropSrc(ev.target.result);setCrop(null);setCompletedCrop(null);}; r.readAsDataURL(f); e.target.value=""; }} />
-                <input id="fis-file-input" type="file" accept="image/*,application/pdf" style={{ display:"none" }}
-                  onChange={e => { const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>{setCropSrc(ev.target.result);setCrop(null);setCompletedCrop(null);}; r.readAsDataURL(f); e.target.value=""; }} />
+                <input id="fis-camera-input" type="file" accept="image/*" capture="environment"
+                  style={{ position:"absolute", opacity:0, width:0, height:0, pointerEvents:"none" }}
+                  onChange={e => {
+                    const f = e.target.files[0];
+                    if (!f) return;
+                    if (cropSrc?.startsWith("blob:")) URL.revokeObjectURL(cropSrc);
+                    const url = URL.createObjectURL(f);
+                    e.target.value = "";
+                    setCropSrc(url);
+                    setCrop(null);
+                    setCompletedCrop(null);
+                  }} />
+                <input id="fis-file-input" type="file" accept="image/*,application/pdf"
+                  style={{ position:"absolute", opacity:0, width:0, height:0, pointerEvents:"none" }}
+                  onChange={e => {
+                    const f = e.target.files[0];
+                    if (!f) return;
+                    if (cropSrc?.startsWith("blob:")) URL.revokeObjectURL(cropSrc);
+                    const url = URL.createObjectURL(f);
+                    e.target.value = "";
+                    setCropSrc(url);
+                    setCrop(null);
+                    setCompletedCrop(null);
+                  }} />
                 {!cropSrc && (
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"12px" }}>
                     <button onClick={()=>document.getElementById("fis-camera-input").click()}
@@ -8473,7 +8494,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                   <div style={{ marginBottom:"12px" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
                       <p style={{ fontSize:"12px", color:"#374151", margin:0, fontWeight:600 }}>✂️ Kırpın, ardından "Onayla" ya tıklayın:</p>
-                      <button onClick={()=>{setCropSrc(null);setCrop(null);setCompletedCrop(null);}}
+                      <button onClick={()=>{ if(cropSrc?.startsWith("blob:")) URL.revokeObjectURL(cropSrc); setCropSrc(null);setCrop(null);setCompletedCrop(null);}}
                         style={{ fontSize:"12px", color:"#6b7280", background:"#f3f4f6", border:"none", borderRadius:"6px", padding:"4px 10px", cursor:"pointer" }}>
                         ↩ Yeniden Seç
                       </button>
@@ -8516,6 +8537,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                       const blob = await resp.blob();
                       fileToUpload = new File([blob], "fis.jpg", { type: blob.type });
                     }
+                    if (cropSrc?.startsWith("blob:")) URL.revokeObjectURL(cropSrc);
                     setUploadFile(fileToUpload);
                     handleUploadFoto(fotoModal, fileToUpload, true, null);
                   }}
