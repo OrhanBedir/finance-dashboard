@@ -8676,6 +8676,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [redModal, setRedModal] = useState(null);
   const [redText, setRedText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [notTooltip, setNotTooltip] = useState({ visible: false, x: 0, y: 0, aciklama: "", not_aciklama: "" });
 
   const _email = (currentUser?.email || "").toLowerCase();
   const isPM = _email === "orhan.bedir@simsektel.com";
@@ -8798,6 +8799,31 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   return (
     <div style={{ maxWidth: "1100px", margin: "24px auto" }}>
+      {notTooltip.visible && (
+        <div style={{
+          position: "fixed", zIndex: 9999,
+          left: notTooltip.x + 14, top: notTooltip.y - 10,
+          background: "#1e293b", color: "#f1f5f9",
+          borderRadius: "10px", padding: "12px 16px",
+          maxWidth: "340px", fontSize: "13px", lineHeight: "1.6",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+          pointerEvents: "none",
+        }}>
+          {notTooltip.aciklama && (
+            <div>
+              <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 700, marginBottom: "4px" }}>AÇIKLAMA</div>
+              <div>{notTooltip.aciklama}</div>
+            </div>
+          )}
+          {notTooltip.aciklama && notTooltip.not_aciklama && <div style={{ borderTop: "1px solid #334155", margin: "8px 0" }} />}
+          {notTooltip.not_aciklama && (
+            <div>
+              <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 700, marginBottom: "4px" }}>NOT</div>
+              <div style={{ whiteSpace: "pre-wrap" }}>{notTooltip.not_aciklama}</div>
+            </div>
+          )}
+        </div>
+      )}
       {myPendingCount > 0 && (
         <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:"12px", padding:"12px 18px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
           <span style={{ fontSize:"20px" }}>⏳</span>
@@ -8962,8 +8988,14 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   <td style={{ padding: "12px 16px", fontSize: "13px", color: "#374151", fontWeight: 600 }}>{t.proje || "—"}</td>
                   <td style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280" }}>{t.personel_ad || "—"}</td>
                   <td style={{ padding: "12px 16px", fontWeight: 700, fontSize: "14px", whiteSpace: "nowrap" }}>₺{Number(t.tutar).toLocaleString("tr-TR")}</td>
-                  <td style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280", maxWidth: "180px" }}>
-                    <div title={t.aciklama}>{t.aciklama ? (t.aciklama.length > 35 ? t.aciklama.slice(0, 35) + "…" : t.aciklama) : "—"}</div>
+                  <td
+                    style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280", maxWidth: "180px", cursor: (t.aciklama || t.not_aciklama) ? "pointer" : "default" }}
+                    onMouseEnter={e => { if (t.aciklama || t.not_aciklama) setNotTooltip({ visible: true, x: e.clientX, y: e.clientY, aciklama: t.aciklama, not_aciklama: t.not_aciklama }); }}
+                    onMouseMove={e => { if (notTooltip.visible) setNotTooltip(p => ({ ...p, x: e.clientX, y: e.clientY })); }}
+                    onMouseLeave={() => setNotTooltip(p => ({ ...p, visible: false }))}
+                  >
+                    <div>{t.aciklama ? (t.aciklama.length > 35 ? t.aciklama.slice(0, 35) + "…" : t.aciklama) : "—"}</div>
+                    {t.not_aciklama && <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>📝 Not var</div>}
                     {t.red_aciklama && <div style={{ color: "#dc2626", fontSize: "11px" }}>Red: {t.red_aciklama}</div>}
                   </td>
                   <td style={{ padding: "12px 16px" }}>
