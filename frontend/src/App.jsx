@@ -9011,14 +9011,19 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   return (
     <div style={{ maxWidth: "1100px", margin: "24px auto" }}>
-      {notTooltip.visible && (
+      {notTooltip.visible && (() => {
+        const TW = 320;
+        const spaceRight = window.innerWidth - notTooltip.x - 16;
+        const tooltipLeft = spaceRight >= TW + 8 ? notTooltip.x + 16 : notTooltip.x - TW - 12;
+        const tooltipTop = Math.min(notTooltip.y - 8, window.innerHeight - 300);
+        return (
         <div style={{
           position: "fixed", zIndex: 9999,
-          left: notTooltip.x + 16, top: notTooltip.y - 8,
+          left: Math.max(8, tooltipLeft), top: Math.max(8, tooltipTop),
           background: "#fff",
           borderRadius: "14px",
           padding: "0",
-          maxWidth: "360px", minWidth: "200px",
+          width: `${TW}px`,
           boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1), 0 10px 30px rgba(0,0,0,0.18)",
           border: "1px solid #e2e8f0",
           pointerEvents: "none",
@@ -9043,7 +9048,8 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
       {myPendingCount > 0 && (
         <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:"12px", padding:"12px 18px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
           <span style={{ fontSize:"20px" }}>⏳</span>
