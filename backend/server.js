@@ -9851,45 +9851,11 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
           rawBuf = Buffer.from(await resp.arrayBuffer());
         } else { continue; }
 
-        // Smart crop: find receipt bounding box using column/row bright-pixel density
+        // No crop — use full image, rotate landscape to portrait
         const meta0 = await sharp(rawBuf).metadata();
         const origW = meta0.width || 800, origH = meta0.height || 1200;
-        const SCAN_W = 300;
-        const scaleF = SCAN_W / origW;
-        const scanH = Math.round(origH * scaleF);
-        const { data: grayData } = await sharp(rawBuf)
-          .resize(SCAN_W, scanH, { fit: "fill" })
-          .greyscale().raw().toBuffer({ resolveWithObject: true });
-
-        const BRIGHT = 200; // only very white/light pixels
-        const DENSITY = 0.35; // column/row must have >35% bright pixels
-        // Find columns with high bright-pixel density
-        const colDense = Array.from({ length: SCAN_W }, (_, x) => {
-          let cnt = 0;
-          for (let y = 0; y < scanH; y++) if (grayData[y * SCAN_W + x] > BRIGHT) cnt++;
-          return cnt / scanH;
-        });
-        const rowDense = Array.from({ length: scanH }, (_, y) => {
-          let cnt = 0;
-          for (let x = 0; x < SCAN_W; x++) if (grayData[y * SCAN_W + x] > BRIGHT) cnt++;
-          return cnt / SCAN_W;
-        });
-        const denseColsX = colDense.map((d, i) => d >= DENSITY ? i : -1).filter(i => i >= 0);
-        const denseRowsY = rowDense.map((d, i) => d >= DENSITY ? i : -1).filter(i => i >= 0);
-        const PAD = 10;
-        let cropLeft, cropTop, cropWidth, cropHeight;
-        if (denseColsX.length > 10 && denseRowsY.length > 10) {
-          cropLeft   = Math.max(0, Math.floor(denseColsX[0] / scaleF) - PAD);
-          cropTop    = Math.max(0, Math.floor(denseRowsY[0] / scaleF) - PAD);
-          cropWidth  = Math.min(origW - cropLeft, Math.ceil((denseColsX[denseColsX.length-1] - denseColsX[0]) / scaleF) + PAD * 2);
-          cropHeight = Math.min(origH - cropTop,  Math.ceil((denseRowsY[denseRowsY.length-1] - denseRowsY[0]) / scaleF) + PAD * 2);
-        }
-        let pipeline = (cropWidth > 50 && cropHeight > 50)
-          ? sharp(rawBuf).extract({ left: cropLeft, top: cropTop, width: cropWidth, height: cropHeight })
-          : sharp(rawBuf);
-        const fw = cropWidth > 50 ? cropWidth : origW;
-        const fh = cropHeight > 50 ? cropHeight : origH;
-        if (fw > fh) pipeline = pipeline.rotate(90);
+        let pipeline = sharp(rawBuf);
+        if (origW > origH) pipeline = pipeline.rotate(90);
 
         const buf = await pipeline.jpeg({ quality: 88 }).toBuffer({ resolveWithObject: true });
         trimmed.push({ buf: buf.data, w: buf.info.width, h: buf.info.height, meta: img });
