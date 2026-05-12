@@ -9012,14 +9012,14 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   return (
     <div style={{ maxWidth: "1100px", margin: "24px auto" }}>
       {notTooltip.visible && (() => {
-        const TW = 320;
-        const spaceRight = window.innerWidth - notTooltip.x - 16;
-        const tooltipLeft = spaceRight >= TW + 8 ? notTooltip.x + 16 : notTooltip.x - TW - 12;
-        const tooltipTop = Math.min(notTooltip.y - 8, window.innerHeight - 300);
+        const TW = 300;
+        const showRight = notTooltip.x + TW + 24 <= window.innerWidth;
+        const left = showRight ? notTooltip.x + 16 : notTooltip.x - TW - 16;
+        const top = Math.min(notTooltip.y - 8, window.innerHeight - 320);
         return (
         <div style={{
           position: "fixed", zIndex: 9999,
-          left: Math.max(8, tooltipLeft), top: Math.max(8, tooltipTop),
+          left: Math.max(8, left), top: Math.max(8, top),
           background: "#fff",
           borderRadius: "14px",
           padding: "0",
@@ -9243,7 +9243,6 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   <td
                     style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280", maxWidth: "180px", cursor: (t.aciklama || t.not_aciklama) ? "pointer" : "default" }}
                     onMouseEnter={e => { if (t.aciklama || t.not_aciklama) setNotTooltip({ visible: true, x: e.clientX, y: e.clientY, aciklama: t.aciklama, not_aciklama: t.not_aciklama }); }}
-                    onMouseMove={e => { if (notTooltip.visible) setNotTooltip(p => ({ ...p, x: e.clientX, y: e.clientY })); }}
                     onMouseLeave={() => setNotTooltip(p => ({ ...p, visible: false }))}
                   >
                     <div>{t.aciklama ? (t.aciklama.length > 35 ? t.aciklama.slice(0, 35) + "…" : t.aciklama) : "—"}</div>
