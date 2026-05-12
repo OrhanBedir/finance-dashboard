@@ -9102,22 +9102,22 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Tutar (₺) <span style={{ color: "#dc2626" }}>*</span>
                   <input type="number" min="1" required value={form.tutar} onChange={e => setForm(f => ({...f, tutar: e.target.value}))}
-                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box" }} />
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", background: "#fff", color: "#1f2937" }} />
                 </label>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Tarih <span style={{ color: "#dc2626" }}>*</span>
                   <input type="date" required value={form.tarih} onChange={e => setForm(f => ({...f, tarih: e.target.value}))}
-                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box" }} />
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", background: "#fff", color: "#1f2937" }} />
                 </label>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Açıklama
                   <input value={form.aciklama} onChange={e => setForm(f => ({...f, aciklama: e.target.value}))}
-                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box" }} />
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", background: "#fff", color: "#1f2937" }} />
                 </label>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Not (opsiyonel)
                   <textarea value={form.not_aciklama} onChange={e => setForm(f => ({...f, not_aciklama: e.target.value}))} rows={3}
-                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", resize: "vertical" }} />
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", resize: "vertical", background: "#fff", color: "#1f2937" }} />
                 </label>
                 <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
                   <button type="button" onClick={() => setShowModal(false)}
