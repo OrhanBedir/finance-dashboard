@@ -9304,32 +9304,48 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
     if (!kalem.rows[0]) return res.status(404).json({ error: "Kalem bulunamadı" });
     const { form_id, kategori } = kalem.rows[0];
 
-    const ocrTimeout = new Promise(resolve => setTimeout(() => resolve({ amount: null, plaka: null, rawPlates: [] }), 7000));
-    const { amount: ocrTutar, plaka: ocrPlaka, rawPlates } = await Promise.race([ocrFis(req.file.buffer), ocrTimeout]);
-
-    let ocrPlakaEslesti = null;
-    let matchedPlaka = ocrPlaka;
-    if (kategori === "YAKIT" && (ocrPlaka || rawPlates?.length)) {
-      const fleet = await pool.query("SELECT plaka FROM araclar WHERE aktif=true");
-      const dbPlakalar = fleet.rows.map(r => r.plaka);
-      const candidates = rawPlates?.length ? rawPlates : [ocrPlaka];
-      for (const cand of candidates) {
-        const found = plakaEsles(cand, dbPlakalar);
-        if (found) { matchedPlaka = found; ocrPlakaEslesti = true; break; }
-      }
-      if (ocrPlakaEslesti === null) ocrPlakaEslesti = false;
-    }
-
+    // 1. Upload first — guaranteed regardless of OCR
     const fname = `${Date.now()}-${req.file.originalname}`;
     const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype);
-
     const { rows } = await pool.query(
-      `INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu, ocr_tutar, ocr_plaka, ocr_plaka_eslesti)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [kalemId, form_id, req.file.originalname, url, ocrTutar, matchedPlaka||ocrPlaka, ocrPlakaEslesti]
+      `INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu)
+       VALUES ($1,$2,$3,$4) RETURNING *`,
+      [kalemId, form_id, req.file.originalname, url]
     );
-    res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const belgeId = rows[0].id;
+
+    // 2. OCR with strict timeout — runs after upload is saved
+    const fileBuffer = req.file.buffer;
+    const ocrTimeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
+    const ocrResult = await Promise.race([ocrFis(fileBuffer), ocrTimeout]);
+
+    let ocrTutar = null, matchedPlaka = null, ocrPlakaEslesti = null;
+    if (ocrResult) {
+      ocrTutar = ocrResult.amount;
+      let ocrPlaka = ocrResult.plaka;
+      const rawPlates = ocrResult.rawPlates || [];
+      if (kategori === "YAKIT" && (ocrPlaka || rawPlates.length)) {
+        const fleet = await pool.query("SELECT plaka FROM araclar WHERE aktif=true");
+        const dbPlakalar = fleet.rows.map(r => r.plaka);
+        const candidates = rawPlates.length ? rawPlates : [ocrPlaka];
+        for (const cand of candidates) {
+          const found = plakaEsles(cand, dbPlakalar);
+          if (found) { matchedPlaka = found; ocrPlakaEslesti = true; break; }
+        }
+        if (ocrPlakaEslesti === null) { matchedPlaka = ocrPlaka; ocrPlakaEslesti = false; }
+      }
+    }
+
+    // 3. Update with OCR results (even if null)
+    const updated = await pool.query(
+      `UPDATE masraf_belge SET ocr_tutar=$1, ocr_plaka=$2, ocr_plaka_eslesti=$3 WHERE id=$4 RETURNING *`,
+      [ocrTutar, matchedPlaka, ocrPlakaEslesti, belgeId]
+    );
+    res.json(updated.rows[0]);
+  } catch (e) {
+    console.error("MASRAF BELGE UPLOAD ERROR:", e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // DELETE belge
@@ -9807,7 +9823,7 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
     const formRes = await pool.query("SELECT * FROM masraf_form WHERE id=$1", [req.params.id]);
     const form = formRes.rows[0];
 
-    const doc = new PDFDocument({ size: "A4", margin: 20, layout: "landscape" });
+    const doc = new PDFDocument({ size: "A4", margin: 20 });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="masraf_fisleri_${req.params.id}.pdf"`);
     doc.pipe(res);
@@ -9815,12 +9831,12 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
     const imgFiles = belgeler.rows.filter(b => /\.(jpg|jpeg|png|gif|webp|heic)$/i.test(b.dosya_yolu));
     const sharp = require("sharp");
     const margin = 20;
-    const gap = 16;
-    const labelH = 18;
-    const pageW = doc.page.width;
-    const pageH = doc.page.height;
+    const gap = 12;
+    const labelH = 20;
+    const pageW = doc.page.width;   // 595 pt (A4 portrait)
+    const pageH = doc.page.height;  // 842 pt
 
-    // Trim each image and collect buffers + dimensions
+    // Fetch, trim and rotate each image to portrait orientation
     const trimmed = [];
     for (const img of imgFiles) {
       try {
@@ -9829,13 +9845,15 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
           const fetch = require("node-fetch");
           const resp = await fetch(img.dosya_yolu);
           rawBuf = Buffer.from(await resp.arrayBuffer());
-        } else {
-          continue; // Skip old local files in production
-        }
-        const buf = await sharp(rawBuf)
-          .trim({ threshold: 120 })
-          .jpeg({ quality: 92 })
-          .toBuffer({ resolveWithObject: true });
+        } else { continue; }
+
+        // Trim whitespace then rotate landscape to portrait
+        let pipeline = sharp(rawBuf).trim({ threshold: 120 });
+        const meta0 = await sharp(rawBuf).metadata();
+        const w0 = meta0.width || 1, h0 = meta0.height || 1;
+        if (w0 > h0) pipeline = pipeline.rotate(90); // landscape → portrait
+
+        const buf = await pipeline.jpeg({ quality: 88 }).toBuffer({ resolveWithObject: true });
         trimmed.push({ buf: buf.data, w: buf.info.width, h: buf.info.height, meta: img });
       } catch {
         try {
@@ -9844,13 +9862,19 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
             const resp = await fetch(img.dosya_yolu);
             const rawBuf = Buffer.from(await resp.arrayBuffer());
             const info = await sharp(rawBuf).metadata();
-            trimmed.push({ buf: rawBuf, w: info.width || 400, h: info.height || 600, meta: img });
+            const w0 = info.width || 400, h0 = info.height || 600;
+            const isLandscape = w0 > h0;
+            const buf = await sharp(rawBuf)
+              .rotate(isLandscape ? 90 : 0)
+              .jpeg({ quality: 88 })
+              .toBuffer({ resolveWithObject: true });
+            trimmed.push({ buf: buf.data, w: buf.info.width, h: buf.info.height, meta: img });
           }
         } catch {}
       }
     }
 
-    // Layout: 2 per page, side by side, respecting receipt aspect ratio
+    // Layout: 2 columns side by side on portrait A4
     const availW = pageW - margin * 2;
     const slotW = (availW - gap) / 2;
     const maxImgH = pageH - margin * 2 - labelH;
@@ -9863,18 +9887,17 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
         firstPage = false;
       }
       const { buf, w, h, meta } = trimmed[i];
-      // Scale to fit within slot, preserving aspect ratio
-      const scale = Math.min(slotW / w, maxImgH / h, 1); // never upscale
+      const scale = Math.min(slotW / w, maxImgH / h);
       const imgW = Math.round(w * scale);
       const imgH = Math.round(h * scale);
       const x = margin + col * (slotW + gap) + (slotW - imgW) / 2;
       const y = margin;
       try {
         doc.image(buf, x, y, { width: imgW, height: imgH });
-        doc.fontSize(8).font("Helvetica").fillColor("#555")
+        doc.fontSize(7).font("Helvetica").fillColor("#444")
            .text(
              `${meta.kategori} · ₺${Number(meta.tutar).toLocaleString("tr-TR")} · ${new Date(meta.tarih).toLocaleDateString("tr-TR")}`,
-             x, y + imgH + 4, { width: imgW, align: "center" }
+             x, y + imgH + 3, { width: imgW, align: "center" }
            );
       } catch {}
     }
