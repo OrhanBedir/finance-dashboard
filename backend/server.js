@@ -9874,24 +9874,28 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
       }
     }
 
-    // Layout: 2 columns side by side on portrait A4
+    // Layout: 2×2 grid (4 per page) on portrait A4
+    const cols = 2, rows = 2;
     const availW = pageW - margin * 2;
-    const slotW = (availW - gap) / 2;
-    const maxImgH = pageH - margin * 2 - labelH;
+    const availH = pageH - margin * 2;
+    const slotW = (availW - gap * (cols - 1)) / cols;
+    const slotH = (availH - gap * (rows - 1) - labelH * rows) / rows;
 
     let firstPage = true;
     for (let i = 0; i < trimmed.length; i++) {
-      const col = i % 2;
-      if (col === 0) {
+      const posInPage = i % 4;
+      if (posInPage === 0) {
         if (!firstPage) doc.addPage();
         firstPage = false;
       }
+      const col = posInPage % cols;
+      const row = Math.floor(posInPage / cols);
       const { buf, w, h, meta } = trimmed[i];
-      const scale = Math.min(slotW / w, maxImgH / h);
+      const scale = Math.min(slotW / w, slotH / h);
       const imgW = Math.round(w * scale);
       const imgH = Math.round(h * scale);
       const x = margin + col * (slotW + gap) + (slotW - imgW) / 2;
-      const y = margin;
+      const y = margin + row * (slotH + labelH + gap) + (slotH - imgH) / 2;
       try {
         doc.image(buf, x, y, { width: imgW, height: imgH });
         doc.fontSize(7).font("Helvetica").fillColor("#444")
