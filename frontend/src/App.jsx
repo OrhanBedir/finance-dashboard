@@ -3,6 +3,8 @@ import "./App.css";
 import * as XLSX from "xlsx";
 import "react-datepicker/dist/react-datepicker.css";
 import DatePicker from "react-datepicker";
+import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
+import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
 function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
@@ -7828,6 +7830,11 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [ocrResult, setOcrResult] = useState(null); // {ocr_tutar, ocr_plaka, ocr_plaka_eslesti, belgeId}
   const [tutarUyariAciklama, setTutarUyariAciklama] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [cropSrc, setCropSrc] = useState(null);       // base64 of selected image
+  const [crop, setCrop] = useState(null);
+  const [completedCrop, setCompletedCrop] = useState(null);
+  const cropImgRef = useRef(null);
+  const cropCanvasRef = useRef(null);
 
   const load = async () => {
     const r = await fetch(`${API_BASE}/hr/masraf-form`);
@@ -7933,6 +7940,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     setOcrResult(null);
     setTutarUyariAciklama("");
     setFisOlmadanAciklama("");
+    setCropSrc(null);
+    setCrop(null);
+    setCompletedCrop(null);
   };
 
   const handleUploadFoto = async (kalemId, file, fis_var, fisAciklama, tutarUyariAciklamaOverride) => {
@@ -8442,12 +8452,30 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                   style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"30px", height:"30px", fontSize:"16px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
                 <h3 style={{ margin:"0 0 8px", fontSize:"18px" }}>📷 Fiş Fotoğrafı Yükle</h3>
                 <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 16px" }}>Fişi çekin veya dosya seçin. Sistem tutarı otomatik okuyacak.</p>
-                <input type="file" accept="image/*,application/pdf" capture="environment" onChange={e=>setUploadFile(e.target.files[0])}
-                  style={{ marginBottom:"16px", width:"100%", fontSize:"14px" }} />
-                {uploadFile && !isUploading && (
-                  <p style={{ fontSize:"12px", color:"#166534", background:"#dcfce7", padding:"8px 12px", borderRadius:"8px", margin:"0 0 12px" }}>
-                    ✅ Dosya seçildi — yüklemeye hazır.
-                  </p>
+                <input type="file" accept="image/*" capture="environment"
+                  onChange={e => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = ev => { setCropSrc(ev.target.result); setCrop(null); setCompletedCrop(null); };
+                    reader.readAsDataURL(file);
+                  }}
+                  style={{ marginBottom:"12px", width:"100%", fontSize:"14px" }} />
+                {cropSrc && (
+                  <div style={{ marginBottom:"12px" }}>
+                    <p style={{ fontSize:"12px", color:"#374151", margin:"0 0 8px", fontWeight:600 }}>✂️ İsterseniz kırpın, ardından "Onayla" ya tıklayın:</p>
+                    <div style={{ maxHeight:"320px", overflowY:"auto", background:"#f9fafb", borderRadius:"8px", padding:"8px" }}>
+                      <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)} style={{ maxWidth:"100%" }}>
+                        <img ref={cropImgRef} src={cropSrc} alt="fiş" style={{ maxWidth:"100%", display:"block" }}
+                          onLoad={e => {
+                            const { width, height } = e.currentTarget;
+                            const c = centerCrop(makeAspectCrop({ unit:"%", width:90 }, width/height, width, height), width, height);
+                            setCrop(c); setCompletedCrop(c);
+                          }} />
+                      </ReactCrop>
+                    </div>
+                    <canvas ref={cropCanvasRef} style={{ display:"none" }} />
+                  </div>
                 )}
                 {isUploading && (
                   <p style={{ fontSize:"13px", color:"#1d4ed8", background:"#dbeafe", padding:"10px 14px", borderRadius:"8px", margin:"0 0 12px" }}>
@@ -8455,9 +8483,30 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                   </p>
                 )}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-                  <button disabled={isUploading} onClick={()=>{ if(uploadFile) handleUploadFoto(fotoModal,uploadFile,true,null); else { const a=prompt("Neden fiş yükleyemediniz?"); if(a!==null) handleUploadFoto(fotoModal,null,false,a); } }}
-                    style={{ padding:"12px", background: isUploading ? "#9ca3af" : "#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor: isUploading ? "not-allowed" : "pointer" }}>
-                    {isUploading ? "Okunuyor..." : "Yükle ve Devam Et"}
+                  <button disabled={isUploading || !cropSrc} onClick={async () => {
+                    if (!cropSrc) return;
+                    let fileToUpload;
+                    if (completedCrop && cropImgRef.current && completedCrop.width > 0) {
+                      const img = cropImgRef.current;
+                      const canvas = document.createElement("canvas");
+                      const scaleX = img.naturalWidth / img.width;
+                      const scaleY = img.naturalHeight / img.height;
+                      canvas.width = completedCrop.width * scaleX;
+                      canvas.height = completedCrop.height * scaleY;
+                      const ctx = canvas.getContext("2d");
+                      ctx.drawImage(img, completedCrop.x * scaleX, completedCrop.y * scaleY, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+                      const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.92));
+                      fileToUpload = new File([blob], "fis.jpg", { type: "image/jpeg" });
+                    } else {
+                      const resp = await fetch(cropSrc);
+                      const blob = await resp.blob();
+                      fileToUpload = new File([blob], "fis.jpg", { type: blob.type });
+                    }
+                    setUploadFile(fileToUpload);
+                    handleUploadFoto(fotoModal, fileToUpload, true, null);
+                  }}
+                    style={{ padding:"12px", background: (isUploading || !cropSrc) ? "#9ca3af" : "#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor: (isUploading || !cropSrc) ? "not-allowed" : "pointer" }}>
+                    {isUploading ? "Okunuyor..." : "✓ Onayla ve Yükle"}
                   </button>
                   <button disabled={isUploading} onClick={()=>{ const a=prompt("Fiş olmadan ilerlemek için açıklama giriniz:"); if(a!==null) handleUploadFoto(fotoModal,null,false,a); }}
                     style={{ padding:"12px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
