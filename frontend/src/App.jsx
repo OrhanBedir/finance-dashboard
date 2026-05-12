@@ -8835,15 +8835,23 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   };
 
   const handleReddet = async () => {
-    if (!redText.trim()) { alert("Red açıklaması zorunlu"); return; }
-    await fetch(`${API_BASE}/hr/is-avans/${redModal}/reddet`, {
-      method: "PUT",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email })
-    });
-    setRedModal(null);
-    setRedText("");
-    load();
+    if (!redText.trim()) { alert("Red açıklaması girilmeden reddedilemez!"); return; }
+    try {
+      const r = await fetch(`${API_BASE}/hr/is-avans/${redModal}/reddet`, {
+        method: "PUT",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email })
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `Sunucu hatası (${r.status})`);
+      }
+      setRedModal(null);
+      setRedText("");
+      load();
+    } catch (err) {
+      alert("Reddetme işlemi başarısız: " + err.message);
+    }
   };
 
   const durumBadge = (durum) => {

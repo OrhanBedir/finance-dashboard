@@ -8950,6 +8950,8 @@ pool.query(`
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS gider_turu TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS bolge TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS proje TEXT;
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS reddeden_email TEXT;
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS red_aciklama TEXT;
 `).catch(e => console.error("is_avans_talep tablo hatası:", e.message));
 
 app.get("/hr/is-avans", async (req, res) => {
