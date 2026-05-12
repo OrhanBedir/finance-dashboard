@@ -9151,6 +9151,18 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     setQcReadyModalOpen(true);
   };
 
+  const openPoIptalModal = () => {
+    const filtered = rows.filter((row) => {
+      const reqQty = Number(row.requested_qty || 0);
+      const doneQty = Number(row.done_qty || 0);
+      return reqQty > doneQty;
+    });
+    setDetailTitle("⚠️ PO İptal Edilmeli");
+    setDetailRows(filtered);
+    setFilterText("");
+    setDetailModalOpen(true);
+  };
+
   const filteredRows = detailRows.filter((row) =>
     Object.values(row).some((val) =>
       String(val || "")
@@ -9923,6 +9935,22 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 value={executiveSummary.poOpenedNotInvoiced}
               />
               <Row label="PO Açılmamış İş" value={executiveSummary.noPO} />
+              <div
+                onClick={openPoIptalModal}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "10px 16px",
+                  borderBottom: "1px solid #e5e7eb",
+                  background: "#fff7ed",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ color: "#b45309", fontWeight: 600 }}>⚠️ PO İptal Edilmeli</div>
+                <div style={{ fontWeight: 700, color: "#b45309" }}>
+                  {rows.filter(r => Number(r.requested_qty||0) > Number(r.done_qty||0)).length} kalem →
+                </div>
+              </div>
             </>
           )}
         </div>
@@ -10618,7 +10646,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     }}
                   />
 
-                  <div
+                  {!detailTitle.includes("İptal") && <div
                     style={{
                       minWidth: "220px",
                       padding: "14px 18px",
@@ -10646,7 +10674,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     >
                       {formatTRY(filteredRowTotal)}
                     </div>
-                  </div>
+                  </div>}
                 </div>
 
                 <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
