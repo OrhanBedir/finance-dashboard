@@ -12095,26 +12095,20 @@ function App() {
             </button>
 
             {(token || financeToken) && (
-              <button
-                type="button"
-                onClick={handleLogout}
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "#dc3545",
-                  color: "#fff",
-                  border: "none",
-                  padding: "10px 16px",
-                  borderRadius: "8px",
-                  cursor: "pointer",
-                  fontWeight: "600",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Çıkış Yap
-              </button>
+              <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", display:"flex", alignItems:"center", gap:"10px" }}>
+                {user?.name && (
+                  <span style={{ fontSize:"13px", fontWeight:600, color:"#1e3a5f", background:"#f0f4ff", border:"1px solid #c7d7fc", borderRadius:"8px", padding:"7px 13px", whiteSpace:"nowrap" }}>
+                    👤 {user.name}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  style={{ background:"#dc3545", color:"#fff", border:"none", padding:"10px 16px", borderRadius:"8px", cursor:"pointer", fontWeight:"600", whiteSpace:"nowrap" }}
+                >
+                  Çıkış Yap
+                </button>
+              </div>
             )}
           </>
         )}
