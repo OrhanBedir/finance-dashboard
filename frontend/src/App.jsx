@@ -8262,36 +8262,63 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
 
               {!isOpen && null}
               {isOpen && <>
-              {/* Sütun başlıkları */}
-              <div style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background:"#dbeafe", borderBottom:"1px solid #bfdbfe" }}>
-                {["TARİH","BELGE NO","BELGE AÇIKLAMASI",`AÇIKLAMA (${kat.aciklamaPlaceholder.toUpperCase()})`, "MASRAF TUTARI",""].map((h,i)=>(
-                  <div key={i} style={{ padding:"5px 8px", fontSize:"10px", fontWeight:800, color:"#1e40af" }}>{h}</div>
-                ))}
-              </div>
-
-              {/* Kayıtlı satırlar */}
-              {katKalemler.length === 0 && !isAdding && (
-                <div style={{ padding:"10px 16px", fontSize:"12px", color:"#9ca3af", fontStyle:"italic" }}>Henüz kayıt yok</div>
-              )}
-              {katKalemler.map((k,i)=>(
-                <div key={k.id} style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background: i%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6", alignItems:"start" }}>
-                  <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR"):""}</div>
-                  <div style={{ padding:"8px 8px", fontSize:"12px", color:"#6b7280" }}>{k.belge_no||"—"}</div>
-                  <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.belge_aciklama||"—"}</div>
-                  <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>
-                    {k.aciklama||"—"}
-                    {!k.fis_var && <div style={{ fontSize:"10px",color:"#dc2626",marginTop:"2px" }}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</div>}
-                    {(k.belgeler||[]).length>0 && <div style={{ fontSize:"10px",color:"#059669",marginTop:"2px" }}>📷 {k.belgeler.length} fiş</div>}
-                  </div>
-                  <div style={{ padding:"8px 8px", fontWeight:700, fontSize:"12px", textAlign:"right" }}>₺{Number(k.tutar).toLocaleString("tr-TR")}</div>
-                  <div style={{ padding:"6px 6px", display:"flex", gap:"3px", justifyContent:"center" }}>
-                    <button onClick={()=>{ setExtraFotoModal(k.id); setUploadFile(null); }} title="Fiş fotoğrafı ekle"
-                      style={{ padding:"4px 7px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>📷</button>
-                    {!isLocked && <button onClick={()=>handleDeleteKalem(k.id)} title="Sil"
-                      style={{ padding:"4px 7px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>✕</button>}
-                  </div>
+              {/* Kayıtlı satırlar — mobil kart / masaüstü grid */}
+              {isMobile ? (
+                <>
+                  {katKalemler.length === 0 && !isAdding && (
+                    <div style={{ padding:"10px 16px", fontSize:"12px", color:"#9ca3af", fontStyle:"italic" }}>Henüz kayıt yok</div>
+                  )}
+                  {katKalemler.map(k=>(
+                    <div key={k.id} style={{ padding:"10px 14px", borderBottom:"1px solid #f3f4f6", background:"#fff" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"4px" }}>
+                        <div style={{ fontSize:"12px", color:"#6b7280" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR"):""}{k.belge_no ? ` · #${k.belge_no}`:""}</div>
+                        <div style={{ fontWeight:800, fontSize:"14px", color:"#1e3a5f" }}>₺{Number(k.tutar).toLocaleString("tr-TR")}</div>
+                      </div>
+                      {k.belge_aciklama && <div style={{ fontSize:"13px", color:"#374151", marginBottom:"2px" }}>{k.belge_aciklama}</div>}
+                      {k.aciklama && <div style={{ fontSize:"12px", color:"#6b7280" }}>{k.aciklama}</div>}
+                      {!k.fis_var && <div style={{ fontSize:"11px", color:"#dc2626", marginTop:"2px" }}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</div>}
+                      {(k.belgeler||[]).length>0 && <div style={{ fontSize:"11px", color:"#059669", marginTop:"2px" }}>📷 {k.belgeler.length} fiş eklendi</div>}
+                      <div style={{ display:"flex", gap:"6px", marginTop:"8px" }}>
+                        <button onClick={()=>{ setExtraFotoModal(k.id); setUploadFile(null); }}
+                          style={{ padding:"6px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>📷 Fiş Ekle</button>
+                        {!isLocked && <button onClick={()=>handleDeleteKalem(k.id)}
+                          style={{ padding:"6px 12px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>✕ Sil</button>}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <>
+                {/* Sütun başlıkları - sadece masaüstü */}
+                <div style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background:"#dbeafe", borderBottom:"1px solid #bfdbfe" }}>
+                  {["TARİH","BELGE NO","BELGE AÇIKLAMASI",`AÇIKLAMA (${kat.aciklamaPlaceholder.toUpperCase()})`, "MASRAF TUTARI",""].map((h,i)=>(
+                    <div key={i} style={{ padding:"5px 8px", fontSize:"10px", fontWeight:800, color:"#1e40af" }}>{h}</div>
+                  ))}
                 </div>
-              ))}
+                {katKalemler.length === 0 && !isAdding && (
+                  <div style={{ padding:"10px 16px", fontSize:"12px", color:"#9ca3af", fontStyle:"italic" }}>Henüz kayıt yok</div>
+                )}
+                {katKalemler.map((k,i)=>(
+                  <div key={k.id} style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background: i%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6", alignItems:"start" }}>
+                    <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR"):""}</div>
+                    <div style={{ padding:"8px 8px", fontSize:"12px", color:"#6b7280" }}>{k.belge_no||"—"}</div>
+                    <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.belge_aciklama||"—"}</div>
+                    <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>
+                      {k.aciklama||"—"}
+                      {!k.fis_var && <div style={{ fontSize:"10px",color:"#dc2626",marginTop:"2px" }}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</div>}
+                      {(k.belgeler||[]).length>0 && <div style={{ fontSize:"10px",color:"#059669",marginTop:"2px" }}>📷 {k.belgeler.length} fiş</div>}
+                    </div>
+                    <div style={{ padding:"8px 8px", fontWeight:700, fontSize:"12px", textAlign:"right" }}>₺{Number(k.tutar).toLocaleString("tr-TR")}</div>
+                    <div style={{ padding:"6px 6px", display:"flex", gap:"3px", justifyContent:"center" }}>
+                      <button onClick={()=>{ setExtraFotoModal(k.id); setUploadFile(null); }} title="Fiş fotoğrafı ekle"
+                        style={{ padding:"4px 7px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>📷</button>
+                      {!isLocked && <button onClick={()=>handleDeleteKalem(k.id)} title="Sil"
+                        style={{ padding:"4px 7px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>✕</button>}
+                    </div>
+                  </div>
+                ))}
+                </>
+              )}
 
               {/* Toplam satırı */}
               {katKalemler.length > 0 && (
