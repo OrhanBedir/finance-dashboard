@@ -9014,24 +9014,32 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
       {notTooltip.visible && (
         <div style={{
           position: "fixed", zIndex: 9999,
-          left: notTooltip.x + 14, top: notTooltip.y - 10,
-          background: "#1e293b", color: "#f1f5f9",
-          borderRadius: "10px", padding: "12px 16px",
-          maxWidth: "340px", fontSize: "13px", lineHeight: "1.6",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+          left: notTooltip.x + 16, top: notTooltip.y - 8,
+          background: "#fff",
+          borderRadius: "14px",
+          padding: "0",
+          maxWidth: "360px", minWidth: "200px",
+          boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1), 0 10px 30px rgba(0,0,0,0.18)",
+          border: "1px solid #e2e8f0",
           pointerEvents: "none",
+          overflow: "hidden",
         }}>
           {notTooltip.aciklama && (
-            <div>
-              <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 700, marginBottom: "4px" }}>AÇIKLAMA</div>
-              <div>{notTooltip.aciklama}</div>
+            <div style={{ padding: "12px 16px", borderBottom: notTooltip.not_aciklama ? "1px solid #f1f5f9" : "none" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+                <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#3b82f6", flexShrink: 0 }} />
+                <span style={{ fontSize: "10px", fontWeight: 800, color: "#3b82f6", letterSpacing: "0.8px", textTransform: "uppercase" }}>Açıklama</span>
+              </div>
+              <div style={{ fontSize: "13px", color: "#1e293b", lineHeight: "1.6", whiteSpace: "pre-wrap" }}>{notTooltip.aciklama}</div>
             </div>
           )}
-          {notTooltip.aciklama && notTooltip.not_aciklama && <div style={{ borderTop: "1px solid #334155", margin: "8px 0" }} />}
           {notTooltip.not_aciklama && (
-            <div>
-              <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 700, marginBottom: "4px" }}>NOT</div>
-              <div style={{ whiteSpace: "pre-wrap" }}>{notTooltip.not_aciklama}</div>
+            <div style={{ padding: "12px 16px", background: notTooltip.aciklama ? "#fafafa" : "#fff" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+                <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#f59e0b", flexShrink: 0 }} />
+                <span style={{ fontSize: "10px", fontWeight: 800, color: "#d97706", letterSpacing: "0.8px", textTransform: "uppercase" }}>Not</span>
+              </div>
+              <div style={{ fontSize: "13px", color: "#374151", lineHeight: "1.6", whiteSpace: "pre-wrap" }}>{notTooltip.not_aciklama}</div>
             </div>
           )}
         </div>
