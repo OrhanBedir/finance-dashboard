@@ -7784,13 +7784,13 @@ const BOLGELER = ["İzmir","Antalya","Ankara"];
 const PROJELER = ["TT - Türk Telekom","TC - Türkcell","VF - Vodafone"];
 
 const MASRAF_KATEGORILER = [
-  { key: "YEMEK",     label: "🍽 Yiyecek / İçecek",       aciklamaPlaceholder: "Proje veya iş adı" },
-  { key: "YAKIT",     label: "⛽ Araç Yakıt / Bakım",      aciklamaPlaceholder: "Araç plaka no" },
-  { key: "KONAKLAMA", label: "🏨 Konaklama",               aciklamaPlaceholder: "Kaç gece, kişi sayısı, otel adı" },
-  { key: "ULASIM",    label: "🚌 Ulaşım",                  aciklamaPlaceholder: "Güzergah, kişi sayısı, neden" },
-  { key: "KOPRU",     label: "🛣 Köprü / Otoyol Geçişi",   aciklamaPlaceholder: "Geçiş detayı, plaka" },
-  { key: "MALZEME",   label: "🔧 Malzeme / Ekipman",       aciklamaPlaceholder: "Malzeme detayı" },
-  { key: "DIGER",     label: "📦 Diğer",                   aciklamaPlaceholder: "İşin detayı" },
+  { key: "YEMEK",     label: "🍽 Yiyecek / İçecek",       aciklamaPlaceholder: "Proje veya iş adı",              belgeAciklamaPlaceholder: "Restoran adı, Kafe, Yemek faturası..." },
+  { key: "YAKIT",     label: "⛽ Araç Yakıt / Bakım",      aciklamaPlaceholder: "Araç plaka no",                  belgeAciklamaPlaceholder: "Yakıt Bedeli, Bakım Faturası..." },
+  { key: "KONAKLAMA", label: "🏨 Konaklama",               aciklamaPlaceholder: "Kaç gece, kişi sayısı, otel adı", belgeAciklamaPlaceholder: "Otel Faturası, Konaklama Makbuzu..." },
+  { key: "ULASIM",    label: "🚌 Ulaşım",                  aciklamaPlaceholder: "Güzergah, kişi sayısı, neden",   belgeAciklamaPlaceholder: "Uçak Bileti, Otobüs / Taksi Fişi..." },
+  { key: "KOPRU",     label: "🛣 Köprü / Otoyol Geçişi",   aciklamaPlaceholder: "Geçiş detayı, plaka",            belgeAciklamaPlaceholder: "HGS/OGS Dekont, Geçiş Makbuzu..." },
+  { key: "MALZEME",   label: "🔧 Malzeme / Ekipman",       aciklamaPlaceholder: "Malzeme adı ve detayı",          belgeAciklamaPlaceholder: "Fatura / İrsaliye No...", hasSiteId: true },
+  { key: "DIGER",     label: "📦 Diğer",                   aciklamaPlaceholder: "İşin detayı",                    belgeAciklamaPlaceholder: "Fiş / Fatura Açıklaması..." },
 ];
 
 function MasrafFormuPanel({ currentUser, onPendingCount }) {
@@ -7817,7 +7817,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [nfPersonelId, setNfPersonelId] = useState("");
   const [nfDonem, setNfDonem]     = useState(thisMonth);
   const [activeForm, setActiveForm] = useState(null); // saved form being edited
-  const [kalemForm, setKalemForm] = useState({ kategori:"YEMEK", tarih:today, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"" });
+  const [kalemForm, setKalemForm] = useState({ kategori:"YEMEK", tarih:today, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"" });
   const [openKats, setOpenKats] = useState(new Set()); // collapsed by default
   const toggleKat = (key) => setOpenKats(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
   const [kalemler, setKalemler]   = useState([]);
@@ -7916,7 +7916,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true })
+      body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, aciklama: kalemForm.site_id ? `Site ID: ${kalemForm.site_id}${kalemForm.aciklama ? " | " + kalemForm.aciklama : ""}` : kalemForm.aciklama })
     });
     const saved = await r.json();
     // Ask for photo upload
@@ -7925,7 +7925,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     setPendingKalemKategori(kalemForm.kategori);
     setOcrResult(null);
     setTutarUyariAciklama("");
-    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"" }));
+    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"" }));
     refreshActive(activeForm.id);
   };
 
@@ -8366,8 +8366,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                     </div>
                     <div style={{ marginBottom:"10px" }}>
                       <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>BELGE AÇIKLAMASI</div>
-                      <input value={kalemForm.belge_aciklama} onChange={e=>setKalemForm(k=>({...k,belge_aciklama:e.target.value}))} placeholder="Yakıt Bedeli, Otel Faturası..." style={inp} />
+                      <input value={kalemForm.belge_aciklama} onChange={e=>setKalemForm(k=>({...k,belge_aciklama:e.target.value}))} placeholder={kat.belgeAciklamaPlaceholder || "Belge açıklaması..."} style={inp} />
                     </div>
+                    {kat.hasSiteId && (
+                      <div style={{ marginBottom:"10px" }}>
+                        <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>SİTE ID</div>
+                        <input value={kalemForm.site_id} onChange={e=>setKalemForm(k=>({...k,site_id:e.target.value}))} placeholder="Örn: AI0246, TR-IST-001..." style={inp} />
+                      </div>
+                    )}
                     <div style={{ marginBottom:"10px" }}>
                       <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>AÇIKLAMA — {kat.aciklamaPlaceholder}</div>
                       <input value={kalemForm.aciklama} onChange={e=>setKalemForm(k=>({...k,aciklama:e.target.value}))} placeholder={kat.aciklamaPlaceholder} style={inp} />
@@ -8387,7 +8393,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                     </div>
                   </div>
                 ) : (
-                  <button onClick={()=>{ setKalemForm(k=>({...k, kategori:kat.key, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"" })); setOpenKats(prev=>{ const s=new Set(prev); s.add(kat.key); return s; }); }}
+                  <button onClick={()=>{ setKalemForm(k=>({...k, kategori:kat.key, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"" })); setOpenKats(prev=>{ const s=new Set(prev); s.add(kat.key); return s; }); }}
                     style={{ width:"100%", padding:"9px", background:"#f0f9ff", border:"none", borderTop:"1px dashed #93c5fd", color:"#2563eb", fontWeight:600, fontSize:"13px", cursor:"pointer", textAlign:"center" }}>
                     + Bu Bölüme Satır Ekle
                   </button>
