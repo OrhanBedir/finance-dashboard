@@ -9041,7 +9041,18 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı</h2>
         <div style={{ display: "flex", gap: "8px" }}>
-          {!isMobile && <a href={`${API_BASE}/hr/is-avans/excel`} style={{ padding: "10px 16px", background: "#166534", color: "#fff", borderRadius: "10px", fontWeight: 600, fontSize: "14px", textDecoration: "none" }}>📥 Excel</a>}
+          {!isMobile && (() => {
+            const p = new URLSearchParams();
+            if (isRequester) p.set("email", currentUser?.email || "");
+            if (filterDurum) p.set("durum", filterDurum);
+            if (filterGider) p.set("gider_turu", filterGider);
+            if (filterBolge) p.set("bolge", filterBolge);
+            if (filterProje) p.set("proje", filterProje);
+            if (filterBaslangic) p.set("baslangic", filterBaslangic);
+            if (filterBitis) p.set("bitis", filterBitis);
+            const qs = p.toString();
+            return <a href={`${API_BASE}/hr/is-avans/excel${qs ? "?" + qs : ""}`} style={{ padding: "10px 16px", background: "#166534", color: "#fff", borderRadius: "10px", fontWeight: 600, fontSize: "14px", textDecoration: "none" }}>📥 Excel</a>;
+          })()}
           {!isMuhasebe && (
             <button onClick={openNew} style={{ padding: isMobile?"10px 16px":"10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 600, fontSize: "14px", cursor: "pointer" }}>
               + Yeni Talep

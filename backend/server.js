@@ -9059,12 +9059,24 @@ app.get("/hr/is-avans/excel", async (req, res) => {
 
     const ws = wb.addWorksheet("İş Avansı Talepleri");
 
+    const { email, durum, gider_turu, bolge, proje, baslangic, bitis } = req.query;
+    const conditions = [];
+    const params = [];
+    if (email) { conditions.push(`t.talep_eden_email = $${params.length+1}`); params.push(email); }
+    if (durum) { conditions.push(`t.durum = $${params.length+1}`); params.push(durum); }
+    if (gider_turu) { conditions.push(`t.gider_turu = $${params.length+1}`); params.push(gider_turu); }
+    if (bolge) { conditions.push(`t.bolge = $${params.length+1}`); params.push(bolge); }
+    if (proje) { conditions.push(`t.proje = $${params.length+1}`); params.push(proje); }
+    if (baslangic) { conditions.push(`t.tarih >= $${params.length+1}`); params.push(baslangic); }
+    if (bitis) { conditions.push(`t.tarih <= $${params.length+1}`); params.push(bitis); }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const list = await pool.query(`
       SELECT t.*, p.ad_soyad as personel_ad
       FROM is_avans_talep t
       LEFT JOIN personel p ON t.personel_id = p.id
+      ${where}
       ORDER BY t.tarih DESC, t.created_at DESC
-    `);
+    `, params);
 
     // Title row
     ws.mergeCells("A1:M1");
