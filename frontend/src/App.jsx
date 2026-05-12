@@ -8441,25 +8441,35 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
           const showPlakaUyari = ocrResult && (ocrResult.tutarOk || ocrResult.tutarSkipped || !showTutarUyari) && ocrResult.ocr_plaka && ocrResult.ocr_plaka_eslesti === false && !ocrResult.plakaOnaylandi;
 
           if (showPlakaUyari) return (
-            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-              <div style={{ background:"#fff", borderRadius:"16px", padding:"28px 24px", width:"90%", maxWidth:"400px" }}>
-                <h3 style={{ margin:"0 0 12px", fontSize:"18px" }}>⚠️ Plaka Sistemde Kayıtlı Değil</h3>
-                <p style={{ fontSize:"14px", color:"#374151", margin:"0 0 8px" }}>
-                  Fişte okunan plaka: <strong style={{ color:"#dc2626" }}>{ocrResult.ocr_plaka}</strong>
-                </p>
-                <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 20px" }}>
-                  Bu plaka firma araç filonuzda bulunmuyor. Yine de ilerletmek istiyor musunuz?
-                </p>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-                  <button onClick={handlePlakaUyariDevam}
-                    style={{ padding:"12px", background:"#f59e0b", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>
-                    Yine de Devam Et
-                  </button>
-                  <button onClick={closeFotoModal}
-                    style={{ padding:"12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
-                    İptal
-                  </button>
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+              <div style={{ background:"#fff", borderRadius:"16px", padding:"28px 24px", width:"90%", maxWidth:"420px", border:"3px solid #dc2626" }}>
+                <div style={{ textAlign:"center", marginBottom:"16px" }}>
+                  <div style={{ fontSize:"48px", marginBottom:"8px" }}>🚫</div>
+                  <h3 style={{ margin:0, fontSize:"20px", color:"#dc2626", fontWeight:800 }}>Fiş Kabul Edilmedi</h3>
                 </div>
+                <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:"10px", padding:"14px 16px", marginBottom:"16px" }}>
+                  <div style={{ fontSize:"13px", color:"#374151", marginBottom:"6px" }}>
+                    Girilen plaka: <strong style={{ color:"#1e3a5f" }}>{kalemForm.aciklama || "—"}</strong>
+                  </div>
+                  <div style={{ fontSize:"13px", color:"#374151" }}>
+                    Fişte okunan plaka: <strong style={{ color:"#dc2626" }}>{ocrResult.ocr_plaka}</strong>
+                  </div>
+                </div>
+                <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 20px", lineHeight:"1.5" }}>
+                  Araç yakıt / bakım fişlerinde plaka bilgisi girilene ait olmalıdır. Lütfen doğru fişi yükleyin veya plaka bilgisini kontrol edin.
+                </p>
+                <button
+                  onClick={async () => {
+                    // Yüklenen belgeyi sil
+                    if (ocrResult?.belgeId) {
+                      await fetch(`${API_BASE}/hr/masraf-belge/${ocrResult.belgeId}`, { method:"DELETE" }).catch(()=>{});
+                    }
+                    closeFotoModal();
+                    refreshActive(activeForm.id);
+                  }}
+                  style={{ width:"100%", padding:"13px", background:"#dc2626", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"15px", cursor:"pointer" }}>
+                  Tamam — Fişi Sil ve Geri Dön
+                </button>
               </div>
             </div>
           );
