@@ -8097,6 +8097,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
 
   const visibleList = list.filter(f => {
     if (!isApprover && f.talep_eden_email !== currentUser?.email) return false;
+    if (isApprover && f.durum === "TASLAK") return false;
     if (filterDurum && f.durum !== filterDurum) return false;
     return true;
   });
@@ -8676,7 +8677,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
         <select value={filterDurum} onChange={e=>setFilterDurum(e.target.value)}
           style={{ padding:"8px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px" }}>
           <option value="">Tüm Durumlar</option>
-          <option value="TASLAK">Taslak</option>
+          {!isApprover && <option value="TASLAK">Taslak</option>}
           <option value="PM_BEKLE">PM Onayı Bekleniyor</option>
           <option value="DIREKTOR_BEKLE">Direktör Onayında</option>
           <option value="TAMAMLANDI">Onaylandı</option>
