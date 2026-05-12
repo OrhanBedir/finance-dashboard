@@ -8451,19 +8451,33 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                 <button onClick={closeFotoModal}
                   style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"30px", height:"30px", fontSize:"16px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
                 <h3 style={{ margin:"0 0 8px", fontSize:"18px" }}>📷 Fiş Fotoğrafı Yükle</h3>
-                <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 16px" }}>Fişi çekin veya dosya seçin. Sistem tutarı otomatik okuyacak.</p>
-                <input type="file" accept="image/*" capture="environment"
-                  onChange={e => {
-                    const file = e.target.files[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = ev => { setCropSrc(ev.target.result); setCrop(null); setCompletedCrop(null); };
-                    reader.readAsDataURL(file);
-                  }}
-                  style={{ marginBottom:"12px", width:"100%", fontSize:"14px" }} />
+                <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 12px" }}>Fişi çekin veya dosya seçin. Kırpma yapabilirsiniz.</p>
+                {/* Gizli inputlar */}
+                <input id="fis-camera-input" type="file" accept="image/*" capture="environment" style={{ display:"none" }}
+                  onChange={e => { const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>{setCropSrc(ev.target.result);setCrop(null);setCompletedCrop(null);}; r.readAsDataURL(f); e.target.value=""; }} />
+                <input id="fis-file-input" type="file" accept="image/*,application/pdf" style={{ display:"none" }}
+                  onChange={e => { const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>{setCropSrc(ev.target.result);setCrop(null);setCompletedCrop(null);}; r.readAsDataURL(f); e.target.value=""; }} />
+                {!cropSrc && (
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"12px" }}>
+                    <button onClick={()=>document.getElementById("fis-camera-input").click()}
+                      style={{ padding:"12px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:600, fontSize:"14px", cursor:"pointer" }}>
+                      📷 Kameradan Çek
+                    </button>
+                    <button onClick={()=>document.getElementById("fis-file-input").click()}
+                      style={{ padding:"12px", background:"#f0f9ff", color:"#1d4ed8", border:"1.5px solid #bfdbfe", borderRadius:"10px", fontWeight:600, fontSize:"14px", cursor:"pointer" }}>
+                      🗂 Dosyadan Seç
+                    </button>
+                  </div>
+                )}
                 {cropSrc && (
                   <div style={{ marginBottom:"12px" }}>
-                    <p style={{ fontSize:"12px", color:"#374151", margin:"0 0 8px", fontWeight:600 }}>✂️ İsterseniz kırpın, ardından "Onayla" ya tıklayın:</p>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
+                      <p style={{ fontSize:"12px", color:"#374151", margin:0, fontWeight:600 }}>✂️ Kırpın, ardından "Onayla" ya tıklayın:</p>
+                      <button onClick={()=>{setCropSrc(null);setCrop(null);setCompletedCrop(null);}}
+                        style={{ fontSize:"12px", color:"#6b7280", background:"#f3f4f6", border:"none", borderRadius:"6px", padding:"4px 10px", cursor:"pointer" }}>
+                        ↩ Yeniden Seç
+                      </button>
+                    </div>
                     <div style={{ maxHeight:"320px", overflowY:"auto", background:"#f9fafb", borderRadius:"8px", padding:"8px" }}>
                       <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)} style={{ maxWidth:"100%" }}>
                         <img ref={cropImgRef} src={cropSrc} alt="fiş" style={{ maxWidth:"100%", display:"block" }}
