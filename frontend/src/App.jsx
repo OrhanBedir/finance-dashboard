@@ -8243,7 +8243,6 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
             </div>
             <div style={{ textAlign:"right", color:"#93c5fd", fontSize:"11px" }}>
               <div>Doküman Kodu: MF.{String(activeForm.form_no || activeForm.id).padStart(3, "0")}</div>
-              <div>Rev No: 0 · Rev. Tarihi: -</div>
               {bakiye !== null && (
                 <div style={{ marginTop:"6px", color:"#fff" }}>
                   <span style={{ fontWeight:700, fontSize:"16px" }}>İş Avansı: ₺{Number(bakiye.bakiye).toLocaleString("tr-TR")}</span>
