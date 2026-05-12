@@ -8199,7 +8199,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   if (activeForm) {
     const canDownload = isPM || isDirektor || isMuhasebe;
     const isLocked = activeForm.durum !== "TASLAK";
-    const inp = { width:"100%", padding:"8px 10px", borderRadius:"8px", border:"1.5px solid #d1d5db", fontSize:"13px", boxSizing:"border-box", background:"#fff" };
+    const inp = { width:"100%", padding:"8px 10px", borderRadius:"8px", border:"1.5px solid #d1d5db", fontSize:"13px", boxSizing:"border-box", background:"#fff", color:"#1f2937" };
     return (
       <div style={{ maxWidth:"860px", margin:"0 auto", padding:"16px" }}>
         {/* Üst başlık - Excel tarzı */}
