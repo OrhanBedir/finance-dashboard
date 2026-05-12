@@ -11464,8 +11464,9 @@ function App() {
     }
   });
   const isAdmin = user?.role === "admin";
-  const isRollout = user?.role === "rollout" || user?.role === "admin";
-  const isPersonel = user?.role === "user";
+  const _isBolgeMudur = user?.email === "nurcan.kus@simsektel.com" || user?.email === "serdar.altinova@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
+  const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur;
+  const isPersonel = user?.role === "user" && !_isBolgeMudur;
   const isSubconUser =
     String(user?.role || "").toLowerCase() === "subcon" ||
     String(user?.subcon_name || "").trim() !== "";
@@ -11519,7 +11520,9 @@ function App() {
 
   const [page, setPage] = useState(() => {
     const u = (() => { try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; } })();
-    return u?.role === "user" ? "masraf" : "finance";
+    const bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"];
+    const isBolge = bolgeMudurEmails.includes(u?.email) || ["rollout_mudur","bolge_mudur"].includes((u?.role||"").toLowerCase());
+    return (u?.role === "user" && !isBolge) ? "masraf" : "finance";
   });
   const [pendingAvansCount, setPendingAvansCount] = useState(0);
   const [pendingMasrafCount, setPendingMasrafCount] = useState(0);
