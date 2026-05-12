@@ -8065,14 +8065,17 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   };
 
   const handleReddet = async () => {
-    if (!redText.trim()) return alert("Red açıklaması zorunlu");
+    if (!redText.trim()) return alert("Red açıklaması girilmeden reddedilemez!");
     const ep = isPM ? "pm-reddet" : "direktor-reddet";
-    await fetch(`${API_BASE}/hr/masraf-form/${redModal}/pm-reddet`.replace("pm-reddet", ep), {
-      method:"PUT", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email })
-    });
-    setRedModal(null); setRedText(""); load();
-    if (viewForm?.id === redModal) loadDetail(redModal);
+    try {
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${redModal}/${ep}`, {
+        method:"PUT", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email })
+      });
+      if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || `Sunucu hatası (${r.status})`); }
+      setRedModal(null); setRedText(""); load();
+      if (viewForm?.id === redModal) loadDetail(redModal);
+    } catch(err) { alert("Reddetme başarısız: " + err.message); }
   };
 
   const durumBadge = (durum) => {
@@ -8167,7 +8170,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                       {(k.belgeler||[]).length > 0
                         ? <div style={{ display:"flex", gap:"4px", flexWrap:"wrap" }}>
                             {k.belgeler.map(b=>(
-                              <a key={b.id} href={`${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`} target="_blank" rel="noreferrer"
+                              <a key={b.id} href={b.dosya_yolu?.startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`} target="_blank" rel="noreferrer"
                                  style={{ fontSize:"11px", background:"#eff6ff", color:"#1d4ed8", padding:"2px 8px", borderRadius:"6px", textDecoration:"none" }}>
                                 📷 Fiş
                               </a>
