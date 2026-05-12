@@ -8834,7 +8834,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-        <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı <span style={{ fontSize: "11px", color: "#9ca3af", fontWeight: 400 }}>{currentUser?.email}</span></h2>
+        <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı</h2>
         <div style={{ display: "flex", gap: "8px" }}>
           {!isMobile && <a href={`${API_BASE}/hr/is-avans/excel`} style={{ padding: "10px 16px", background: "#166534", color: "#fff", borderRadius: "10px", fontWeight: 600, fontSize: "14px", textDecoration: "none" }}>📥 Excel</a>}
           {!isMuhasebe && (
@@ -12133,12 +12133,12 @@ function App() {
                       {/* Badges */}
                       <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                         <span style={{
-                          background: u.role === "admin" ? "#fef3c7" : "#eff6ff",
-                          color: u.role === "admin" ? "#92400e" : "#1e40af",
+                          background: u.role === "admin" ? "#fef3c7" : u.role === "rollout_mudur" ? "#f0fdf4" : "#eff6ff",
+                          color: u.role === "admin" ? "#92400e" : u.role === "rollout_mudur" ? "#166534" : "#1e40af",
                           fontSize: "11px", fontWeight: 700, padding: "3px 10px",
                           borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.05em",
                         }}>
-                          {u.role === "admin" ? "👑 Admin" : "👤 User"}
+                          {u.role === "admin" ? "👑 Admin" : u.role === "rollout_mudur" ? "🏗 Rollout" : "👤 User"}
                         </span>
                         <span style={{
                           background: u.is_active ? "#dcfce7" : "#f3f4f6",
@@ -12164,18 +12164,20 @@ function App() {
                         >
                           {u.is_active ? "Pasife Al" : "Aktif Et"}
                         </button>
-                        <button
-                          onClick={() => handleAdminRoleChange(u.id, u.role === "admin" ? "user" : "admin")}
+                        <select
+                          value={u.role || "user"}
+                          onChange={e => handleAdminRoleChange(u.id, e.target.value)}
                           style={{
-                            padding: "6px 12px",
-                            background: u.role === "admin" ? "#fee2e2" : "#f0fdf4",
-                            color: u.role === "admin" ? "#991b1b" : "#166534",
-                            border: "none", borderRadius: "8px",
+                            padding: "6px 10px",
+                            border: "1px solid #e5e7eb", borderRadius: "8px",
                             fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                            background: "#f9fafb", color: "#374151",
                           }}
                         >
-                          {u.role === "admin" ? "→ User" : "→ Admin"}
-                        </button>
+                          <option value="user">👤 User</option>
+                          <option value="admin">👑 Admin</option>
+                          <option value="rollout_mudur">🏗 Rollout Müdürü</option>
+                        </select>
                         <button
                           onClick={() => deleteUser(u.id)}
                           style={{
