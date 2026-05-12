@@ -8808,7 +8808,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-        <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı</h2>
+        <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı <span style={{ fontSize: "11px", color: "#9ca3af", fontWeight: 400 }}>{currentUser?.email}</span></h2>
         <div style={{ display: "flex", gap: "8px" }}>
           {!isMobile && <a href={`${API_BASE}/hr/is-avans/excel`} style={{ padding: "10px 16px", background: "#166534", color: "#fff", borderRadius: "10px", fontWeight: 600, fontSize: "14px", textDecoration: "none" }}>📥 Excel</a>}
           {!isMuhasebe && (
