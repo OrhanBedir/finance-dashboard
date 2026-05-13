@@ -7422,8 +7422,9 @@ app.get("/export/detail-excel", authMiddleware, async (req, res) => {
     }
 
     if (type === "PO_BEKLER") {
+      // Modalda gösterilen mantıkla aynı: done_qty < requested_qty (yapılmamış / yarım kalan)
       rows = rows.filter(
-        (row) => String(row.status || "").toUpperCase() === "PO_BEKLER",
+        (row) => Number(row.requested_qty || 0) > Number(row.done_qty || 0),
       );
     }
 
@@ -7571,9 +7572,11 @@ app.get("/export/detail-excel", authMiddleware, async (req, res) => {
       to: "L2",
     };
 
-    const fileName = `detail_${region || "all"}_${type || "all"}_${new Date()
-      .toISOString()
-      .slice(0, 10)}.xlsx`;
+    const typeLabel = type === "PO_BEKLER" ? "PO_Iptal_Edilmeli"
+                    : type === "NOT_INVOICED" ? "Faturalanmamis"
+                    : type || "all";
+    const regionLabel = (region || "").replace(/[^\x20-\x7EÀ-ɏ]/g, "").trim() || "Tum_Bolgeler";
+    const fileName = `${regionLabel}_${typeLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
     const safeFileName = fileName
       .replace(/İ/g, "I")
