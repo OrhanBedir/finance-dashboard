@@ -2389,7 +2389,7 @@ function DailyEntry() {
                     zIndex: 2,
                   }}
                 >
-                  İş Açıklaması
+                  Item Description
                 </th>
                 <th
                   style={{
