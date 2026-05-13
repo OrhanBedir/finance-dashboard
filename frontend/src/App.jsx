@@ -2381,7 +2381,16 @@ function DailyEntry() {
                 >
                   Item Code
                 </th>
-
+                <th
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    background: "#f3f4f6",
+                    zIndex: 2,
+                  }}
+                >
+                  İş Açıklaması
+                </th>
                 <th
                   style={{
                     position: "sticky",
@@ -2496,7 +2505,7 @@ function DailyEntry() {
             </thead>
             <tbody>
               {siteEntries.length === 0 ? (
-                <EmptyRow colSpan={15} text="Bu saha için giriş yapılmamış" />
+                <EmptyRow colSpan={16} text="Bu saha için giriş yapılmamış" />
               ) : (
                 siteEntries.map((row, index) => {
                   const analysis = getQtyAnalysis(
@@ -2525,51 +2534,49 @@ function DailyEntry() {
                       <td>{formatDateTR(row.onair_date)}</td>
                       <td>{row.note}</td>
                       <td>
-                        <td>
-                          <div
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            flexWrap: "nowrap",
+                            justifyContent: "center",
+                            alignItems: "center",
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="tab"
                             style={{
-                              display: "flex",
-                              gap: "8px",
-                              flexWrap: "nowrap",
-                              justifyContent: "center",
-                              alignItems: "center",
+                              padding: "8px 14px",
+                              minWidth: "86px",
+                              borderRadius: "10px",
+                              fontWeight: "600",
+                              whiteSpace: "nowrap",
                             }}
+                            onClick={() => handleEdit(row)}
+                            title="Kaydı düzenle"
                           >
-                            <button
-                              type="button"
-                              className="tab"
-                              style={{
-                                padding: "8px 14px",
-                                minWidth: "86px",
-                                borderRadius: "10px",
-                                fontWeight: "600",
-                                whiteSpace: "nowrap",
-                              }}
-                              onClick={() => handleEdit(row)}
-                              title="Kaydı düzenle"
-                            >
-                              Düzenle
-                            </button>
+                            Düzenle
+                          </button>
 
-                            <button
-                              type="button"
-                              className="tab"
-                              style={{
-                                padding: "8px 14px",
-                                minWidth: "70px",
-                                borderRadius: "10px",
-                                fontWeight: "600",
-                                whiteSpace: "nowrap",
-                                background: "#fee2e2",
-                                color: "#991b1b",
-                              }}
-                              onClick={() => handleDelete(row)}
-                              title="Kaydı sil"
-                            >
-                              Sil
-                            </button>
-                          </div>
-                        </td>
+                          <button
+                            type="button"
+                            className="tab"
+                            style={{
+                              padding: "8px 14px",
+                              minWidth: "70px",
+                              borderRadius: "10px",
+                              fontWeight: "600",
+                              whiteSpace: "nowrap",
+                              background: "#fee2e2",
+                              color: "#991b1b",
+                            }}
+                            onClick={() => handleDelete(row)}
+                            title="Kaydı sil"
+                          >
+                            Sil
+                          </button>
+                        </div>
                       </td>
                       <td>{row.qc_durum || "-"}</td>
                       <td>{row.kabul_durum || "-"}</td>
