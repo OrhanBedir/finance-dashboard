@@ -14,5 +14,11 @@ services:
         sync: false
       - key: FINANCE_ALLOWED_USERS
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: OCR_SPACE_KEY
+        sync: false
       - key: NODE_ENV
         value: production

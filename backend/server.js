@@ -7422,9 +7422,15 @@ app.get("/export/detail-excel", authMiddleware, async (req, res) => {
     }
 
     if (type === "PO_BEKLER") {
-      // Modalda gösterilen mantıkla aynı: done_qty < requested_qty (yapılmamış / yarım kalan)
       rows = rows.filter(
-        (row) => Number(row.requested_qty || 0) > Number(row.done_qty || 0),
+        (row) => String(row.status || "").toUpperCase() === "PO_BEKLER",
+      );
+    }
+
+    if (type === "PO_IPTAL") {
+      // PO İptal Edilmeli: hiç iş yapılmamış (done_qty = 0)
+      rows = rows.filter(
+        (row) => Number(row.done_qty || 0) === 0,
       );
     }
 
@@ -7572,7 +7578,8 @@ app.get("/export/detail-excel", authMiddleware, async (req, res) => {
       to: "L2",
     };
 
-    const typeLabel = type === "PO_BEKLER" ? "PO_Iptal_Edilmeli"
+    const typeLabel = type === "PO_IPTAL" ? "PO_Iptal_Edilmeli"
+                    : type === "PO_BEKLER" ? "PO_Bekler"
                     : type === "NOT_INVOICED" ? "Faturalanmamis"
                     : type || "all";
     const regionLabel = (region || "").replace(/[^\x20-\x7EÀ-ɏ]/g, "").trim() || "Tum_Bolgeler";

@@ -7862,7 +7862,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     setPersonelList(data);
     if (currentUser?.email) {
       const match = data.find(p => (p.email || "").toLowerCase() === currentUser.email.toLowerCase());
-      if (match) setNfPersonelId(String(match.id));
+      if (match) {
+        setNfPersonelId(String(match.id));
+      } else if (currentUser?.name) {
+        const nameMatch = data.find(p =>
+          (p.ad_soyad || "").toLowerCase() === currentUser.name.toLowerCase()
+        );
+        if (nameMatch) setNfPersonelId(String(nameMatch.id));
+      }
     }
   };
 
@@ -7966,8 +7973,27 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     fd.append("dosya", file);
     let belge;
     try {
-      const r = await fetch(`${API_BASE}/hr/masraf-belge/${kalemId}`, { method:"POST", body:fd });
+      const controller = new AbortController();
+      const uploadTimeout = setTimeout(() => controller.abort(), 60000);
+      let r;
+      try {
+        r = await fetch(`${API_BASE}/hr/masraf-belge/${kalemId}`, { method:"POST", body:fd, signal: controller.signal });
+      } finally {
+        clearTimeout(uploadTimeout);
+      }
+      if (!r.ok) {
+        const errText = await r.text().catch(() => "Sunucu hatası");
+        throw new Error(errText);
+      }
       belge = await r.json();
+    } catch (err) {
+      setIsUploading(false);
+      if (err.name === "AbortError") {
+        alert("Yükleme zaman aşımına uğradı. Sunucu meşgul olabilir, lütfen tekrar deneyin.");
+      } else {
+        alert("Fiş yüklenemedi: " + err.message);
+      }
+      return;
     } finally {
       setIsUploading(false);
     }
@@ -9516,9 +9542,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const openPoIptalModal = () => {
     const filtered = rows.filter((row) => {
-      const reqQty = Number(row.requested_qty || 0);
-      const doneQty = Number(row.done_qty || 0);
-      return reqQty > doneQty;
+      return Number(row.done_qty || 0) === 0;
     });
     setDetailTitle("⚠️ PO İptal Edilmeli");
     setDetailRows(filtered);
@@ -10003,6 +10027,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         : "";
       const exportType = detailTitle.includes("Faturalanmamış")
         ? "NOT_INVOICED"
+        : detailTitle.includes("İptal")
+        ? "PO_IPTAL"
         : "PO_BEKLER";
 
       const params = new URLSearchParams({
