@@ -9997,9 +9997,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const savedToken =
         localStorage.getItem("financeToken") || localStorage.getItem("token");
 
-      const regionName = String(detailTitle || "")
-        .split(" - ")[0]
-        .trim();
+      // Başlık "Bölge - Tip" formatındaysa bölgeyi al, değilse boş bırak
+      const regionName = String(detailTitle || "").includes(" - ")
+        ? String(detailTitle || "").split(" - ")[0].trim()
+        : "";
       const exportType = detailTitle.includes("Faturalanmamış")
         ? "NOT_INVOICED"
         : "PO_BEKLER";
