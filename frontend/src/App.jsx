@@ -7330,7 +7330,17 @@ function HrDashboard({ onBack, currentUser }) {
             /* Personel Listesi */
             <div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px", flexWrap:"wrap", gap:"12px" }}>
-                <h2 style={{ margin:0, fontSize:"20px" }}>👤 Personel Listesi</h2>
+                <div>
+                  <h2 style={{ margin:0, fontSize:"20px" }}>
+                    👤 Personel Listesi
+                    <span style={{ marginLeft:"10px", fontSize:"13px", fontWeight:500, color:"#6b7280", background:"#f3f4f6", borderRadius:"20px", padding:"2px 10px" }}>
+                      {personelList.filter(p=>p.aktif).length} aktif
+                    </span>
+                  </h2>
+                  <div style={{ marginTop:"4px", fontSize:"12px", color:"#9ca3af", fontWeight:500 }}>
+                    💰 {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Ayı Maaş Ödemesi Yapılacak
+                  </div>
+                </div>
                 <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
                   <select value={yilStr} onChange={e=>setPuantajAy(`${e.target.value}-${ayStr}`)}
                     style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px" }}>
