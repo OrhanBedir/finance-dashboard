@@ -9549,7 +9549,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const openPoIptalModal = () => {
     const filtered = rows.filter((row) => {
-      return Number(row.done_qty || 0) === 0;
+      return Number(row.done_qty || 0) === 0 && Number(row.requested_qty || 0) > 0;
     });
     setDetailTitle("⚠️ PO İptal Edilmeli");
     setDetailRows(filtered);
@@ -10345,7 +10345,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               >
                 <div style={{ color: "#b45309", fontWeight: 600 }}>⚠️ PO İptal Edilmeli</div>
                 <div style={{ fontWeight: 700, color: "#b45309" }}>
-                  {rows.filter(r => Number(r.done_qty||0) === 0).length} kalem →
+                  {rows.filter(r => Number(r.done_qty||0) === 0 && Number(r.requested_qty||0) > 0).length} kalem →
                 </div>
               </div>
             </>

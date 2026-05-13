@@ -7428,9 +7428,9 @@ app.get("/export/detail-excel", authMiddleware, async (req, res) => {
     }
 
     if (type === "PO_IPTAL") {
-      // PO İptal Edilmeli: hiç iş yapılmamış (done_qty = 0)
+      // PO İptal Edilmeli: PO açılmış ama hiç iş yapılmamış
       rows = rows.filter(
-        (row) => Number(row.done_qty || 0) === 0,
+        (row) => Number(row.done_qty || 0) === 0 && Number(row.requested_qty || 0) > 0,
       );
     }
 
