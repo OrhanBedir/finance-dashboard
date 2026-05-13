@@ -10338,7 +10338,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               >
                 <div style={{ color: "#b45309", fontWeight: 600 }}>⚠️ PO İptal Edilmeli</div>
                 <div style={{ fontWeight: 700, color: "#b45309" }}>
-                  {rows.filter(r => Number(r.requested_qty||0) > Number(r.done_qty||0)).length} kalem →
+                  {rows.filter(r => Number(r.done_qty||0) === 0).length} kalem →
                 </div>
               </div>
             </>
