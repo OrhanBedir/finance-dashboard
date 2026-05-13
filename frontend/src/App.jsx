@@ -12745,6 +12745,11 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
         return hasInstallStart || hasMalzemeOk;
       }).length;
     }
+
+    // PO Closed: backend summary'den gelen değeri kullan (site_po.due_qty = 0 kontrolü)
+    if (item.key === "po_closed") {
+      return backendValue;
+    }
     if (
       ["5G", "DSS", "LTE", "STANDALONE"].includes(type) &&
       item.key === "target"
@@ -12854,6 +12859,9 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
 
   const weekCount = (type, item, weekNo) => {
     const typeRows = getRowsByType(type);
+
+    // po_closed için hafta bazlı sayım yapılamaz (tarih yok)
+    if (item.key === "po_closed") return 0;
 
     // rf_equipment_received için tarih alanı yok ama installation_actual_start_date kullanabiliriz
     if (item.key === "rf_equipment_received") {

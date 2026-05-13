@@ -5285,7 +5285,7 @@ app.get("/export/excel", async (req, res) => {
     let values = [];
 
     if (region && region !== "ALL" && region !== "Tüm Bölgeler") {
-      query += ` WHERE bolge = $1`;
+      query += ` WHERE LOWER(COALESCE(bolge,'')) = LOWER($1)`;
       values.push(region);
     }
 
@@ -5700,7 +5700,20 @@ app.get("/rollout/summary", async (req, res) => {
         COUNT(*) FILTER (
           WHERE abonelik_actual_end_date IS NOT NULL
              OR abonelik_end_date IS NOT NULL
-        )::int AS abonelik_end
+        )::int AS abonelik_end,
+
+        -- PO Closed: site_po tablosunda bu site için tüm kalemlerin due_qty = 0 ise kapalı
+        COUNT(*) FILTER (
+          WHERE EXISTS (
+            SELECT 1 FROM site_po sp
+            WHERE UPPER(TRIM(sp.site_code)) = UPPER(TRIM(rollout_progress.site_code))
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM site_po sp2
+            WHERE UPPER(TRIM(sp2.site_code)) = UPPER(TRIM(rollout_progress.site_code))
+            AND COALESCE(sp2.due_qty, 0) > 0
+          )
+        )::int AS po_closed
 
       FROM rollout_progress
       ${whereRegion}
