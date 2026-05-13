@@ -7338,7 +7338,13 @@ function HrDashboard({ onBack, currentUser }) {
                     </span>
                   </h2>
                   <div style={{ marginTop:"4px", fontSize:"12px", color:"#9ca3af", fontWeight:500 }}>
-                    💰 {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Ayı Maaş Ödemesi Yapılacak
+                    💰 {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Ayı Maaş Ödemesi Yapılacak:{" "}
+                    <span style={{ color:"#1f2937", fontWeight:700 }}>
+                      ₺{(ozet.length > 0
+                        ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
+                        : personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0)
+                      ).toLocaleString("tr-TR")}
+                    </span>
                   </div>
                 </div>
                 <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
