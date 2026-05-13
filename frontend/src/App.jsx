@@ -12737,11 +12737,12 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
     const backendValue = Number(data[item.key] || 0);
 
     if (item.key === "rf_equipment_received") {
+      // Otomasyon: kurulum başlamışsa malzeme kesinlikle gelmiş demektir
+      // Manuel fallback: malzeme_status = "OK" olarak elle girilmişse
       return getRowsByType(type).filter((r) => {
-        const status = String(r.malzeme_status || "")
-          .toUpperCase()
-          .trim();
-        return status === "OK";
+        const hasInstallStart = String(r.installation_actual_start_date || "").trim() !== "";
+        const hasMalzemeOk = String(r.malzeme_status || "").toUpperCase().trim() === "OK";
+        return hasInstallStart || hasMalzemeOk;
       }).length;
     }
     if (
@@ -12853,6 +12854,17 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
 
   const weekCount = (type, item, weekNo) => {
     const typeRows = getRowsByType(type);
+
+    // rf_equipment_received için tarih alanı yok ama installation_actual_start_date kullanabiliriz
+    if (item.key === "rf_equipment_received") {
+      return typeRows.filter((r) => {
+        // Önce installation start date dene (otomasyon)
+        const dateVal = String(r.installation_actual_start_date || "").trim();
+        if (!dateVal) return false;
+        const week = getWeekNumber(dateVal);
+        return week && week <= weekNo;
+      }).length;
+    }
 
     if (!item.dateField) return Number(getRow(type)[item.key] || 0);
 
