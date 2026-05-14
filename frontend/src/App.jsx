@@ -344,7 +344,8 @@ function getRegion(siteCode = "", projectCode = "") {
     code.startsWith("MU") ||
     code.startsWith("MN") ||
     code.startsWith("AI") ||
-    code.startsWith("DE")
+    code.startsWith("DE") ||
+    code.includes("_IZM")
   ) {
     return "İzmir";
   }
@@ -353,7 +354,8 @@ function getRegion(siteCode = "", projectCode = "") {
     code.startsWith("AT") ||
     code.startsWith("IP") ||
     code.startsWith("BU") ||
-    code.startsWith("AF")
+    code.startsWith("AF") ||
+    code.includes("_ANT")
   ) {
     return "Antalya";
   }
