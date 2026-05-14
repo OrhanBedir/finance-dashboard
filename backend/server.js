@@ -5702,14 +5702,14 @@ app.get("/rollout/summary", async (req, res) => {
              OR abonelik_end_date IS NOT NULL
         )::int AS abonelik_end,
 
-        -- PO Closed: site_po tablosunda bu site için tüm kalemlerin due_qty = 0 ise kapalı
+        -- PO Closed: po_rows tablosunda bu site için tüm kalemlerin due_qty = 0 ise kapalı
         COUNT(*) FILTER (
           WHERE EXISTS (
-            SELECT 1 FROM site_po sp
+            SELECT 1 FROM po_rows sp
             WHERE UPPER(TRIM(sp.site_code)) = UPPER(TRIM(rollout_progress.site_code))
           )
           AND NOT EXISTS (
-            SELECT 1 FROM site_po sp2
+            SELECT 1 FROM po_rows sp2
             WHERE UPPER(TRIM(sp2.site_code)) = UPPER(TRIM(rollout_progress.site_code))
             AND COALESCE(sp2.due_qty, 0) > 0
           )
