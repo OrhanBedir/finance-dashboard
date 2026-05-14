@@ -6961,6 +6961,13 @@ function PuantajPanel({ currentUser, onBack }) {
         );
       })()}
 
+      {/* Legend */}
+      <div style={{ display:"flex", gap:"10px", marginBottom:"14px", flexWrap:"wrap", alignItems:"center" }}>
+        {DURUMLAR.map(d=><span key={d.key} style={{ fontSize:"13px" }}>{d.label} {d.key}</span>)}
+        <span style={{ fontSize:"13px", color:"#7c3aed" }}>🟣 Pazar</span>
+        <span style={{ fontSize:"13px", color:"#1d4ed8" }}>🎌 Resmi Tatil</span>
+      </div>
+
       <div style={{ overflowX:"auto", borderRadius:"14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
         <table style={{ borderCollapse:"collapse", width:"100%", background:"#fff", borderRadius:"14px", overflow:"hidden" }}>
           <thead>
