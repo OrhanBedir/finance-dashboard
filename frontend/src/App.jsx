@@ -7201,26 +7201,32 @@ function HrDashboard({ onBack, currentUser }) {
     loadPersonel();
   };
   const loadMaasOde = async (personelId) => {
-    const res = await fetch(`${API_BASE}/hr/maas-odeme?personel_id=${personelId}`);
-    const data = await res.json();
-    setMaasOdeList(data);
+    try {
+      const res = await fetch(`${API_BASE}/hr/maas-odeme?personel_id=${personelId}`);
+      const data = await res.json();
+      setMaasOdeList(Array.isArray(data) ? data : []);
+    } catch { setMaasOdeList([]); }
   };
   const handleSaveMaasOde = async (e) => {
     e.preventDefault();
     if (!maasOdeModal) return;
     setMaasOdeSaving(true);
-    await fetch(`${API_BASE}/hr/maas-odeme`, {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ personel_id: maasOdeModal.id, ...maasOdeForm, created_by: currentUser?.email })
-    });
-    setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
-    await loadMaasOde(maasOdeModal.id);
+    try {
+      await fetch(`${API_BASE}/hr/maas-odeme`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ personel_id: maasOdeModal.id, ...maasOdeForm, created_by: currentUser?.email })
+      });
+      setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
+      await loadMaasOde(maasOdeModal.id);
+    } catch (err) { alert("Kayıt sırasında hata: " + err.message); }
     setMaasOdeSaving(false);
   };
   const handleDeleteMaasOde = async (id) => {
     if (!window.confirm("Bu ödeme kaydı silinsin mi?")) return;
-    await fetch(`${API_BASE}/hr/maas-odeme/${id}`, { method:"DELETE" });
-    if (maasOdeModal) await loadMaasOde(maasOdeModal.id);
+    try {
+      await fetch(`${API_BASE}/hr/maas-odeme/${id}`, { method:"DELETE" });
+      if (maasOdeModal) await loadMaasOde(maasOdeModal.id);
+    } catch { /* sessiz */ }
   };
   const handleBelgeUpload = async (personelId, tur, file) => {
     const fd = new FormData(); fd.append("dosya", file);
