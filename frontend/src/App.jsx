@@ -7310,25 +7310,33 @@ function HrDashboard({ onBack, currentUser }) {
   };
   const handleSaveIsg = async (e) => {
     e.preventDefault();
+    let saved = null;
     try {
       const tur = isgTurleri.find(t=>t.tur===isgForm.egitim_turu);
       const res = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg`, {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({...isgForm, gecerlilik_yil: tur?.gecerlilik_yil || isgForm.gecerlilik_yil})
       });
-      const saved = await res.json();
-      if (!res.ok) { alert("Hata: " + (saved.error || res.status)); return; }
-      if (isgBelgeDosya && saved.id) {
+      saved = await res.json();
+      if (!res.ok) { alert("Kayıt hatası: " + (saved.error || res.status)); return; }
+    } catch(err) { alert("Kayıt hatası: " + err.message); return; }
+
+    // Kayıt başarılı — formu kapat ve listeyi yenile
+    setShowIsgForm(false);
+    setIsgForm({ egitim_turu:"", egitim_tarihi:"", gecerlilik_yil:2 });
+    loadPersonelDetail(selectedPersonel);
+    loadIsgUyarilar();
+
+    // Belge upload — ayrı, başarısız olsa kayıt bozulmaz
+    if (isgBelgeDosya && saved?.id) {
+      try {
         const fd = new FormData(); fd.append("dosya", isgBelgeDosya);
         const br = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${saved.id}/belge`, { method:"POST", body: fd });
-        if (!br.ok) { const be = await br.json(); alert("Belge yükleme hatası: " + (be.error || br.status)); }
-      }
-      setShowIsgForm(false);
-      setIsgBelgeDosya(null);
-      setIsgForm({ egitim_turu:"", egitim_tarihi:"", gecerlilik_yil:2 });
-      loadPersonelDetail(selectedPersonel);
-      loadIsgUyarilar();
-    } catch(err) { alert("Kayıt hatası: " + err.message); }
+        if (!br.ok) { const be = await br.json().catch(()=>{}); alert("Belge yükleme hatası: " + (be?.error || br.status)); }
+        else loadPersonelDetail(selectedPersonel);
+      } catch(err) { alert("Belge yükleme hatası: " + err.message); }
+      finally { setIsgBelgeDosya(null); }
+    } else { setIsgBelgeDosya(null); }
   };
   const handleIsgBelgeUpload = async (personelId, isgId, file) => {
     const fd = new FormData(); fd.append("dosya", file);
