@@ -10414,6 +10414,79 @@ app.get("/hr/masraf-form/donem/:donem/excel", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Otomatik migration: her deploy/restart'ta eksik kolonları ekle ──
+const AUTO_MIGRATIONS = [
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS bolge TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS il TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS site_physical_type TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS project_code TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS malzeme_status TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS plan_start_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS installation_actual_start_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS installation_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS onair_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS rf_not TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS atlas_status TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS qc_durum TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS qc_closed_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS los_subcon TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS los_plan_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS los_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS los_belge_url TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tss_subcon TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tss_plan_start_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tss_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tssr_subcon TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tssr_plan_start_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tssr_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tssr_belge_url TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_subcon TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_plan_start_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_approved TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_certificate_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_belge_url TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS gs_status TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS survey_note TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_plan_start_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_belge_url TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_subcon TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_plan_start_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_not TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_site_type TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_subcon TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_plan_start_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_not TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_subcon TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_hazir DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_not TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_belge_url TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_subcon TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_plan_start_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS abonelik_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS abonelik_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tt_horizon_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS qc_closed_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+];
+
+(async () => {
+  try {
+    for (const sql of AUTO_MIGRATIONS) {
+      await pool.query(sql).catch(() => {});
+    }
+    console.log("✅ Auto-migrations tamamlandı");
+  } catch (e) {
+    console.error("Migration hatası:", e.message);
+  }
+})();
+
 if (process.env.NODE_ENV !== "production" || process.env.LOCAL_SERVER) {
   app.listen(PORT, () => {
     console.log(`Server çalışıyor: ${PORT}`);
