@@ -7338,15 +7338,26 @@ function HrDashboard({ onBack, currentUser }) {
   };
   const uploadIsgBelge = async (isgId, file) => {
     const ext = file.name.split(".").pop();
-    const signRes = await fetch(`${API_BASE}/hr/isg/signed-upload-url?isgId=${isgId}&ext=${ext}`);
-    if (!signRes.ok) throw new Error("Signed URL alınamadı");
-    const { signedUrl, publicUrl } = await signRes.json();
-    const upRes = await fetch(signedUrl, { method:"PUT", body: file, headers:{ "Content-Type": file.type } });
-    if (!upRes.ok) throw new Error("Supabase upload hatası: " + upRes.status);
-    const patchRes = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgId}/belge-url`, {
-      method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ url: publicUrl })
-    });
-    if (!patchRes.ok) throw new Error("URL kaydedilemedi");
+    // Adım 1: Backend'den signed URL al
+    let signedUrl, publicUrl;
+    try {
+      const signRes = await fetch(`${API_BASE}/hr/isg/signed-upload-url?isgId=${isgId}&ext=${ext}`);
+      if (!signRes.ok) { const e=await signRes.json().catch(()=>({error:signRes.status})); throw new Error(e.error||signRes.status); }
+      const d = await signRes.json();
+      signedUrl = d.signedUrl; publicUrl = d.publicUrl;
+    } catch(e) { throw new Error("Adım1 (signed URL): " + e.message); }
+    // Adım 2: Dosyayı Supabase'e direkt yükle
+    try {
+      const upRes = await fetch(signedUrl, { method:"PUT", body: file, headers:{ "Content-Type": file.type, "x-upsert":"true" } });
+      if (!upRes.ok) throw new Error(upRes.status);
+    } catch(e) { throw new Error("Adım2 (Supabase PUT): " + e.message); }
+    // Adım 3: Public URL'yi DB'ye kaydet
+    try {
+      const patchRes = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgId}/belge-url`, {
+        method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ url: publicUrl })
+      });
+      if (!patchRes.ok) throw new Error(patchRes.status);
+    } catch(e) { throw new Error("Adım3 (URL kaydet): " + e.message); }
   };
   const handleIsgBelgeUpload = async (personelId, isgId, file) => {
     try {
