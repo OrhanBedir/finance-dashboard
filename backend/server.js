@@ -8835,6 +8835,37 @@ app.get("/hr/excel/puantaj", async (req, res) => {
     const { ay, yil } = req.query;
     const ExcelJS = require("exceljs");
     const wb = new ExcelJS.Workbook();
+
+    // ── Açıklama sayfası (ilk sayfa) ──
+    const wsAciklama = wb.addWorksheet("Açıklama");
+    wsAciklama.columns = [{ width: 22 }, { width: 40 }];
+    const aciklamaBaslik = wsAciklama.addRow(["PUANTAJ SİMGELERİ AÇIKLAMASI"]);
+    aciklamaBaslik.getCell(1).font = { bold: true, size: 13, color: { argb: "FFFFFFFF" } };
+    aciklamaBaslik.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
+    wsAciklama.mergeCells(`A1:B1`);
+    aciklamaBaslik.getCell(1).alignment = { horizontal: "center" };
+    wsAciklama.addRow([]);
+    const aciklamalar = [
+      ["✅  ÇALIŞTI",    "Personel o gün çalışmıştır.",           "FFD1FAE5"],
+      ["❌  GELMEDİ",    "Personel o gün işe gelmemiştir (ücretsiz).", "FFFEE2E2"],
+      ["🏖  İZİN",       "Yıllık izin kullanılmıştır (ücretli).", "FFDBEAFE"],
+      ["☪️  RAPOR",      "Sağlık raporu / hastalık izni.",         "FFFEF3C7"],
+      ["⭕  TATİL",      "Hafta tatili veya girilmemiş gün.",      "FFF9FAFB"],
+      ["💤  DİNLENME",   "Pazar fazla mesai karşılığı dinlenme.",  "FFF3E8FF"],
+      ["🎌  RESMİ TATİL","Ulusal veya dini resmi tatil günü.",     "FFDBEAFE"],
+    ];
+    for (const [simge, aciklama, renk] of aciklamalar) {
+      const r = wsAciklama.addRow([simge, aciklama]);
+      r.getCell(1).font = { bold: true };
+      r.eachCell(c => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: renk } }; c.alignment = { vertical: "middle" }; });
+      r.height = 22;
+    }
+    wsAciklama.addRow([]);
+    const notSatir = wsAciklama.addRow(["NOT:", "Maaş bilgileri bu Excel'e dahil edilmemiştir."]);
+    notSatir.getCell(1).font = { bold: true, color: { argb: "FFB91C1C" } };
+    notSatir.getCell(2).font = { italic: true, color: { argb: "FF6B7280" } };
+
+    // ── Puantaj sayfası ──
     const ws = wb.addWorksheet("Puantaj");
 
     const totalDays = new Date(Number(yil), Number(ay), 0).getDate();
@@ -8843,37 +8874,31 @@ app.get("/hr/excel/puantaj", async (req, res) => {
       `SELECT id, personel_id, tarih, durum, not_aciklama, belge_yolu FROM puantaj
        WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2`, [ay, yil]
     );
-    const avansList = await pool.query(
-      `SELECT personel_id, SUM(tutar) as toplam FROM avans
-       WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2 GROUP BY personel_id`, [ay, yil]
-    );
 
     const ayGunleri = Array.from({ length: totalDays }, (_, i) => i + 1);
-    const headers = ["Personel", "Unvan", ...ayGunleri.map(g => String(g)), "Çalışılan", "Net Maaş", "Hakediş", "Banka", "Elden", "Avans", "Kalan"];
+    const headers = ["Personel", "Unvan", ...ayGunleri.map(g => String(g)), "Çalışılan"];
     const headerRow = ws.addRow(headers);
     headerRow.eachCell(cell => {
-      cell.font = { bold: true, size: 11 };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
       cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
       cell.alignment = { horizontal: "center" };
     });
 
-    const DURUM_LABEL = { CALISDI: "✅", IZIN: "🏖", RAPOR: "☪️", TATIL: "⭕", GELMEDI: "❌" };
-    const DURUM_COLOR = { CALISDI: "FFD1FAE5", IZIN: "FFDBEAFE", RAPOR: "FFFEF3C7", TATIL: "FFF9FAFB", GELMEDI: "FFFEE2E2" };
+    const DURUM_LABEL = { CALISDI:"✅", GELMEDI:"❌", IZIN:"🏖", RAPOR:"☪️", TATIL:"⭕", DINLENME:"💤", RESMI_TATIL:"🎌" };
+    const DURUM_COLOR = { CALISDI:"FFD1FAE5", GELMEDI:"FFFEE2E2", IZIN:"FFDBEAFE", RAPOR:"FFFEF3C7", TATIL:"FFF9FAFB", DINLENME:"FFF3E8FF", RESMI_TATIL:"FFDBEAFE" };
 
-    // Notlar sayfası
+    // ── Notlar sayfası ──
     const wsNot = wb.addWorksheet("Notlar");
     const notHeaders = wsNot.addRow(["Personel", "Tarih", "Durum", "Not", "Belge"]);
     notHeaders.eachCell(cell => {
       cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF991B1B" } };
     });
-    wsNot.columns = [{ width: 22 }, { width: 14 }, { width: 12 }, { width: 50 }, { width: 30 }];
+    wsNot.columns = [{ width: 22 }, { width: 14 }, { width: 14 }, { width: 50 }, { width: 30 }];
 
     for (const p of personelList.rows) {
       const rowData = [p.ad_soyad, p.unvan || ""];
       let calisilan = 0;
-      const cellNotMap = {}; // col index -> note text
 
       for (const g of ayGunleri) {
         const tarih = `${yil}-${String(ay).padStart(2,"0")}-${String(g).padStart(2,"0")}`;
@@ -8882,47 +8907,29 @@ app.get("/hr/excel/puantaj", async (req, res) => {
         if (durum === "CALISDI") calisilan++;
         rowData.push(DURUM_LABEL[durum] || "");
         if (pr?.not_aciklama || pr?.belge_yolu) {
-          cellNotMap[g + 1] = pr; // g+1 for 1-based col offset after Personel+Unvan cols
-          // Notlar sayfasına ekle
-          const notRow = wsNot.addRow([
-            p.ad_soyad,
-            tarih,
-            durum,
-            pr.not_aciklama || "",
-            pr.belge_yolu ? `http://localhost:5001/puantaj-belgeler/${pr.belge_yolu}` : "",
-          ]);
+          const notRow = wsNot.addRow([p.ad_soyad, tarih, durum, pr.not_aciklama || "", pr.belge_yolu || ""]);
           notRow.getCell(4).alignment = { wrapText: true };
-          if (durum === "GELMEDI") notRow.eachCell(c => { c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFFEE2E2" } }; });
-          if (durum === "RAPOR")   notRow.eachCell(c => { c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFFEF3C7" } }; });
-          if (durum === "IZIN")    notRow.eachCell(c => { c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFDBEAFE" } }; });
+          const notRenk = { GELMEDI:"FFFEE2E2", RAPOR:"FFFEF3C7", IZIN:"FFDBEAFE" }[durum];
+          if (notRenk) notRow.eachCell(c => { c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:notRenk } }; });
         }
       }
 
-      const hakediş = Math.round((calisilan / totalDays) * (p.net_maas || 0));
-      const bankadan = Math.round((calisilan / totalDays) * (p.bankadan_gosterilen || 0));
-      const elden = Math.round((calisilan / totalDays) * (p.elden_verilen || 0));
-      const avansRow = avansList.rows.find(a => a.personel_id === p.id);
-      const avans = Number(avansRow?.toplam || 0);
-      rowData.push(calisilan, p.net_maas || 0, hakediş, bankadan, elden, avans, hakediş - avans);
+      rowData.push(calisilan);
       const excelRow = ws.addRow(rowData);
       excelRow.getCell(1).font = { bold: true };
 
-      // Hücre renklendirme + not yorumu
       for (const g of ayGunleri) {
         const tarih = `${yil}-${String(ay).padStart(2,"0")}-${String(g).padStart(2,"0")}`;
         const pr = puantajRows.rows.find(x => x.personel_id === p.id && x.tarih?.toISOString?.().startsWith(tarih));
         const durum = pr?.durum || "TATIL";
         const cell = excelRow.getCell(g + 2); // +2 = Personel + Unvan
         cell.alignment = { horizontal: "center" };
-        const bg = DURUM_COLOR[durum] || "FFF9FAFB";
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
-        if (pr?.not_aciklama) {
-          cell.note = { texts: [{ text: pr.not_aciklama }] };
-        }
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: DURUM_COLOR[durum] || "FFF9FAFB" } };
+        if (pr?.not_aciklama) cell.note = { texts: [{ text: pr.not_aciklama }] };
       }
     }
 
-    ws.columns.forEach((col, i) => { col.width = i < 2 ? 20 : i < 2 + totalDays ? 5 : 14; });
+    ws.columns.forEach((col, i) => { col.width = i < 2 ? 20 : i < 2 + totalDays ? 5 : 10; });
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename=puantaj_${yil}_${String(ay).padStart(2,"0")}.xlsx`);
