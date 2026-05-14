@@ -7330,18 +7330,29 @@ function HrDashboard({ onBack, currentUser }) {
     // Belge upload — ayrı, başarısız olsa kayıt bozulmaz
     if (isgBelgeDosya && saved?.id) {
       try {
-        const fd = new FormData(); fd.append("dosya", isgBelgeDosya);
-        const br = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${saved.id}/belge`, { method:"POST", body: fd });
-        if (!br.ok) { const be = await br.json().catch(()=>{}); alert("Belge yükleme hatası: " + (be?.error || br.status)); }
-        else loadPersonelDetail(selectedPersonel);
+        await uploadIsgBelge(saved.id, isgBelgeDosya);
+        loadPersonelDetail(selectedPersonel);
       } catch(err) { alert("Belge yükleme hatası: " + err.message); }
       finally { setIsgBelgeDosya(null); }
     } else { setIsgBelgeDosya(null); }
   };
+  const uploadIsgBelge = async (isgId, file) => {
+    const ext = file.name.split(".").pop();
+    const signRes = await fetch(`${API_BASE}/hr/isg/signed-upload-url?isgId=${isgId}&ext=${ext}`);
+    if (!signRes.ok) throw new Error("Signed URL alınamadı");
+    const { signedUrl, publicUrl } = await signRes.json();
+    const upRes = await fetch(signedUrl, { method:"PUT", body: file, headers:{ "Content-Type": file.type } });
+    if (!upRes.ok) throw new Error("Supabase upload hatası: " + upRes.status);
+    const patchRes = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgId}/belge-url`, {
+      method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ url: publicUrl })
+    });
+    if (!patchRes.ok) throw new Error("URL kaydedilemedi");
+  };
   const handleIsgBelgeUpload = async (personelId, isgId, file) => {
-    const fd = new FormData(); fd.append("dosya", file);
-    await fetch(`${API_BASE}/hr/personel/${personelId}/isg/${isgId}/belge`, { method:"POST", body: fd });
-    loadPersonelDetail(selectedPersonel);
+    try {
+      await uploadIsgBelge(isgId, file);
+      loadPersonelDetail(selectedPersonel);
+    } catch(err) { alert("Belge yükleme hatası: " + err.message); }
   };
   const handleDeleteIsg = async (isgId) => {
     if (!window.confirm("Silinsin mi?")) return;

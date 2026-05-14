@@ -12,7 +12,7 @@ const jwt = require("jsonwebtoken");
 const { createWorker } = require("tesseract.js");
 const { detectRegion } = require("./utils/regionHelper");
 const { applyPremiumExcelStyle } = require("./utils/excelStyle");
-const { uploadToStorage, deleteFromStorage } = require("./supabase-storage");
+const { uploadToStorage, deleteFromStorage, supabase, BUCKET } = require("./supabase-storage");
 
 // ─── OCR HELPER ──────────────────────────────────────────────────────────────
 
@@ -8642,6 +8642,26 @@ app.post("/hr/personel/:id/isg/:isgId/belge", uploadPersonelBelge.single("dosya"
     const { url } = await uploadToStorage("isg-belgeler", fname, req.file.buffer, req.file.mimetype);
     await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
     res.json({ ok: true, dosya: url });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Signed URL — browser Supabase'e direkt upload yapar (Vercel body limitini aşmak için)
+app.get("/hr/isg/signed-upload-url", async (req, res) => {
+  try {
+    const { isgId, ext } = req.query;
+    const filePath = `isg-belgeler/isg-${isgId}-${Date.now()}.${(ext||"jpg").replace(/^\./, "")}`;
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(filePath);
+    if (error) throw error;
+    const publicUrl = supabase.storage.from(BUCKET).getPublicUrl(filePath).data.publicUrl;
+    res.json({ signedUrl: data.signedUrl, path: filePath, publicUrl });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch("/hr/personel/:id/isg/:isgId/belge-url", async (req, res) => {
+  try {
+    const { url } = req.body;
+    await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
