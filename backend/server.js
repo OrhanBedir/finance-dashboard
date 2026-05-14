@@ -9092,17 +9092,28 @@ app.get("/hr/is-avans/bakiye", async (req, res) => {
   try {
     const { email } = req.query;
     if (!email) return res.status(400).json({ error: "email gerekli" });
+    // Avans: kişi PERSONEL olarak atandıysa ona göre say (talep eden değil, alıcı)
     const avansRes = await pool.query(
-      `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep WHERE talep_eden_email=$1 AND durum='TAMAMLANDI'`,
+      `SELECT COALESCE(SUM(t.tutar),0) as toplam
+       FROM is_avans_talep t
+       JOIN personel p ON p.id = t.personel_id
+       WHERE LOWER(p.email)=LOWER($1) AND t.durum='TAMAMLANDI'`,
+      [email]
+    );
+    // Eğer personel kaydı yoksa talep_eden_email ile fallback
+    const avansResFallback = await pool.query(
+      `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep
+       WHERE LOWER(talep_eden_email)=LOWER($1) AND durum='TAMAMLANDI'
+       AND personel_id IS NULL`,
       [email]
     );
     const masrafRes = await pool.query(
       `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
-       WHERE mf.talep_eden_email=$1 AND mf.durum='ARSIVLENDI'`,
+       WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mf.durum='ARSIVLENDI'`,
       [email]
     );
-    const avans = Number(avansRes.rows[0].toplam);
+    const avans = Number(avansRes.rows[0].toplam) + Number(avansResFallback.rows[0].toplam);
     const masraf = Number(masrafRes.rows[0].toplam);
     res.json({ avans, masraf, bakiye: avans - masraf });
   } catch (e) { res.status(500).json({ error: e.message }); }
