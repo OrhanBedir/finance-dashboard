@@ -14083,39 +14083,15 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           {input("GS Status", "gs_status")}
           {input("Survey Note", "survey_note")}
 
-          {input("ENH Subcon", "enh_subcon")}
-          {select("ENH Site Type", "enh_site_type", [
-            "Abone",
-            "Süzme",
-            "Abone + Süzme",
-          ])}
-          {input("ENH Plan Start Date", "enh_plan_start_date", "date")}
-          {input("ENH Actual End Date", "enh_actual_end_date", "date")}
-          {input("ENH Not", "enh_not")}
-
-          {input("Power Subcon", "power_subcon")}
-          {input("Power Plan Start Date", "power_plan_start_date", "date")}
-          {input("Power Actual End Date", "power_actual_end_date", "date")}
-
-          {input(
-            "Abonelik Actual End Date",
-            "abonelik_actual_end_date",
-            "date",
-          )}
-          {input(
-            "Horizon Actual End Date",
-            "tt_horizon_actual_end_date",
-            "date",
-          )}
-          {input("PAC Actual End Date", "pac_actual_end_date", "date")}
         </div>
 
-        {/* ===== ENH PROJE (Standalone - Abone) ===== */}
+        {/* ===== ENH PROJE (Standalone - Abone) — Montajdan önce ===== */}
         <div style={{ margin:"16px 0 0", padding:"16px", background:"#f0fdf4", borderRadius:"12px", border:"1px solid #bbf7d0" }}>
           <div style={{ fontWeight:700, fontSize:"14px", color:"#166534", marginBottom:"12px" }}>
             🔌 ENH Proje Bilgileri (Standalone / Abone)
           </div>
           <div className="modalGrid">
+            {select("ENH Site Type", "enh_site_type", ["Abone", "Süzme", "Abone + Süzme"])}
             {input("ENH Proje Subcon", "enh_proje_subcon")}
             {input("ENH Proje Hazır Tarihi", "enh_proje_hazir", "date")}
             {input("ENH Proje Not", "enh_proje_not")}
@@ -14144,6 +14120,30 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
                 {enhProjeBelgeFile && <span style={{ color:"#059669" }}>{enhProjeBelgeFile.name}</span>}
               </label>
             )}
+          </div>
+        </div>
+
+        {/* ENH Montaj */}
+        <div style={{ margin:"16px 0 0", padding:"16px", background:"#fffbeb", borderRadius:"12px", border:"1px solid #fde68a" }}>
+          <div style={{ fontWeight:700, fontSize:"14px", color:"#92400e", marginBottom:"12px" }}>⚡ ENH Montaj</div>
+          <div className="modalGrid">
+            {input("ENH Subcon", "enh_subcon")}
+            {input("ENH Plan Start Date", "enh_plan_start_date", "date")}
+            {input("ENH Actual End Date", "enh_actual_end_date", "date")}
+            {input("ENH Not", "enh_not")}
+          </div>
+        </div>
+
+        {/* Power */}
+        <div style={{ margin:"16px 0 0", padding:"16px", background:"#eff6ff", borderRadius:"12px", border:"1px solid #bfdbfe" }}>
+          <div style={{ fontWeight:700, fontSize:"14px", color:"#1e40af", marginBottom:"12px" }}>🔋 Power</div>
+          <div className="modalGrid">
+            {input("Power Subcon", "power_subcon")}
+            {input("Power Plan Start Date", "power_plan_start_date", "date")}
+            {input("Power Actual End Date", "power_actual_end_date", "date")}
+            {input("Abonelik Actual End Date", "abonelik_actual_end_date", "date")}
+            {input("Horizon Actual End Date", "tt_horizon_actual_end_date", "date")}
+            {input("PAC Actual End Date", "pac_actual_end_date", "date")}
           </div>
         </div>
 

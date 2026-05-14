@@ -2205,11 +2205,57 @@ app.get("/setup-db", async (req, res) => {
       );
     `);
 
-    // ENH Proje kolonları (ALTER TABLE IF NOT EXISTS)
-    await pool.query(`ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_subcon TEXT`);
-    await pool.query(`ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_hazir DATE`);
-    await pool.query(`ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_not TEXT`);
-    await pool.query(`ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_belge_url TEXT`);
+    // Eksik kolonlar — ALTER TABLE IF NOT EXISTS (idempotent)
+    const missingCols = [
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS bolge TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS il TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS site_physical_type TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS project_code TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS malzeme_status TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS plan_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS installation_actual_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS installation_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS onair_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS rf_not TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS atlas_status TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS qc_durum TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS qc_closed_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS los_plan_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS los_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tss_plan_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tss_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tssr_plan_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tssr_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_plan_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_approved TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_certificate_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_site_type TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_subcon TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_plan_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_not TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_subcon TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_plan_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS abonelik_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS abonelik_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tt_horizon_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_subcon TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_plan_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_not TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_plan_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_subcon TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_hazir DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_not TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_belge_url TEXT",
+    ];
+    for (const sql of missingCols) {
+      await pool.query(sql).catch(() => {}); // sessizce atla, zaten varsa sorun değil
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rollout_files (
