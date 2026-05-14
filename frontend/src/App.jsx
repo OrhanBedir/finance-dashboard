@@ -13920,8 +13920,18 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     enh_proje_hazir: existingRow.enh_proje_hazir || "",
     enh_proje_not: existingRow.enh_proje_not || "",
     enh_proje_belge_url: existingRow.enh_proje_belge_url || "",
+    los_belge_url: existingRow.los_belge_url || "",
+    tssr_belge_url: existingRow.tssr_belge_url || "",
+    btk_belge_url: existingRow.btk_belge_url || "",
+    emr_belge_url: existingRow.emr_belge_url || "",
+    pac_belge_url: existingRow.pac_belge_url || "",
   });
   const [enhProjeBelgeFile, setEnhProjeBelgeFile] = useState(null);
+  const [losBelgeFile, setLosBelgeFile] = useState(null);
+  const [tssrBelgeFile, setTssrBelgeFile] = useState(null);
+  const [btkBelgeFile, setBtkBelgeFile] = useState(null);
+  const [emrBelgeFile, setEmrBelgeFile] = useState(null);
+  const [pacBelgeFile, setPacBelgeFile] = useState(null);
   const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
   const handleChange = (field, value) => {
@@ -13946,22 +13956,41 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
 
       console.log("ROLLOUT SAVE RESULT:", result);
 
-      // ENH Proje belgesi upload
-      if (enhProjeBelgeFile && result.row?.id) {
-        try {
-          setEnhProjeSaving(true);
-          const ext = enhProjeBelgeFile.name.split(".").pop();
-          const signRes = await fetch(`${API_BASE}/rollout/enh-proje/signed-upload-url?rolloutId=${result.row.id}&ext=${ext}`);
-          if (signRes.ok) {
-            const { signedUrl, publicUrl } = await signRes.json();
-            await fetch(signedUrl, { method:"PUT", body: enhProjeBelgeFile, headers:{ "Content-Type": enhProjeBelgeFile.type, "x-upsert":"true" } });
-            await fetchJson(`${API_BASE}/rollout/${result.row.id}/enh-proje-belge-url`, {
-              method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
-              body: JSON.stringify({ url: publicUrl })
-            });
-          }
-        } catch(e) { alert("Belge yükleme hatası: " + e.message); }
-        finally { setEnhProjeSaving(false); setEnhProjeBelgeFile(null); }
+      // Belge upload helper
+      const uploadRolloutBelge = async (file, type, field) => {
+        const ext = file.name.split(".").pop();
+        const signRes = await fetch(`${API_BASE}/rollout/signed-upload-url?rolloutId=${result.row.id}&type=${type}&ext=${ext}`);
+        if (!signRes.ok) throw new Error("Signed URL alınamadı");
+        const { signedUrl, publicUrl } = await signRes.json();
+        const upRes = await fetch(signedUrl, { method:"PUT", body: file, headers:{ "Content-Type": file.type, "x-upsert":"true" } });
+        if (!upRes.ok) throw new Error("Supabase yükleme başarısız");
+        await fetchJson(`${API_BASE}/rollout/${result.row.id}/belge-url`, {
+          method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ field, url: publicUrl })
+        });
+        return publicUrl;
+      };
+
+      // Tüm belge upload'ları
+      const belgeUploads = [
+        { file: enhProjeBelgeFile, type:"enh_proje", field:"enh_proje_belge_url", setter: setEnhProjeBelgeFile },
+        { file: losBelgeFile,      type:"los",       field:"los_belge_url",       setter: setLosBelgeFile },
+        { file: tssrBelgeFile,     type:"tssr",      field:"tssr_belge_url",      setter: setTssrBelgeFile },
+        { file: btkBelgeFile,      type:"btk",       field:"btk_belge_url",       setter: setBtkBelgeFile },
+        { file: emrBelgeFile,      type:"emr",       field:"emr_belge_url",       setter: setEmrBelgeFile },
+        { file: pacBelgeFile,      type:"pac",       field:"pac_belge_url",       setter: setPacBelgeFile },
+      ];
+      if (result.row?.id) {
+        setEnhProjeSaving(true);
+        for (const { file, type, field, setter } of belgeUploads) {
+          if (!file) continue;
+          try {
+            const url = await uploadRolloutBelge(file, type, field);
+            setForm(prev => ({ ...prev, [field]: url }));
+          } catch(e) { alert(`${type.toUpperCase()} belgesi yükleme hatası: ${e.message}`); }
+          finally { setter(null); }
+        }
+        setEnhProjeSaving(false);
       }
 
       alert("Kayıt başarıyla kaydedildi");
@@ -14026,6 +14055,68 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     </label>
   );
 
+  // Belge upload widget
+  const belgeWidget = (urlField, file, setFile) => {
+    const currentUrl = form[urlField];
+    const accept = ".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx";
+    return (
+      <div style={{ marginTop:"8px" }}>
+        {currentUrl ? (
+          <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+            <a href={currentUrl} target="_blank" rel="noreferrer"
+              style={{ background:"#dbeafe", color:"#1d4ed8", padding:"5px 12px", borderRadius:"8px", fontSize:"12px", textDecoration:"none", fontWeight:600 }}>
+              📄 Belgeyi Görüntüle
+            </a>
+            <label style={{ background:"#e0e7ff", color:"#4338ca", padding:"5px 12px", borderRadius:"8px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>
+              🔄 Değiştir
+              <input type="file" accept={accept} style={{ display:"none" }} onChange={e=>setFile(e.target.files[0]||null)} />
+            </label>
+            {file && <span style={{ fontSize:"11px", color:"#059669", fontWeight:600 }}>📎 {file.name}</span>}
+          </div>
+        ) : (
+          <label style={{ display:"inline-flex", alignItems:"center", gap:"6px", background:"#f3f4f6", border:"1px dashed #9ca3af", borderRadius:"8px", padding:"7px 14px", cursor:"pointer", fontSize:"12px" }}>
+            📎 Belge Ekle (PDF, JPG, PNG, DWG, Excel, Word)
+            <input type="file" accept={accept} style={{ display:"none" }} onChange={e=>setFile(e.target.files[0]||null)} />
+            {file && <span style={{ color:"#059669", fontWeight:600 }}>{file.name}</span>}
+          </label>
+        )}
+      </div>
+    );
+  };
+
+  // Tüm saha belgelerini ZIP olarak indir
+  const handleSahaBelgeleriIndir = async () => {
+    const belgeler = [
+      { url: form.los_belge_url,       ad: "LOS" },
+      { url: form.tssr_belge_url,      ad: "TSSR" },
+      { url: form.btk_belge_url,       ad: "BTK" },
+      { url: form.emr_belge_url,       ad: "EMR" },
+      { url: form.pac_belge_url,       ad: "PAC" },
+      { url: form.enh_proje_belge_url, ad: "ENH_Proje" },
+    ].filter(b => b.url);
+    if (belgeler.length === 0) { alert("Bu sahaya ait belge bulunamadı."); return; }
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    let count = 0;
+    for (const { url, ad } of belgeler) {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) continue;
+        const buf = await r.arrayBuffer();
+        const ext = url.split("?")[0].split(".").pop() || "pdf";
+        zip.file(`${form.site_code}_${ad}.${ext}`, buf);
+        count++;
+      } catch {}
+    }
+    if (count === 0) { alert("Belgeler indirilemedi."); return; }
+    const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${form.site_code}_Belgeler.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   return (
     <div className="modalOverlay" onClick={onClose}>
       <div className="rolloutModal" onClick={(e) => e.stopPropagation()}>
@@ -14034,55 +14125,84 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           <button onClick={onClose}>✕</button>
         </div>
 
+        {/* ===== Temel Bilgiler ===== */}
         <div className="modalGrid">
           {input("Site Code", "site_code")}
           {select("Site Type", "site_type", ["5G", "DSS", "LTE", "STANDALONE"])}
-          {select("Site Fiziksel Tip", "site_physical_type", [
-            "Rooftop",
-            "Kule",
-            "Gizleme",
-            "VF Katılım",
-            "TT Katılım",
-          ])}
+          {select("Site Fiziksel Tip", "site_physical_type", ["Rooftop","Kule","Gizleme","VF Katılım","TT Katılım"])}
           {input("Project Code", "project_code")}
           {input("Malzeme Status", "malzeme_status")}
           {input("İl", "il")}
+        </div>
 
-          {input("RF Subcon", "rf_subcon")}
-          {input("Plan Start Date", "plan_start_date", "date")}
-          {input(
-            "Installation Start Date",
-            "installation_actual_start_date",
-            "date",
-          )}
-          {input(
-            "Installation End Date",
-            "installation_actual_end_date",
-            "date",
-          )}
-          {input("OnAir Date", "onair_date", "date")}
-          {input("RF Not", "rf_not")}
-          {input("Atlas Status", "atlas_status")}
+        {/* ===== RF ===== */}
+        <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#f8fafc", borderRadius:"12px", border:"1px solid #e2e8f0" }}>
+          <div style={{ fontWeight:700, fontSize:"13px", color:"#475569", marginBottom:"10px" }}>📡 RF / Kurulum</div>
+          <div className="modalGrid">
+            {input("RF Subcon", "rf_subcon")}
+            {input("Plan Start Date", "plan_start_date", "date")}
+            {input("Installation Start Date", "installation_actual_start_date", "date")}
+            {input("Installation End Date", "installation_actual_end_date", "date")}
+            {input("OnAir Date", "onair_date", "date")}
+            {input("RF Not", "rf_not")}
+            {input("Atlas Status", "atlas_status")}
+          </div>
+        </div>
 
-          {input("LOS Subcon", "los_subcon")}
-          {input("LOS Plan Date", "los_plan_date", "date")}
-          {input("LOS Actual End Date", "los_actual_end_date", "date")}
+        {/* ===== LOS ===== */}
+        <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#fff7ed", borderRadius:"12px", border:"1px solid #fed7aa" }}>
+          <div style={{ fontWeight:700, fontSize:"13px", color:"#c2410c", marginBottom:"10px" }}>📡 LOS</div>
+          <div className="modalGrid">
+            {input("LOS Subcon", "los_subcon")}
+            {input("LOS Plan Date", "los_plan_date", "date")}
+            {input("LOS Actual End Date", "los_actual_end_date", "date")}
+          </div>
+          {belgeWidget("los_belge_url", losBelgeFile, setLosBelgeFile)}
+        </div>
 
-          {input("TSS Subcon", "tss_subcon")}
-          {input("TSS Plan Start Date", "tss_plan_start_date", "date")}
-          {input("TSS Actual End Date", "tss_actual_end_date", "date")}
+        {/* ===== TSS ===== */}
+        <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#f8fafc", borderRadius:"12px", border:"1px solid #e2e8f0" }}>
+          <div style={{ fontWeight:700, fontSize:"13px", color:"#475569", marginBottom:"10px" }}>🔧 TSS</div>
+          <div className="modalGrid">
+            {input("TSS Subcon", "tss_subcon")}
+            {input("TSS Plan Start Date", "tss_plan_start_date", "date")}
+            {input("TSS Actual End Date", "tss_actual_end_date", "date")}
+          </div>
+        </div>
 
-          {input("TSSR Subcon", "tssr_subcon")}
-          {input("TSSR Plan Start Date", "tssr_plan_start_date", "date")}
-          {input("TSSR Actual End Date", "tssr_actual_end_date", "date")}
+        {/* ===== TSSR ===== */}
+        <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#faf5ff", borderRadius:"12px", border:"1px solid #e9d5ff" }}>
+          <div style={{ fontWeight:700, fontSize:"13px", color:"#7c3aed", marginBottom:"10px" }}>📋 TSSR</div>
+          <div className="modalGrid">
+            {input("TSSR Subcon", "tssr_subcon")}
+            {input("TSSR Plan Start Date", "tssr_plan_start_date", "date")}
+            {input("TSSR Actual End Date", "tssr_actual_end_date", "date")}
+          </div>
+          {belgeWidget("tssr_belge_url", tssrBelgeFile, setTssrBelgeFile)}
+        </div>
 
-          {input("BTK Subcon", "btk_subcon")}
-          {input("BTK Plan Start Date", "btk_plan_start_date", "date")}
-          {input("BTK Actual End Date", "btk_actual_end_date", "date")}
-          {input("BTK Approval Status", "btk_approved")}
-          {input("GS Status", "gs_status")}
-          {input("Survey Note", "survey_note")}
+        {/* ===== BTK ===== */}
+        <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#fff1f2", borderRadius:"12px", border:"1px solid #fecdd3" }}>
+          <div style={{ fontWeight:700, fontSize:"13px", color:"#be123c", marginBottom:"10px" }}>🏛️ BTK</div>
+          <div className="modalGrid">
+            {input("BTK Subcon", "btk_subcon")}
+            {input("BTK Plan Start Date", "btk_plan_start_date", "date")}
+            {input("BTK Actual End Date", "btk_actual_end_date", "date")}
+            {input("BTK Approval Status", "btk_approved")}
+            {input("GS Status", "gs_status")}
+            {input("Survey Note", "survey_note")}
+          </div>
+          {belgeWidget("btk_belge_url", btkBelgeFile, setBtkBelgeFile)}
+        </div>
 
+        {/* ===== EMR ===== */}
+        <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#f0fdfa", borderRadius:"12px", border:"1px solid #99f6e4" }}>
+          <div style={{ fontWeight:700, fontSize:"13px", color:"#0f766e", marginBottom:"10px" }}>⚙️ EMR</div>
+          <div className="modalGrid">
+            {input("EMR Plan Start Date", "emr_plan_start_date", "date")}
+            {input("EMR Actual End Date", "emr_actual_end_date", "date")}
+          </div>
+          {belgeWidget("emr_belge_url", emrBelgeFile, setEmrBelgeFile)}
         </div>
 
         {/* ===== ENH PROJE (Standalone - Abone) — Montajdan önce ===== */}
@@ -14097,30 +14217,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             {input("ENH Proje Not", "enh_proje_not")}
           </div>
           {/* Belge eki */}
-          <div style={{ marginTop:"12px" }}>
-            <div style={{ fontSize:"13px", fontWeight:600, color:"#374151", marginBottom:"6px" }}>📎 ENH Proje Belgesi</div>
-            {form.enh_proje_belge_url ? (
-              <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-                <a href={form.enh_proje_belge_url} target="_blank" rel="noreferrer"
-                  style={{ background:"#dbeafe", color:"#1d4ed8", padding:"6px 12px", borderRadius:"8px", fontSize:"13px", textDecoration:"none" }}>
-                  📄 Belgeyi Görüntüle
-                </a>
-                <label style={{ background:"#e0e7ff", color:"#4338ca", padding:"6px 12px", borderRadius:"8px", fontSize:"13px", cursor:"pointer" }}>
-                  🔄 Değiştir
-                  <input type="file" accept=".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx" style={{ display:"none" }}
-                    onChange={e=>setEnhProjeBelgeFile(e.target.files[0]||null)} />
-                </label>
-                {enhProjeBelgeFile && <span style={{ fontSize:"12px", color:"#059669" }}>📎 {enhProjeBelgeFile.name}</span>}
-              </div>
-            ) : (
-              <label style={{ display:"inline-flex", alignItems:"center", gap:"6px", background:"#f3f4f6", border:"1px dashed #9ca3af", borderRadius:"8px", padding:"8px 14px", cursor:"pointer", fontSize:"13px" }}>
-                📎 Belge Yükle (PDF, JPG, PNG, DWG, Excel, Word)
-                <input type="file" accept=".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx" style={{ display:"none" }}
-                  onChange={e=>setEnhProjeBelgeFile(e.target.files[0]||null)} />
-                {enhProjeBelgeFile && <span style={{ color:"#059669" }}>{enhProjeBelgeFile.name}</span>}
-              </label>
-            )}
-          </div>
+          {belgeWidget("enh_proje_belge_url", enhProjeBelgeFile, setEnhProjeBelgeFile)}
         </div>
 
         {/* ENH Montaj */}
@@ -14145,6 +14242,10 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             {input("Horizon Actual End Date", "tt_horizon_actual_end_date", "date")}
             {input("PAC Actual End Date", "pac_actual_end_date", "date")}
           </div>
+          <div style={{ marginTop:"10px" }}>
+            <div style={{ fontSize:"12px", fontWeight:600, color:"#1e40af", marginBottom:"4px" }}>📎 PAC Belgesi</div>
+            {belgeWidget("pac_belge_url", pacBelgeFile, setPacBelgeFile)}
+          </div>
         </div>
 
         <div className="modalActions">
@@ -14156,18 +14257,22 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             <button
               className="tab"
               onClick={deleteRollout}
-              style={{
-                background: "#fee2e2",
-                color: "#991b1b",
-                fontWeight: "700",
-              }}
+              style={{ background: "#fee2e2", color: "#991b1b", fontWeight: "700" }}
             >
               Kaydı Sil
             </button>
           )}
 
-          <button className="saveButton" onClick={save}>
-            Kaydet
+          <button
+            className="tab"
+            onClick={handleSahaBelgeleriIndir}
+            style={{ background:"#1e293b", color:"#fff", fontWeight:700 }}
+          >
+            📦 Saha Belgelerini İndir
+          </button>
+
+          <button className="saveButton" onClick={save} disabled={enhProjeSaving}>
+            {enhProjeSaving ? "⏳ Yükleniyor..." : "Kaydet"}
           </button>
         </div>
       </div>

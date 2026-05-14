@@ -2252,6 +2252,11 @@ app.get("/setup-db", async (req, res) => {
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_hazir DATE",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_not TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_belge_url TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS los_belge_url TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tssr_belge_url TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_belge_url TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_belge_url TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
     ];
     for (const sql of missingCols) {
       await pool.query(sql).catch(() => {}); // sessizce atla, zaten varsa sorun değil
@@ -5237,11 +5242,13 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// ENH Proje belge signed URL
-app.get("/rollout/enh-proje/signed-upload-url", async (req, res) => {
+// Generic rollout belge signed URL (type: los, tssr, btk, emr, pac, enh_proje)
+const ROLLOUT_BELGE_FIELDS = ["los_belge_url","tssr_belge_url","btk_belge_url","emr_belge_url","pac_belge_url","enh_proje_belge_url"];
+app.get("/rollout/signed-upload-url", async (req, res) => {
   try {
-    const { rolloutId, ext } = req.query;
-    const filePath = `rollout-enh-proje/rollout-${rolloutId}-${Date.now()}.${(ext||"pdf").replace(/^\./, "")}`;
+    const { rolloutId, type, ext } = req.query;
+    const safeType = String(type||"doc").replace(/[^a-z0-9_-]/g,"");
+    const filePath = `rollout-belgeler/${safeType}/rollout-${rolloutId}-${Date.now()}.${(ext||"pdf").replace(/^\./, "")}`;
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(filePath);
     if (error) throw error;
     const publicUrl = supabase.storage.from(BUCKET).getPublicUrl(filePath).data.publicUrl;
@@ -5249,6 +5256,29 @@ app.get("/rollout/enh-proje/signed-upload-url", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Legacy enh-proje endpoint (backward compat)
+app.get("/rollout/enh-proje/signed-upload-url", async (req, res) => {
+  try {
+    const { rolloutId, ext } = req.query;
+    const filePath = `rollout-belgeler/enh_proje/rollout-${rolloutId}-${Date.now()}.${(ext||"pdf").replace(/^\./, "")}`;
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(filePath);
+    if (error) throw error;
+    const publicUrl = supabase.storage.from(BUCKET).getPublicUrl(filePath).data.publicUrl;
+    res.json({ signedUrl: data.signedUrl, path: filePath, publicUrl });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Generic belge-url save
+app.post("/rollout/:id/belge-url", async (req, res) => {
+  try {
+    const { field, url } = req.body;
+    if (!ROLLOUT_BELGE_FIELDS.includes(field)) return res.status(400).json({ error: "Geçersiz alan" });
+    await pool.query(`UPDATE rollout_progress SET ${field}=$1 WHERE id=$2`, [url, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Legacy enh-proje belge url
 app.post("/rollout/:id/enh-proje-belge-url", async (req, res) => {
   try {
     const { url } = req.body;
