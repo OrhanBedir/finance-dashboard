@@ -7456,7 +7456,7 @@ function HrDashboard({ onBack, currentUser }) {
 
       {/* Sekmeler */}
       <div style={{ display:"flex", gap:"8px", marginBottom:"20px" }}>
-        {[["personel","👤 Personel"],["puantaj","📋 Puantaj"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"]].map(([k,l]) => (
+        {[["personel","👤 Personel"],["puantaj","📋 Puantaj"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["isg","🎓 ISG / Belgeler"]].map(([k,l]) => (
           <button key={k} onClick={()=>{
             if (k === "personel" && !personelUnlocked) {
               const pwd = prompt("Personel bilgileri için şifre giriniz:");
@@ -7767,7 +7767,7 @@ function HrDashboard({ onBack, currentUser }) {
                     </div>
                     <span style={{ background:p.aktif?"#dcfce7":"#f3f4f6", color:p.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{p.aktif?"Aktif":"Pasif"}</span>
                     <div style={{ display:"flex", gap:"6px" }}>
-                      <button onClick={()=>loadPersonelDetail(p)} style={{ padding:"6px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>ISG / Belgeler</button>
+                      <button onClick={()=>loadPersonelDetail(p)} style={{ padding:"6px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Detay / Belgeler</button>
                       <button onClick={()=>handleEditPersonel(p)} style={{ padding:"6px 12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
                       <button onClick={()=>{ const now=new Date(); const pOzet=ozet.find(o=>String(o.personel_id)===String(p.id)); const hakVal=pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0); setMaasOdeModal(p); setMaasOdeHak(hakVal); setMaasOdeForm({ donem:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`, bankadan:"", elden:"", tarih:now.toISOString().split("T")[0], aciklama:"" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>
                       <button onClick={()=>handleToggleAktif(p)} style={{ padding:"6px 12px", background:p.aktif?"#fef3c7":"#f0fdf4", color:p.aktif?"#92400e":"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
@@ -8184,6 +8184,35 @@ function HrDashboard({ onBack, currentUser }) {
 
       {/* ===== İŞ AVANSI SEKMESİ ===== */}
       {tab==="is_avans" && <IsAvansPanel currentUser={currentUser} onPendingCount={()=>{}} />}
+
+      {/* ===== ISG / BELGELER SEKMESİ ===== */}
+      {tab==="isg" && (
+        <div>
+          {/* ISG Uyarıları */}
+          {isgUyarilar.length > 0 && (
+            <div style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:"12px", padding:"12px 16px", marginBottom:"16px", display:"flex", gap:"12px", alignItems:"flex-start", flexWrap:"wrap" }}>
+              <span style={{ fontWeight:700, color:"#991b1b", fontSize:"14px" }}>⚠️ ISG Eğitim Uyarısı:</span>
+              {isgUyarilar.map((u,i) => (
+                <span key={i} style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"8px", padding:"3px 10px", fontSize:"13px" }}>
+                  {u.ad_soyad} — {u.egitim_turu} ({u.durum})
+                </span>
+              ))}
+            </div>
+          )}
+          <div style={{ ...secSt }}>
+            <h3 style={{ margin:"0 0 16px" }}>🎓 ISG / Belgeler</h3>
+            <p style={{ color:"#6b7280", fontSize:"14px" }}>
+              Personel seçmek için <b>Personel</b> sekmesine geçip <b>Detay / Belgeler</b> butonuna tıklayın.
+              Burada tüm personelin ISG uyarıları ve eğitim durum özeti görüntülenir.
+            </p>
+            {isgUyarilar.length === 0 && (
+              <div style={{ textAlign:"center", padding:"40px", color:"#9ca3af" }}>
+                ✅ Tüm ISG eğitimleri güncel, uyarı bulunmuyor.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ===== AVANS SEKMESİ ===== */}
       {(tab==="maas_avans") && (() => {
