@@ -7093,6 +7093,9 @@ function PuantajPanel({ currentUser, onBack }) {
    HR DASHBOARD - Personel / Puantaj / Avans / ISG
    ============================================================ */
 function HrDashboard({ onBack, currentUser }) {
+  const _hrEmail = (currentUser?.email || "").toLowerCase();
+  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
+  const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
   const [tab, setTab] = useState("personel");
   const [personelList, setPersonelList] = useState([]);
   const [isgTurleri, setIsgTurleri] = useState([]);
@@ -7349,9 +7352,10 @@ function HrDashboard({ onBack, currentUser }) {
       <div style={{ display:"flex", gap:"8px", marginBottom:"20px" }}>
         {[["personel","👤 Personel"],["puantaj","📋 Puantaj"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["isg","🎓 ISG Eğitimler"]].map(([k,l]) => (
           <button key={k} onClick={()=>{
-            if (k === "maas_avans") {
-              const pwd = prompt("Maaş Avansı için şifre giriniz:");
+            if (k === "personel" && !personelUnlocked) {
+              const pwd = prompt("Personel bilgileri için şifre giriniz:");
               if (!["Orhan2026!","Duzgun2026!"].includes(pwd)) { alert("Yetkisiz erişim!"); return; }
+              setPersonelUnlocked(true);
             }
             setTab(k);
           }} className={tab===k?"tab activeTab":"tab"} style={{ fontSize:"14px" }}>{l}</button>
@@ -7359,7 +7363,21 @@ function HrDashboard({ onBack, currentUser }) {
       </div>
 
       {/* ===== PERSONEL SEKMESİ ===== */}
-      {tab==="personel" && (
+      {tab==="personel" && !personelUnlocked && (
+        <div style={{ textAlign:"center", padding:"60px 20px" }}>
+          <div style={{ fontSize:"48px", marginBottom:"16px" }}>🔒</div>
+          <div style={{ fontSize:"18px", fontWeight:700, color:"#1f2937", marginBottom:"8px" }}>Bu alan şifre korumalıdır</div>
+          <div style={{ fontSize:"14px", color:"#6b7280", marginBottom:"24px" }}>Personel maaş bilgilerine erişmek için yetkili şifre gereklidir.</div>
+          <button onClick={()=>{
+            const pwd = prompt("Personel bilgileri için şifre giriniz:");
+            if (["Orhan2026!","Duzgun2026!"].includes(pwd)) setPersonelUnlocked(true);
+            else if (pwd !== null) alert("Yetkisiz erişim!");
+          }} style={{ padding:"12px 28px", background:"#1f2937", color:"#fff", border:"none", borderRadius:"10px", fontSize:"15px", fontWeight:700, cursor:"pointer" }}>
+            Şifre Gir
+          </button>
+        </div>
+      )}
+      {tab==="personel" && personelUnlocked && (
         <div>
           {selectedPersonel ? (
             /* Personel Detay */
