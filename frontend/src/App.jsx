@@ -7177,6 +7177,7 @@ function HrDashboard({ onBack, currentUser }) {
   useEffect(() => { if (tab==="personel") { loadAvans(); loadIsAvans(); } }, [tab, puantajAy]);
   useEffect(() => { if (tab==="maas_avans") loadAvans(); }, [tab]);
   useEffect(() => { if (tab==="is_avans") loadIsAvans(); }, [tab]);
+  useEffect(() => { if (tab==="personel" && hrPersonelFilter) loadMaasOde(hrPersonelFilter); else setMaasOdeList([]); }, [tab, hrPersonelFilter, puantajAy]);
 
   const handleSavePersonel = async (e) => {
     e.preventDefault();
@@ -7565,7 +7566,10 @@ function HrDashboard({ onBack, currentUser }) {
                 const isAvans = isAvansList
                   .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy))
                   .reduce((s,a)=>s+Number(a.tutar||0), 0);
-                const net = hak - maasAvans;
+                const odenenBuAy = maasOdeList
+                  .filter(o => o.donem === puantajAy)
+                  .reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0), 0);
+                const net = hak - maasAvans - odenenBuAy;
                 return (
                   <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"20px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
                     <div style={{ minWidth:"130px" }}>
@@ -7612,12 +7616,16 @@ function HrDashboard({ onBack, currentUser }) {
                           <div style={{ fontSize:"18px", fontWeight:800, color:"#7e22ce" }}>₺{isAvans.toLocaleString("tr-TR")}</div>
                         </div>
                       )}
-                      {maasAvans > 0 && (
-                        <div style={{ background:"linear-gradient(135deg,#1d4ed8,#2563eb)", borderRadius:"12px", padding:"8px 18px", textAlign:"center", color:"#fff" }}>
-                          <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>Net Ödenecek</div>
-                          <div style={{ fontSize:"20px", fontWeight:800 }}>₺{net.toLocaleString("tr-TR")}</div>
+                      {odenenBuAy > 0 && (
+                        <div style={{ background:"#dcfce7", borderRadius:"12px", padding:"8px 18px", textAlign:"center" }}>
+                          <div style={{ fontSize:"10px", fontWeight:600, color:"#166534" }}>Ödendi</div>
+                          <div style={{ fontSize:"18px", fontWeight:800, color:"#166534" }}>-₺{odenenBuAy.toLocaleString("tr-TR")}</div>
                         </div>
                       )}
+                      <div style={{ background: net<=0 ? "linear-gradient(135deg,#166534,#15803d)" : "linear-gradient(135deg,#1d4ed8,#2563eb)", borderRadius:"12px", padding:"8px 18px", textAlign:"center", color:"#fff" }}>
+                        <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>{net<=0 ? "✅ Tamamlandı" : "Net Ödenecek"}</div>
+                        <div style={{ fontSize:"20px", fontWeight:800 }}>₺{Math.max(0,net).toLocaleString("tr-TR")}</div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -7691,10 +7699,34 @@ function HrDashboard({ onBack, currentUser }) {
       {maasOdeModal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}>
           <div style={{ background:"#fff", borderRadius:"18px", padding:"28px", width:"100%", maxWidth:"600px", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"20px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px" }}>
               <h3 style={{ margin:0, fontSize:"18px" }}>💰 Maaş Ödemesi — {maasOdeModal.ad_soyad}</h3>
               <button onClick={()=>setMaasOdeModal(null)} style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#6b7280" }}>✕</button>
             </div>
+
+            {/* Kalan özeti */}
+            {(() => {
+              const modalMaasAvans = avansList.filter(a => String(a.personel_id)===String(maasOdeModal.id) && (a.tarih||"").startsWith(puantajAy)).reduce((s,a)=>s+Number(a.tutar||0),0);
+              const modalOdenen = maasOdeList.filter(o => o.donem===puantajAy).reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0),0);
+              const modalHak = Number(maasOdeModal.net_maas||0); // approximate if no ozet loaded
+              const modalKalan = modalHak - modalMaasAvans - modalOdenen;
+              return (
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginBottom:"16px", padding:"12px", background:"#f8fafc", borderRadius:"12px", textAlign:"center" }}>
+                  <div>
+                    <div style={{ fontSize:"10px", fontWeight:600, color:"#6b7280" }}>Net Maaş</div>
+                    <div style={{ fontSize:"16px", fontWeight:800, color:"#166534" }}>₺{modalHak.toLocaleString("tr-TR")}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:"10px", fontWeight:600, color:"#6b7280" }}>Ödendi (avans + nakdi)</div>
+                    <div style={{ fontSize:"16px", fontWeight:800, color:"#92400e" }}>₺{(modalMaasAvans+modalOdenen).toLocaleString("tr-TR")}</div>
+                  </div>
+                  <div style={{ background: modalKalan<=0?"#dcfce7":"#eff6ff", borderRadius:"8px", padding:"4px" }}>
+                    <div style={{ fontSize:"10px", fontWeight:600, color: modalKalan<=0?"#166534":"#1d4ed8" }}>{modalKalan<=0?"✅ Tamamlandı":"Kalan Ödeme"}</div>
+                    <div style={{ fontSize:"16px", fontWeight:800, color: modalKalan<=0?"#166534":"#1d4ed8" }}>₺{Math.max(0,modalKalan).toLocaleString("tr-TR")}</div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Yeni ödeme formu */}
             <form onSubmit={handleSaveMaasOde} style={{ display:"grid", gap:"12px", marginBottom:"24px", padding:"16px", background:"#f8fafc", borderRadius:"12px" }}>
