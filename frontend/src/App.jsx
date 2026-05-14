@@ -3346,6 +3346,8 @@ function FinanceDashboard({
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [paymentRows, setPaymentRows] = useState([]);
+  const [paymentInvoiceFilter, setPaymentInvoiceFilter] = useState("");
+  const [paymentDueDateFilter, setPaymentDueDateFilter] = useState("");
 
   const [errorMessage, setErrorMessage] = useState("");
   const [paymentDateFilter, setPaymentDateFilter] = useState("");
@@ -4345,6 +4347,16 @@ function FinanceDashboard({
     });
   }, [paymentRows]);
 
+  const filteredPaymentRows = useMemo(() => {
+    return sortedPaymentRows.filter(row => {
+      const invoiceMatch = !paymentInvoiceFilter ||
+        (row.invoice_no || "").toLowerCase().includes(paymentInvoiceFilter.toLowerCase());
+      const dueDateMatch = !paymentDueDateFilter ||
+        (row.due_date || "").startsWith(paymentDueDateFilter);
+      return invoiceMatch && dueDateMatch;
+    });
+  }, [sortedPaymentRows, paymentInvoiceFilter, paymentDueDateFilter]);
+
   const filteredManualInvoiceRows = useMemo(() => {
     const q = manualInvoiceSearch.toLowerCase().trim();
 
@@ -4763,7 +4775,41 @@ function FinanceDashboard({
         </table>
       </div>
 
-      <h3 className="listTitle">Huawei Payment Kayıtları</h3>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:"12px", marginTop:"24px", marginBottom:"10px" }}>
+        <h3 className="listTitle" style={{ margin:0 }}>Huawei Payment Kayıtları</h3>
+        <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+          <input
+            type="text"
+            placeholder="🔍 Invoice No ara..."
+            value={paymentInvoiceFilter}
+            onChange={e => setPaymentInvoiceFilter(e.target.value)}
+            style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", minWidth:"170px" }}
+          />
+          <input
+            type="date"
+            value={paymentDueDateFilter}
+            onChange={e => setPaymentDueDateFilter(e.target.value)}
+            style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px" }}
+          />
+          {(paymentInvoiceFilter || paymentDueDateFilter) && (
+            <button
+              onClick={() => { setPaymentInvoiceFilter(""); setPaymentDueDateFilter(""); }}
+              style={{ padding:"7px 12px", border:"none", borderRadius:"8px", background:"#f3f4f6", fontSize:"13px", cursor:"pointer", color:"#6b7280" }}
+            >✕ Temizle</button>
+          )}
+        </div>
+      </div>
+
+      {(paymentInvoiceFilter || paymentDueDateFilter) && (
+        <div style={{ display:"flex", gap:"16px", marginBottom:"10px", padding:"10px 16px", background:"#f0f9ff", border:"1.5px solid #bae6fd", borderRadius:"10px", fontSize:"13px", flexWrap:"wrap" }}>
+          <span>📋 <b>{filteredPaymentRows.length}</b> kayıt</span>
+          <span>🧾 Invoice Toplam: <b>{formatMoneyByCurrency(filteredPaymentRows.reduce((s,r) => s + Number(r.invoice_amount||0), 0), filteredPaymentRows[0]?.currency)}</b></span>
+          <span>✅ Ödenen: <b>{formatMoneyByCurrency(filteredPaymentRows.reduce((s,r) => s + Number(r.payment_amount||0), 0), filteredPaymentRows[0]?.currency)}</b></span>
+          <span>⏳ Kalan: <b style={{ color: filteredPaymentRows.reduce((s,r) => s + Number(r.remaining_amount||0), 0) > 0 ? "#dc2626" : "#16a34a" }}>
+            {formatMoneyByCurrency(filteredPaymentRows.reduce((s,r) => s + Number(r.remaining_amount||0), 0), filteredPaymentRows[0]?.currency)}
+          </b></span>
+        </div>
+      )}
 
       <div
         className="tableWrap"
@@ -4771,7 +4817,7 @@ function FinanceDashboard({
           maxHeight: "50vh",
           overflowY: "auto",
           overflowX: "auto",
-          marginTop: "12px",
+          marginTop: "4px",
         }}
       >
         <table>
@@ -4840,10 +4886,10 @@ function FinanceDashboard({
             </tr>
           </thead>
           <tbody>
-            {sortedPaymentRows.length === 0 ? (
-              <EmptyRow colSpan={6} text="Henüz payment kaydı bulunamadı" />
+            {filteredPaymentRows.length === 0 ? (
+              <EmptyRow colSpan={6} text="Kayıt bulunamadı" />
             ) : (
-              sortedPaymentRows.map((row, index) => (
+              filteredPaymentRows.map((row, index) => (
                 <tr key={row.id ?? index}>
                   <td>{row.invoice_no || "-"}</td>
                   <td>
