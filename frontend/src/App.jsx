@@ -7348,7 +7348,13 @@ function HrDashboard({ onBack, currentUser }) {
       {/* Sekmeler */}
       <div style={{ display:"flex", gap:"8px", marginBottom:"20px" }}>
         {[["personel","👤 Personel"],["puantaj","📋 Puantaj"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["isg","🎓 ISG Eğitimler"]].map(([k,l]) => (
-          <button key={k} onClick={()=>setTab(k)} className={tab===k?"tab activeTab":"tab"} style={{ fontSize:"14px" }}>{l}</button>
+          <button key={k} onClick={()=>{
+            if (k === "maas_avans") {
+              const pwd = prompt("Maaş Avansı için şifre giriniz:");
+              if (!["Orhan2026!","Duzgun2026!"].includes(pwd)) { alert("Yetkisiz erişim!"); return; }
+            }
+            setTab(k);
+          }} className={tab===k?"tab activeTab":"tab"} style={{ fontSize:"14px" }}>{l}</button>
         ))}
       </div>
 
