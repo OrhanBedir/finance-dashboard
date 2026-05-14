@@ -7090,6 +7090,78 @@ function PuantajPanel({ currentUser, onBack }) {
 }
 
 /* ============================================================
+   VERGİ HESABI — 2026 Türkiye oranları
+   Net bankadan ödeme → brüt → tüm yükümlülükler
+   ============================================================ */
+function hesaplaVergi(netBankadan) {
+  const net = Number(netBankadan) || 0;
+  if (net <= 0) return null;
+
+  // 2026 oranları
+  const SGK_ISCI      = 0.14;
+  const ISSIZLIK_ISCI = 0.01;
+  const SGK_ISVEREN      = 0.205;
+  const ISSIZLIK_ISVEREN = 0.02;
+  const DAMGA         = 0.00759;
+
+  // 2026 aylık gelir vergisi dilimleri (Resmi Gazete 2025 sonu ilanı)
+  const DILIMLER = [
+    { tavan: 19167,  oran: 0.15 },
+    { tavan: 41667,  oran: 0.20 },
+    { tavan: 108333, oran: 0.27 },
+    { tavan: 400000, oran: 0.35 },
+    { tavan: Infinity, oran: 0.40 },
+  ];
+
+  function gelirVergisi(matraha) {
+    let vergi = 0, kalan = matraha, onceki = 0;
+    for (const d of DILIMLER) {
+      const dilimMiktar = Math.min(kalan, d.tavan - onceki);
+      if (dilimMiktar <= 0) break;
+      vergi += dilimMiktar * d.oran;
+      kalan -= dilimMiktar;
+      onceki = d.tavan;
+    }
+    return vergi;
+  }
+
+  // Binary search: net biliniyorken brüt'ü bul
+  let lo = net, hi = net * 4;
+  for (let i = 0; i < 60; i++) {
+    const b = (lo + hi) / 2;
+    const sgkI = b * SGK_ISCI;
+    const issI = b * ISSIZLIK_ISCI;
+    const matraha = b - sgkI - issI;
+    const gv = gelirVergisi(matraha);
+    const dv = b * DAMGA;
+    const hesap = b - sgkI - issI - gv - dv;
+    if (Math.abs(hesap - net) < 0.5) break;
+    hesap > net ? hi = b : lo = b;
+  }
+  const brut = (lo + hi) / 2;
+
+  const sgkIsci      = Math.round(brut * SGK_ISCI);
+  const issizlikIsci = Math.round(brut * ISSIZLIK_ISCI);
+  const matraha      = brut - sgkIsci - issizlikIsci;
+  const gelirVrg     = Math.round(gelirVergisi(matraha));
+  const damgaVrg     = Math.round(brut * DAMGA);
+  const sgkIsveren      = Math.round(brut * SGK_ISVEREN);
+  const issizlikIsveren = Math.round(brut * ISSIZLIK_ISVEREN);
+
+  const toplamDevletOdemesi = sgkIsci + issizlikIsci + gelirVrg + damgaVrg + sgkIsveren + issizlikIsveren;
+  const toplamIsverenMaliyet = Math.round(brut) + sgkIsveren + issizlikIsveren;
+
+  return {
+    brut: Math.round(brut), net: Math.round(net),
+    sgk_isci: sgkIsci, issizlik_isci: issizlikIsci,
+    gelir_vergisi: gelirVrg, damga_vergisi: damgaVrg,
+    sgk_isveren: sgkIsveren, issizlik_isveren: issizlikIsveren,
+    toplam_devlet: toplamDevletOdemesi,
+    toplam_isveren_maliyet: toplamIsverenMaliyet,
+  };
+}
+
+/* ============================================================
    HR DASHBOARD - Personel / Puantaj / Avans / ISG
    ============================================================ */
 function HrDashboard({ onBack, currentUser }) {
@@ -7771,12 +7843,69 @@ function HrDashboard({ onBack, currentUser }) {
               </div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <div style={{ fontSize:"13px", color:"#6b7280" }}>
-                  Toplam: <b>₺{(Number(maasOdeForm.bankadan||0)+Number(maasOdeForm.elden||0)).toLocaleString("tr-TR")}</b>
+                  Bankadan + Elden: <b>₺{(Number(maasOdeForm.bankadan||0)+Number(maasOdeForm.elden||0)).toLocaleString("tr-TR")}</b>
                 </div>
                 <button type="submit" disabled={maasOdeSaving} style={{ padding:"8px 20px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
                   {maasOdeSaving ? "Kaydediliyor..." : "Kaydet"}
                 </button>
               </div>
+
+              {/* Vergi Hesabı — bankadan kısmından otomatik */}
+              {Number(maasOdeForm.bankadan) > 0 && (() => {
+                const v = hesaplaVergi(Number(maasOdeForm.bankadan));
+                if (!v) return null;
+                const elden = Number(maasOdeForm.elden||0);
+                const TL = n => `₺${Math.round(n).toLocaleString("tr-TR")}`;
+                return (
+                  <div style={{ marginTop:"12px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"12px", overflow:"hidden" }}>
+                    <div style={{ background:"#1e3a5f", color:"#fff", padding:"8px 14px", fontSize:"12px", fontWeight:700 }}>
+                      📊 Vergi & Maliyet Hesabı — Bankadan {TL(v.net)} üzerinden (2026 oranları)
+                    </div>
+                    <div style={{ padding:"12px 14px", display:"grid", gap:"4px" }}>
+                      {/* Brüt */}
+                      <div style={{ display:"flex", justifyContent:"space-between", padding:"4px 0", borderBottom:"1px solid #f3f4f6", fontSize:"13px" }}>
+                        <span style={{ color:"#374151", fontWeight:600 }}>Brüt Maaş</span>
+                        <span style={{ fontWeight:700 }}>{TL(v.brut)}</span>
+                      </div>
+                      {/* İşçi kesintileri */}
+                      <div style={{ fontSize:"11px", color:"#6b7280", padding:"6px 0 2px", fontWeight:600 }}>İşçi Kesintileri (net'ten düşülen)</div>
+                      {[
+                        ["SGK İşçi Payı (%14)", v.sgk_isci],
+                        ["İşsizlik İşçi (%1)", v.issizlik_isci],
+                        ["Gelir Vergisi", v.gelir_vergisi],
+                        ["Damga Vergisi (%0.759)", v.damga_vergisi],
+                      ].map(([l,a])=>(
+                        <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", padding:"2px 0", color:"#6b7280" }}>
+                          <span>{l}</span><span style={{ color:"#dc2626" }}>−{TL(a)}</span>
+                        </div>
+                      ))}
+                      {/* İşveren kesintileri */}
+                      <div style={{ fontSize:"11px", color:"#6b7280", padding:"6px 0 2px", fontWeight:600 }}>İşveren Ek Yükümlülükleri (ayrıca ödenen)</div>
+                      {[
+                        ["SGK İşveren Payı (%20.5)", v.sgk_isveren],
+                        ["İşsizlik İşveren (%2)", v.issizlik_isveren],
+                      ].map(([l,a])=>(
+                        <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", padding:"2px 0", color:"#6b7280" }}>
+                          <span>{l}</span><span style={{ color:"#d97706" }}>+{TL(a)}</span>
+                        </div>
+                      ))}
+                      {/* Özet */}
+                      <div style={{ borderTop:"2px solid #e5e7eb", marginTop:"8px", paddingTop:"8px", display:"grid", gap:"4px" }}>
+                        {[
+                          ["Toplam Devlet Ödemesi (vergi+SGK)", v.toplam_devlet, "#7c3aed"],
+                          ["İşverene Toplam Maliyet (bankadan)", v.toplam_isveren_maliyet, "#1d4ed8"],
+                          elden > 0 && ["Elden Ödeme (vergisiz)", elden, "#6b7280"],
+                          ["HAZİNEDEN ÇIKACAK TOPLAM", v.toplam_isveren_maliyet + elden, "#166534"],
+                        ].filter(Boolean).map(([l,a,c])=>(
+                          <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", fontWeight:700, color:c }}>
+                            <span>{l}</span><span>{TL(a)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </form>
 
             {/* Geçmiş ödemeler */}
