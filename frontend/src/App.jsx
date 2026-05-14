@@ -7550,16 +7550,21 @@ function HrDashboard({ onBack, currentUser }) {
                   return row?.durum === "CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0;
                 }).length;
                 const dailyRateHR = (sp.net_maas||0) / 26;
-                const hak = Math.round((sp.net_maas||0) - gelmediSay * dailyRateHR + pazarCalisdiHR * dailyRateHR * 1.5);
-                const pazarBonusHR = Math.round(pazarCalisdiHR * dailyRateHR * 1.5);
+                const gelmediKesinti = Math.round(gelmediSay * dailyRateHR);
                 const ozetRowHR = ozet.find(o => o.personel_id === sp.id);
-                const dinlenmeBakiyeHR = ozetRowHR?.dinlenme_bakiye ?? pazarCalisdiHR;
-                const tooltipHR = [
-                  `Çalışılan gün: ${cal}`,
-                  `Gelmedi: ${gelmediSay} gün (kesinti: ₺${Math.round(gelmediSay*dailyRateHR).toLocaleString("tr-TR")})`,
-                  `Pazar çalışılan: ${pazarCalisdiHR} gün`,
-                  `Pazar primli: +₺${pazarBonusHR.toLocaleString("tr-TR")} (1.5x günlük)`,
-                  `Toplam hakediş: ₺${hak.toLocaleString("tr-TR")}`,
+                const dinlenmeBakiyeHR = ozetRowHR?.dinlenme_bakiye ?? 0;
+                const toplamPazarHR = ozetRowHR?.toplam_pazar_calisdi ?? 0;
+                const toplamResmiTatilHR = ozetRowHR?.toplam_resmi_tatil_calisdi ?? 0;
+                const toplamDinlenmeHR = ozetRowHR?.toplam_dinlenme ?? 0;
+                const extraHakedisHR = ozetRowHR?.extra_hakedis ?? Math.round(dinlenmeBakiyeHR * dailyRateHR * 1.5);
+                const tooltipExtra = [
+                  `Pazar çalışma (toplam): ${toplamPazarHR} gün`,
+                  `Resmi tatil çalışma (toplam): ${toplamResmiTatilHR} gün`,
+                  `Dinlenme alınan (toplam): ${toplamDinlenmeHR} gün`,
+                  `─────────────────`,
+                  `Kalan bakiye: ${dinlenmeBakiyeHR} gün`,
+                  `Günlük ücret × 1.5 = ₺${Math.round(dailyRateHR*1.5).toLocaleString("tr-TR")}`,
+                  `Toplam extra hakediş: ₺${extraHakedisHR.toLocaleString("tr-TR")}`,
                 ].join("\n");
                 const maasAvans = avansList
                   .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy))
@@ -7570,7 +7575,9 @@ function HrDashboard({ onBack, currentUser }) {
                 const odenenBuAy = maasOdeList
                   .filter(o => o.donem === puantajAy)
                   .reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0), 0);
-                const net = hak - maasAvans - odenenBuAy;
+                // Net ödenecek: net_maas bazlı (extra hakediş ayrı takip edilir)
+                const netBase = Math.round((sp.net_maas||0) - gelmediKesinti);
+                const net = netBase - maasAvans - odenenBuAy;
                 return (
                   <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"20px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
                     <div style={{ minWidth:"130px" }}>
@@ -7599,11 +7606,20 @@ function HrDashboard({ onBack, currentUser }) {
                         </div>
                       )}
                     </div>
-                    <div style={{ display:"flex", flexDirection:"column", gap:"8px", minWidth:"160px" }}>
-                      <div title={tooltipHR} style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"12px", padding:"12px 18px", textAlign:"center", color:"#fff", cursor:"help" }}>
-                        <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>Bu Ay Hakediş ℹ️</div>
-                        <div style={{ fontSize:"22px", fontWeight:800 }}>₺{hak.toLocaleString("tr-TR")}</div>
-                        <div style={{ fontSize:"10px", opacity:0.7 }}>{cal} gün · ref: 26 gün</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:"8px", minWidth:"180px" }}>
+                      <div style={{ display:"flex", gap:"8px", alignItems:"stretch" }}>
+                        <div style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"12px", padding:"12px 18px", textAlign:"center", color:"#fff", flex:1 }}>
+                          <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>Net Maaş</div>
+                          <div style={{ fontSize:"22px", fontWeight:800 }}>₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}</div>
+                          <div style={{ fontSize:"10px", opacity:0.7 }}>{gelmediKesinti>0?`-₺${gelmediKesinti.toLocaleString("tr-TR")} kesinti`:`${cal} gün çalışıldı`}</div>
+                        </div>
+                        {extraHakedisHR > 0 && (
+                          <div title={tooltipExtra} style={{ background:"linear-gradient(135deg,#7c3aed,#6d28d9)", borderRadius:"12px", padding:"10px 12px", textAlign:"center", color:"#fff", minWidth:"80px", cursor:"help" }}>
+                            <div style={{ fontSize:"9px", fontWeight:600, opacity:0.8 }}>Extra ℹ️</div>
+                            <div style={{ fontSize:"15px", fontWeight:800 }}>₺{extraHakedisHR.toLocaleString("tr-TR")}</div>
+                            <div style={{ fontSize:"9px", opacity:0.7 }}>{dinlenmeBakiyeHR} gün bakiye</div>
+                          </div>
+                        )}
                       </div>
                       {maasAvans > 0 && (
                         <div style={{ background:"#fef3c7", borderRadius:"12px", padding:"8px 18px", textAlign:"center" }}>

@@ -8714,13 +8714,28 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
        WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2`, [ay, yil]
     );
 
-    // Cumulative all-time: total Sundays worked and total DINLENME days given
+    // TR resmi tatiller (2024-2027)
+    const TR_TATIL = ["2024-01-01","2024-04-23","2024-05-01","2024-05-19","2024-07-15","2024-08-30","2024-10-29","2024-03-29","2024-03-30","2024-03-31","2024-04-01","2024-04-02","2024-04-03","2024-06-16","2024-06-17","2024-06-18","2024-06-19","2025-01-01","2025-03-29","2025-03-30","2025-03-31","2025-04-01","2025-04-02","2025-04-23","2025-05-01","2025-05-19","2025-06-06","2025-06-07","2025-06-08","2025-06-09","2025-07-15","2025-08-30","2025-10-29","2026-01-01","2026-03-18","2026-03-19","2026-03-20","2026-03-21","2026-03-22","2026-04-23","2026-05-01","2026-05-19","2026-05-26","2026-05-27","2026-05-28","2026-05-29","2026-07-15","2026-08-30","2026-10-29","2027-01-01","2027-03-08","2027-03-09","2027-03-10","2027-03-11","2027-03-12","2027-04-23","2027-05-01","2027-05-19","2027-05-16","2027-05-17","2027-05-18","2027-05-19","2027-07-15","2027-08-30","2027-10-29"];
+
+    // Cumulative all-time: total Sundays worked, resmi tatil worked, and total DINLENME days given
     const bakiyeRows = await pool.query(
       `SELECT personel_id,
         COUNT(*) FILTER (WHERE durum='CALISDI' AND EXTRACT(DOW FROM tarih)=0) AS pazar_calisdi_toplam,
         COUNT(*) FILTER (WHERE durum='DINLENME') AS dinlenme_toplam
        FROM puantaj GROUP BY personel_id`
     );
+
+    // Cumulative resmi tatil çalışma (CALISDI on a known resmi tatil date)
+    const tatilCalisdi = {};
+    {
+      const allCalisdi = await pool.query(`SELECT personel_id, tarih FROM puantaj WHERE durum='CALISDI'`);
+      allCalisdi.rows.forEach(r => {
+        const d = (r.tarih||"").toString().slice(0,10);
+        if (TR_TATIL.includes(d)) {
+          tatilCalisdi[r.personel_id] = (tatilCalisdi[r.personel_id]||0) + 1;
+        }
+      });
+    }
 
     const avansList = await pool.query(
       `SELECT personel_id, SUM(tutar) as toplam FROM avans
@@ -8757,11 +8772,15 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
       const avansRow = avansList.rows.find(a => a.personel_id === p.id);
       const avans = Number(avansRow?.toplam || 0);
 
-      // Cumulative DİNLENME balance (all-time Sundays worked minus all-time DINLENME days taken)
+      // Cumulative DİNLENME balance
       const bakiye = bakiyeRows.rows.find(r => r.personel_id === p.id);
       const toplamPazarCalisdi = parseInt(bakiye?.pazar_calisdi_toplam || 0);
       const toplamDinlenme = parseInt(bakiye?.dinlenme_toplam || 0);
-      const dinlenmeBakiye = toplamPazarCalisdi - toplamDinlenme;
+      const toplamResmiTatilCalisdi = tatilCalisdi[p.id] || 0;
+      // dinlenme bakiye: (pazar + resmi tatil) - dinlenme alınanlar
+      const toplamExtraGun = toplamPazarCalisdi + toplamResmiTatilCalisdi;
+      const dinlenmeBakiye = Math.max(0, toplamExtraGun - toplamDinlenme);
+      const extraHakedis = Math.round(dinlenmeBakiye * (netMaas / REFERANS_GUN) * 1.5);
 
       return {
         personel_id: p.id, ad_soyad: p.ad_soyad, unvan: p.unvan, aktif: p.aktif,
@@ -8771,6 +8790,10 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
         hakedilen_maas: hakedilen, bankadan, elden, avans,
         kalan: hakedilen - avans,
         dinlenme_bakiye: dinlenmeBakiye,
+        toplam_pazar_calisdi: toplamPazarCalisdi,
+        toplam_resmi_tatil_calisdi: toplamResmiTatilCalisdi,
+        toplam_dinlenme: toplamDinlenme,
+        extra_hakedis: extraHakedis,
       };
     }).filter(p => p.aktif);
 
