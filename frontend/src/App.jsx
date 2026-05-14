@@ -7125,6 +7125,7 @@ function HrDashboard({ onBack, currentUser }) {
   const [isgForm, setIsgForm] = useState({ egitim_turu:"", egitim_tarihi:"", gecerlilik_yil:2 });
   const [notModal, setNotModal] = useState(null); // { puantajRow, personelAd, tarih }
   const [maasOdeModal, setMaasOdeModal] = useState(null); // personel object
+  const [maasOdeHak, setMaasOdeHak] = useState(0); // bu ay gerçek hakediş (pazar primiyle)
   const [maasOdeList, setMaasOdeList] = useState([]);
   const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
   const [maasOdeSaving, setMaasOdeSaving] = useState(false);
@@ -7680,7 +7681,7 @@ function HrDashboard({ onBack, currentUser }) {
                     <div style={{ display:"flex", gap:"6px" }}>
                       <button onClick={()=>loadPersonelDetail(p)} style={{ padding:"6px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Detay / Belgeler</button>
                       <button onClick={()=>handleEditPersonel(p)} style={{ padding:"6px 12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
-                      <button onClick={()=>{ const now=new Date(); setMaasOdeModal(p); setMaasOdeForm({ donem:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`, bankadan:String(p.bankadan_gosterilen||""), elden:String(p.elden_verilen||""), tarih:now.toISOString().split("T")[0], aciklama:"" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>
+                      <button onClick={()=>{ const now=new Date(); const pOzet=ozet.find(o=>String(o.personel_id)===String(p.id)); const hakVal=pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0); setMaasOdeModal(p); setMaasOdeHak(hakVal); setMaasOdeForm({ donem:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`, bankadan:"", elden:"", tarih:now.toISOString().split("T")[0], aciklama:"" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>
                       <button onClick={()=>handleToggleAktif(p)} style={{ padding:"6px 12px", background:p.aktif?"#fef3c7":"#f0fdf4", color:p.aktif?"#92400e":"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
                         {p.aktif?"Pasife Al":"Aktif Et"}
                       </button>
@@ -7708,13 +7709,12 @@ function HrDashboard({ onBack, currentUser }) {
             {(() => {
               const modalMaasAvans = avansList.filter(a => String(a.personel_id)===String(maasOdeModal.id) && (a.tarih||"").startsWith(puantajAy)).reduce((s,a)=>s+Number(a.tutar||0),0);
               const modalOdenen = maasOdeList.filter(o => o.donem===puantajAy).reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0),0);
-              const modalHak = Number(maasOdeModal.net_maas||0); // approximate if no ozet loaded
-              const modalKalan = modalHak - modalMaasAvans - modalOdenen;
+              const modalKalan = maasOdeHak - modalMaasAvans - modalOdenen;
               return (
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginBottom:"16px", padding:"12px", background:"#f8fafc", borderRadius:"12px", textAlign:"center" }}>
                   <div>
-                    <div style={{ fontSize:"10px", fontWeight:600, color:"#6b7280" }}>Net Maaş</div>
-                    <div style={{ fontSize:"16px", fontWeight:800, color:"#166534" }}>₺{modalHak.toLocaleString("tr-TR")}</div>
+                    <div style={{ fontSize:"10px", fontWeight:600, color:"#6b7280" }}>Bu Ay Hakediş</div>
+                    <div style={{ fontSize:"16px", fontWeight:800, color:"#166534" }}>₺{maasOdeHak.toLocaleString("tr-TR")}</div>
                   </div>
                   <div>
                     <div style={{ fontSize:"10px", fontWeight:600, color:"#6b7280" }}>Ödendi (avans + nakdi)</div>
