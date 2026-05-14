@@ -7941,10 +7941,10 @@ function HrDashboard({ onBack, currentUser }) {
                         </div>
                         {v && (
                           <div style={{ background:"#1e3a5f", color:"#fff", padding:"8px 16px", fontSize:"11px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"8px", textAlign:"center" }}>
-                            <div><div style={{ opacity:0.7 }}>Brüt</div><div style={{ fontWeight:700 }}>{TL(v.brut)}</div></div>
-                            <div><div style={{ opacity:0.7 }}>SGK+İşsizlik İşçi</div><div style={{ fontWeight:700, color:"#fca5a5" }}>{TL(v.sgk_isci+v.issizlik_isci)}</div></div>
-                            <div><div style={{ opacity:0.7 }}>Gelir+Damga Vrg.</div><div style={{ fontWeight:700, color:"#fca5a5" }}>{TL(v.gelir_vergisi+v.damga_vergisi)}</div></div>
-                            <div><div style={{ opacity:0.7 }}>SGK+İşsizlik İşv.</div><div style={{ fontWeight:700, color:"#fcd34d" }}>{TL(v.sgk_isveren+v.issizlik_isveren)}</div></div>
+                            <div><div style={{ opacity:0.7 }}>Brüt</div><div style={{ fontWeight:700 }}>{TL(v.brut)}</div><div style={{ fontSize:"9px", opacity:0.45, marginTop:"2px" }}>net'ten hesaplanan</div></div>
+                            <div><div style={{ opacity:0.7 }}>SGK+İşsizlik İşçi</div><div style={{ fontWeight:700, color:"#fca5a5" }}>{TL(v.sgk_isci+v.issizlik_isci)}</div><div style={{ fontSize:"9px", opacity:0.5, marginTop:"2px" }}>%14 + %1 = %15</div></div>
+                            <div><div style={{ opacity:0.7 }}>Gelir+Damga Vrg.</div><div style={{ fontWeight:700, color:"#fca5a5" }}>{TL(v.gelir_vergisi+v.damga_vergisi)}</div><div style={{ fontSize:"9px", opacity:0.5, marginTop:"2px" }}>dilimli + %0.759</div></div>
+                            <div><div style={{ opacity:0.7 }}>SGK+İşsizlik İşv.</div><div style={{ fontWeight:700, color:"#fcd34d" }}>{TL(v.sgk_isveren+v.issizlik_isveren)}</div><div style={{ fontSize:"9px", opacity:0.5, marginTop:"2px" }}>%20.5 + %2 = %22.5</div></div>
                           </div>
                         )}
                         {v && (
