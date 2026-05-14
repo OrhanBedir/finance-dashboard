@@ -7485,91 +7485,6 @@ function HrDashboard({ onBack, currentUser }) {
       )}
       {tab==="personel" && personelUnlocked && (
         <div>
-          {selectedPersonel ? (
-            /* Personel Detay */
-            <div>
-              <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"20px" }}>
-                <button className="tab" onClick={()=>setSelectedPersonel(null)}>← Geri</button>
-                <h2 style={{ margin:0, fontSize:"20px" }}>👤 {selectedPersonel.ad_soyad}</h2>
-                <span style={{ background: selectedPersonel.aktif?"#dcfce7":"#f3f4f6", color: selectedPersonel.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>
-                  {selectedPersonel.aktif?"Aktif":"Pasif"}
-                </span>
-              </div>
-
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"16px" }}>
-                {/* Belgeler */}
-                <div style={secSt}>
-                  <div style={{ fontWeight:700, marginBottom:"14px", color:"#374151" }}>📂 Personel Belgeleri</div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
-                    {BELGE_TURLERI.map(bt => {
-                      const mevcut = personelBelgeler.find(b=>b.belge_turu===bt.key);
-                      return (
-                        <div key={bt.key} style={{ border:"1.5px solid #e5e7eb", borderRadius:"10px", padding:"10px 12px", background: mevcut?"#f0fdf4":"#fafafa" }}>
-                          <div style={{ fontSize:"13px", fontWeight:600, color:"#374151", marginBottom:"8px" }}>{bt.label}</div>
-                          {mevcut ? (
-                            <a href={`http://localhost:5001/personel-belgeler/${mevcut.dosya_yolu}`} target="_blank" rel="noreferrer"
-                              style={{ fontSize:"12px", color:"#166534", fontWeight:600 }}>Görüntüle →</a>
-                          ) : (
-                            <label style={{ fontSize:"12px", color:"#6b7280", cursor:"pointer" }}>
-                              <input type="file" style={{display:"none"}} onChange={e=>handleBelgeUpload(selectedPersonel.id,bt.key,e.target.files[0])} />
-                              + Yükle
-                            </label>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* ISG Eğitimleri */}
-                <div style={secSt}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
-                    <div style={{ fontWeight:700, color:"#374151" }}>🎓 ISG Eğitimleri</div>
-                    <button className="tab" onClick={()=>setShowIsgForm(true)} style={{ fontSize:"12px" }}>+ Eğitim Ekle</button>
-                  </div>
-                  {showIsgForm && (
-                    <form onSubmit={handleSaveIsg} style={{ background:"#f8fafc", borderRadius:"10px", padding:"14px", marginBottom:"12px" }}>
-                      <div style={{ marginBottom:"8px" }}>
-                        <label style={labelSt}>Eğitim Türü</label>
-                        <select value={isgForm.egitim_turu} onChange={e=>{const t=isgTurleri.find(x=>x.tur===e.target.value); setIsgForm(f=>({...f,egitim_turu:e.target.value,gecerlilik_yil:t?.gecerlilik_yil||2}));}} style={inputSt} required>
-                          <option value="">Seç...</option>
-                          {isgTurleri.map(t=><option key={t.tur} value={t.tur}>{t.tur} ({t.gecerlilik_yil} yıl)</option>)}
-                        </select>
-                      </div>
-                      <div style={{ marginBottom:"8px" }}>
-                        <label style={labelSt}>Eğitim Tarihi</label>
-                        <input type="date" value={isgForm.egitim_tarihi} onChange={e=>setIsgForm(f=>({...f,egitim_tarihi:e.target.value}))} style={inputSt} required />
-                      </div>
-                      <div style={{ display:"flex", gap:"8px" }}>
-                        <button type="submit" className="saveButton" style={{ flex:1 }}>Kaydet</button>
-                        <button type="button" className="tab" onClick={()=>setShowIsgForm(false)}>İptal</button>
-                      </div>
-                    </form>
-                  )}
-                  {personelIsg.length===0 ? <div style={{ color:"#9ca3af", fontSize:"13px" }}>Henüz eğitim girilmemiş</div> : (
-                    personelIsg.map(eg => {
-                      const suresi = new Date(eg.bitis_tarihi) < new Date() ? "DOLDU" : new Date(eg.bitis_tarihi) < new Date(Date.now()+30*864e5) ? "YAKLASAN" : "OK";
-                      return (
-                        <div key={eg.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", borderRadius:"8px", marginBottom:"6px", background: suresi==="DOLDU"?"#fef2f2": suresi==="YAKLASAN"?"#fffbeb":"#f0fdf4" }}>
-                          <div>
-                            <div style={{ fontWeight:600, fontSize:"13px" }}>{eg.egitim_turu}</div>
-                            <div style={{ fontSize:"11px", color:"#9ca3af" }}>
-                              {eg.egitim_tarihi?.split("T")[0]} → {eg.bitis_tarihi?.split("T")[0]}
-                              {suresi==="DOLDU" && <span style={{ color:"#dc2626", fontWeight:700 }}> ⚠️ SÜRESİ DOLDU</span>}
-                              {suresi==="YAKLASAN" && <span style={{ color:"#d97706", fontWeight:700 }}> ⚠️ YAKLAŞIYOR</span>}
-                            </div>
-                          </div>
-                          <button onClick={()=>handleDeleteIsg(eg.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* Personel Listesi */
-            <div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px", flexWrap:"wrap", gap:"12px" }}>
                 <div>
                   <h2 style={{ margin:0, fontSize:"20px" }}>
@@ -7767,7 +7682,6 @@ function HrDashboard({ onBack, currentUser }) {
                     </div>
                     <span style={{ background:p.aktif?"#dcfce7":"#f3f4f6", color:p.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{p.aktif?"Aktif":"Pasif"}</span>
                     <div style={{ display:"flex", gap:"6px" }}>
-                      <button onClick={()=>loadPersonelDetail(p)} style={{ padding:"6px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Detay / Belgeler</button>
                       <button onClick={()=>handleEditPersonel(p)} style={{ padding:"6px 12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
                       <button onClick={()=>{ const now=new Date(); const pOzet=ozet.find(o=>String(o.personel_id)===String(p.id)); const hakVal=pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0); setMaasOdeModal(p); setMaasOdeHak(hakVal); setMaasOdeForm({ donem:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`, bankadan:"", elden:"", tarih:now.toISOString().split("T")[0], aciklama:"" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>
                       <button onClick={()=>handleToggleAktif(p)} style={{ padding:"6px 12px", background:p.aktif?"#fef3c7":"#f0fdf4", color:p.aktif?"#92400e":"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
@@ -7779,8 +7693,6 @@ function HrDashboard({ onBack, currentUser }) {
                 ))}
                 {personelList.length===0 && <div style={{ ...secSt, textAlign:"center", color:"#9ca3af" }}>Henüz personel eklenmemiş. "Personel Ekle" butonuna tıklayın.</div>}
               </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -8188,7 +8100,7 @@ function HrDashboard({ onBack, currentUser }) {
       {/* ===== ISG / BELGELER SEKMESİ ===== */}
       {tab==="isg" && (
         <div>
-          {/* ISG Uyarıları */}
+          {/* ISG Uyarı Bandı */}
           {isgUyarilar.length > 0 && (
             <div style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:"12px", padding:"12px 16px", marginBottom:"16px", display:"flex", gap:"12px", alignItems:"flex-start", flexWrap:"wrap" }}>
               <span style={{ fontWeight:700, color:"#991b1b", fontSize:"14px" }}>⚠️ ISG Eğitim Uyarısı:</span>
@@ -8199,18 +8111,108 @@ function HrDashboard({ onBack, currentUser }) {
               ))}
             </div>
           )}
-          <div style={{ ...secSt }}>
-            <h3 style={{ margin:"0 0 16px" }}>🎓 ISG / Belgeler</h3>
-            <p style={{ color:"#6b7280", fontSize:"14px" }}>
-              Personel seçmek için <b>Personel</b> sekmesine geçip <b>Detay / Belgeler</b> butonuna tıklayın.
-              Burada tüm personelin ISG uyarıları ve eğitim durum özeti görüntülenir.
-            </p>
-            {isgUyarilar.length === 0 && (
-              <div style={{ textAlign:"center", padding:"40px", color:"#9ca3af" }}>
-                ✅ Tüm ISG eğitimleri güncel, uyarı bulunmuyor.
-              </div>
-            )}
+
+          {/* Personel Seçici */}
+          <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"20px" }}>
+            <h2 style={{ margin:0, fontSize:"20px" }}>🎓 ISG / Belgeler</h2>
+            <select
+              value={selectedPersonel?.id || ""}
+              onChange={e => {
+                const p = personelList.find(x => String(x.id) === e.target.value);
+                if (p) loadPersonelDetail(p); else setSelectedPersonel(null);
+              }}
+              style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", minWidth:"200px" }}
+            >
+              <option value="">— Personel Seç —</option>
+              {personelList.filter(p=>p.aktif).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+            </select>
           </div>
+
+          {!selectedPersonel ? (
+            <div style={{ ...secSt, textAlign:"center", color:"#9ca3af", padding:"40px" }}>
+              Belgelerini ve ISG kayıtlarını görmek için yukarıdan personel seçin.
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontWeight:700, fontSize:"16px", marginBottom:"16px" }}>
+                👤 {selectedPersonel.ad_soyad}
+                <span style={{ marginLeft:"10px", background: selectedPersonel.aktif?"#dcfce7":"#f3f4f6", color: selectedPersonel.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>
+                  {selectedPersonel.aktif?"Aktif":"Pasif"}
+                </span>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"16px" }}>
+                {/* Belgeler */}
+                <div style={secSt}>
+                  <div style={{ fontWeight:700, marginBottom:"14px", color:"#374151" }}>📂 Personel Belgeleri</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+                    {BELGE_TURLERI.map(bt => {
+                      const mevcut = personelBelgeler.find(b=>b.belge_turu===bt.key);
+                      return (
+                        <div key={bt.key} style={{ border:"1.5px solid #e5e7eb", borderRadius:"10px", padding:"10px 12px", background: mevcut?"#f0fdf4":"#fafafa" }}>
+                          <div style={{ fontSize:"13px", fontWeight:600, color:"#374151", marginBottom:"8px" }}>{bt.label}</div>
+                          {mevcut ? (
+                            <a href={mevcut.dosya_yolu} target="_blank" rel="noreferrer"
+                              style={{ fontSize:"12px", color:"#166534", fontWeight:600 }}>Görüntüle →</a>
+                          ) : (
+                            <label style={{ fontSize:"12px", color:"#6b7280", cursor:"pointer" }}>
+                              <input type="file" style={{display:"none"}} onChange={e=>handleBelgeUpload(selectedPersonel.id,bt.key,e.target.files[0])} />
+                              + Yükle
+                            </label>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ISG Eğitimleri */}
+                <div style={secSt}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
+                    <div style={{ fontWeight:700, color:"#374151" }}>🎓 ISG Eğitimleri</div>
+                    <button className="tab" onClick={()=>setShowIsgForm(true)} style={{ fontSize:"12px" }}>+ Eğitim Ekle</button>
+                  </div>
+                  {showIsgForm && (
+                    <form onSubmit={handleSaveIsg} style={{ background:"#f8fafc", borderRadius:"10px", padding:"14px", marginBottom:"12px" }}>
+                      <div style={{ marginBottom:"8px" }}>
+                        <label style={labelSt}>Eğitim Türü</label>
+                        <select value={isgForm.egitim_turu} onChange={e=>{const t=isgTurleri.find(x=>x.tur===e.target.value); setIsgForm(f=>({...f,egitim_turu:e.target.value,gecerlilik_yil:t?.gecerlilik_yil||2}));}} style={inputSt} required>
+                          <option value="">Seç...</option>
+                          {isgTurleri.map(t=><option key={t.tur} value={t.tur}>{t.tur} ({t.gecerlilik_yil} yıl)</option>)}
+                        </select>
+                      </div>
+                      <div style={{ marginBottom:"8px" }}>
+                        <label style={labelSt}>Eğitim Tarihi</label>
+                        <input type="date" value={isgForm.egitim_tarihi} onChange={e=>setIsgForm(f=>({...f,egitim_tarihi:e.target.value}))} style={inputSt} required />
+                      </div>
+                      <div style={{ display:"flex", gap:"8px" }}>
+                        <button type="submit" className="saveButton" style={{ flex:1 }}>Kaydet</button>
+                        <button type="button" className="tab" onClick={()=>setShowIsgForm(false)}>İptal</button>
+                      </div>
+                    </form>
+                  )}
+                  {personelIsg.length===0
+                    ? <div style={{ color:"#9ca3af", fontSize:"13px" }}>Henüz eğitim girilmemiş</div>
+                    : personelIsg.map(eg => {
+                        const suresi = new Date(eg.bitis_tarihi) < new Date() ? "DOLDU" : new Date(eg.bitis_tarihi) < new Date(Date.now()+30*864e5) ? "YAKLASAN" : "OK";
+                        return (
+                          <div key={eg.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", borderRadius:"8px", marginBottom:"6px", background: suresi==="DOLDU"?"#fef2f2": suresi==="YAKLASAN"?"#fffbeb":"#f0fdf4" }}>
+                            <div>
+                              <div style={{ fontWeight:600, fontSize:"13px" }}>{eg.egitim_turu}</div>
+                              <div style={{ fontSize:"11px", color:"#9ca3af" }}>
+                                {eg.egitim_tarihi?.split("T")[0]} → {eg.bitis_tarihi?.split("T")[0]}
+                                {suresi==="DOLDU" && <span style={{ color:"#dc2626", fontWeight:700 }}> ⚠️ SÜRESİ DOLDU</span>}
+                                {suresi==="YAKLASAN" && <span style={{ color:"#d97706", fontWeight:700 }}> ⚠️ YAKLAŞIYOR</span>}
+                              </div>
+                            </div>
+                            <button onClick={()=>handleDeleteIsg(eg.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
+                          </div>
+                        );
+                      })
+                  }
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
