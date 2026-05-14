@@ -7310,20 +7310,25 @@ function HrDashboard({ onBack, currentUser }) {
   };
   const handleSaveIsg = async (e) => {
     e.preventDefault();
-    const tur = isgTurleri.find(t=>t.tur===isgForm.egitim_turu);
-    const res = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg`, {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({...isgForm, gecerlilik_yil: tur?.gecerlilik_yil || isgForm.gecerlilik_yil})
-    });
-    const saved = await res.json();
-    if (isgBelgeDosya && saved.id) {
-      const fd = new FormData(); fd.append("dosya", isgBelgeDosya);
-      await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${saved.id}/belge`, { method:"POST", body: fd });
-    }
-    setShowIsgForm(false);
-    setIsgBelgeDosya(null);
-    loadPersonelDetail(selectedPersonel);
-    loadIsgUyarilar();
+    try {
+      const tur = isgTurleri.find(t=>t.tur===isgForm.egitim_turu);
+      const res = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({...isgForm, gecerlilik_yil: tur?.gecerlilik_yil || isgForm.gecerlilik_yil})
+      });
+      const saved = await res.json();
+      if (!res.ok) { alert("Hata: " + (saved.error || res.status)); return; }
+      if (isgBelgeDosya && saved.id) {
+        const fd = new FormData(); fd.append("dosya", isgBelgeDosya);
+        const br = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${saved.id}/belge`, { method:"POST", body: fd });
+        if (!br.ok) { const be = await br.json(); alert("Belge yükleme hatası: " + (be.error || br.status)); }
+      }
+      setShowIsgForm(false);
+      setIsgBelgeDosya(null);
+      setIsgForm({ egitim_turu:"", egitim_tarihi:"", gecerlilik_yil:2 });
+      loadPersonelDetail(selectedPersonel);
+      loadIsgUyarilar();
+    } catch(err) { alert("Kayıt hatası: " + err.message); }
   };
   const handleIsgBelgeUpload = async (personelId, isgId, file) => {
     const fd = new FormData(); fd.append("dosya", file);
