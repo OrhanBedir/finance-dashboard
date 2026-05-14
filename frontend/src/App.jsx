@@ -822,12 +822,85 @@ function RolloutDashboard() {
   const [showRolloutEntryModal, setShowRolloutEntryModal] = useState(false);
   const [selectedRolloutSite, setSelectedRolloutSite] = useState("");
 
-  const handleExportExcel = () => {
-    const region = regionFilter || "ALL";
+  const handleExportExcel = async () => {
+    // Frontend-side Excel: filteredRows zaten doğru filtreli
+    const XLSX = await import("xlsx");
+    const today = new Date().toISOString().split("T")[0];
+    const regionLabel = regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter;
 
-    const url = `${API_BASE}/export/excel?region=${encodeURIComponent(region)}`;
+    const fd = (v) => {
+      if (!v) return "";
+      const d = new Date(v);
+      if (isNaN(d)) return String(v);
+      return `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+    };
 
-    window.open(url, "_blank");
+    const data = filteredRows.map(r => ({
+      "Bölge":                    r.bolge || "",
+      "Site Type":                r.site_type || "",
+      "Site Fiziksel Tip":        r.site_physical_type || "",
+      "Project Code":             r.project_code || "",
+      "Site Code":                r.site_code || "",
+      "Malzeme Status":           r.malzeme_status || "",
+      "İl":                       r.il || "",
+      "RF Subcon":                r.rf_subcon || "",
+      "Plan Start Date":          fd(r.plan_start_date),
+      "Installation Start Date":  fd(r.installation_actual_start_date),
+      "Installation End Date":    fd(r.installation_actual_end_date),
+      "OnAir Date":               fd(r.onair_date),
+      "QC Closed Date":           fd(r.qc_closed_date),
+      "RF Not":                   r.rf_not || "",
+      "LOS Subcon":               r.los_subcon || "",
+      "LOS Plan Date":            fd(r.los_plan_date),
+      "LOS Actual End Date":      fd(r.los_actual_end_date),
+      "TSS Subcon":               r.tss_subcon || "",
+      "TSS Plan Start Date":      fd(r.tss_plan_start_date),
+      "TSS Actual End Date":      fd(r.tss_actual_end_date),
+      "TSSR Subcon":              r.tssr_subcon || "",
+      "TSSR Plan Start Date":     fd(r.tssr_plan_start_date),
+      "TSSR Actual End Date":     fd(r.tssr_actual_end_date),
+      "BTK Subcon":               r.btk_subcon || "",
+      "BTK Plan Start Date":      fd(r.btk_plan_start_date),
+      "BTK Actual End Date":      fd(r.btk_actual_end_date),
+      "BTK Approval Status":      r.btk_approved || "",
+      "GS Status":                r.gs_status || "",
+      "Atlas Status":             r.atlas_status || "",
+      "Survey Note":              r.survey_note || "",
+      "EMR Plan Start Date":      fd(r.emr_plan_start_date),
+      "EMR Actual End Date":      fd(r.emr_actual_end_date),
+      "TRS Subcon":               r.trs_subcon || "",
+      "TRS Plan Start Date":      fd(r.trs_plan_start_date),
+      "TRS Actual End Date":      fd(r.trs_actual_end_date),
+      "TRS Not":                  r.trs_not || "",
+      "ENH Site Type":            r.enh_site_type || "",
+      "ENH Subcon":               r.enh_subcon || "",
+      "ENH Plan Start Date":      fd(r.enh_plan_start_date),
+      "ENH Actual End Date":      fd(r.enh_actual_end_date),
+      "ENH Not":                  r.enh_not || "",
+      "ENH Proje Subcon":         r.enh_proje_subcon || "",
+      "ENH Proje Hazır Tarihi":   fd(r.enh_proje_hazir),
+      "ENH Proje Not":            r.enh_proje_not || "",
+      "Power Subcon":             r.power_subcon || "",
+      "Power Plan Start Date":    fd(r.power_plan_start_date),
+      "Power Actual End Date":    fd(r.power_actual_end_date),
+      "Abonelik Actual End Date": fd(r.abonelik_actual_end_date),
+      "Horizon Actual End Date":  fd(r.tt_horizon_actual_end_date),
+      "PAC Actual End Date":      fd(r.pac_actual_end_date),
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Rollout Data");
+
+    // Başlık satırını kalın yap
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: 0, c: C })];
+      if (cell) cell.s = { font: { bold: true }, fill: { fgColor: { rgb: "1F4E79" } } };
+    }
+
+    const fileName = `rollout_${regionLabel}_${today}.xlsx`;
+    XLSX.writeFile(wb, fileName);
   };
 
   const loadData = useCallback(async () => {
