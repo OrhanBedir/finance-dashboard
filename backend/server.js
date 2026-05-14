@@ -13,6 +13,9 @@ const { createWorker } = require("tesseract.js");
 const { detectRegion } = require("./utils/regionHelper");
 const { applyPremiumExcelStyle } = require("./utils/excelStyle");
 const { uploadToStorage, deleteFromStorage, supabase, BUCKET } = require("./supabase-storage");
+const archiver = require("archiver");
+const https = require("https");
+const http = require("http");
 
 // ─── OCR HELPER ──────────────────────────────────────────────────────────────
 
@@ -8603,6 +8606,66 @@ app.get("/hr/personel/:id/belgeler", async (req, res) => {
     const r = await pool.query("SELECT * FROM personel_belgeler WHERE personel_id=$1", [req.params.id]);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Tüm belgeleri ZIP olarak indir
+app.get("/hr/personel/:id/belgeler-zip", async (req, res) => {
+  try {
+    const pid = req.params.id;
+    const personelR = await pool.query("SELECT ad_soyad FROM personel WHERE id=$1", [pid]);
+    if (!personelR.rows[0]) return res.status(404).json({ error: "Personel bulunamadı" });
+    const ad = personelR.rows[0].ad_soyad.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_çğıöşüÇĞİÖŞÜ]/g, "");
+
+    const belgeR = await pool.query("SELECT belge_turu, dosya_yolu FROM personel_belgeler WHERE personel_id=$1", [pid]);
+    const isgR = await pool.query("SELECT egitim_turu, belge_yolu FROM personel_isg WHERE personel_id=$1 AND belge_yolu IS NOT NULL", [pid]);
+
+    const belge_adi_map = {
+      FOTOGRAF:"Fotograf", TC_KIMLIK:"TC_Kimlik", EHLIYET:"Ehliyet",
+      SAGLIK_RAPORU:"Saglik_Raporu", SGK_BILDIRGE:"SGK_Bildirge", DIGER_BELGE:"Diger_Belge"
+    };
+
+    // URL'den dosya stream'i al
+    const fetchStream = (url) => new Promise((resolve, reject) => {
+      const mod = url.startsWith("https") ? https : http;
+      mod.get(url, res => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          fetchStream(res.headers.location).then(resolve).catch(reject);
+        } else if (res.statusCode !== 200) {
+          reject(new Error("HTTP " + res.statusCode));
+        } else {
+          resolve(res);
+        }
+      }).on("error", reject);
+    });
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${ad}_Belgeler.zip"`);
+
+    const archive = archiver("zip", { zlib: { level: 6 } });
+    archive.on("error", err => { if (!res.headersSent) res.status(500).json({ error: err.message }); });
+    archive.pipe(res);
+
+    for (const b of belgeR.rows) {
+      if (!b.dosya_yolu) continue;
+      try {
+        const ext = b.dosya_yolu.split(".").pop().split("?")[0] || "pdf";
+        const dosyaAd = (belge_adi_map[b.belge_turu] || b.belge_turu) + "." + ext;
+        const stream = await fetchStream(b.dosya_yolu);
+        archive.append(stream, { name: `Personel_Belgeleri/${dosyaAd}` });
+      } catch(e) { /* skip unavailable file */ }
+    }
+    for (const i of isgR.rows) {
+      if (!i.belge_yolu) continue;
+      try {
+        const ext = i.belge_yolu.split(".").pop().split("?")[0] || "pdf";
+        const dosyaAd = i.egitim_turu.replace(/[\/\\:*?"<>|]/g, "_") + "." + ext;
+        const stream = await fetchStream(i.belge_yolu);
+        archive.append(stream, { name: `ISG_Egitimleri/${dosyaAd}` });
+      } catch(e) { /* skip unavailable file */ }
+    }
+
+    await archive.finalize();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: e.message }); }
 });
 
 // ---- ISG EĞİTİMLER ----

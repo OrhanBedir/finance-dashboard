@@ -8216,7 +8216,13 @@ function HrDashboard({ onBack, currentUser }) {
                 <div style={secSt}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
                     <div style={{ fontWeight:700, color:"#374151" }}>🎓 ISG Eğitimleri</div>
-                    <button className="tab" onClick={()=>setShowIsgForm(true)} style={{ fontSize:"12px" }}>+ Eğitim Ekle</button>
+                    <div style={{ display:"flex", gap:"8px" }}>
+                      <a href={`${API_BASE}/hr/personel/${selectedPersonel.id}/belgeler-zip`} download
+                        style={{ fontSize:"12px", padding:"4px 10px", borderRadius:"8px", background:"#064e3b", color:"#fff", textDecoration:"none", display:"flex", alignItems:"center", gap:"4px" }}>
+                        📦 Tüm Belgeleri İndir
+                      </a>
+                      <button className="tab" onClick={()=>setShowIsgForm(true)} style={{ fontSize:"12px" }}>+ Eğitim Ekle</button>
+                    </div>
                   </div>
                   {showIsgForm && (
                     <form onSubmit={handleSaveIsg} style={{ background:"#f8fafc", borderRadius:"10px", padding:"14px", marginBottom:"12px" }}>
