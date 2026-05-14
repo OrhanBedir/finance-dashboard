@@ -9325,7 +9325,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   })() : null;
 
   return (
-    <div style={{ maxWidth: "1100px", margin: "24px auto" }}>
+    <div style={{ maxWidth: "1400px", margin: "24px auto" }}>
       {NotTooltipEl}
       {myPendingCount > 0 && (
         <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:"12px", padding:"12px 18px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
