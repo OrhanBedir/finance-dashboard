@@ -7912,31 +7912,79 @@ function HrDashboard({ onBack, currentUser }) {
             <div style={{ fontWeight:700, fontSize:"14px", color:"#374151", marginBottom:"12px" }}>Ödeme Geçmişi</div>
             {maasOdeList.length === 0
               ? <div style={{ textAlign:"center", color:"#9ca3af", padding:"20px", fontSize:"14px" }}>Henüz ödeme kaydı yok.</div>
-              : <div style={{ display:"grid", gap:"8px" }}>
-                  {maasOdeList.map(od => (
-                    <div key={od.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 16px", background:"#f8fafc", borderRadius:"10px", gap:"8px" }}>
-                      <div>
-                        <div style={{ fontWeight:700, fontSize:"14px" }}>{od.donem} <span style={{ fontWeight:400, color:"#6b7280", fontSize:"12px" }}>· {new Date(od.tarih).toLocaleDateString("tr-TR")}</span></div>
-                        <div style={{ fontSize:"13px", marginTop:"2px" }}>
-                          {Number(od.bankadan)>0 && <span style={{ marginRight:"10px" }}>🏦 ₺{Number(od.bankadan).toLocaleString("tr-TR")}</span>}
-                          {Number(od.elden)>0 && <span>💵 ₺{Number(od.elden).toLocaleString("tr-TR")}</span>}
-                          {!Number(od.bankadan) && !Number(od.elden) && <span style={{ color:"#9ca3af" }}>—</span>}
+              : (() => {
+                  const TL = n => `₺${Math.round(n).toLocaleString("tr-TR")}`;
+                  // Tüm geçmiş ödemelerin vergi toplamları
+                  let kumBankadan=0, kumElden=0, kumDevlet=0, kumIsverenMaliyet=0, kumToplamHazine=0;
+                  const odemeKartlari = maasOdeList.map(od => {
+                    const banka = Number(od.bankadan||0);
+                    const elden = Number(od.elden||0);
+                    const v = banka > 0 ? hesaplaVergi(banka) : null;
+                    kumBankadan += banka; kumElden += elden;
+                    if (v) { kumDevlet += v.toplam_devlet; kumIsverenMaliyet += v.toplam_isveren_maliyet; kumToplamHazine += v.toplam_isveren_maliyet + elden; }
+                    else { kumToplamHazine += banka + elden; }
+                    return (
+                      <div key={od.id} style={{ background:"#f8fafc", borderRadius:"10px", overflow:"hidden" }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 16px" }}>
+                          <div>
+                            <div style={{ fontWeight:700, fontSize:"14px" }}>{od.donem} <span style={{ fontWeight:400, color:"#6b7280", fontSize:"12px" }}>· {new Date(od.tarih).toLocaleDateString("tr-TR")}</span></div>
+                            <div style={{ fontSize:"13px", marginTop:"2px" }}>
+                              {banka>0 && <span style={{ marginRight:"10px" }}>🏦 {TL(banka)}</span>}
+                              {elden>0 && <span>💵 {TL(elden)}</span>}
+                            </div>
+                            {od.aciklama && <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"2px" }}>{od.aciklama}</div>}
+                          </div>
+                          <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                            <div style={{ fontWeight:700, color:"#166534", fontSize:"15px" }}>{TL(banka+elden)}</div>
+                            <button onClick={()=>handleDeleteMaasOde(od.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
+                          </div>
                         </div>
-                        {od.aciklama && <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"2px" }}>{od.aciklama}</div>}
+                        {v && (
+                          <div style={{ background:"#1e3a5f", color:"#fff", padding:"8px 16px", fontSize:"11px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"8px", textAlign:"center" }}>
+                            <div><div style={{ opacity:0.7 }}>Brüt</div><div style={{ fontWeight:700 }}>{TL(v.brut)}</div></div>
+                            <div><div style={{ opacity:0.7 }}>SGK+İşsizlik İşçi</div><div style={{ fontWeight:700, color:"#fca5a5" }}>{TL(v.sgk_isci+v.issizlik_isci)}</div></div>
+                            <div><div style={{ opacity:0.7 }}>Gelir+Damga Vrg.</div><div style={{ fontWeight:700, color:"#fca5a5" }}>{TL(v.gelir_vergisi+v.damga_vergisi)}</div></div>
+                            <div><div style={{ opacity:0.7 }}>SGK+İşsizlik İşv.</div><div style={{ fontWeight:700, color:"#fcd34d" }}>{TL(v.sgk_isveren+v.issizlik_isveren)}</div></div>
+                          </div>
+                        )}
+                        {v && (
+                          <div style={{ background:"#0f2444", color:"#fff", padding:"6px 16px", fontSize:"11px", display:"flex", justifyContent:"space-between" }}>
+                            <span>Devlet ödemesi: <b style={{color:"#a78bfa"}}>{TL(v.toplam_devlet)}</b></span>
+                            <span>İşveren maliyeti: <b style={{color:"#60a5fa"}}>{TL(v.toplam_isveren_maliyet)}</b></span>
+                            {elden>0 && <span>Elden (vergisiz): <b style={{color:"#9ca3af"}}>{TL(elden)}</b></span>}
+                            <span>HAZİNEDEN TOPLAM: <b style={{color:"#86efac"}}>{TL(v.toplam_isveren_maliyet+elden)}</b></span>
+                          </div>
+                        )}
                       </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-                        <div style={{ fontWeight:700, color:"#166534", fontSize:"15px" }}>₺{(Number(od.bankadan)+Number(od.elden)).toLocaleString("tr-TR")}</div>
-                        <button onClick={()=>handleDeleteMaasOde(od.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
+                    );
+                  });
+                  return (
+                    <div style={{ display:"grid", gap:"8px" }}>
+                      {odemeKartlari}
+                      {/* Kümülatif özet */}
+                      <div style={{ background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)", color:"#fff", borderRadius:"12px", padding:"14px 16px" }}>
+                        <div style={{ fontWeight:700, fontSize:"13px", marginBottom:"10px", opacity:0.8 }}>📊 Toplam Maliyet Özeti</div>
+                        <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"8px" }}>
+                          {[
+                            ["Net Bankadan Ödenen", TL(kumBankadan), "#86efac"],
+                            ["Net Elden Ödenen (vergisiz)", TL(kumElden), "#d1d5db"],
+                            ["Toplam Devlet Ödemesi", TL(kumDevlet), "#c4b5fd"],
+                            ["Toplam İşveren Maliyeti", TL(kumIsverenMaliyet), "#93c5fd"],
+                          ].map(([l,v,c])=>(
+                            <div key={l} style={{ background:"rgba(255,255,255,0.08)", borderRadius:"8px", padding:"8px 12px" }}>
+                              <div style={{ fontSize:"10px", opacity:0.7 }}>{l}</div>
+                              <div style={{ fontSize:"16px", fontWeight:800, color:c }}>{v}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ marginTop:"10px", background:"rgba(255,255,255,0.12)", borderRadius:"8px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                          <span style={{ fontWeight:700, fontSize:"13px" }}>HAZİNEDEN ÇIKAN TOPLAM</span>
+                          <span style={{ fontWeight:800, fontSize:"20px", color:"#86efac" }}>{TL(kumToplamHazine)}</span>
+                        </div>
                       </div>
                     </div>
-                  ))}
-                  <div style={{ padding:"10px 16px", background:"#dcfce7", borderRadius:"10px", display:"flex", justifyContent:"space-between" }}>
-                    <span style={{ fontWeight:700, color:"#166534" }}>Toplam Ödenen</span>
-                    <span style={{ fontWeight:700, color:"#166534", fontSize:"16px" }}>
-                      ₺{maasOdeList.reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0),0).toLocaleString("tr-TR")}
-                    </span>
-                  </div>
-                </div>
+                  );
+                })()
             }
           </div>
         </div>
