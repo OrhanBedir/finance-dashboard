@@ -1043,6 +1043,9 @@ function RolloutDashboard() {
         <table>
           <thead>
             <tr>
+              <th colSpan="1">📦</th>
+              <th colSpan="5">MİLESTONE DURUM</th>
+
               <th colSpan="7">GENEL</th>
 
               <th colSpan="7">RF</th>
@@ -1066,6 +1069,13 @@ function RolloutDashboard() {
               <th colSpan="4">KABUL</th>
             </tr>
             <tr>
+              <th style={{ background:"#1e293b", color:"#fff", fontSize:"11px" }}>Belgeler</th>
+              <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>RF Rcv</th>
+              <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>RF Start</th>
+              <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>RF Fin</th>
+              <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>QC OK</th>
+              <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>OnAir</th>
+
               <th>Bölge</th>
               <th>Site Type</th>
               <th>Site Fiziksel Tip</th>
@@ -1129,10 +1139,58 @@ function RolloutDashboard() {
 
           <tbody>
             {filteredRows.length === 0 ? (
-              <EmptyRow colSpan={44} text="Rollout kaydı bulunamadı" />
+              <EmptyRow colSpan={50} text="Rollout kaydı bulunamadı" />
             ) : (
-              filteredRows.map((row, index) => (
+              filteredRows.map((row, index) => {
+                const ms_rfRcv   = !!(row.installation_actual_start_date || (String(row.malzeme_status||"").toUpperCase()==="OK"));
+                const ms_rfStart = !!row.installation_actual_start_date;
+                const ms_rfFin   = !!row.installation_actual_end_date;
+                const ms_qcOk    = String(row.qc_durum||"").toUpperCase()==="OK";
+                const ms_onair   = !!row.onair_date;
+                const ms = (v) => v ? "✅" : "⏳";
+                const msTd = (v) => (
+                  <td style={{ textAlign:"center", fontSize:"14px", background: v?"#f0fdf4":"#fafafa" }}>{ms(v)}</td>
+                );
+                const handleRowIndir = async () => {
+                  const belgeler = [
+                    { url: row.los_belge_url,       ad: "LOS" },
+                    { url: row.tssr_belge_url,       ad: "TSSR" },
+                    { url: row.btk_belge_url,        ad: "BTK" },
+                    { url: row.emr_belge_url,        ad: "EMR" },
+                    { url: row.pac_belge_url,        ad: "PAC" },
+                    { url: row.enh_proje_belge_url,  ad: "ENH_Proje" },
+                  ].filter(b => b.url);
+                  if (!belgeler.length) { alert("Bu sahaya ait belge bulunamadı."); return; }
+                  const JSZip = (await import("jszip")).default;
+                  const zip = new JSZip();
+                  let cnt = 0;
+                  for (const { url, ad } of belgeler) {
+                    try {
+                      const r = await fetch(url); if (!r.ok) continue;
+                      const buf = await r.arrayBuffer();
+                      const ext = url.split("?")[0].split(".").pop() || "pdf";
+                      zip.file(`${row.site_code}_${ad}.${ext}`, buf); cnt++;
+                    } catch {}
+                  }
+                  if (!cnt) { alert("Belgeler indirilemedi."); return; }
+                  const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
+                  const a = document.createElement("a");
+                  a.href = URL.createObjectURL(blob); a.download = `${row.site_code}_Belgeler.zip`; a.click(); URL.revokeObjectURL(a.href);
+                };
+                const hasBelge = !!(row.los_belge_url || row.tssr_belge_url || row.btk_belge_url || row.emr_belge_url || row.pac_belge_url || row.enh_proje_belge_url);
+                return (
                 <tr key={row.id}>
+                  <td style={{ textAlign:"center" }}>
+                    <button onClick={handleRowIndir} title="Saha belgelerini ZIP indir"
+                      style={{ background: hasBelge?"#1e293b":"#e5e7eb", color: hasBelge?"#fff":"#9ca3af", border:"none", borderRadius:"6px", padding:"4px 8px", cursor: hasBelge?"pointer":"default", fontSize:"13px" }}>
+                      📦
+                    </button>
+                  </td>
+                  {msTd(ms_rfRcv)}
+                  {msTd(ms_rfStart)}
+                  {msTd(ms_rfFin)}
+                  {msTd(ms_qcOk)}
+                  {msTd(ms_onair)}
                   <td>{row.bolge}</td>
                   <td>{row.site_type}</td>
                   <td>{row.site_physical_type}</td>
@@ -1192,7 +1250,8 @@ function RolloutDashboard() {
                   <td>{renderDate(row.tt_horizon_actual_end_date)}</td>
                   <td>{renderDate(row.pac_actual_end_date)}</td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
@@ -13711,8 +13770,9 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
           {
             label: "Acceptance",
             key: "acceptance",
-            dateField: "pac_actual_end_date",
+            dateField: "onair_date",
           },
+          { label: "PO Status(Closed)", key: "po_closed" },
         ])}
 
         {makeTable(
@@ -13735,9 +13795,14 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
               dateField: "installation_actual_end_date",
             },
             {
+              label: "QC(Closed)",
+              key: "qc_closed",
+              dateField: "qc_closed_date",
+            },
+            {
               label: "Acceptance",
               key: "acceptance",
-              dateField: "pac_actual_end_date",
+              dateField: "onair_date",
             },
             { label: "PO Status(Closed)", key: "po_closed" },
           ],
@@ -13766,8 +13831,9 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
           {
             label: "Acceptance",
             key: "acceptance",
-            dateField: "pac_actual_end_date",
+            dateField: "onair_date",
           },
+          { label: "PO Status(Closed)", key: "po_closed" },
         ])}
 
         {makeTable(`${regionTitle} LTE PLAN TOTAL`, "LTE", "RF STATUS", [
@@ -13786,9 +13852,14 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
             dateField: "installation_actual_end_date",
           },
           {
+            label: "QC(Closed)",
+            key: "qc_closed",
+            dateField: "qc_closed_date",
+          },
+          {
             label: "Acceptance",
             key: "acceptance",
-            dateField: "pac_actual_end_date",
+            dateField: "onair_date",
           },
           { label: "PO Status(Closed)", key: "po_closed" },
         ])}
