@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import "./App.css";
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 import "react-datepicker/dist/react-datepicker.css";
 import DatePicker from "react-datepicker";
 import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
@@ -7359,6 +7360,48 @@ function HrDashboard({ onBack, currentUser }) {
       if (!patchRes.ok) throw new Error(patchRes.status);
     } catch(e) { throw new Error("Adım3 (URL kaydet): " + e.message); }
   };
+  const handleTumBelgeleriIndir = async () => {
+    if (!selectedPersonel) return;
+    const zip = new JSZip();
+    const belgeAdiMap = {
+      FOTOGRAF:"Fotograf", TC_KIMLIK:"TC_Kimlik", EHLIYET:"Ehliyet",
+      SAGLIK_RAPORU:"Saglik_Raporu", SGK_BILDIRGE:"SGK_Bildirge", DIGER_BELGE:"Diger_Belge"
+    };
+    const fetchBuf = async (url) => {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.arrayBuffer();
+    };
+    let count = 0;
+    // Personel belgeleri
+    for (const b of personelBelgeler) {
+      if (!b.dosya_yolu) continue;
+      try {
+        const ext = (b.dosya_yolu.split(".").pop().split("?")[0] || "bin").toLowerCase();
+        const ad = (belgeAdiMap[b.belge_turu] || b.belge_turu) + "." + ext;
+        const buf = await fetchBuf(b.dosya_yolu);
+        zip.folder("Personel_Belgeleri").file(ad, buf);
+        count++;
+      } catch(e) {}
+    }
+    // ISG eğitim belgeleri
+    for (const i of personelIsg) {
+      if (!i.belge_yolu) continue;
+      try {
+        const ext = (i.belge_yolu.split(".").pop().split("?")[0] || "bin").toLowerCase();
+        const ad = i.egitim_turu.replace(/[/\\:*?"<>|]/g, "_") + "." + ext;
+        const buf = await fetchBuf(i.belge_yolu);
+        zip.folder("ISG_Egitimleri").file(ad, buf);
+        count++;
+      } catch(e) {}
+    }
+    if (count === 0) { alert("İndirilecek belge bulunamadı."); return; }
+    const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `${selectedPersonel.ad_soyad.replace(/\s+/g,"_")}_Belgeler.zip`;
+    a.click(); URL.revokeObjectURL(url);
+  };
   const handleIsgBelgeUpload = async (personelId, isgId, file) => {
     try {
       await uploadIsgBelge(isgId, file);
@@ -8217,10 +8260,10 @@ function HrDashboard({ onBack, currentUser }) {
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
                     <div style={{ fontWeight:700, color:"#374151" }}>🎓 ISG Eğitimleri</div>
                     <div style={{ display:"flex", gap:"8px" }}>
-                      <a href={`${API_BASE}/hr/personel/${selectedPersonel.id}/belgeler-zip`} download
-                        style={{ fontSize:"12px", padding:"4px 10px", borderRadius:"8px", background:"#064e3b", color:"#fff", textDecoration:"none", display:"flex", alignItems:"center", gap:"4px" }}>
+                      <button onClick={handleTumBelgeleriIndir}
+                        style={{ fontSize:"12px", padding:"4px 10px", borderRadius:"8px", background:"#064e3b", color:"#fff", border:"none", cursor:"pointer" }}>
                         📦 Tüm Belgeleri İndir
-                      </a>
+                      </button>
                       <button className="tab" onClick={()=>setShowIsgForm(true)} style={{ fontSize:"12px" }}>+ Eğitim Ekle</button>
                     </div>
                   </div>
