@@ -8337,7 +8337,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     };
 
     return (
-      <div style={{ maxWidth:"900px", margin:"24px auto" }}>
+      <div style={{ maxWidth:"1400px", margin:"24px auto" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px" }}>
           <button onClick={()=>setViewForm(null)} style={{ background:"#f3f4f6", border:"1px solid #d1d5db", cursor:"pointer", color:"#374151", fontSize:"13px", fontWeight:600, padding:"7px 16px", borderRadius:"8px" }}>← Listeye Dön</button>
           {canDelete && (
@@ -8462,7 +8462,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     const isLocked = activeForm.durum !== "TASLAK";
     const inp = { width:"100%", padding:"8px 10px", borderRadius:"8px", border:"1.5px solid #d1d5db", fontSize:"13px", boxSizing:"border-box", background:"#fff", color:"#1f2937" };
     return (
-      <div style={{ maxWidth:"860px", margin:"0 auto", padding:"16px" }}>
+      <div style={{ maxWidth:"1400px", margin:"0 auto", padding:"16px" }}>
         {/* Üst başlık - Excel tarzı */}
         <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:"12px", marginBottom:"12px", overflow:"hidden" }}>
           <div style={{ background:"#1e3a5f", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -8883,7 +8883,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
 
   // ── List view ──
   return (
-    <div style={{ maxWidth:"1100px", margin:"24px auto" }}>
+    <div style={{ maxWidth:"1400px", margin:"24px auto" }}>
       {myPending > 0 && (
         <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:"12px", padding:"12px 18px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
           <span style={{ fontSize:"20px" }}>⏳</span>
