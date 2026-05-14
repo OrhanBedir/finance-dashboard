@@ -6784,14 +6784,24 @@ function PuantajPanel({ currentUser, onBack }) {
   const [yilStr, ayStr] = puantajAy.split("-");
   const ayGunleri = Array.from({ length: new Date(Number(yilStr), Number(ayStr), 0).getDate() }, (_, i) => i+1);
 
-  const DURUMLAR = [
-    { key:"CALISDI", label:"✅" },
-    { key:"GELMEDI", label:"❌" },
-    { key:"IZIN",    label:"🏖" },
-    { key:"RAPOR",   label:"☪️" },
-    { key:"TATIL",   label:"⭕" },
+  const TR_RESMI_TATIL = [
+    "2024-01-01","2024-04-10","2024-04-11","2024-04-12","2024-04-23","2024-05-01","2024-05-19","2024-06-15","2024-06-16","2024-06-17","2024-06-18","2024-07-15","2024-08-30","2024-10-29",
+    "2025-01-01","2025-03-30","2025-03-31","2025-04-01","2025-04-23","2025-05-01","2025-05-19","2025-06-06","2025-06-07","2025-06-08","2025-06-09","2025-07-15","2025-08-30","2025-10-29",
+    "2026-01-01","2026-03-31","2026-04-01","2026-04-02","2026-04-23","2026-05-01","2026-05-19","2026-06-06","2026-06-07","2026-06-08","2026-06-09","2026-07-15","2026-08-30","2026-10-29",
+    "2027-01-01","2027-03-20","2027-03-21","2027-03-22","2027-04-23","2027-05-01","2027-05-19","2027-05-27","2027-05-28","2027-05-29","2027-05-30","2027-07-15","2027-08-30","2027-10-29",
   ];
-  const DURUM_COLOR = { CALISDI:"#dcfce7", IZIN:"#dbeafe", RAPOR:"#fef3c7", TATIL:"transparent", GELMEDI:"#fee2e2" };
+
+  const DURUMLAR = [
+    { key:"CALISDI",  label:"✅" },
+    { key:"GELMEDI",  label:"❌" },
+    { key:"IZIN",     label:"🏖" },
+    { key:"RAPOR",    label:"☪️" },
+    { key:"TATIL",    label:"⭕" },
+    { key:"DINLENME", label:"💤" },
+  ];
+  const DURUM_COLOR = { CALISDI:"#dcfce7", IZIN:"#dbeafe", RAPOR:"#fef3c7", TATIL:"transparent", GELMEDI:"#fee2e2", DINLENME:"#f3e8ff" };
+
+  const [puantajOzet, setPuantajOzet] = useState([]);
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
@@ -6802,9 +6812,14 @@ function PuantajPanel({ currentUser, onBack }) {
     const r = await fetch(`${API_BASE}/hr/puantaj?ay=${ay}&yil=${yil}`);
     setPuantajData(await r.json());
   };
+  const loadPuantajOzet = async () => {
+    const [yil, ay] = puantajAy.split("-");
+    const r = await fetch(`${API_BASE}/hr/puantaj/ozet?ay=${ay}&yil=${yil}`);
+    setPuantajOzet(await r.json());
+  };
 
   useEffect(() => { loadPersonel(); }, []);
-  useEffect(() => { loadPuantaj(); }, [puantajAy]);
+  useEffect(() => { loadPuantaj(); loadPuantajOzet(); }, [puantajAy]);
 
   const getPuantaj = (personelId, gun) => {
     const tarih = `${puantajAy}-${String(gun).padStart(2,"0")}`;
@@ -6879,7 +6894,7 @@ function PuantajPanel({ currentUser, onBack }) {
           {personelList.map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
         </select>
 
-        <span style={{ fontSize:"12px", color:"#9ca3af" }}>Tıkla: ✅→❌→🏖→☪️→⭕</span>
+        <span style={{ fontSize:"12px", color:"#9ca3af" }}>Tıkla: ✅→❌→🏖→☪️→⭕→💤</span>
 
         <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`}
           style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none", marginLeft:"auto" }}>
@@ -6893,7 +6908,23 @@ function PuantajPanel({ currentUser, onBack }) {
         const sc = {};
         ayGunleri.forEach(g => { const durum = getPuantaj(sp.id,g)?.durum||"TATIL"; sc[durum]=(sc[durum]||0)+1; });
         const cal = sc["CALISDI"]||0;
-        const hak = Math.round((cal/ayGunleri.length)*(sp.net_maas||0));
+        const gelmedi = sc["GELMEDI"]||0;
+        const pazarCalisdi = ayGunleri.filter(g => {
+          const row = getPuantaj(sp.id, g);
+          return row?.durum === "CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0;
+        }).length;
+        const dailyRate = (sp.net_maas||0) / 26;
+        const hak = Math.round((sp.net_maas||0) - gelmedi * dailyRate + pazarCalisdi * dailyRate * 1.5);
+        const pazarBonus = Math.round(pazarCalisdi * dailyRate * 1.5);
+        const ozetRow = puantajOzet.find(o => o.personel_id === sp.id);
+        const dinlenmeBakiye = ozetRow?.dinlenme_bakiye ?? pazarCalisdi;
+        const tooltipText = [
+          `Çalışılan gün: ${cal}`,
+          `Gelmedi: ${gelmedi} gün (kesinti: ₺${Math.round(gelmedi*dailyRate).toLocaleString("tr-TR")})`,
+          `Pazar çalışılan: ${pazarCalisdi} gün`,
+          `Pazar primli: +₺${pazarBonus.toLocaleString("tr-TR")} (1.5x günlük)`,
+          `Toplam hakediş: ₺${hak.toLocaleString("tr-TR")}`,
+        ].join("\n");
         return (
           <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"16px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
             <div style={{ minWidth:"110px" }}>
@@ -6903,21 +6934,28 @@ function PuantajPanel({ currentUser, onBack }) {
             <div style={{ display:"flex", gap:"10px", flex:1, flexWrap:"wrap" }}>
               {[
                 { label:"Çalışılan", emoji:"✅", val:cal, bg:"#dcfce7", tc:"#166534" },
-                { label:"Gelmedi",   emoji:"❌", val:sc["GELMEDI"]||0, bg:"#fee2e2", tc:"#991b1b" },
+                { label:"Gelmedi",   emoji:"❌", val:gelmedi, bg:"#fee2e2", tc:"#991b1b" },
                 { label:"İzin",      emoji:"🏖", val:sc["IZIN"]||0,    bg:"#dbeafe", tc:"#1d4ed8" },
                 { label:"Rapor",     emoji:"☪️", val:sc["RAPOR"]||0,   bg:"#fef3c7", tc:"#92400e" },
                 { label:"Tatil",     emoji:"⭕", val:sc["TATIL"]||0,   bg:"#f1f5f9", tc:"#64748b" },
+                { label:"Dinlenme",  emoji:"💤", val:sc["DINLENME"]||0, bg:"#f3e8ff", tc:"#7c3aed" },
               ].map(s=>(
                 <div key={s.label} style={{ background:s.bg, borderRadius:"12px", padding:"10px 14px", textAlign:"center", minWidth:"70px" }}>
                   <div style={{ fontSize:"22px", fontWeight:800, color:s.tc }}>{s.val}</div>
                   <div style={{ fontSize:"10px", fontWeight:600, color:s.tc, marginTop:"2px" }}>{s.emoji} {s.label}</div>
                 </div>
               ))}
+              {dinlenmeBakiye > 0 && (
+                <div style={{ background:"#fdf4ff", border:"2px solid #d8b4fe", borderRadius:"12px", padding:"10px 14px", textAlign:"center", minWidth:"70px" }}>
+                  <div style={{ fontSize:"22px", fontWeight:800, color:"#7c3aed" }}>{dinlenmeBakiye}</div>
+                  <div style={{ fontSize:"10px", fontWeight:600, color:"#7c3aed", marginTop:"2px" }}>💤 Bakiye</div>
+                </div>
+              )}
             </div>
-            <div style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"14px", padding:"16px 22px", textAlign:"center", color:"#fff", minWidth:"140px" }}>
-              <div style={{ fontSize:"11px", fontWeight:600, opacity:0.8, marginBottom:"4px" }}>Bu Ay Hakediş</div>
+            <div title={tooltipText} style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"14px", padding:"16px 22px", textAlign:"center", color:"#fff", minWidth:"140px", cursor:"help" }}>
+              <div style={{ fontSize:"11px", fontWeight:600, opacity:0.8, marginBottom:"4px" }}>Bu Ay Hakediş ℹ️</div>
               <div style={{ fontSize:"26px", fontWeight:800, letterSpacing:"-0.5px" }}>₺{hak.toLocaleString("tr-TR")}</div>
-              <div style={{ fontSize:"11px", opacity:0.7, marginTop:"4px" }}>{cal} / {ayGunleri.length} gün</div>
+              <div style={{ fontSize:"11px", opacity:0.7, marginTop:"4px" }}>{cal} gün · {pazarCalisdi > 0 ? `${pazarCalisdi} pazar` : "ref: 26 gün"}</div>
             </div>
           </div>
         );
@@ -6930,11 +6968,15 @@ function PuantajPanel({ currentUser, onBack }) {
               <th style={{ padding:"10px 14px", textAlign:"left", fontSize:"13px", fontWeight:700, position:"sticky", left:0, background:"#f8fafc", zIndex:2, minWidth:"150px", borderRight:"2px solid #e5e7eb" }}>Personel</th>
               {ayGunleri.map(g => {
                 const d = new Date(Number(yilStr), Number(ayStr)-1, g).getDay();
+                const thDate = `${puantajAy}-${String(g).padStart(2,"0")}`;
+                const isResmiTatil = TR_RESMI_TATIL.includes(thDate);
+                const thColor = isResmiTatil ? "#1d4ed8" : d===0 ? "#7c3aed" : "#374151";
                 return (
-                  <th key={g} style={{ padding:"4px 2px", fontSize:"11px", fontWeight:700, textAlign:"center", minWidth:"36px", width:"36px", color: d===0||d===6?"#ef4444":"#374151" }}>
+                  <th key={g} style={{ padding:"4px 2px", fontSize:"11px", fontWeight:700, textAlign:"center", minWidth:"36px", width:"36px", color: thColor }}>
                     <div>{g}</div>
-                    {d===0 && <div style={{ fontSize:"9px", fontWeight:500, color:"#ef4444", lineHeight:1 }}>Paz</div>}
-                    {d===6 && <div style={{ fontSize:"9px", fontWeight:500, color:"#ef4444", lineHeight:1 }}>Cmt</div>}
+                    {d===0 && <div style={{ fontSize:"9px", fontWeight:500, lineHeight:1 }}>Paz</div>}
+                    {d===6 && <div style={{ fontSize:"9px", fontWeight:500, lineHeight:1 }}>Cmt</div>}
+                    {isResmiTatil && d!==0 && <div style={{ fontSize:"8px", lineHeight:1 }}>🎌</div>}
                   </th>
                 );
               })}
@@ -6955,8 +6997,10 @@ function PuantajPanel({ currentUser, onBack }) {
                     const durum = row?.durum || "TATIL";
                     const label = DURUMLAR.find(x=>x.key===durum)?.label || "";
                     const tarih = `${puantajAy}-${String(g).padStart(2,"0")}`;
-                    const isWeekend = [0,6].includes(new Date(Number(yilStr), Number(ayStr)-1, g).getDay());
-                    const cellBg = DURUM_COLOR[durum] || (isWeekend?"#f1f5f9":"transparent");
+                    const dayOfWeek = new Date(Number(yilStr), Number(ayStr)-1, g).getDay();
+                    const isResmiTatilCell = TR_RESMI_TATIL.includes(tarih);
+                    const defaultCellBg = dayOfWeek===0 ? "#ede9fe" : isResmiTatilCell ? "#dbeafe" : dayOfWeek===6 ? "#f8fafc" : "transparent";
+                    const cellBg = DURUM_COLOR[durum] || defaultCellBg;
                     const hasNot = !!(row?.not_aciklama || row?.belge_yolu);
                     const showNot = durum!=="CALISDI" && durum!=="TATIL" && row?.id;
                     const cellEditable = canEditAny || tarih === todayStr;
@@ -7228,12 +7272,21 @@ function HrDashboard({ onBack, currentUser }) {
   // Puantaj yardımcıları
   const [yilStr, ayStr] = puantajAy.split("-");
   const ayGunleri = Array.from({ length: new Date(Number(yilStr), Number(ayStr), 0).getDate() }, (_, i) => i+1);
+
+  const TR_RESMI_TATIL_HR = [
+    "2024-01-01","2024-04-10","2024-04-11","2024-04-12","2024-04-23","2024-05-01","2024-05-19","2024-06-15","2024-06-16","2024-06-17","2024-06-18","2024-07-15","2024-08-30","2024-10-29",
+    "2025-01-01","2025-03-30","2025-03-31","2025-04-01","2025-04-23","2025-05-01","2025-05-19","2025-06-06","2025-06-07","2025-06-08","2025-06-09","2025-07-15","2025-08-30","2025-10-29",
+    "2026-01-01","2026-03-31","2026-04-01","2026-04-02","2026-04-23","2026-05-01","2026-05-19","2026-06-06","2026-06-07","2026-06-08","2026-06-09","2026-07-15","2026-08-30","2026-10-29",
+    "2027-01-01","2027-03-20","2027-03-21","2027-03-22","2027-04-23","2027-05-01","2027-05-19","2027-05-27","2027-05-28","2027-05-29","2027-05-30","2027-07-15","2027-08-30","2027-10-29",
+  ];
+
   const DURUMLAR = [
-    { key:"CALISDI", label:"✅", color:"#22c55e" },
-    { key:"GELMEDI", label:"❌", color:"#ef4444" },
-    { key:"IZIN",    label:"🏖", color:"#3b82f6" },
-    { key:"RAPOR",   label:"☪️", color:"#f59e0b" },
-    { key:"TATIL",   label:"⭕", color:"#9ca3af" },
+    { key:"CALISDI",  label:"✅", color:"#22c55e" },
+    { key:"GELMEDI",  label:"❌", color:"#ef4444" },
+    { key:"IZIN",     label:"🏖", color:"#3b82f6" },
+    { key:"RAPOR",    label:"☪️", color:"#f59e0b" },
+    { key:"TATIL",    label:"⭕", color:"#9ca3af" },
+    { key:"DINLENME", label:"💤", color:"#7c3aed" },
   ];
   const getPuantaj = (personelId, gun) => {
     const tarih = `${puantajAy}-${String(gun).padStart(2,"0")}`;
@@ -7421,7 +7474,23 @@ function HrDashboard({ onBack, currentUser }) {
                 const sc = {};
                 ayGunleri.forEach(g => { const durum = getPuantaj(sp.id,g)?.durum||"TATIL"; sc[durum]=(sc[durum]||0)+1; });
                 const cal = sc["CALISDI"]||0;
-                const hak = Math.round((cal/ayGunleri.length)*(sp.net_maas||0));
+                const gelmediSay = sc["GELMEDI"]||0;
+                const pazarCalisdiHR = ayGunleri.filter(g => {
+                  const row = getPuantaj(sp.id, g);
+                  return row?.durum === "CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0;
+                }).length;
+                const dailyRateHR = (sp.net_maas||0) / 26;
+                const hak = Math.round((sp.net_maas||0) - gelmediSay * dailyRateHR + pazarCalisdiHR * dailyRateHR * 1.5);
+                const pazarBonusHR = Math.round(pazarCalisdiHR * dailyRateHR * 1.5);
+                const ozetRowHR = ozet.find(o => o.personel_id === sp.id);
+                const dinlenmeBakiyeHR = ozetRowHR?.dinlenme_bakiye ?? pazarCalisdiHR;
+                const tooltipHR = [
+                  `Çalışılan gün: ${cal}`,
+                  `Gelmedi: ${gelmediSay} gün (kesinti: ₺${Math.round(gelmediSay*dailyRateHR).toLocaleString("tr-TR")})`,
+                  `Pazar çalışılan: ${pazarCalisdiHR} gün`,
+                  `Pazar primli: +₺${pazarBonusHR.toLocaleString("tr-TR")} (1.5x günlük)`,
+                  `Toplam hakediş: ₺${hak.toLocaleString("tr-TR")}`,
+                ].join("\n");
                 const maasAvans = avansList
                   .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy))
                   .reduce((s,a)=>s+Number(a.tutar||0), 0);
@@ -7439,22 +7508,29 @@ function HrDashboard({ onBack, currentUser }) {
                     <div style={{ display:"flex", gap:"10px", flex:1, flexWrap:"wrap" }}>
                       {[
                         { label:"Çalışılan", emoji:"✅", val:cal, bg:"#dcfce7", tc:"#166534" },
-                        { label:"Gelmedi",   emoji:"❌", val:sc["GELMEDI"]||0, bg:"#fee2e2", tc:"#991b1b" },
+                        { label:"Gelmedi",   emoji:"❌", val:gelmediSay, bg:"#fee2e2", tc:"#991b1b" },
                         { label:"İzin",      emoji:"🏖", val:sc["IZIN"]||0,    bg:"#dbeafe", tc:"#1d4ed8" },
                         { label:"Rapor",     emoji:"☪️", val:sc["RAPOR"]||0,   bg:"#fef3c7", tc:"#92400e" },
                         { label:"Tatil",     emoji:"⭕", val:sc["TATIL"]||0,   bg:"#f1f5f9", tc:"#64748b" },
+                        { label:"Dinlenme",  emoji:"💤", val:sc["DINLENME"]||0, bg:"#f3e8ff", tc:"#7c3aed" },
                       ].map(s=>(
                         <div key={s.label} style={{ background:s.bg, borderRadius:"12px", padding:"10px 14px", textAlign:"center", minWidth:"70px" }}>
                           <div style={{ fontSize:"22px", fontWeight:800, color:s.tc }}>{s.val}</div>
                           <div style={{ fontSize:"10px", fontWeight:600, color:s.tc, marginTop:"2px" }}>{s.emoji} {s.label}</div>
                         </div>
                       ))}
+                      {dinlenmeBakiyeHR > 0 && (
+                        <div style={{ background:"#fdf4ff", border:"2px solid #d8b4fe", borderRadius:"12px", padding:"10px 14px", textAlign:"center", minWidth:"70px" }}>
+                          <div style={{ fontSize:"22px", fontWeight:800, color:"#7c3aed" }}>{dinlenmeBakiyeHR}</div>
+                          <div style={{ fontSize:"10px", fontWeight:600, color:"#7c3aed", marginTop:"2px" }}>💤 Bakiye</div>
+                        </div>
+                      )}
                     </div>
                     <div style={{ display:"flex", flexDirection:"column", gap:"8px", minWidth:"160px" }}>
-                      <div style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"12px", padding:"12px 18px", textAlign:"center", color:"#fff" }}>
-                        <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>Bu Ay Hakediş</div>
+                      <div title={tooltipHR} style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"12px", padding:"12px 18px", textAlign:"center", color:"#fff", cursor:"help" }}>
+                        <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>Bu Ay Hakediş ℹ️</div>
                         <div style={{ fontSize:"22px", fontWeight:800 }}>₺{hak.toLocaleString("tr-TR")}</div>
-                        <div style={{ fontSize:"10px", opacity:0.7 }}>{cal} / {ayGunleri.length} gün</div>
+                        <div style={{ fontSize:"10px", opacity:0.7 }}>{cal} gün · ref: 26 gün</div>
                       </div>
                       {maasAvans > 0 && (
                         <div style={{ background:"#fef3c7", borderRadius:"12px", padding:"8px 18px", textAlign:"center" }}>
@@ -7557,7 +7633,7 @@ function HrDashboard({ onBack, currentUser }) {
                 <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
               ))}
             </select>
-            <div style={{ fontSize:"13px", color:"#6b7280" }}>Hücreye tıkla: ✅→🏖→☪️→⭕→❌→✅</div>
+            <div style={{ fontSize:"13px", color:"#6b7280" }}>Hücreye tıkla: ✅→❌→🏖→☪️→⭕→💤</div>
             <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`}
               style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>
               📥 Excel İndir
@@ -7567,6 +7643,8 @@ function HrDashboard({ onBack, currentUser }) {
           {/* Legend */}
           <div style={{ display:"flex", gap:"10px", marginBottom:"16px", flexWrap:"wrap" }}>
             {DURUMLAR.map(d=><span key={d.key} style={{ fontSize:"13px" }}>{d.label} {d.key}</span>)}
+            <span style={{ fontSize:"13px", color:"#7c3aed" }}>🟣 Pazar</span>
+            <span style={{ fontSize:"13px", color:"#1d4ed8" }}>🎌 Resmi Tatil</span>
           </div>
 
           <div style={{ overflowX:"auto", borderRadius:"14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
@@ -7576,11 +7654,15 @@ function HrDashboard({ onBack, currentUser }) {
                   <th style={{ padding:"10px 14px", textAlign:"left", fontSize:"13px", fontWeight:700, position:"sticky", left:0, background:"#f8fafc", zIndex:2, minWidth:"150px" }}>Personel</th>
                   {ayGunleri.map(g=>{
                     const d = new Date(Number(yilStr), Number(ayStr)-1, g).getDay();
+                    const thDate2 = `${puantajAy}-${String(g).padStart(2,"0")}`;
+                    const isResmiTatilHdr = TR_RESMI_TATIL_HR.includes(thDate2);
+                    const thColor2 = isResmiTatilHdr ? "#1d4ed8" : d===0 ? "#7c3aed" : "#374151";
                     return (
-                      <th key={g} style={{ padding:"4px 2px", fontSize:"11px", fontWeight:700, textAlign:"center", minWidth:"36px", width:"36px", color: d===0||d===6?"#ef4444":"#374151" }}>
+                      <th key={g} style={{ padding:"4px 2px", fontSize:"11px", fontWeight:700, textAlign:"center", minWidth:"36px", width:"36px", color: thColor2 }}>
                         <div>{g}</div>
-                        {d===0 && <div style={{ fontSize:"9px", fontWeight:500, color:"#ef4444", lineHeight:1 }}>Paz</div>}
-                        {d===6 && <div style={{ fontSize:"9px", fontWeight:500, color:"#ef4444", lineHeight:1 }}>Cmt</div>}
+                        {d===0 && <div style={{ fontSize:"9px", fontWeight:500, lineHeight:1 }}>Paz</div>}
+                        {d===6 && <div style={{ fontSize:"9px", fontWeight:500, lineHeight:1 }}>Cmt</div>}
+                        {isResmiTatilHdr && d!==0 && <div style={{ fontSize:"8px", lineHeight:1 }}>🎌</div>}
                       </th>
                     );
                   })}
@@ -7590,11 +7672,14 @@ function HrDashboard({ onBack, currentUser }) {
               </thead>
               <tbody>
                 {personelList.filter(p=>p.aktif && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
-                  const calisilan = ayGunleri.filter(g=>{
+                  const calisilan = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="CALISDI").length;
+                  const gelmediCount = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="GELMEDI").length;
+                  const pazarCalisdiCount = ayGunleri.filter(g => {
                     const row = getPuantaj(p.id, g);
-                    return row?.durum==="CALISDI";
+                    return row?.durum==="CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay()===0;
                   }).length;
-                  const hakedilen = Math.round((calisilan/ayGunleri.length)*p.net_maas);
+                  const dr = (p.net_maas||0) / 26;
+                  const hakedilen = Math.round((p.net_maas||0) - gelmediCount * dr + pazarCalisdiCount * dr * 1.5);
                   const rowBg = pi%2===0?"#fff":"#fafafa";
                   return (
                     <tr key={p.id} style={{ borderTop:"1px solid #f3f4f6", background: rowBg }}>
@@ -7606,8 +7691,11 @@ function HrDashboard({ onBack, currentUser }) {
                         const durum = row?.durum || "TATIL";
                         const d = DURUMLAR.find(x=>x.key===durum);
                         const tarih = `${puantajAy}-${String(g).padStart(2,"0")}`;
-                        const isWeekend = new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0 || new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 6;
-                        const cellBg = durum==="CALISDI" ? "#dcfce7" : durum==="GELMEDI" ? "#fee2e2" : durum==="IZIN" ? "#dbeafe" : durum==="RAPOR" ? "#fef3c7" : isWeekend ? "#f1f5f9" : "transparent";
+                        const dayW = new Date(Number(yilStr), Number(ayStr)-1, g).getDay();
+                        const isResmiTatilCell2 = TR_RESMI_TATIL_HR.includes(tarih);
+                        const defaultBg2 = dayW===0 ? "#ede9fe" : isResmiTatilCell2 ? "#dbeafe" : dayW===6 ? "#f8fafc" : "transparent";
+                        const DURUM_BG = { CALISDI:"#dcfce7", GELMEDI:"#fee2e2", IZIN:"#dbeafe", RAPOR:"#fef3c7", DINLENME:"#f3e8ff" };
+                        const cellBg = DURUM_BG[durum] || defaultBg2;
                         const hasNot = !!(row?.not_aciklama || row?.belge_yolu);
                         const showNot2 = durum !== "CALISDI" && durum !== "TATIL" && row?.id;
                         return (
@@ -7646,16 +7734,26 @@ function HrDashboard({ onBack, currentUser }) {
             <div style={{ marginTop:"24px" }}>
               <h3 style={{ marginBottom:"12px" }}>💰 Ay Özeti</h3>
               <div style={{ display:"grid", gap:"8px" }}>
-                {ozet.map(o => (
-                  <div key={o.personel_id} style={{ background:"#fff", borderRadius:"12px", padding:"12px 18px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"grid", gridTemplateColumns:"1fr auto auto auto auto auto", gap:"16px", alignItems:"center" }}>
-                    <div style={{ fontWeight:600 }}>{o.ad_soyad}</div>
-                    <div style={{ fontSize:"13px" }}>{o.calisilan_gun}/{o.toplam_gun} gün</div>
-                    <div style={{ fontSize:"13px" }}>Hakediş: <b>₺{o.hakedilen_maas.toLocaleString("tr-TR")}</b></div>
-                    <div style={{ fontSize:"13px", color:"#3b82f6" }}>Banka: ₺{o.bankadan.toLocaleString("tr-TR")}</div>
-                    <div style={{ fontSize:"13px", color:"#f59e0b" }}>Elden: ₺{o.elden.toLocaleString("tr-TR")}</div>
-                    <div style={{ fontSize:"13px", color: o.avans>0?"#ef4444":"#9ca3af" }}>Avans: ₺{o.avans.toLocaleString("tr-TR")}</div>
-                  </div>
-                ))}
+                {ozet.map(o => {
+                  const tooltipOzet = [
+                    `Çalışılan: ${o.calisilan_gun} gün`,
+                    `Gelmedi: ${o.gelmedi_gun||0} gün (kesinti: ₺${Math.round((o.gelmedi_gun||0)*(o.net_maas||0)/26).toLocaleString("tr-TR")})`,
+                    `Pazar çalışılan: ${o.pazar_calisdi||0} gün (+₺${(o.pazar_bonus||0).toLocaleString("tr-TR")} prim)`,
+                    `Net Maaş: ₺${Number(o.net_maas||0).toLocaleString("tr-TR")}`,
+                    `Hakediş: ₺${o.hakedilen_maas.toLocaleString("tr-TR")}`,
+                  ].join("\n");
+                  return (
+                    <div key={o.personel_id} style={{ background:"#fff", borderRadius:"12px", padding:"12px 18px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"grid", gridTemplateColumns:"1fr auto auto auto auto auto auto", gap:"12px", alignItems:"center" }}>
+                      <div style={{ fontWeight:600 }}>{o.ad_soyad}</div>
+                      <div style={{ fontSize:"12px", color:"#6b7280" }}>{o.calisilan_gun} çalışılan{o.gelmedi_gun > 0 && <span style={{ color:"#ef4444" }}> · {o.gelmedi_gun} gelmedi</span>}{o.pazar_calisdi > 0 && <span style={{ color:"#7c3aed" }}> · {o.pazar_calisdi} pazar</span>}</div>
+                      <div title={tooltipOzet} style={{ fontSize:"13px", cursor:"help" }}>Hakediş: <b>₺{o.hakedilen_maas.toLocaleString("tr-TR")}</b>{o.pazar_bonus > 0 && <span style={{ color:"#7c3aed", fontSize:"11px" }}> (+₺{o.pazar_bonus.toLocaleString("tr-TR")} prim)</span>}</div>
+                      <div style={{ fontSize:"13px", color:"#3b82f6" }}>Banka: ₺{o.bankadan.toLocaleString("tr-TR")}</div>
+                      <div style={{ fontSize:"13px", color:"#f59e0b" }}>Elden: ₺{o.elden.toLocaleString("tr-TR")}</div>
+                      <div style={{ fontSize:"13px", color: o.avans>0?"#ef4444":"#9ca3af" }}>Avans: ₺{o.avans.toLocaleString("tr-TR")}</div>
+                      {o.dinlenme_bakiye > 0 && <div style={{ fontSize:"12px", background:"#f3e8ff", color:"#7c3aed", padding:"3px 8px", borderRadius:"8px", fontWeight:600 }}>💤 Bakiye: {o.dinlenme_bakiye}</div>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

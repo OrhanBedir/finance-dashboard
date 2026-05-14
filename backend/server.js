@@ -8696,33 +8696,70 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
   try {
     const { ay, yil } = req.query;
     const personelList = await pool.query("SELECT * FROM personel WHERE aktif=true OR isten_ayrilma_tarihi IS NOT NULL ORDER BY ad_soyad");
+
+    // Individual records to detect Sundays
     const puantajRows = await pool.query(
-      `SELECT personel_id, durum, COUNT(*) as gun_sayisi FROM puantaj
-       WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2
-       GROUP BY personel_id, durum`, [ay, yil]
+      `SELECT personel_id, durum, tarih FROM puantaj
+       WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2`, [ay, yil]
     );
+
+    // Cumulative all-time: total Sundays worked and total DINLENME days given
+    const bakiyeRows = await pool.query(
+      `SELECT personel_id,
+        COUNT(*) FILTER (WHERE durum='CALISDI' AND EXTRACT(DOW FROM tarih)=0) AS pazar_calisdi_toplam,
+        COUNT(*) FILTER (WHERE durum='DINLENME') AS dinlenme_toplam
+       FROM puantaj GROUP BY personel_id`
+    );
+
     const avansList = await pool.query(
       `SELECT personel_id, SUM(tutar) as toplam FROM avans
        WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2 AND avans_turu='MAAS' GROUP BY personel_id`, [ay, yil]
     );
 
+    const REFERANS_GUN = 26;
     const totalDays = new Date(yil, ay, 0).getDate();
 
     const ozet = personelList.rows.map(p => {
       const pRows = puantajRows.rows.filter(r => r.personel_id === p.id);
-      const calisdi = pRows.find(r => r.durum === "CALISDI");
-      const calisilan = parseInt(calisdi?.gun_sayisi || 0);
-      const hakedilen = Math.round((calisilan / totalDays) * p.net_maas);
-      const bankadan = Math.round((calisilan / totalDays) * p.bankadan_gosterilen);
-      const elden = Math.round((calisilan / totalDays) * p.elden_verilen);
+
+      const calisilan = pRows.filter(r => r.durum === "CALISDI").length;
+      const gelmedi = pRows.filter(r => r.durum === "GELMEDI").length;
+      const dinlenme = pRows.filter(r => r.durum === "DINLENME").length;
+
+      // Count CALISDI entries that fall on a Sunday (DOW=0)
+      const pazarCalisdi = pRows.filter(r => {
+        if (r.durum !== "CALISDI") return false;
+        return new Date(r.tarih).getDay() === 0;
+      }).length;
+
+      const netMaas = Number(p.net_maas) || 0;
+      const dailyRate = netMaas / REFERANS_GUN;
+      // Base salary minus GELMEDI deductions, plus Sunday overtime bonus (1.5x daily rate)
+      const hakedilen = Math.round(netMaas - gelmedi * dailyRate + pazarCalisdi * dailyRate * 1.5);
+      const pazarBonus = Math.round(pazarCalisdi * dailyRate * 1.5);
+
+      const bankaDailyRate = (Number(p.bankadan_gosterilen) || 0) / REFERANS_GUN;
+      const eldenDailyRate = (Number(p.elden_verilen) || 0) / REFERANS_GUN;
+      const bankadan = Math.round((Number(p.bankadan_gosterilen) || 0) - gelmedi * bankaDailyRate);
+      const elden = Math.round((Number(p.elden_verilen) || 0) - gelmedi * eldenDailyRate);
+
       const avansRow = avansList.rows.find(a => a.personel_id === p.id);
       const avans = Number(avansRow?.toplam || 0);
+
+      // Cumulative DİNLENME balance (all-time Sundays worked minus all-time DINLENME days taken)
+      const bakiye = bakiyeRows.rows.find(r => r.personel_id === p.id);
+      const toplamPazarCalisdi = parseInt(bakiye?.pazar_calisdi_toplam || 0);
+      const toplamDinlenme = parseInt(bakiye?.dinlenme_toplam || 0);
+      const dinlenmeBakiye = toplamPazarCalisdi - toplamDinlenme;
+
       return {
         personel_id: p.id, ad_soyad: p.ad_soyad, unvan: p.unvan, aktif: p.aktif,
         net_maas: p.net_maas, bankadan_gosterilen: p.bankadan_gosterilen, elden_verilen: p.elden_verilen,
-        calisilan_gun: calisilan, toplam_gun: totalDays,
+        calisilan_gun: calisilan, gelmedi_gun: gelmedi, pazar_calisdi: pazarCalisdi,
+        pazar_bonus: pazarBonus, dinlenme_gun: dinlenme, toplam_gun: totalDays,
         hakedilen_maas: hakedilen, bankadan, elden, avans,
         kalan: hakedilen - avans,
+        dinlenme_bakiye: dinlenmeBakiye,
       };
     }).filter(p => p.aktif);
 
