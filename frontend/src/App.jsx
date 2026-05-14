@@ -3286,8 +3286,8 @@ function FinanceDashboard({
 
   const handleMaasAvansClick = () => {
     const password = prompt("Bu alana giriş için şifre giriniz:");
-
-    if (password === "simsek2026") {
+    const allowed = ["Orhan2026!", "Duzgun2026!"];
+    if (allowed.includes(password)) {
       setShowSalaryModal(true);
     } else {
       alert("Yetkisiz erişim!");
