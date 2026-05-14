@@ -8519,6 +8519,17 @@ pool.query(`
     created_at TIMESTAMP DEFAULT NOW()
   );
   ALTER TABLE avans ADD COLUMN IF NOT EXISTS avans_turu TEXT DEFAULT 'MAAS';
+  CREATE TABLE IF NOT EXISTS maas_odeme (
+    id SERIAL PRIMARY KEY,
+    personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE,
+    donem TEXT NOT NULL,
+    bankadan NUMERIC DEFAULT 0,
+    elden NUMERIC DEFAULT 0,
+    tarih DATE NOT NULL,
+    aciklama TEXT,
+    created_by TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
 `).catch(e => console.error("HR tablo hatası:", e.message));
 
 // ---- PERSONEL CRUD ----
@@ -8809,6 +8820,38 @@ app.put("/hr/avans/:id", async (req, res) => {
 app.delete("/hr/avans/:id", async (req, res) => {
   try {
     await pool.query("DELETE FROM avans WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- MAAŞ ÖDEME ----
+app.get("/hr/maas-odeme", async (req, res) => {
+  try {
+    const { personel_id } = req.query;
+    const r = await pool.query(
+      `SELECT m.*, p.ad_soyad FROM maas_odeme m JOIN personel p ON m.personel_id=p.id
+       WHERE m.personel_id=$1 ORDER BY m.donem DESC, m.created_at DESC`,
+      [personel_id]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/hr/maas-odeme", async (req, res) => {
+  try {
+    const { personel_id, donem, bankadan, elden, tarih, aciklama, created_by } = req.body;
+    const r = await pool.query(
+      `INSERT INTO maas_odeme (personel_id,donem,bankadan,elden,tarih,aciklama,created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [personel_id, donem, bankadan||0, elden||0, tarih, aciklama||"", created_by||""]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/maas-odeme/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM maas_odeme WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

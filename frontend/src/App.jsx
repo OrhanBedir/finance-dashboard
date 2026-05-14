@@ -7124,6 +7124,10 @@ function HrDashboard({ onBack, currentUser }) {
   });
   const [isgForm, setIsgForm] = useState({ egitim_turu:"", egitim_tarihi:"", gecerlilik_yil:2 });
   const [notModal, setNotModal] = useState(null); // { puantajRow, personelAd, tarih }
+  const [maasOdeModal, setMaasOdeModal] = useState(null); // personel object
+  const [maasOdeList, setMaasOdeList] = useState([]);
+  const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
+  const [maasOdeSaving, setMaasOdeSaving] = useState(false);
   const [notText, setNotText] = useState("");
   const [notFile, setNotFile] = useState(null);
   const [notSaving, setNotSaving] = useState(false);
@@ -7195,6 +7199,28 @@ function HrDashboard({ onBack, currentUser }) {
     if (!window.confirm(`${p.ad_soyad} silinsin mi?`)) return;
     await fetch(`${API_BASE}/hr/personel/${p.id}`, { method:"DELETE" });
     loadPersonel();
+  };
+  const loadMaasOde = async (personelId) => {
+    const res = await fetch(`${API_BASE}/hr/maas-odeme?personel_id=${personelId}`);
+    const data = await res.json();
+    setMaasOdeList(data);
+  };
+  const handleSaveMaasOde = async (e) => {
+    e.preventDefault();
+    if (!maasOdeModal) return;
+    setMaasOdeSaving(true);
+    await fetch(`${API_BASE}/hr/maas-odeme`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ personel_id: maasOdeModal.id, ...maasOdeForm, created_by: currentUser?.email })
+    });
+    setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
+    await loadMaasOde(maasOdeModal.id);
+    setMaasOdeSaving(false);
+  };
+  const handleDeleteMaasOde = async (id) => {
+    if (!window.confirm("Bu ödeme kaydı silinsin mi?")) return;
+    await fetch(`${API_BASE}/hr/maas-odeme/${id}`, { method:"DELETE" });
+    if (maasOdeModal) await loadMaasOde(maasOdeModal.id);
   };
   const handleBelgeUpload = async (personelId, tur, file) => {
     const fd = new FormData(); fd.append("dosya", file);
@@ -7640,6 +7666,7 @@ function HrDashboard({ onBack, currentUser }) {
                     <div style={{ display:"flex", gap:"6px" }}>
                       <button onClick={()=>loadPersonelDetail(p)} style={{ padding:"6px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Detay / Belgeler</button>
                       <button onClick={()=>handleEditPersonel(p)} style={{ padding:"6px 12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
+                      <button onClick={()=>{ const now=new Date(); setMaasOdeModal(p); setMaasOdeForm({ donem:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`, bankadan:String(p.bankadan_gosterilen||""), elden:String(p.elden_verilen||""), tarih:now.toISOString().split("T")[0], aciklama:"" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>
                       <button onClick={()=>handleToggleAktif(p)} style={{ padding:"6px 12px", background:p.aktif?"#fef3c7":"#f0fdf4", color:p.aktif?"#92400e":"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
                         {p.aktif?"Pasife Al":"Aktif Et"}
                       </button>
@@ -7651,6 +7678,84 @@ function HrDashboard({ onBack, currentUser }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ===== MAAŞ ÖDEME MODAL ===== */}
+      {maasOdeModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}>
+          <div style={{ background:"#fff", borderRadius:"18px", padding:"28px", width:"100%", maxWidth:"600px", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"20px" }}>
+              <h3 style={{ margin:0, fontSize:"18px" }}>💰 Maaş Ödemesi — {maasOdeModal.ad_soyad}</h3>
+              <button onClick={()=>setMaasOdeModal(null)} style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#6b7280" }}>✕</button>
+            </div>
+
+            {/* Yeni ödeme formu */}
+            <form onSubmit={handleSaveMaasOde} style={{ display:"grid", gap:"12px", marginBottom:"24px", padding:"16px", background:"#f8fafc", borderRadius:"12px" }}>
+              <div style={{ fontWeight:700, fontSize:"14px", color:"#374151", marginBottom:"4px" }}>Yeni Ödeme Ekle</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+                <div>
+                  <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Dönem (Ay)</div>
+                  <input type="month" value={maasOdeForm.donem} onChange={e=>setMaasOdeForm(f=>({...f,donem:e.target.value}))} required style={{ width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Ödeme Tarihi</div>
+                  <input type="date" value={maasOdeForm.tarih} onChange={e=>setMaasOdeForm(f=>({...f,tarih:e.target.value}))} required style={{ width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Bankadan (₺)</div>
+                  <input type="number" value={maasOdeForm.bankadan} onChange={e=>setMaasOdeForm(f=>({...f,bankadan:e.target.value}))} placeholder="0" style={{ width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Elden (₺)</div>
+                  <input type="number" value={maasOdeForm.elden} onChange={e=>setMaasOdeForm(f=>({...f,elden:e.target.value}))} placeholder="0" style={{ width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Açıklama</div>
+                <input type="text" value={maasOdeForm.aciklama} onChange={e=>setMaasOdeForm(f=>({...f,aciklama:e.target.value}))} placeholder="Opsiyonel not..." style={{ width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={{ fontSize:"13px", color:"#6b7280" }}>
+                  Toplam: <b>₺{(Number(maasOdeForm.bankadan||0)+Number(maasOdeForm.elden||0)).toLocaleString("tr-TR")}</b>
+                </div>
+                <button type="submit" disabled={maasOdeSaving} style={{ padding:"8px 20px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
+                  {maasOdeSaving ? "Kaydediliyor..." : "Kaydet"}
+                </button>
+              </div>
+            </form>
+
+            {/* Geçmiş ödemeler */}
+            <div style={{ fontWeight:700, fontSize:"14px", color:"#374151", marginBottom:"12px" }}>Ödeme Geçmişi</div>
+            {maasOdeList.length === 0
+              ? <div style={{ textAlign:"center", color:"#9ca3af", padding:"20px", fontSize:"14px" }}>Henüz ödeme kaydı yok.</div>
+              : <div style={{ display:"grid", gap:"8px" }}>
+                  {maasOdeList.map(od => (
+                    <div key={od.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 16px", background:"#f8fafc", borderRadius:"10px", gap:"8px" }}>
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:"14px" }}>{od.donem} <span style={{ fontWeight:400, color:"#6b7280", fontSize:"12px" }}>· {new Date(od.tarih).toLocaleDateString("tr-TR")}</span></div>
+                        <div style={{ fontSize:"13px", marginTop:"2px" }}>
+                          {Number(od.bankadan)>0 && <span style={{ marginRight:"10px" }}>🏦 ₺{Number(od.bankadan).toLocaleString("tr-TR")}</span>}
+                          {Number(od.elden)>0 && <span>💵 ₺{Number(od.elden).toLocaleString("tr-TR")}</span>}
+                          {!Number(od.bankadan) && !Number(od.elden) && <span style={{ color:"#9ca3af" }}>—</span>}
+                        </div>
+                        {od.aciklama && <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"2px" }}>{od.aciklama}</div>}
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                        <div style={{ fontWeight:700, color:"#166534", fontSize:"15px" }}>₺{(Number(od.bankadan)+Number(od.elden)).toLocaleString("tr-TR")}</div>
+                        <button onClick={()=>handleDeleteMaasOde(od.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ padding:"10px 16px", background:"#dcfce7", borderRadius:"10px", display:"flex", justifyContent:"space-between" }}>
+                    <span style={{ fontWeight:700, color:"#166534" }}>Toplam Ödenen</span>
+                    <span style={{ fontWeight:700, color:"#166534", fontSize:"16px" }}>
+                      ₺{maasOdeList.reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0),0).toLocaleString("tr-TR")}
+                    </span>
+                  </div>
+                </div>
+            }
+          </div>
         </div>
       )}
 
