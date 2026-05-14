@@ -2205,6 +2205,12 @@ app.get("/setup-db", async (req, res) => {
       );
     `);
 
+    // ENH Proje kolonları (ALTER TABLE IF NOT EXISTS)
+    await pool.query(`ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_subcon TEXT`);
+    await pool.query(`ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_hazir DATE`);
+    await pool.query(`ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_not TEXT`);
+    await pool.query(`ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_belge_url TEXT`);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rollout_files (
         id SERIAL PRIMARY KEY,
@@ -5142,22 +5148,12 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
     const result = await pool.query(
       `
       INSERT INTO rollout_progress (
-        site_code,
-        site_type,
-        bolge,
-        il,
-        site_physical_type,
-        enh_site_type,
-        atlas_status,
-        gs_status,
-        rf_not,
-        survey_note,
-        enh_not,
-        qc_closed_date
+        site_code, site_type, bolge, il, site_physical_type,
+        enh_site_type, atlas_status, gs_status, rf_not, survey_note,
+        enh_not, qc_closed_date,
+        enh_proje_subcon, enh_proje_hazir, enh_proje_not
       )
-      VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
-      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       ON CONFLICT (site_code)
       DO UPDATE SET
         site_type = EXCLUDED.site_type,
@@ -5171,22 +5167,21 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         survey_note = EXCLUDED.survey_note,
         enh_not = EXCLUDED.enh_not,
         qc_closed_date = EXCLUDED.qc_closed_date,
+        enh_proje_subcon = EXCLUDED.enh_proje_subcon,
+        enh_proje_hazir = EXCLUDED.enh_proje_hazir,
+        enh_proje_not = EXCLUDED.enh_proje_not,
         updated_at = NOW()
       RETURNING *
       `,
       [
-        data.site_code,
-        autoSiteType,
-        autoRegion,
-        autoCity,
-        data.site_physical_type || null,
-        data.enh_site_type || null,
-        data.atlas_status || null,
-        data.gs_status || null,
-        data.rf_not || null,
-        data.survey_note || null,
-        data.enh_not || null,
-        data.qc_closed_date || null,
+        data.site_code, autoSiteType, autoRegion, autoCity,
+        data.site_physical_type || null, data.enh_site_type || null,
+        data.atlas_status || null, data.gs_status || null,
+        data.rf_not || null, data.survey_note || null,
+        data.enh_not || null, data.qc_closed_date || null,
+        data.enh_proje_subcon || null,
+        data.enh_proje_hazir || null,
+        data.enh_proje_not || null,
       ],
     );
 
@@ -5196,6 +5191,26 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// ENH Proje belge signed URL
+app.get("/rollout/enh-proje/signed-upload-url", async (req, res) => {
+  try {
+    const { rolloutId, ext } = req.query;
+    const filePath = `rollout-enh-proje/rollout-${rolloutId}-${Date.now()}.${(ext||"pdf").replace(/^\./, "")}`;
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(filePath);
+    if (error) throw error;
+    const publicUrl = supabase.storage.from(BUCKET).getPublicUrl(filePath).data.publicUrl;
+    res.json({ signedUrl: data.signedUrl, path: filePath, publicUrl });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/rollout/:id/enh-proje-belge-url", async (req, res) => {
+  try {
+    const { url } = req.body;
+    await pool.query("UPDATE rollout_progress SET enh_proje_belge_url=$1 WHERE id=$2", [url, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.delete("/rollout/:id", authMiddleware, async (req, res) => {
   try {
     const id = req.params.id;

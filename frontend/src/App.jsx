@@ -13461,7 +13461,7 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       return backendValue;
     }
     if (
-      ["5G", "DSS", "LTE", "STANDALONE"].includes(type) &&
+      ["5G", "DSS", "LTE", "STANDALONE", "STANDALONE_ABONE"].includes(type) &&
       item.key === "target"
     ) {
       const uniqueSites = new Set();
@@ -13556,6 +13556,11 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
         return rowType === "STANDALONE";
       }
 
+      if (type === "STANDALONE_ABONE") {
+        return rowType === "STANDALONE" &&
+          String(r.enh_site_type || "").trim().toLowerCase() === "abone";
+      }
+
       return rowType === type;
     });
 
@@ -13597,7 +13602,7 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
     }).length;
   };
 
-  const makeTable = (title, type, statusTitle, items) => {
+  const makeTable = (title, type, statusTitle, items, opts = {}) => {
     const data = getRow(type);
 
     const target = getActualValue(type, { key: "target" }, data);
@@ -13634,15 +13639,17 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
               <th>Δ</th>
             </tr>
 
-            <tr className="excelTypeRow">
-              <th>{type}</th>
-              <th>{target}</th>
-              <th></th>
-              <th></th>
-              <th></th>
-              <th></th>
-              <th></th>
-            </tr>
+            {!opts.hideTypeRow && (
+              <tr className="excelTypeRow">
+                <th>{type}</th>
+                <th>{target}</th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th></th>
+              </tr>
+            )}
 
             <tr>
               <th colSpan="7" className="excelStatusTitle">
@@ -13809,9 +13816,19 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
           },
           { label: "BTK Approved by BTK", key: "btk_approved" },
           { label: "BTK Certificate Date", key: "btk_certificate_date" },
-        ])}
+        ], { hideTypeRow: true })}
 
-        {makeTable(`${regionTitle} POWER PLAN TOTAL`, "DSS", "", [
+        {makeTable(`${regionTitle} POWER PLAN TOTAL (Standalone - Abone)`, "STANDALONE_ABONE", "", [
+          {
+            label: "ENH Proje Plan Start Date",
+            key: "enh_plan_start",
+            dateField: "enh_plan_start_date",
+          },
+          {
+            label: "ENH Proje Actual End Date",
+            key: "enh_actual_end",
+            dateField: "enh_actual_end_date",
+          },
           {
             label: "POWER Project Plan Start Date",
             key: "power_plan_start",
@@ -13823,21 +13840,11 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
             dateField: "power_actual_end_date",
           },
           {
-            label: "ENH Plan Start Date",
-            key: "enh_plan_start",
-            dateField: "enh_plan_start_date",
-          },
-          {
-            label: "ENH Actual End Date",
-            key: "enh_actual_end",
-            dateField: "enh_actual_end_date",
-          },
-          {
             label: "Abonelik Belgesi Actual End Date",
             key: "abonelik_end",
             dateField: "abonelik_actual_end_date",
           },
-        ])}
+        ], { hideTypeRow: true })}
       </div>
     </div>
   );
@@ -13908,7 +13915,14 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     abonelik_actual_end_date: existingRow.abonelik_actual_end_date || "",
     tt_horizon_actual_end_date: existingRow.tt_horizon_actual_end_date || "",
     pac_actual_end_date: existingRow.pac_actual_end_date || "",
+
+    enh_proje_subcon: existingRow.enh_proje_subcon || "",
+    enh_proje_hazir: existingRow.enh_proje_hazir || "",
+    enh_proje_not: existingRow.enh_proje_not || "",
+    enh_proje_belge_url: existingRow.enh_proje_belge_url || "",
   });
+  const [enhProjeBelgeFile, setEnhProjeBelgeFile] = useState(null);
+  const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -13931,8 +13945,26 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
       });
 
       console.log("ROLLOUT SAVE RESULT:", result);
-      alert("Kayıt başarıyla kaydedildi");
 
+      // ENH Proje belgesi upload
+      if (enhProjeBelgeFile && result.row?.id) {
+        try {
+          setEnhProjeSaving(true);
+          const ext = enhProjeBelgeFile.name.split(".").pop();
+          const signRes = await fetch(`${API_BASE}/rollout/enh-proje/signed-upload-url?rolloutId=${result.row.id}&ext=${ext}`);
+          if (signRes.ok) {
+            const { signedUrl, publicUrl } = await signRes.json();
+            await fetch(signedUrl, { method:"PUT", body: enhProjeBelgeFile, headers:{ "Content-Type": enhProjeBelgeFile.type, "x-upsert":"true" } });
+            await fetchJson(`${API_BASE}/rollout/${result.row.id}/enh-proje-belge-url`, {
+              method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ url: publicUrl })
+            });
+          }
+        } catch(e) { alert("Belge yükleme hatası: " + e.message); }
+        finally { setEnhProjeSaving(false); setEnhProjeBelgeFile(null); }
+      }
+
+      alert("Kayıt başarıyla kaydedildi");
       onSaved();
     } catch (err) {
       console.error("ROLLOUT SAVE ERROR:", err);
@@ -14076,6 +14108,43 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             "date",
           )}
           {input("PAC Actual End Date", "pac_actual_end_date", "date")}
+        </div>
+
+        {/* ===== ENH PROJE (Standalone - Abone) ===== */}
+        <div style={{ margin:"16px 0 0", padding:"16px", background:"#f0fdf4", borderRadius:"12px", border:"1px solid #bbf7d0" }}>
+          <div style={{ fontWeight:700, fontSize:"14px", color:"#166534", marginBottom:"12px" }}>
+            🔌 ENH Proje Bilgileri (Standalone / Abone)
+          </div>
+          <div className="modalGrid">
+            {input("ENH Proje Subcon", "enh_proje_subcon")}
+            {input("ENH Proje Hazır Tarihi", "enh_proje_hazir", "date")}
+            {input("ENH Proje Not", "enh_proje_not")}
+          </div>
+          {/* Belge eki */}
+          <div style={{ marginTop:"12px" }}>
+            <div style={{ fontSize:"13px", fontWeight:600, color:"#374151", marginBottom:"6px" }}>📎 ENH Proje Belgesi</div>
+            {form.enh_proje_belge_url ? (
+              <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                <a href={form.enh_proje_belge_url} target="_blank" rel="noreferrer"
+                  style={{ background:"#dbeafe", color:"#1d4ed8", padding:"6px 12px", borderRadius:"8px", fontSize:"13px", textDecoration:"none" }}>
+                  📄 Belgeyi Görüntüle
+                </a>
+                <label style={{ background:"#e0e7ff", color:"#4338ca", padding:"6px 12px", borderRadius:"8px", fontSize:"13px", cursor:"pointer" }}>
+                  🔄 Değiştir
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx" style={{ display:"none" }}
+                    onChange={e=>setEnhProjeBelgeFile(e.target.files[0]||null)} />
+                </label>
+                {enhProjeBelgeFile && <span style={{ fontSize:"12px", color:"#059669" }}>📎 {enhProjeBelgeFile.name}</span>}
+              </div>
+            ) : (
+              <label style={{ display:"inline-flex", alignItems:"center", gap:"6px", background:"#f3f4f6", border:"1px dashed #9ca3af", borderRadius:"8px", padding:"8px 14px", cursor:"pointer", fontSize:"13px" }}>
+                📎 Belge Yükle (PDF, JPG, PNG, DWG, Excel, Word)
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx" style={{ display:"none" }}
+                  onChange={e=>setEnhProjeBelgeFile(e.target.files[0]||null)} />
+                {enhProjeBelgeFile && <span style={{ color:"#059669" }}>{enhProjeBelgeFile.name}</span>}
+              </label>
+            )}
+          </div>
         </div>
 
         <div className="modalActions">
