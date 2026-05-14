@@ -7354,7 +7354,7 @@ function HrDashboard({ onBack, currentUser }) {
     // Adım 3: Public URL'yi DB'ye kaydet
     try {
       const patchRes = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgId}/belge-url`, {
-        method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ url: publicUrl })
+        method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ url: publicUrl })
       });
       if (!patchRes.ok) throw new Error(patchRes.status);
     } catch(e) { throw new Error("Adım3 (URL kaydet): " + e.message); }

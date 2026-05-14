@@ -221,7 +221,7 @@ app.use((req, res, next) => {
 
   res.header("Access-Control-Allow-Credentials", "true");
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
 
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
@@ -500,7 +500,7 @@ app.use((req, res, next) => {
   res.header("Vary", "Origin");
   res.header("Access-Control-Allow-Credentials", "true");
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
 
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
@@ -8658,6 +8658,13 @@ app.get("/hr/isg/signed-upload-url", async (req, res) => {
 });
 
 app.patch("/hr/personel/:id/isg/:isgId/belge-url", async (req, res) => {
+  try {
+    const { url } = req.body;
+    await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/hr/personel/:id/isg/:isgId/belge-url", async (req, res) => {
   try {
     const { url } = req.body;
     await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
