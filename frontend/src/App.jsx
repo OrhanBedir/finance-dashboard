@@ -7195,6 +7195,7 @@ function HrDashboard({ onBack, currentUser }) {
     elden_verilen:"", iban:"", banka_adi:"", banka_hesap_no:"", aktif: true,
   });
   const [isgForm, setIsgForm] = useState({ egitim_turu:"", egitim_tarihi:"", gecerlilik_yil:2 });
+  const [isgBelgeDosya, setIsgBelgeDosya] = useState(null);
   const [notModal, setNotModal] = useState(null); // { puantajRow, personelAd, tarih }
   const [maasOdeModal, setMaasOdeModal] = useState(null); // personel object
   const [maasOdeHak, setMaasOdeHak] = useState(0); // bu ay gerçek hakediş (pazar primiyle)
@@ -7310,13 +7311,24 @@ function HrDashboard({ onBack, currentUser }) {
   const handleSaveIsg = async (e) => {
     e.preventDefault();
     const tur = isgTurleri.find(t=>t.tur===isgForm.egitim_turu);
-    await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg`, {
+    const res = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg`, {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({...isgForm, gecerlilik_yil: tur?.gecerlilik_yil || isgForm.gecerlilik_yil})
     });
+    const saved = await res.json();
+    if (isgBelgeDosya && saved.id) {
+      const fd = new FormData(); fd.append("dosya", isgBelgeDosya);
+      await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${saved.id}/belge`, { method:"POST", body: fd });
+    }
     setShowIsgForm(false);
+    setIsgBelgeDosya(null);
     loadPersonelDetail(selectedPersonel);
     loadIsgUyarilar();
+  };
+  const handleIsgBelgeUpload = async (personelId, isgId, file) => {
+    const fd = new FormData(); fd.append("dosya", file);
+    await fetch(`${API_BASE}/hr/personel/${personelId}/isg/${isgId}/belge`, { method:"POST", body: fd });
+    loadPersonelDetail(selectedPersonel);
   };
   const handleDeleteIsg = async (isgId) => {
     if (!window.confirm("Silinsin mi?")) return;
@@ -8184,9 +8196,15 @@ function HrDashboard({ onBack, currentUser }) {
                         <label style={labelSt}>Eğitim Tarihi</label>
                         <input type="date" value={isgForm.egitim_tarihi} onChange={e=>setIsgForm(f=>({...f,egitim_tarihi:e.target.value}))} style={inputSt} required />
                       </div>
+                      <div style={{ marginBottom:"10px" }}>
+                        <label style={labelSt}>Eğitim Belgesi (opsiyonel)</label>
+                        <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e=>setIsgBelgeDosya(e.target.files[0]||null)}
+                          style={{ width:"100%", fontSize:"13px", padding:"6px", border:"1px dashed #d1d5db", borderRadius:"8px", background:"#fff", cursor:"pointer" }} />
+                        {isgBelgeDosya && <div style={{ fontSize:"11px", color:"#059669", marginTop:"4px" }}>📎 {isgBelgeDosya.name}</div>}
+                      </div>
                       <div style={{ display:"flex", gap:"8px" }}>
                         <button type="submit" className="saveButton" style={{ flex:1 }}>Kaydet</button>
-                        <button type="button" className="tab" onClick={()=>setShowIsgForm(false)}>İptal</button>
+                        <button type="button" className="tab" onClick={()=>{setShowIsgForm(false);setIsgBelgeDosya(null);}}>İptal</button>
                       </div>
                     </form>
                   )}
@@ -8195,16 +8213,28 @@ function HrDashboard({ onBack, currentUser }) {
                     : personelIsg.map(eg => {
                         const suresi = new Date(eg.bitis_tarihi) < new Date() ? "DOLDU" : new Date(eg.bitis_tarihi) < new Date(Date.now()+30*864e5) ? "YAKLASAN" : "OK";
                         return (
-                          <div key={eg.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", borderRadius:"8px", marginBottom:"6px", background: suresi==="DOLDU"?"#fef2f2": suresi==="YAKLASAN"?"#fffbeb":"#f0fdf4" }}>
-                            <div>
-                              <div style={{ fontWeight:600, fontSize:"13px" }}>{eg.egitim_turu}</div>
-                              <div style={{ fontSize:"11px", color:"#9ca3af" }}>
-                                {eg.egitim_tarihi?.split("T")[0]} → {eg.bitis_tarihi?.split("T")[0]}
-                                {suresi==="DOLDU" && <span style={{ color:"#dc2626", fontWeight:700 }}> ⚠️ SÜRESİ DOLDU</span>}
-                                {suresi==="YAKLASAN" && <span style={{ color:"#d97706", fontWeight:700 }}> ⚠️ YAKLAŞIYOR</span>}
+                          <div key={eg.id} style={{ borderRadius:"8px", marginBottom:"8px", background: suresi==="DOLDU"?"#fef2f2": suresi==="YAKLASAN"?"#fffbeb":"#f0fdf4", overflow:"hidden" }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px" }}>
+                              <div>
+                                <div style={{ fontWeight:600, fontSize:"13px" }}>{eg.egitim_turu}</div>
+                                <div style={{ fontSize:"11px", color:"#9ca3af" }}>
+                                  {eg.egitim_tarihi?.split("T")[0]} → {eg.bitis_tarihi?.split("T")[0]}
+                                  {suresi==="DOLDU" && <span style={{ color:"#dc2626", fontWeight:700 }}> ⚠️ SÜRESİ DOLDU</span>}
+                                  {suresi==="YAKLASAN" && <span style={{ color:"#d97706", fontWeight:700 }}> ⚠️ YAKLAŞIYOR</span>}
+                                </div>
+                              </div>
+                              <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
+                                {eg.belge_yolu
+                                  ? <a href={eg.belge_yolu} target="_blank" rel="noreferrer" style={{ background:"#dbeafe", color:"#1d4ed8", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", textDecoration:"none", whiteSpace:"nowrap" }}>📎 Belge</a>
+                                  : <label style={{ background:"#e0e7ff", color:"#4338ca", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer", whiteSpace:"nowrap" }}>
+                                      📎 Yükle
+                                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }}
+                                        onChange={e=>{ const f=e.target.files[0]; if(f) handleIsgBelgeUpload(selectedPersonel.id, eg.id, f); }} />
+                                    </label>
+                                }
+                                <button onClick={()=>handleDeleteIsg(eg.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
                               </div>
                             </div>
-                            <button onClick={()=>handleDeleteIsg(eg.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
                           </div>
                         );
                       })
