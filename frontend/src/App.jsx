@@ -6793,14 +6793,16 @@ function PuantajPanel({ currentUser, onBack }) {
   ];
 
   const DURUMLAR = [
-    { key:"CALISDI",  label:"✅" },
-    { key:"GELMEDI",  label:"❌" },
-    { key:"IZIN",     label:"🏖" },
-    { key:"RAPOR",    label:"☪️" },
-    { key:"TATIL",    label:"⭕" },
-    { key:"DINLENME", label:"💤" },
+    { key:"CALISDI",    label:"✅", name:"ÇALIŞTI" },
+    { key:"GELMEDI",    label:"❌", name:"GELMEDİ" },
+    { key:"IZIN",       label:"🏖", name:"İZİN" },
+    { key:"RAPOR",      label:"☪️", name:"RAPOR" },
+    { key:"TATIL",      label:"⭕", name:"TATİL" },
+    { key:"DINLENME",   label:"💤", name:"DİNLENME" },
+    { key:"RESMI_TATIL",label:"🎌", name:"RESMİ TATİL" },
   ];
-  const DURUM_COLOR = { CALISDI:"#dcfce7", IZIN:"#dbeafe", RAPOR:"#fef3c7", TATIL:"transparent", GELMEDI:"#fee2e2", DINLENME:"#f3e8ff" };
+  // TATIL kasıtlı olarak yok — transparent döndürmesi yerine defaultCellBg'ye düşsün (resmi tatil/pazar rengi görünsün)
+  const DURUM_COLOR = { CALISDI:"#dcfce7", IZIN:"#dbeafe", RAPOR:"#fef3c7", GELMEDI:"#fee2e2", DINLENME:"#f3e8ff", RESMI_TATIL:"#dbeafe" };
 
   const [puantajOzet, setPuantajOzet] = useState([]);
 
@@ -6895,7 +6897,7 @@ function PuantajPanel({ currentUser, onBack }) {
           {personelList.map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
         </select>
 
-        <span style={{ fontSize:"12px", color:"#9ca3af" }}>Tıkla: ✅→❌→🏖→☪️→⭕→💤</span>
+        <span style={{ fontSize:"12px", color:"#9ca3af" }}>Tıkla: ✅→❌→🏖→☪️→⭕→💤→🎌</span>
 
         <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`}
           style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none", marginLeft:"auto" }}>
@@ -6964,9 +6966,8 @@ function PuantajPanel({ currentUser, onBack }) {
 
       {/* Legend */}
       <div style={{ display:"flex", gap:"10px", marginBottom:"14px", flexWrap:"wrap", alignItems:"center" }}>
-        {DURUMLAR.map(d=><span key={d.key} style={{ fontSize:"13px" }}>{d.label} {d.key}</span>)}
+        {DURUMLAR.map(d=><span key={d.key} style={{ fontSize:"13px" }}>{d.label} {d.name||d.key}</span>)}
         <span style={{ fontSize:"13px", color:"#7c3aed" }}>🟣 Pazar</span>
-        <span style={{ fontSize:"13px", color:"#1d4ed8" }}>🎌 Resmi Tatil</span>
       </div>
 
       <div style={{ overflowX:"auto", borderRadius:"14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
@@ -7010,7 +7011,7 @@ function PuantajPanel({ currentUser, onBack }) {
                     const defaultCellBg = dayOfWeek===0 ? "#ede9fe" : isResmiTatilCell ? "#dbeafe" : dayOfWeek===6 ? "#f8fafc" : "transparent";
                     const cellBg = DURUM_COLOR[durum] || defaultCellBg;
                     const hasNot = !!(row?.not_aciklama || row?.belge_yolu);
-                    const showNot = durum!=="CALISDI" && durum!=="TATIL" && row?.id;
+                    const showNot = durum!=="CALISDI" && durum!=="TATIL" && durum!=="RESMI_TATIL" && row?.id;
                     const cellEditable = canEditAny || tarih === todayStr;
                     return (
                       <td key={g} style={{ padding:"0", background:cellBg, border:"1px solid #f0f0f0", minWidth:"36px", width:"36px", userSelect:"none" }}>
@@ -7289,12 +7290,13 @@ function HrDashboard({ onBack, currentUser }) {
   ];
 
   const DURUMLAR = [
-    { key:"CALISDI",  label:"✅", color:"#22c55e" },
-    { key:"GELMEDI",  label:"❌", color:"#ef4444" },
-    { key:"IZIN",     label:"🏖", color:"#3b82f6" },
-    { key:"RAPOR",    label:"☪️", color:"#f59e0b" },
-    { key:"TATIL",    label:"⭕", color:"#9ca3af" },
-    { key:"DINLENME", label:"💤", color:"#7c3aed" },
+    { key:"CALISDI",    label:"✅", color:"#22c55e", name:"ÇALIŞTI" },
+    { key:"GELMEDI",    label:"❌", color:"#ef4444", name:"GELMEDİ" },
+    { key:"IZIN",       label:"🏖", color:"#3b82f6", name:"İZİN" },
+    { key:"RAPOR",      label:"☪️", color:"#f59e0b", name:"RAPOR" },
+    { key:"TATIL",      label:"⭕", color:"#9ca3af", name:"TATİL" },
+    { key:"DINLENME",   label:"💤", color:"#7c3aed", name:"DİNLENME" },
+    { key:"RESMI_TATIL",label:"🎌", color:"#1d4ed8", name:"RESMİ TATİL" },
   ];
   const getPuantaj = (personelId, gun) => {
     const tarih = `${puantajAy}-${String(gun).padStart(2,"0")}`;
@@ -7641,7 +7643,7 @@ function HrDashboard({ onBack, currentUser }) {
                 <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
               ))}
             </select>
-            <div style={{ fontSize:"13px", color:"#6b7280" }}>Hücreye tıkla: ✅→❌→🏖→☪️→⭕→💤</div>
+            <div style={{ fontSize:"13px", color:"#6b7280" }}>Hücreye tıkla: ✅→❌→🏖→☪️→⭕→💤→🎌</div>
             <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`}
               style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>
               📥 Excel İndir
@@ -7650,9 +7652,8 @@ function HrDashboard({ onBack, currentUser }) {
 
           {/* Legend */}
           <div style={{ display:"flex", gap:"10px", marginBottom:"16px", flexWrap:"wrap" }}>
-            {DURUMLAR.map(d=><span key={d.key} style={{ fontSize:"13px" }}>{d.label} {d.key}</span>)}
+            {DURUMLAR.map(d=><span key={d.key} style={{ fontSize:"13px" }}>{d.label} {d.name||d.key}</span>)}
             <span style={{ fontSize:"13px", color:"#7c3aed" }}>🟣 Pazar</span>
-            <span style={{ fontSize:"13px", color:"#1d4ed8" }}>🎌 Resmi Tatil</span>
           </div>
 
           <div style={{ overflowX:"auto", borderRadius:"14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
@@ -7702,10 +7703,10 @@ function HrDashboard({ onBack, currentUser }) {
                         const dayW = new Date(Number(yilStr), Number(ayStr)-1, g).getDay();
                         const isResmiTatilCell2 = TR_RESMI_TATIL_HR.includes(tarih);
                         const defaultBg2 = dayW===0 ? "#ede9fe" : isResmiTatilCell2 ? "#dbeafe" : dayW===6 ? "#f8fafc" : "transparent";
-                        const DURUM_BG = { CALISDI:"#dcfce7", GELMEDI:"#fee2e2", IZIN:"#dbeafe", RAPOR:"#fef3c7", DINLENME:"#f3e8ff" };
+                        const DURUM_BG = { CALISDI:"#dcfce7", GELMEDI:"#fee2e2", IZIN:"#dbeafe", RAPOR:"#fef3c7", DINLENME:"#f3e8ff", RESMI_TATIL:"#dbeafe" };
                         const cellBg = DURUM_BG[durum] || defaultBg2;
                         const hasNot = !!(row?.not_aciklama || row?.belge_yolu);
-                        const showNot2 = durum !== "CALISDI" && durum !== "TATIL" && row?.id;
+                        const showNot2 = durum !== "CALISDI" && durum !== "TATIL" && durum !== "RESMI_TATIL" && row?.id;
                         return (
                           <td key={g} style={{ padding:"0", background: cellBg, border:"1px solid #f0f0f0", minWidth:"36px", width:"36px", userSelect:"none" }}>
                             <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
