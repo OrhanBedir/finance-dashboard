@@ -6778,7 +6778,8 @@ function PuantajPanel({ currentUser, onBack }) {
 
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
-  const canEditAny = isPM || isDirektor;
+  const isNurcan = currentUser?.email === "nurcan.kus@simsektel.com";
+  const canEditAny = isPM || isDirektor || isNurcan;
   const todayStr = new Date().toISOString().split("T")[0];
 
   const [yilStr, ayStr] = puantajAy.split("-");
