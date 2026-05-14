@@ -1147,7 +1147,7 @@ function RolloutDashboard() {
               <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>RF Start</th>
               <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>RF Fin</th>
               <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>QC OK</th>
-              <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>OnAir</th>
+              <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>Accept</th>
 
               <th>Bölge</th>
               <th>Site Type</th>
@@ -1219,7 +1219,7 @@ function RolloutDashboard() {
                 const ms_rfStart = !!row.installation_actual_start_date;
                 const ms_rfFin   = !!row.installation_actual_end_date;
                 const ms_qcOk    = String(row.qc_durum||"").toUpperCase()==="OK";
-                const ms_onair   = !!row.onair_date;
+                const ms_accept  = !!row.pac_actual_end_date;
                 const ms = (v) => v ? "✅" : "⏳";
                 const msTd = (v) => (
                   <td style={{ textAlign:"center", fontSize:"14px", background: v?"#f0fdf4":"#fafafa" }}>{ms(v)}</td>
@@ -1263,7 +1263,7 @@ function RolloutDashboard() {
                   {msTd(ms_rfStart)}
                   {msTd(ms_rfFin)}
                   {msTd(ms_qcOk)}
-                  {msTd(ms_onair)}
+                  {msTd(ms_accept)}
                   <td>{row.bolge}</td>
                   <td>{row.site_type}</td>
                   <td>{row.site_physical_type}</td>
@@ -13843,7 +13843,7 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
           {
             label: "Acceptance",
             key: "acceptance",
-            dateField: "onair_date",
+            dateField: "pac_actual_end_date",
           },
           { label: "PO Status(Closed)", key: "po_closed" },
         ])}
@@ -13875,7 +13875,7 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
             {
               label: "Acceptance",
               key: "acceptance",
-              dateField: "onair_date",
+              dateField: "pac_actual_end_date",
             },
             { label: "PO Status(Closed)", key: "po_closed" },
           ],
@@ -13904,7 +13904,7 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
           {
             label: "Acceptance",
             key: "acceptance",
-            dateField: "onair_date",
+            dateField: "pac_actual_end_date",
           },
           { label: "PO Status(Closed)", key: "po_closed" },
         ])}
@@ -13932,7 +13932,7 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
           {
             label: "Acceptance",
             key: "acceptance",
-            dateField: "onair_date",
+            dateField: "pac_actual_end_date",
           },
           { label: "PO Status(Closed)", key: "po_closed" },
         ])}
