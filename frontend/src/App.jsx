@@ -7895,7 +7895,7 @@ function HrDashboard({ onBack, currentUser }) {
                           ["Toplam Devlet Ödemesi (vergi+SGK)", v.toplam_devlet, "#7c3aed"],
                           ["İşverene Toplam Maliyet (bankadan)", v.toplam_isveren_maliyet, "#1d4ed8"],
                           elden > 0 && ["Elden Ödeme (vergisiz)", elden, "#6b7280"],
-                          ["HAZİNEDEN ÇIKACAK TOPLAM", v.toplam_isveren_maliyet + elden, "#166534"],
+                          ["TOPLAM NAKİT ÇIKIŞI", v.toplam_isveren_maliyet + elden, "#166534"],
                         ].filter(Boolean).map(([l,a,c])=>(
                           <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", fontWeight:700, color:c }}>
                             <span>{l}</span><span>{TL(a)}</span>
@@ -7952,7 +7952,7 @@ function HrDashboard({ onBack, currentUser }) {
                             <span>Devlet ödemesi: <b style={{color:"#a78bfa"}}>{TL(v.toplam_devlet)}</b></span>
                             <span>İşveren maliyeti: <b style={{color:"#60a5fa"}}>{TL(v.toplam_isveren_maliyet)}</b></span>
                             {elden>0 && <span>Elden (vergisiz): <b style={{color:"#9ca3af"}}>{TL(elden)}</b></span>}
-                            <span>HAZİNEDEN TOPLAM: <b style={{color:"#86efac"}}>{TL(v.toplam_isveren_maliyet+elden)}</b></span>
+                            <span>NAKİT ÇIKIŞI: <b style={{color:"#86efac"}}>{TL(v.toplam_isveren_maliyet+elden)}</b></span>
                           </div>
                         )}
                       </div>
@@ -7978,7 +7978,7 @@ function HrDashboard({ onBack, currentUser }) {
                           ))}
                         </div>
                         <div style={{ marginTop:"10px", background:"rgba(255,255,255,0.12)", borderRadius:"8px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                          <span style={{ fontWeight:700, fontSize:"13px" }}>HAZİNEDEN ÇIKAN TOPLAM</span>
+                          <span style={{ fontWeight:700, fontSize:"13px" }}>TOPLAM NAKİT ÇIKIŞI</span>
                           <span style={{ fontWeight:800, fontSize:"20px", color:"#86efac" }}>{TL(kumToplamHazine)}</span>
                         </div>
                       </div>
