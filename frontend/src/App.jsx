@@ -14400,7 +14400,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         <div className="modalGrid">
           {input("Site Code", "site_code")}
           {select("Site Type", "site_type", ["5G", "DSS", "LTE", "STANDALONE"])}
-          {select("Site Fiziksel Tip", "site_physical_type", ["Rooftop","Kule","Gizleme","VF Katılım","TT Katılım"])}
+          {select("Site Fiziksel Tip", "site_physical_type", ["Rooftop","Kule","Gizleme","VF Katılım","TT Katılım","TC Katılım"])}
           {input("Project Code", "project_code")}
           {input("Malzeme Status", "malzeme_status")}
           {input("İl", "il")}
