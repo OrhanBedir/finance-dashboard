@@ -247,7 +247,8 @@ app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
 });
 app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
   try {
-    const { name, email, password, role = "user" } = req.body;
+    const { name, password, role = "user" } = req.body;
+    const email = String(req.body.email || "").trim().toLowerCase();
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -258,12 +259,26 @@ app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
 
     const hashed = await bcrypt.hash(password, 10);
 
-    const result = await pool.query(
-      `INSERT INTO users (name, email, password_hash, role, is_active)
-       VALUES ($1, $2, $3, $4, true)
-       RETURNING id, name, email, role, is_active`,
-      [name, email, hashed, role],
+    // Aynı email varsa şifre + aktif güncelle, yoksa yeni kayıt ekle
+    const existing = await pool.query(
+      `SELECT id FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1`,
+      [email]
     );
+    let result;
+    if (existing.rows.length > 0) {
+      result = await pool.query(
+        `UPDATE users SET name=$1, password_hash=$2, role=$3, is_active=true
+         WHERE id=$4 RETURNING id, name, email, role, is_active`,
+        [name, hashed, role, existing.rows[0].id]
+      );
+    } else {
+      result = await pool.query(
+        `INSERT INTO users (name, email, password_hash, role, is_active)
+         VALUES ($1, $2, $3, $4, true)
+         RETURNING id, name, email, role, is_active`,
+        [name, email, hashed, role],
+      );
+    }
 
     res.json({ ok: true, user: result.rows[0] });
   } catch (err) {
@@ -524,7 +539,8 @@ app.post("/auth/login", async (req, res) => {
       `
       SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate
       FROM users
-      WHERE email = $1
+      WHERE LOWER(TRIM(email)) = $1
+      ORDER BY id DESC
       LIMIT 1
       `,
       [String(email).trim().toLowerCase()],
