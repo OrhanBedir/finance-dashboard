@@ -8724,38 +8724,52 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [listLoading, setListLoading] = useState(false);
 
   const load = async () => {
-    const r = await fetch(`${API_BASE}/hr/masraf-form`);
-    const data = await r.json();
-    setList(data);
-    if (onPendingCount) {
-      let cnt = 0;
-      if (isPM)       cnt = data.filter(f => f.durum === "PM_BEKLE").length;
-      if (isDirektor) cnt = data.filter(f => f.durum === "DIREKTOR_BEKLE").length;
-      if (isMuhasebe) cnt = data.filter(f => f.durum === "TAMAMLANDI").length;
-      onPendingCount(cnt);
+    try {
+      const r = await fetch(`${API_BASE}/hr/masraf-form`);
+      const data = await r.json();
+      const safeData = Array.isArray(data) ? data : [];
+      setList(safeData);
+      if (onPendingCount) {
+        let cnt = 0;
+        if (isPM)       cnt = safeData.filter(f => f.durum === "PM_BEKLE").length;
+        if (isDirektor) cnt = safeData.filter(f => f.durum === "DIREKTOR_BEKLE").length;
+        if (isMuhasebe) cnt = safeData.filter(f => f.durum === "TAMAMLANDI").length;
+        onPendingCount(cnt);
+      }
+    } catch (err) {
+      console.error("Masraf form listesi yüklenemedi:", err);
     }
   };
 
   const loadDetail = async (id) => {
-    const r = await fetch(`${API_BASE}/hr/masraf-form/${id}`);
-    const data = await r.json();
-    setViewForm(data);
+    try {
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${id}`);
+      const data = await r.json();
+      setViewForm(data);
+    } catch (err) {
+      console.error("Form detayı yüklenemedi:", err);
+    }
   };
 
   const loadPersonel = async () => {
-    const r = await fetch(`${API_BASE}/hr/personel`);
-    const data = await r.json();
-    setPersonelList(data);
-    if (currentUser?.email) {
-      const match = data.find(p => (p.email || "").toLowerCase() === currentUser.email.toLowerCase());
-      if (match) {
-        setNfPersonelId(String(match.id));
-      } else if (currentUser?.name) {
-        const nameMatch = data.find(p =>
-          (p.ad_soyad || "").toLowerCase() === currentUser.name.toLowerCase()
-        );
-        if (nameMatch) setNfPersonelId(String(nameMatch.id));
+    try {
+      const r = await fetch(`${API_BASE}/hr/personel`);
+      const data = await r.json();
+      const safeData = Array.isArray(data) ? data : [];
+      setPersonelList(safeData);
+      if (currentUser?.email) {
+        const match = safeData.find(p => (p.email || "").toLowerCase() === currentUser.email.toLowerCase());
+        if (match) {
+          setNfPersonelId(String(match.id));
+        } else if (currentUser?.name) {
+          const nameMatch = safeData.find(p =>
+            (p.ad_soyad || "").toLowerCase() === currentUser.name.toLowerCase()
+          );
+          if (nameMatch) setNfPersonelId(String(nameMatch.id));
+        }
       }
+    } catch (err) {
+      console.error("Personel listesi yüklenemedi:", err);
     }
   };
 
@@ -9376,10 +9390,10 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
         {/* Alt butonlar */}
         {!isLocked && (
           <div style={{ display:"flex", gap:"12px" }}>
-            <button onClick={async()=>{
-                await load();
+            <button onClick={()=>{
                 setActiveForm(null);
                 setKalemler([]);
+                load(); // listeyi arka planda yenile
               }}
               style={{ padding:"13px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, fontSize:"14px", cursor:"pointer" }}>
               💾 Kaydet (Taslak)
