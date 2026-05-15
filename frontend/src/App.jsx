@@ -14065,12 +14065,40 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
   );
 }
 function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
-  const existingRow =
-    rows.find(
+  const existingRow = (() => {
+    const raw = rows.find(
       (r) =>
         String(r.site_code || "").toUpperCase() ===
         String(siteCode || "").toUpperCase(),
     ) || {};
+    // HTML <input type="date"> YYYY-MM-DD ister; DB'den ISO datetime gelebilir → normalize et
+    const DATE_FIELDS = [
+      "plan_start_date","inst_plan_start_date",
+      "installation_actual_start_date","installation_actual_end_date","onair_date",
+      "los_plan_date","los_actual_end_date",
+      "tss_plan_start_date","tss_actual_end_date",
+      "tssr_plan_start_date","tssr_actual_end_date",
+      "btk_plan_start_date","btk_actual_end_date","btk_approved",
+      "emr_plan_start_date","emr_actual_end_date",
+      "trs_plan_start_date","trs_actual_end_date",
+      "enh_plan_start_date","enh_actual_end_date","enh_proje_hazir",
+      "power_plan_start_date","power_actual_end_date",
+      "abonelik_actual_end_date","tt_horizon_actual_end_date",
+      "pac_actual_end_date","tamamlanma_tarihi",
+    ];
+    const norm = { ...raw };
+    for (const f of DATE_FIELDS) {
+      const v = norm[f];
+      if (v && v !== "__NA__") {
+        const s = String(v);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+          const d = new Date(s);
+          if (!isNaN(d.getTime())) norm[f] = d.toISOString().split("T")[0];
+        }
+      }
+    }
+    return norm;
+  })();
 
   const [form, setForm] = useState({
     site_code: siteCode || existingRow.site_code || "",
