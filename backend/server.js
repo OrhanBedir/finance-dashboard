@@ -2106,6 +2106,37 @@ app.get("/debug/counts", async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+/* ================== FIX SITE TYPES ================== */
+app.get("/rollout/fix-site-types", async (req, res) => {
+  try {
+    // Tüm "DİĞER" veya boş site_type kayıtlarını site_code'dan yeniden türet
+    const rows = await pool.query(
+      `SELECT id, site_code FROM rollout_progress WHERE UPPER(COALESCE(site_type,'')) IN ('DİĞER','DIGER','OTHER','')`
+    );
+    let fixed = 0, skipped = 0;
+    for (const row of rows.rows) {
+      const code = String(row.site_code || "").toUpperCase().trim();
+      let newType = "";
+      if (code.includes("_DSS_") || code.includes("_GPS_")) newType = "DSS";
+      else if (code.includes("_L1800_") || code.includes("_L2600_") || code.includes("_L800_") ||
+               code.includes("_LC1800_") || code.includes("_L2100_") || code.includes("_L900_") ||
+               code.includes("_LTE_") || code.includes("_W2100_") || code.includes("_W900_") ||
+               code.includes("_W1900_")) newType = "LTE";
+      else if (code.includes("_NR3500_") || code.includes("_NR700_") || code.includes("_TRP_") ||
+               code.includes("5GEXP") || code.includes("5GREADINESS")) newType = "5G";
+      else if (code.includes("_NS_")) newType = "STANDALONE";
+
+      if (newType) {
+        await pool.query("UPDATE rollout_progress SET site_type=$1 WHERE id=$2", [newType, row.id]);
+        fixed++;
+      } else {
+        skipped++;
+      }
+    }
+    res.json({ ok: true, fixed, skipped, total: rows.rows.length });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 /* ================== INSTANT MIGRATION ================== */
 app.get("/migrate", async (req, res) => {
   const migrations = [
@@ -5141,10 +5172,10 @@ function getSiteTypeFromSiteCode(siteCode) {
     .toUpperCase()
     .trim();
 
-  // DSS
-  if (code.includes("_DSS_")) return "DSS";
+  // DSS — _DSS_ veya _GPS_ (GPS Readiness = DSS)
+  if (code.includes("_DSS_") || code.includes("_GPS_")) return "DSS";
 
-  // LTE
+  // LTE — standart pattern'ler + _W2100_ / _W900_ / _W1900_
   if (
     code.includes("_L1800_") ||
     code.includes("_L2600_") ||
@@ -5152,17 +5183,21 @@ function getSiteTypeFromSiteCode(siteCode) {
     code.includes("_LC1800_") ||
     code.includes("_L2100_") ||
     code.includes("_L900_") ||
-    code.includes("_LTE_")
+    code.includes("_LTE_") ||
+    code.includes("_W2100_") ||
+    code.includes("_W900_") ||
+    code.includes("_W1900_")
   ) {
     return "LTE";
   }
 
-  // 5G
+  // 5G — standart pattern'ler + _5GREADINESS_
   if (
     code.includes("_NR3500_") ||
     code.includes("_NR700_") ||
     code.includes("_TRP_") ||
-    code.includes("5GEXP")
+    code.includes("5GEXP") ||
+    code.includes("5GREADINESS")
   ) {
     return "5G";
   }

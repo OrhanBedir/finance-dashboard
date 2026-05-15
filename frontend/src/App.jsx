@@ -981,8 +981,9 @@ function RolloutDashboard() {
   }, [regionFilter]);
 
   useEffect(() => {
-    // DB migration: eksik kolonları otomatik ekle (Render restart beklemeden)
+    // DB migration + site type fix
     fetch(`${API_BASE}/migrate`).catch(() => {});
+    fetch(`${API_BASE}/rollout/fix-site-types`).catch(() => {});
     loadData();
   }, [regionFilter]);
 
@@ -1466,24 +1467,24 @@ function DailyEntry() {
   function detectSiteTypeFromSiteCode(siteCode) {
     const code = String(siteCode || "").toUpperCase();
 
-    if (code.includes("NR3500") || code.includes("5GEXP")) {
-      return "5G";
-    }
+    // DSS: _DSS_ veya _GPS_ (GPS Readiness = DSS)
+    if (code.includes("_DSS_") || code.includes("_GPS_")) return "DSS";
 
-    if (code.includes("NS")) {
-      return "STANDALONE";
-    }
-
+    // LTE: standart + _W2100_ / _W900_ / _W1900_
     if (
-      code.includes("L800") ||
-      code.includes("L2600") ||
-      code.includes("L2100") ||
-      code.includes("NR700") ||
-      code.includes("TRP") ||
-      code.includes("L")
-    ) {
-      return "LTE";
-    }
+      code.includes("_L800_") || code.includes("_L2600_") || code.includes("_L2100_") ||
+      code.includes("_L1800_") || code.includes("_LC1800_") || code.includes("_L900_") ||
+      code.includes("_LTE_") || code.includes("_NR700_") || code.includes("_TRP_") ||
+      code.includes("_W2100_") || code.includes("_W900_") || code.includes("_W1900_")
+    ) return "LTE";
+
+    // 5G: standart + _5GREADINESS_
+    if (
+      code.includes("_NR3500_") || code.includes("5GEXP") || code.includes("5GREADINESS")
+    ) return "5G";
+
+    // STANDALONE
+    if (code.includes("_NS_")) return "STANDALONE";
 
     return "5G";
   }
