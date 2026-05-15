@@ -12507,12 +12507,13 @@ function App() {
     }
   });
   const isAdmin = user?.role === "admin";
-  const _isBolgeMudur = user?.email === "nurcan.kus@simsektel.com" || user?.email === "serdar.altinova@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
-  // Rollout erişimi var ama Puantaj görmeyecek kullanıcılar
+  // Rollout erişimi var ama Puantaj görmeyecek kullanıcılar (rol ne olursa olsun rollout gibi davranır)
   const _PUANTAJ_HARIC = ["hatice.omus@simsektel.com"];
-  const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur;
+  const _ROLLOUT_OVERRIDE = ["hatice.omus@simsektel.com"]; // user rolünde olsa bile rollout gibi davranır
+  const _isBolgeMudur = user?.email === "nurcan.kus@simsektel.com" || user?.email === "serdar.altinova@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
+  const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur || _ROLLOUT_OVERRIDE.includes((user?.email||"").toLowerCase());
   const canSeePuantaj = isRollout && !_PUANTAJ_HARIC.includes((user?.email||"").toLowerCase());
-  const isPersonel = user?.role === "user" && !_isBolgeMudur;
+  const isPersonel = user?.role === "user" && !_isBolgeMudur && !_ROLLOUT_OVERRIDE.includes((user?.email||"").toLowerCase());
   const isSubconUser =
     String(user?.role || "").toLowerCase() === "subcon" ||
     String(user?.subcon_name || "").trim() !== "";
@@ -12567,8 +12568,10 @@ function App() {
   const [page, setPage] = useState(() => {
     const u = (() => { try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; } })();
     const bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"];
+    const rolloutOverrideEmails = ["hatice.omus@simsektel.com"];
     const isBolge = bolgeMudurEmails.includes(u?.email) || ["rollout_mudur","bolge_mudur"].includes((u?.role||"").toLowerCase());
-    if (u?.role === "user" && !isBolge) return "masraf";
+    const isRolloutOverride = rolloutOverrideEmails.includes((u?.email||"").toLowerCase());
+    if (u?.role === "user" && !isBolge && !isRolloutOverride) return "masraf";
     if (isBolge) return "region";
     return "finance";
   });
@@ -12888,8 +12891,10 @@ function App() {
       // Reset page based on the logged-in user's role so switching users works correctly
       const _lu = data.user;
       const _bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"];
+      const _rolloutOverrideEmails = ["hatice.omus@simsektel.com"];
       const _luIsBolge = _bolgeMudurEmails.includes(_lu?.email) || ["rollout_mudur","bolge_mudur"].includes((_lu?.role||"").toLowerCase());
-      if (_lu?.role === "user" && !_luIsBolge) setPage("masraf");
+      const _luIsRolloutOverride = _rolloutOverrideEmails.includes((_lu?.email||"").toLowerCase());
+      if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("masraf");
       else if (_luIsBolge) setPage("region");
       else setPage("finance");
 
