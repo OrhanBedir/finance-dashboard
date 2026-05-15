@@ -11121,36 +11121,50 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     }));
   };
 
-  const handleExportRegionExcel = async () => {
+  const handleExportRegionExcel = () => {
     try {
-      const savedToken =
-        localStorage.getItem("financeToken") || localStorage.getItem("token");
+      // Analiz değerini hesapla (tabloda görünen mantıkla aynı)
+      const getAnaliz = (row) => {
+        if (row.status === "PO_BEKLER") return "Eksik";
+        if (Number(row.done_qty || 0) === 0) return "Giriş Yok";
+        if (Number(row.done_qty || 0) === Number(row.requested_qty || 0)) return "Tamam";
+        if (Number(row.done_qty || 0) > Number(row.requested_qty || 0)) return "Fazla";
+        return "Eksik";
+      };
 
-      const response = await fetch(`${API_BASE}/export/region-analysis`, {
-        method: "GET",
-        headers: {
-          Authorization: savedToken ? `Bearer ${savedToken}` : "",
-        },
-      });
+      // sortedRows zaten filtreli — filtreyi yansıtır
+      const data = sortedRows.map((row) => ({
+        "Bölge":           getRegion(row.site_code, row.project_code),
+        "Status":          row.status || "",
+        "Analiz":          getAnaliz(row),
+        "Project":         row.project_code || "",
+        "Site Code":       row.site_code || "",
+        "Item Description": row.item_description || "",
+        "Item Code":       row.item_code || "",
+        "OnAir Date":      row.onair_date || "",
+        "Done Qty":        Number(row.done_qty || 0),
+        "Requested Qty":   Number(row.requested_qty || 0),
+        "Billed Qty":      Number(row.billed_qty || 0),
+        "Currency":        row.currency || "",
+        "Unit Price":      Number(row.unit_price || 0),
+        "Şimşek Toplam Hakedis": Number(row.total_done_amount || 0),
+        "Taşeron":         row.subcon_name || "",
+      }));
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("REGION ANALYSIS EXPORT ERROR:", errorText);
-        alert(`Excel indirilemedi:\n${errorText}`);
-        return;
-      }
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Region Analysis");
 
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      // Sütun genişlikleri
+      ws["!cols"] = [
+        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 22 },
+        { wch: 45 }, { wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 14 },
+        { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 20 }, { wch: 18 },
+      ];
 
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `region_analysis_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(url);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const searchSuffix = regionSearch.trim() ? `-${regionSearch.trim().replace(/[^a-zA-Z0-9_]/g,"_")}` : "";
+      XLSX.writeFile(wb, `region_analysis_${dateStr}${searchSuffix}.xlsx`);
     } catch (err) {
       console.error("REGION ANALYSIS EXCEL ERROR:", err);
       alert(`Excel indirilemedi:\n${err.message}`);
