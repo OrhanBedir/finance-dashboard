@@ -9376,7 +9376,11 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
         {/* Alt butonlar */}
         {!isLocked && (
           <div style={{ display:"flex", gap:"12px" }}>
-            <button onClick={()=>{ setActiveForm(null); setKalemler([]); load(); }}
+            <button onClick={async()=>{
+                await load();
+                setActiveForm(null);
+                setKalemler([]);
+              }}
               style={{ padding:"13px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, fontSize:"14px", cursor:"pointer" }}>
               💾 Kaydet (Taslak)
             </button>
@@ -9574,11 +9578,37 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
         {extraFotoModal && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:1000 }}>
             <div style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"28px 24px", width:"100%", maxWidth:"480px" }}>
-              <h3 style={{ margin:"0 0 16px" }}>📷 Ek Fiş Fotoğrafı</h3>
-              <input type="file" accept="image/*,application/pdf" capture="environment" onChange={e=>setUploadFile(e.target.files[0])} style={{ marginBottom:"16px", width:"100%" }} />
+              <h3 style={{ margin:"0 0 8px" }}>📷 Ek Fiş Fotoğrafı</h3>
+              <p style={{ fontSize:"12px", color:"#6b7280", margin:"0 0 14px" }}>Dosyadan seçin veya kameradan çekin</p>
+              <div style={{ display:"flex", gap:"8px", marginBottom:"16px" }}>
+                <label style={{ flex:1, padding:"12px", background:"#f0f9ff", color:"#1d4ed8", border:"1.5px solid #bfdbfe", borderRadius:"10px", fontWeight:600, fontSize:"14px", cursor:"pointer", textAlign:"center" }}>
+                  🗂 Dosyadan Seç
+                  <input key={`file-${extraFotoModal}`} type="file" accept="image/*,application/pdf"
+                    style={{ display:"none" }}
+                    onChange={e=>{ const f=e.target.files[0]; if(f) setUploadFile(f); e.target.value=""; }} />
+                </label>
+                <label style={{ flex:1, padding:"12px", background:"#f0fdf4", color:"#166534", border:"1.5px solid #bbf7d0", borderRadius:"10px", fontWeight:600, fontSize:"14px", cursor:"pointer", textAlign:"center" }}>
+                  📷 Kamera
+                  <input key={`cam-${extraFotoModal}`} type="file" accept="image/*" capture="environment"
+                    style={{ display:"none" }}
+                    onChange={e=>{ const f=e.target.files[0]; if(f) setUploadFile(f); e.target.value=""; }} />
+                </label>
+              </div>
+              {uploadFile && <p style={{ fontSize:"13px", color:"#374151", margin:"0 0 12px", background:"#f0fdf4", padding:"8px 12px", borderRadius:"8px" }}>✅ Seçilen: {uploadFile.name}</p>}
               <div style={{ display:"flex", gap:"8px" }}>
-                <button onClick={async()=>{ if(uploadFile){ const fd=new FormData(); fd.append("dosya",uploadFile); await fetch(`${API_BASE}/hr/masraf-belge/${extraFotoModal}`,{method:"POST",body:fd}); } setExtraFotoModal(null); setUploadFile(null); refreshActive(activeForm.id); }}
-                  style={{ flex:1, padding:"12px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Yükle</button>
+                <button onClick={async()=>{
+                  if(!uploadFile){ alert("Lütfen bir dosya seçin"); return; }
+                  try {
+                    const fd=new FormData(); fd.append("dosya",uploadFile);
+                    const res = await fetch(`${API_BASE}/hr/masraf-belge/${extraFotoModal}`,{method:"POST",body:fd});
+                    if(!res.ok) throw new Error("Yükleme başarısız");
+                    setExtraFotoModal(null); setUploadFile(null);
+                    refreshActive(activeForm.id);
+                  } catch(err){ alert("Fiş yüklenemedi: " + err.message); }
+                }}
+                  style={{ flex:1, padding:"12px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>
+                  ⬆️ Yükle
+                </button>
                 <button onClick={()=>{setExtraFotoModal(null);setUploadFile(null);}}
                   style={{ padding:"12px 20px", background:"#f3f4f6", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
               </div>
