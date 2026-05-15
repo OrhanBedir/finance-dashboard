@@ -12630,6 +12630,23 @@ function App() {
       alert(err.message);
     }
   };
+  const handleResetPassword = async (userId, userName) => {
+    const newPass = window.prompt(`${userName} için yeni şifre girin:`);
+    if (!newPass || !newPass.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/admin/users/${userId}/password`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ password: newPass.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Şifre değiştirilemedi");
+      alert(`${userName} şifresi başarıyla güncellendi.`);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   const handleToggleActive = async (userId) => {
     try {
       const response = await fetch(`${API_BASE}/admin/users/${userId}/active`, {
@@ -13420,6 +13437,19 @@ function App() {
                           <option value="admin">👑 Admin</option>
                           <option value="rollout_mudur">🏗 Rollout Müdürü</option>
                         </select>
+                        <button
+                          onClick={() => handleResetPassword(u.id, u.name)}
+                          style={{
+                            padding: "6px 12px",
+                            background: "#eff6ff",
+                            color: "#1d4ed8",
+                            border: "none", borderRadius: "8px",
+                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                          }}
+                          title="Şifre değiştir"
+                        >
+                          🔑 Şifre
+                        </button>
                         <button
                           onClick={() => deleteUser(u.id)}
                           style={{
@@ -14335,6 +14365,23 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           }}>
             <span style={{ background:"#e2e8f0", color:"#64748b", padding:"2px 8px", borderRadius:"20px", fontSize:"11px" }}>N/A</span>
             {naMsg}
+          </div>
+        ) : type === "date" ? (
+          <div style={{ display:"flex", alignItems:"center", gap:"4px" }}>
+            <input
+              type="date"
+              value={form[field] || ""}
+              onChange={(e) => handleChange(field, e.target.value)}
+              style={{ flex:1 }}
+            />
+            {form[field] && (
+              <button
+                type="button"
+                onClick={() => handleChange(field, "")}
+                title="Tarihi temizle"
+                style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"13px", lineHeight:1 }}
+              >✕</button>
+            )}
           </div>
         ) : (
           <input
