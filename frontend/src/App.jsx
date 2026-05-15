@@ -783,7 +783,7 @@ function formatDateTR(date) {
   return d.toLocaleDateString("tr-TR");
 }
 
-function RolloutDashboard() {
+function RolloutDashboard({ currentUser }) {
   const exportExcel = () => {
     const regionParam =
       selectedRegion && selectedRegion !== "Tüm Bölgeler"
@@ -1175,6 +1175,7 @@ function RolloutDashboard() {
         <table>
           <thead>
             <tr>
+              <th colSpan="1">✏️</th>
               <th colSpan="1">📦</th>
               <th colSpan="5">MİLESTONE DURUM</th>
 
@@ -1201,6 +1202,7 @@ function RolloutDashboard() {
               <th colSpan="4">KABUL</th>
             </tr>
             <tr>
+              <th style={{ background:"#0f172a", color:"#fff", fontSize:"11px" }}>Güncelle</th>
               <th style={{ background:"#1e293b", color:"#fff", fontSize:"11px" }}>Belgeler</th>
               <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>RF Rcv</th>
               <th style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>RF Start</th>
@@ -1313,6 +1315,14 @@ function RolloutDashboard() {
                 const hasBelge = !!(row.los_belge_url || row.tssr_belge_url || row.btk_belge_url || row.emr_belge_url || row.pac_belge_url || row.enh_proje_belge_url);
                 return (
                 <tr key={row.id}>
+                  <td style={{ textAlign:"center" }}>
+                    <button
+                      onClick={() => { setSelectedRolloutSite(row.site_code); setShowRolloutEntryModal(true); }}
+                      title="Kaydı güncelle"
+                      style={{ background:"#2563eb", color:"#fff", border:"none", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"13px" }}>
+                      ✏️
+                    </button>
+                  </td>
                   <td style={{ textAlign:"center" }}>
                     <button onClick={handleRowIndir} title="Saha belgelerini ZIP indir"
                       style={{ background: hasBelge?"#1e293b":"#e5e7eb", color: hasBelge?"#fff":"#9ca3af", border:"none", borderRadius:"6px", padding:"4px 8px", cursor: hasBelge?"pointer":"default", fontSize:"13px" }}>
@@ -11412,7 +11422,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         }
                       >
                         <span style={{ color: "#16a34a", textAlign: "left" }}>
-                          FAC OK Fatura Bekler 20%
+                          PAC OK Fatura Bekler 20%
                         </span>
                         <strong
                           style={{ color: "#16a34a", textAlign: "right" }}
@@ -11432,7 +11442,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         }
                       >
                         <span style={{ color: "#dc2626", textAlign: "left" }}>
-                          FAC NOK Fatura Bekler 20%
+                          PAC NOK Fatura Bekler 20%
                         </span>
                         <strong
                           style={{ color: "#dc2626", textAlign: "right" }}
@@ -13202,7 +13212,7 @@ function App() {
       {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
       {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
       {page === "puantaj" && isRollout && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
-      {page === "executive" && <RolloutDashboard />}
+      {page === "executive" && <RolloutDashboard currentUser={user} />}
       {page === "region" && (
         <RegionAnalysis
           isSubconUser={!isAdmin && !!user?.subcon_name}
@@ -14666,6 +14676,11 @@ function AraclarPanel({ currentUser, onBack }) {
   };
 
   const handleBelgeSil = async (belgeId) => {
+    const yetkiliEmails = ["orhan.bedir@simsektel.com", "nurcan.kus@simsektel.com"];
+    if (!yetkiliEmails.includes((currentUser?.email || "").toLowerCase())) {
+      alert("Bu işlem için yetkiniz bulunmamaktadır. Dosya silme yetkisi yalnızca Nurcan Kuş ve Orhan Bedir'e aittir.");
+      return;
+    }
     if (!window.confirm("Bu belgeyi silmek istediğinizden emin misiniz?")) return;
     await fetch(`${API_BASE}/hr/arac-belge/${belgeId}`, { method:"DELETE" });
     load();
@@ -15048,6 +15063,11 @@ function OfisDepoPanel({ currentUser, onBack }) {
     load();
   };
   const handleBelgeSil = async (id) => {
+    const yetkiliEmails = ["orhan.bedir@simsektel.com", "nurcan.kus@simsektel.com"];
+    if (!yetkiliEmails.includes((currentUser?.email || "").toLowerCase())) {
+      alert("Bu işlem için yetkiniz bulunmamaktadır. Dosya silme yetkisi yalnızca Nurcan Kuş ve Orhan Bedir'e aittir.");
+      return;
+    }
     if (!window.confirm("Bu belgeyi silmek istediğinizden emin misiniz?")) return;
     await fetch(`${API_BASE}/hr/ofis-belge/${id}`, { method:"DELETE" }); load();
   };
