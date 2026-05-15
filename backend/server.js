@@ -2197,6 +2197,7 @@ app.get("/migrate", async (req, res) => {
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tt_horizon_actual_end_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_actual_end_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tamamlanma_tarihi DATE",
   ];
   const results = [];
   for (const sql of migrations) {
@@ -10578,6 +10579,7 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tt_horizon_actual_end_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_actual_end_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tamamlanma_tarihi DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS qc_closed_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
 ];

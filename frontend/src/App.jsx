@@ -1499,7 +1499,7 @@ function DailyEntry() {
     item_description: "",
     done_qty: "",
     subcon_name: "",
-    onair_date: getTodayTR(),
+    onair_date: "",
     note: "",
 
     qc_durum: "NOK",
@@ -14071,12 +14071,10 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     il: existingRow.il || "",
 
     rf_subcon: existingRow.rf_subcon || "",
-    plan_start_date: existingRow.plan_start_date || "",
-    installation_actual_start_date:
-      existingRow.installation_actual_start_date || "",
-    installation_actual_end_date:
-      existingRow.installation_actual_end_date || "",
-    onair_date: existingRow.onair_date || "",
+    plan_start_date: /^h(uawei|w)$/i.test(existingRow.rf_subcon||"") && !existingRow.plan_start_date ? "__NA__" : existingRow.plan_start_date || "",
+    installation_actual_start_date: /^h(uawei|w)$/i.test(existingRow.rf_subcon||"") && !existingRow.installation_actual_start_date ? "__NA__" : existingRow.installation_actual_start_date || "",
+    installation_actual_end_date: /^h(uawei|w)$/i.test(existingRow.rf_subcon||"") && !existingRow.installation_actual_end_date ? "__NA__" : existingRow.installation_actual_end_date || "",
+    onair_date: /^h(uawei|w)$/i.test(existingRow.rf_subcon||"") && !existingRow.onair_date ? "__NA__" : existingRow.onair_date || "",
     rf_not: existingRow.rf_not || "",
     atlas_status: existingRow.atlas_status || "",
 
@@ -14100,8 +14098,8 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     survey_note: existingRow.survey_note || "",
 
     emr_subcon: existingRow.emr_subcon || "",
-    emr_plan_start_date: existingRow.emr_plan_start_date || "",
-    emr_actual_end_date: existingRow.emr_actual_end_date || "",
+    emr_plan_start_date: /^h(uawei|w)$/i.test(existingRow.emr_subcon||"") && !existingRow.emr_plan_start_date ? "__NA__" : existingRow.emr_plan_start_date || "",
+    emr_actual_end_date: /^h(uawei|w)$/i.test(existingRow.emr_subcon||"") && !existingRow.emr_actual_end_date ? "__NA__" : existingRow.emr_actual_end_date || "",
 
     trs_subcon: existingRow.trs_subcon || "",
     trs_plan_start_date: existingRow.trs_plan_start_date || "",
@@ -14121,9 +14119,19 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     abonelik_actual_end_date: existingRow.abonelik_actual_end_date || "",
     tt_horizon_actual_end_date: existingRow.tt_horizon_actual_end_date || "",
     pac_actual_end_date: existingRow.pac_actual_end_date || "",
+    tamamlanma_tarihi: existingRow.tamamlanma_tarihi || "",
 
-    enh_proje_subcon: existingRow.enh_proje_subcon || "",
-    enh_proje_hazir: existingRow.enh_proje_hazir || "",
+    // ENH Proje: Abone değilse Subcon + Hazır Tarihi kilitli
+    enh_proje_subcon: (() => {
+      const t = String(existingRow.enh_site_type || "").toLowerCase();
+      if (t && t !== "abone" && !existingRow.enh_proje_subcon) return "__NA__";
+      return existingRow.enh_proje_subcon || "";
+    })(),
+    enh_proje_hazir: (() => {
+      const t = String(existingRow.enh_site_type || "").toLowerCase();
+      if (t && t !== "abone" && !existingRow.enh_proje_hazir) return "__NA__";
+      return existingRow.enh_proje_hazir || "";
+    })(),
     enh_proje_not: existingRow.enh_proje_not || "",
     enh_proje_belge_url: existingRow.enh_proje_belge_url || "",
     los_belge_url: existingRow.los_belge_url || "",
@@ -14145,10 +14153,12 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
 
   // HW subcon → ilgili alanları N/A işaretle
   const HW_NA_MAP = {
+    rf_subcon:   ["plan_start_date", "installation_actual_start_date", "installation_actual_end_date", "onair_date"],
     los_subcon:  ["los_plan_date", "los_actual_end_date"],
     tss_subcon:  ["tss_plan_start_date", "tss_actual_end_date"],
     tssr_subcon: ["tssr_plan_start_date", "tssr_actual_end_date"],
     btk_subcon:  ["btk_plan_start_date", "btk_actual_end_date", "btk_approved"],
+    emr_subcon:  ["emr_plan_start_date", "emr_actual_end_date"],
   };
   const NA_MARKER = "__NA__"; // DB'ye göndermeden önce null'a çevrilecek
 
@@ -14161,10 +14171,20 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         if (isHw(value)) {
           naFields.forEach(f => { next[f] = NA_MARKER; });
         } else {
-          // HW kaldırıldıysa NA_MARKER olan alanları temizle
           naFields.forEach(f => {
             if (prev[f] === NA_MARKER) next[f] = "";
           });
+        }
+      }
+      // ENH Site Type Abone değilse ENH Proje Subcon + Hazır Tarihi kilitle
+      if (field === "enh_site_type") {
+        const isAbone = String(value || "").toLowerCase() === "abone";
+        if (!isAbone && value !== "") {
+          if (!prev.enh_proje_subcon || prev.enh_proje_subcon === NA_MARKER) next.enh_proje_subcon = NA_MARKER;
+          if (!prev.enh_proje_hazir || prev.enh_proje_hazir === NA_MARKER) next.enh_proje_hazir = NA_MARKER;
+        } else {
+          if (prev.enh_proje_subcon === NA_MARKER) next.enh_proje_subcon = "";
+          if (prev.enh_proje_hazir === NA_MARKER) next.enh_proje_hazir = "";
         }
       }
       return next;
@@ -14264,7 +14284,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     }
   };
 
-  const input = (label, field, type = "text") => {
+  const input = (label, field, type = "text", naMsg = "Huawei sorumluluğunda") => {
     const isNA = form[field] === "__NA__";
     return (
       <label className="modalField">
@@ -14276,7 +14296,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             display:"flex", alignItems:"center", gap:"6px"
           }}>
             <span style={{ background:"#e2e8f0", color:"#64748b", padding:"2px 8px", borderRadius:"20px", fontSize:"11px" }}>N/A</span>
-            Huawei sorumluluğunda
+            {naMsg}
           </div>
         ) : (
           <input
@@ -14395,6 +14415,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             {input("Installation Start Date", "installation_actual_start_date", "date")}
             {input("Installation End Date", "installation_actual_end_date", "date")}
             {input("OnAir Date", "onair_date", "date")}
+            {input("Tamamlanma Tarihi", "tamamlanma_tarihi", "date")}
             {input("RF Not", "rf_not")}
             {input("Atlas Status", "atlas_status")}
           </div>
@@ -14464,8 +14485,8 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           </div>
           <div className="modalGrid">
             {select("ENH Site Type", "enh_site_type", ["Abone", "Süzme", "Abone + Süzme"])}
-            {input("ENH Proje Subcon", "enh_proje_subcon")}
-            {input("ENH Proje Hazır Tarihi", "enh_proje_hazir", "date")}
+            {input("ENH Proje Subcon", "enh_proje_subcon", "text", "Sadece Abone tipinde gerekli")}
+            {input("ENH Proje Hazır Tarihi", "enh_proje_hazir", "date", "Sadece Abone tipinde gerekli")}
             {input("ENH Proje Not", "enh_proje_not")}
           </div>
           {/* Belge eki */}
