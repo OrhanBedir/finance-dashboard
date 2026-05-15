@@ -9022,8 +9022,10 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     : isMuhasebe ? list.filter(f=>f.durum==="TAMAMLANDI").length : 0;
 
   const visibleList = list.filter(f => {
+    // Personel sadece kendi formlarını görür
     if (!isApprover && f.talep_eden_email !== currentUser?.email) return false;
-    if (isApprover && f.durum === "TASLAK") return false;
+    // Onaylayıcılar başkasının TASLAK'larını görmez ama KENDİ TASLAK'larını görebilir
+    if (isApprover && f.durum === "TASLAK" && f.talep_eden_email !== currentUser?.email) return false;
     if (filterDurum && f.durum !== filterDurum) return false;
     return true;
   });
@@ -13046,10 +13048,12 @@ function App() {
             {pendingMasrafCount>0 && <span style={{ position:"absolute", top:"8px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingMasrafCount}</span>}
           </button>
         </div>
-        {/* Content area */}
+        {/* Content area — default masraf, is_avans seçilince o gösterilir */}
         <div style={{ padding:"12px 12px 80px" }}>
-          {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
-          {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
+          {page === "is_avans"
+            ? <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />
+            : <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />
+          }
         </div>
       </div>
     );
