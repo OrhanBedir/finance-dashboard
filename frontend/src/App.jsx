@@ -12462,7 +12462,10 @@ function App() {
   });
   const isAdmin = user?.role === "admin";
   const _isBolgeMudur = user?.email === "nurcan.kus@simsektel.com" || user?.email === "serdar.altinova@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
+  // Rollout erişimi var ama Puantaj görmeyecek kullanıcılar
+  const _PUANTAJ_HARIC = ["hatice.omus@simsektel.com"];
   const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur;
+  const canSeePuantaj = isRollout && !_PUANTAJ_HARIC.includes((user?.email||"").toLowerCase());
   const isPersonel = user?.role === "user" && !_isBolgeMudur;
   const isSubconUser =
     String(user?.role || "").toLowerCase() === "subcon" ||
@@ -13079,7 +13082,7 @@ function App() {
               Günlük İş Girişi
             </button>
 
-            {isRollout && (
+            {canSeePuantaj && (
               <button
                 className={page === "puantaj" ? "tab activeTab" : "tab"}
                 onClick={() => setPage("puantaj")}
@@ -13228,7 +13231,7 @@ function App() {
       {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
       {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
       {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
-      {page === "puantaj" && isRollout && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
+      {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
       {page === "executive" && <RolloutDashboard currentUser={user} />}
       {page === "region" && (
         <RegionAnalysis
@@ -13305,6 +13308,7 @@ function App() {
                 >
                   <option value="user">👤 User</option>
                   <option value="admin">👑 Admin</option>
+                  <option value="rollout_mudur">🏗 Rollout Müdürü</option>
                 </select>
                 <button
                   onClick={handleCreateUser}
