@@ -9519,9 +9519,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                         ↩ Yeniden Seç
                       </button>
                     </div>
-                    <div style={{ background:"#f9fafb", borderRadius:"8px", padding:"8px" }}>
+                    <div style={{ background:"#f9fafb", borderRadius:"8px", padding:"8px", overflow:"auto", maxHeight:"55vh" }}>
                       <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)} style={{ width:"100%" }}>
-                        <img ref={cropImgRef} src={cropSrc} alt="fiş" style={{ width:"100%", height:"auto", display:"block" }}
+                        <img ref={cropImgRef} src={cropSrc} alt="fiş" style={{ width:"100%", height:"auto", display:"block", maxHeight:"55vh", objectFit:"contain" }}
                           onLoad={e => {
                             const { width, height } = e.currentTarget;
                             const c = centerCrop(makeAspectCrop({ unit:"%", width:90 }, width/height, width, height), width, height);
@@ -12868,6 +12868,14 @@ function App() {
       setToken(data.token);
       setUser(data.user);
       setFinanceUserEmail(data.user.email);
+
+      // Reset page based on the logged-in user's role so switching users works correctly
+      const _lu = data.user;
+      const _bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"];
+      const _luIsBolge = _bolgeMudurEmails.includes(_lu?.email) || ["rollout_mudur","bolge_mudur"].includes((_lu?.role||"").toLowerCase());
+      if (_lu?.role === "user" && !_luIsBolge) setPage("masraf");
+      else if (_luIsBolge) setPage("region");
+      else setPage("finance");
 
       setFinanceLoginEmail("");
       setFinanceLoginPassword("");
