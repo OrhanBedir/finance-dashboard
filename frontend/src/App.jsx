@@ -1190,7 +1190,7 @@ function RolloutDashboard() {
 
               <th colSpan="7">BTK</th>
 
-              <th colSpan="3">EMR</th>
+              <th colSpan="4">EMR</th>
 
               <th colSpan="4">TRS</th>
 
@@ -1245,6 +1245,7 @@ function RolloutDashboard() {
 
               <th>Survey Note</th>
 
+              <th>EMR Subcon</th>
               <th>EMR Plan Start Date</th>
               <th>EMR Actual End Date</th>
 
@@ -1360,6 +1361,7 @@ function RolloutDashboard() {
 
                   <td>{row.survey_note}</td>
 
+                  <td>{row.emr_subcon}</td>
                   <td>{formatDate(row.emr_plan_start_date)}</td>
                   <td>{formatDate(row.emr_actual_end_date)}</td>
 
@@ -14097,6 +14099,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     gs_status: existingRow.gs_status || "",
     survey_note: existingRow.survey_note || "",
 
+    emr_subcon: existingRow.emr_subcon || "",
     emr_plan_start_date: existingRow.emr_plan_start_date || "",
     emr_actual_end_date: existingRow.emr_actual_end_date || "",
 
@@ -14447,6 +14450,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#f0fdfa", borderRadius:"12px", border:"1px solid #99f6e4" }}>
           <div style={{ fontWeight:700, fontSize:"13px", color:"#0f766e", marginBottom:"10px" }}>⚙️ EMR</div>
           <div className="modalGrid">
+            {input("EMR Subcon", "emr_subcon")}
             {input("EMR Plan Start Date", "emr_plan_start_date", "date")}
             {input("EMR Actual End Date", "emr_actual_end_date", "date")}
           </div>
