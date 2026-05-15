@@ -113,10 +113,14 @@ function parseOcrText(text) {
     const allNums = (text.match(TR_NUM_RE) || []).map(parseTrNumber).filter(n => n >= 1 && n <= 999999);
     if (allNums.length) amount = Math.max(...allNums);
   }
-  const plateRe = /\b(\d{2})\s*([A-ZÇŞĞÜÖİ0-9]{1,4})\s*(\d{2,4})\b/gi;
+  // Türk plaka formatı: 2 rakam + 1-3 HARF (rakam değil) + 2-4 rakam
+  // Örn: 16GB307, 34ABC1234, 06A1234
+  const plateRe = /\b(\d{2})\s*([A-ZÇŞĞÜÖİ]{1,3})\s*(\d{2,4})\b/g;
   const rawPlates = [...text.matchAll(plateRe)]
     .map(m => (m[1] + m[2] + m[3]).toUpperCase().replace(/[^A-Z0-9]/g, ""))
-    .filter(p => p.length >= 5 && p.length <= 9);
+    .filter(p => p.length >= 5 && p.length <= 8);
+  // En uzun eşleşmeyi önce al (gerçek plakalar genelde daha uzun)
+  rawPlates.sort((a, b) => b.length - a.length);
   return { amount: amount || null, plaka: rawPlates[0] || null, rawPlates };
 }
 
