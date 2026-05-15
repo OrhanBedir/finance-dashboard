@@ -928,6 +928,8 @@ function RolloutDashboard() {
   }, [regionFilter]);
 
   useEffect(() => {
+    // DB migration: eksik kolonları otomatik ekle (Render restart beklemeden)
+    fetch(`${API_BASE}/migrate`).catch(() => {});
     loadData();
   }, [regionFilter]);
 
@@ -14020,21 +14022,21 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     atlas_status: existingRow.atlas_status || "",
 
     los_subcon: existingRow.los_subcon || "",
-    los_plan_date: existingRow.los_plan_date || "",
-    los_actual_end_date: existingRow.los_actual_end_date || "",
+    los_plan_date: /^h(uawei|w)$/i.test(existingRow.los_subcon||"") && !existingRow.los_plan_date ? "__NA__" : existingRow.los_plan_date || "",
+    los_actual_end_date: /^h(uawei|w)$/i.test(existingRow.los_subcon||"") && !existingRow.los_actual_end_date ? "__NA__" : existingRow.los_actual_end_date || "",
 
     tss_subcon: existingRow.tss_subcon || "",
-    tss_plan_start_date: existingRow.tss_plan_start_date || "",
-    tss_actual_end_date: existingRow.tss_actual_end_date || "",
+    tss_plan_start_date: /^h(uawei|w)$/i.test(existingRow.tss_subcon||"") && !existingRow.tss_plan_start_date ? "__NA__" : existingRow.tss_plan_start_date || "",
+    tss_actual_end_date: /^h(uawei|w)$/i.test(existingRow.tss_subcon||"") && !existingRow.tss_actual_end_date ? "__NA__" : existingRow.tss_actual_end_date || "",
 
     tssr_subcon: existingRow.tssr_subcon || "",
-    tssr_plan_start_date: existingRow.tssr_plan_start_date || "",
-    tssr_actual_end_date: existingRow.tssr_actual_end_date || "",
+    tssr_plan_start_date: /^h(uawei|w)$/i.test(existingRow.tssr_subcon||"") && !existingRow.tssr_plan_start_date ? "__NA__" : existingRow.tssr_plan_start_date || "",
+    tssr_actual_end_date: /^h(uawei|w)$/i.test(existingRow.tssr_subcon||"") && !existingRow.tssr_actual_end_date ? "__NA__" : existingRow.tssr_actual_end_date || "",
 
     btk_subcon: existingRow.btk_subcon || "",
-    btk_plan_start_date: existingRow.btk_plan_start_date || "",
-    btk_actual_end_date: existingRow.btk_actual_end_date || "",
-    btk_approved: existingRow.btk_approved || "",
+    btk_plan_start_date: /^h(uawei|w)$/i.test(existingRow.btk_subcon||"") && !existingRow.btk_plan_start_date ? "__NA__" : existingRow.btk_plan_start_date || "",
+    btk_actual_end_date: /^h(uawei|w)$/i.test(existingRow.btk_subcon||"") && !existingRow.btk_actual_end_date ? "__NA__" : existingRow.btk_actual_end_date || "",
+    btk_approved: /^h(uawei|w)$/i.test(existingRow.btk_subcon||"") && !existingRow.btk_approved ? "__NA__" : existingRow.btk_approved || "",
     gs_status: existingRow.gs_status || "",
     survey_note: existingRow.survey_note || "",
 
@@ -14078,8 +14080,35 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   const [pacBelgeFile, setPacBelgeFile] = useState(null);
   const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
+  // Subcon HW mi? (HW, Huawei, huawei vb.)
+  const isHw = (v) => /^h(uawei|w)$/i.test(String(v || "").trim());
+
+  // HW subcon → ilgili alanları N/A işaretle
+  const HW_NA_MAP = {
+    los_subcon:  ["los_plan_date", "los_actual_end_date"],
+    tss_subcon:  ["tss_plan_start_date", "tss_actual_end_date"],
+    tssr_subcon: ["tssr_plan_start_date", "tssr_actual_end_date"],
+    btk_subcon:  ["btk_plan_start_date", "btk_actual_end_date", "btk_approved"],
+  };
+  const NA_MARKER = "__NA__"; // DB'ye göndermeden önce null'a çevrilecek
+
   const handleChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      // Subcon HW ise bağlı alanları NA_MARKER yap
+      if (field in HW_NA_MAP) {
+        const naFields = HW_NA_MAP[field];
+        if (isHw(value)) {
+          naFields.forEach(f => { next[f] = NA_MARKER; });
+        } else {
+          // HW kaldırıldıysa NA_MARKER olan alanları temizle
+          naFields.forEach(f => {
+            if (prev[f] === NA_MARKER) next[f] = "";
+          });
+        }
+      }
+      return next;
+    });
   };
 
   const save = async () => {
@@ -14089,13 +14118,17 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         return;
       }
 
+      // NA_MARKER değerlerini null'a çevir (DATE kolonu N/A kabul etmez)
+      const cleanForm = Object.fromEntries(
+        Object.entries(form).map(([k, v]) => [k, v === "__NA__" ? null : v])
+      );
       const result = await fetchJson(`${API_BASE}/rollout/update`, {
         method: "POST",
         withAuth: true,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify(cleanForm),
       });
 
       console.log("ROLLOUT SAVE RESULT:", result);
@@ -14171,16 +14204,30 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     }
   };
 
-  const input = (label, field, type = "text") => (
-    <label className="modalField">
-      <span>{label}</span>
-      <input
-        type={type}
-        value={form[field] || ""}
-        onChange={(e) => handleChange(field, e.target.value)}
-      />
-    </label>
-  );
+  const input = (label, field, type = "text") => {
+    const isNA = form[field] === "__NA__";
+    return (
+      <label className="modalField">
+        <span>{label}</span>
+        {isNA ? (
+          <div style={{
+            background:"#f1f5f9", border:"1px solid #cbd5e1", borderRadius:"8px",
+            padding:"8px 12px", color:"#94a3b8", fontSize:"13px", fontWeight:600,
+            display:"flex", alignItems:"center", gap:"6px"
+          }}>
+            <span style={{ background:"#e2e8f0", color:"#64748b", padding:"2px 8px", borderRadius:"20px", fontSize:"11px" }}>N/A</span>
+            Huawei sorumluluğunda
+          </div>
+        ) : (
+          <input
+            type={type}
+            value={form[field] || ""}
+            onChange={(e) => handleChange(field, e.target.value)}
+          />
+        )}
+      </label>
+    );
+  };
 
   const select = (label, field, options) => (
     <label className="modalField">
