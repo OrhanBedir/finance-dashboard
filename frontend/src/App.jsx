@@ -12741,12 +12741,13 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   // ── KALEM SATIRI ──
   const renderKalemRow = (k, i) => {
     const fiyatAc = fiyatListe.find(f => f.malzeme_adi.toLowerCase() === k.malzeme_adi.toLowerCase());
-    const suggestions = k.malzeme_adi.length > 1
+    const exactMatch = fiyatListe.some(f => f.malzeme_adi.toLowerCase() === k.malzeme_adi.toLowerCase());
+    const suggestions = !exactMatch && k.malzeme_adi.length > 1
       ? fiyatListe.filter(f => f.malzeme_adi.toLowerCase().includes(k.malzeme_adi.toLowerCase())).slice(0,10)
       : [];
     const toplam = (Number(k.miktar)||0) * (Number(k.birim_fiyat)||0);
     return (
-      <div key={i} style={{ display:"grid", gridTemplateColumns:"3fr 70px 90px 110px 100px 1fr 32px", gap:6, marginBottom:8, alignItems:"start" }}>
+      <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 70px 90px 110px 90px 90px 32px", gap:6, marginBottom:8, alignItems:"start" }}>
         {/* Malzeme adı + autocomplete */}
         <div style={{ position:"relative" }}>
           <input placeholder="Malzeme adı yazın..." value={k.malzeme_adi}
@@ -12756,12 +12757,16 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             }}
             style={{ width:"100%",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13,boxSizing:"border-box" }} />
           {suggestions.length > 0 && (
-            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#fff",border:"1px solid #d1d5db",borderRadius:6,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:200,overflowY:"auto" }}>
+            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#fff",border:"1px solid #d1d5db",borderRadius:6,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:240,overflowY:"auto" }}>
               {suggestions.map(f => (
-                <div key={f.id} style={{ padding:"7px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center" }}
-                  onMouseDown={e => { e.preventDefault(); setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:f.malzeme_adi, birim:f.birim, birim_fiyat:f.birim_fiyat||""} : x)); }}>
-                  <span>{f.malzeme_adi}</span>
-                  <span style={{ color:"#9ca3af",fontSize:11 }}>{f.birim} {f.birim_fiyat>0 ? `· ₺${Number(f.birim_fiyat).toLocaleString("tr-TR")}` : ""}</span>
+                <div key={f.id} style={{ padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6" }}
+                  onMouseDown={e => { e.preventDefault(); setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:f.malzeme_adi, birim:f.birim||k.birim, birim_fiyat:f.birim_fiyat||""} : x)); }}>
+                  <div style={{ wordBreak:"break-word", lineHeight:"1.4" }}>{f.malzeme_adi}</div>
+                  {(f.birim || Number(f.birim_fiyat)>0) && (
+                    <div style={{ color:"#9ca3af",fontSize:11,marginTop:2 }}>
+                      {f.birim}{f.birim_fiyat>0 ? ` · ₺${Number(f.birim_fiyat).toLocaleString("tr-TR")}` : ""}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -13039,7 +13044,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               </button>
             </div>
             {/* Başlıklar */}
-            <div style={{ display:"grid",gridTemplateColumns:"3fr 70px 90px 110px 100px 1fr 32px",gap:6,marginBottom:6 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 70px 90px 110px 90px 90px 32px",gap:6,marginBottom:6 }}>
               {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not",""].map(h=>(
                 <div key={h} style={{ fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.3px",padding:"0 2px" }}>{h}</div>
               ))}
