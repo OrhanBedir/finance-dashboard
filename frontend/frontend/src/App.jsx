@@ -12573,6 +12573,286 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
+  const MALZEME_LISTESI = [
+    "10M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "20M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "30M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "40M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "50M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "60M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "70M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "80M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "90M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "100M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "110M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "120M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "130M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "140M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "150M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "3M LC-LC PATCH CORT OPTİK ( SİNGLE MOD ) ( SARI )",
+    "5M LC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "10M LC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "3M SC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "5M SC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "10M SC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "3M SC-SC PATCH CORT OPTİK( SİNGLE MOD )( SARI )",
+    "5M SC-SC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "10M SC-SC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "3M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "4M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "5M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "6M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "8M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "10M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "3M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "4M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "5M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "6M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "8M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "10M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "3M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "4M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "5M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "6M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "8M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "10M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "2x6 DC TTR ENERJİ KABLOSU ( HUAWEİ TİPİ ) ( SİYAH-YUMUŞAK )",
+    "2x10 DC TTR ENERJİ KABLOSU ( HUAWEİ TİPİ )( SİYAH-YUMUŞAK )",
+    "2x16 DC TTR ENERJİ KABLOSU ( HUAWEİ TİPİ )( SİYAH-YUMUŞAK )",
+    "2x25 DC TTR ENERJİ KABLOSU ( HUAWEİ TİPİ )( SİYAH-YUMUŞAK )",
+    "1X50 DC ENERJİ KABLOSU ( ERICSSON TİPİ ) ( SİYAH )( H07RN-F )",
+    "1X35mm NYAF TOPRAK KABLOSU ( BAKIR )",
+    "1X50mm NYAF TOPRAK KABLOSU ( BAKIR )",
+    "1X16MM NYAF MAVİ TOPRAK KABLOSU ( BAKIR )",
+    "1X16MM NYAF SİYAH TOPRAK KABLOSU ( BAKIR )",
+    "MKS-03",
+    "16mm TOPRAKLAMA PABUCU",
+    "25mm TOPRAKLAMA PABUCU",
+    "35mm TOPRAKLAMA PABUCU",
+    "50mm TOPRAKLAMA PABUCU",
+    "AVEA TİPİ YUMA ASMA KİLİT",
+    "AVEA TİPİ YUMA BAREL",
+    "2x1,5 TTR KABLO",
+    "3x1,5 TTR KABLO",
+    "3x2,5 TTR KABLO",
+    "4x1,5 TTR KABLO",
+    "4x2,5 TTR KABLO",
+    "CAT6 KABLO",
+    "3M HAZIR ÇAKILI CAT6 KABLO",
+    "5M HAZIR ÇAKILI CAT6 KABLO",
+    "4x6 NYY KABLO",
+    "4x10 NYY KABLO",
+    "4x16 NYY KABLO",
+    "4 LÜK YÜKSÜK",
+    "6 LIK YÜKSÜK",
+    "10 LUK YÜKSÜK",
+    "16 LIK YÜKSÜK",
+    "25 LİK YÜKSÜK",
+    "35 LİK YÜKSÜK",
+    "50 LİK YÜKSÜK",
+    "AVEA TİPİ 2G 900 MARKİNG",
+    "AVEA TİPİ 2G 1800 MARKİNG",
+    "AVEA TİPİ 3G 900 MARKİNG",
+    "AVEA TİPİ 3G 2100 MARKİNG",
+    "AVEA TİPİ LTE 800 MARKİNG",
+    "AVEA TİPİ LTE 1800 MARKİNG",
+    "AVEA TİPİ LTE 2600 MARKİNG",
+    "ROXTEK ( 16/18 ) ( 34 LÜK KİT )",
+    "1/2 NORMAL FEEDERE GÖRE DÜZ 7,16 ( KALIN ) DİŞİ KONNEKTÖR",
+    "1/2 NORMAL FEEDERE GÖRE DÜZ 7,16 ( KALIN ) ERKEK KONNEKTÖR",
+    "1/2 FLEXİ FEEDERE GÖRE DÜZ 7,16 ( KALIN ) DİŞİ KONNEKTÖR",
+    "1/2 FLEXİ FEEDERE GÖRE DÜZ 7,16 ( KALIN ) ERKEK KONNEKTÖR",
+    "1/2 NORMAL FEEDERE GÖRE DÜZ 4,3-10 ( İNCE ) DİŞİ KONNEKTÖR",
+    "1/2 NORMAL FEEDERE GÖRE DÜZ 4,3-10 ( İNCE ) ERKEK KONNEKTÖR",
+    "1/2 FLEXİ FEEDERE GÖRE DÜZ 4,3-10 ( İNCE ) DİŞİ KONNEKTÖR",
+    "1/2 FLEXİ FEEDERE GÖRE DÜZ 4,3-10 ( İNCE ) ERKEK KONNEKTÖR",
+    "1/2 NORMAL FEEDERE GÖRE DÜZ N TYPE DİŞİ KONNEKTÖR",
+    "1/2 NORMAL FEEDERE GÖRE DÜZ N TYPE ERKEK KONNEKTÖR",
+    "1/2 FLEXİ FEEDERE GÖRE DÜZ N TYPE DİŞİ KONNEKTÖR",
+    "1/2 FLEXİ FEEDERE GÖRE DÜZ N TYPE ERKEK KONNEKTÖR",
+    "DIŞ RACK ( TAKIM )",
+    "İÇ RACK ( TAKIM )",
+    "COLD SHİRİNG",
+    "7/8 FEEDER KABLO",
+    "1/2 FEEDER KABLO",
+    "10 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "20 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "30 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "40 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "50 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "10 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "20 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "30 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "40 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "50 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "KULE ANTEN ASMA APARATI ( KULE OFSET )( TAKIM )",
+    "ÇİÇEK ( YILDIZ OFSET ) ( 2,5 İNÇ BORUYA GÖRE )( TAKIM )",
+    "ÇİÇEK ( YILDIZ OFSET ) ( 4 İNÇ BORUYA GÖRE )(TAKIM )",
+    "PANEL ANTEN",
+    "OMNİ ANTEN",
+    "12 CORE İNDOOR ODF",
+    "24 CORE İNDOOR ODF",
+    "36 CORE İNDOOR ODF",
+    "48 CORE İNDOOR ODF",
+    "12 CORE OUTDOOR ODF",
+    "24 CORE OUTDOOR ODF",
+    "36 CORE OUTDOOR ODF",
+    "48 CORE OUTDOOR ODF",
+    "12 CORE FİBER KABLO",
+    "24 CORE FİBER KABLO",
+    "36 CORE FİBER KABLO",
+    "48 CORE FİBER KABLO",
+    "2X6-2X10 DC CLAMP ( HUAWEİ TİPİ )",
+    "2X16-2X25 DC CLAMP ( HUAWEİ TİPİ )",
+    "PLASTİK KABLO BAĞI ( KALIN )",
+    "PLASTİK KABLO BAĞI ( İNCE )",
+    "PLASTİK KABLO BAĞI ( KISA-KIL )",
+    "DYMO KUTUCUK ( PVC )",
+    "DYMO KARTUŞ ( SARI )",
+    "SİYAH SİLİKON",
+    "BEYAZ SİLİKON",
+    "SİYAH İZOLELİ BANT",
+    "5M ERİCSSON RET KABLOSU",
+    "5M HUAWEİ RET KABLOSU",
+    "SAYAÇ PANOSU",
+    "UÇAK İKAZ",
+    "SİYAH SPREY BOYA",
+    "BEYAZ SPREY BOYA",
+    "TURKUAZ SPREY BOYA",
+    "GRİ SPREY BOYA",
+    "MİNTİ YEŞİL SPREY BOYA",
+    "3XC 25A GRUP SİGORTA",
+    "3XC 32A GRUP SİGORTA",
+    "3XC 40A GRUP SİGORTA",
+    "3XC 63A GRUP SİGORTA",
+    "3XB 25A GRUP SİGORTA",
+    "3XB 32A GRUP SİGORTA",
+    "3XB 40A GRUP SİGORTA",
+    "3XB 63A GRUP SİGORTA",
+    "4XC 25A GRUP SİGORTA",
+    "4XC 32A GRUP SİGORTA",
+    "4XC 40A GRUP SİGORTA",
+    "4XC 63A GRUP SİGORTA",
+    "4XB 25A GRUP SİGORTA",
+    "4XB 32A GRUP SİGORTA",
+    "4XB 40A GRUP SİGORTA",
+    "4XB 63A GRUP SİGORTA",
+    "4X25A 300MA YANGIN KORUMA SİGORTASI",
+    "4X32A 300MA YANGIN KORUMA SİGORTASI",
+    "4X40A 300MA YANGIN KORUMA SİGORTASI",
+    "4X63A 300MA YANGIN KORUMA SİGORTASI",
+    "4X25A 30MA KAÇAK AKIM SİGORTASI",
+    "4X32A 30MA KAÇAK AKIM SİGORTASI",
+    "4X40A 30MA KAÇAK AKIM SİGORTASI",
+    "4X63A 30MA KAÇAK AKIM SİGORTASI",
+    "1XC 16A MONOFAZE SİGORTA",
+    "1XC 25A MONOFAZE SİGORTA",
+    "1XC 32A MONOFAZE SİGORTA",
+    "1XC 40A MONOFAZE SİGORTA",
+    "1XC 63A MONOFAZE SİGORTA",
+    "1XC 100A MONOFAZE SİGORTA",
+    "1XC 125A MONOFAZE SİGORTA",
+    "16A BIÇAKLI SİGORTA ( BOY 0 )",
+    "25A BIÇAKLI SİGORTA ( BOY 0 )",
+    "32A BIÇAKLI SİGORTA ( BOY 0 )",
+    "40A BIÇAKLI SİGORTA ( BOY 0 )",
+    "63A BIÇAKLI SİGORTA ( BOY 0 )",
+    "100A BIÇAKLI SİGORTA ( BOY 0 )",
+    "125A BIÇAKLI SİGORTA ( BOY 0 )",
+    "NYY 3x4mm2 ENERJİ KABLOSU",
+    "NYY 3x6mm2 ENERJİ KABLOSU",
+    "NYY 3x10mm2 ENERJİ KABLOSU",
+    "NYY 3x16mm2 ENERJİ KABLOSU",
+    "NYY 3x35mm2 ENERJİ KABLOSU",
+    "NYY 1x50mm2 ENERJİ KABLOSU",
+    "NYY 1x95mm2 ENERJİ KABLOSU",
+    "NYAF 1x50mm2 ESNEK TOPRAKLAMA İLETKENİ",
+    "NYAF 1x16mm2 ESNEK TOPRAKLAMA İLETKENİ",
+    "NYAF 1x6mm2 ESNEK TOPRAKLAMA İLETKENİ",
+    "NH-FE 180 3x2.5mm2 YANMAZ ENERJİ KABLOSU",
+    "DC 48V GÜÇ KABLOSU 2x35mm2",
+    "BAKIR ÖRGÜLÜ TOPRAKLAMA İLETKENİ 35mm2",
+    "HDPE Ø50/42mm TEK KATLI KABLO KORUMA BORUSU",
+    "HDPE Ø63/53mm TEK KATLI KABLO KORUMA BORUSU",
+    "HDPE Ø110/94mm ÇİFT KATLI KABLO KORUMA BORUSU",
+    "HDPE Ø160/136mm ÇİFT KATLI KABLO KORUMA BORUSU",
+    "HDPE Ø40/34mm MİKROKANAL BORUSU",
+    "PVC BORU Ø32mm ELEKTRİK TESİSAT BORUSU",
+    "PVC BORU Ø50mm ELEKTRİK TESİSAT BORUSU",
+    "PVC BORU Ø75mm ELEKTRİK TESİSAT BORUSU",
+    "GALVANİZLİ ÇELİK BORU 2'",
+    "CORRUGATED BORU Ø32mm ESNEKLİK BORUSU",
+    "3m STANDART ANTEN OFSETİ (GALVANİZLİ ÇELİK)",
+    "6m STANDART ANTEN OFSETİ (GALVANİZLİ ÇELİK)",
+    "1.5m KISA ANTEN OFSETİ (HOT DIP GALVANİZLİ)",
+    "DUVAR TİPİ ANTEN MONTAJ KOL SETİ",
+    "SEKTÖR ANTEN MONTAJ FLANŞI VE BAĞLANTI KİTİ",
+    "ANTEN TAVAN MONTAJ KİTİ (3 NOKTA SABITLEME)",
+    "U-BOLT M16 GALVANİZLİ KULE BAĞLANTI CİVATASI (4'LÜ SET)",
+    "48 FİBER OPTİK KABLO G.652D LOOSE TUBE OUTDOOR",
+    "96 FİBER OPTİK KABLO G.652D LOOSE TUBE OUTDOOR",
+    "24 FİBER OPTİK KABLO G.652D LOOSE TUBE OUTDOOR",
+    "12 FİBER OPTİK KABLO G.657A2 INDOOR/OUTDOOR",
+    "4 FİBER OPTİK KABLO G.652D FİGÜR-8 HAVAI",
+    "2M LC-LC SİNGLE MOD PATCH CORD (INDOOR)",
+    "2M SC-LC SİNGLE MOD PATCH CORD (INDOOR)",
+    "2M SC-SC SİNGLE MOD PATCH CORD (INDOOR)",
+    "LC/UPC PİGTAİL 1.5M SİNGLE MOD G.652D",
+    "SC/UPC PİGTAİL 1.5M SİNGLE MOD G.652D",
+    "SC/APC PİGTAİL 1.5M SİNGLE MOD G.652D",
+    "12 FİBER SC/UPC FANOUT SİNGLE MOD",
+    "24 FİBER SC/UPC FANOUT SİNGLE MOD",
+    "12 PORT LC DUPLEX FIBER OPTİK PATCH PANEL 19'",
+    "24 PORT SC SIMPLEX FIBER OPTİK PATCH PANEL 19'",
+    "48 PORT LC DUPLEX FIBER OPTİK PATCH PANEL 19'",
+    "FIBER OPTİK SPLICE CLOSURE 48 FİBER 4 PORT",
+    "FIBER OPTİK SPLICE CLOSURE 144 FİBER 6 PORT",
+    "FIBER OPTİK SPLICE CLOSURE 288 FİBER 6 PORT",
+    "FIBER OPTİK SONLANDIRMA KUTUSU 12 PORT SC",
+    "FIBER OPTİK SONLANDIRMA KUTUSU 24 PORT SC",
+    "ODF 19'",
+    "FIBER OPTİK SPLICE TRAY (12 FİBER KAPASİTELİ)",
+    "SC/LC ADAPTÖR SİNGLE MOD UPC",
+    "SC/LC ADAPTÖR SİNGLE MOD APC",
+    "BAKIR TOPRAKLAMA ÇUBUĞU 14mm x 1500mm",
+    "BAKIR TOPRAKLAMA ÇUBUĞU 14mm x 2000mm",
+    "BAKIR ŞERİT 30x3mm2 TOPRAKLAMA İLETKENİ",
+    "BAKIR ŞERİT 25x3mm2 TOPRAKLAMA İLETKENİ",
+    "TOPRAKLAMA RAYIÇ KLEMENSİ BUS BAR 100A",
+    "TOPRAKLAMA RAYIÇ KLEMENSİ BUS BAR 200A",
+    "TOPRAKLAMA PABUCİ CU 50mm2 M8",
+    "TOPRAKLAMA PABUCİ CU 95mm2 M10",
+    "GALVANİZLİ TOPRAKLAMA BAĞLANTISI KELEPÇE SETİ",
+    "RF KOAKSIYEL FEEDER KABLO 1/2'",
+    "RF KOAKSIYEL FEEDER KABLO 7/8'",
+    "RF JUMPER KABLO 0.5M N(M)-N(M) SÜPER ESNEK",
+    "RF JUMPER KABLO 1M N(M)-N(M) SÜPER ESNEK",
+    "RF JUMPER KABLO 2M N(M)-N(M) SÜPER ESNEK",
+    "N TİPİ KONNEKTÖR 1/2'",
+    "N TİPİ KONNEKTÖR 7/8'",
+    "7/16 DIN KONNEKTÖR 7/8'",
+    "RF TOPRAKLAMA KİTİ 1/2'",
+    "RF TOPRAKLAMA KİTİ 7/8'",
+    "GALVANİZLİ KABLO KANALÜ 100x50mm (3m PARÇA)",
+    "GALVANİZLİ KABLO KANALÜ 200x100mm (3m PARÇA)",
+    "PVC KABLO KANALÜ 25x16mm (2m PARÇA)",
+    "PVC KABLO KANALÜ 40x25mm (2m PARÇA)",
+    "KABLO ASKISI GALVANİZLİ 50mm",
+    "KABLO ASKISI GALVANİZLİ 75mm",
+    "ÇELİK KABLO BAĞI TIE WRAP 250mm 100 ADET",
+    "PVC SPIRAL KABLO KORUYUCU Ø20mm",
+    "KABLO MERDİVENİ LADDER RACK 300mm",
+    "KABLO MERDİVENİ LADDER RACK 600mm",
+    "J-HOOK KABLO ASKI KANCASI Ø75mm",
+    "OUTDOOR METAL KABIN IP55 600x800x300mm",
+    "OUTDOOR METAL KABIN IP55 1000x800x300mm",
+    "19'",
+    "HAVALANDIRMA FAN KİTİ KABIN 230VAC",
+    "SPD AŞIRI GERİLİM KORUYUCU TİP 2 40kA",
+    "AC KABLO 3x2.5mm2 TESİSAT KABLOSU",
+    "ALÇAK GERİLİM KABİN ANAHTARLAMA PANELI"
+  ];
+
   const BOLGELER = ["İzmir","İstanbul","Ankara","Bursa","Antalya","Adana","Samsun","Trabzon","Erzurum","Diyarbakır","Diğer"];
   const PROJELER = ["TT","TC","VF","Diğer"];
   const SITE_TYPES = ["GF","RT","IB","OUT","Diğer"];
@@ -12803,10 +13083,13 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
   // ── KALEM SATIRI ──
   const renderKalemRow = (k, i) => {
+    // Fiyat listesinden DB fiyatı (varsa)
     const fiyatAc = fiyatListe.find(f => f.malzeme_adi.toLowerCase() === k.malzeme_adi.toLowerCase());
-    const exactMatch = fiyatListe.some(f => f.malzeme_adi.toLowerCase() === k.malzeme_adi.toLowerCase());
-    const suggestions = !exactMatch && k.malzeme_adi.length >= 1
-      ? fiyatListe.filter(f => f.malzeme_adi.toLowerCase().includes(k.malzeme_adi.toLowerCase())).slice(0,12)
+    // Hardcoded MALZEME_LISTESI'nden autocomplete (API'ye bağımlı değil)
+    const q = k.malzeme_adi.toLowerCase();
+    const exactMatch = q.length > 0 && MALZEME_LISTESI.some(n => n.toLowerCase() === q);
+    const suggestions = !exactMatch && q.length >= 1
+      ? MALZEME_LISTESI.filter(n => n.toLowerCase().includes(q)).slice(0, 14)
       : [];
     const toplam = (Number(k.miktar)||0) * (Number(k.birim_fiyat)||0);
     return (
@@ -12814,24 +13097,36 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
         {/* Malzeme adı + autocomplete */}
         <div style={{ position:"relative" }}>
           <input placeholder="Malzeme adı yazın..." value={k.malzeme_adi}
+            autoComplete="off"
             onChange={e => {
               const v = e.target.value;
-              setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:v, birim_fiyat: ""} : x));
+              setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:v, birim_fiyat:""} : x));
             }}
             style={{ width:"100%",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13,boxSizing:"border-box" }} />
           {suggestions.length > 0 && (
-            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#fff",border:"1px solid #d1d5db",borderRadius:6,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:240,overflowY:"auto" }}>
-              {suggestions.map(f => (
-                <div key={f.id} style={{ padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6" }}
-                  onMouseDown={e => { e.preventDefault(); setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:f.malzeme_adi, birim:f.birim||k.birim, birim_fiyat:f.birim_fiyat||""} : x)); }}>
-                  <div style={{ wordBreak:"break-word", lineHeight:"1.4" }}>{f.malzeme_adi}</div>
-                  {(f.birim || Number(f.birim_fiyat)>0) && (
-                    <div style={{ color:"#9ca3af",fontSize:11,marginTop:2 }}>
-                      {f.birim}{f.birim_fiyat>0 ? ` · ₺${Number(f.birim_fiyat).toLocaleString("tr-TR")}` : ""}
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#fff",border:"1px solid #d1d5db",borderRadius:6,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:260,overflowY:"auto" }}>
+              {suggestions.map((name, idx) => {
+                const dbItem = fiyatListe.find(f => f.malzeme_adi.toLowerCase() === name.toLowerCase());
+                return (
+                  <div key={idx} style={{ padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6",background:"#fff" }}
+                    onMouseDown={e => {
+                      e.preventDefault();
+                      setTalepKalemler(prev => prev.map((x,j) => j===i ? {
+                        ...x,
+                        malzeme_adi: name,
+                        birim: dbItem?.birim || k.birim,
+                        birim_fiyat: dbItem?.birim_fiyat || ""
+                      } : x));
+                    }}>
+                    <div style={{ wordBreak:"break-word", lineHeight:"1.5" }}>{name}</div>
+                    {dbItem && Number(dbItem.birim_fiyat)>0 && (
+                      <div style={{ color:"#9ca3af",fontSize:11,marginTop:2 }}>
+                        {dbItem.birim} · ₺{Number(dbItem.birim_fiyat).toLocaleString("tr-TR")}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
