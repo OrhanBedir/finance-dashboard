@@ -7797,25 +7797,26 @@ function HrDashboard({ onBack, currentUser }) {
                       {personelList.filter(p=>p.aktif).length} aktif
                     </span>
                   </h2>
-                  {/* Tam ay tahmini bütçe — puantajdan bağımsız, sabit */}
-                  <div style={{ marginTop:"6px", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
-                    <span style={{ fontSize:"12px", fontWeight:600, color:"#374151", textTransform:"uppercase", letterSpacing:"0.5px" }}>
-                      📊 {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Tahmini Maaş Bütçesi
-                    </span>
-                    <span style={{ fontSize:"17px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 10px" }}>
-                      ₺{personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0).toLocaleString("tr-TR")}
-                    </span>
-                    <span style={{ fontSize:"11px", color:"#374151", fontWeight:500 }}>(tüm personel tam çalışırsa)</span>
-                  </div>
-                  {/* An itibarıyla puantaja göre oluşan maaş */}
-                  <div style={{ marginTop:"4px", fontSize:"13px", color:"#374151", fontWeight:600 }}>
-                    💰 An İtibariyle {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Ayı Maaş Ödemesi Yapılacak:{" "}
-                    <span style={{ color:"#1f2937", fontWeight:800 }}>
-                      ₺{(ozet.length > 0
-                        ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
-                        : personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0)
-                      ).toLocaleString("tr-TR")}
-                    </span>
+                  {/* Tam ay tahmini bütçe + an itibariyle — alt alta */}
+                  <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"4px" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+                      <span style={{ fontSize:"12px", fontWeight:600, color:"#374151", textTransform:"uppercase", letterSpacing:"0.5px" }}>
+                        📊 {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Tahmini Maaş Bütçesi
+                      </span>
+                      <span style={{ fontSize:"17px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 10px" }}>
+                        ₺{personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0).toLocaleString("tr-TR")}
+                      </span>
+                      <span style={{ fontSize:"11px", color:"#374151", fontWeight:500 }}>(tüm personel tam çalışırsa)</span>
+                    </div>
+                    <div style={{ fontSize:"13px", color:"#374151", fontWeight:600 }}>
+                      💰 An İtibariyle {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Ayı Maaş Ödemesi Yapılacak:{" "}
+                      <span style={{ color:"#1f2937", fontWeight:800 }}>
+                        ₺{(ozet.length > 0
+                          ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
+                          : personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0)
+                        ).toLocaleString("tr-TR")}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
