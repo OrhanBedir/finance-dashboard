@@ -12671,23 +12671,56 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
   // ── EXCEL EXPORT ──
   const excelIndir = (t, kalemler) => {
+    const durumLabel = {
+      TASLAK:"Taslak", NURCAN_ONAY:"Nurcan Onayı Bekliyor", FIYAT_GIRISI:"Fiyat Girişi (Murat)",
+      PM_ONAY:"PM Onayı (Orhan Bedir)", DUZGUN_ONAY:"Düzgün Onayı Bekliyor",
+      ONAYLANDI:"Onaylandı", SATINALINACAK:"Satın Alınacak", DEPODA:"Depoda", REDDEDILDI:"Reddedildi"
+    };
+    const tarihFmt = (d) => {
+      if (!d) return "";
+      const dt = new Date(d);
+      if (isNaN(dt)) return d;
+      return `${String(dt.getDate()).padStart(2,"0")}.${String(dt.getMonth()+1).padStart(2,"0")}.${dt.getFullYear()}`;
+    };
+    const toplam = kalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0);
     const rows = [
-      ["MALZEME TALEBİ", "", "", "", "", "", ""],
-      ["Talep No:", t.talep_no, "", "Tarih:", t.talep_tarihi||"", "", ""],
-      ["Bölge:", t.bolge||"", "", "Proje:", t.proje||"", "Site Tipi:", t.site_type||""],
-      ["Talep Eden:", t.talep_eden_ad||"", "", "Firma:", t.talep_edilen_firma||"", "", ""],
-      ["Talep Ed. Personel:", t.talep_edilen_personel||"", "", "Durum:", t.durum||"", "", ""],
-      ["Açıklama:", t.notlar||"", "", "", "", "", ""],
+      ["ERC MÜHENDİSLİK - MALZEME TALEBİ", "", "", "", "", "", ""],
       [],
-      ["#","Malzeme Adı","Miktar","Birim","Birim Fiyat (₺)","Toplam (₺)","Not"],
-      ...kalemler.map((k,i) => [i+1, k.malzeme_adi, k.miktar, k.birim, Number(k.birim_fiyat||0).toFixed(2), Number(k.toplam_tutar||0).toFixed(2), k.notlar||""]),
+      ["TALEP NO",        t.talep_no||"",              "", "TARİH",       tarihFmt(t.talep_tarihi), "", ""],
+      ["BÖLGE",           t.bolge||"-",                "", "PROJE",       t.proje||"-",             "SİTE TİPİ", t.site_type||"-"],
+      ["TALEP EDEN",      t.talep_eden_ad||"-",        "", "FİRMA",       t.talep_edilen_firma||"-","", ""],
+      ["TALEP ED. PERS.", t.talep_edilen_personel||"-","", "DURUM",       durumLabel[t.durum]||t.durum||"-", "", ""],
+      ["AÇIKLAMA",        t.notlar||"-",               "", "", "", "", ""],
       [],
-      ["","","","","TOPLAM:", kalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0).toFixed(2), ""],
+      ["#", "MALZEME ADI", "MİKTAR", "BİRİM", "BİRİM FİYAT (₺)", "TOPLAM (₺)", "NOT"],
+      ...kalemler.map((k,i) => [
+        i+1,
+        k.malzeme_adi||"",
+        Number(k.miktar||0),
+        k.birim||"Adet",
+        Number(Number(k.birim_fiyat||0).toFixed(2)),
+        Number(Number(k.toplam_tutar||0).toFixed(2)),
+        k.notlar||""
+      ]),
+      [],
+      ["", "", "", "", "GENEL TOPLAM (₺)", Number(toplam.toFixed(2)), ""],
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
+    // Kolon genişlikleri
+    ws["!cols"] = [
+      { wch: 22 }, // A - etiket
+      { wch: 36 }, // B - değer (malzeme adı)
+      { wch: 3  }, // C - boşluk
+      { wch: 18 }, // D - etiket2
+      { wch: 22 }, // E - değer2
+      { wch: 12 }, // F - site tipi etiket
+      { wch: 12 }, // G - site tipi değer
+    ];
+    // Başlık birleştir (A1:G1)
+    ws["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:6} }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Talep");
-    XLSX.writeFile(wb, `${t.talep_no}.xlsx`);
+    XLSX.writeFile(wb, `${t.talep_no||"Malzeme_Talebi"}.xlsx`);
   };
 
   // ── SARF ──
@@ -13078,7 +13111,16 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               style={{ padding:"12px 24px",background:"#e5e7eb",color:"#374151",border:"2px solid #d1d5db",borderRadius:9,cursor:"pointer",fontWeight:700 }}>
               {saving?"Kaydediliyor...":"💾 Taslağa Kaydet"}
             </button>
-            <button onClick={()=>saveTalep("NURCAN_ONAY")} disabled={saving}
+            <button onClick={()=>{
+              // Hiyerarşiye göre ilk onay adımını belirle:
+              // Nurcan Kuş → Orhan Bedir - Murat İstek - Düzgün Şimşek - Murat İstek
+              const submitDurum = isDirektor ? "ONAYLANDI"
+                : isMurat    ? "DUZGUN_ONAY"
+                : isPM       ? "FIYAT_GIRISI"   // Orhan → Nurcan'ı atla, Murat'a git
+                : isNurcan   ? "PM_ONAY"         // Nurcan → kendini atla, Orhan'a git
+                : "NURCAN_ONAY";                 // Diğerleri → Nurcan'dan başla
+              saveTalep(submitDurum);
+            }} disabled={saving}
               style={{ padding:"12px 28px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:15 }}>
               {saving?"Gönderiliyor...":"📤 Onaya Gönder"}
             </button>
