@@ -7798,7 +7798,7 @@ function HrDashboard({ onBack, currentUser }) {
                     </span>
                   </h2>
                   {/* Tam ay tahmini bütçe + an itibariyle — alt alta */}
-                  <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"4px" }}>
+                  <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"4px", alignItems:"flex-start" }}>
                     <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
                       <span style={{ fontSize:"12px", fontWeight:600, color:"#374151", textTransform:"uppercase", letterSpacing:"0.5px" }}>
                         📊 {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Tahmini Maaş Bütçesi
