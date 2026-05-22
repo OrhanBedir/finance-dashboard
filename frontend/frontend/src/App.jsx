@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import "./App.css";
 import * as XLSX from "xlsx";
+import * as XLSXStyle from "xlsx-js-style";
 import JSZip from "jszip";
 import "react-datepicker/dist/react-datepicker.css";
 import DatePicker from "react-datepicker";
@@ -7842,43 +7843,70 @@ function HrDashboard({ onBack, currentUser }) {
                   </select>
                   <button style={{ padding:"7px 14px", background:"#16a34a", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}
                     onClick={() => {
-                      const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş Tarihi","İşten Ayrılma Tarihi","Net Maaş (₺)","Bankadan Gösterilen (₺)","Elden Verilen (₺)","IBAN","Banka Adı","Banka Hesap No","Durum"];
-                      const keys   = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","iban","banka_adi","banka_hesap_no","aktif"];
-                      const rows = personelList.map(p => keys.map(k => k==="aktif" ? (p[k]?"Aktif":"Pasif") : (p[k]||"")));
-                      const wsData = [headers, ...rows];
-                      const ws = XLSX.utils.aoa_to_sheet(wsData);
-                      // Kolon genişlikleri
-                      ws["!cols"] = [22,18,14,14,14,14,26,14,14,14,18,14,30,16,18,8].map(w=>({wch:w}));
-                      // Başlık stili — mavi arka plan, beyaz yazı, kalın
-                      const blueFill = { patternType:"solid", fgColor:{ rgb:"1E40AF" } };
-                      const whiteFont = { bold:true, color:{ rgb:"FFFFFF" }, sz:11 };
-                      const border = { top:{style:"thin",color:{rgb:"CCCCCC"}}, bottom:{style:"thin",color:{rgb:"CCCCCC"}}, left:{style:"thin",color:{rgb:"CCCCCC"}}, right:{style:"thin",color:{rgb:"CCCCCC"}} };
-                      headers.forEach((_,ci) => {
-                        const addr = XLSX.utils.encode_cell({r:0,c:ci});
-                        if (!ws[addr]) return;
-                        ws[addr].s = { fill:blueFill, font:whiteFont, alignment:{horizontal:"center",vertical:"center",wrapText:true}, border };
+                      const today = new Date().toISOString().slice(0,10);
+                      const ayAdiEx = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][new Date().getMonth()];
+                      const fmtDate = v => { if (!v) return ""; const d = new Date(v); return isNaN(d)?String(v):`${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`; };
+                      const fmtNum  = v => v ? Number(v).toLocaleString("tr-TR") : "0";
+
+                      const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi","Net Maaş (₺)","Bankadan (₺)","Elden (₺)","IBAN","Banka Adı","Hesap No","Durum"];
+                      const cols    = [26,18,14,14,13,14,28,13,13,16,14,12,34,16,18,8];
+                      const dateKeys = ["dogum_tarihi","ise_giris_tarihi","isten_ayrilma_tarihi"];
+                      const numKeys  = ["net_maas","bankadan_gosterilen","elden_verilen"];
+                      const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","iban","banka_adi","banka_hesap_no","aktif"];
+
+                      // Stil sabitleri
+                      const headerS = {
+                        fill:{ patternType:"solid", fgColor:{ rgb:"1E3A5F" } },
+                        font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" },
+                        alignment:{ horizontal:"center", vertical:"center", wrapText:true },
+                        border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3B6EA5"}}, right:{style:"thin",color:{rgb:"3B6EA5"}} }
+                      };
+                      const cellS = (ri, isNum, isDurum, val) => ({
+                        fill:{ patternType:"solid", fgColor:{ rgb: ri%2===0 ? "EFF6FF":"FFFFFF" } },
+                        font:{ sz:10, name:"Calibri",
+                          bold: isNum,
+                          color:{ rgb: isDurum ? (val==="Aktif"?"166534":"991B1B") : isNum ? "1E3A8A" : "1F2937" }
+                        },
+                        alignment:{ horizontal: isNum?"right":isDurum?"center":"left", vertical:"center" },
+                        border:{ top:{style:"thin",color:{rgb:"DBEAFE"}}, bottom:{style:"thin",color:{rgb:"DBEAFE"}}, left:{style:"thin",color:{rgb:"DBEAFE"}}, right:{style:"thin",color:{rgb:"DBEAFE"}} }
                       });
-                      // Veri satırları stili — zebra şerit
-                      rows.forEach((row,ri) => {
-                        row.forEach((_,ci) => {
-                          const addr = XLSX.utils.encode_cell({r:ri+1,c:ci});
-                          if (!ws[addr]) return;
-                          const isNum = ["net_maas","bankadan_gosterilen","elden_verilen"].includes(keys[ci]);
-                          ws[addr].s = {
-                            fill:{ patternType:"solid", fgColor:{ rgb: ri%2===0 ? "F8FAFC" : "FFFFFF" } },
-                            font:{ sz:10, color:{ rgb: isNum?"1E40AF":"1F2937" }, bold: isNum },
-                            alignment:{ horizontal: isNum?"right":"left", vertical:"center" },
-                            border
-                          };
-                          if (isNum && ws[addr].v) ws[addr].t="n", ws[addr].v=Number(ws[addr].v)||0;
+
+                      const wsData = [headers];
+                      personelList.forEach(p => {
+                        wsData.push(keys.map(k => {
+                          if (k==="aktif") return p[k]?"Aktif":"Pasif";
+                          if (dateKeys.includes(k)) return fmtDate(p[k]);
+                          if (numKeys.includes(k)) return fmtNum(p[k]);
+                          return p[k]||"";
+                        }));
+                      });
+
+                      const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
+                      ws["!cols"] = cols.map(w=>({wch:w}));
+                      ws["!rows"] = [{ hpt:26 }, ...personelList.map(()=>({hpt:20}))];
+
+                      // Başlık stilleri
+                      headers.forEach((_,ci) => {
+                        const a = XLSXStyle.utils.encode_cell({r:0,c:ci});
+                        if (ws[a]) ws[a].s = headerS;
+                      });
+                      // Veri satırı stilleri
+                      personelList.forEach((_,ri) => {
+                        keys.forEach((k,ci) => {
+                          const a = XLSXStyle.utils.encode_cell({r:ri+1,c:ci});
+                          if (!ws[a]) return;
+                          const isNum = numKeys.includes(k);
+                          const isDurum = k==="aktif";
+                          ws[a].s = cellS(ri, isNum, isDurum, ws[a].v);
                         });
                       });
-                      // Satır yüksekliği — başlık
-                      ws["!rows"] = [{ hpt:22 }, ...rows.map(()=>({ hpt:18 }))];
-                      const wb = XLSX.utils.book_new();
-                      XLSX.utils.book_append_sheet(wb, ws, "Personel Listesi");
-                      const today = new Date().toISOString().slice(0,10);
-                      XLSX.writeFile(wb, `ERC_Personel_Listesi_${today}.xlsx`);
+
+                      // Başlık satırı dondur
+                      ws["!freeze"] = { xSplit:0, ySplit:1 };
+
+                      const wb = XLSXStyle.utils.book_new();
+                      XLSXStyle.utils.book_append_sheet(wb, ws, "Personel Listesi");
+                      XLSXStyle.writeFile(wb, `ERC_Personel_Listesi_${today}.xlsx`);
                     }}>
                     📥 Excel İndir
                   </button>
