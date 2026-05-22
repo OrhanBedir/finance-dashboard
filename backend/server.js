@@ -8358,6 +8358,63 @@ app.get("/debug/db-check", async (req, res) => {
   }
 });
 
+/* ================== FINANCE CASHFLOW MONTHLY ================== */
+app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
+  try {
+    const { yil, ay } = req.query;
+    if (!yil || !ay) return res.status(400).json({ ok: false, error: "yil ve ay gerekli" });
+
+    const monthStr = `${yil}-${String(ay).padStart(2,"0")}`;
+
+    // 1) Gerçekleşen ödemeler — payment_date bu ayda, payment_amount > 0
+    const received = await pool.query(`
+      SELECT
+        EXTRACT(DAY FROM payment_date)::int AS gun,
+        SUM(COALESCE(payment_amount, 0)) AS tutar
+      FROM hw_payment_rows
+      WHERE to_char(payment_date, 'YYYY-MM') = $1
+        AND COALESCE(payment_amount, 0) > 0
+      GROUP BY gun
+      ORDER BY gun
+    `, [monthStr]);
+
+    // 2) Bekleyen tahsilat — due_date bu ayda, remaining_amount > 0
+    const pending = await pool.query(`
+      SELECT
+        EXTRACT(DAY FROM due_date)::int AS gun,
+        SUM(COALESCE(remaining_amount, 0)) AS tutar
+      FROM hw_payment_rows
+      WHERE to_char(due_date, 'YYYY-MM') = $1
+        AND COALESCE(remaining_amount, 0) > 0
+      GROUP BY gun
+      ORDER BY gun
+    `, [monthStr]);
+
+    // 3) H01 kesintiler — due_date bu ayda, remaining_amount < 0
+    const deductions = await pool.query(`
+      SELECT
+        EXTRACT(DAY FROM due_date)::int AS gun,
+        SUM(COALESCE(remaining_amount, 0)) AS tutar
+      FROM hw_payment_rows
+      WHERE to_char(due_date, 'YYYY-MM') = $1
+        AND COALESCE(remaining_amount, 0) < 0
+        AND LOWER(COALESCE(invoice_no,'')) LIKE 'h01%'
+      GROUP BY gun
+      ORDER BY gun
+    `, [monthStr]);
+
+    res.json({
+      ok: true,
+      received:   received.rows,    // payment_date bazlı alınan
+      pending:    pending.rows,     // due_date bazlı bekleyen
+      deductions: deductions.rows,  // H01 kesintiler
+    });
+  } catch(e) {
+    console.error("CASHFLOW MONTHLY ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 /* ================== FINANCE UPCOMING COLLECTIONS ================== */
 app.get("/finance/upcoming-payments", async (req, res) => {
   try {
