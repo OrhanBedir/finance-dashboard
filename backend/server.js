@@ -10613,7 +10613,7 @@ app.get("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
 app.post("/malzeme/talepler", authMiddleware, async (req, res) => {
   try {
     const { talep_eden_email, talep_eden_ad, notlar, kalemler, durum: istenenDurum,
-            bolge, proje, site_type, talep_edilen_personel, talep_edilen_firma, talep_tarihi } = req.body;
+            bolge, proje, site_type, site_id, talep_edilen_personel, talep_edilen_firma, talep_tarihi } = req.body;
     const yil = new Date().getFullYear();
     const sayac = await pool.query(
       "SELECT COUNT(*)+1 AS sira FROM malzeme_talepler WHERE EXTRACT(YEAR FROM created_at)=$1", [yil]
@@ -10623,10 +10623,10 @@ app.post("/malzeme/talepler", authMiddleware, async (req, res) => {
     const t = await pool.query(
       `INSERT INTO malzeme_talepler
          (talep_no, talep_eden_email, talep_eden_ad, durum, notlar,
-          bolge, proje, site_type, talep_edilen_personel, talep_edilen_firma, talep_tarihi)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+          bolge, proje, site_type, site_id, talep_edilen_personel, talep_edilen_firma, talep_tarihi)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [talep_no, talep_eden_email, talep_eden_ad, durum, notlar||"",
-       bolge||"", proje||"", site_type||"", talep_edilen_personel||"", talep_edilen_firma||"",
+       bolge||"", proje||"", site_type||"", site_id||"", talep_edilen_personel||"", talep_edilen_firma||"",
        talep_tarihi || new Date().toISOString().split("T")[0]]
     );
     const tId = t.rows[0].id;
@@ -10657,13 +10657,13 @@ app.post("/malzeme/talepler", authMiddleware, async (req, res) => {
 app.put("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
   try {
     const { notlar, kalemler, durum: istenenDurum,
-            bolge, proje, site_type, talep_edilen_personel, talep_edilen_firma, talep_tarihi } = req.body;
+            bolge, proje, site_type, site_id, talep_edilen_personel, talep_edilen_firma, talep_tarihi } = req.body;
     const durum = istenenDurum || "TASLAK";
     await pool.query(
-      `UPDATE malzeme_talepler SET durum=$1, notlar=$2, bolge=$3, proje=$4, site_type=$5,
-       talep_edilen_personel=$6, talep_edilen_firma=$7, talep_tarihi=$8
-       WHERE id=$9`,
-      [durum, notlar||"", bolge||"", proje||"", site_type||"",
+      `UPDATE malzeme_talepler SET durum=$1, notlar=$2, bolge=$3, proje=$4, site_type=$5, site_id=$6,
+       talep_edilen_personel=$7, talep_edilen_firma=$8, talep_tarihi=$9
+       WHERE id=$10`,
+      [durum, notlar||"", bolge||"", proje||"", site_type||"", site_id||"",
        talep_edilen_personel||"", talep_edilen_firma||"",
        talep_tarihi||new Date().toISOString().split("T")[0], req.params.id]
     );
@@ -10905,6 +10905,7 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS talep_edilen_personel TEXT",
   "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS talep_edilen_firma TEXT",
   "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS talep_tarihi DATE DEFAULT CURRENT_DATE",
+  "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS site_id TEXT",
   // ── Rollout progress kolonları ──
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS bolge TEXT",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS il TEXT",

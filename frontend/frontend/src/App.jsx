@@ -12533,7 +12533,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const [formView, setFormView] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const emptyForm = () => ({
-    bolge: "", proje: "", site_type: "",
+    bolge: "", proje: "", site_type: "", site_id: "",
     talep_eden_ad: currentUser?.name || currentUser?.email || "",
     talep_eden_email: currentUser?.email || "",
     talep_edilen_personel: "", talep_edilen_personel_manuel: false,
@@ -12586,7 +12586,11 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     try { const r = await fetch(`${API_BASE}/malzeme/depo-stok`, { headers }); setDepoStok(await r.json()); } catch {}
   };
   const loadFiyatListe = async () => {
-    try { const r = await fetch(`${API_BASE}/malzeme/fiyat-listesi`, { headers }); setFiyatListe(await r.json()); } catch {}
+    try {
+      const r = await fetch(`${API_BASE}/malzeme/fiyat-listesi`, { headers });
+      const d = await r.json();
+      setFiyatListe(Array.isArray(d) ? d : []);
+    } catch { setFiyatListe([]); }
   };
   const loadPersonel = async () => {
     try {
@@ -12642,7 +12646,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
       const r = await fetch(`${API_BASE}/malzeme/talepler/${t.id}`, { headers });
       const d = await r.json();
       setTalepForm({
-        bolge: d.bolge||"", proje: d.proje||"", site_type: d.site_type||"",
+        bolge: d.bolge||"", proje: d.proje||"", site_type: d.site_type||"", site_id: d.site_id||"",
         talep_eden_ad: d.talep_eden_ad||"", talep_eden_email: d.talep_eden_email||"",
         talep_edilen_personel: d.talep_edilen_personel||"", talep_edilen_personel_manuel: false,
         talep_edilen_firma: d.talep_edilen_firma||"",
@@ -12688,6 +12692,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
       [],
       ["TALEP NO",        t.talep_no||"",              "", "TARİH",       tarihFmt(t.talep_tarihi), "", ""],
       ["BÖLGE",           t.bolge||"-",                "", "PROJE",       t.proje||"-",             "SİTE TİPİ", t.site_type||"-"],
+      ["SİTE ID",         t.site_id||"-",              "", "", "", "", ""],
       ["TALEP EDEN",      t.talep_eden_ad||"-",        "", "FİRMA",       t.talep_edilen_firma||"-","", ""],
       ["TALEP ED. PERS.", t.talep_edilen_personel||"-","", "DURUM",       durumLabel[t.durum]||t.durum||"-", "", ""],
       ["AÇIKLAMA",        t.notlar||"-",               "", "", "", "", ""],
@@ -13022,6 +13027,12 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   {SITE_TYPES.map(b=><option key={b}>{b}</option>)}
                 </select>
               </div>
+              {/* Site ID */}
+              <div>
+                <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Site ID</label>
+                <input placeholder="Örn: IST-0042" value={talepForm.site_id||""} onChange={e=>setTalepForm(p=>({...p,site_id:e.target.value}))}
+                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+              </div>
               {/* Talep Eden */}
               <div>
                 <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Talep Eden</label>
@@ -13182,6 +13193,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                         {t.bolge&&<span>📍 {t.bolge}</span>}
                         {t.proje&&<span>🏗 {t.proje}</span>}
                         {t.site_type&&<span>📡 {t.site_type}</span>}
+                        {t.site_id&&<span>🔖 {t.site_id}</span>}
                         {t.talep_edilen_firma&&<span>🏢 {t.talep_edilen_firma}</span>}
                         <span>📅 {t.talep_tarihi ? new Date(t.talep_tarihi).toLocaleDateString("tr-TR") : new Date(t.created_at).toLocaleDateString("tr-TR")}</span>
                         <span>{Number(t.kalem_sayisi)} kalem</span>
