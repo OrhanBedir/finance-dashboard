@@ -7935,17 +7935,17 @@ function HrDashboard({ onBack, currentUser }) {
                       const wb = XLSXStyle.utils.book_new();
                       XLSXStyle.utils.book_append_sheet(wb, ws, "Personel Listesi");
 
-                      // Gridlines'ı kapat: buffer → JSZip XML patch → download
+                      // Gridlines kapat: buffer → JSZip STORE → XML patch → download
                       const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
                       JSZip.loadAsync(buf).then(zip => {
                         const sheetFile = zip.file("xl/worksheets/sheet1.xml");
                         return sheetFile.async("string").then(xml => {
-                          const patched = xml.replace(
-                            /<sheetView([^/]*)\/?>/,
-                            (m, attrs) => `<sheetView showGridLines="0"${attrs}/>`
-                          );
+                          // Basit string replace — regex yerine güvenli
+                          const patched = xml
+                            .replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>')
+                            .replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
                           zip.file("xl/worksheets/sheet1.xml", patched);
-                          return zip.generateAsync({ type:"blob", compression:"DEFLATE" });
+                          return zip.generateAsync({ type:"blob", compression:"STORE" });
                         });
                       }).then(blob => {
                         const url = URL.createObjectURL(blob);
