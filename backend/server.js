@@ -11219,6 +11219,117 @@ const AUTO_MIGRATIONS = [
     } else {
       console.log(`ℹ️  Malzeme fiyat listesi zaten dolu (${count.rows[0].count} kayıt)`);
     }
+    // GSP altyapı malzemeleri — her zaman eksik olanları ekle
+    const GSP_SEED = [
+      { adi:"NYY 3x4mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"NYY 3x6mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"NYY 3x10mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"NYY 3x16mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"NYY 3x35mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"NYY 1x50mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"NYY 1x95mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"NYAF 1x50mm2 ESNEK TOPRAKLAMA İLETKENİ", birim:"Metre", kategori:"Topraklama" },
+      { adi:"NYAF 1x16mm2 ESNEK TOPRAKLAMA İLETKENİ", birim:"Metre", kategori:"Topraklama" },
+      { adi:"NYAF 1x6mm2 ESNEK TOPRAKLAMA İLETKENİ", birim:"Metre", kategori:"Topraklama" },
+      { adi:"NH-FE 180 3x2.5mm2 YANMAZ ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"DC 48V GÜÇ KABLOSU 2x35mm2", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"BAKIR ÖRGÜLÜ TOPRAKLAMA İLETKENİ 35mm2", birim:"Metre", kategori:"Topraklama" },
+      { adi:"HDPE Ø50/42mm TEK KATLI KABLO KORUMA BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"HDPE Ø63/53mm TEK KATLI KABLO KORUMA BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"HDPE Ø110/94mm ÇİFT KATLI KABLO KORUMA BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"HDPE Ø160/136mm ÇİFT KATLI KABLO KORUMA BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"HDPE Ø40/34mm MİKROKANAL BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"PVC BORU Ø32mm ELEKTRİK TESİSAT BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"PVC BORU Ø50mm ELEKTRİK TESİSAT BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"PVC BORU Ø75mm ELEKTRİK TESİSAT BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"GALVANİZLİ ÇELİK BORU 2\" KABLO KORUMA BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"CORRUGATED BORU Ø32mm ESNEKLİK BORUSU", birim:"Metre", kategori:"Boru" },
+      { adi:"3m STANDART ANTEN OFSETİ (GALVANİZLİ ÇELİK)", birim:"Adet", kategori:"Ofset" },
+      { adi:"6m STANDART ANTEN OFSETİ (GALVANİZLİ ÇELİK)", birim:"Adet", kategori:"Ofset" },
+      { adi:"1.5m KISA ANTEN OFSETİ (HOT DIP GALVANİZLİ)", birim:"Adet", kategori:"Ofset" },
+      { adi:"DUVAR TİPİ ANTEN MONTAJ KOL SETİ", birim:"Set", kategori:"Ofset" },
+      { adi:"SEKTÖR ANTEN MONTAJ FLANŞI VE BAĞLANTI KİTİ", birim:"Set", kategori:"Ofset" },
+      { adi:"ANTEN TAVAN MONTAJ KİTİ (3 NOKTA SABITLEME)", birim:"Set", kategori:"Ofset" },
+      { adi:"U-BOLT M16 GALVANİZLİ KULE BAĞLANTI CİVATASI (4'LÜ SET)", birim:"Set", kategori:"Ofset" },
+      { adi:"48 FİBER OPTİK KABLO G.652D LOOSE TUBE OUTDOOR", birim:"Metre", kategori:"Fiber Optik" },
+      { adi:"96 FİBER OPTİK KABLO G.652D LOOSE TUBE OUTDOOR", birim:"Metre", kategori:"Fiber Optik" },
+      { adi:"24 FİBER OPTİK KABLO G.652D LOOSE TUBE OUTDOOR", birim:"Metre", kategori:"Fiber Optik" },
+      { adi:"12 FİBER OPTİK KABLO G.657A2 INDOOR/OUTDOOR", birim:"Metre", kategori:"Fiber Optik" },
+      { adi:"4 FİBER OPTİK KABLO G.652D FİGÜR-8 HAVAI", birim:"Metre", kategori:"Fiber Optik" },
+      { adi:"2M LC-LC SİNGLE MOD PATCH CORD (INDOOR)", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"2M SC-LC SİNGLE MOD PATCH CORD (INDOOR)", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"2M SC-SC SİNGLE MOD PATCH CORD (INDOOR)", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"LC/UPC PİGTAİL 1.5M SİNGLE MOD G.652D", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"SC/UPC PİGTAİL 1.5M SİNGLE MOD G.652D", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"SC/APC PİGTAİL 1.5M SİNGLE MOD G.652D", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"12 FİBER SC/UPC FANOUT SİNGLE MOD", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"24 FİBER SC/UPC FANOUT SİNGLE MOD", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"12 PORT LC DUPLEX FIBER OPTİK PATCH PANEL 19\" 1U", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"24 PORT SC SIMPLEX FIBER OPTİK PATCH PANEL 19\" 1U", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"48 PORT LC DUPLEX FIBER OPTİK PATCH PANEL 19\" 2U", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"FIBER OPTİK SPLICE CLOSURE 48 FİBER 4 PORT", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"FIBER OPTİK SPLICE CLOSURE 144 FİBER 6 PORT", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"FIBER OPTİK SPLICE CLOSURE 288 FİBER 6 PORT", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"FIBER OPTİK SONLANDIRMA KUTUSU 12 PORT SC", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"FIBER OPTİK SONLANDIRMA KUTUSU 24 PORT SC", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"ODF 19\" RACK TİPİ 12U FİBER DAĞITIM ÇERÇEVESİ", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"FIBER OPTİK SPLICE TRAY (12 FİBER KAPASİTELİ)", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"SC/LC ADAPTÖR SİNGLE MOD UPC", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"SC/LC ADAPTÖR SİNGLE MOD APC", birim:"Adet", kategori:"Fiber Optik" },
+      { adi:"BAKIR TOPRAKLAMA ÇUBUĞU 14mm x 1500mm", birim:"Adet", kategori:"Topraklama" },
+      { adi:"BAKIR TOPRAKLAMA ÇUBUĞU 14mm x 2000mm", birim:"Adet", kategori:"Topraklama" },
+      { adi:"BAKIR ŞERİT 30x3mm2 TOPRAKLAMA İLETKENİ", birim:"Metre", kategori:"Topraklama" },
+      { adi:"BAKIR ŞERİT 25x3mm2 TOPRAKLAMA İLETKENİ", birim:"Metre", kategori:"Topraklama" },
+      { adi:"TOPRAKLAMA RAYIÇ KLEMENSİ BUS BAR 100A", birim:"Adet", kategori:"Topraklama" },
+      { adi:"TOPRAKLAMA RAYIÇ KLEMENSİ BUS BAR 200A", birim:"Adet", kategori:"Topraklama" },
+      { adi:"TOPRAKLAMA PABUCİ CU 50mm2 M8", birim:"Adet", kategori:"Topraklama" },
+      { adi:"TOPRAKLAMA PABUCİ CU 95mm2 M10", birim:"Adet", kategori:"Topraklama" },
+      { adi:"GALVANİZLİ TOPRAKLAMA BAĞLANTISI KELEPÇE SETİ", birim:"Set", kategori:"Topraklama" },
+      { adi:"RF KOAKSIYEL FEEDER KABLO 1/2\"", birim:"Metre", kategori:"RF" },
+      { adi:"RF KOAKSIYEL FEEDER KABLO 7/8\"", birim:"Metre", kategori:"RF" },
+      { adi:"RF JUMPER KABLO 0.5M N(M)-N(M) SÜPER ESNEK", birim:"Adet", kategori:"RF" },
+      { adi:"RF JUMPER KABLO 1M N(M)-N(M) SÜPER ESNEK", birim:"Adet", kategori:"RF" },
+      { adi:"RF JUMPER KABLO 2M N(M)-N(M) SÜPER ESNEK", birim:"Adet", kategori:"RF" },
+      { adi:"N TİPİ KONNEKTÖR 1/2\" KOAKSIYEL KABLO İÇİN", birim:"Adet", kategori:"RF" },
+      { adi:"N TİPİ KONNEKTÖR 7/8\" KOAKSIYEL KABLO İÇİN", birim:"Adet", kategori:"RF" },
+      { adi:"7/16 DIN KONNEKTÖR 7/8\" KOAKSIYEL KABLO İÇİN", birim:"Adet", kategori:"RF" },
+      { adi:"RF TOPRAKLAMA KİTİ 1/2\" KABLO", birim:"Adet", kategori:"RF" },
+      { adi:"RF TOPRAKLAMA KİTİ 7/8\" KABLO", birim:"Adet", kategori:"RF" },
+      { adi:"GALVANİZLİ KABLO KANALÜ 100x50mm (3m PARÇA)", birim:"Adet", kategori:"Kablo Yönetimi" },
+      { adi:"GALVANİZLİ KABLO KANALÜ 200x100mm (3m PARÇA)", birim:"Adet", kategori:"Kablo Yönetimi" },
+      { adi:"PVC KABLO KANALÜ 25x16mm (2m PARÇA)", birim:"Adet", kategori:"Kablo Yönetimi" },
+      { adi:"PVC KABLO KANALÜ 40x25mm (2m PARÇA)", birim:"Adet", kategori:"Kablo Yönetimi" },
+      { adi:"KABLO ASKISI GALVANİZLİ 50mm", birim:"Adet", kategori:"Kablo Yönetimi" },
+      { adi:"KABLO ASKISI GALVANİZLİ 75mm", birim:"Adet", kategori:"Kablo Yönetimi" },
+      { adi:"ÇELİK KABLO BAĞI TIE WRAP 250mm 100 ADET", birim:"Paket", kategori:"Kablo Yönetimi" },
+      { adi:"PVC SPIRAL KABLO KORUYUCU Ø20mm", birim:"Metre", kategori:"Kablo Yönetimi" },
+      { adi:"KABLO MERDİVENİ LADDER RACK 300mm", birim:"Metre", kategori:"Kablo Yönetimi" },
+      { adi:"KABLO MERDİVENİ LADDER RACK 600mm", birim:"Metre", kategori:"Kablo Yönetimi" },
+      { adi:"J-HOOK KABLO ASKI KANCASI Ø75mm", birim:"Adet", kategori:"Kablo Yönetimi" },
+      { adi:"OUTDOOR METAL KABIN IP55 600x800x300mm", birim:"Adet", kategori:"Kabin" },
+      { adi:"OUTDOOR METAL KABIN IP55 1000x800x300mm", birim:"Adet", kategori:"Kabin" },
+      { adi:"19\" RACK DOLABI 42U AÇIK TİP", birim:"Adet", kategori:"Kabin" },
+      { adi:"19\" RACK DOLABI 42U KAPALI TİP", birim:"Adet", kategori:"Kabin" },
+      { adi:"HAVALANDIRMA FAN KİTİ KABIN 230VAC", birim:"Adet", kategori:"Kabin" },
+      { adi:"SPD AŞIRI GERİLİM KORUYUCU TİP 2 40kA", birim:"Adet", kategori:"Kabin" },
+      { adi:"AC KABLO 3x2.5mm2 TESİSAT KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
+      { adi:"ALÇAK GERİLİM KABİN ANAHTARLAMA PANELI", birim:"Adet", kategori:"Kabin" },
+    ];
+    let added = 0;
+    for (const m of GSP_SEED) {
+      const exists = await pool.query(
+        "SELECT 1 FROM malzeme_fiyat_listesi WHERE LOWER(malzeme_adi)=LOWER($1)", [m.adi]
+      );
+      if (!exists.rows.length) {
+        await pool.query(
+          `INSERT INTO malzeme_fiyat_listesi (malzeme_adi, birim, birim_fiyat, kategori)
+           VALUES ($1, $2, 0, $3)`,
+          [m.adi, m.birim, m.kategori]
+        ).catch(() => {});
+        added++;
+      }
+    }
+    if (added > 0) console.log(`✅ ${added} yeni GSP malzeme eklendi`);
   } catch (e) {
     console.error('Malzeme seed hatası:', e.message);
   }
