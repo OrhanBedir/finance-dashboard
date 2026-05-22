@@ -7901,8 +7901,9 @@ function HrDashboard({ onBack, currentUser }) {
                         });
                       });
 
-                      // Başlık satırı dondur
+                      // Başlık satırı dondur + gridlines kapat
                       ws["!freeze"] = { xSplit:0, ySplit:1 };
+                      ws["!sheetView"] = { showGridLines: false };
 
                       const wb = XLSXStyle.utils.book_new();
                       XLSXStyle.utils.book_append_sheet(wb, ws, "Personel Listesi");
