@@ -7974,7 +7974,7 @@ function HrDashboard({ onBack, currentUser }) {
               )}
 
               <div style={{ display:"grid", gap:"10px" }}>
-                {personelList.map(p => (
+                {personelList.filter(p => !hrPersonelFilter || String(p.id) === String(hrPersonelFilter)).map(p => (
                   <div key={p.id} style={{ background:"#fff", borderRadius:"14px", padding:"16px 20px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"grid", gridTemplateColumns:"44px 1fr auto auto auto", alignItems:"center", gap:"16px", opacity: p.aktif?1:0.6 }}>
                     <div style={{ width:44, height:44, borderRadius:"12px", background: p.aktif?"linear-gradient(135deg,#60a5fa,#3b82f6)":"#e5e7eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"18px", fontWeight:700, color:"#fff" }}>
                       {p.ad_soyad.charAt(0)}
