@@ -10612,16 +10612,22 @@ app.get("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
 // POST /malzeme/talepler
 app.post("/malzeme/talepler", authMiddleware, async (req, res) => {
   try {
-    const { talep_eden_email, talep_eden_ad, notlar, kalemler } = req.body;
+    const { talep_eden_email, talep_eden_ad, notlar, kalemler, durum: istenenDurum,
+            bolge, proje, site_type, talep_edilen_personel, talep_edilen_firma, talep_tarihi } = req.body;
     const yil = new Date().getFullYear();
     const sayac = await pool.query(
       "SELECT COUNT(*)+1 AS sira FROM malzeme_talepler WHERE EXTRACT(YEAR FROM created_at)=$1", [yil]
     );
     const talep_no = `MT-${yil}-${String(sayac.rows[0].sira).padStart(3,"0")}`;
+    const durum = istenenDurum || "TASLAK";
     const t = await pool.query(
-      `INSERT INTO malzeme_talepler (talep_no, talep_eden_email, talep_eden_ad, durum, notlar)
-       VALUES ($1,$2,$3,'NURCAN_ONAY',$4) RETURNING *`,
-      [talep_no, talep_eden_email, talep_eden_ad, notlar || ""]
+      `INSERT INTO malzeme_talepler
+         (talep_no, talep_eden_email, talep_eden_ad, durum, notlar,
+          bolge, proje, site_type, talep_edilen_personel, talep_edilen_firma, talep_tarihi)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [talep_no, talep_eden_email, talep_eden_ad, durum, notlar||"",
+       bolge||"", proje||"", site_type||"", talep_edilen_personel||"", talep_edilen_firma||"",
+       talep_tarihi || new Date().toISOString().split("T")[0]]
     );
     const tId = t.rows[0].id;
     if (Array.isArray(kalemler)) {
@@ -10634,8 +10640,65 @@ app.post("/malzeme/talepler", authMiddleware, async (req, res) => {
         );
       }
     }
+    // Fiyat listesine yeni fiyat varsa güncelle
+    for (const k of (kalemler||[])) {
+      if (k.birim_fiyat && Number(k.birim_fiyat) > 0) {
+        await pool.query(
+          `UPDATE malzeme_fiyat_listesi SET birim_fiyat=$1 WHERE LOWER(malzeme_adi)=LOWER($2)`,
+          [k.birim_fiyat, k.malzeme_adi]
+        ).catch(()=>{});
+      }
+    }
     res.json(t.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /malzeme/talepler/:id (talebi güncelle - taslak düzenleme)
+app.put("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
+  try {
+    const { notlar, kalemler, durum: istenenDurum,
+            bolge, proje, site_type, talep_edilen_personel, talep_edilen_firma, talep_tarihi } = req.body;
+    const durum = istenenDurum || "TASLAK";
+    await pool.query(
+      `UPDATE malzeme_talepler SET durum=$1, notlar=$2, bolge=$3, proje=$4, site_type=$5,
+       talep_edilen_personel=$6, talep_edilen_firma=$7, talep_tarihi=$8
+       WHERE id=$9`,
+      [durum, notlar||"", bolge||"", proje||"", site_type||"",
+       talep_edilen_personel||"", talep_edilen_firma||"",
+       talep_tarihi||new Date().toISOString().split("T")[0], req.params.id]
+    );
+    // kalem güncelle
+    if (Array.isArray(kalemler)) {
+      await pool.query("DELETE FROM malzeme_talep_kalemleri WHERE talep_id=$1", [req.params.id]);
+      for (const k of kalemler) {
+        await pool.query(
+          `INSERT INTO malzeme_talep_kalemleri (talep_id, malzeme_adi, miktar, birim, birim_fiyat, toplam_tutar, temin_turu, notlar)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [req.params.id, k.malzeme_adi, k.miktar, k.birim||"Adet", k.birim_fiyat||0,
+           k.toplam_tutar||(k.miktar*(k.birim_fiyat||0)), k.temin_turu||"", k.notlar||""]
+        );
+      }
+      for (const k of kalemler) {
+        if (k.birim_fiyat && Number(k.birim_fiyat) > 0) {
+          await pool.query(
+            `UPDATE malzeme_fiyat_listesi SET birim_fiyat=$1 WHERE LOWER(malzeme_adi)=LOWER($2)`,
+            [k.birim_fiyat, k.malzeme_adi]
+          ).catch(()=>{});
+        }
+      }
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /malzeme/bekleyen-count (Murat için bildirim sayısı)
+app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT COUNT(*) FROM malzeme_talepler WHERE durum='FIYAT_GIRISI'"
+    );
+    res.json({ count: Number(r.rows[0].count) });
+  } catch (e) { res.json({ count: 0 }); }
 });
 
 // PUT /malzeme/talepler/:id/durum  – durum güncelle + isteğe bağlı kalem güncelleme
@@ -10836,6 +10899,12 @@ const AUTO_MIGRATIONS = [
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`,
   "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS onay_notu TEXT",
+  "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS bolge TEXT",
+  "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS proje TEXT",
+  "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS site_type TEXT",
+  "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS talep_edilen_personel TEXT",
+  "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS talep_edilen_firma TEXT",
+  "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS talep_tarihi DATE DEFAULT CURRENT_DATE",
   // ── Rollout progress kolonları ──
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS bolge TEXT",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS il TEXT",

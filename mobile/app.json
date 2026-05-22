@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "ERC Operasyon",
+    "slug": "erc-operasyon",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1D4ED8"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.simsektel.ercoperasyon"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1D4ED8"
+      },
+      "package": "com.simsektel.ercoperasyon",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-build-properties"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "90c62b24-daec-4084-a6ee-9f3d23ea0c9c"
+      }
+    }
+  }
+}
