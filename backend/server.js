@@ -9151,71 +9151,110 @@ app.get("/hr/isg/uyarilar", async (req, res) => {
 // ---- HR EXCEL EXPORTS ----
 app.get("/hr/excel/puantaj", async (req, res) => {
   try {
-    const { ay, yil } = req.query;
+    const { ay, yil, personel_id } = req.query;
     const ExcelJS = require("exceljs");
     const wb = new ExcelJS.Workbook();
+    wb.creator = "ERC Dashboard";
+    wb.created = new Date();
 
-    // ── Açıklama sayfası (ilk sayfa) ──
+    const NAVY       = "FF1E3A5F";
+    const WHITE      = "FFFFFFFF";
+    const LIGHT_BLUE = "FFEFF6FF";
+
+    const DURUM_LABEL = { CALISDI:"✅", GELMEDI:"❌", IZIN:"🏖", RAPOR:"☪️", TATIL:"⭕", DINLENME:"💤", RESMI_TATIL:"🎌" };
+    const DURUM_COLOR = { CALISDI:"FFD1FAE5", GELMEDI:"FFFEE2E2", IZIN:"FFDBEAFE", RAPOR:"FFFEF3C7", TATIL:"FFF9FAFB", DINLENME:"FFF3E8FF", RESMI_TATIL:"FFDBEAFE" };
+    const WEEKEND_BG  = "FFFFF7ED"; // cumartesi/pazar kolonları
+
+    // ── Açıklama sayfası ──
     const wsAciklama = wb.addWorksheet("Açıklama");
-    wsAciklama.columns = [{ width: 22 }, { width: 40 }];
-    const aciklamaBaslik = wsAciklama.addRow(["PUANTAJ SİMGELERİ AÇIKLAMASI"]);
-    aciklamaBaslik.getCell(1).font = { bold: true, size: 13, color: { argb: "FFFFFFFF" } };
-    aciklamaBaslik.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
-    wsAciklama.mergeCells(`A1:B1`);
-    aciklamaBaslik.getCell(1).alignment = { horizontal: "center" };
+    wsAciklama.views = [{ showGridLines: false }];
+    wsAciklama.columns = [{ width: 24 }, { width: 46 }];
+
+    const aciklamaBaslik = wsAciklama.addRow(["PUANTAJ SİMGELERİ AÇIKLAMASI", ""]);
+    wsAciklama.mergeCells("A1:B1");
+    aciklamaBaslik.height = 28;
+    aciklamaBaslik.getCell(1).font = { bold: true, size: 13, color: { argb: WHITE }, name: "Calibri" };
+    aciklamaBaslik.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+    aciklamaBaslik.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+
     wsAciklama.addRow([]);
     const aciklamalar = [
-      ["✅  ÇALIŞTI",    "Personel o gün çalışmıştır.",           "FFD1FAE5"],
+      ["✅  ÇALIŞTI",    "Personel o gün çalışmıştır.",                "FFD1FAE5"],
       ["❌  GELMEDİ",    "Personel o gün işe gelmemiştir (ücretsiz).", "FFFEE2E2"],
-      ["🏖  İZİN",       "Yıllık izin kullanılmıştır (ücretli).", "FFDBEAFE"],
-      ["☪️  RAPOR",      "Sağlık raporu / hastalık izni.",         "FFFEF3C7"],
-      ["⭕  TATİL",      "Hafta tatili veya girilmemiş gün.",      "FFF9FAFB"],
-      ["💤  DİNLENME",   "Pazar fazla mesai karşılığı dinlenme.",  "FFF3E8FF"],
-      ["🎌  RESMİ TATİL","Ulusal veya dini resmi tatil günü.",     "FFDBEAFE"],
+      ["🏖  İZİN",       "Yıllık izin kullanılmıştır (ücretli).",      "FFDBEAFE"],
+      ["☪️  RAPOR",      "Sağlık raporu / hastalık izni.",              "FFFEF3C7"],
+      ["⭕  TATİL",      "Hafta tatili veya girilmemiş gün.",           "FFF1F5F9"],
+      ["💤  DİNLENME",   "Pazar fazla mesai karşılığı dinlenme.",       "FFF3E8FF"],
+      ["🎌  RESMİ TATİL","Ulusal veya dini resmi tatil günü.",          "FFDBEAFE"],
     ];
     for (const [simge, aciklama, renk] of aciklamalar) {
       const r = wsAciklama.addRow([simge, aciklama]);
-      r.getCell(1).font = { bold: true };
-      r.eachCell(c => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: renk } }; c.alignment = { vertical: "middle" }; });
       r.height = 22;
+      r.getCell(1).font = { bold: true, name: "Calibri", size: 11 };
+      r.getCell(2).font = { name: "Calibri", size: 11 };
+      r.eachCell(c => {
+        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: renk } };
+        c.alignment = { vertical: "middle" };
+        c.border = { bottom: { style: "thin", color: { argb: "FFE5E7EB" } } };
+      });
     }
     wsAciklama.addRow([]);
     const notSatir = wsAciklama.addRow(["NOT:", "Maaş bilgileri bu Excel'e dahil edilmemiştir."]);
-    notSatir.getCell(1).font = { bold: true, color: { argb: "FFB91C1C" } };
-    notSatir.getCell(2).font = { italic: true, color: { argb: "FF6B7280" } };
+    notSatir.getCell(1).font = { bold: true, color: { argb: "FFB91C1C" }, name: "Calibri" };
+    notSatir.getCell(2).font = { italic: true, color: { argb: "FF6B7280" }, name: "Calibri" };
 
     // ── Puantaj sayfası ──
     const ws = wb.addWorksheet("Puantaj");
+    ws.views = [{ showGridLines: false, state: "frozen", xSplit: 2, ySplit: 1 }];
 
     const totalDays = new Date(Number(yil), Number(ay), 0).getDate();
-    const personelList = await pool.query("SELECT * FROM personel WHERE aktif=true ORDER BY ad_soyad");
+    const ayAdi = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ay)-1];
+
+    let personelQuery = "SELECT * FROM personel WHERE aktif=true";
+    const queryParams = [];
+    if (personel_id) {
+      queryParams.push(personel_id);
+      personelQuery += ` AND id=$1`;
+    }
+    personelQuery += " ORDER BY ad_soyad";
+    const personelList = await pool.query(personelQuery, queryParams);
+
     const puantajRows = await pool.query(
       `SELECT id, personel_id, tarih, durum, not_aciklama, belge_yolu FROM puantaj
        WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2`, [ay, yil]
     );
 
     const ayGunleri = Array.from({ length: totalDays }, (_, i) => i + 1);
-    const headers = ["Personel", "Unvan", ...ayGunleri.map(g => String(g)), "Çalışılan"];
+
+    // Başlık satırı
+    const headers = ["Personel", "Unvan", ...ayGunleri.map(g => {
+      const d = new Date(Number(yil), Number(ay)-1, g).getDay();
+      return d===0 ? `${g}\nPaz` : d===6 ? `${g}\nCmt` : String(g);
+    }), "Çalışılan"];
     const headerRow = ws.addRow(headers);
-    headerRow.eachCell(cell => {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.alignment = { horizontal: "center" };
+    headerRow.height = 30;
+    headerRow.eachCell((cell, colNo) => {
+      const g = colNo - 2; // gün index
+      const isWeekend = g >= 1 && g <= totalDays && [0,6].includes(new Date(Number(yil), Number(ay)-1, g).getDay());
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isWeekend ? "FF2563EB" : NAVY } };
+      cell.font = { bold: true, color: { argb: WHITE }, name: "Calibri", size: colNo <= 2 ? 11 : 9 };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = { right: { style: "thin", color: { argb: "FF3B6EA5" } } };
     });
 
-    const DURUM_LABEL = { CALISDI:"✅", GELMEDI:"❌", IZIN:"🏖", RAPOR:"☪️", TATIL:"⭕", DINLENME:"💤", RESMI_TATIL:"🎌" };
-    const DURUM_COLOR = { CALISDI:"FFD1FAE5", GELMEDI:"FFFEE2E2", IZIN:"FFDBEAFE", RAPOR:"FFFEF3C7", TATIL:"FFF9FAFB", DINLENME:"FFF3E8FF", RESMI_TATIL:"FFDBEAFE" };
-
-    // ── Notlar sayfası ──
+    // Notlar sayfası
     const wsNot = wb.addWorksheet("Notlar");
-    const notHeaders = wsNot.addRow(["Personel", "Tarih", "Durum", "Not", "Belge"]);
+    wsNot.views = [{ showGridLines: false }];
+    const notHeaders = wsNot.addRow(["Personel", "Tarih", "Durum", "Not / Açıklama", "Belge"]);
+    notHeaders.height = 24;
     notHeaders.eachCell(cell => {
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF991B1B" } };
+      cell.font = { bold: true, color: { argb: WHITE }, name: "Calibri" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
     });
-    wsNot.columns = [{ width: 22 }, { width: 14 }, { width: 14 }, { width: 50 }, { width: 30 }];
+    wsNot.columns = [{ width: 24 }, { width: 14 }, { width: 14 }, { width: 52 }, { width: 30 }];
 
-    for (const p of personelList.rows) {
+    for (const [pi, p] of personelList.rows.entries()) {
       const rowData = [p.ad_soyad, p.unvan || ""];
       let calisilan = 0;
 
@@ -9224,37 +9263,63 @@ app.get("/hr/excel/puantaj", async (req, res) => {
         const pr = puantajRows.rows.find(x => x.personel_id === p.id && x.tarih?.toISOString?.().startsWith(tarih));
         const durum = pr?.durum || "TATIL";
         if (durum === "CALISDI") calisilan++;
-        rowData.push(DURUM_LABEL[durum] || "");
+        rowData.push(DURUM_LABEL[durum] || "⭕");
         if (pr?.not_aciklama || pr?.belge_yolu) {
           const notRow = wsNot.addRow([p.ad_soyad, tarih, durum, pr.not_aciklama || "", pr.belge_yolu || ""]);
+          notRow.height = 20;
           notRow.getCell(4).alignment = { wrapText: true };
           const notRenk = { GELMEDI:"FFFEE2E2", RAPOR:"FFFEF3C7", IZIN:"FFDBEAFE" }[durum];
-          if (notRenk) notRow.eachCell(c => { c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:notRenk } }; });
+          if (notRenk) notRow.eachCell(c => { c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:notRenk } }; c.border = { bottom:{ style:"thin", color:{ argb:"FFE5E7EB" } } }; });
         }
       }
 
       rowData.push(calisilan);
       const excelRow = ws.addRow(rowData);
-      excelRow.getCell(1).font = { bold: true };
+      excelRow.height = 20;
+      const isEven = pi % 2 === 0;
 
+      // İsim & Unvan sütunları
+      excelRow.getCell(1).font = { bold: true, name: "Calibri", size: 10 };
+      excelRow.getCell(2).font = { name: "Calibri", size: 10, color: { argb: "FF6B7280" } };
+      excelRow.getCell(1).fill = { type:"pattern", pattern:"solid", fgColor:{ argb: isEven ? LIGHT_BLUE : "FFFFFFFF" } };
+      excelRow.getCell(2).fill = { type:"pattern", pattern:"solid", fgColor:{ argb: isEven ? LIGHT_BLUE : "FFFFFFFF" } };
+
+      // Gün hücreleri
       for (const g of ayGunleri) {
         const tarih = `${yil}-${String(ay).padStart(2,"0")}-${String(g).padStart(2,"0")}`;
         const pr = puantajRows.rows.find(x => x.personel_id === p.id && x.tarih?.toISOString?.().startsWith(tarih));
         const durum = pr?.durum || "TATIL";
-        const cell = excelRow.getCell(g + 2); // +2 = Personel + Unvan
-        cell.alignment = { horizontal: "center" };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: DURUM_COLOR[durum] || "FFF9FAFB" } };
+        const dayOfWeek = new Date(Number(yil), Number(ay)-1, g).getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const cell = excelRow.getCell(g + 2);
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        const bgColor = DURUM_COLOR[durum] || "FFF1F5F9";
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isWeekend && durum==="TATIL" ? WEEKEND_BG : bgColor } };
+        cell.font = { name: "Calibri", size: 10 };
+        cell.border = { right: { style: "hair", color: { argb: "FFE5E7EB" } }, bottom: { style: "hair", color: { argb: "FFE5E7EB" } } };
         if (pr?.not_aciklama) cell.note = { texts: [{ text: pr.not_aciklama }] };
       }
+
+      // Çalışılan sütunu
+      const calCell = excelRow.getCell(ayGunleri.length + 3);
+      calCell.font = { bold: true, name: "Calibri", size: 11, color: { argb: "FF1E3A5F" } };
+      calCell.alignment = { horizontal: "center", vertical: "middle" };
+      calCell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: isEven ? "FFE0F2FE" : "FFCFFAFE" } };
+      calCell.border = { left: { style: "medium", color: { argb: "FF93C5FD" } } };
     }
 
-    ws.columns.forEach((col, i) => { col.width = i < 2 ? 20 : i < 2 + totalDays ? 5 : 10; });
+    // Kolon genişlikleri
+    ws.getColumn(1).width = 22;
+    ws.getColumn(2).width = 16;
+    for (let g = 1; g <= totalDays; g++) ws.getColumn(g + 2).width = 4.5;
+    ws.getColumn(totalDays + 3).width = 10;
 
+    const ayPad = String(ay).padStart(2,"0");
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename=puantaj_${yil}_${String(ay).padStart(2,"0")}.xlsx`);
+    res.setHeader("Content-Disposition", `attachment; filename=ERC_Puantaj_${ayAdi}_${yil}.xlsx`);
     await wb.xlsx.write(res);
     res.end();
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error("PUANTAJ EXCEL ERROR:", e.message); res.status(500).json({ error: e.message }); }
 });
 
 app.get("/hr/excel/isg", async (req, res) => {

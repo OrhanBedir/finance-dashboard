@@ -8356,8 +8356,39 @@ function HrDashboard({ onBack, currentUser }) {
                 <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
               ))}
             </select>
+            {/* Puantaj personel filtresi */}
+            <div style={{ position:"relative", minWidth:"180px" }}>
+              <input
+                type="text"
+                placeholder="🔍 Personel ara..."
+                value={hrSearchText}
+                autoComplete="off"
+                onFocus={()=>setHrSearchOpen(true)}
+                onBlur={()=>setTimeout(()=>setHrSearchOpen(false),150)}
+                onChange={e=>{ setHrSearchText(e.target.value); setHrSearchOpen(true); if(!e.target.value){ setHrPersonelFilter(""); } }}
+                style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}
+              />
+              {hrSearchOpen && (
+                <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"8px", boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:999, maxHeight:"220px", overflowY:"auto" }}>
+                  <div onMouseDown={()=>{ setHrPersonelFilter(""); setHrSearchText(""); setHrSearchOpen(false); }}
+                    style={{ padding:"8px 12px", fontSize:"13px", color:"#6b7280", cursor:"pointer", borderBottom:"1px solid #f3f4f6" }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                    onMouseLeave={e=>e.currentTarget.style.background=""}>
+                    👥 Tüm Personel
+                  </div>
+                  {personelList.filter(p=>p.aktif && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
+                    <div key={p.id} onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); }}
+                      style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
+                      onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                      onMouseLeave={e=>e.currentTarget.style.background=""}>
+                      {p.ad_soyad}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div style={{ fontSize:"13px", color:"#6b7280" }}>Hücreye tıkla: ✅→❌→🏖→☪️→⭕→💤→🎌</div>
-            <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`}
+            <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}${hrPersonelFilter ? `&personel_id=${hrPersonelFilter}` : ""}`}
               style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>
               📥 Excel İndir
             </a>
