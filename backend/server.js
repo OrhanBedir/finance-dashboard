@@ -1388,6 +1388,7 @@ function getEndOfMonth(date) {
 }
 
 async function buildUpcomingCollectionsData() {
+  // H01 iade faturaları (negatif remaining_amount) dahil — net ödeme hesabı için
   const result = await pool.query(`
     SELECT
       p.invoice_no,
@@ -1395,7 +1396,7 @@ async function buildUpcomingCollectionsData() {
       COALESCE(p.remaining_amount, 0) AS remaining_amount,
       COALESCE(p.currency, 'TRY') AS currency
     FROM hw_payment_rows p
-    WHERE COALESCE(p.remaining_amount, 0) > 0
+    WHERE COALESCE(p.remaining_amount, 0) != 0
       AND p.due_date IS NOT NULL
     ORDER BY p.due_date ASC
   `);
@@ -1422,7 +1423,7 @@ async function buildUpcomingCollectionsData() {
 
   for (const row of result.rows) {
     const amount = Number(row.remaining_amount || 0);
-    if (amount <= 0) continue;
+    if (amount === 0) continue;  // Sadece sıfırı atla; H01 negatifleri dahil et
 
     const dueDate = new Date(row.due_date);
     dueDate.setHours(0, 0, 0, 0);
@@ -1462,11 +1463,19 @@ async function buildUpcomingCollectionsData() {
         due_date: key,
         day_name,
         amount: 0,
+        gross_amount: 0,
+        deduction_amount: 0,
         currency: row.currency || "TRY",
       });
     }
 
-    groupedMap.get(key).amount += amount;
+    const entry = groupedMap.get(key);
+    entry.amount += amount;  // net (pozitif + negatif)
+    if (amount > 0) {
+      entry.gross_amount += amount;
+    } else {
+      entry.deduction_amount += amount;  // negatif → H01 kesintisi
+    }
   }
 
   const rows = [...groupedMap.values()].sort(

@@ -4974,13 +4974,18 @@ function FinanceDashboard({
               <EmptyRow colSpan={3} text="Gelecek tahsilat bulunamadı" />
             ) : (
               upcomingRows.map((row, index) => (
-                <tr key={index}>
+                <tr key={index} style={row.amount < 0 ? { background:"#fff5f5" } : {}}>
                   <td>{row.day_name || "-"}</td>
                   <td>{formatDateOnly(row.due_date)}</td>
                   <td>
-                    {formatMoneyByCurrency(
-                      row.amount || 0,
-                      row.currency || "TRY",
+                    <div style={{ fontWeight:700, color: row.amount < 0 ? "#dc2626" : "#1a7f45" }}>
+                      {formatMoneyByCurrency(row.amount || 0, row.currency || "TRY")}
+                    </div>
+                    {row.deduction_amount < 0 && (
+                      <div style={{ fontSize:11, color:"#dc2626", marginTop:2 }}>
+                        Brüt: {formatMoneyByCurrency(row.gross_amount || 0, row.currency || "TRY")}
+                        &nbsp;|&nbsp;İade Kesinti: {formatMoneyByCurrency(row.deduction_amount || 0, row.currency || "TRY")}
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -5104,26 +5109,22 @@ function FinanceDashboard({
             {filteredPaymentRows.length === 0 ? (
               <EmptyRow colSpan={6} text="Kayıt bulunamadı" />
             ) : (
-              filteredPaymentRows.map((row, index) => (
-                <tr key={row.id ?? index}>
-                  <td>{row.invoice_no || "-"}</td>
-                  <td>
-                    {formatMoneyByCurrency(
-                      row.invoice_amount || 0,
-                      row.currency,
-                    )}
+              filteredPaymentRows.map((row, index) => {
+                const isIade = String(row.invoice_no || "").startsWith("H01");
+                return (
+                <tr key={row.id ?? index} style={isIade ? { background:"#fff5f5" } : {}}>
+                  <td style={isIade ? { color:"#dc2626", fontWeight:600 } : {}}>
+                    {row.invoice_no || "-"}
+                    {isIade && <span style={{ marginLeft:6, fontSize:11, background:"#fee2e2", color:"#dc2626", borderRadius:4, padding:"1px 5px" }}>İADE</span>}
                   </td>
-                  <td>
-                    {formatMoneyByCurrency(
-                      row.payment_amount || 0,
-                      row.currency,
-                    )}
+                  <td style={isIade ? { color:"#dc2626" } : {}}>
+                    {formatMoneyByCurrency(row.invoice_amount || 0, row.currency)}
                   </td>
-                  <td>
-                    {formatMoneyByCurrency(
-                      row.remaining_amount || 0,
-                      row.currency,
-                    )}
+                  <td style={isIade ? { color:"#dc2626" } : {}}>
+                    {formatMoneyByCurrency(row.payment_amount || 0, row.currency)}
+                  </td>
+                  <td style={isIade ? { color:"#dc2626" } : {}}>
+                    {formatMoneyByCurrency(row.remaining_amount || 0, row.currency)}
                   </td>
                   <td>{formatDateOnly(row.payment_date)}</td>
 
@@ -5136,7 +5137,8 @@ function FinanceDashboard({
                     {row.due_date ? formatDateOnly(row.due_date) : "-"}
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
