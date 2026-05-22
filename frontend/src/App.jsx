@@ -12647,17 +12647,19 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     return <span style={{ padding: "3px 10px", borderRadius: 12, fontSize: 12, fontWeight: 700, color: s.color, background: s.bg, whiteSpace: "nowrap" }}>{s.label}</span>;
   };
 
-  const KalemRow = ({ k, i }) => (
-    <div style={{ display: "grid", gridTemplateColumns: "2fr 80px 80px 1fr auto", gap: 6, marginBottom: 6 }}>
+  // KalemRow component olarak değil, renderKalem fonksiyonu olarak tanımlandı
+  // (component olarak tanımlanırsa her render'da re-mount olup focus kaybolur)
+  const renderKalemRow = (k, i) => (
+    <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 80px 80px 1fr auto", gap: 6, marginBottom: 6 }}>
       <div style={{ position: "relative" }}>
         <input placeholder="Malzeme adı" value={k.malzeme_adi}
           onChange={e => { const v = e.target.value; setTalepKalemler(prev => prev.map((x, j) => j===i ? {...x, malzeme_adi: v} : x)); }}
           style={{ width: "100%", padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, boxSizing: "border-box" }} />
         {k.malzeme_adi.length > 1 && fiyatListe.filter(f => f.malzeme_adi.toLowerCase().includes(k.malzeme_adi.toLowerCase())).length > 0 && (
-          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", maxHeight: 150, overflowY: "auto" }}>
-            {fiyatListe.filter(f => f.malzeme_adi.toLowerCase().includes(k.malzeme_adi.toLowerCase())).slice(0,8).map(f => (
-              <div key={f.id} style={{ padding: "6px 10px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid #f3f4f6" }}
-                onMouseDown={() => setTalepKalemler(prev => prev.map((x, j) => j===i ? {...x, malzeme_adi: f.malzeme_adi, birim: f.birim} : x))}>
+          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", maxHeight: 180, overflowY: "auto" }}>
+            {fiyatListe.filter(f => f.malzeme_adi.toLowerCase().includes(k.malzeme_adi.toLowerCase())).slice(0,10).map(f => (
+              <div key={f.id} style={{ padding: "6px 10px", cursor: "pointer", fontSize: 12, borderBottom: "1px solid #f3f4f6" }}
+                onMouseDown={e => { e.preventDefault(); setTalepKalemler(prev => prev.map((x, j) => j===i ? {...x, malzeme_adi: f.malzeme_adi, birim: f.birim} : x)); }}>
                 {f.malzeme_adi} <span style={{ color: "#9ca3af", fontSize: 11 }}>({f.birim})</span>
               </div>
             ))}
@@ -12964,7 +12966,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                 <button onClick={() => setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",notlar:""}])}
                   style={{ padding:"5px 12px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:700 }}>+ Kalem Ekle</button>
               </div>
-              {talepKalemler.map((k,i) => <KalemRow key={i} k={k} i={i} />)}
+              {talepKalemler.map((k,i) => renderKalemRow(k, i))}
             </div>
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end",marginTop:16 }}>
               <button onClick={() => setYeniTalep(false)} style={{ padding:"10px 20px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>İptal</button>
