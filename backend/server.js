@@ -10619,20 +10619,26 @@ const AUTO_MIGRATIONS = [
 (async () => {
   try {
     const existing = await pool.query(
-      "SELECT id FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1",
+      "SELECT id, subcon_name, payment_rate FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1",
       ["zsandal@ubstasarimmakine.com.tr"]
     );
     if (existing.rows.length === 0) {
-      const bcrypt = require("bcrypt");
       const hash = await bcrypt.hash("123456", 10);
       await pool.query(
         `INSERT INTO users (name, email, password_hash, role, is_active, subcon_name, payment_rate)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         ["Zeki Sandal", "zsandal@ubstasarimmakine.com.tr", hash, "subcon", true, "UBS", 0.75]
       );
-      console.log("✅ UBS kullanıcısı oluşturuldu: zsandal@ubstasarimmakine.com.tr");
+      console.log("✅ UBS kullanıcısı oluşturuldu");
+    } else if (!existing.rows[0].subcon_name || existing.rows[0].payment_rate !== 0.75) {
+      await pool.query(
+        `UPDATE users SET subcon_name = $1, payment_rate = $2, role = 'subcon', is_active = true
+         WHERE LOWER(TRIM(email)) = $3`,
+        ["UBS", 0.75, "zsandal@ubstasarimmakine.com.tr"]
+      );
+      console.log("✅ UBS kullanıcısı güncellendi (subcon_name + payment_rate)");
     } else {
-      console.log("ℹ️  UBS kullanıcısı zaten mevcut");
+      console.log("ℹ️  UBS kullanıcısı zaten doğru");
     }
   } catch (e) {
     console.error("UBS seed hatası:", e.message);
