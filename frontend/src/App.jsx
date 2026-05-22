@@ -8487,7 +8487,7 @@ function HrDashboard({ onBack, currentUser }) {
             <div style={{ marginTop:"24px" }}>
               <h3 style={{ marginBottom:"12px" }}>💰 Ay Özeti</h3>
               <div style={{ display:"grid", gap:"8px" }}>
-                {ozet.map(o => {
+                {ozet.filter(o => !hrPersonelFilter || String(o.personel_id) === String(hrPersonelFilter)).map(o => {
                   const tooltipOzet = [
                     `Çalışılan: ${o.calisilan_gun} gün`,
                     `Gelmedi: ${o.gelmedi_gun||0} gün (kesinti: ₺${Math.round((o.gelmedi_gun||0)*(o.net_maas||0)/26).toLocaleString("tr-TR")})`,
