@@ -7840,6 +7840,48 @@ function HrDashboard({ onBack, currentUser }) {
                     <option value="">👥 Tüm Personel</option>
                     {personelList.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
                   </select>
+                  <button style={{ padding:"7px 14px", background:"#16a34a", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}
+                    onClick={() => {
+                      const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş Tarihi","İşten Ayrılma Tarihi","Net Maaş (₺)","Bankadan Gösterilen (₺)","Elden Verilen (₺)","IBAN","Banka Adı","Banka Hesap No","Durum"];
+                      const keys   = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","iban","banka_adi","banka_hesap_no","aktif"];
+                      const rows = personelList.map(p => keys.map(k => k==="aktif" ? (p[k]?"Aktif":"Pasif") : (p[k]||"")));
+                      const wsData = [headers, ...rows];
+                      const ws = XLSX.utils.aoa_to_sheet(wsData);
+                      // Kolon genişlikleri
+                      ws["!cols"] = [22,18,14,14,14,14,26,14,14,14,18,14,30,16,18,8].map(w=>({wch:w}));
+                      // Başlık stili — mavi arka plan, beyaz yazı, kalın
+                      const blueFill = { patternType:"solid", fgColor:{ rgb:"1E40AF" } };
+                      const whiteFont = { bold:true, color:{ rgb:"FFFFFF" }, sz:11 };
+                      const border = { top:{style:"thin",color:{rgb:"CCCCCC"}}, bottom:{style:"thin",color:{rgb:"CCCCCC"}}, left:{style:"thin",color:{rgb:"CCCCCC"}}, right:{style:"thin",color:{rgb:"CCCCCC"}} };
+                      headers.forEach((_,ci) => {
+                        const addr = XLSX.utils.encode_cell({r:0,c:ci});
+                        if (!ws[addr]) return;
+                        ws[addr].s = { fill:blueFill, font:whiteFont, alignment:{horizontal:"center",vertical:"center",wrapText:true}, border };
+                      });
+                      // Veri satırları stili — zebra şerit
+                      rows.forEach((row,ri) => {
+                        row.forEach((_,ci) => {
+                          const addr = XLSX.utils.encode_cell({r:ri+1,c:ci});
+                          if (!ws[addr]) return;
+                          const isNum = ["net_maas","bankadan_gosterilen","elden_verilen"].includes(keys[ci]);
+                          ws[addr].s = {
+                            fill:{ patternType:"solid", fgColor:{ rgb: ri%2===0 ? "F8FAFC" : "FFFFFF" } },
+                            font:{ sz:10, color:{ rgb: isNum?"1E40AF":"1F2937" }, bold: isNum },
+                            alignment:{ horizontal: isNum?"right":"left", vertical:"center" },
+                            border
+                          };
+                          if (isNum && ws[addr].v) ws[addr].t="n", ws[addr].v=Number(ws[addr].v)||0;
+                        });
+                      });
+                      // Satır yüksekliği — başlık
+                      ws["!rows"] = [{ hpt:22 }, ...rows.map(()=>({ hpt:18 }))];
+                      const wb = XLSX.utils.book_new();
+                      XLSX.utils.book_append_sheet(wb, ws, "Personel Listesi");
+                      const today = new Date().toISOString().slice(0,10);
+                      XLSX.writeFile(wb, `ERC_Personel_Listesi_${today}.xlsx`);
+                    }}>
+                    📥 Excel İndir
+                  </button>
                   <button className="saveButton" onClick={()=>{ setEditingPersonel(null); setPForm({ ad_soyad:"",tc_no:"",dogum_tarihi:"",telefon:"",email:"",unvan:"",bolge:"",ise_giris_tarihi:"",isten_ayrilma_tarihi:"",net_maas:"",bankadan_gosterilen:"",elden_verilen:"",iban:"",banka_adi:"",banka_hesap_no:"",aktif:true }); setShowPersonelForm(true); }}>
                     + Personel Ekle
                   </button>
