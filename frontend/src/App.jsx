@@ -12683,6 +12683,46 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
 
 // ─── MALZEME YÖNETİMİ PANELİ ─────────────────────────────────────────────────
+/* ============================================================
+   NAKIT AKIŞ / CASH FLOW PANEL
+   ============================================================ */
+function CashFlowPanel({ currentUser, onBack }) {
+  return (
+    <div style={{ maxWidth:"1200px", margin:"0 auto", padding:"24px" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"28px" }}>
+        {onBack && (
+          <button onClick={onBack} style={{ background:"#f3f4f6", border:"none", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>←</button>
+        )}
+        <div>
+          <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>💵 Nakit Akış</h2>
+          <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>Gelir & gider akışı, likidite takibi</p>
+        </div>
+      </div>
+
+      <div style={{ background:"#fff", borderRadius:"16px", padding:"48px", textAlign:"center", boxShadow:"0 2px 12px rgba(0,0,0,0.06)", border:"2px dashed #e5e7eb" }}>
+        <div style={{ fontSize:"56px", marginBottom:"16px" }}>💵</div>
+        <h3 style={{ fontSize:"20px", fontWeight:700, color:"#1e3a5f", margin:"0 0 10px" }}>Nakit Akış Modülü</h3>
+        <p style={{ color:"#6b7280", fontSize:"14px", maxWidth:"480px", margin:"0 auto 24px" }}>
+          Bu bölüm geliştirme aşamasındadır. Nasıl bir nakit akış takibi istediğinizi birlikte tasarlayacağız.
+        </p>
+        <div style={{ display:"flex", gap:"12px", justifyContent:"center", flexWrap:"wrap" }}>
+          {[
+            { emoji:"📥", label:"Gelir Girişleri" },
+            { emoji:"📤", label:"Gider Çıkışları" },
+            { emoji:"📊", label:"Aylık Grafik" },
+            { emoji:"💰", label:"Likidite Tahmini" },
+          ].map(item => (
+            <div key={item.label} style={{ background:"#f8fafc", borderRadius:"12px", padding:"16px 20px", minWidth:"130px", border:"1.5px solid #e5e7eb" }}>
+              <div style={{ fontSize:"28px", marginBottom:"6px" }}>{item.emoji}</div>
+              <div style={{ fontSize:"12px", fontWeight:600, color:"#374151" }}>{item.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const _email = (currentUser?.email || "").toLowerCase();
   const isAdmin    = currentUser?.role === "admin";
@@ -14685,7 +14725,25 @@ function App() {
               )}
             </button>
 
-            {canSeeMalzeme && (
+            {(canSeeMalzeme || isAdmin) && (
+              <button
+                className={page === "malzeme" ? "tab activeTab" : "tab"}
+                onClick={() => setPage("malzeme")}
+              >
+                📦 Malzeme Yönetimi
+              </button>
+            )}
+
+            {isAdmin && (
+              <button
+                className={page === "cashflow" ? "tab activeTab" : "tab"}
+                onClick={() => setPage("cashflow")}
+              >
+                💵 Nakit Akış
+              </button>
+            )}
+
+            {canSeeMalzeme && false && (
               <button
                 className={page === "malzeme" ? "tab activeTab" : "tab"}
                 onClick={() => setPage("malzeme")}
@@ -14810,6 +14868,7 @@ function App() {
       {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
       {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
       {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
+      {page === "cashflow" && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
       {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
       {page === "executive" && <RolloutDashboard currentUser={user} />}
       {page === "region" && (
