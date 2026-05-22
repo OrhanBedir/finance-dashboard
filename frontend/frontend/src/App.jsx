@@ -12532,6 +12532,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   // Form görünümü: null=liste, "yeni"=yeni form, id=düzenleme
   const [formView, setFormView] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [siteCodeSuggestions, setSiteCodeSuggestions] = useState([]);
+  const [showSiteDropdown, setShowSiteDropdown] = useState(false);
   const emptyForm = () => ({
     bolge: "", proje: "", site_type: "", site_id: "",
     talep_eden_ad: currentUser?.name || currentUser?.email || "",
@@ -12592,6 +12594,25 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
       setFiyatListe(Array.isArray(d) ? d : []);
     } catch { setFiyatListe([]); }
   };
+
+  const searchSiteCode = async (q) => {
+    if (!q || q.length < 2) { setSiteCodeSuggestions([]); return; }
+    try {
+      const r = await fetch(`${API_BASE}/malzeme/site-codes?q=${encodeURIComponent(q)}`, { headers });
+      const d = await r.json();
+      setSiteCodeSuggestions(Array.isArray(d) ? d : []);
+    } catch { setSiteCodeSuggestions([]); }
+  };
+
+  const deleteTalep = async (id) => {
+    if (!window.confirm("Bu talebi silmek istediğinize emin misiniz?")) return;
+    try {
+      const r = await fetch(`${API_BASE}/malzeme/talepler/${id}`, { method:"DELETE", headers });
+      const d = await r.json();
+      if (d.error) { alert(d.error); return; }
+      loadTalepler();
+    } catch (e) { alert(e.message); }
+  };
   const loadPersonel = async () => {
     try {
       const r = await fetch(`${API_BASE}/hr/personel`, { headers });
@@ -12617,6 +12638,10 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const saveTalep = async (durum) => {
     const kalemlerDolu = talepKalemler.filter(k => k.malzeme_adi.trim());
     if (!kalemlerDolu.length) { alert("En az bir malzeme kalemi girin"); return; }
+    if (durum !== "TASLAK" && !talepForm.site_id?.trim()) {
+      alert("⚠️ Onaya göndermeden önce Site ID giriniz.\nHuawei sisteminde PO olmadan malzeme çıkışı yapılamaz.");
+      return;
+    }
     setSaving(true);
     try {
       const body = {
@@ -12780,12 +12805,12 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const renderKalemRow = (k, i) => {
     const fiyatAc = fiyatListe.find(f => f.malzeme_adi.toLowerCase() === k.malzeme_adi.toLowerCase());
     const exactMatch = fiyatListe.some(f => f.malzeme_adi.toLowerCase() === k.malzeme_adi.toLowerCase());
-    const suggestions = !exactMatch && k.malzeme_adi.length > 1
-      ? fiyatListe.filter(f => f.malzeme_adi.toLowerCase().includes(k.malzeme_adi.toLowerCase())).slice(0,10)
+    const suggestions = !exactMatch && k.malzeme_adi.length >= 1
+      ? fiyatListe.filter(f => f.malzeme_adi.toLowerCase().includes(k.malzeme_adi.toLowerCase())).slice(0,12)
       : [];
     const toplam = (Number(k.miktar)||0) * (Number(k.birim_fiyat)||0);
     return (
-      <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 70px 90px 110px 90px 90px 32px", gap:6, marginBottom:8, alignItems:"start" }}>
+      <div key={i} style={{ display:"grid", gridTemplateColumns:"2fr 80px 100px 120px 100px 100px 36px", gap:8, marginBottom:10, alignItems:"start" }}>
         {/* Malzeme adı + autocomplete */}
         <div style={{ position:"relative" }}>
           <input placeholder="Malzeme adı yazın..." value={k.malzeme_adi}
@@ -12999,81 +13024,101 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           {/* Talep Bilgileri */}
           <div style={{ background:"#fff",borderRadius:12,padding:20,marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
             <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f",marginBottom:14 }}>📋 Talep Bilgileri</div>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12 }}>
-              {/* Bölge */}
+            {/* Satır 1: Bölge | Proje | Site Tipi */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12 }}>
               <div>
                 <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Bölge <span style={{color:"#dc2626"}}>*</span></label>
                 <select value={talepForm.bolge} onChange={e=>setTalepForm(p=>({...p,bolge:e.target.value}))}
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }}>
+                  style={{ width:"100%",padding:"10px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box",height:40 }}>
                   <option value="">Seçin...</option>
                   {BOLGELER.map(b=><option key={b}>{b}</option>)}
                 </select>
               </div>
-              {/* Proje */}
               <div>
                 <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Proje <span style={{color:"#dc2626"}}>*</span></label>
                 <select value={talepForm.proje} onChange={e=>setTalepForm(p=>({...p,proje:e.target.value}))}
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }}>
+                  style={{ width:"100%",padding:"10px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box",height:40 }}>
                   <option value="">Seçin...</option>
                   {PROJELER.map(b=><option key={b}>{b}</option>)}
                 </select>
               </div>
-              {/* Site Type */}
               <div>
                 <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Site Tipi</label>
                 <select value={talepForm.site_type} onChange={e=>setTalepForm(p=>({...p,site_type:e.target.value}))}
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }}>
+                  style={{ width:"100%",padding:"10px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box",height:40 }}>
                   <option value="">Seçin...</option>
                   {SITE_TYPES.map(b=><option key={b}>{b}</option>)}
                 </select>
               </div>
-              {/* Site ID */}
-              <div>
-                <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Site ID</label>
-                <input placeholder="Örn: IST-0042" value={talepForm.site_id||""} onChange={e=>setTalepForm(p=>({...p,site_id:e.target.value}))}
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+            </div>
+            {/* Satır 2: Site ID (autocomplete) | Talep Eden | Talep Tarihi */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12 }}>
+              <div style={{ position:"relative" }}>
+                <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Site ID <span style={{color:"#dc2626"}}>*</span></label>
+                <input placeholder="Site kodu yazın..." value={talepForm.site_id||""}
+                  onChange={e=>{
+                    setTalepForm(p=>({...p,site_id:e.target.value}));
+                    searchSiteCode(e.target.value);
+                    setShowSiteDropdown(true);
+                  }}
+                  onBlur={()=>setTimeout(()=>setShowSiteDropdown(false),200)}
+                  onFocus={()=>{ if(talepForm.site_id?.length>=2) setShowSiteDropdown(true); }}
+                  style={{ width:"100%",padding:"10px 10px",border:`1px solid ${talepForm.site_id?"#16a34a":"#d1d5db"}`,borderRadius:7,fontSize:13,boxSizing:"border-box",height:40 }} />
+                {showSiteDropdown && siteCodeSuggestions.length>0 && (
+                  <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:300,background:"#fff",border:"1px solid #d1d5db",borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:200,overflowY:"auto" }}>
+                    {siteCodeSuggestions.map(s=>(
+                      <div key={s.site_code} onMouseDown={e=>{
+                        e.preventDefault();
+                        setTalepForm(p=>({...p, site_id:s.site_code, site_type:s.site_type||p.site_type, bolge:s.bolge||p.bolge}));
+                        setShowSiteDropdown(false);
+                      }} style={{ padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between" }}>
+                        <span style={{fontWeight:700}}>{s.site_code}</span>
+                        <span style={{color:"#9ca3af"}}>{[s.bolge,s.site_type,s.project_code].filter(Boolean).join(" · ")}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              {/* Talep Eden */}
               <div>
                 <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Talep Eden</label>
                 <input value={talepForm.talep_eden_ad} readOnly
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #e5e7eb",borderRadius:7,fontSize:13,background:"#f9fafb",boxSizing:"border-box" }} />
+                  style={{ width:"100%",padding:"10px 10px",border:"1px solid #e5e7eb",borderRadius:7,fontSize:13,background:"#f9fafb",boxSizing:"border-box",height:40 }} />
               </div>
-              {/* Talep Tarihi */}
               <div>
                 <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Talep Tarihi</label>
                 <input type="date" value={talepForm.talep_tarihi} onChange={e=>setTalepForm(p=>({...p,talep_tarihi:e.target.value}))}
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+                  style={{ width:"100%",padding:"10px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box",height:40 }} />
               </div>
-              {/* Talep Edilen Firma */}
+            </div>
+            {/* Satır 3: Talep Edilen Firma | boş | boş */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12 }}>
               <div>
                 <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Talep Edilen Firma</label>
                 <select value={talepForm.talep_edilen_firma} onChange={e=>setTalepForm(p=>({...p,talep_edilen_firma:e.target.value}))}
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }}>
+                  style={{ width:"100%",padding:"10px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box",height:40 }}>
                   <option value="">Seçin...</option>
                   {FIRMALAR.map(b=><option key={b}>{b}</option>)}
                 </select>
               </div>
-            </div>
-            {/* Talep Edilen Personel */}
-            <div style={{ marginTop:12 }}>
-              <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Talep Edilen Personel</label>
-              <div style={{ display:"flex",gap:8 }}>
-                {!talepForm.talep_edilen_personel_manuel ? (
-                  <select value={talepForm.talep_edilen_personel} onChange={e=>setTalepForm(p=>({...p,talep_edilen_personel:e.target.value}))}
-                    style={{ flex:1,padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }}>
-                    <option value="">Personel listesinden seçin...</option>
-                    {personelListe.map(p=><option key={p.id} value={p.ad_soyad}>{p.ad_soyad}</option>)}
-                  </select>
-                ) : (
-                  <input value={talepForm.talep_edilen_personel} onChange={e=>setTalepForm(p=>({...p,talep_edilen_personel:e.target.value}))}
-                    placeholder="Personel adını yazın..."
-                    style={{ flex:1,padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }} />
-                )}
-                <button onClick={()=>setTalepForm(p=>({...p,talep_edilen_personel_manuel:!p.talep_edilen_personel_manuel,talep_edilen_personel:""}))}
-                  style={{ padding:"9px 14px",background:"#f3f4f6",border:"1px solid #d1d5db",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:600,whiteSpace:"nowrap" }}>
-                  {talepForm.talep_edilen_personel_manuel ? "📋 Listeden Seç" : "✏️ Manuel Gir"}
-                </button>
+              <div style={{ gridColumn:"span 2" }}>
+                <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Talep Edilen Personel</label>
+                <div style={{ display:"flex",gap:8,height:40 }}>
+                  {!talepForm.talep_edilen_personel_manuel ? (
+                    <select value={talepForm.talep_edilen_personel} onChange={e=>setTalepForm(p=>({...p,talep_edilen_personel:e.target.value}))}
+                      style={{ flex:1,padding:"10px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,height:40,boxSizing:"border-box" }}>
+                      <option value="">Personel listesinden seçin...</option>
+                      {personelListe.map(p=><option key={p.id} value={p.ad_soyad}>{p.ad_soyad}</option>)}
+                    </select>
+                  ) : (
+                    <input placeholder="Personel adı yazın..." value={talepForm.talep_edilen_personel}
+                      onChange={e=>setTalepForm(p=>({...p,talep_edilen_personel:e.target.value}))}
+                      style={{ flex:1,padding:"10px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,height:40,boxSizing:"border-box" }} />
+                  )}
+                  <button type="button" onClick={()=>setTalepForm(p=>({...p,talep_edilen_personel_manuel:!p.talep_edilen_personel_manuel,talep_edilen_personel:""}))}
+                    style={{ padding:"0 14px",background:"#f3f4f6",border:"1px solid #d1d5db",borderRadius:7,fontSize:12,cursor:"pointer",whiteSpace:"nowrap",height:40 }}>
+                    ✏️ {talepForm.talep_edilen_personel_manuel?"Listeden Seç":"Manuel Gir"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -13088,7 +13133,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               </button>
             </div>
             {/* Başlıklar */}
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 70px 90px 110px 90px 90px 32px",gap:6,marginBottom:6 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"2fr 80px 100px 120px 100px 100px 36px",gap:8,marginBottom:6 }}>
               {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not",""].map(h=>(
                 <div key={h} style={{ fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.3px",padding:"0 2px" }}>{h}</div>
               ))}
@@ -13202,12 +13247,16 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                     </div>
                     <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
                       {durumBadge(t.durum)}
-                      {["TASLAK","REDDEDILDI"].includes(t.durum) && t.talep_eden_email===currentUser?.email && (
+                      {["TASLAK","REDDEDILDI"].includes(t.durum) && t.talep_eden_email===currentUser?.email && (<>
                         <button onClick={()=>openEdit(t)}
                           style={{ padding:"5px 12px",background:"#dbeafe",color:"#1d4ed8",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:700 }}>
                           ✏️ Düzenle
                         </button>
-                      )}
+                        <button onClick={e=>{e.stopPropagation();deleteTalep(t.id);}}
+                          style={{ padding:"5px 12px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:700 }}>
+                          🗑 Sil
+                        </button>
+                      </>)}
                       <span style={{color:"#9ca3af",fontSize:18,cursor:"pointer"}} onClick={()=>loadDetay(t.id)}>›</span>
                     </div>
                   </div>

@@ -10691,6 +10691,38 @@ app.put("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /malzeme/site-codes — rollout_progress'teki tüm site kodları (autocomplete için)
+app.get("/malzeme/site-codes", authMiddleware, async (req, res) => {
+  try {
+    const q = req.query.q ? `%${req.query.q.toUpperCase()}%` : "%";
+    const r = await pool.query(
+      `SELECT DISTINCT site_code, site_type, bolge, project_code
+       FROM rollout_progress
+       WHERE site_code IS NOT NULL AND site_code != ''
+         AND UPPER(site_code) LIKE $1
+       ORDER BY site_code
+       LIMIT 20`,
+      [q]
+    );
+    res.json(r.rows);
+  } catch (e) { res.json([]); }
+});
+
+// DELETE /malzeme/talepler/:id — talebi sil (sadece TASLAK veya REDDEDILDI)
+app.delete("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
+  try {
+    const t = await pool.query("SELECT * FROM malzeme_talepler WHERE id=$1", [req.params.id]);
+    if (!t.rows.length) return res.status(404).json({ error: "Bulunamadı" });
+    const durum = t.rows[0].durum;
+    if (!["TASLAK","REDDEDILDI"].includes(durum)) {
+      return res.status(400).json({ error: "Sadece Taslak veya Reddedildi talepler silinebilir" });
+    }
+    await pool.query("DELETE FROM malzeme_talep_kalemleri WHERE talep_id=$1", [req.params.id]);
+    await pool.query("DELETE FROM malzeme_talepler WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /malzeme/bekleyen-count (Murat için bildirim sayısı)
 app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
   try {
