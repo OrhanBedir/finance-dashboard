@@ -12568,7 +12568,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   // Personel listesi
   const [personelListe, setPersonelListe] = useState([]);
 
-  const token = localStorage.getItem("token") || "";
+  const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
   const BOLGELER = ["İzmir","İstanbul","Ankara","Bursa","Antalya","Adana","Samsun","Trabzon","Erzurum","Diyarbakır","Diğer"];
@@ -13490,6 +13490,11 @@ function App() {
   const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur || _ROLLOUT_OVERRIDE.includes(_userEmail);
   const canSeePuantaj = isRollout && !_PUANTAJ_HARIC.includes(_userEmail);
   const isPersonel = user?.role === "user" && !_isBolgeMudur && !_ROLLOUT_OVERRIDE.includes(_userEmail);
+  const canSeeMalzeme = [
+    "nurcan.kus@simsektel.com",
+    "murat.istek@simsektel.com",
+    "serdar.altinova@simsektel.com",
+  ].includes(_userEmail);
   const isSubconUser =
     String(user?.role || "").toLowerCase() === "subcon" ||
     String(user?.subcon_name || "").trim() !== "";
@@ -14155,6 +14160,15 @@ function App() {
                 </span>
               )}
             </button>
+
+            {canSeeMalzeme && (
+              <button
+                className={page === "malzeme" ? "tab activeTab" : "tab"}
+                onClick={() => setPage("malzeme")}
+              >
+                📦 Malzeme
+              </button>
+            )}
 
             {(token || financeToken) && (
               <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", display:"flex", alignItems:"center", gap:"10px" }}>
