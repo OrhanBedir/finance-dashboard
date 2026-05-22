@@ -7797,8 +7797,19 @@ function HrDashboard({ onBack, currentUser }) {
                       {personelList.filter(p=>p.aktif).length} aktif
                     </span>
                   </h2>
-                  <div style={{ marginTop:"4px", fontSize:"12px", color:"#9ca3af", fontWeight:500 }}>
-                    💰 {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Ayı Maaş Ödemesi Yapılacak:{" "}
+                  {/* Tam ay tahmini bütçe — puantajdan bağımsız, sabit */}
+                  <div style={{ marginTop:"6px", display:"flex", alignItems:"center", gap:"8px" }}>
+                    <span style={{ fontSize:"11px", fontWeight:600, color:"#6b7280", textTransform:"uppercase", letterSpacing:"0.5px" }}>
+                      📊 {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Tahmini Maaş Bütçesi
+                    </span>
+                    <span style={{ fontSize:"17px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 10px", letterSpacing:"0.2px" }}>
+                      ₺{personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0).toLocaleString("tr-TR")}
+                    </span>
+                    <span style={{ fontSize:"10px", color:"#9ca3af" }}>(tüm personel tam çalışırsa)</span>
+                  </div>
+                  {/* An itibarıyla puantaja göre oluşan maaş */}
+                  <div style={{ marginTop:"3px", fontSize:"12px", color:"#9ca3af", fontWeight:500 }}>
+                    💰 An İtibariyle {["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1]} {yilStr} Ayı Maaş Ödemesi Yapılacak:{" "}
                     <span style={{ color:"#1f2937", fontWeight:700 }}>
                       ₺{(ozet.length > 0
                         ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
