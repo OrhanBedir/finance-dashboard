@@ -11219,8 +11219,8 @@ const AUTO_MIGRATIONS = [
     } else {
       console.log(`ℹ️  Malzeme fiyat listesi zaten dolu (${count.rows[0].count} kayıt)`);
     }
-    // GSP altyapı malzemeleri — her zaman eksik olanları ekle
-    const GSP_SEED = [
+    // GSM altyapı malzemeleri — her zaman eksik olanları ekle
+    const GSM_SEED = [
       { adi:"NYY 3x4mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
       { adi:"NYY 3x6mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
       { adi:"NYY 3x10mm2 ENERJİ KABLOSU", birim:"Metre", kategori:"Enerji Kablo" },
@@ -11316,7 +11316,7 @@ const AUTO_MIGRATIONS = [
       { adi:"ALÇAK GERİLİM KABİN ANAHTARLAMA PANELI", birim:"Adet", kategori:"Kabin" },
     ];
     let added = 0;
-    for (const m of GSP_SEED) {
+    for (const m of GSM_SEED) {
       const exists = await pool.query(
         "SELECT 1 FROM malzeme_fiyat_listesi WHERE LOWER(malzeme_adi)=LOWER($1)", [m.adi]
       );
@@ -11329,7 +11329,7 @@ const AUTO_MIGRATIONS = [
         added++;
       }
     }
-    if (added > 0) console.log(`✅ ${added} yeni GSP malzeme eklendi`);
+    if (added > 0) console.log(`✅ ${added} yeni GSM malzeme eklendi`);
   } catch (e) {
     console.error('Malzeme seed hatası:', e.message);
   }
