@@ -12687,37 +12687,226 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
    NAKIT AKIŞ / CASH FLOW PANEL
    ============================================================ */
 function CashFlowPanel({ currentUser, onBack }) {
+  const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+  const headers = { Authorization: `Bearer ${token}` };
+
+  const now = new Date();
+  const [yil, setYil] = useState(String(now.getFullYear()));
+  const [ay, setAy]   = useState(String(now.getMonth() + 1).padStart(2, "0"));
+  const [hwRows,      setHwRows]      = useState([]);
+  const [personelList,setPersonelList]= useState([]);
+  const [araclar,     setAraclar]     = useState([]);
+  const [ofisList,    setOfisList]    = useState([]);
+  const [loading,     setLoading]     = useState(false);
+
+  const AY_ADLARI = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+
+  useEffect(() => { loadData(); }, [ay, yil]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [upRes, perRes, aracRes, ofisRes] = await Promise.all([
+        fetch(`${API_BASE}/finance/upcoming-payments`, { headers }),
+        fetch(`${API_BASE}/hr/personel`, { headers }),
+        fetch(`${API_BASE}/hr/araclar`, { headers }),
+        fetch(`${API_BASE}/hr/ofis`, { headers }),
+      ]);
+      const upData   = await upRes.json();
+      const perData  = await perRes.json();
+      const aracData = await aracRes.json();
+      const ofisData = await ofisRes.json();
+
+      const monthStr = `${yil}-${ay}`;
+      setHwRows((upData.rows || []).filter(r => (r.due_date || "").startsWith(monthStr)));
+      setPersonelList(Array.isArray(perData) ? perData.filter(p => p.aktif) : []);
+      setAraclar(Array.isArray(aracData) ? aracData.filter(a => a.durum === "AKTİF") : []);
+      setOfisList(Array.isArray(ofisData?.rows) ? ofisData.rows : Array.isArray(ofisData) ? ofisData : []);
+    } catch(e) { console.error("CashFlow load error:", e); }
+    setLoading(false);
+  };
+
+  const totalDays  = new Date(Number(yil), Number(ay), 0).getDate();
+  const days       = Array.from({ length: totalDays }, (_, i) => i + 1);
+  const getDayName = d => ["Paz","Pzt","Sal","Çar","Per","Cum","Cmt"][new Date(Number(yil), Number(ay)-1, d).getDay()];
+  const isWeekend  = d => { const wd = new Date(Number(yil), Number(ay)-1, d).getDay(); return wd===0||wd===6; };
+
+  // HW tahsilat — gün bazında
+  const hwByDay = {};
+  hwRows.forEach(r => {
+    const d = parseInt((r.due_date || "").split("-")[2] || "0");
+    if (d) hwByDay[d] = (hwByDay[d] || 0) + Number(r.amount || 0);
+  });
+
+  // Sabit gider hesapları
+  const totalMaas   = personelList.reduce((s,p) => s + Number(p.net_maas||0), 0);
+  const totalArac   = araclar.reduce((s,a) => s + Number(a.aylik_kira||0), 0);
+  const totalTicket = personelList.length * 10000;
+  const totalOfis   = ofisList.reduce((s,o) => s + Number(o.aylik_kira||0), 0);
+
+  // Kategoriler
+  const KATEGORILER = [
+    { key:"hw",     label:"📥 HW Tahsilat",       type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwByDay },
+    { key:"maas",   label:"👥 Personel Maaşları",  type:"expense", color:"#fee2e2", textColor:"#991b1b", byDay: totalMaas>0   ? {15: totalMaas}   : {} },
+    { key:"arac",   label:"🚗 Araç Kiraları",       type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: totalArac>0   ? {10: totalArac}   : {} },
+    { key:"ticket", label:"🎫 Ticket'lar",           type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: totalTicket>0 ? {5:  totalTicket} : {} },
+    { key:"ofis",   label:"🏢 Depo & Ofis Kirası",  type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0   ? {5:  totalOfis}   : {} },
+    { key:"diger",  label:"📋 Diğer Giderler",       type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: {} },
+  ];
+
+  // Günlük net ve kümülatif bakiye
+  const dailyNet = {};
+  days.forEach(d => {
+    let net = 0;
+    KATEGORILER.forEach(k => { const a = k.byDay[d]||0; net += k.type==="income" ? a : -a; });
+    dailyNet[d] = net;
+  });
+  let cum = 0;
+  const cumByDay = {};
+  days.forEach(d => { cum += dailyNet[d]||0; cumByDay[d] = cum; });
+
+  const totalGelir  = KATEGORILER.filter(k=>k.type==="income" ).reduce((s,k)=>s+Object.values(k.byDay).reduce((a,b)=>a+b,0),0);
+  const totalGider  = KATEGORILER.filter(k=>k.type==="expense").reduce((s,k)=>s+Object.values(k.byDay).reduce((a,b)=>a+b,0),0);
+  const netBakiye   = totalGelir - totalGider;
+
+  const fmt = v => v===0 ? "" : Number(v).toLocaleString("tr-TR",{maximumFractionDigits:0});
+  const fmtFull = v => `₺${Math.abs(v).toLocaleString("tr-TR",{maximumFractionDigits:0})}`;
+
+  const thSt  = { padding:"6px 4px", fontSize:"11px", fontWeight:700, textAlign:"center", whiteSpace:"nowrap", background:"#1e3a5f", color:"#fff", position:"sticky", top:0, zIndex:2 };
+  const tdSt  = { padding:"5px 4px", fontSize:"11px", textAlign:"center", whiteSpace:"nowrap", minWidth:"44px" };
+  const rowLbl= { padding:"8px 14px", fontSize:"12px", fontWeight:700, whiteSpace:"nowrap", position:"sticky", left:0, zIndex:1, minWidth:"180px" };
+
   return (
-    <div style={{ maxWidth:"1200px", margin:"0 auto", padding:"24px" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"28px" }}>
-        {onBack && (
-          <button onClick={onBack} style={{ background:"#f3f4f6", border:"none", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>←</button>
-        )}
+    <div style={{ padding:"24px", maxWidth:"100%" }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"20px", flexWrap:"wrap" }}>
+        {onBack && <button onClick={onBack} style={{ background:"#f3f4f6", border:"none", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer" }}>←</button>}
         <div>
           <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>💵 Nakit Akış</h2>
-          <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>Gelir & gider akışı, likidite takibi</p>
+          <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>Aylık gelir & gider takvimi</p>
+        </div>
+        {/* Filtreler */}
+        <div style={{ marginLeft:"auto", display:"flex", gap:"8px", alignItems:"center" }}>
+          <select value={yil} onChange={e=>setYil(e.target.value)} style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", fontWeight:600 }}>
+            {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+          <select value={ay} onChange={e=>setAy(e.target.value)} style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", fontWeight:600, minWidth:"100px" }}>
+            {AY_ADLARI.map((a,i)=><option key={i} value={String(i+1).padStart(2,"0")}>{a}</option>)}
+          </select>
+          {loading && <span style={{ fontSize:"12px", color:"#6b7280" }}>⏳ Yükleniyor...</span>}
         </div>
       </div>
 
-      <div style={{ background:"#fff", borderRadius:"16px", padding:"48px", textAlign:"center", boxShadow:"0 2px 12px rgba(0,0,0,0.06)", border:"2px dashed #e5e7eb" }}>
-        <div style={{ fontSize:"56px", marginBottom:"16px" }}>💵</div>
-        <h3 style={{ fontSize:"20px", fontWeight:700, color:"#1e3a5f", margin:"0 0 10px" }}>Nakit Akış Modülü</h3>
-        <p style={{ color:"#6b7280", fontSize:"14px", maxWidth:"480px", margin:"0 auto 24px" }}>
-          Bu bölüm geliştirme aşamasındadır. Nasıl bir nakit akış takibi istediğinizi birlikte tasarlayacağız.
-        </p>
-        <div style={{ display:"flex", gap:"12px", justifyContent:"center", flexWrap:"wrap" }}>
-          {[
-            { emoji:"📥", label:"Gelir Girişleri" },
-            { emoji:"📤", label:"Gider Çıkışları" },
-            { emoji:"📊", label:"Aylık Grafik" },
-            { emoji:"💰", label:"Likidite Tahmini" },
-          ].map(item => (
-            <div key={item.label} style={{ background:"#f8fafc", borderRadius:"12px", padding:"16px 20px", minWidth:"130px", border:"1.5px solid #e5e7eb" }}>
-              <div style={{ fontSize:"28px", marginBottom:"6px" }}>{item.emoji}</div>
-              <div style={{ fontSize:"12px", fontWeight:600, color:"#374151" }}>{item.label}</div>
+      {/* Özet kartları */}
+      <div style={{ display:"flex", gap:"12px", marginBottom:"20px", flexWrap:"wrap" }}>
+        {[
+          { label:"💰 Toplam Gelir",  val:totalGelir,  bg:"#dcfce7", tc:"#166534", border:"#86efac" },
+          { label:"📤 Toplam Gider",  val:totalGider,  bg:"#fee2e2", tc:"#991b1b", border:"#fca5a5" },
+          { label:"📊 Net Bakiye",    val:netBakiye,   bg: netBakiye>=0?"#eff6ff":"#fff5f5", tc: netBakiye>=0?"#1e40af":"#dc2626", border: netBakiye>=0?"#93c5fd":"#fca5a5" },
+          { label:"👥 Aktif Personel",val:personelList.length, bg:"#f5f3ff", tc:"#6d28d9", border:"#c4b5fd", isCount:true },
+          { label:"🎫 Toplam Ticket", val:totalTicket, bg:"#faf5ff", tc:"#7c3aed", border:"#ddd6fe" },
+        ].map(c=>(
+          <div key={c.label} style={{ background:c.bg, border:`1.5px solid ${c.border}`, borderRadius:"12px", padding:"14px 18px", minWidth:"160px", flex:1 }}>
+            <div style={{ fontSize:"11px", fontWeight:600, color:c.tc, marginBottom:"4px" }}>{c.label}</div>
+            <div style={{ fontSize:"20px", fontWeight:800, color:c.tc }}>
+              {c.isCount ? `${c.val} kişi` : fmtFull(c.val)}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Ana tablo */}
+      <div style={{ overflowX:"auto", borderRadius:"14px", boxShadow:"0 2px 12px rgba(0,0,0,0.08)", background:"#fff" }}>
+        <table style={{ borderCollapse:"collapse", width:"100%" }}>
+          <thead>
+            <tr>
+              <th style={{ ...thSt, textAlign:"left", left:0, position:"sticky", zIndex:3, minWidth:"180px", background:"#1e3a5f" }}>Kategori</th>
+              {days.map(d=>(
+                <th key={d} style={{ ...thSt, background: isWeekend(d) ? "#2563eb" : "#1e3a5f", minWidth:"44px" }}>
+                  <div>{d}</div>
+                  <div style={{ fontSize:"9px", opacity:0.75 }}>{getDayName(d)}</div>
+                </th>
+              ))}
+              <th style={{ ...thSt, background:"#0f172a", minWidth:"80px" }}>Toplam</th>
+            </tr>
+          </thead>
+          <tbody>
+            {KATEGORILER.map((kat, ki) => {
+              const rowTotal = Object.values(kat.byDay).reduce((a,b)=>a+b,0);
+              return (
+                <tr key={kat.key} style={{ background: ki%2===0 ? "#fafafa":"#fff" }}>
+                  <td style={{ ...rowLbl, background: ki%2===0?"#fafafa":"#fff", color:kat.textColor, borderRight:"2px solid #e5e7eb", borderBottom:"1px solid #f3f4f6" }}>
+                    {kat.label}
+                    {kat.key==="maas"   && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>Ödeme: 15. gün</div>}
+                    {kat.key==="arac"   && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>Ödeme: 10. gün</div>}
+                    {kat.key==="ticket" && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>{personelList.length} kişi × ₺10.000 · 5. gün</div>}
+                    {kat.key==="ofis"   && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>Ödeme: 5. gün</div>}
+                  </td>
+                  {days.map(d => {
+                    const val = kat.byDay[d] || 0;
+                    return (
+                      <td key={d} style={{ ...tdSt, background: val!==0 ? kat.color : isWeekend(d)?"#f8f9fe":"transparent", borderBottom:"1px solid #f3f4f6", borderRight:"1px solid #f3f4f6" }}>
+                        {val!==0 && (
+                          <div style={{ color:kat.textColor, fontWeight:700, fontSize:"10px" }}>
+                            {kat.type==="income" ? "+" : "-"}{fmt(val)}
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td style={{ ...tdSt, fontWeight:800, fontSize:"11px", color:kat.textColor, background:kat.color, borderLeft:"2px solid #e5e7eb" }}>
+                    {rowTotal>0 ? `${kat.type==="income"?"+ ":"- "}₺${rowTotal.toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+
+            {/* Günlük Net satırı */}
+            <tr style={{ background:"#f0f9ff" }}>
+              <td style={{ ...rowLbl, background:"#f0f9ff", color:"#1e40af", borderRight:"2px solid #e5e7eb", borderTop:"2px solid #93c5fd" }}>
+                📊 Günlük Net
+              </td>
+              {days.map(d => {
+                const n = dailyNet[d]||0;
+                return (
+                  <td key={d} style={{ ...tdSt, borderTop:"2px solid #93c5fd", borderRight:"1px solid #dbeafe", background: n>0?"#dcfce7":n<0?"#fee2e2":"#f0f9ff" }}>
+                    {n!==0 && <span style={{ fontWeight:700, fontSize:"10px", color:n>0?"#166534":"#dc2626" }}>{n>0?"+":""}{fmt(n)}</span>}
+                  </td>
+                );
+              })}
+              <td style={{ ...tdSt, fontWeight:800, color: netBakiye>=0?"#166534":"#dc2626", background:"#dbeafe", borderLeft:"2px solid #93c5fd", borderTop:"2px solid #93c5fd" }}>
+                {netBakiye>=0?"+":"-"}₺{Math.abs(netBakiye).toLocaleString("tr-TR",{maximumFractionDigits:0})}
+              </td>
+            </tr>
+
+            {/* Kümülatif Bakiye satırı */}
+            <tr style={{ background:"#1e3a5f" }}>
+              <td style={{ ...rowLbl, background:"#1e3a5f", color:"#fff", borderRight:"2px solid #3b82f6" }}>
+                💰 Kümülatif Bakiye
+              </td>
+              {days.map(d => {
+                const c = cumByDay[d]||0;
+                return (
+                  <td key={d} style={{ ...tdSt, background: c>=0?"#0f4c2a":"#7f1d1d", color:"#fff", fontWeight:700, fontSize:"10px" }}>
+                    {fmt(Math.abs(c))}
+                  </td>
+                );
+              })}
+              <td style={{ ...tdSt, background:"#0f172a", color:"#fff", fontWeight:800, fontSize:"12px" }}>
+                {fmtFull(netBakiye)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Alt not */}
+      <div style={{ marginTop:"12px", fontSize:"11px", color:"#9ca3af", display:"flex", gap:"16px", flexWrap:"wrap" }}>
+        <span>📅 HW Tahsilat: Gelecek Tahsilat Planından otomatik</span>
+        <span>👥 Maaş: Aktif personel net maaş toplamı · Ödeme: 15. gün</span>
+        <span>🚗 Araç: Aktif araç kira toplamı · Ödeme: 10. gün</span>
+        <span>🎫 Ticket: {personelList.length} kişi × ₺10.000 · Ödeme: 5. gün</span>
+        <span>🏢 Ofis/Depo: Kayıtlı kiralar · Ödeme: 5. gün</span>
       </div>
     </div>
   );
