@@ -7399,6 +7399,8 @@ function HrDashboard({ onBack, currentUser }) {
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   });
   const [hrPersonelFilter, setHrPersonelFilter] = useState("");
+  const [hrSearchText, setHrSearchText]         = useState("");
+  const [hrSearchOpen, setHrSearchOpen]         = useState(false);
   const [puantajData, setPuantajData] = useState([]);
   const [ozet, setOzet] = useState([]);
   const [avansList, setAvansList] = useState([]);
@@ -7836,11 +7838,37 @@ function HrDashboard({ onBack, currentUser }) {
                       <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
                     ))}
                   </select>
-                  <select value={hrPersonelFilter} onChange={e=>setHrPersonelFilter(e.target.value)}
-                    style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", minWidth:"150px" }}>
-                    <option value="">👥 Tüm Personel</option>
-                    {personelList.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
-                  </select>
+                  {/* Arama + dropdown filtre */}
+                  <div style={{ position:"relative", minWidth:"180px" }}>
+                    <input
+                      type="text"
+                      placeholder="🔍 Personel ara..."
+                      value={hrSearchText}
+                      autoComplete="off"
+                      onFocus={()=>setHrSearchOpen(true)}
+                      onBlur={()=>setTimeout(()=>setHrSearchOpen(false),150)}
+                      onChange={e=>{ setHrSearchText(e.target.value); setHrSearchOpen(true); if(!e.target.value){ setHrPersonelFilter(""); } }}
+                      style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}
+                    />
+                    {hrSearchOpen && (
+                      <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"8px", boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:999, maxHeight:"220px", overflowY:"auto" }}>
+                        <div
+                          onMouseDown={()=>{ setHrPersonelFilter(""); setHrSearchText(""); setHrSearchOpen(false); }}
+                          style={{ padding:"8px 12px", fontSize:"13px", color:"#6b7280", cursor:"pointer", borderBottom:"1px solid #f3f4f6" }}
+                          onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                          onMouseLeave={e=>e.currentTarget.style.background=""}
+                        >👥 Tüm Personel</div>
+                        {personelList.filter(p=>p.aktif && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
+                          <div key={p.id}
+                            onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); }}
+                            style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
+                            onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                            onMouseLeave={e=>e.currentTarget.style.background=""}
+                          >{p.ad_soyad}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <button style={{ padding:"7px 14px", background:"#16a34a", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}
                     onClick={() => {
                       const today = new Date().toISOString().slice(0,10);
@@ -7901,13 +7929,32 @@ function HrDashboard({ onBack, currentUser }) {
                         });
                       });
 
-                      // Başlık satırı dondur + gridlines kapat
+                      // Başlık satırı dondur
                       ws["!freeze"] = { xSplit:0, ySplit:1 };
-                      ws["!sheetView"] = { showGridLines: false };
 
                       const wb = XLSXStyle.utils.book_new();
                       XLSXStyle.utils.book_append_sheet(wb, ws, "Personel Listesi");
-                      XLSXStyle.writeFile(wb, `ERC_Personel_Listesi_${today}.xlsx`);
+
+                      // Gridlines'ı kapat: buffer → JSZip XML patch → download
+                      const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
+                      JSZip.loadAsync(buf).then(zip => {
+                        const sheetFile = zip.file("xl/worksheets/sheet1.xml");
+                        return sheetFile.async("string").then(xml => {
+                          const patched = xml.replace(
+                            /<sheetView([^/]*)\/?>/,
+                            (m, attrs) => `<sheetView showGridLines="0"${attrs}/>`
+                          );
+                          zip.file("xl/worksheets/sheet1.xml", patched);
+                          return zip.generateAsync({ type:"blob", compression:"DEFLATE" });
+                        });
+                      }).then(blob => {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url; a.download = `ERC_Personel_Listesi_${today}.xlsx`;
+                        document.body.appendChild(a); a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      });
                     }}>
                     📥 Excel İndir
                   </button>
