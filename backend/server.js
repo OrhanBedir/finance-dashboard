@@ -10615,6 +10615,30 @@ const AUTO_MIGRATIONS = [
   }
 })();
 
+// ─── UBS TAŞERON KULLANICI SEED ───────────────────────────────────────────────
+(async () => {
+  try {
+    const existing = await pool.query(
+      "SELECT id FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1",
+      ["zsandal@ubstasarimmakine.com.tr"]
+    );
+    if (existing.rows.length === 0) {
+      const bcrypt = require("bcrypt");
+      const hash = await bcrypt.hash("123456", 10);
+      await pool.query(
+        `INSERT INTO users (name, email, password_hash, role, is_active, subcon_name, payment_rate)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        ["Zeki Sandal", "zsandal@ubstasarimmakine.com.tr", hash, "subcon", true, "UBS", 0.75]
+      );
+      console.log("✅ UBS kullanıcısı oluşturuldu: zsandal@ubstasarimmakine.com.tr");
+    } else {
+      console.log("ℹ️  UBS kullanıcısı zaten mevcut");
+    }
+  } catch (e) {
+    console.error("UBS seed hatası:", e.message);
+  }
+})();
+
 if (process.env.NODE_ENV !== "production" || process.env.LOCAL_SERVER) {
   app.listen(PORT, () => {
     console.log(`Server çalışıyor: ${PORT}`);
