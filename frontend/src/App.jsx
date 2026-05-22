@@ -16372,6 +16372,12 @@ function AraclarPanel({ currentUser, onBack }) {
           <div>
             <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>🚗 Araç Filosu</h2>
             <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>{araclar.filter(a=>a.durum==="AKTİF").length} aktif araç</p>
+            <div style={{ marginTop:"5px", display:"flex", alignItems:"center", gap:"8px" }}>
+              <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💰 Aylık Toplam Kira:</span>
+              <span style={{ fontSize:"16px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 12px" }}>
+                ₺{araclar.filter(a=>a.durum==="AKTİF").reduce((s,a)=>s+Number(a.aylik_kira||0),0).toLocaleString("tr-TR")}
+              </span>
+            </div>
           </div>
         </div>
         <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
