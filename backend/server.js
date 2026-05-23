@@ -9189,6 +9189,68 @@ app.delete("/hr/maas-odeme/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Aylık tüm personel ödeme özeti (personel maaş ödeme takibi için)
+app.get("/hr/maas-odeme-aylik", async (req, res) => {
+  try {
+    const { donem } = req.query;
+    if (!donem) return res.status(400).json({ error: "donem required (YYYY-MM)" });
+    const r = await pool.query(`
+      SELECT m.id, m.personel_id, m.bankadan, m.elden, m.tarih, m.aciklama, m.created_at,
+             p.ad_soyad, p.net_maas,
+             (COALESCE(m.bankadan,0) + COALESCE(m.elden,0)) AS toplam
+      FROM maas_odeme m
+      JOIN personel p ON m.personel_id = p.id
+      WHERE m.donem = $1
+      ORDER BY p.ad_soyad, m.tarih
+    `, [donem]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Sarkan ödemeler: önceki aylarda eksik kalan maaş ödemeleri
+app.get("/finance/sarkan-odemeler", requireFinanceAuth, async (req, res) => {
+  try {
+    // Toplam aktif personel bütçesi (şu anki net_maas toplamı)
+    const butceRes = await pool.query(
+      `SELECT COALESCE(SUM(net_maas),0) AS toplam FROM personel WHERE aktif=true`
+    );
+    const butce = Number(butceRes.rows[0].toplam);
+    if (butce === 0) return res.json([]);
+
+    // Son 6 ayın puantaj verisi olan dönemleri bul
+    const donemRes = await pool.query(`
+      SELECT DISTINCT to_char(to_date(yil||'-'||lpad(ay::text,2,'0'), 'YYYY-MM'), 'YYYY-MM') AS donem
+      FROM puantaj
+      WHERE to_char(to_date(yil||'-'||lpad(ay::text,2,'0'), 'YYYY-MM'), 'YYYY-MM') < to_char(NOW(), 'YYYY-MM')
+      ORDER BY donem DESC
+      LIMIT 6
+    `).catch(() => ({ rows: [] }));
+
+    if (donemRes.rows.length === 0) return res.json([]);
+
+    const donemler = donemRes.rows.map(r => r.donem);
+
+    // Her dönem için toplam ödenen
+    const odemeRes = await pool.query(`
+      SELECT donem, COALESCE(SUM(COALESCE(bankadan,0)+COALESCE(elden,0)),0) AS odenen
+      FROM maas_odeme
+      WHERE donem = ANY($1)
+      GROUP BY donem
+    `, [donemler]);
+
+    const odemeMap = {};
+    odemeRes.rows.forEach(r => { odemeMap[r.donem] = Number(r.odenen); });
+
+    const sarkanlar = donemler.map(donem => {
+      const odenen = odemeMap[donem] || 0;
+      const sarkan = Math.max(0, butce - odenen);
+      return { donem, butce, odenen, sarkan };
+    }).filter(s => s.sarkan > 0);
+
+    res.json(sarkanlar);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ISG uyarı özeti (süresi biten/bitecek eğitimler)
 app.get("/hr/isg/uyarilar", async (req, res) => {
   try {

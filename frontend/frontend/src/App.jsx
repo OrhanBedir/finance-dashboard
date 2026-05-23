@@ -7420,6 +7420,7 @@ function HrDashboard({ onBack, currentUser }) {
   const [maasOdeList, setMaasOdeList] = useState([]);
   const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
   const [maasOdeSaving, setMaasOdeSaving] = useState(false);
+  const [aylikOdemeler, setAylikOdemeler] = useState([]); // tüm personel bu ay ödeme özeti
   const [notText, setNotText] = useState("");
   const [notFile, setNotFile] = useState(null);
   const [notSaving, setNotSaving] = useState(false);
@@ -7466,7 +7467,7 @@ function HrDashboard({ onBack, currentUser }) {
 
   useEffect(() => { loadPersonel(); loadIsgTurleri(); loadIsgUyarilar(); }, []);
   useEffect(() => { if (tab==="puantaj" || tab==="personel") { loadPuantaj(); loadOzet(); } }, [tab, puantajAy]);
-  useEffect(() => { if (tab==="personel") { loadAvans(); loadIsAvans(); } }, [tab, puantajAy]);
+  useEffect(() => { if (tab==="personel") { loadAvans(); loadIsAvans(); loadAylikOdemeler(); } }, [tab, puantajAy]);
   useEffect(() => { if (tab==="maas_avans") loadAvans(); }, [tab]);
   useEffect(() => { if (tab==="is_avans") loadIsAvans(); }, [tab]);
   useEffect(() => { if (tab==="personel" && hrPersonelFilter) loadMaasOde(hrPersonelFilter); else setMaasOdeList([]); }, [tab, hrPersonelFilter, puantajAy]);
@@ -7500,6 +7501,13 @@ function HrDashboard({ onBack, currentUser }) {
       setMaasOdeList(Array.isArray(data) ? data : []);
     } catch { setMaasOdeList([]); }
   };
+  const loadAylikOdemeler = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/hr/maas-odeme-aylik?donem=${puantajAy}`);
+      const data = await res.json();
+      setAylikOdemeler(Array.isArray(data) ? data : []);
+    } catch { setAylikOdemeler([]); }
+  };
   const handleSaveMaasOde = async (e) => {
     e.preventDefault();
     if (!maasOdeModal) return;
@@ -7511,6 +7519,7 @@ function HrDashboard({ onBack, currentUser }) {
       });
       setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
       await loadMaasOde(maasOdeModal.id);
+      loadAylikOdemeler();
     } catch (err) { alert("Kayıt sırasında hata: " + err.message); }
     setMaasOdeSaving(false);
   };
@@ -7519,6 +7528,7 @@ function HrDashboard({ onBack, currentUser }) {
     try {
       await fetch(`${API_BASE}/hr/maas-odeme/${id}`, { method:"DELETE" });
       if (maasOdeModal) await loadMaasOde(maasOdeModal.id);
+      loadAylikOdemeler();
     } catch { /* sessiz */ }
   };
   const handleBelgeUpload = async (personelId, tur, file) => {
@@ -7822,6 +7832,88 @@ function HrDashboard({ onBack, currentUser }) {
                               : personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0)
                             ).toLocaleString("tr-TR")}
                           </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {/* ── Maaş Ödeme Takip Paneli ── */}
+                  {(() => {
+                    const ayAdi = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1];
+                    // Personel bazında ödenen toplamları hesapla
+                    const odenenByPer = {};
+                    aylikOdemeler.forEach(o => {
+                      odenenByPer[o.personel_id] = (odenenByPer[o.personel_id]||0) + Number(o.toplam||0);
+                    });
+                    // Aktif personel + hakedişleri
+                    const aktifPer = personelList.filter(p=>p.aktif);
+                    const perRows = aktifPer.map(p => {
+                      const ozO = ozet.find(o=>String(o.personel_id)===String(p.id));
+                      const hakEdis = ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0);
+                      const odenen = odenenByPer[p.id] || 0;
+                      const kalan  = Math.max(0, hakEdis - odenen);
+                      return { ...p, hakEdis, odenen, kalan };
+                    });
+                    const topHak   = perRows.reduce((s,r)=>s+r.hakEdis,0);
+                    const topOde   = perRows.reduce((s,r)=>s+r.odenen,0);
+                    const topKalan = Math.max(0, topHak - topOde);
+                    const tamamlandi = perRows.filter(r=>r.kalan===0 && r.odenen>0).length;
+                    const bekleyen   = perRows.filter(r=>r.kalan>0).length;
+                    return (
+                      <div style={{ marginTop:"14px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"14px", overflow:"hidden" }}>
+                        {/* Başlık */}
+                        <div style={{ background:"#1e3a5f", padding:"10px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                          <span style={{ color:"#fff", fontWeight:700, fontSize:"14px" }}>
+                            📋 {ayAdi} {yilStr} — Maaş Ödeme Durumu
+                          </span>
+                          <div style={{ display:"flex", gap:"10px" }}>
+                            <span style={{ background:"#dcfce7", color:"#166534", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>✅ {tamamlandi} tamamlandı</span>
+                            {bekleyen>0 && <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>⏳ {bekleyen} bekliyor</span>}
+                          </div>
+                        </div>
+                        {/* Tablo */}
+                        <div style={{ overflowX:"auto" }}>
+                          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px" }}>
+                            <thead>
+                              <tr style={{ background:"#f8fafc" }}>
+                                {["Personel","Ünvan","Hakediş","Ödenen","Kalan"].map(h=>(
+                                  <th key={h} style={{ padding:"8px 12px", fontWeight:700, color:"#374151", textAlign: h==="Personel"||h==="Ünvan" ? "left" : "right", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {perRows.map((p,i)=>(
+                                <tr key={p.id} style={{ background: i%2===0?"#fff":"#f9fafb" }}>
+                                  <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}</td>
+                                  <td style={{ padding:"7px 12px", color:"#6b7280", whiteSpace:"nowrap" }}>{p.unvan||"-"}</td>
+                                  <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:600 }}>₺{p.hakEdis.toLocaleString("tr-TR")}</td>
+                                  <td style={{ padding:"7px 12px", textAlign:"right", color: p.odenen>0?"#166534":"#9ca3af", fontWeight:600 }}>
+                                    {p.odenen>0 ? `₺${p.odenen.toLocaleString("tr-TR")}` : "—"}
+                                  </td>
+                                  <td style={{ padding:"7px 12px", textAlign:"right" }}>
+                                    {p.kalan===0 && p.odenen>0
+                                      ? <span style={{ color:"#166534", fontWeight:700 }}>✅ Tam</span>
+                                      : p.kalan>0
+                                        ? <span style={{ color:"#dc2626", fontWeight:800 }}>₺{p.kalan.toLocaleString("tr-TR")}</span>
+                                        : <span style={{ color:"#9ca3af" }}>—</span>
+                                    }
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr style={{ background:"#1e3a5f" }}>
+                                <td colSpan={2} style={{ padding:"9px 12px", color:"#fff", fontWeight:800, fontSize:"13px" }}>TOPLAM</td>
+                                <td style={{ padding:"9px 12px", textAlign:"right", color:"#93c5fd", fontWeight:800, fontSize:"13px" }}>₺{topHak.toLocaleString("tr-TR")}</td>
+                                <td style={{ padding:"9px 12px", textAlign:"right", color:"#86efac", fontWeight:800, fontSize:"13px" }}>₺{topOde.toLocaleString("tr-TR")}</td>
+                                <td style={{ padding:"9px 12px", textAlign:"right", fontWeight:800, fontSize:"13px" }}>
+                                  {topKalan===0
+                                    ? <span style={{ color:"#86efac" }}>✅ Tamamlandı</span>
+                                    : <span style={{ color:"#fca5a5" }}>₺{topKalan.toLocaleString("tr-TR")}</span>
+                                  }
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
                         </div>
                       </div>
                     );
@@ -12699,6 +12791,7 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [personelList,setPersonelList]= useState([]);
   const [araclar,     setAraclar]     = useState([]);
   const [ofisList,    setOfisList]    = useState([]);
+  const [sarkanlar,   setSarkanlar]   = useState([]); // önceki aylardan sarkan ödemeler
   const [loading,     setLoading]     = useState(false);
 
   const AY_ADLARI = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
@@ -12708,16 +12801,18 @@ function CashFlowPanel({ currentUser, onBack }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [cfRes, perRes, aracRes, ofisRes] = await Promise.all([
+      const [cfRes, perRes, aracRes, ofisRes, sarkanRes] = await Promise.all([
         fetch(`${API_BASE}/finance/cashflow-monthly?yil=${yil}&ay=${ay}`, { headers }),
         fetch(`${API_BASE}/hr/personel`, { headers }),
         fetch(`${API_BASE}/hr/araclar`, { headers }),
         fetch(`${API_BASE}/hr/ofis`, { headers }),
+        fetch(`${API_BASE}/finance/sarkan-odemeler`, { headers }),
       ]);
-      const cfData   = await cfRes.json();
-      const perData  = await perRes.json();
-      const aracData = await aracRes.json();
-      const ofisData = await ofisRes.json();
+      const cfData     = await cfRes.json();
+      const perData    = await perRes.json();
+      const aracData   = await aracRes.json();
+      const ofisData   = await ofisRes.json();
+      const sarkanData = await sarkanRes.json();
 
       const toMap = (rows) => (rows||[]).reduce((m,r) => { m[r.gun]=(m[r.gun]||0)+Number(r.tutar||0); return m; }, {});
       setHwReceived(toMap(cfData.received));
@@ -12726,6 +12821,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       setPersonelList(Array.isArray(perData) ? perData.filter(p => p.aktif) : []);
       setAraclar(Array.isArray(aracData) ? aracData.filter(a => a.durum === "AKTİF") : []);
       setOfisList(Array.isArray(ofisData?.rows) ? ofisData.rows : Array.isArray(ofisData) ? ofisData : []);
+      setSarkanlar(Array.isArray(sarkanData) ? sarkanData : []);
     } catch(e) { console.error("CashFlow load error:", e); }
     setLoading(false);
   };
@@ -12814,6 +12910,49 @@ function CashFlowPanel({ currentUser, onBack }) {
           </div>
         ))}
       </div>
+
+      {/* ── Sarkan Ödemeler Bandı ── */}
+      {sarkanlar.length > 0 && (
+        <div style={{ marginBottom:"20px", background:"#fff7ed", border:"2px solid #fed7aa", borderRadius:"14px", padding:"14px 18px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"12px" }}>
+            <span style={{ fontSize:"20px" }}>⚠️</span>
+            <div>
+              <div style={{ fontWeight:800, fontSize:"15px", color:"#9a3412" }}>Devredilen (Sarkan) Ödemeler</div>
+              <div style={{ fontSize:"12px", color:"#c2410c", marginTop:"2px" }}>Önceki aylarda tam ödenmeyen maaş borçları — bu aya devredildi</div>
+            </div>
+            <div style={{ marginLeft:"auto", background:"#dc2626", color:"#fff", borderRadius:"10px", padding:"4px 14px", fontWeight:800, fontSize:"15px" }}>
+              ₺{sarkanlar.reduce((s,r)=>s+Number(r.sarkan||0),0).toLocaleString("tr-TR")}
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
+            {sarkanlar.map(s => {
+              const [sy, sm] = (s.donem||"").split("-");
+              const ayAdi = AY_ADLARI[Number(sm)-1];
+              const pct = s.butce > 0 ? Math.round((s.odenen/s.butce)*100) : 0;
+              return (
+                <div key={s.donem} style={{ background:"#fff", border:"1.5px solid #fed7aa", borderRadius:"10px", padding:"10px 14px", minWidth:"200px", flex:1 }}>
+                  <div style={{ fontWeight:700, fontSize:"13px", color:"#9a3412", marginBottom:"6px" }}>{ayAdi} {sy}</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", color:"#6b7280", marginBottom:"4px" }}>
+                    <span>Bütçe:</span><span style={{ fontWeight:600, color:"#374151" }}>₺{Number(s.butce).toLocaleString("tr-TR")}</span>
+                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", color:"#6b7280", marginBottom:"4px" }}>
+                    <span>Ödenen:</span><span style={{ fontWeight:600, color:"#166534" }}>₺{Number(s.odenen).toLocaleString("tr-TR")}</span>
+                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", marginBottom:"8px" }}>
+                    <span style={{ color:"#dc2626", fontWeight:600 }}>Eksik:</span>
+                    <span style={{ fontWeight:800, color:"#dc2626" }}>₺{Number(s.sarkan).toLocaleString("tr-TR")}</span>
+                  </div>
+                  {/* İlerleme çubuğu */}
+                  <div style={{ background:"#fecaca", borderRadius:"99px", height:"6px", overflow:"hidden" }}>
+                    <div style={{ width:`${pct}%`, height:"100%", background:"#16a34a", borderRadius:"99px", transition:"width 0.4s" }} />
+                  </div>
+                  <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px", textAlign:"right" }}>{pct}% ödendi</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Ana tablo */}
       <div style={{ overflowX:"auto", borderRadius:"14px", boxShadow:"0 2px 12px rgba(0,0,0,0.08)", background:"#fff" }}>
