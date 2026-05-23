@@ -11693,6 +11693,55 @@ app.get("/finance/taseron-odeme-gecmisi", requireFinanceAuth, async (req, res) =
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Taşeron Banka Bilgileri ────────────────────────────────────
+pool.query(`
+  CREATE TABLE IF NOT EXISTS taseron_banka (
+    id           SERIAL PRIMARY KEY,
+    firma        TEXT NOT NULL UNIQUE,
+    banka_adi    TEXT,
+    sube         TEXT,
+    hesap_no     TEXT,
+    iban         TEXT,
+    hesap_sahibi TEXT,
+    aciklama     TEXT,
+    created_at   TIMESTAMP DEFAULT NOW(),
+    updated_at   TIMESTAMP DEFAULT NOW()
+  );
+`).catch(e => console.error("taseron_banka tablo hatası:", e.message));
+
+app.get("/finance/taseron-banka", requireFinanceAuth, async (req, res) => {
+  try {
+    const { firma } = req.query;
+    if (firma) {
+      const r = await pool.query("SELECT * FROM taseron_banka WHERE firma = $1", [firma]);
+      return res.json(r.rows[0] || null);
+    }
+    const r = await pool.query("SELECT * FROM taseron_banka ORDER BY firma ASC");
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/finance/taseron-banka", requireFinanceAuth, async (req, res) => {
+  try {
+    const { firma, banka_adi, sube, hesap_no, iban, hesap_sahibi, aciklama } = req.body;
+    if (!firma) return res.status(400).json({ error: "firma zorunlu" });
+    const r = await pool.query(`
+      INSERT INTO taseron_banka (firma, banka_adi, sube, hesap_no, iban, hesap_sahibi, aciklama)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (firma) DO UPDATE SET
+        banka_adi    = EXCLUDED.banka_adi,
+        sube         = EXCLUDED.sube,
+        hesap_no     = EXCLUDED.hesap_no,
+        iban         = EXCLUDED.iban,
+        hesap_sahibi = EXCLUDED.hesap_sahibi,
+        aciklama     = EXCLUDED.aciklama,
+        updated_at   = NOW()
+      RETURNING *
+    `, [firma, banka_adi||null, sube||null, hesap_no||null, iban||null, hesap_sahibi||null, aciklama||null]);
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Taşeron ödeme Excel export
 app.get("/finance/taseron-odeme-excel", requireFinanceAuth, async (req, res) => {
   try {

@@ -3559,6 +3559,11 @@ function FinanceDashboard({
   const [odemeModalLog,     setOdemeModalLog]     = useState([]);
   const [odemeModalLoading, setOdemeModalLoading] = useState(false);
   const [odemeModalSonuc,   setOdemeModalSonuc]   = useState(null);
+  const [bankaInfo,         setBankaInfo]         = useState(null);  // seçili firma banka bilgisi
+  const [showBankaCard,     setShowBankaCard]     = useState(false); // banka kartı açık mı
+  const [bankaEditMode,     setBankaEditMode]     = useState(false); // düzenleme modu
+  const [bankaForm,         setBankaForm]         = useState({ banka_adi:"", sube:"", hesap_no:"", iban:"", hesap_sahibi:"", aciklama:"" });
+  const [ibanCopied,        setIbanCopied]        = useState(false);
 
   const [manualInvoiceRows, setManualInvoiceRows] = useState([]);
   const [overdueRows, setOverdueRows] = useState([]);
@@ -4239,24 +4244,52 @@ function FinanceDashboard({
     const q = (manualInvoiceSearch || "").trim().toLowerCase();
     await loadOdemeModalFirmalar();
     setShowOdemeModal(true);
+    setShowBankaCard(false);
+    setBankaEditMode(false);
     // Kısa gecikme sonrası filter match
     setTimeout(async () => {
       const firms = await fetchJson(`${API_BASE}/finance/taseron-firmalar`, { withAuth: true }).catch(()=>[]);
       const matched = (Array.isArray(firms) ? firms : []).filter(f => f.firma.toLowerCase().includes(q));
       if (q && matched.length === 1) {
         setOdemeModalFirma(matched[0].firma);
-        await loadOdemeModalCari(matched[0].firma);
+        await Promise.all([loadOdemeModalCari(matched[0].firma), loadBankaInfo(matched[0].firma)]);
       } else {
         setOdemeModalFirma("");
         setOdemeModalCari(null);
+        setBankaInfo(null);
       }
     }, 100);
+  };
+
+  const loadBankaInfo = async (firma) => {
+    if (!firma) { setBankaInfo(null); return; }
+    try {
+      const data = await fetchJson(`${API_BASE}/finance/taseron-banka?firma=${encodeURIComponent(firma)}`, { withAuth: true });
+      setBankaInfo(data);
+      if (data) setBankaForm({ banka_adi: data.banka_adi||"", sube: data.sube||"", hesap_no: data.hesap_no||"", iban: data.iban||"", hesap_sahibi: data.hesap_sahibi||"", aciklama: data.aciklama||"" });
+      else setBankaForm({ banka_adi:"", sube:"", hesap_no:"", iban:"", hesap_sahibi:"", aciklama:"" });
+    } catch { setBankaInfo(null); }
+  };
+
+  const handleSaveBanka = async () => {
+    if (!odemeModalFirma) return;
+    try {
+      const saved = await fetchJson(`${API_BASE}/finance/taseron-banka`, {
+        method:"POST", withAuth:true,
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ firma: odemeModalFirma, ...bankaForm }),
+      });
+      setBankaInfo(saved);
+      setBankaEditMode(false);
+    } catch(err) { alert(err.message); }
   };
 
   const handleOdemeModalFirmaChange = async (firma) => {
     setOdemeModalFirma(firma);
     setOdemeModalSonuc(null);
-    await loadOdemeModalCari(firma);
+    setShowBankaCard(false);
+    setBankaEditMode(false);
+    await Promise.all([loadOdemeModalCari(firma), loadBankaInfo(firma)]);
   };
 
   const handleTaseronOdemeSubmit = async (e) => {
@@ -5813,10 +5846,92 @@ function FinanceDashboard({
 
                 {odemeModalCari && (
                   <>
-                    <div style={{ background:"#7e22ce", color:"#fff", borderRadius:"12px", padding:"14px 16px", marginBottom:"14px" }}>
+                    <div style={{ background:"#7e22ce", color:"#fff", borderRadius:"12px", padding:"14px 16px", marginBottom:"10px" }}>
                       <div style={{ fontSize:"11px", opacity:0.8, marginBottom:"4px" }}>Toplam Açık Cari</div>
                       <div style={{ fontWeight:800, fontSize:"22px" }}>₺{Number(odemeModalCari.toplamKalan).toLocaleString("tr-TR",{maximumFractionDigits:0})}</div>
                     </div>
+
+                    {/* Banka Bilgileri Butonu */}
+                    <button
+                      type="button"
+                      onClick={() => { setShowBankaCard(v=>!v); setBankaEditMode(false); }}
+                      style={{ width:"100%", marginBottom:"10px", padding:"9px 14px", background: showBankaCard ? "#1e3a5f" : "#fff", color: showBankaCard ? "#fff" : "#1e3a5f", border:"1.5px solid #1e3a5f", borderRadius:"10px", fontSize:"13px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px" }}
+                    >
+                      <span>🏦 Banka Bilgileri</span>
+                      <span style={{ fontSize:"11px", opacity:0.7 }}>{showBankaCard ? "▲ Kapat" : "▼ Göster"}</span>
+                    </button>
+
+                    {/* Banka Kartı */}
+                    {showBankaCard && (
+                      <div style={{ background:"#fff", border:"1.5px solid #bfdbfe", borderRadius:"12px", padding:"14px", marginBottom:"12px", boxShadow:"0 2px 8px rgba(30,58,95,0.08)" }}>
+                        {!bankaEditMode ? (
+                          bankaInfo ? (
+                            <>
+                              {/* Kart görünümü */}
+                              <div style={{ background:"linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%)", borderRadius:"10px", padding:"14px 16px", color:"#fff", marginBottom:"10px", position:"relative" }}>
+                                <div style={{ fontSize:"10px", opacity:0.7, marginBottom:"2px", letterSpacing:"0.05em", textTransform:"uppercase" }}>Hesap Sahibi</div>
+                                <div style={{ fontWeight:800, fontSize:"14px", marginBottom:"8px" }}>{bankaInfo.hesap_sahibi || odemeModalFirma}</div>
+                                <div style={{ fontSize:"10px", opacity:0.7, marginBottom:"2px", letterSpacing:"0.05em", textTransform:"uppercase" }}>IBAN</div>
+                                <div style={{ fontWeight:700, fontSize:"13px", letterSpacing:"0.08em", fontFamily:"monospace", marginBottom:"8px", display:"flex", alignItems:"center", gap:"8px" }}>
+                                  {bankaInfo.iban || "—"}
+                                  {bankaInfo.iban && (
+                                    <button
+                                      onClick={() => { navigator.clipboard.writeText(bankaInfo.iban); setIbanCopied(true); setTimeout(()=>setIbanCopied(false),2000); }}
+                                      style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:"5px", color:"#fff", padding:"2px 7px", fontSize:"10px", cursor:"pointer", fontWeight:700 }}
+                                    >{ibanCopied ? "✓" : "Kopyala"}</button>
+                                  )}
+                                </div>
+                                <div style={{ display:"flex", gap:"20px" }}>
+                                  <div>
+                                    <div style={{ fontSize:"9px", opacity:0.6, textTransform:"uppercase" }}>Banka</div>
+                                    <div style={{ fontSize:"12px", fontWeight:600 }}>{bankaInfo.banka_adi || "—"}</div>
+                                  </div>
+                                  {bankaInfo.sube && <div>
+                                    <div style={{ fontSize:"9px", opacity:0.6, textTransform:"uppercase" }}>Şube</div>
+                                    <div style={{ fontSize:"12px", fontWeight:600 }}>{bankaInfo.sube}</div>
+                                  </div>}
+                                  {bankaInfo.hesap_no && <div>
+                                    <div style={{ fontSize:"9px", opacity:0.6, textTransform:"uppercase" }}>Hesap No</div>
+                                    <div style={{ fontSize:"12px", fontWeight:600 }}>{bankaInfo.hesap_no}</div>
+                                  </div>}
+                                </div>
+                              </div>
+                              {bankaInfo.aciklama && <div style={{ fontSize:"11px", color:"#6b7280", marginBottom:"8px", fontStyle:"italic" }}>{bankaInfo.aciklama}</div>}
+                              <button onClick={()=>setBankaEditMode(true)} style={{ width:"100%", padding:"7px", background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:"8px", color:"#1d4ed8", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle</button>
+                            </>
+                          ) : (
+                            <div style={{ textAlign:"center", padding:"10px 0" }}>
+                              <div style={{ fontSize:"13px", color:"#6b7280", marginBottom:"10px" }}>Henüz banka bilgisi eklenmemiş</div>
+                              <button onClick={()=>setBankaEditMode(true)} style={{ padding:"8px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>+ Banka Bilgisi Ekle</button>
+                            </div>
+                          )
+                        ) : (
+                          /* Düzenleme formu */
+                          <div>
+                            <div style={{ fontWeight:700, fontSize:"13px", color:"#1e3a5f", marginBottom:"10px" }}>🏦 Banka Bilgilerini Düzenle</div>
+                            {[
+                              { label:"Hesap Sahibi", key:"hesap_sahibi", placeholder:"Firma adı veya kişi" },
+                              { label:"Banka Adı", key:"banka_adi", placeholder:"Ziraat, Garanti, YKB..." },
+                              { label:"Şube", key:"sube", placeholder:"Şube adı (opsiyonel)" },
+                              { label:"Hesap No", key:"hesap_no", placeholder:"Hesap numarası (opsiyonel)" },
+                              { label:"IBAN", key:"iban", placeholder:"TR00 0000 0000 0000..." },
+                              { label:"Açıklama", key:"aciklama", placeholder:"Not..." },
+                            ].map(f => (
+                              <div key={f.key} style={{ marginBottom:"8px" }}>
+                                <label style={{ display:"block", fontSize:"11px", fontWeight:600, color:"#374151", marginBottom:"3px" }}>{f.label}</label>
+                                <input value={bankaForm[f.key]} onChange={e=>setBankaForm(p=>({...p,[f.key]:e.target.value}))} placeholder={f.placeholder}
+                                  style={{ width:"100%", padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"12px", boxSizing:"border-box" }} />
+                              </div>
+                            ))}
+                            <div style={{ display:"flex", gap:"8px", marginTop:"10px" }}>
+                              <button onClick={handleSaveBanka} style={{ flex:1, padding:"8px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>✅ Kaydet</button>
+                              <button onClick={()=>setBankaEditMode(false)} style={{ padding:"8px 12px", background:"#f3f4f6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>İptal</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
 
                     <div style={{ fontSize:"12px", fontWeight:700, color:"#6b21a8", marginBottom:"8px" }}>Açık Faturalar (FIFO sırası)</div>
                     {odemeModalCari.faturalar.map((f,i) => (
