@@ -12952,11 +12952,11 @@ function CashFlowPanel({ currentUser, onBack }) {
     // hex renk haritası (ABGR → RRGGBB)
     const hex = c => c.replace("#","").toUpperCase();
 
-    // Başlık satırı: Boş | Toplam | gün 1..N
+    // Başlık satırı: Kategori | gün 1..N | TOPLAM (sonda)
     const hdrRow = [
       { v:`${ayAdi} ${yil} — Nakit Akış`, s: hdrS(navy) },
-      { v:"Toplam", s: hdrS(navy) },
       ...days.map(d => ({ v:`${d}\n${getDayName(d)}`, s: hdrS(isWeekend(d)?wkEnd:navy) })),
+      { v:"TOPLAM", s: hdrS("0F172A") },
     ];
     rows.push(hdrRow);
 
@@ -12969,17 +12969,17 @@ function CashFlowPanel({ currentUser, onBack }) {
     };
     KATEGORILER.forEach((kat, ki) => {
       const [rowBg, rowTc] = ROW_COLORS[kat.key] || ["F9FAFB","374151"];
-      const rowTotal = Object.values(kat.byDay).reduce((a,b)=>a+b,0);
+      const rowTotal = Object.values(kat.byDay).reduce((a,b)=>a+Number(b),0);
       const sign = kat.type==="income" ? "+" : "-";
       const zebra = ki%2===0 ? "FAFAFA":"FFFFFF";
       const dataRow = [
         { v: kat.label.replace(/[\u{1F300}-\u{1FFFF}]/gu,"").trim(), s: lblS(rowBg, rowTc) },
-        { v: rowTotal>0 ? `${sign}₺${rowTotal.toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "", s: cellS(rowBg, rowTc, true) },
         ...days.map(d => {
           const val = kat.byDay[d]||0;
           const bg = val!==0 ? rowBg : (isWeekend(d)?"F8F9FE":zebra);
           return { v: val!==0 ? `${sign}₺${val.toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "", s: cellS(bg, val!==0?rowTc:"9CA3AF") };
         }),
+        { v: rowTotal!==0 ? `${sign}₺${rowTotal.toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "—", s: cellS(rowBg, rowTc, true) },
       ];
       rows.push(dataRow);
     });
@@ -12987,24 +12987,24 @@ function CashFlowPanel({ currentUser, onBack }) {
     // Günlük Net satırı
     const netRow = [
       { v:"📊 Günlük Net", s: lblS("DBEAFE","1E40AF") },
-      { v: `${netBakiye>=0?"+":"-"}₺${Math.abs(netBakiye).toLocaleString("tr-TR",{maximumFractionDigits:0})}`, s: cellS("DBEAFE", netBakiye>=0?"166534":"DC2626", true) },
       ...days.map(d => {
         const n = dailyNet[d]||0;
         const bg = n>0?"DCFCE7":n<0?"FEE2E2":"F0F9FF";
         const tc = n>0?"166534":n<0?"DC2626":"1E40AF";
         return { v: n!==0 ? `${n>0?"+":""}₺${Math.abs(n).toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "", s: cellS(bg,tc,true) };
       }),
+      { v: `${netBakiye>=0?"+":"-"}₺${Math.abs(netBakiye).toLocaleString("tr-TR",{maximumFractionDigits:0})}`, s: cellS("DBEAFE", netBakiye>=0?"166534":"DC2626", true) },
     ];
     rows.push(netRow);
 
     // Kümülatif Bakiye satırı
     const cumRow = [
       { v:"💰 Kümülatif Bakiye", s: hdrS(darkNy) },
-      { v:`₺${Math.abs(netBakiye).toLocaleString("tr-TR",{maximumFractionDigits:0})}`, s: hdrS(darkNy) },
       ...days.map(d => {
         const c = cumByDay[d]||0;
         return { v: `₺${Math.abs(c).toLocaleString("tr-TR",{maximumFractionDigits:0})}`, s: hdrS(c>=0?"0F4C2A":"7F1D1D") };
       }),
+      { v:`₺${Math.abs(netBakiye).toLocaleString("tr-TR",{maximumFractionDigits:0})}`, s: hdrS("0F172A") },
     ];
     rows.push(cumRow);
 
@@ -13018,8 +13018,8 @@ function CashFlowPanel({ currentUser, onBack }) {
       });
     });
 
-    // Sütun genişlikleri
-    ws["!cols"] = [{ wch:28 }, { wch:14 }, ...days.map(()=>({ wch:10 }))];
+    // Sütun genişlikleri: Kategori | gün 1..N | TOPLAM
+    ws["!cols"] = [{ wch:28 }, ...days.map(()=>({ wch:10 })), { wch:16 }];
     ws["!rows"] = [{ hpt:32 }, ...rows.slice(1).map(()=>({ hpt:20 }))];
 
     XS.utils.book_append_sheet(wb, ws, `${ayAdi} ${yil}`);
