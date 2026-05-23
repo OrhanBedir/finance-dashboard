@@ -12833,6 +12833,7 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [araclar,     setAraclar]     = useState([]);
   const [ofisList,    setOfisList]    = useState([]);
   const [sarkanlar,   setSarkanlar]   = useState([]); // önceki aylardan sarkan ödemeler
+  const [prevOzet,    setPrevOzet]    = useState([]); // önceki ay puantaj özeti (maaş hesabı için)
   const [loading,     setLoading]     = useState(false);
 
   const AY_ADLARI = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
@@ -12842,18 +12843,25 @@ function CashFlowPanel({ currentUser, onBack }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [cfRes, perRes, aracRes, ofisRes, sarkanRes] = await Promise.all([
+      // Önceki ayı hesapla (maaş tahakkuku önceki aya ait)
+      const prevDate = new Date(Number(yil), Number(ay) - 2, 1);
+      const prevYil  = String(prevDate.getFullYear());
+      const prevAy   = String(prevDate.getMonth() + 1).padStart(2, "0");
+
+      const [cfRes, perRes, aracRes, ofisRes, sarkanRes, prevOzetRes] = await Promise.all([
         fetch(`${API_BASE}/finance/cashflow-monthly?yil=${yil}&ay=${ay}`, { headers }),
         fetch(`${API_BASE}/hr/personel`, { headers }),
         fetch(`${API_BASE}/hr/araclar`, { headers }),
         fetch(`${API_BASE}/hr/ofis`, { headers }),
         fetch(`${API_BASE}/finance/sarkan-odemeler`, { headers }),
+        fetch(`${API_BASE}/hr/puantaj/ozet?yil=${prevYil}&ay=${prevAy}`, { headers }),
       ]);
-      const cfData     = await cfRes.json();
-      const perData    = await perRes.json();
-      const aracData   = await aracRes.json();
-      const ofisData   = await ofisRes.json();
-      const sarkanData = await sarkanRes.json();
+      const cfData      = await cfRes.json();
+      const perData     = await perRes.json();
+      const aracData    = await aracRes.json();
+      const ofisData    = await ofisRes.json();
+      const sarkanData  = await sarkanRes.json();
+      const prevOzetData= await prevOzetRes.json();
 
       const toMap = (rows) => (rows||[]).reduce((m,r) => { m[r.gun]=(m[r.gun]||0)+Number(r.tutar||0); return m; }, {});
       setHwReceived(toMap(cfData.received));
@@ -12863,6 +12871,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       setAraclar(Array.isArray(aracData) ? aracData.filter(a => a.durum === "AKTİF") : []);
       setOfisList(Array.isArray(ofisData?.rows) ? ofisData.rows : Array.isArray(ofisData) ? ofisData : []);
       setSarkanlar(Array.isArray(sarkanData) ? sarkanData : []);
+      setPrevOzet(Array.isArray(prevOzetData) ? prevOzetData : []);
     } catch(e) { console.error("CashFlow load error:", e); }
     setLoading(false);
   };
@@ -12872,8 +12881,15 @@ function CashFlowPanel({ currentUser, onBack }) {
   const getDayName = d => ["Paz","Pzt","Sal","Çar","Per","Cum","Cmt"][new Date(Number(yil), Number(ay)-1, d).getDay()];
   const isWeekend  = d => { const wd = new Date(Number(yil), Number(ay)-1, d).getDay(); return wd===0||wd===6; };
 
-  // Sabit gider hesapları
-  const totalMaas   = personelList.reduce((s,p) => s + Number(p.net_maas||0), 0);
+  // Önceki ay bilgileri (label'larda göstermek için)
+  const prevDate2  = new Date(Number(yil), Number(ay) - 2, 1);
+  const prevAyAdi  = AY_ADLARI[prevDate2.getMonth()];
+
+  // Gider hesapları — maaş: önceki ayın hakedilen toplamı (tahakkuk esası)
+  const prevMaasHakedilen = prevOzet.reduce((s,o) => s + Number(o.hakedilen_maas||0), 0);
+  const totalMaas   = prevMaasHakedilen > 0
+    ? prevMaasHakedilen
+    : personelList.reduce((s,p) => s + Number(p.net_maas||0), 0); // fallback: puantaj yoksa net_maas
   const totalArac   = araclar.reduce((s,a) => s + Number(a.aylik_kira||0), 0);
   const totalTicket = personelList.length * 10000;
   const totalOfis   = ofisList.reduce((s,o) => s + Number(o.aylik_kira||0), 0);
@@ -12881,14 +12897,14 @@ function CashFlowPanel({ currentUser, onBack }) {
   // Kategoriler
   const hwDeductAbs = Object.fromEntries(Object.entries(hwDeduct).map(([k,v])=>[k,Math.abs(v)]));
   const KATEGORILER = [
-    { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",   type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived },
-    { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",  type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending  },
-    { key:"hw_deduct",   label:"↩️ İade Kesinti (H01)",      type:"expense", color:"#fee2e2", textColor:"#991b1b", byDay: hwDeductAbs },
-    { key:"maas",        label:"👥 Personel Maaşları",        type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: totalMaas>0   ? {15: totalMaas}   : {} },
-    { key:"arac",        label:"🚗 Araç Kiraları",             type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: totalArac>0   ? {10: totalArac}   : {} },
-    { key:"ticket",      label:"🎫 Ticket'lar",                type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: totalTicket>0 ? {5:  totalTicket} : {} },
-    { key:"ofis",        label:"🏢 Depo & Ofis Kirası",        type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0   ? {5:  totalOfis}   : {} },
-    { key:"diger",       label:"📋 Diğer Giderler",            type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: {} },
+    { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",               type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived },
+    { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",              type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending  },
+    { key:"hw_deduct",   label:"↩️ İade Kesinti (H01)",                  type:"expense", color:"#fee2e2", textColor:"#991b1b", byDay: hwDeductAbs },
+    { key:"maas",        label:`👥 ${prevAyAdi} Maaşları`,               type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: totalMaas>0   ? {15: totalMaas}   : {}, note: `${prevAyAdi} ayı hakedilen · Ödeme: 15. gün` },
+    { key:"arac",        label:`🚗 ${prevAyAdi} Araç Kiraları`,           type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: totalArac>0   ? {10: totalArac}   : {}, note: `${prevAyAdi} kirası · Ödeme: 10. gün` },
+    { key:"ticket",      label:"🎫 Ticket'lar",                           type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: totalTicket>0 ? {5:  totalTicket} : {}, note: `${personelList.length} kişi × ₺10.000 · 5. gün` },
+    { key:"ofis",        label:`🏢 ${prevAyAdi} Depo & Ofis Kirası`,      type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0   ? {5:  totalOfis}   : {}, note: `${prevAyAdi} kirası · Ödeme: 5. gün` },
+    { key:"diger",       label:"📋 Diğer Giderler",                       type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: {} },
   ];
 
   // Günlük net ve kümülatif bakiye
@@ -13017,10 +13033,7 @@ function CashFlowPanel({ currentUser, onBack }) {
                 <tr key={kat.key} style={{ background: ki%2===0 ? "#fafafa":"#fff" }}>
                   <td style={{ ...rowLbl, background: ki%2===0?"#fafafa":"#fff", color:kat.textColor, borderRight:"2px solid #e5e7eb", borderBottom:"1px solid #f3f4f6" }}>
                     {kat.label}
-                    {kat.key==="maas"   && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>Ödeme: 15. gün</div>}
-                    {kat.key==="arac"   && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>Ödeme: 10. gün</div>}
-                    {kat.key==="ticket" && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>{personelList.length} kişi × ₺10.000 · 5. gün</div>}
-                    {kat.key==="ofis"   && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>Ödeme: 5. gün</div>}
+                    {kat.note && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>{kat.note}</div>}
                   </td>
                   {days.map(d => {
                     const val = kat.byDay[d] || 0;
@@ -13082,11 +13095,10 @@ function CashFlowPanel({ currentUser, onBack }) {
 
       {/* Alt not */}
       <div style={{ marginTop:"12px", fontSize:"11px", color:"#9ca3af", display:"flex", gap:"16px", flexWrap:"wrap" }}>
-        <span>📅 HW Tahsilat: Gelecek Tahsilat Planından otomatik</span>
-        <span>👥 Maaş: Aktif personel net maaş toplamı · Ödeme: 15. gün</span>
-        <span>🚗 Araç: Aktif araç kira toplamı · Ödeme: 10. gün</span>
-        <span>🎫 Ticket: {personelList.length} kişi × ₺10.000 · Ödeme: 5. gün</span>
-        <span>🏢 Ofis/Depo: Kayıtlı kiralar · Ödeme: 5. gün</span>
+        <span>📅 HW Tahsilat: Ödeme kayıtlarından gerçek veri</span>
+        <span>👥 Maaş: <b>{prevAyAdi}</b> ayı hakedilen (önceki ay puantajından) · 15. gün ödenir</span>
+        <span>🚗 Araç & 🏢 Ofis: <b>{prevAyAdi}</b> kirası · Sırasıyla 10. ve 5. gün</span>
+        <span>🎫 Ticket: {personelList.length} kişi × ₺10.000 · 5. gün</span>
       </div>
     </div>
   );
