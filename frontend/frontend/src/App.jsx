@@ -8742,15 +8742,32 @@ function HrDashboard({ onBack, currentUser }) {
                             </div>
                           </div>
 
+                          {/* İş Avansı bloğu — sadece varsa gösterilir */}
+                          {isAvans > 0 && (() => {
+                            const isAvansItems = isAvansList
+                              .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy) && !a.odendi);
+                            return (
+                              <div style={{ background:"linear-gradient(135deg,#fffbeb,#fef3c7)", border:"1.5px solid #fbbf24", borderRadius:"12px", padding:"9px 12px" }}>
+                                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: isAvansItems.length>0?"6px":"0" }}>
+                                  <span style={{ fontSize:"10px", fontWeight:700, color:"#92400e", textTransform:"uppercase", letterSpacing:"0.04em" }}>🏗 İş Avansı</span>
+                                  <span style={{ fontSize:"14px", fontWeight:800, color:"#b45309" }}>₺{isAvans.toLocaleString("tr-TR")}</span>
+                                </div>
+                                {isAvansItems.map((a,i) => (
+                                  <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"10px", color:"#78350f", borderTop: i===0?"1px solid #fde68a":"none", paddingTop: i===0?"4px":"2px" }}>
+                                    <span style={{ opacity:0.8, maxWidth:"120px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{a.aciklama||"—"}</span>
+                                    <span style={{ fontWeight:700 }}>₺{Number(a.tutar||0).toLocaleString("tr-TR")}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+
                           {/* Satır 4 — Tamamlandı / Kalan (tam genişlik) */}
                           <div style={cardSt(tamam?"linear-gradient(135deg,#166534,#15803d)":"linear-gradient(135deg,#dc2626,#ef4444)")}>
                             <div style={lbl}>{tamam?"✅ Tamamlandı":"⏳ Kalan Ödeme"}</div>
                             <div style={amt(22)}>₺{toplamKalan.toLocaleString("tr-TR")}</div>
-                            {(maasAvans>0||isAvans>0) && (
-                              <div style={sub}>
-                                {maasAvans>0?`Maaş avansı: ₺${maasAvans.toLocaleString("tr-TR")} · `:""}
-                                {isAvans>0?`İş avansı: ₺${isAvans.toLocaleString("tr-TR")}`:""}
-                              </div>
+                            {maasAvans>0 && (
+                              <div style={sub}>Maaş avansı: ₺{maasAvans.toLocaleString("tr-TR")}</div>
                             )}
                           </div>
 
