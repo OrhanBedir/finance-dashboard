@@ -8632,13 +8632,23 @@ function HrDashboard({ onBack, currentUser }) {
                   return row?.durum === "CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0;
                 }).length;
                 const dailyRateHR = (sp.net_maas||0) / 26;
-                const gelmediKesinti = Math.round(gelmediSay * dailyRateHR);
-                const ozetRowHR = ozet.find(o => o.personel_id === sp.id);
+                // Gelmedi × extra bakiye mahsuplaşması: önce extra günlerden düşülür, kalan kesilir
+                const ozetRowHR_pre = ozet.find(o => o.personel_id === sp.id);
+                const bakiyeOnceMahsup = ozetRowHR_pre?.dinlenme_bakiye ?? 0;
+                const mahsupGun     = Math.min(gelmediSay, bakiyeOnceMahsup);
+                const kesilenGun    = gelmediSay - mahsupGun;
+                const gelmediKesinti = Math.round(kesilenGun * dailyRateHR);
+                const ozetRowHR = ozetRowHR_pre;
                 const dinlenmeBakiyeHR = ozetRowHR?.dinlenme_bakiye ?? 0;
+                // Mahsup sonrası efektif bakiye
+                const effectiveBakiye = Math.max(0, dinlenmeBakiyeHR - mahsupGun);
                 const toplamPazarHR = ozetRowHR?.toplam_pazar_calisdi ?? 0;
                 const toplamResmiTatilHR = ozetRowHR?.toplam_resmi_tatil_calisdi ?? 0;
                 const toplamDinlenmeHR = ozetRowHR?.toplam_dinlenme ?? 0;
                 const extraHakedisHR = ozetRowHR?.extra_hakedis ?? Math.round(dinlenmeBakiyeHR * dailyRateHR * 1.5);
+                const kazanilanGun   = (toplamPazarHR||0) + (toplamResmiTatilHR||0);
+                const kullanilanGun  = toplamDinlenmeHR||0;
+                const effectivePara  = Math.round(effectiveBakiye * dailyRateHR * 1.5);
                 const tooltipExtra = [
                   `Pazar çalışma (toplam): ${toplamPazarHR} gün`,
                   `Resmi tatil çalışma (toplam): ${toplamResmiTatilHR} gün`,
@@ -8694,7 +8704,7 @@ function HrDashboard({ onBack, currentUser }) {
                         </div>
                       )}
                     </div>
-                    {/* ── Yeni 4 satır kart tasarımı ── */}
+                    {/* ── Extra blok + Kart sütunu ── */}
                     {(() => {
                       const bankadan_gosterilen = Number(sp.bankadan_gosterilen||0);
                       const elden_verilen       = Number(sp.elden_verilen||0);
@@ -8709,7 +8719,6 @@ function HrDashboard({ onBack, currentUser }) {
                       const tamam       = toplamKalan <= 0;
 
                       const cardW = "220px";
-                      const halfW = "107px";
                       const cardSt = (grad, extra={}) => ({
                         background: grad, borderRadius:"14px", padding:"12px 14px",
                         textAlign:"center", color:"#fff", ...extra,
@@ -8732,25 +8741,62 @@ function HrDashboard({ onBack, currentUser }) {
                       };
 
                       return (
-                        <div style={{ display:"flex", flexDirection:"column", gap:"7px", width:cardW, flexShrink:0 }}>
+                        <div style={{ display:"flex", gap:"10px", alignItems:"flex-start", flexShrink:0 }}>
+
+                          {/* ── Extra Dinlenme Hakkı Bloğu (sol) ── */}
+                          {kazanilanGun > 0 && (
+                            <div style={{ width:"160px", flexShrink:0, background:"linear-gradient(160deg,#4c1d95,#7c3aed)", borderRadius:"14px", padding:"14px 14px", color:"#fff", display:"flex", flexDirection:"column", gap:"4px" }}>
+                              <div style={{ fontSize:"10px", fontWeight:700, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:"4px" }}>✨ Dinlenme Hakkı</div>
+                              {/* Büyük rakam: gün ve para */}
+                              <div style={{ display:"flex", alignItems:"baseline", gap:"6px" }}>
+                                <span style={{ fontSize:"28px", fontWeight:900, lineHeight:1 }}>{effectiveBakiye}</span>
+                                <span style={{ fontSize:"12px", fontWeight:600, opacity:0.8 }}>gün</span>
+                              </div>
+                              <div style={{ fontSize:"16px", fontWeight:800, color:"#c4b5fd", marginBottom:"6px" }}>
+                                ₺{effectivePara.toLocaleString("tr-TR")}
+                              </div>
+                              {/* Breakdown */}
+                              <div style={{ borderTop:"1px solid rgba(255,255,255,0.15)", paddingTop:"6px", display:"flex", flexDirection:"column", gap:"2px" }}>
+                                <div style={{ display:"flex", justifyContent:"space-between", fontSize:"10px", opacity:0.75 }}>
+                                  <span>Kazanılan</span><span>{kazanilanGun} gün</span>
+                                </div>
+                                {kullanilanGun>0 && (
+                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:"10px", opacity:0.75 }}>
+                                    <span>- Dinlendirildi</span><span>{kullanilanGun} gün</span>
+                                  </div>
+                                )}
+                                {mahsupGun>0 && (
+                                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:"10px", color:"#fca5a5" }}>
+                                    <span>- Gelmedi mahsup</span><span>{mahsupGun} gün</span>
+                                  </div>
+                                )}
+                              </div>
+                              <div style={{ marginTop:"4px", fontSize:"9px", opacity:0.55, fontStyle:"italic", lineHeight:1.4 }}>
+                                {effectiveBakiye>0 ? "Ödeme yok · dinlendirilerek kullanılır" : "✅ Tüm hak kullanıldı"}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ── Kart sütunu (sağ) ── */}
+                          <div style={{ display:"flex", flexDirection:"column", gap:"7px", width:cardW }}>
 
                           {/* Satır 1 — Hakedilen Maaş (puantaj bazlı, yeşil) */}
                           <div style={cardSt("linear-gradient(135deg,#15803d,#22c55e)")}>
                             <div style={lbl}>💰 Hakedilen Maaş</div>
                             <div style={amt(24)}>₺{hakedilen.toLocaleString("tr-TR")}</div>
                             <div style={sub}>
-                              {gelmediKesinti>0
-                                ? `-₺${gelmediKesinti.toLocaleString("tr-TR")} kesinti (${gelmediSay} gün gelmedi)`
+                              {kesilenGun>0
+                                ? `-₺${gelmediKesinti.toLocaleString("tr-TR")} kesinti (${kesilenGun} gün)`
                                 : `${cal} gün çalışıldı · tam hak`}
                             </div>
-                            {hakedilen !== Number(sp.net_maas||0) && (
-                              <div style={{ fontSize:"10px", opacity:0.65, marginTop:"2px" }}>
-                                Taban: ₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}
+                            {mahsupGun>0 && (
+                              <div style={{ fontSize:"9px", opacity:0.65, marginTop:"2px" }}>
+                                {mahsupGun} gün gelmedi → extra'dan mahsup
                               </div>
                             )}
-                            {extraHakedisHR > 0 && (
-                              <div title={tooltipExtra} style={{ marginTop:"5px", fontSize:"10px", background:"rgba(255,255,255,0.2)", borderRadius:"8px", padding:"3px 8px", cursor:"help" }}>
-                                ✨ Extra: ₺{extraHakedisHR.toLocaleString("tr-TR")} ({dinlenmeBakiyeHR} gün)
+                            {hakedilen !== Number(sp.net_maas||0) && kesilenGun>0 && (
+                              <div style={{ fontSize:"10px", opacity:0.65, marginTop:"2px" }}>
+                                Taban: ₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}
                               </div>
                             )}
                           </div>
@@ -8817,6 +8863,7 @@ function HrDashboard({ onBack, currentUser }) {
                             </div>
                           </div>
 
+                        </div>
                         </div>
                       );
                     })()}
