@@ -5818,14 +5818,29 @@ function FinanceDashboard({
                 <div style={{ fontSize:"12px", opacity:0.8, marginTop:"2px" }}>FIFO — en eski fatura önce kapatılır</div>
               </div>
               <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-                <a
-                  href={`${API_BASE}/finance/taseron-odeme-excel${odemeModalFirma ? `?firma=${encodeURIComponent(odemeModalFirma)}` : ""}`}
-                  download
-                  onClick={e => { e.stopPropagation(); }}
-                  style={{ background:"rgba(255,255,255,0.2)", border:"1px solid rgba(255,255,255,0.4)", borderRadius:"8px", color:"#fff", padding:"6px 12px", fontWeight:700, fontSize:"13px", textDecoration:"none", display:"flex", alignItems:"center", gap:"5px" }}
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    try {
+                      const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+                      const url = `${API_BASE}/finance/taseron-odeme-excel${odemeModalFirma ? `?firma=${encodeURIComponent(odemeModalFirma)}` : ""}`;
+                      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+                      if (!res.ok) throw new Error("İndirme başarısız");
+                      const blob = await res.blob();
+                      const blobUrl = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = blobUrl;
+                      const safeFirma = odemeModalFirma ? `_${odemeModalFirma.replace(/[^a-zA-Z0-9]/g,"_")}` : "_tum";
+                      a.download = `taseron_odemeler${safeFirma}_${new Date().toISOString().slice(0,10)}.xlsx`;
+                      a.click();
+                      URL.revokeObjectURL(blobUrl);
+                    } catch(err) { alert(err.message); }
+                  }}
+                  style={{ background:"rgba(255,255,255,0.2)", border:"1px solid rgba(255,255,255,0.4)", borderRadius:"8px", color:"#fff", padding:"6px 12px", fontWeight:700, fontSize:"13px", cursor:"pointer", display:"flex", alignItems:"center", gap:"5px" }}
                 >
                   📥 Excel
-                </a>
+                </button>
                 <button onClick={() => setShowOdemeModal(false)} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:"8px", color:"#fff", padding:"6px 14px", cursor:"pointer", fontWeight:700 }}>✕ Kapat</button>
               </div>
             </div>
