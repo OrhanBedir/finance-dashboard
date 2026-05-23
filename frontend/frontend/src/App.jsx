@@ -8630,9 +8630,15 @@ function HrDashboard({ onBack, currentUser }) {
                 const odenenBuAy = maasOdeList
                   .filter(o => o.donem === puantajAy)
                   .reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0), 0);
-                // Net ödenecek: net_maas bazlı (extra hakediş ayrı takip edilir)
-                const netBase = Math.round((sp.net_maas||0) - gelmediKesinti);
-                const net = netBase - maasAvans - odenenBuAy;
+                // Hakedilen: ozet'ten (backend prorated) veya gelmedi kesintisi ile hesaplanan
+                const netBase    = Math.round((sp.net_maas||0) - gelmediKesinti);
+                const hakedilen  = ozetRowHR ? Math.round(Number(ozetRowHR.hakedilen_maas||0)) : netBase;
+                // Banka/elden prorated (hakedilen oranı)
+                const hakRatio   = Number(sp.net_maas||0) > 0 ? hakedilen / Number(sp.net_maas) : 1;
+                const proratedBanka = Math.round(Number(sp.bankadan_gosterilen||0) * hakRatio);
+                const proratedElden = Math.round(Number(sp.elden_verilen||0) * hakRatio);
+                // Kalan ödeme = hakedilen - maaş avansı - iş avansı - ödenen bu ay
+                const toplamOdenmesi = Math.max(0, hakedilen - maasAvans - isAvans - odenenBuAy);
                 return (
                   <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"20px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
                     <div style={{ minWidth:"130px" }}>
@@ -8669,9 +8675,10 @@ function HrDashboard({ onBack, currentUser }) {
                       const buAyOdeme = maasOdeList.filter(o => o.donem === puantajAy);
                       const bankaOdenen = buAyOdeme.reduce((s,o)=>s+Number(o.bankadan||0), 0);
                       const eldenOdenen = buAyOdeme.reduce((s,o)=>s+Number(o.elden||0),    0);
-                      const bankaKalan  = Math.max(0, bankadan_gosterilen - bankaOdenen);
-                      const eldenKalan  = Math.max(0, elden_verilen       - eldenOdenen);
-                      const toplamKalan = bankaKalan + eldenKalan;
+                      // Prorated kalan (puantaj + iş avansı düşülmüş)
+                      const bankaKalan  = Math.max(0, proratedBanka - bankaOdenen);
+                      const eldenKalan  = Math.max(0, proratedElden - eldenOdenen);
+                      const toplamKalan = toplamOdenmesi; // hakedilen - maasAvans - isAvans - ödenen
                       const tamam       = toplamKalan <= 0;
 
                       const cardW = "220px";
@@ -8700,11 +8707,20 @@ function HrDashboard({ onBack, currentUser }) {
                       return (
                         <div style={{ display:"flex", flexDirection:"column", gap:"7px", width:cardW, flexShrink:0 }}>
 
-                          {/* Satır 1 — Net Maaş (tam genişlik, yeşil) */}
+                          {/* Satır 1 — Hakedilen Maaş (puantaj bazlı, yeşil) */}
                           <div style={cardSt("linear-gradient(135deg,#15803d,#22c55e)")}>
-                            <div style={lbl}>💰 Net Maaş</div>
-                            <div style={amt(24)}>₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}</div>
-                            <div style={sub}>{gelmediKesinti>0?`-₺${gelmediKesinti.toLocaleString("tr-TR")} kesinti (${gelmediSay} gün)`:`${cal} gün çalışıldı`}</div>
+                            <div style={lbl}>💰 Hakedilen Maaş</div>
+                            <div style={amt(24)}>₺{hakedilen.toLocaleString("tr-TR")}</div>
+                            <div style={sub}>
+                              {gelmediKesinti>0
+                                ? `-₺${gelmediKesinti.toLocaleString("tr-TR")} kesinti (${gelmediSay} gün gelmedi)`
+                                : `${cal} gün çalışıldı · tam hak`}
+                            </div>
+                            {hakedilen !== Number(sp.net_maas||0) && (
+                              <div style={{ fontSize:"10px", opacity:0.65, marginTop:"2px" }}>
+                                Taban: ₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}
+                              </div>
+                            )}
                             {extraHakedisHR > 0 && (
                               <div title={tooltipExtra} style={{ marginTop:"5px", fontSize:"10px", background:"rgba(255,255,255,0.2)", borderRadius:"8px", padding:"3px 8px", cursor:"help" }}>
                                 ✨ Extra: ₺{extraHakedisHR.toLocaleString("tr-TR")} ({dinlenmeBakiyeHR} gün)
@@ -8766,9 +8782,12 @@ function HrDashboard({ onBack, currentUser }) {
                           <div style={cardSt(tamam?"linear-gradient(135deg,#166534,#15803d)":"linear-gradient(135deg,#dc2626,#ef4444)")}>
                             <div style={lbl}>{tamam?"✅ Tamamlandı":"⏳ Kalan Ödeme"}</div>
                             <div style={amt(22)}>₺{toplamKalan.toLocaleString("tr-TR")}</div>
-                            {maasAvans>0 && (
-                              <div style={sub}>Maaş avansı: ₺{maasAvans.toLocaleString("tr-TR")}</div>
-                            )}
+                            <div style={{ marginTop:"5px", fontSize:"10px", opacity:0.75, textAlign:"left", lineHeight:1.6 }}>
+                              <div>Hakedilen: ₺{hakedilen.toLocaleString("tr-TR")}</div>
+                              {maasAvans>0 && <div>- Maaş avansı: ₺{maasAvans.toLocaleString("tr-TR")}</div>}
+                              {isAvans>0   && <div>- İş avansı: ₺{isAvans.toLocaleString("tr-TR")}</div>}
+                              {odenenBuAy>0 && <div>- Ödenen: ₺{odenenBuAy.toLocaleString("tr-TR")}</div>}
+                            </div>
                           </div>
 
                         </div>
