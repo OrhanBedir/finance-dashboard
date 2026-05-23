@@ -7963,14 +7963,14 @@ function HrDashboard({ onBack, currentUser }) {
                     {hrSearchOpen && (
                       <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"8px", boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:999, maxHeight:"220px", overflowY:"auto" }}>
                         <div
-                          onMouseDown={()=>{ setHrPersonelFilter(""); setHrSearchText(""); setHrSearchOpen(false); }}
+                          onMouseDown={()=>{ setHrPersonelFilter(""); setHrSearchText(""); setHrSearchOpen(false); setOdemeTabloAcik(false); }}
                           style={{ padding:"8px 12px", fontSize:"13px", color:"#6b7280", cursor:"pointer", borderBottom:"1px solid #f3f4f6" }}
                           onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                           onMouseLeave={e=>e.currentTarget.style.background=""}
                         >👥 Tüm Personel</div>
                         {personelList.filter(p=>p.aktif && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
                           <div key={p.id}
-                            onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); }}
+                            onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); setOdemeTabloAcik(true); }}
                             style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
                             onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
                             onMouseLeave={e=>e.currentTarget.style.background=""}
