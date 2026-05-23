@@ -3481,6 +3481,8 @@ function FinanceDashboard({
   onGoToAraclar,
   onGoToOfis,
   onGoToMalzeme,
+  onGoToCashflow,
+  currentUser,
 }) {
   function parseDateTR(dateStr) {
     const [day, month, year] = dateStr.split(".");
@@ -4687,6 +4689,16 @@ function FinanceDashboard({
             👤 Maaş & Avans
           </button>
 
+          {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes((currentUser?.email||"").toLowerCase()) && (
+            <button
+              type="button"
+              className="tab smallTab"
+              onClick={onGoToCashflow}
+            >
+              💵 Nakit Akış
+            </button>
+          )}
+
           <button
             type="button"
             className="tab smallTab"
@@ -4701,14 +4713,6 @@ function FinanceDashboard({
             onClick={onGoToOfis}
           >
             🏢 Ofis & Depo
-          </button>
-
-          <button
-            type="button"
-            className="tab smallTab"
-            onClick={onGoToMalzeme}
-          >
-            📦 Malzeme
           </button>
 
           <button
@@ -15197,6 +15201,8 @@ function App() {
             onGoToAraclar={() => setPage("araclar")}
             onGoToOfis={() => setPage("ofis")}
             onGoToMalzeme={() => setPage("malzeme")}
+            onGoToCashflow={() => setPage("cashflow")}
+            currentUser={user}
           />
         ) : (
           <div
