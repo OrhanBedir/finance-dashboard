@@ -13024,13 +13024,14 @@ function CashFlowPanel({ currentUser, onBack }) {
 
     XS.utils.book_append_sheet(wb, ws, `${ayAdi} ${yil}`);
 
-    // Gridlines kapat
+    // Gridlines kapat + freeze (1. satır + A sütunu)
+    const freezePane = `<pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/><selection pane="bottomRight"/>`;
     const buf = XS.write(wb, { type:"array", bookType:"xlsx" });
     JSZip.loadAsync(buf).then(zip => {
       return zip.file("xl/worksheets/sheet1.xml").async("string").then(xml => {
         const patched = xml
-          .replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>')
-          .replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
+          .replace('<sheetView workbookViewId="0"/>', `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`)
+          .replace('<sheetView tabSelected="1" workbookViewId="0"/>', `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`);
         zip.file("xl/worksheets/sheet1.xml", patched);
         return zip.generateAsync({ type:"blob", compression:"STORE" });
       });
