@@ -8367,35 +8367,21 @@ function HrDashboard({ onBack, currentUser }) {
                     const tamamlandi = allRows.filter(r=>r.kalan===0 && r.odenen>0).length;
                     const bekleyen   = allRows.filter(r=>r.kalan>0).length;
                     return (
-                      <div style={{ marginTop:"14px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"14px", overflow:"hidden" }}>
-                        {/* ── Tıklanabilir başlık + özet ── */}
-                        <div
-                          onClick={()=>setOdemeTabloAcik(v=>!v)}
-                          style={{ background:"#1e3a5f", padding:"0", cursor:"pointer", userSelect:"none" }}
-                        >
-                          {/* Üst bar: başlık + rozetler + ok */}
-                          <div style={{ padding:"10px 18px", display:"flex", alignItems:"center", gap:"10px" }}>
-                            <span style={{ color:"#fff", fontWeight:700, fontSize:"14px", flex:1 }}>
-                              📋 {ayAdi} {yilStr} — Maaş Ödeme Durumu
-                            </span>
-                            <span style={{ background:"#dcfce7", color:"#166534", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>✅ {tamamlandi} tamamlandı</span>
-                            {bekleyen>0 && <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>⏳ {bekleyen} bekliyor</span>}
-                            <span style={{ color:"#93c5fd", fontSize:"16px", marginLeft:"6px", transition:"transform 0.25s", display:"inline-block", transform: odemeTabloAcik?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
-                          </div>
-                          {/* Filtre satırı — tıklama olayını durduruyoruz, accordion toggle olmasın */}
-                          <div onClick={e=>e.stopPropagation()} style={{ padding:"8px 18px", background:"rgba(0,0,0,0.18)", display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap", borderTop:"1px solid rgba(255,255,255,0.08)" }}>
+                      <div style={{ marginTop:"14px" }}>
+                        {/* ── Filtre satırı — üstte, bloğun dışında ── */}
+                        <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap", marginBottom:"8px" }}>
                             <select value={yilStr} onChange={e=>setPuantajAy(`${e.target.value}-${ayStr}`)}
-                              style={{ padding:"5px 8px", border:"none", borderRadius:"7px", fontSize:"12px", background:"rgba(255,255,255,0.12)", color:"#fff", fontWeight:600, cursor:"pointer" }}>
-                              {[2024,2025,2026,2027].map(y=><option key={y} value={y} style={{ color:"#1f2937" }}>{y}</option>)}
+                              style={{ padding:"5px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"12px", background:"#fff", color:"#1f2937", fontWeight:600, cursor:"pointer" }}>
+                              {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
                             </select>
                             <select value={ayStr} onChange={e=>setPuantajAy(`${yilStr}-${e.target.value}`)}
-                              style={{ padding:"5px 8px", border:"none", borderRadius:"7px", fontSize:"12px", background:"rgba(255,255,255,0.12)", color:"#fff", fontWeight:600, cursor:"pointer" }}>
+                              style={{ padding:"5px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"12px", background:"#fff", color:"#1f2937", fontWeight:600, cursor:"pointer" }}>
                               {["01","02","03","04","05","06","07","08","09","10","11","12"].map((m,i)=>(
-                                <option key={m} value={m} style={{ color:"#1f2937" }}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
+                                <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
                               ))}
                             </select>
                             {/* Arama + dropdown */}
-                            <div style={{ position:"relative", minWidth:"160px" }}>
+                            <div style={{ position:"relative", minWidth:"180px" }}>
                               <input
                                 type="text"
                                 placeholder="🔍 Personel ara..."
@@ -8404,7 +8390,7 @@ function HrDashboard({ onBack, currentUser }) {
                                 onFocus={()=>setHrSearchOpen(true)}
                                 onBlur={()=>setTimeout(()=>setHrSearchOpen(false),150)}
                                 onChange={e=>{ setHrSearchText(e.target.value); setHrSearchOpen(true); if(!e.target.value){ setHrPersonelFilter(""); } }}
-                                style={{ padding:"5px 9px", border:"none", borderRadius:"7px", fontSize:"12px", width:"100%", boxSizing:"border-box", background:"rgba(255,255,255,0.15)", color:"#fff" }}
+                                style={{ padding:"5px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"12px", width:"100%", boxSizing:"border-box", background:"#fff", color:"#1f2937" }}
                               />
                               {hrSearchOpen && (
                                 <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"8px", boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:999, maxHeight:"220px", overflowY:"auto" }}>
@@ -8431,11 +8417,11 @@ function HrDashboard({ onBack, currentUser }) {
                                 const today = new Date().toISOString().slice(0,10);
                                 const fmtDate = v => { if (!v) return ""; const d = new Date(v); return isNaN(d)?String(v):`${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`; };
                                 const fmtNum  = v => v ? Number(v).toLocaleString("tr-TR") : "0";
-                                const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi","Net Maaş (₺)","Bankadan (₺)","Elden (₺)","IBAN","Banka Adı","Hesap No","Durum","Bankadan Ödenen (₺)","Elden Ödenen (₺)"];
-                                const cols    = [26,18,14,14,13,14,28,13,13,16,14,12,34,16,18,8,18,16];
+                                const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi","Net Maaş (₺)","Bankadan (₺)","Elden (₺)","Bankadan Ödenen (₺)","Elden Ödenen (₺)","IBAN","Banka Adı","Hesap No","Durum"];
+                                const cols    = [26,18,14,14,13,14,28,13,13,16,14,12,18,16,34,16,18,8];
                                 const dateKeys = ["dogum_tarihi","ise_giris_tarihi","isten_ayrilma_tarihi"];
                                 const numKeys  = ["net_maas","bankadan_gosterilen","elden_verilen"];
-                                const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","iban","banka_adi","banka_hesap_no","aktif","_banka_odenen","_elden_odenen"];
+                                const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","_banka_odenen","_elden_odenen","iban","banka_adi","banka_hesap_no","aktif"];
                                 const odenenByPerId = {};
                                 aylikOdemeler.forEach(o => {
                                   if (!odenenByPerId[o.personel_id]) odenenByPerId[o.personel_id] = { banka:0, elden:0 };
@@ -8460,7 +8446,7 @@ function HrDashboard({ onBack, currentUser }) {
                                 const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
                                 ws["!cols"] = cols.map(w=>({wch:w}));
                                 ws["!rows"] = [{ hpt:26 }, ...personelList.map(()=>({hpt:20}))];
-                                headers.forEach((_,ci) => { const a = XLSXStyle.utils.encode_cell({r:0,c:ci}); if (ws[a]) ws[a].s = (ci >= 16) ? headerMN : headerS; });
+                                headers.forEach((_,ci) => { const a = XLSXStyle.utils.encode_cell({r:0,c:ci}); if (ws[a]) ws[a].s = (ci >= 12 && ci <= 13) ? headerMN : headerS; });
                                 personelList.forEach((_,ri) => { keys.forEach((k,ci) => { const a = XLSXStyle.utils.encode_cell({r:ri+1,c:ci}); if (!ws[a]) return; const isNum = numKeys.includes(k)||k==="_banka_odenen"||k==="_elden_odenen"; const isDurum = k==="aktif"; const isMN = k==="_banka_odenen"||k==="_elden_odenen"; ws[a].s = cellS(ri,isNum,isDurum,ws[a].v,isMN); }); });
                                 ws["!freeze"] = { xSplit:0, ySplit:1 };
                                 const wb = XLSXStyle.utils.book_new();
@@ -8485,6 +8471,22 @@ function HrDashboard({ onBack, currentUser }) {
                             <button style={{ padding:"5px 12px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
                               onClick={()=>{ setEditingPersonel(null); setPForm({ ad_soyad:"",tc_no:"",dogum_tarihi:"",telefon:"",email:"",unvan:"",bolge:"",ise_giris_tarihi:"",isten_ayrilma_tarihi:"",net_maas:"",bankadan_gosterilen:"",elden_verilen:"",iban:"",banka_adi:"",banka_hesap_no:"",aktif:true }); setShowPersonelForm(true); }}>
                               + Personel Ekle</button>
+                        </div>
+                        {/* ── Kart kutusu: başlık + accordion ── */}
+                        <div style={{ background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"14px", overflow:"hidden" }}>
+                        {/* ── Tıklanabilir başlık + özet ── */}
+                        <div
+                          onClick={()=>setOdemeTabloAcik(v=>!v)}
+                          style={{ background:"#1e3a5f", padding:"0", cursor:"pointer", userSelect:"none" }}
+                        >
+                          {/* Başlık + rozetler + ok */}
+                          <div style={{ padding:"10px 18px", display:"flex", alignItems:"center", gap:"10px" }}>
+                            <span style={{ color:"#fff", fontWeight:700, fontSize:"14px", flex:1 }}>
+                              📋 {ayAdi} {yilStr} — Maaş Ödeme Durumu
+                            </span>
+                            <span style={{ background:"#dcfce7", color:"#166534", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>✅ {tamamlandi} tamamlandı</span>
+                            {bekleyen>0 && <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>⏳ {bekleyen} bekliyor</span>}
+                            <span style={{ color:"#93c5fd", fontSize:"16px", marginLeft:"6px", transition:"transform 0.25s", display:"inline-block", transform: odemeTabloAcik?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
                           </div>
                           {/* Alt özet şeridi (her zaman görünür) */}
                           <div style={{ background:"rgba(0,0,0,0.25)", padding:"8px 18px", display:"flex", gap:"0" }}>
@@ -8544,6 +8546,7 @@ function HrDashboard({ onBack, currentUser }) {
                             </table>
                           </div>
                         </div>
+                        </div>{/* /kart kutusu */}
                       </div>
                     );
                   })()}
