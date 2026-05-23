@@ -3974,6 +3974,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       proje_kodu,
       fatura_no,
       fatura_tarihi,
+      odeme_tarihi,
       tedarikci,
       rf_montaj_firma,
       fatura_kalemi,
@@ -3997,6 +3998,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         proje_kodu,
         fatura_no,
         fatura_tarihi,
+        odeme_tarihi,
         tedarikci,
         rf_montaj_firma,
         fatura_kalemi,
@@ -4012,7 +4014,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       )
       VALUES
       (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
       )
       RETURNING *
       `,
@@ -4022,6 +4024,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         proje_kodu || null,
         fatura_no || null,
         fatura_tarihi || null,
+        odeme_tarihi || null,
         tedarikci || null,
         rf_montaj_firma || null,
         fatura_kalemi || null,
@@ -6856,6 +6859,7 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
       proje_kodu,
       fatura_no,
       fatura_tarihi,
+      odeme_tarihi,
       tedarikci,
       rf_montaj_firma,
       fatura_kalemi,
@@ -6879,19 +6883,20 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
         proje_kodu = $3,
         fatura_no = $4,
         fatura_tarihi = $5,
-        tedarikci = $6,
-        rf_montaj_firma = $7, -- ✅ EKLENDİ
-        fatura_kalemi = $8,
-        is_kalemi = $9,
-        po_no = $10,
-        site_id = $11,
-        tutar = $12,
-        kdv = $13,
-        toplam_tutar = $14,
-        odenen_tutar = $15,
-        kalan_borc = $16,
-        note = $17
-      WHERE id = $18
+        odeme_tarihi = $6,
+        tedarikci = $7,
+        rf_montaj_firma = $8,
+        fatura_kalemi = $9,
+        is_kalemi = $10,
+        po_no = $11,
+        site_id = $12,
+        tutar = $13,
+        kdv = $14,
+        toplam_tutar = $15,
+        odenen_tutar = $16,
+        kalan_borc = $17,
+        note = $18
+      WHERE id = $19
       RETURNING *
       `,
       [
@@ -6900,8 +6905,9 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
         proje_kodu || null,
         fatura_no || null,
         fatura_tarihi || null,
+        odeme_tarihi || null,
         tedarikci || null,
-        rf_montaj_firma || null, // ✅
+        rf_montaj_firma || null,
         fatura_kalemi || null,
         is_kalemi || null,
         po_no || null,
@@ -8649,8 +8655,9 @@ app.get("/test-db", async (req, res) => {
 
 /* ===== FATURA BELGE UPLOAD & VIEW ===== */
 
-// DB kolonu ekle (idempotent)
+// DB kolonları ekle (idempotent)
 pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS belge_path TEXT`).catch(() => {});
+pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS odeme_tarihi DATE`).catch(() => {});
 
 app.post(
   "/invoice-entries/:id/belge",
@@ -9215,6 +9222,43 @@ app.get("/hr/maas-odeme-aylik", async (req, res) => {
       ORDER BY p.ad_soyad, m.tarih
     `, [donem]);
     res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Taşeron ödemeleri: fatura girişlerindeki odeme_tarihi'ne göre aylık özet
+app.get("/finance/taseron-cashflow", requireFinanceAuth, async (req, res) => {
+  try {
+    const { yil, ay } = req.query;
+    if (!yil || !ay) return res.status(400).json({ error: "yil ve ay zorunlu" });
+
+    // Sadece odeme_tarihi o ay olan, odenen_tutar > 0 kayıtlar
+    const result = await pool.query(`
+      SELECT
+        EXTRACT(DAY FROM odeme_tarihi)::int AS gun,
+        TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
+        COALESCE(odenen_tutar, 0) AS tutar,
+        fatura_no,
+        fatura_tarihi,
+        note
+      FROM invoice_entries
+      WHERE EXTRACT(YEAR FROM odeme_tarihi) = $1
+        AND EXTRACT(MONTH FROM odeme_tarihi) = $2
+        AND COALESCE(odenen_tutar, 0) > 0
+        AND odeme_tarihi IS NOT NULL
+      ORDER BY gun ASC, firma ASC
+    `, [Number(yil), Number(ay)]);
+
+    // Gün bazlı toplam (cashflow grid için)
+    const byDay = {};
+    const details = {}; // gun → [{firma, tutar, fatura_no}, ...]
+    result.rows.forEach(r => {
+      const g = r.gun;
+      byDay[g] = (byDay[g] || 0) + Number(r.tutar);
+      if (!details[g]) details[g] = [];
+      details[g].push({ firma: r.firma, tutar: Number(r.tutar), fatura_no: r.fatura_no, note: r.note });
+    });
+
+    res.json({ byDay, details });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -3839,6 +3839,7 @@ function FinanceDashboard({
     proje_kodu: "",
     fatura_no: "",
     fatura_tarihi: "",
+    odeme_tarihi: "",
     tedarikci: "",
     rf_montaj_firma: "",
     fatura_kalemi: "",
@@ -4222,9 +4223,8 @@ function FinanceDashboard({
       proje: row.proje || "",
       proje_kodu: row.proje_kodu || "",
       fatura_no: row.fatura_no || "",
-      fatura_tarihi: row.fatura_tarihi
-        ? String(row.fatura_tarihi).slice(0, 10)
-        : "",
+      fatura_tarihi: row.fatura_tarihi ? String(row.fatura_tarihi).slice(0, 10) : "",
+      odeme_tarihi: row.odeme_tarihi ? String(row.odeme_tarihi).slice(0, 10) : "",
       tedarikci: row.tedarikci || "",
       rf_montaj_firma: row.rf_montaj_firma || "",
       fatura_kalemi: row.fatura_kalemi || "",
@@ -4273,6 +4273,7 @@ function FinanceDashboard({
         proje_kodu: invoiceForm.proje_kodu,
         fatura_no: invoiceForm.fatura_no,
         fatura_tarihi: invoiceForm.fatura_tarihi || null,
+        odeme_tarihi: invoiceForm.odeme_tarihi || null,
         tedarikci: invoiceForm.tedarikci,
         rf_montaj_firma: invoiceForm.rf_montaj_firma,
         fatura_kalemi: invoiceForm.fatura_kalemi,
@@ -4317,6 +4318,7 @@ function FinanceDashboard({
         proje_kodu: "",
         fatura_no: "",
         fatura_tarihi: "",
+        odeme_tarihi: "",
         tedarikci: "",
         rf_montaj_firma: "",
         fatura_kalemi: "",
@@ -4671,7 +4673,7 @@ function FinanceDashboard({
               setEditingInvoiceId(null);
               setInvoiceForm({
                 bolge: "", proje: "", proje_kodu: "", fatura_no: "",
-                fatura_tarihi: "", tedarikci: "", rf_montaj_firma: "",
+                fatura_tarihi: "", odeme_tarihi: "", tedarikci: "", rf_montaj_firma: "",
                 fatura_kalemi: "", is_kalemi: "", po_no: "", site_id: "",
                 tutar: "", kdv: "", toplam_tutar: "", odenen_tutar: "",
                 kalan_borc: "", note: "",
@@ -5350,6 +5352,7 @@ function FinanceDashboard({
                     proje_kodu: "",
                     fatura_no: "",
                     fatura_tarihi: "",
+                    odeme_tarihi: "",
                     tedarikci: "",
                     rf_montaj_firma: "",
                     fatura_kalemi: "",
@@ -5359,7 +5362,7 @@ function FinanceDashboard({
                     tutar: "",
                     kdv: "",
                     toplam_tutar: "",
-                    odenen_tutar: "",
+                    odened_tutar: "",
                     kalan_borc: "",
                     note: "",
                   });
@@ -5603,6 +5606,12 @@ function FinanceDashboard({
                           <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>Fatura Tarihi</label>
                           <input type="date" name="fatura_tarihi" value={invoiceForm.fatura_tarihi} onChange={handleInvoiceFormChange}
                             style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                        </div>
+                        <div>
+                          <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#7e22ce", marginBottom: "6px" }}>💸 Ödeme Tarihi</label>
+                          <input type="date" name="odeme_tarihi" value={invoiceForm.odeme_tarihi} onChange={handleInvoiceFormChange}
+                            style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #d8b4fe", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box", background:"#fdf4ff" }} />
+                          <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Nakit Akış'ta taşeron satırı olarak görünür</div>
                         </div>
                       </div>
                     </div>
@@ -12838,6 +12847,9 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [ofisList,    setOfisList]    = useState([]);
   const [sarkanlar,   setSarkanlar]   = useState([]); // önceki aylardan sarkan ödemeler
   const [prevOzet,    setPrevOzet]    = useState([]); // önceki ay puantaj özeti (maaş hesabı için)
+  const [taseronByDay,setTaseronByDay]= useState({}); // gun→toplam taşeron ödemesi
+  const [taseronDet,  setTaseronDet]  = useState({}); // gun→[{firma,tutar,fatura_no}]
+  const [taseronModal,setTaseronModal]= useState(null); // {gun, items, rect}
   const [loading,     setLoading]     = useState(false);
 
   const AY_ADLARI = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
@@ -12852,13 +12864,14 @@ function CashFlowPanel({ currentUser, onBack }) {
       const prevYil  = String(prevDate.getFullYear());
       const prevAy   = String(prevDate.getMonth() + 1).padStart(2, "0");
 
-      const [cfRes, perRes, aracRes, ofisRes, sarkanRes, prevOzetRes] = await Promise.all([
+      const [cfRes, perRes, aracRes, ofisRes, sarkanRes, prevOzetRes, taseronRes] = await Promise.all([
         fetch(`${API_BASE}/finance/cashflow-monthly?yil=${yil}&ay=${ay}`, { headers }),
         fetch(`${API_BASE}/hr/personel`, { headers }),
         fetch(`${API_BASE}/hr/araclar`, { headers }),
         fetch(`${API_BASE}/hr/ofis`, { headers }),
         fetch(`${API_BASE}/finance/sarkan-odemeler`, { headers }),
         fetch(`${API_BASE}/hr/puantaj/ozet?yil=${prevYil}&ay=${prevAy}`, { headers }),
+        fetch(`${API_BASE}/finance/taseron-cashflow?yil=${yil}&ay=${ay}`, { headers }),
       ]);
       const cfData      = await cfRes.json();
       const perData     = await perRes.json();
@@ -12866,6 +12879,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       const ofisData    = await ofisRes.json();
       const sarkanData  = await sarkanRes.json();
       const prevOzetData= await prevOzetRes.json();
+      const taseronData = await taseronRes.json();
 
       const toMap = (rows) => (rows||[]).reduce((m,r) => { m[r.gun]=(m[r.gun]||0)+Number(r.tutar||0); return m; }, {});
       setHwReceived(toMap(cfData.received));
@@ -12876,6 +12890,8 @@ function CashFlowPanel({ currentUser, onBack }) {
       setOfisList(Array.isArray(ofisData?.rows) ? ofisData.rows : Array.isArray(ofisData) ? ofisData : []);
       setSarkanlar(Array.isArray(sarkanData) ? sarkanData : []);
       setPrevOzet(Array.isArray(prevOzetData) ? prevOzetData : []);
+      setTaseronByDay(taseronData?.byDay || {});
+      setTaseronDet(taseronData?.details || {});
     } catch(e) { console.error("CashFlow load error:", e); }
     setLoading(false);
   };
@@ -12910,12 +12926,8 @@ function CashFlowPanel({ currentUser, onBack }) {
   // Ödeme günü geçmiş mi?
   const paymentOverdue = (payDay) => isPastMonth || (isCurrMonth && todayGun > payDay);
 
-  // Maaş için sarkanlar kontrolü (önceki aya ait)
-  const prevMonthStr = (() => {
-    const d = new Date(selYil, selAy - 2, 1);
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-  })();
-  const maasOverdue   = paymentOverdue(15) && sarkanlar.some(s => s.donem === prevMonthStr && s.sarkan > 0);
+  // Maaş gecikmesi: ödeme günü geçmiş VE maaş tutarı > 0 (sarkanlar'dan bağımsız)
+  const maasOverdue = totalMaas > 0 && paymentOverdue(15);
 
   // ── Spillover (önceki aydan sarkan) ─────────────────────────────
   const totalSarkan  = sarkanlar.reduce((s,r) => s + Number(r.sarkan||0), 0);
@@ -12943,6 +12955,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       note: `${sarkanlar.length} aydan sarkan · HW geliri ile ödenmeli (${firstHWDay}. gün)`,
       overdue: true,
     }] : []),
+    { key:"taseron",     label:"🔧 Taşeron Ödemeleri",                    type:"expense", color:"#fdf4ff", textColor:"#7e22ce", byDay: taseronByDay, isTaseron: true },
     { key:"diger",       label:"📋 Diğer Giderler",                       type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: {} },
   ];
 
@@ -13001,7 +13014,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       hw_deduct:  ["FEE2E2","991B1B"], maas:["FECACA","7F1D1D"],
       arac:       ["FEF3C7","92400E"], ticket:["F3E8FF","6B21A8"],
       ofis:       ["FFF7ED","9A3412"], spillover:["FECACA","DC2626"],
-      diger:      ["F1F5F9","475569"],
+      taseron:    ["FDF4FF","7E22CE"], diger:["F1F5F9","475569"],
     };
     KATEGORILER.forEach((kat, ki) => {
       const [rowBg, rowTc] = kat.overdue
@@ -13202,10 +13215,16 @@ function CashFlowPanel({ currentUser, onBack }) {
                       ? (kat.overdue ? "#fecaca" : kat.color)
                       : (kat.overdue ? "#fff5f5" : (isWeekend(d)?"#f8f9fe":"transparent"));
                     return (
-                      <td key={d} style={{ ...tdSt, background: cellBg, borderBottom:"1px solid #f3f4f6", borderRight:"1px solid #f3f4f6" }}>
+                      <td key={d}
+                        onClick={kat.isTaseron && val!==0 ? (e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setTaseronModal({ gun: d, items: taseronDet[d]||[], rect });
+                        } : undefined}
+                        style={{ ...tdSt, background: cellBg, borderBottom:"1px solid #f3f4f6", borderRight:"1px solid #f3f4f6", cursor: kat.isTaseron && val!==0 ? "pointer" : "default" }}>
                         {val!==0 && (
                           <div style={{ color: kat.overdue ? "#dc2626" : kat.textColor, fontWeight:700, fontSize:"10px" }}>
                             {kat.type==="income" ? "+" : "-"}{fmt(val)}
+                            {kat.isTaseron && <div style={{ fontSize:"9px", opacity:0.7 }}>ℹ️</div>}
                           </div>
                         )}
                       </td>
@@ -13263,7 +13282,55 @@ function CashFlowPanel({ currentUser, onBack }) {
         <span>👥 Maaş: <b>{prevAyAdi}</b> ayı hakedilen (önceki ay puantajından) · 15. gün ödenir</span>
         <span>🚗 Araç & 🏢 Ofis: <b>{prevAyAdi}</b> kirası · Sırasıyla 10. ve 5. gün</span>
         <span>🎫 Ticket: {personelList.length} kişi × ₺10.000 · 5. gün</span>
+        <span>🔧 Taşeron: Fatura girişindeki ödeme tarihinden · Tutara tıkla → detay</span>
       </div>
+
+      {/* Taşeron Detay Modal */}
+      {taseronModal && (
+        <div
+          onClick={() => setTaseronModal(null)}
+          style={{ position:"fixed", inset:0, zIndex:9999, background:"rgba(0,0,0,0.15)" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              position:"fixed",
+              top: Math.min(taseronModal.rect.bottom + 8, window.innerHeight - 320),
+              left: Math.min(taseronModal.rect.left, window.innerWidth - 340),
+              width:"320px",
+              background:"#fff",
+              borderRadius:"14px",
+              boxShadow:"0 8px 32px rgba(0,0,0,0.18)",
+              padding:"16px",
+              zIndex:10000,
+            }}
+          >
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
+              <div>
+                <div style={{ fontWeight:800, fontSize:"14px", color:"#7e22ce" }}>🔧 Taşeron Ödemeleri</div>
+                <div style={{ fontSize:"11px", color:"#9ca3af" }}>{taseronModal.gun}. gün detayı</div>
+              </div>
+              <button onClick={() => setTaseronModal(null)} style={{ background:"#f3f4f6", border:"none", borderRadius:"50%", width:"28px", height:"28px", cursor:"pointer", fontSize:"14px" }}>✕</button>
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:"6px", maxHeight:"220px", overflowY:"auto" }}>
+              {taseronModal.items.map((it, i) => (
+                <div key={i} style={{ background:"#fdf4ff", borderRadius:"10px", padding:"8px 12px", border:"1px solid #e9d5ff" }}>
+                  <div style={{ fontWeight:700, fontSize:"13px", color:"#6b21a8" }}>{it.firma || "—"}</div>
+                  {it.fatura_no && <div style={{ fontSize:"11px", color:"#9ca3af" }}>Fatura: {it.fatura_no}</div>}
+                  {it.note && <div style={{ fontSize:"11px", color:"#78716c", fontStyle:"italic" }}>{it.note}</div>}
+                  <div style={{ fontWeight:800, fontSize:"14px", color:"#7e22ce", marginTop:"4px" }}>
+                    - ₺{Number(it.tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop:"10px", paddingTop:"10px", borderTop:"1px solid #f3f4f6", display:"flex", justifyContent:"space-between", fontWeight:800, fontSize:"13px" }}>
+              <span style={{ color:"#374151" }}>Toplam</span>
+              <span style={{ color:"#7e22ce" }}>- ₺{taseronModal.items.reduce((s,it)=>s+Number(it.tutar),0).toLocaleString("tr-TR",{maximumFractionDigits:0})}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
