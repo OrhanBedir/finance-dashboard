@@ -7420,6 +7420,7 @@ function HrDashboard({ onBack, currentUser }) {
   const [maasOdeList, setMaasOdeList] = useState([]);
   const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
   const [maasOdeSaving, setMaasOdeSaving] = useState(false);
+  const [maasOdeEditId, setMaasOdeEditId] = useState(null); // düzenlenen ödeme id'si
   const [aylikOdemeler, setAylikOdemeler] = useState([]); // tüm personel bu ay ödeme özeti
   const [odemeTabloAcik, setOdemeTabloAcik] = useState(false); // ödeme takip tablosu açık/kapalı
   const [notText, setNotText] = useState("");
@@ -7515,10 +7516,20 @@ function HrDashboard({ onBack, currentUser }) {
     if (!maasOdeModal) return;
     setMaasOdeSaving(true);
     try {
-      await fetch(`${API_BASE}/hr/maas-odeme`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ personel_id: maasOdeModal.id, ...maasOdeForm, created_by: currentUser?.email })
-      });
+      if (maasOdeEditId) {
+        // Güncelleme (PUT)
+        await fetch(`${API_BASE}/hr/maas-odeme/${maasOdeEditId}`, {
+          method:"PUT", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify(maasOdeForm)
+        });
+        setMaasOdeEditId(null);
+      } else {
+        // Yeni kayıt (POST)
+        await fetch(`${API_BASE}/hr/maas-odeme`, {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ personel_id: maasOdeModal.id, ...maasOdeForm, created_by: currentUser?.email })
+        });
+      }
       setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
       await loadMaasOde(maasOdeModal.id);
       loadAylikOdemeler();
@@ -8277,9 +8288,19 @@ function HrDashboard({ onBack, currentUser }) {
               );
             })()}
 
-            {/* Yeni ödeme formu */}
-            <form onSubmit={handleSaveMaasOde} style={{ display:"grid", gap:"12px", marginBottom:"24px", padding:"16px", background:"#f8fafc", borderRadius:"12px" }}>
-              <div style={{ fontWeight:700, fontSize:"14px", color:"#374151", marginBottom:"4px" }}>Yeni Ödeme Ekle</div>
+            {/* Yeni / Düzenle ödeme formu */}
+            <form onSubmit={handleSaveMaasOde} style={{ display:"grid", gap:"12px", marginBottom:"24px", padding:"16px", background: maasOdeEditId ? "#fffbeb" : "#f8fafc", borderRadius:"12px", border: maasOdeEditId ? "2px solid #fbbf24" : "none" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={{ fontWeight:700, fontSize:"14px", color: maasOdeEditId ? "#92400e" : "#374151" }}>
+                  {maasOdeEditId ? "✏️ Ödemeyi Düzenle" : "Yeni Ödeme Ekle"}
+                </div>
+                {maasOdeEditId && (
+                  <button type="button" onClick={()=>{ setMaasOdeEditId(null); setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" }); }}
+                    style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>
+                    ✕ İptal
+                  </button>
+                )}
+              </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
                 <div>
                   <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Dönem (Ay)</div>
@@ -8306,8 +8327,8 @@ function HrDashboard({ onBack, currentUser }) {
                 <div style={{ fontSize:"13px", color:"#6b7280" }}>
                   Bankadan + Elden: <b>₺{(Number(maasOdeForm.bankadan||0)+Number(maasOdeForm.elden||0)).toLocaleString("tr-TR")}</b>
                 </div>
-                <button type="submit" disabled={maasOdeSaving} style={{ padding:"8px 20px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
-                  {maasOdeSaving ? "Kaydediliyor..." : "Kaydet"}
+                <button type="submit" disabled={maasOdeSaving} style={{ padding:"8px 20px", background: maasOdeEditId ? "#d97706" : "#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
+                  {maasOdeSaving ? "Kaydediliyor..." : maasOdeEditId ? "✏️ Güncelle" : "Kaydet"}
                 </button>
               </div>
 
@@ -8395,8 +8416,10 @@ function HrDashboard({ onBack, currentUser }) {
                             </div>
                             {od.aciklama && <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"2px" }}>{od.aciklama}</div>}
                           </div>
-                          <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
                             <div style={{ fontWeight:700, color:"#166534", fontSize:"15px" }}>{TL(banka+elden)}</div>
+                            <button onClick={()=>{ setMaasOdeEditId(od.id); setMaasOdeForm({ donem: od.donem, bankadan: String(od.bankadan||""), elden: String(od.elden||""), tarih: (od.tarih||"").split("T")[0], aciklama: od.aciklama||"" }); window.scrollTo({top:0}); }}
+                              style={{ background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>✏️ Düzenle</button>
                             <button onClick={()=>handleDeleteMaasOde(od.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
                           </div>
                         </div>

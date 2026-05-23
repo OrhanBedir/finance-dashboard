@@ -9182,6 +9182,17 @@ app.post("/hr/maas-odeme", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.put("/hr/maas-odeme/:id", async (req, res) => {
+  try {
+    const { donem, bankadan, elden, tarih, aciklama } = req.body;
+    const r = await pool.query(
+      `UPDATE maas_odeme SET donem=$1, bankadan=$2, elden=$3, tarih=$4, aciklama=$5 WHERE id=$6 RETURNING *`,
+      [donem, bankadan||0, elden||0, tarih, aciklama||"", req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.delete("/hr/maas-odeme/:id", async (req, res) => {
   try {
     await pool.query("DELETE FROM maas_odeme WHERE id=$1", [req.params.id]);
