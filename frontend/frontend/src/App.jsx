@@ -7480,6 +7480,7 @@ function HrDashboard({ onBack, currentUser }) {
     await fetch(url, { method, headers: { "Content-Type":"application/json" }, body: JSON.stringify(pForm) });
     setShowPersonelForm(false); setEditingPersonel(null);
     loadPersonel();
+    loadAylikOdemeler();
   };
   const handleEditPersonel = (p) => {
     setEditingPersonel(p);
@@ -7803,7 +7804,7 @@ function HrDashboard({ onBack, currentUser }) {
       )}
       {tab==="personel" && personelUnlocked && (
         <div>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px", flexWrap:"wrap", gap:"12px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"16px", flexWrap:"wrap", gap:"12px" }}>
                 <div>
                   <h2 style={{ margin:0, fontSize:"20px" }}>
                     👤 Personel Listesi
@@ -7845,20 +7846,25 @@ function HrDashboard({ onBack, currentUser }) {
                     aylikOdemeler.forEach(o => {
                       odenenByPer[o.personel_id] = (odenenByPer[o.personel_id]||0) + Number(o.toplam||0);
                     });
-                    // Aktif personel + hakedişleri
+                    // Aktif personel + hakedişleri (tüm personel için toplamları hesapla)
                     const aktifPer = personelList.filter(p=>p.aktif);
-                    const perRows = aktifPer.map(p => {
+                    const allRows = aktifPer.map(p => {
                       const ozO = ozet.find(o=>String(o.personel_id)===String(p.id));
                       const hakEdis = ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0);
                       const odenen = odenenByPer[p.id] || 0;
                       const kalan  = Math.max(0, hakEdis - odenen);
                       return { ...p, hakEdis, odenen, kalan };
                     });
-                    const topHak   = perRows.reduce((s,r)=>s+r.hakEdis,0);
-                    const topOde   = perRows.reduce((s,r)=>s+r.odenen,0);
+                    // Tablo satırları: filtre seçiliyse sadece o personel
+                    const perRows = hrPersonelFilter
+                      ? allRows.filter(r=>String(r.id)===String(hrPersonelFilter))
+                      : allRows;
+                    // Toplamlar her zaman tüm personel üzerinden (filtreden bağımsız)
+                    const topHak   = allRows.reduce((s,r)=>s+r.hakEdis,0);
+                    const topOde   = allRows.reduce((s,r)=>s+r.odenen,0);
                     const topKalan = Math.max(0, topHak - topOde);
-                    const tamamlandi = perRows.filter(r=>r.kalan===0 && r.odenen>0).length;
-                    const bekleyen   = perRows.filter(r=>r.kalan>0).length;
+                    const tamamlandi = allRows.filter(r=>r.kalan===0 && r.odenen>0).length;
+                    const bekleyen   = allRows.filter(r=>r.kalan>0).length;
                     return (
                       <div style={{ marginTop:"14px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"14px", overflow:"hidden" }}>
                         {/* ── Tıklanabilir başlık + özet ── */}
@@ -7931,7 +7937,7 @@ function HrDashboard({ onBack, currentUser }) {
                     );
                   })()}
                 </div>
-                <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+                <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap", position:"sticky", top:"12px", alignSelf:"flex-start" }}>
                   <select value={yilStr} onChange={e=>setPuantajAy(`${e.target.value}-${ayStr}`)}
                     style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px" }}>
                     {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
