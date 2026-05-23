@@ -7421,6 +7421,7 @@ function HrDashboard({ onBack, currentUser }) {
   const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
   const [maasOdeSaving, setMaasOdeSaving] = useState(false);
   const [aylikOdemeler, setAylikOdemeler] = useState([]); // tüm personel bu ay ödeme özeti
+  const [odemeTabloAcik, setOdemeTabloAcik] = useState(false); // ödeme takip tablosu açık/kapalı
   const [notText, setNotText] = useState("");
   const [notFile, setNotFile] = useState(null);
   const [notSaving, setNotSaving] = useState(false);
@@ -7860,60 +7861,71 @@ function HrDashboard({ onBack, currentUser }) {
                     const bekleyen   = perRows.filter(r=>r.kalan>0).length;
                     return (
                       <div style={{ marginTop:"14px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"14px", overflow:"hidden" }}>
-                        {/* Başlık */}
-                        <div style={{ background:"#1e3a5f", padding:"10px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                          <span style={{ color:"#fff", fontWeight:700, fontSize:"14px" }}>
-                            📋 {ayAdi} {yilStr} — Maaş Ödeme Durumu
-                          </span>
-                          <div style={{ display:"flex", gap:"10px" }}>
+                        {/* ── Tıklanabilir başlık + özet ── */}
+                        <div
+                          onClick={()=>setOdemeTabloAcik(v=>!v)}
+                          style={{ background:"#1e3a5f", padding:"0", cursor:"pointer", userSelect:"none" }}
+                        >
+                          {/* Üst bar: başlık + rozetler + ok */}
+                          <div style={{ padding:"10px 18px", display:"flex", alignItems:"center", gap:"10px" }}>
+                            <span style={{ color:"#fff", fontWeight:700, fontSize:"14px", flex:1 }}>
+                              📋 {ayAdi} {yilStr} — Maaş Ödeme Durumu
+                            </span>
                             <span style={{ background:"#dcfce7", color:"#166534", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>✅ {tamamlandi} tamamlandı</span>
                             {bekleyen>0 && <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>⏳ {bekleyen} bekliyor</span>}
+                            <span style={{ color:"#93c5fd", fontSize:"16px", marginLeft:"6px", transition:"transform 0.25s", display:"inline-block", transform: odemeTabloAcik?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
+                          </div>
+                          {/* Alt özet şeridi (her zaman görünür) */}
+                          <div style={{ background:"rgba(0,0,0,0.25)", padding:"8px 18px", display:"flex", gap:"0" }}>
+                            {[
+                              { label:"Toplam Hakediş", val:`₺${topHak.toLocaleString("tr-TR")}`, color:"#93c5fd" },
+                              { label:"Ödenen",         val:`₺${topOde.toLocaleString("tr-TR")}`, color:"#86efac" },
+                              { label:"Kalan",          val: topKalan===0 ? "✅ Tamamlandı" : `₺${topKalan.toLocaleString("tr-TR")}`, color: topKalan===0?"#86efac":"#fca5a5" },
+                            ].map((s,i)=>(
+                              <div key={i} style={{ flex:1, textAlign:"center", borderRight: i<2?"1px solid rgba(255,255,255,0.1)":"none", padding:"4px 12px" }}>
+                                <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.55)", fontWeight:600, marginBottom:"2px" }}>{s.label}</div>
+                                <div style={{ fontSize:"15px", fontWeight:800, color:s.color }}>{s.val}</div>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                        {/* Tablo */}
-                        <div style={{ overflowX:"auto" }}>
-                          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px" }}>
-                            <thead>
-                              <tr style={{ background:"#f8fafc" }}>
-                                {["Personel","Ünvan","Hakediş","Ödenen","Kalan"].map(h=>(
-                                  <th key={h} style={{ padding:"8px 12px", fontWeight:700, color:"#374151", textAlign: h==="Personel"||h==="Ünvan" ? "left" : "right", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>{h}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {perRows.map((p,i)=>(
-                                <tr key={p.id} style={{ background: i%2===0?"#fff":"#f9fafb" }}>
-                                  <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}</td>
-                                  <td style={{ padding:"7px 12px", color:"#6b7280", whiteSpace:"nowrap" }}>{p.unvan||"-"}</td>
-                                  <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:600 }}>₺{p.hakEdis.toLocaleString("tr-TR")}</td>
-                                  <td style={{ padding:"7px 12px", textAlign:"right", color: p.odenen>0?"#166534":"#9ca3af", fontWeight:600 }}>
-                                    {p.odenen>0 ? `₺${p.odenen.toLocaleString("tr-TR")}` : "—"}
-                                  </td>
-                                  <td style={{ padding:"7px 12px", textAlign:"right" }}>
-                                    {p.kalan===0 && p.odenen>0
-                                      ? <span style={{ color:"#166534", fontWeight:700 }}>✅ Tam</span>
-                                      : p.kalan>0
-                                        ? <span style={{ color:"#dc2626", fontWeight:800 }}>₺{p.kalan.toLocaleString("tr-TR")}</span>
-                                        : <span style={{ color:"#9ca3af" }}>—</span>
-                                    }
-                                  </td>
+                        {/* ── Açılır tablo ── */}
+                        <div style={{
+                          maxHeight: odemeTabloAcik ? "800px" : "0px",
+                          overflow: "hidden",
+                          transition: "max-height 0.35s ease",
+                        }}>
+                          <div style={{ overflowX:"auto" }}>
+                            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px" }}>
+                              <thead>
+                                <tr style={{ background:"#f8fafc" }}>
+                                  {["Personel","Ünvan","Hakediş","Ödenen","Kalan"].map(h=>(
+                                    <th key={h} style={{ padding:"8px 12px", fontWeight:700, color:"#374151", textAlign: h==="Personel"||h==="Ünvan" ? "left" : "right", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>{h}</th>
+                                  ))}
                                 </tr>
-                              ))}
-                            </tbody>
-                            <tfoot>
-                              <tr style={{ background:"#1e3a5f" }}>
-                                <td colSpan={2} style={{ padding:"9px 12px", color:"#fff", fontWeight:800, fontSize:"13px" }}>TOPLAM</td>
-                                <td style={{ padding:"9px 12px", textAlign:"right", color:"#93c5fd", fontWeight:800, fontSize:"13px" }}>₺{topHak.toLocaleString("tr-TR")}</td>
-                                <td style={{ padding:"9px 12px", textAlign:"right", color:"#86efac", fontWeight:800, fontSize:"13px" }}>₺{topOde.toLocaleString("tr-TR")}</td>
-                                <td style={{ padding:"9px 12px", textAlign:"right", fontWeight:800, fontSize:"13px" }}>
-                                  {topKalan===0
-                                    ? <span style={{ color:"#86efac" }}>✅ Tamamlandı</span>
-                                    : <span style={{ color:"#fca5a5" }}>₺{topKalan.toLocaleString("tr-TR")}</span>
-                                  }
-                                </td>
-                              </tr>
-                            </tfoot>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {perRows.map((p,i)=>(
+                                  <tr key={p.id} style={{ background: i%2===0?"#fff":"#f9fafb" }}>
+                                    <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}</td>
+                                    <td style={{ padding:"7px 12px", color:"#6b7280", whiteSpace:"nowrap" }}>{p.unvan||"-"}</td>
+                                    <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:600 }}>₺{p.hakEdis.toLocaleString("tr-TR")}</td>
+                                    <td style={{ padding:"7px 12px", textAlign:"right", color: p.odenen>0?"#166534":"#9ca3af", fontWeight:600 }}>
+                                      {p.odenen>0 ? `₺${p.odenen.toLocaleString("tr-TR")}` : "—"}
+                                    </td>
+                                    <td style={{ padding:"7px 12px", textAlign:"right" }}>
+                                      {p.kalan===0 && p.odenen>0
+                                        ? <span style={{ color:"#166534", fontWeight:700 }}>✅ Tam</span>
+                                        : p.kalan>0
+                                          ? <span style={{ color:"#dc2626", fontWeight:800 }}>₺{p.kalan.toLocaleString("tr-TR")}</span>
+                                          : <span style={{ color:"#9ca3af" }}>—</span>
+                                      }
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </div>
                     );
