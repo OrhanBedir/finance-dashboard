@@ -8324,17 +8324,40 @@ function HrDashboard({ onBack, currentUser }) {
                           </span>
                         </div>
                         {(()=>{
-                          const _netT = ozet.length > 0
-                            ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
-                            : personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0);
-                          const _bm = calcBrutMaas(_netT);
+                          // Her personel için: bankadan_gosterilen üzerinden brüt (vergi var),
+                          // elden_verilen doğrudan eklenir (vergi yok).
+                          // ozet varsa çalışılan güne göre orantılı hesaplanır.
+                          const aktifP = personelList.filter(p => p.aktif);
+                          let _toplamIsverenMal = 0;
+                          let _toplamSgkIsv = 0;
+                          if (ozet.length > 0) {
+                            ozet.forEach(o => {
+                              const p = aktifP.find(x => String(x.id) === String(o.personel_id));
+                              const netMaas   = Number(p?.net_maas || 0);
+                              const hakedilen = Number(o.hakedilen_maas || 0);
+                              const ratio     = netMaas > 0 ? hakedilen / netMaas : 1;
+                              const bankadan  = Math.round(Number(p?.bankadan_gosterilen || 0) * ratio);
+                              const elden     = Math.round(Number(p?.elden_verilen || 0) * ratio);
+                              const bm        = calcBrutMaas(bankadan);
+                              _toplamIsverenMal += bm.isverenMaliyet + elden;
+                              _toplamSgkIsv     += bm.sgkIssizlikIsv;
+                            });
+                          } else {
+                            aktifP.forEach(p => {
+                              const bankadan = Number(p.bankadan_gosterilen || 0);
+                              const elden    = Number(p.elden_verilen || 0);
+                              const bm       = calcBrutMaas(bankadan);
+                              _toplamIsverenMal += bm.isverenMaliyet + elden;
+                              _toplamSgkIsv     += bm.sgkIssizlikIsv;
+                            });
+                          }
                           return (
                             <div style={{ display:"flex", alignItems:"center", gap:"6px", background:"#ecfdf5", border:"1.5px solid #6ee7b7", borderRadius:"8px", padding:"5px 12px" }}>
                               <span style={{ fontSize:"13px", fontWeight:600, color:"#065f46" }}>
                                 🏛️ An İtibariyle {ayAdi} {yilStr} Ayı Brüt Maaş Ödemesi Yapılacak:
                               </span>
-                              <span style={{ fontSize:"15px", fontWeight:800, color:"#065f46" }}>₺{_bm.isverenMaliyet.toLocaleString("tr-TR")}</span>
-                              <span style={{ fontSize:"11px", color:"#6b7280", fontWeight:400 }}>(+SGK/İşsizlik işv. ₺{_bm.sgkIssizlikIsv.toLocaleString("tr-TR")})</span>
+                              <span style={{ fontSize:"15px", fontWeight:800, color:"#065f46" }}>₺{Math.round(_toplamIsverenMal).toLocaleString("tr-TR")}</span>
+                              <span style={{ fontSize:"11px", color:"#6b7280", fontWeight:400 }}>(+SGK/İşsizlik işv. ₺{Math.round(_toplamSgkIsv).toLocaleString("tr-TR")})</span>
                             </div>
                           );
                         })()}
@@ -13444,11 +13467,26 @@ function CashFlowPanel({ currentUser, onBack }) {
   const prevAyAdi  = AY_ADLARI[prevDate2.getMonth()];
 
   // Gider hesapları — maaş: önceki ayın hakedilen toplamı (tahakkuk esası) — brüt işveren maliyeti
+  // bankadan_gosterilen üzerinden vergi hesabı, elden_verilen vergisiz eklenir
   const prevMaasHakedilen = prevOzet.reduce((s,o) => s + Number(o.hakedilen_maas||0), 0);
-  const prevMaasNetToplam = prevMaasHakedilen > 0
-    ? prevMaasHakedilen
-    : personelList.reduce((s,p) => s + Number(p.net_maas||0), 0); // fallback: puantaj yoksa net_maas
-  const totalMaas = calcBrutMaas(prevMaasNetToplam).isverenMaliyet; // brüt işveren maliyeti
+  const totalMaas = (() => {
+    if (prevMaasHakedilen > 0) {
+      return prevOzet.reduce((s, o) => {
+        const p       = personelList.find(x => String(x.id) === String(o.personel_id));
+        const netMaas = Number(p?.net_maas || 0);
+        const ratio   = netMaas > 0 ? Number(o.hakedilen_maas||0) / netMaas : 1;
+        const bankadan = Math.round(Number(p?.bankadan_gosterilen || 0) * ratio);
+        const elden    = Math.round(Number(p?.elden_verilen || 0) * ratio);
+        return s + calcBrutMaas(bankadan).isverenMaliyet + elden;
+      }, 0);
+    }
+    // fallback: puantaj yoksa tüm aktif personel tam ay
+    return personelList.filter(p=>p.aktif).reduce((s, p) => {
+      const bankadan = Number(p.bankadan_gosterilen || 0);
+      const elden    = Number(p.elden_verilen || 0);
+      return s + calcBrutMaas(bankadan).isverenMaliyet + elden;
+    }, 0);
+  })();
   const totalArac   = araclar.reduce((s,a) => s + Number(a.aylik_kira||0), 0);
   const totalTicket = personelList.length * 10000;
   const totalOfis   = ofisList.reduce((s,o) => s + Number(o.aylik_kira||0), 0);
