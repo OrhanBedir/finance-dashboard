@@ -111,6 +111,20 @@ function formatDateOnly(value) {
 
   return str;
 }
+// ─── Brüt Maaş Hesaplama (2026 Türkiye) ─────────────────────────────────────
+// Net = Brüt × (1 - SGK İşçi 14% - İşsizlik İşçi 1% - Gelir+Damga ~15%)
+// Brüt ≈ Net / 0.70
+// İşveren maliyeti = Brüt × (1 + SGK İşv 20.5% + İşsizlik İşv 2%)
+function calcBrutMaas(netMaas) {
+  const net  = Number(netMaas || 0);
+  const brut = Math.round(net / 0.70);
+  const sgkIssizlikIsci = Math.round(brut * 0.15);   // 14% SGK + 1% İşsizlik
+  const gelirDamga      = Math.round(brut - net - sgkIssizlikIsci); // kalan kesinti
+  const sgkIssizlikIsv  = Math.round(brut * 0.225);  // 20.5% SGK + 2% İşsizlik
+  const isverenMaliyet  = brut + sgkIssizlikIsv;
+  return { brut, sgkIssizlikIsci, gelirDamga, sgkIssizlikIsv, isverenMaliyet };
+}
+
 //Silinecek//Fatura bilgi yükle//
 function InvoiceEntryExcelUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
@@ -8262,6 +8276,19 @@ function HrDashboard({ onBack, currentUser }) {
                             ).toLocaleString("tr-TR")}
                           </span>
                         </div>
+                        {(() => {
+                          const netToplam = ozet.length > 0
+                            ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
+                            : personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0);
+                          const { isverenMaliyet, sgkIssizlikIsv } = calcBrutMaas(netToplam);
+                          return (
+                            <div style={{ ...labelSt, paddingLeft:"12px", borderLeft:"3px solid #d1fae5", color:"#065f46" }}>
+                              🏛️ An İtibariyle {ayAdi} {yilStr} Ayı Brüt Maaş Ödemesi Yapılacak:
+                              <span style={amountSt("#065f46")}>₺{isverenMaliyet.toLocaleString("tr-TR")}</span>
+                              <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:400 }}>(net + SGK/İşsizlik işv. ₺{sgkIssizlikIsv.toLocaleString("tr-TR")})</span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })()}
@@ -8434,11 +8461,19 @@ function HrDashboard({ onBack, currentUser }) {
                       const fmtDate = v => { if (!v) return ""; const d = new Date(v); return isNaN(d)?String(v):`${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`; };
                       const fmtNum  = v => v ? Number(v).toLocaleString("tr-TR") : "0";
 
-                      const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi","Net Maaş (₺)","Bankadan (₺)","Elden (₺)","IBAN","Banka Adı","Hesap No","Durum"];
-                      const cols    = [26,18,14,14,13,14,28,13,13,16,14,12,34,16,18,8];
+                      const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi","Net Maaş (₺)","Bankadan (₺)","Elden (₺)","IBAN","Banka Adı","Hesap No","Durum","Bankadan Ödenen (₺)","Elden Ödenen (₺)"];
+                      const cols    = [26,18,14,14,13,14,28,13,13,16,14,12,34,16,18,8,18,16];
                       const dateKeys = ["dogum_tarihi","ise_giris_tarihi","isten_ayrilma_tarihi"];
                       const numKeys  = ["net_maas","bankadan_gosterilen","elden_verilen"];
-                      const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","iban","banka_adi","banka_hesap_no","aktif"];
+                      const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","iban","banka_adi","banka_hesap_no","aktif","_banka_odenen","_elden_odenen"];
+
+                      // Dönem bazlı ödeme özeti (M ve N kolonları)
+                      const odenenByPerId = {};
+                      aylikOdemeler.forEach(o => {
+                        if (!odenenByPerId[o.personel_id]) odenenByPerId[o.personel_id] = { banka:0, elden:0 };
+                        odenenByPerId[o.personel_id].banka  += Number(o.bankadan||0);
+                        odenenByPerId[o.personel_id].elden  += Number(o.elden||0);
+                      });
 
                       // Stil sabitleri
                       const headerS = {
@@ -8447,11 +8482,17 @@ function HrDashboard({ onBack, currentUser }) {
                         alignment:{ horizontal:"center", vertical:"center", wrapText:true },
                         border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3B6EA5"}}, right:{style:"thin",color:{rgb:"3B6EA5"}} }
                       };
-                      const cellS = (ri, isNum, isDurum, val) => ({
-                        fill:{ patternType:"solid", fgColor:{ rgb: ri%2===0 ? "EFF6FF":"FFFFFF" } },
+                      const headerMN = {
+                        fill:{ patternType:"solid", fgColor:{ rgb:"1E5F3A" } },
+                        font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" },
+                        alignment:{ horizontal:"center", vertical:"center", wrapText:true },
+                        border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3BA57A"}}, right:{style:"thin",color:{rgb:"3BA57A"}} }
+                      };
+                      const cellS = (ri, isNum, isDurum, val, isMN) => ({
+                        fill:{ patternType:"solid", fgColor:{ rgb: isMN ? (ri%2===0?"ECFDF5":"F0FDF4") : ri%2===0 ? "EFF6FF":"FFFFFF" } },
                         font:{ sz:10, name:"Calibri",
                           bold: isNum,
-                          color:{ rgb: isDurum ? (val==="Aktif"?"166534":"991B1B") : isNum ? "1E3A8A" : "1F2937" }
+                          color:{ rgb: isDurum ? (val==="Aktif"?"166534":"991B1B") : isMN ? "065F46" : isNum ? "1E3A8A" : "1F2937" }
                         },
                         alignment:{ horizontal: isNum?"right":isDurum?"center":"left", vertical:"center" },
                         border:{ top:{style:"thin",color:{rgb:"DBEAFE"}}, bottom:{style:"thin",color:{rgb:"DBEAFE"}}, left:{style:"thin",color:{rgb:"DBEAFE"}}, right:{style:"thin",color:{rgb:"DBEAFE"}} }
@@ -8459,8 +8500,11 @@ function HrDashboard({ onBack, currentUser }) {
 
                       const wsData = [headers];
                       personelList.forEach(p => {
+                        const ode = odenenByPerId[p.id] || { banka:0, elden:0 };
                         wsData.push(keys.map(k => {
                           if (k==="aktif") return p[k]?"Aktif":"Pasif";
+                          if (k==="_banka_odenen") return fmtNum(ode.banka);
+                          if (k==="_elden_odenen") return fmtNum(ode.elden);
                           if (dateKeys.includes(k)) return fmtDate(p[k]);
                           if (numKeys.includes(k)) return fmtNum(p[k]);
                           return p[k]||"";
@@ -8471,19 +8515,20 @@ function HrDashboard({ onBack, currentUser }) {
                       ws["!cols"] = cols.map(w=>({wch:w}));
                       ws["!rows"] = [{ hpt:26 }, ...personelList.map(()=>({hpt:20}))];
 
-                      // Başlık stilleri
+                      // Başlık stilleri (M ve N kolonları yeşil)
                       headers.forEach((_,ci) => {
                         const a = XLSXStyle.utils.encode_cell({r:0,c:ci});
-                        if (ws[a]) ws[a].s = headerS;
+                        if (ws[a]) ws[a].s = (ci >= 16) ? headerMN : headerS;
                       });
                       // Veri satırı stilleri
                       personelList.forEach((_,ri) => {
                         keys.forEach((k,ci) => {
                           const a = XLSXStyle.utils.encode_cell({r:ri+1,c:ci});
                           if (!ws[a]) return;
-                          const isNum = numKeys.includes(k);
+                          const isNum = numKeys.includes(k) || k==="_banka_odenen" || k==="_elden_odenen";
                           const isDurum = k==="aktif";
-                          ws[a].s = cellS(ri, isNum, isDurum, ws[a].v);
+                          const isMN = k==="_banka_odenen" || k==="_elden_odenen";
+                          ws[a].s = cellS(ri, isNum, isDurum, ws[a].v, isMN);
                         });
                       });
 
@@ -8716,6 +8761,45 @@ function HrDashboard({ onBack, currentUser }) {
                         </div>
                       ))}
                     </div>
+                    {/* Brüt maaş breakdown — net_maas girilince otomatik hesaplanır */}
+                    {Number(pForm.net_maas||0) > 0 && (() => {
+                      const { brut, sgkIssizlikIsci, gelirDamga, sgkIssizlikIsv, isverenMaliyet } = calcBrutMaas(pForm.net_maas);
+                      const rowSt = { display:"flex", justifyContent:"space-between", padding:"5px 10px", fontSize:"12px" };
+                      const valSt = (c) => ({ fontWeight:700, color:c||"#374151" });
+                      return (
+                        <div style={{ background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)", border:"1.5px solid #86efac", borderRadius:"12px", padding:"12px 16px", marginBottom:"12px" }}>
+                          <div style={{ fontSize:"12px", fontWeight:700, color:"#065f46", marginBottom:"8px" }}>📊 Bordro Özeti (Tahmini)</div>
+                          <div style={{ background:"#fff", borderRadius:"8px", overflow:"hidden", border:"1px solid #d1fae5" }}>
+                            <div style={{ ...rowSt, background:"#f0fdf4" }}>
+                              <span style={{ color:"#374151" }}>Brüt Maaş</span>
+                              <span style={valSt("#1e40af")}>₺{brut.toLocaleString("tr-TR")}</span>
+                            </div>
+                            <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic", borderBottom:"1px solid #f0fdf4" }}>Çalışan Kesintileri</div>
+                            <div style={rowSt}>
+                              <span style={{ color:"#374151" }}>  SGK + İşsizlik İşçi (%15)</span>
+                              <span style={valSt("#dc2626")}>- ₺{sgkIssizlikIsci.toLocaleString("tr-TR")}</span>
+                            </div>
+                            <div style={rowSt}>
+                              <span style={{ color:"#374151" }}>  Gelir + Damga Vergisi</span>
+                              <span style={valSt("#dc2626")}>- ₺{gelirDamga.toLocaleString("tr-TR")}</span>
+                            </div>
+                            <div style={{ ...rowSt, background:"#f0fdf4", borderTop:"1px solid #d1fae5" }}>
+                              <span style={{ color:"#065f46", fontWeight:700 }}>Net Maaş</span>
+                              <span style={valSt("#166534")}>₺{Number(pForm.net_maas||0).toLocaleString("tr-TR")}</span>
+                            </div>
+                            <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic", borderBottom:"1px solid #f0fdf4" }}>İşveren Maliyeti</div>
+                            <div style={rowSt}>
+                              <span style={{ color:"#374151" }}>  SGK + İşsizlik İşveren (%22.5)</span>
+                              <span style={valSt("#92400e")}>+ ₺{sgkIssizlikIsv.toLocaleString("tr-TR")}</span>
+                            </div>
+                            <div style={{ ...rowSt, background:"#fef3c7", borderTop:"1px solid #fde68a" }}>
+                              <span style={{ color:"#78350f", fontWeight:700 }}>🏛️ Toplam İşveren Maliyeti</span>
+                              <span style={valSt("#b45309")}>₺{isverenMaliyet.toLocaleString("tr-TR")}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
                       <button type="button" className="tab" onClick={()=>setShowPersonelForm(false)}>Vazgeç</button>
                       <button type="submit" className="saveButton">Kaydet</button>
@@ -13387,11 +13471,12 @@ function CashFlowPanel({ currentUser, onBack }) {
   const prevDate2  = new Date(Number(yil), Number(ay) - 2, 1);
   const prevAyAdi  = AY_ADLARI[prevDate2.getMonth()];
 
-  // Gider hesapları — maaş: önceki ayın hakedilen toplamı (tahakkuk esası)
+  // Gider hesapları — maaş: önceki ayın hakedilen toplamı (tahakkuk esası) — brüt işveren maliyeti
   const prevMaasHakedilen = prevOzet.reduce((s,o) => s + Number(o.hakedilen_maas||0), 0);
-  const totalMaas   = prevMaasHakedilen > 0
+  const prevMaasNetToplam = prevMaasHakedilen > 0
     ? prevMaasHakedilen
     : personelList.reduce((s,p) => s + Number(p.net_maas||0), 0); // fallback: puantaj yoksa net_maas
+  const totalMaas = calcBrutMaas(prevMaasNetToplam).isverenMaliyet; // brüt işveren maliyeti
   const totalArac   = araclar.reduce((s,a) => s + Number(a.aylik_kira||0), 0);
   const totalTicket = personelList.length * 10000;
   const totalOfis   = ofisList.reduce((s,o) => s + Number(o.aylik_kira||0), 0);
