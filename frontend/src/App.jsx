@@ -15080,7 +15080,7 @@ function App() {
               </button>
             )}
 
-            {isAdmin && (
+            {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
               <button
                 className={page === "cashflow" ? "tab activeTab" : "tab"}
                 onClick={() => setPage("cashflow")}
@@ -15214,7 +15214,7 @@ function App() {
       {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
       {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
       {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
-      {page === "cashflow" && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
+      {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
       {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
       {page === "executive" && <RolloutDashboard currentUser={user} />}
       {page === "region" && (
