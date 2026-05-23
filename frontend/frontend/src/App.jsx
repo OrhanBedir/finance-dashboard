@@ -12933,6 +12933,115 @@ function CashFlowPanel({ currentUser, onBack }) {
   const tdSt  = { padding:"5px 4px", fontSize:"11px", textAlign:"center", whiteSpace:"nowrap", minWidth:"44px" };
   const rowLbl= { padding:"8px 14px", fontSize:"12px", fontWeight:700, whiteSpace:"nowrap", position:"sticky", left:0, zIndex:1, minWidth:"180px" };
 
+  // ─── Excel Export ───────────────────────────────────────────────
+  const handleExcelIndir = async () => {
+    const XS = await import("xlsx-js-style");
+    const JSZip = (await import("jszip")).default;
+    const ayAdi = AY_ADLARI[Number(ay)-1];
+    const wb = XS.utils.book_new();
+    const rows = [];
+
+    // Hücre stilleri
+    const navy   = "1E3A5F";
+    const darkNy = "0F172A";
+    const wkEnd  = "2563EB";
+    const hdrS   = (bg=navy) => ({ fill:{patternType:"solid",fgColor:{rgb:bg}}, font:{bold:true,color:{rgb:"FFFFFF"},sz:10,name:"Calibri"}, alignment:{horizontal:"center",vertical:"center",wrapText:true}, border:{top:{style:"thin",color:{rgb:"FFFFFF"}},bottom:{style:"thin",color:{rgb:"FFFFFF"}},left:{style:"thin",color:{rgb:"334D6E"}},right:{style:"thin",color:{rgb:"334D6E"}}} });
+    const cellS  = (bg, tc="111827", bold=false) => ({ fill:{patternType:"solid",fgColor:{rgb:bg}}, font:{sz:10,name:"Calibri",bold,color:{rgb:tc.replace("#","")}}, alignment:{horizontal:"right",vertical:"center"}, border:{top:{style:"thin",color:{rgb:"E5E7EB"}},bottom:{style:"thin",color:{rgb:"E5E7EB"}},left:{style:"thin",color:{rgb:"E5E7EB"}},right:{style:"thin",color:{rgb:"E5E7EB"}}} });
+    const lblS   = (bg, tc="1E3A5F", bold=true) => ({ fill:{patternType:"solid",fgColor:{rgb:bg}}, font:{sz:10,name:"Calibri",bold,color:{rgb:tc.replace("#","")}}, alignment:{horizontal:"left",vertical:"center"}, border:{top:{style:"thin",color:{rgb:"E5E7EB"}},bottom:{style:"thin",color:{rgb:"E5E7EB"}},left:{style:"thin",color:{rgb:"E5E7EB"}},right:{style:"thin",color:{rgb:"E5E7EB"}}} });
+
+    // hex renk haritası (ABGR → RRGGBB)
+    const hex = c => c.replace("#","").toUpperCase();
+
+    // Başlık satırı: Boş | Toplam | gün 1..N
+    const hdrRow = [
+      { v:`${ayAdi} ${yil} — Nakit Akış`, s: hdrS(navy) },
+      { v:"Toplam", s: hdrS(navy) },
+      ...days.map(d => ({ v:`${d}\n${getDayName(d)}`, s: hdrS(isWeekend(d)?wkEnd:navy) })),
+    ];
+    rows.push(hdrRow);
+
+    // Kategori satırları
+    const ROW_COLORS = {
+      hw_received:["BBFCD0","14532D"], hw_pending:["DCFCE7","166534"],
+      hw_deduct:  ["FEE2E2","991B1B"], maas:["FECACA","7F1D1D"],
+      arac:       ["FEF3C7","92400E"], ticket:["F3E8FF","6B21A8"],
+      ofis:       ["FFF7ED","9A3412"], diger:["F1F5F9","475569"],
+    };
+    KATEGORILER.forEach((kat, ki) => {
+      const [rowBg, rowTc] = ROW_COLORS[kat.key] || ["F9FAFB","374151"];
+      const rowTotal = Object.values(kat.byDay).reduce((a,b)=>a+b,0);
+      const sign = kat.type==="income" ? "+" : "-";
+      const zebra = ki%2===0 ? "FAFAFA":"FFFFFF";
+      const dataRow = [
+        { v: kat.label.replace(/[\u{1F300}-\u{1FFFF}]/gu,"").trim(), s: lblS(rowBg, rowTc) },
+        { v: rowTotal>0 ? `${sign}₺${rowTotal.toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "", s: cellS(rowBg, rowTc, true) },
+        ...days.map(d => {
+          const val = kat.byDay[d]||0;
+          const bg = val!==0 ? rowBg : (isWeekend(d)?"F8F9FE":zebra);
+          return { v: val!==0 ? `${sign}₺${val.toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "", s: cellS(bg, val!==0?rowTc:"9CA3AF") };
+        }),
+      ];
+      rows.push(dataRow);
+    });
+
+    // Günlük Net satırı
+    const netRow = [
+      { v:"📊 Günlük Net", s: lblS("DBEAFE","1E40AF") },
+      { v: `${netBakiye>=0?"+":"-"}₺${Math.abs(netBakiye).toLocaleString("tr-TR",{maximumFractionDigits:0})}`, s: cellS("DBEAFE", netBakiye>=0?"166534":"DC2626", true) },
+      ...days.map(d => {
+        const n = dailyNet[d]||0;
+        const bg = n>0?"DCFCE7":n<0?"FEE2E2":"F0F9FF";
+        const tc = n>0?"166534":n<0?"DC2626":"1E40AF";
+        return { v: n!==0 ? `${n>0?"+":""}₺${Math.abs(n).toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "", s: cellS(bg,tc,true) };
+      }),
+    ];
+    rows.push(netRow);
+
+    // Kümülatif Bakiye satırı
+    const cumRow = [
+      { v:"💰 Kümülatif Bakiye", s: hdrS(darkNy) },
+      { v:`₺${Math.abs(netBakiye).toLocaleString("tr-TR",{maximumFractionDigits:0})}`, s: hdrS(darkNy) },
+      ...days.map(d => {
+        const c = cumByDay[d]||0;
+        return { v: `₺${Math.abs(c).toLocaleString("tr-TR",{maximumFractionDigits:0})}`, s: hdrS(c>=0?"0F4C2A":"7F1D1D") };
+      }),
+    ];
+    rows.push(cumRow);
+
+    const ws = XS.utils.aoa_to_sheet(rows.map(r => r.map(c => c.v)));
+    // Stiller uygula
+    rows.forEach((row, ri) => {
+      row.forEach((cell, ci) => {
+        const addr = XS.utils.encode_cell({r:ri, c:ci});
+        if (!ws[addr]) ws[addr] = { v:cell.v };
+        ws[addr].s = cell.s;
+      });
+    });
+
+    // Sütun genişlikleri
+    ws["!cols"] = [{ wch:28 }, { wch:14 }, ...days.map(()=>({ wch:10 }))];
+    ws["!rows"] = [{ hpt:32 }, ...rows.slice(1).map(()=>({ hpt:20 }))];
+
+    XS.utils.book_append_sheet(wb, ws, `${ayAdi} ${yil}`);
+
+    // Gridlines kapat
+    const buf = XS.write(wb, { type:"array", bookType:"xlsx" });
+    JSZip.loadAsync(buf).then(zip => {
+      return zip.file("xl/worksheets/sheet1.xml").async("string").then(xml => {
+        const patched = xml
+          .replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>')
+          .replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
+        zip.file("xl/worksheets/sheet1.xml", patched);
+        return zip.generateAsync({ type:"blob", compression:"STORE" });
+      });
+    }).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `NakitAkis_${ayAdi}_${yil}.xlsx`;
+      a.click(); URL.revokeObjectURL(url);
+    });
+  };
+
   return (
     <div style={{ padding:"24px", maxWidth:"100%" }}>
       {/* Header */}
@@ -12950,6 +13059,9 @@ function CashFlowPanel({ currentUser, onBack }) {
           <select value={ay} onChange={e=>setAy(e.target.value)} style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", fontWeight:600, minWidth:"100px" }}>
             {AY_ADLARI.map((a,i)=><option key={i} value={String(i+1).padStart(2,"0")}>{a}</option>)}
           </select>
+          <button onClick={handleExcelIndir} style={{ padding:"8px 18px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}>
+            📥 Excel İndir
+          </button>
           {loading && <span style={{ fontSize:"12px", color:"#6b7280" }}>⏳ Yükleniyor...</span>}
         </div>
       </div>
