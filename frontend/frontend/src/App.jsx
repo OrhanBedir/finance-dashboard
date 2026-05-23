@@ -8569,44 +8569,102 @@ function HrDashboard({ onBack, currentUser }) {
                         </div>
                       )}
                     </div>
-                    <div style={{ display:"flex", flexDirection:"column", gap:"8px", minWidth:"180px" }}>
-                      <div style={{ display:"flex", gap:"8px", alignItems:"stretch" }}>
-                        <div style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"12px", padding:"12px 18px", textAlign:"center", color:"#fff", flex:1 }}>
-                          <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>Net Maaş</div>
-                          <div style={{ fontSize:"22px", fontWeight:800 }}>₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}</div>
-                          <div style={{ fontSize:"10px", opacity:0.7 }}>{gelmediKesinti>0?`-₺${gelmediKesinti.toLocaleString("tr-TR")} kesinti`:`${cal} gün çalışıldı`}</div>
-                        </div>
-                        {extraHakedisHR > 0 && (
-                          <div title={tooltipExtra} style={{ background:"linear-gradient(135deg,#7c3aed,#6d28d9)", borderRadius:"12px", padding:"10px 12px", textAlign:"center", color:"#fff", minWidth:"80px", cursor:"help" }}>
-                            <div style={{ fontSize:"9px", fontWeight:600, opacity:0.8 }}>Extra ℹ️</div>
-                            <div style={{ fontSize:"15px", fontWeight:800 }}>₺{extraHakedisHR.toLocaleString("tr-TR")}</div>
-                            <div style={{ fontSize:"9px", opacity:0.7 }}>{dinlenmeBakiyeHR} gün bakiye</div>
+                    {/* ── Yeni 4 satır kart tasarımı ── */}
+                    {(() => {
+                      const bankadan_gosterilen = Number(sp.bankadan_gosterilen||0);
+                      const elden_verilen       = Number(sp.elden_verilen||0);
+                      // Bu ay maas_odeme kayıtlarından banka / elden ayrımı
+                      const buAyOdeme = maasOdeList.filter(o => o.donem === puantajAy);
+                      const bankaOdenen = buAyOdeme.reduce((s,o)=>s+Number(o.bankadan||0), 0);
+                      const eldenOdenen = buAyOdeme.reduce((s,o)=>s+Number(o.elden||0),    0);
+                      const bankaKalan  = Math.max(0, bankadan_gosterilen - bankaOdenen);
+                      const eldenKalan  = Math.max(0, elden_verilen       - eldenOdenen);
+                      const toplamKalan = bankaKalan + eldenKalan;
+                      const tamam       = toplamKalan <= 0;
+
+                      const cardW = "220px";
+                      const halfW = "107px";
+                      const cardSt = (grad, extra={}) => ({
+                        background: grad, borderRadius:"14px", padding:"12px 14px",
+                        textAlign:"center", color:"#fff", ...extra,
+                      });
+                      const lbl = { fontSize:"10px", fontWeight:700, opacity:0.82, marginBottom:"3px", textTransform:"uppercase", letterSpacing:"0.04em" };
+                      const amt = (sz=22) => ({ fontSize:`${sz}px`, fontWeight:800, lineHeight:1.1 });
+                      const sub = { fontSize:"10px", opacity:0.68, marginTop:"3px" };
+
+                      // Kalan progress bar helper
+                      const ProgressBar = ({paid, total, color="#86efac"}) => {
+                        const pct = total>0 ? Math.min(100,Math.round((paid/total)*100)) : (paid>0?100:0);
+                        return (
+                          <div style={{ marginTop:"5px" }}>
+                            <div style={{ background:"rgba(255,255,255,0.2)", borderRadius:"99px", height:"4px", overflow:"hidden" }}>
+                              <div style={{ width:`${pct}%`, height:"100%", background:color, borderRadius:"99px", transition:"width 0.4s" }} />
+                            </div>
+                            <div style={{ fontSize:"9px", opacity:0.65, marginTop:"2px" }}>{pct}% ödendi</div>
                           </div>
-                        )}
-                      </div>
-                      {maasAvans > 0 && (
-                        <div style={{ background:"#fef3c7", borderRadius:"12px", padding:"8px 18px", textAlign:"center" }}>
-                          <div style={{ fontSize:"10px", fontWeight:600, color:"#92400e" }}>Maaş Avansı</div>
-                          <div style={{ fontSize:"18px", fontWeight:800, color:"#92400e" }}>-₺{maasAvans.toLocaleString("tr-TR")}</div>
+                        );
+                      };
+
+                      return (
+                        <div style={{ display:"flex", flexDirection:"column", gap:"7px", width:cardW, flexShrink:0 }}>
+
+                          {/* Satır 1 — Net Maaş (tam genişlik, yeşil) */}
+                          <div style={cardSt("linear-gradient(135deg,#15803d,#22c55e)")}>
+                            <div style={lbl}>💰 Net Maaş</div>
+                            <div style={amt(24)}>₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}</div>
+                            <div style={sub}>{gelmediKesinti>0?`-₺${gelmediKesinti.toLocaleString("tr-TR")} kesinti (${gelmediSay} gün)`:`${cal} gün çalışıldı`}</div>
+                            {extraHakedisHR > 0 && (
+                              <div title={tooltipExtra} style={{ marginTop:"5px", fontSize:"10px", background:"rgba(255,255,255,0.2)", borderRadius:"8px", padding:"3px 8px", cursor:"help" }}>
+                                ✨ Extra: ₺{extraHakedisHR.toLocaleString("tr-TR")} ({dinlenmeBakiyeHR} gün)
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Satır 2 — Resmi / Elden planlanan (yarım genişlik, yeşil tonu) */}
+                          <div style={{ display:"flex", gap:"7px" }}>
+                            <div style={{ ...cardSt("linear-gradient(135deg,#166534,#16a34a)"), flex:1 }}>
+                              <div style={lbl}>🏦 Resmi Ödeme</div>
+                              <div style={amt(18)}>₺{bankadan_gosterilen.toLocaleString("tr-TR")}</div>
+                              <div style={sub}>Bankadan</div>
+                            </div>
+                            <div style={{ ...cardSt("linear-gradient(135deg,#14532d,#15803d)"), flex:1 }}>
+                              <div style={lbl}>💵 Elden Ödeme</div>
+                              <div style={amt(18)}>₺{elden_verilen.toLocaleString("tr-TR")}</div>
+                              <div style={sub}>Nakit</div>
+                            </div>
+                          </div>
+
+                          {/* Satır 3 — Bankadan / Elden ödenen & kalan */}
+                          <div style={{ display:"flex", gap:"7px" }}>
+                            <div style={{ ...cardSt(bankaKalan<=0?"linear-gradient(135deg,#0f4c2a,#166534)":"linear-gradient(135deg,#1e3a5f,#2563eb)"), flex:1 }}>
+                              <div style={lbl}>🏦 {bankaKalan<=0?"✓ Banka":"Banka Kalan"}</div>
+                              <div style={amt(17)}>₺{bankaKalan.toLocaleString("tr-TR")}</div>
+                              <div style={sub}>Ödenen: ₺{bankaOdenen.toLocaleString("tr-TR")}</div>
+                              <ProgressBar paid={bankaOdenen} total={bankadan_gosterilen} />
+                            </div>
+                            <div style={{ ...cardSt(eldenKalan<=0?"linear-gradient(135deg,#0f4c2a,#166534)":"linear-gradient(135deg,#1e3a5f,#2563eb)"), flex:1 }}>
+                              <div style={lbl}>💵 {eldenKalan<=0?"✓ Elden":"Elden Kalan"}</div>
+                              <div style={amt(17)}>₺{eldenKalan.toLocaleString("tr-TR")}</div>
+                              <div style={sub}>Ödenen: ₺{eldenOdenen.toLocaleString("tr-TR")}</div>
+                              <ProgressBar paid={eldenOdenen} total={elden_verilen} />
+                            </div>
+                          </div>
+
+                          {/* Satır 4 — Tamamlandı / Kalan (tam genişlik) */}
+                          <div style={cardSt(tamam?"linear-gradient(135deg,#166534,#15803d)":"linear-gradient(135deg,#dc2626,#ef4444)")}>
+                            <div style={lbl}>{tamam?"✅ Tamamlandı":"⏳ Kalan Ödeme"}</div>
+                            <div style={amt(22)}>₺{toplamKalan.toLocaleString("tr-TR")}</div>
+                            {(maasAvans>0||isAvans>0) && (
+                              <div style={sub}>
+                                {maasAvans>0?`Maaş avansı: ₺${maasAvans.toLocaleString("tr-TR")} · `:""}
+                                {isAvans>0?`İş avansı: ₺${isAvans.toLocaleString("tr-TR")}`:""}
+                              </div>
+                            )}
+                          </div>
+
                         </div>
-                      )}
-                      {isAvans > 0 && (
-                        <div style={{ background:"#f3e8ff", borderRadius:"12px", padding:"8px 18px", textAlign:"center" }}>
-                          <div style={{ fontSize:"10px", fontWeight:600, color:"#7e22ce" }}>İş Avansı</div>
-                          <div style={{ fontSize:"18px", fontWeight:800, color:"#7e22ce" }}>₺{isAvans.toLocaleString("tr-TR")}</div>
-                        </div>
-                      )}
-                      {odenenBuAy > 0 && (
-                        <div style={{ background:"#dcfce7", borderRadius:"12px", padding:"8px 18px", textAlign:"center" }}>
-                          <div style={{ fontSize:"10px", fontWeight:600, color:"#166534" }}>Ödendi</div>
-                          <div style={{ fontSize:"18px", fontWeight:800, color:"#166534" }}>-₺{odenenBuAy.toLocaleString("tr-TR")}</div>
-                        </div>
-                      )}
-                      <div style={{ background: net<=0 ? "linear-gradient(135deg,#166534,#15803d)" : "linear-gradient(135deg,#1d4ed8,#2563eb)", borderRadius:"12px", padding:"8px 18px", textAlign:"center", color:"#fff" }}>
-                        <div style={{ fontSize:"10px", fontWeight:600, opacity:0.8 }}>{net<=0 ? "✅ Tamamlandı" : "Net Ödenecek"}</div>
-                        <div style={{ fontSize:"20px", fontWeight:800 }}>₺{Math.max(0,net).toLocaleString("tr-TR")}</div>
-                      </div>
-                    </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}
