@@ -8368,13 +8368,14 @@ function HrDashboard({ onBack, currentUser }) {
                   {(() => {
                     const ayAdi = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1];
 
-                    // Nakdi maaş ödemeleri (maas_odeme tablosu)
-                    const nakdiByPer = {};
+                    // Maaş ödemeleri — banka / elden ayrımı
+                    const bankaByPer = {}, eldenByPer = {};
                     aylikOdemeler.forEach(o => {
-                      nakdiByPer[o.personel_id] = (nakdiByPer[o.personel_id]||0) + Number(o.toplam||0);
+                      bankaByPer[o.personel_id] = (bankaByPer[o.personel_id]||0) + Number(o.bankadan||0);
+                      eldenByPer[o.personel_id] = (eldenByPer[o.personel_id]||0) + Number(o.elden||0);
                     });
 
-                    // Maaş avansları (avans_turu = 'MAAS' veya boş — İş avansı değil)
+                    // Maaş avansları (avans_turu = 'MAAS')
                     const avansMapByPer = {};
                     avansList
                       .filter(a => {
@@ -8385,16 +8386,26 @@ function HrDashboard({ onBack, currentUser }) {
                         avansMapByPer[a.personel_id] = (avansMapByPer[a.personel_id]||0) + Number(a.tutar||0);
                       });
 
-                    // Aktif personel + hakedişleri (tüm personel için toplamları hesapla)
+                    // İş avansları (avans_turu = 'IS')
+                    const isAvansMapByPer = {};
+                    isAvansList
+                      .filter(a => (a.tarih||"").startsWith(puantajAy))
+                      .forEach(a => {
+                        isAvansMapByPer[a.personel_id] = (isAvansMapByPer[a.personel_id]||0) + Number(a.tutar||0);
+                      });
+
+                    // Aktif personel + hakedişleri
                     const aktifPer = personelList.filter(p=>p.aktif);
                     const allRows = aktifPer.map(p => {
-                      const ozO = ozet.find(o=>String(o.personel_id)===String(p.id));
+                      const ozO    = ozet.find(o=>String(o.personel_id)===String(p.id));
                       const hakEdis  = ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0);
-                      const avans    = avansMapByPer[p.id] || 0;
-                      const nakdi    = nakdiByPer[p.id]    || 0;
-                      const odenen   = avans + nakdi;
+                      const avans    = avansMapByPer[p.id]  || 0;
+                      const isAvans  = isAvansMapByPer[p.id] || 0;
+                      const banka    = bankaByPer[p.id]     || 0;
+                      const elden    = eldenByPer[p.id]     || 0;
+                      const odenen   = avans + isAvans + banka + elden;
                       const kalan    = Math.max(0, hakEdis - odenen);
-                      return { ...p, hakEdis, avans, nakdi, odenen, kalan };
+                      return { ...p, hakEdis, avans, isAvans, banka, elden, odenen, kalan };
                     });
                     // Tablo satırları: filtre seçiliyse sadece o personel
                     const perRows = hrPersonelFilter
@@ -8552,8 +8563,18 @@ function HrDashboard({ onBack, currentUser }) {
                             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px" }}>
                               <thead>
                                 <tr style={{ background:"#f8fafc" }}>
-                                  {["Personel","Ünvan","Hakediş","M.Avans","Nakdi Öd.","Toplam Öd.","Kalan"].map(h=>(
-                                    <th key={h} style={{ padding:"8px 12px", fontWeight:700, color:"#374151", textAlign: h==="Personel"||h==="Ünvan" ? "left" : "right", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>{h}</th>
+                                  {[
+                                    { label:"Personel",    align:"left"  },
+                                    { label:"Ünvan",       align:"left"  },
+                                    { label:"Hakediş",     align:"right" },
+                                    { label:"M.Avans",     align:"right", color:"#92400e" },
+                                    { label:"🏦 Banka Öd.", align:"right", color:"#1d4ed8" },
+                                    { label:"💵 Elden Öd.", align:"right", color:"#15803d" },
+                                    { label:"🏗 İş Avansı", align:"right", color:"#b45309" },
+                                    { label:"Toplam Öd.",  align:"right" },
+                                    { label:"Kalan",       align:"right" },
+                                  ].map(h=>(
+                                    <th key={h.label} style={{ padding:"8px 12px", fontWeight:700, color: h.color||"#374151", textAlign: h.align, borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>{h.label}</th>
                                   ))}
                                 </tr>
                               </thead>
@@ -8566,8 +8587,14 @@ function HrDashboard({ onBack, currentUser }) {
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.avans>0?"#92400e":"#9ca3af", fontWeight:600 }}>
                                       {p.avans>0 ? `₺${p.avans.toLocaleString("tr-TR")}` : "—"}
                                     </td>
-                                    <td style={{ padding:"7px 12px", textAlign:"right", color: p.nakdi>0?"#1d4ed8":"#9ca3af", fontWeight:600 }}>
-                                      {p.nakdi>0 ? `₺${p.nakdi.toLocaleString("tr-TR")}` : "—"}
+                                    <td style={{ padding:"7px 12px", textAlign:"right", color: p.banka>0?"#1d4ed8":"#9ca3af", fontWeight:600 }}>
+                                      {p.banka>0 ? `₺${p.banka.toLocaleString("tr-TR")}` : "—"}
+                                    </td>
+                                    <td style={{ padding:"7px 12px", textAlign:"right", color: p.elden>0?"#15803d":"#9ca3af", fontWeight:600 }}>
+                                      {p.elden>0 ? `₺${p.elden.toLocaleString("tr-TR")}` : "—"}
+                                    </td>
+                                    <td style={{ padding:"7px 12px", textAlign:"right", color: p.isAvans>0?"#b45309":"#9ca3af", fontWeight:600 }}>
+                                      {p.isAvans>0 ? `₺${p.isAvans.toLocaleString("tr-TR")}` : "—"}
                                     </td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.odenen>0?"#166534":"#9ca3af", fontWeight:700 }}>
                                       {p.odenen>0 ? `₺${p.odenen.toLocaleString("tr-TR")}` : "—"}
