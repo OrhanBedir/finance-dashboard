@@ -3548,6 +3548,18 @@ function FinanceDashboard({
   const [manualInvoiceStatusFilter, setManualInvoiceStatusFilter] =
     useState("ALL");
 
+  // ── Taşeron Ödeme Motoru ──────────────────────────────────────
+  const [showOdemeModal,    setShowOdemeModal]    = useState(false);
+  const [odemeModalFirma,   setOdemeModalFirma]   = useState("");
+  const [odemeModalTutar,   setOdemeModalTutar]   = useState("");
+  const [odemeModalTarih,   setOdemeModalTarih]   = useState(() => new Date().toISOString().slice(0,10));
+  const [odemeModalAciklama,setOdemeModalAciklama]= useState("");
+  const [odemeModalFirmalar,setOdemeModalFirmalar]= useState([]); // [{firma, toplam_kalan}]
+  const [odemeModalCari,    setOdemeModalCari]    = useState(null); // {faturalar, toplamKalan}
+  const [odemeModalLog,     setOdemeModalLog]     = useState([]);
+  const [odemeModalLoading, setOdemeModalLoading] = useState(false);
+  const [odemeModalSonuc,   setOdemeModalSonuc]   = useState(null);
+
   const [manualInvoiceRows, setManualInvoiceRows] = useState([]);
   const [overdueRows, setOverdueRows] = useState([]);
   const [showOverdueModal, setShowOverdueModal] = useState(false);
@@ -4196,6 +4208,82 @@ function FinanceDashboard({
 
       return updated;
     });
+  };
+
+  // ── Taşeron Ödeme Modal handlers ─────────────────────────────
+  const loadOdemeModalFirmalar = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE}/finance/taseron-firmalar`, { withAuth: true });
+      setOdemeModalFirmalar(Array.isArray(data) ? data : []);
+    } catch { setOdemeModalFirmalar([]); }
+  };
+
+  const loadOdemeModalCari = async (firma) => {
+    if (!firma) { setOdemeModalCari(null); setOdemeModalLog([]); return; }
+    try {
+      const [cari, log] = await Promise.all([
+        fetchJson(`${API_BASE}/finance/taseron-cari?firma=${encodeURIComponent(firma)}`, { withAuth: true }),
+        fetchJson(`${API_BASE}/finance/taseron-odeme-gecmisi?firma=${encodeURIComponent(firma)}`, { withAuth: true }),
+      ]);
+      setOdemeModalCari(cari);
+      setOdemeModalLog(Array.isArray(log) ? log : []);
+    } catch { setOdemeModalCari(null); setOdemeModalLog([]); }
+  };
+
+  const handleOpenOdemeModal = async () => {
+    setOdemeModalSonuc(null);
+    setOdemeModalTutar("");
+    setOdemeModalAciklama("");
+    setOdemeModalTarih(new Date().toISOString().slice(0,10));
+    // Arama kutusunda tekil tedarikçi varsa onu seç
+    const q = (manualInvoiceSearch || "").trim().toLowerCase();
+    await loadOdemeModalFirmalar();
+    setShowOdemeModal(true);
+    // Kısa gecikme sonrası filter match
+    setTimeout(async () => {
+      const firms = await fetchJson(`${API_BASE}/finance/taseron-firmalar`, { withAuth: true }).catch(()=>[]);
+      const matched = (Array.isArray(firms) ? firms : []).filter(f => f.firma.toLowerCase().includes(q));
+      if (q && matched.length === 1) {
+        setOdemeModalFirma(matched[0].firma);
+        await loadOdemeModalCari(matched[0].firma);
+      } else {
+        setOdemeModalFirma("");
+        setOdemeModalCari(null);
+      }
+    }, 100);
+  };
+
+  const handleOdemeModalFirmaChange = async (firma) => {
+    setOdemeModalFirma(firma);
+    setOdemeModalSonuc(null);
+    await loadOdemeModalCari(firma);
+  };
+
+  const handleTaseronOdemeSubmit = async (e) => {
+    e.preventDefault();
+    if (!odemeModalFirma || !odemeModalTutar || !odemeModalTarih) return;
+    setOdemeModalLoading(true);
+    setOdemeModalSonuc(null);
+    try {
+      const result = await fetchJson(`${API_BASE}/finance/taseron-odeme`, {
+        method: "POST", withAuth: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firma: odemeModalFirma,
+          tutar: Number(odemeModalTutar),
+          tarih: odemeModalTarih,
+          aciklama: odemeModalAciklama,
+        }),
+      });
+      setOdemeModalSonuc(result);
+      setOdemeModalTutar("");
+      setOdemeModalAciklama("");
+      await loadOdemeModalCari(odemeModalFirma);
+      await loadFinance();
+    } catch(err) {
+      setOdemeModalSonuc({ error: err.message });
+    }
+    setOdemeModalLoading(false);
   };
 
   const handleDeleteManualInvoice = async (row) => {
@@ -5371,6 +5459,13 @@ function FinanceDashboard({
               >
                 Yeni Fatura Gir
               </button>
+              <button
+                type="button"
+                onClick={handleOpenOdemeModal}
+                style={{ padding:"9px 18px", background:"#7e22ce", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:"6px", whiteSpace:"nowrap" }}
+              >
+                💳 Ödeme Gir
+              </button>
             </div>
 
             {/* SUMMARY */}
@@ -5672,6 +5767,162 @@ function FinanceDashboard({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Taşeron Ödeme Motoru Modal ─────────────────────────── */}
+      {showOdemeModal && (
+        <div onClick={() => setShowOdemeModal(false)}
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{ background:"#fff", width:"100%", maxWidth:"1000px", maxHeight:"90vh", borderRadius:"20px", overflow:"hidden", display:"flex", flexDirection:"column", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+
+            {/* Header */}
+            <div style={{ background:"#7e22ce", color:"#fff", padding:"18px 24px", display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
+              <div>
+                <div style={{ fontWeight:800, fontSize:"18px" }}>💳 Taşeron Ödeme Girişi</div>
+                <div style={{ fontSize:"12px", opacity:0.8, marginTop:"2px" }}>FIFO — en eski fatura önce kapatılır</div>
+              </div>
+              <button onClick={() => setShowOdemeModal(false)} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:"8px", color:"#fff", padding:"6px 14px", cursor:"pointer", fontWeight:700 }}>✕ Kapat</button>
+            </div>
+
+            <div style={{ display:"flex", flex:1, minHeight:0, overflow:"hidden" }}>
+              {/* SOL — Firma seç + Cari */}
+              <div style={{ width:"340px", flexShrink:0, borderRight:"1px solid #e5e7eb", padding:"20px", overflowY:"auto", background:"#fdf4ff" }}>
+                <div style={{ marginBottom:"16px" }}>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:700, color:"#6b21a8", marginBottom:"6px" }}>Taşeron Firmayı Seç</label>
+                  <select value={odemeModalFirma} onChange={e=>handleOdemeModalFirmaChange(e.target.value)}
+                    style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #d8b4fe", borderRadius:"10px", fontSize:"14px", background:"#fff" }}>
+                    <option value="">-- Firma Seçin --</option>
+                    {odemeModalFirmalar.map(f => (
+                      <option key={f.firma} value={f.firma}>{f.firma} — ₺{Number(f.toplam_kalan).toLocaleString("tr-TR",{maximumFractionDigits:0})} kalan</option>
+                    ))}
+                  </select>
+                </div>
+
+                {odemeModalCari && (
+                  <>
+                    <div style={{ background:"#7e22ce", color:"#fff", borderRadius:"12px", padding:"14px 16px", marginBottom:"14px" }}>
+                      <div style={{ fontSize:"11px", opacity:0.8, marginBottom:"4px" }}>Toplam Açık Cari</div>
+                      <div style={{ fontWeight:800, fontSize:"22px" }}>₺{Number(odemeModalCari.toplamKalan).toLocaleString("tr-TR",{maximumFractionDigits:0})}</div>
+                    </div>
+
+                    <div style={{ fontSize:"12px", fontWeight:700, color:"#6b21a8", marginBottom:"8px" }}>Açık Faturalar (FIFO sırası)</div>
+                    {odemeModalCari.faturalar.map((f,i) => (
+                      <div key={f.id} style={{ background:"#fff", border:"1px solid #e9d5ff", borderRadius:"10px", padding:"10px 12px", marginBottom:"6px" }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"3px" }}>
+                          <span style={{ fontWeight:700, fontSize:"12px", color:"#374151" }}>{i+1}. {f.fatura_no || "—"}</span>
+                          <span style={{ fontSize:"10px", color:"#9ca3af" }}>{f.fatura_tarihi ? String(f.fatura_tarihi).slice(0,10) : "—"}</span>
+                        </div>
+                        <div style={{ display:"flex", gap:"8px", fontSize:"11px" }}>
+                          <span style={{ color:"#6b7280" }}>Toplam: <b>₺{Number(f.toplam_tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}</b></span>
+                          <span style={{ color:"#16a34a" }}>Ödenen: <b>₺{Number(f.odenen_tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}</b></span>
+                        </div>
+                        <div style={{ marginTop:"4px", display:"flex", alignItems:"center", gap:"6px" }}>
+                          <div style={{ flex:1, height:"5px", background:"#f3e8ff", borderRadius:"99px", overflow:"hidden" }}>
+                            <div style={{ height:"100%", background:"#7e22ce", borderRadius:"99px", width:`${f.toplam_tutar>0?Math.min(100,Math.round((Number(f.odenen_tutar)/Number(f.toplam_tutar))*100)):0}%` }} />
+                          </div>
+                          <span style={{ fontSize:"10px", color:"#dc2626", fontWeight:700 }}>Kalan: ₺{Number(f.kalan_borc).toLocaleString("tr-TR",{maximumFractionDigits:0})}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {!odemeModalCari && odemeModalFirma && (
+                  <div style={{ textAlign:"center", padding:"20px", color:"#9ca3af" }}>Açık fatura bulunamadı</div>
+                )}
+              </div>
+
+              {/* SAĞ — Ödeme formu + geçmiş */}
+              <div style={{ flex:1, padding:"20px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"16px" }}>
+                {/* Ödeme Formu */}
+                <div style={{ background:"#fff", border:"1.5px solid #e9d5ff", borderRadius:"14px", padding:"20px" }}>
+                  <div style={{ fontWeight:800, fontSize:"15px", color:"#6b21a8", marginBottom:"16px" }}>💳 Ödeme Kaydı</div>
+                  <form onSubmit={handleTaseronOdemeSubmit}>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"12px" }}>
+                      <div>
+                        <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"5px" }}>Ödeme Tutarı (₺) *</label>
+                        <input type="number" step="0.01" value={odemeModalTutar} onChange={e=>setOdemeModalTutar(e.target.value)}
+                          placeholder={odemeModalCari ? `Max: ${Number(odemeModalCari.toplamKalan).toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "0"}
+                          required style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #d8b4fe", borderRadius:"10px", fontSize:"15px", fontWeight:700, boxSizing:"border-box", background:"#fdf4ff" }} />
+                        {odemeModalCari && odemeModalTutar && Number(odemeModalTutar) > Number(odemeModalCari.toplamKalan) && (
+                          <div style={{ fontSize:"11px", color:"#dc2626", marginTop:"3px" }}>⚠️ Girilen tutar toplam borcu aşıyor</div>
+                        )}
+                      </div>
+                      <div>
+                        <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"5px" }}>Ödeme Tarihi *</label>
+                        <input type="date" value={odemeModalTarih} onChange={e=>setOdemeModalTarih(e.target.value)}
+                          required style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"10px", fontSize:"14px", boxSizing:"border-box" }} />
+                      </div>
+                    </div>
+                    <div style={{ marginBottom:"12px" }}>
+                      <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"5px" }}>Açıklama (opsiyonel)</label>
+                      <input type="text" value={odemeModalAciklama} onChange={e=>setOdemeModalAciklama(e.target.value)}
+                        placeholder="Banka transferi, EFT vb."
+                        style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"10px", fontSize:"14px", boxSizing:"border-box" }} />
+                    </div>
+                    <button type="submit" disabled={!odemeModalFirma || !odemeModalTutar || odemeModalLoading}
+                      style={{ width:"100%", padding:"12px", background: odemeModalFirma && odemeModalTutar ? "#7e22ce" : "#d1d5db", color:"#fff", border:"none", borderRadius:"10px", fontSize:"15px", fontWeight:800, cursor: odemeModalFirma && odemeModalTutar ? "pointer" : "not-allowed" }}>
+                      {odemeModalLoading ? "⏳ Kaydediliyor..." : "✅ Ödemeyi Kaydet"}
+                    </button>
+                  </form>
+
+                  {/* Sonuç */}
+                  {odemeModalSonuc && !odemeModalSonuc.error && (
+                    <div style={{ marginTop:"14px", background:"#f0fdf4", border:"1.5px solid #86efac", borderRadius:"10px", padding:"12px 16px" }}>
+                      <div style={{ fontWeight:800, color:"#166534", marginBottom:"8px" }}>✅ Ödeme kaydedildi!</div>
+                      {odemeModalSonuc.dagilim?.map((d,i) => (
+                        <div key={i} style={{ fontSize:"12px", color:"#374151", padding:"4px 0", borderBottom:"1px solid #dcfce7" }}>
+                          <b>{d.fatura_no}</b> → <span style={{ color:"#7e22ce" }}>₺{Number(d.odeme).toLocaleString("tr-TR",{maximumFractionDigits:0})} ödendi</span>
+                          <span style={{ color:d.kalan_sonra>0?"#dc2626":"#16a34a", marginLeft:"8px" }}>
+                            {d.kalan_sonra > 0 ? `(Kalan: ₺${Number(d.kalan_sonra).toLocaleString("tr-TR",{maximumFractionDigits:0})})` : "(✓ Kapatıldı)"}
+                          </span>
+                        </div>
+                      ))}
+                      {odemeModalSonuc.fazla > 0 && (
+                        <div style={{ fontSize:"11px", color:"#dc2626", marginTop:"6px" }}>⚠️ ₺{Number(odemeModalSonuc.fazla).toLocaleString("tr-TR",{maximumFractionDigits:0})} fazla ödeme — fatura yok</div>
+                      )}
+                    </div>
+                  )}
+                  {odemeModalSonuc?.error && (
+                    <div style={{ marginTop:"10px", background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:"10px", padding:"10px 14px", color:"#dc2626", fontSize:"13px" }}>
+                      ❌ {odemeModalSonuc.error}
+                    </div>
+                  )}
+                </div>
+
+                {/* Ödeme Geçmişi */}
+                {odemeModalLog.length > 0 && (
+                  <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:"14px", padding:"16px 20px" }}>
+                    <div style={{ fontWeight:800, fontSize:"14px", color:"#374151", marginBottom:"12px" }}>📋 Ödeme Geçmişi</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+                      {odemeModalLog.map(log => (
+                        <div key={log.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", padding:"10px 12px", background:"#f9fafb", borderRadius:"8px", border:"1px solid #f3f4f6" }}>
+                          <div>
+                            <div style={{ fontWeight:700, fontSize:"13px", color:"#1e3a5f" }}>
+                              ₺{Number(log.tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}
+                            </div>
+                            {log.aciklama && <div style={{ fontSize:"11px", color:"#6b7280" }}>{log.aciklama}</div>}
+                            {log.dagilim && Array.isArray(log.dagilim) && (
+                              <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>
+                                {log.dagilim.map((d,i)=><span key={i} style={{ marginRight:"6px" }}>{d.fatura_no}: ₺{Number(d.odeme).toLocaleString("tr-TR",{maximumFractionDigits:0})}</span>)}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ textAlign:"right", flexShrink:0, marginLeft:"10px" }}>
+                            <div style={{ fontSize:"12px", fontWeight:600, color:"#374151" }}>{log.tarih ? String(log.tarih).slice(0,10) : "—"}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {odemeModalFirma && odemeModalLog.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"20px", color:"#9ca3af", fontSize:"13px" }}>Henüz ödeme kaydı yok</div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -11620,6 +11620,165 @@ const SUBCON_USERS = [
   }
 })();
 
+/* ═══════════════════════════════════════════════════════════════
+   TAŞERON ÖDEME MOTORU
+   ═══════════════════════════════════════════════════════════════ */
+
+// Tablo + kolon garantisi (idempotent)
+pool.query(`
+  CREATE TABLE IF NOT EXISTS taseron_odeme_log (
+    id          SERIAL PRIMARY KEY,
+    firma       TEXT NOT NULL,
+    tutar       NUMERIC NOT NULL DEFAULT 0,
+    tarih       DATE NOT NULL,
+    aciklama    TEXT,
+    dagilim     JSONB,          -- [{fatura_no, tutar}, ...]
+    created_at  TIMESTAMP DEFAULT NOW()
+  );
+`).catch(e => console.error("taseron_odeme_log tablo hatası:", e.message));
+
+// Firmalar listesi (filtreleme için)
+app.get("/finance/taseron-firmalar", requireFinanceAuth, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT
+        TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
+        COUNT(*)::int AS fatura_sayisi,
+        COALESCE(SUM(toplam_tutar),0) AS toplam_tutar,
+        COALESCE(SUM(odenen_tutar),0) AS toplam_odenen,
+        COALESCE(SUM(kalan_borc),0)   AS toplam_kalan
+      FROM invoice_entries
+      WHERE COALESCE(TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')), '') <> ''
+      GROUP BY TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, ''))
+      HAVING COALESCE(SUM(kalan_borc),0) > 0
+      ORDER BY firma ASC
+    `);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Firma cari detayı (ödenmemiş faturalar FIFO sırası)
+app.get("/finance/taseron-cari", requireFinanceAuth, async (req, res) => {
+  try {
+    const { firma } = req.query;
+    if (!firma) return res.status(400).json({ error: "firma zorunlu" });
+
+    const r = await pool.query(`
+      SELECT id, fatura_no, fatura_tarihi, toplam_tutar, odenen_tutar,
+             COALESCE(kalan_borc,0) AS kalan_borc, odeme_tarihi, note
+      FROM invoice_entries
+      WHERE TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) = $1
+        AND COALESCE(kalan_borc,0) > 0
+      ORDER BY COALESCE(fatura_tarihi, created_at) ASC
+    `, [firma]);
+
+    const toplamKalan = r.rows.reduce((s,row) => s + Number(row.kalan_borc), 0);
+    res.json({ faturalar: r.rows, toplamKalan });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Firma ödeme geçmişi
+app.get("/finance/taseron-odeme-gecmisi", requireFinanceAuth, async (req, res) => {
+  try {
+    const { firma } = req.query;
+    if (!firma) return res.status(400).json({ error: "firma zorunlu" });
+    const r = await pool.query(`
+      SELECT id, firma, tutar, tarih, aciklama, dagilim, created_at
+      FROM taseron_odeme_log
+      WHERE firma = $1
+      ORDER BY tarih DESC, created_at DESC
+      LIMIT 50
+    `, [firma]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// FIFO ödeme dağıtım motoru
+app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { firma, tutar, tarih, aciklama } = req.body;
+    if (!firma || !tutar || !tarih) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "firma, tutar ve tarih zorunlu" });
+    }
+
+    const odemeAmount = Number(tutar);
+    if (odemeAmount <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Ödeme tutarı sıfırdan büyük olmalı" });
+    }
+
+    // Ödenmemiş faturalar: FIFO (fatura tarihine göre eskiden yeniye)
+    const faturalar = await client.query(`
+      SELECT id, fatura_no, toplam_tutar, odenen_tutar,
+             COALESCE(kalan_borc, 0) AS kalan_borc
+      FROM invoice_entries
+      WHERE TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) = $1
+        AND COALESCE(kalan_borc, 0) > 0
+      ORDER BY COALESCE(fatura_tarihi, created_at) ASC
+      FOR UPDATE
+    `, [firma]);
+
+    if (faturalar.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Bu firmaya ait açık fatura bulunamadı" });
+    }
+
+    let kalan = odemeAmount;
+    const dagilim = [];
+
+    for (const fatura of faturalar.rows) {
+      if (kalan <= 0) break;
+
+      const faturaBorcu = Number(fatura.kalan_borc);
+      const buFaturaOdeme = Math.min(kalan, faturaBorcu);
+      const yeniOdenen = Number(fatura.odenen_tutar || 0) + buFaturaOdeme;
+      const yeniKalan  = faturaBorcu - buFaturaOdeme;
+
+      await client.query(`
+        UPDATE invoice_entries
+        SET odenen_tutar = $1,
+            kalan_borc   = $2,
+            odeme_tarihi = $3
+        WHERE id = $4
+      `, [yeniOdenen, yeniKalan, tarih, fatura.id]);
+
+      dagilim.push({
+        fatura_id: fatura.id,
+        fatura_no: fatura.fatura_no,
+        odeme: buFaturaOdeme,
+        kalan_sonra: yeniKalan,
+      });
+
+      kalan -= buFaturaOdeme;
+    }
+
+    // Ödeme logu kaydet
+    await client.query(`
+      INSERT INTO taseron_odeme_log (firma, tutar, tarih, aciklama, dagilim)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [firma, odemeAmount, tarih, aciklama || null, JSON.stringify(dagilim)]);
+
+    await client.query("COMMIT");
+
+    res.json({
+      ok: true,
+      odenen: odemeAmount - kalan,
+      fazla: kalan > 0 ? kalan : 0,
+      dagilim,
+    });
+  } catch(e) {
+    await client.query("ROLLBACK");
+    console.error("TASERON ODEME ERROR:", e.message);
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 if (process.env.NODE_ENV !== "production" || process.env.LOCAL_SERVER) {
   app.listen(PORT, () => {
     console.log(`Server çalışıyor: ${PORT}`);
