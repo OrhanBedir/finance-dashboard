@@ -125,30 +125,47 @@ function calcBrutMaas(netMaas) {
   return { brut, sgkIssizlikIsci, gelirDamga, sgkIssizlikIsv, isverenMaliyet };
 }
 
-function BordroOzeti({ netMaas }) {
-  if (!netMaas || netMaas <= 0) return null;
-  const { brut, sgkIssizlikIsci, gelirDamga, sgkIssizlikIsv, isverenMaliyet } = calcBrutMaas(netMaas);
-  const R = ({ label, val, color, bg, bold }) => (
+function BordroOzeti({ bankadan, elden }) {
+  const b = Number(bankadan || 0);
+  const e = Number(elden || 0);
+  if (b <= 0 && e <= 0) return null;
+  // Vergi hesabı yalnızca bankadan yatırılan kısım üzerinden
+  const brut              = Math.round(b / 0.70);
+  const sgkIssizlikIsci   = Math.round(brut * 0.15);
+  const gelirDamga        = Math.round(brut - b - sgkIssizlikIsci);
+  const sgkIssizlikIsv    = Math.round(brut * 0.225);
+  const bankaIsverenMal   = brut + sgkIssizlikIsv;
+  const toplamIsverenMal  = bankaIsverenMal + e;
+  const TL = (n) => `₺${Number(n).toLocaleString("tr-TR")}`;
+  const R = ({ label, val, color, bg, bold, indent }) => (
     <div style={{ display:"flex", justifyContent:"space-between", padding:"5px 10px", fontSize:"12px", background: bg||"transparent" }}>
-      <span style={{ color:"#374151", fontWeight: bold?700:400 }}>{label}</span>
+      <span style={{ color:"#374151", fontWeight: bold?700:400, paddingLeft: indent?"10px":"0" }}>{label}</span>
       <span style={{ fontWeight:700, color: color||"#374151" }}>{val}</span>
     </div>
   );
-  const TL = (n) => `₺${Number(n).toLocaleString("tr-TR")}`;
+  const Sep = ({ label }) => (
+    <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic", borderTop:"1px solid #f0fdf4" }}>{label}</div>
+  );
   return (
     <div style={{ background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)", border:"1.5px solid #86efac", borderRadius:"12px", padding:"12px 16px", marginBottom:"12px" }}>
       <div style={{ fontSize:"12px", fontWeight:700, color:"#065f46", marginBottom:"8px" }}>📊 Bordro Özeti (Tahmini)</div>
       <div style={{ background:"#fff", borderRadius:"8px", overflow:"hidden", border:"1px solid #d1fae5" }}>
-        <R label="Brüt Maaş" val={TL(brut)} color="#1e40af" bg="#f0fdf4" bold />
-        <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic" }}>Çalışan Kesintileri</div>
-        <R label="  SGK + İşsizlik İşçi (%15)" val={`- ${TL(sgkIssizlikIsci)}`} color="#dc2626" />
-        <R label="  Gelir + Damga Vergisi" val={`- ${TL(gelirDamga)}`} color="#dc2626" />
-        <R label="Net Maaş" val={TL(netMaas)} color="#166534" bg="#f0fdf4" bold />
-        <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic" }}>İşveren Maliyeti</div>
-        <R label="  SGK + İşsizlik İşveren (%22.5)" val={`+ ${TL(sgkIssizlikIsv)}`} color="#92400e" />
-        <div style={{ display:"flex", justifyContent:"space-between", padding:"6px 10px", fontSize:"12px", background:"#fef3c7", borderTop:"1px solid #fde68a" }}>
+        {b > 0 && <>
+          <R label="Brüt Maaş (bankadan kısım)" val={TL(brut)} color="#1e40af" bg="#f0fdf4" bold />
+          <Sep label="Çalışan Kesintileri" />
+          <R label="SGK + İşsizlik İşçi (%15)" val={`- ${TL(sgkIssizlikIsci)}`} color="#dc2626" indent />
+          <R label="Gelir + Damga Vergisi" val={`- ${TL(gelirDamga)}`} color="#dc2626" indent />
+          <R label="Net Bankadan Ödeme" val={TL(b)} color="#166534" bg="#f0fdf4" bold />
+          <Sep label="İşveren Yükümlülüğü (Bankadan)" />
+          <R label="SGK + İşsizlik İşveren (%22.5)" val={`+ ${TL(sgkIssizlikIsv)}`} color="#92400e" indent />
+        </>}
+        {e > 0 && <>
+          <Sep label="Elden Ödeme (vergisiz — iş avansı mantığı)" />
+          <R label="💵 Elden Verilen" val={TL(e)} color="#7c3aed" bg="#faf5ff" bold />
+        </>}
+        <div style={{ display:"flex", justifyContent:"space-between", padding:"7px 10px", fontSize:"12px", background:"#fef3c7", borderTop:"1px solid #fde68a" }}>
           <span style={{ color:"#78350f", fontWeight:700 }}>🏛️ Toplam İşveren Maliyeti</span>
-          <span style={{ fontWeight:800, color:"#b45309" }}>{TL(isverenMaliyet)}</span>
+          <span style={{ fontWeight:800, color:"#b45309" }}>{TL(toplamIsverenMal)}</span>
         </div>
       </div>
     </div>
@@ -8743,12 +8760,18 @@ function HrDashboard({ onBack, currentUser }) {
                       {[["Net Maaş (₺)","net_maas"],["Bankadan Gösterilen (₺)","bankadan_gosterilen"],["Elden Verilen (₺)","elden_verilen"]].map(([l,n])=>(
                         <div key={n}>
                           <label style={labelSt}>{l}</label>
-                          <input type="number" value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} />
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={formatTLInput(pForm[n]||"")}
+                            onChange={e=>setPForm(f=>({...f,[n]:parseTLInput(e.target.value)}))}
+                            style={inputSt}
+                          />
                         </div>
                       ))}
                     </div>
-                    {/* Brüt maaş breakdown — net_maas girilince otomatik hesaplanır */}
-                    <BordroOzeti netMaas={Number(pForm.net_maas||0)} />
+                    {/* Bordro özeti — sadece bankadan gösterilen kısım üzerinden vergi hesabı */}
+                    <BordroOzeti bankadan={Number(pForm.bankadan_gosterilen||0)} elden={Number(pForm.elden_verilen||0)} />
                     <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
                       <button type="button" className="tab" onClick={()=>setShowPersonelForm(false)}>Vazgeç</button>
                       <button type="submit" className="saveButton">Kaydet</button>
