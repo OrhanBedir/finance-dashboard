@@ -5843,9 +5843,21 @@ function FinanceDashboard({
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"12px" }}>
                       <div>
                         <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"5px" }}>Ödeme Tutarı (₺) *</label>
-                        <input type="number" step="0.01" value={odemeModalTutar} onChange={e=>setOdemeModalTutar(e.target.value)}
-                          placeholder={odemeModalCari ? `Max: ${Number(odemeModalCari.toplamKalan).toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "0"}
-                          required style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #d8b4fe", borderRadius:"10px", fontSize:"15px", fontWeight:700, boxSizing:"border-box", background:"#fdf4ff" }} />
+                        <div style={{ position:"relative" }}>
+                          <span style={{ position:"absolute", left:"12px", top:"50%", transform:"translateY(-50%)", fontWeight:800, fontSize:"16px", color:"#7e22ce", pointerEvents:"none" }}>₺</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={odemeModalTutar ? Number(String(odemeModalTutar).replace(/\./g,"")).toLocaleString("tr-TR") : ""}
+                            onChange={e => {
+                              const raw = e.target.value.replace(/\./g,"").replace(/[^0-9]/g,"");
+                              setOdemeModalTutar(raw);
+                            }}
+                            placeholder={odemeModalCari ? Number(odemeModalCari.toplamKalan).toLocaleString("tr-TR",{maximumFractionDigits:0}) : "0"}
+                            required
+                            style={{ width:"100%", padding:"12px 12px 12px 28px", border:"1.5px solid #d8b4fe", borderRadius:"10px", fontSize:"18px", fontWeight:800, boxSizing:"border-box", background:"#fdf4ff", color:"#7e22ce", letterSpacing:"0.5px" }}
+                          />
+                        </div>
                         {odemeModalCari && odemeModalTutar && Number(odemeModalTutar) > Number(odemeModalCari.toplamKalan) && (
                           <div style={{ fontSize:"11px", color:"#dc2626", marginTop:"3px" }}>⚠️ Girilen tutar toplam borcu aşıyor</div>
                         )}
