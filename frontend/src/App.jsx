@@ -15231,14 +15231,6 @@ function App() {
               </button>
             )}
 
-            {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
-              <button
-                className={page === "cashflow" ? "tab activeTab" : "tab"}
-                onClick={() => setPage("cashflow")}
-              >
-                💵 Nakit Akış
-              </button>
-            )}
 
             {canSeeMalzeme && false && (
               <button
