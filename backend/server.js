@@ -11693,6 +11693,142 @@ app.get("/finance/taseron-odeme-gecmisi", requireFinanceAuth, async (req, res) =
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Taşeron ödeme Excel export
+app.get("/finance/taseron-odeme-excel", requireFinanceAuth, async (req, res) => {
+  try {
+    const { firma } = req.query;
+    const params = [];
+    let where = "";
+    if (firma) {
+      params.push(firma);
+      where = "WHERE firma = $1";
+    }
+
+    const r = await pool.query(`
+      SELECT firma, tutar, tarih, aciklama, dagilim, created_at
+      FROM taseron_odeme_log ${where}
+      ORDER BY firma ASC, tarih DESC, created_at DESC
+    `, params);
+
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet("Taşeron Ödemeleri");
+
+    const cols = [
+      { header: "Firma",         key: "firma",     width: 30 },
+      { header: "Ödeme Tarihi",  key: "tarih",     width: 16 },
+      { header: "Tutar (₺)",     key: "tutar",     width: 18 },
+      { header: "Açıklama",      key: "aciklama",  width: 28 },
+      { header: "Dağılım (Faturalar)", key: "dagilim", width: 55 },
+    ];
+    ws.columns = cols;
+
+    // Başlık satırı
+    ws.mergeCells("A1:E1");
+    const title = ws.getCell("A1");
+    const now = new Date().toLocaleDateString("tr-TR");
+    title.value = firma
+      ? `TAŞERON ÖDEME RAPORU — ${firma.toUpperCase()} (${now})`
+      : `TAŞERON ÖDEME RAPORU — TÜM FİRMALAR (${now})`;
+    title.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    title.alignment = { horizontal: "center", vertical: "middle" };
+    title.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "7E22CE" } };
+    ws.getRow(1).height = 28;
+
+    // Kolon başlıkları
+    const hdr = ws.getRow(2);
+    cols.forEach((col, i) => {
+      const cell = hdr.getCell(i + 1);
+      cell.value = col.header;
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "6D28D9" } };
+      cell.border = {
+        top: { style: "thin", color: { argb: "D9D9D9" } },
+        left: { style: "thin", color: { argb: "D9D9D9" } },
+        bottom: { style: "thin", color: { argb: "D9D9D9" } },
+        right: { style: "thin", color: { argb: "D9D9D9" } },
+      };
+    });
+    hdr.height = 22;
+
+    // Firma gruplamaları
+    let lastFirma = null;
+    let firmaStart = 3;
+    const firmaGroups = [];
+
+    r.rows.forEach((row, idx) => {
+      const rowNum = idx + 3;
+      const dagilimStr = Array.isArray(row.dagilim)
+        ? row.dagilim.map(d => `${d.fatura_no}: ₺${Number(d.odeme).toLocaleString("tr-TR",{maximumFractionDigits:0})}`).join(" | ")
+        : "";
+
+      const isEven = idx % 2 === 0;
+      const bgColor = isEven ? "FAF5FF" : "FFFFFF";
+
+      const newRow = ws.addRow({
+        firma: row.firma || "",
+        tarih: row.tarih ? String(row.tarih).slice(0, 10) : "",
+        tutar: Number(row.tutar || 0),
+        aciklama: row.aciklama || "",
+        dagilim: dagilimStr,
+      });
+
+      newRow.eachCell((cell, colNum) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
+        cell.border = {
+          top: { style: "thin", color: { argb: "E9D5FF" } },
+          left: { style: "thin", color: { argb: "E9D5FF" } },
+          bottom: { style: "thin", color: { argb: "E9D5FF" } },
+          right: { style: "thin", color: { argb: "E9D5FF" } },
+        };
+        // Tutar sütunu sağa hizalı, bold
+        if (colNum === 3) {
+          cell.alignment = { horizontal: "right" };
+          cell.font = { bold: true, color: { argb: "6D28D9" } };
+          cell.numFmt = '#,##0';
+        }
+      });
+
+      // Firma gruplaması için izle
+      if (row.firma !== lastFirma) {
+        if (lastFirma !== null) firmaGroups.push({ firma: lastFirma, start: firmaStart, end: rowNum - 1 });
+        lastFirma = row.firma;
+        firmaStart = rowNum;
+      }
+    });
+
+    if (lastFirma !== null) firmaGroups.push({ firma: lastFirma, start: firmaStart, end: r.rows.length + 2 });
+
+    // Toplam satırları (firma bazında)
+    firmaGroups.forEach(g => {
+      const totalRow = ws.addRow({
+        firma: `TOPLAM — ${g.firma}`,
+        tarih: "",
+        tutar: { formula: `SUM(C${g.start}:C${g.end})` },
+        aciklama: "",
+        dagilim: `${g.end - g.start + 1} ödeme`,
+      });
+      totalRow.eachCell((cell, colNum) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "7E22CE" } };
+        if (colNum === 3) { cell.alignment = { horizontal: "right" }; cell.numFmt = '#,##0'; }
+      });
+    });
+
+    ws.autoFilter = { from: "A2", to: "E2" };
+    ws.views = [{ state: "frozen", xSplit: 0, ySplit: 2, showGridLines: false }];
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const safeFirma = firma ? `_${firma.replace(/[^a-zA-Z0-9]/g, "_")}` : "_tum";
+    res.setHeader("Content-Disposition", `attachment; filename=taseron_odemeler${safeFirma}_${new Date().toISOString().slice(0,10)}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch(e) {
+    console.error("TASERON ODEME EXCEL ERROR:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // FIFO ödeme dağıtım motoru
 app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
   const client = await pool.connect();
