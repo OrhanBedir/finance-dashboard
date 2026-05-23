@@ -125,6 +125,36 @@ function calcBrutMaas(netMaas) {
   return { brut, sgkIssizlikIsci, gelirDamga, sgkIssizlikIsv, isverenMaliyet };
 }
 
+function BordroOzeti({ netMaas }) {
+  if (!netMaas || netMaas <= 0) return null;
+  const { brut, sgkIssizlikIsci, gelirDamga, sgkIssizlikIsv, isverenMaliyet } = calcBrutMaas(netMaas);
+  const R = ({ label, val, color, bg, bold }) => (
+    <div style={{ display:"flex", justifyContent:"space-between", padding:"5px 10px", fontSize:"12px", background: bg||"transparent" }}>
+      <span style={{ color:"#374151", fontWeight: bold?700:400 }}>{label}</span>
+      <span style={{ fontWeight:700, color: color||"#374151" }}>{val}</span>
+    </div>
+  );
+  const TL = (n) => `₺${Number(n).toLocaleString("tr-TR")}`;
+  return (
+    <div style={{ background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)", border:"1.5px solid #86efac", borderRadius:"12px", padding:"12px 16px", marginBottom:"12px" }}>
+      <div style={{ fontSize:"12px", fontWeight:700, color:"#065f46", marginBottom:"8px" }}>📊 Bordro Özeti (Tahmini)</div>
+      <div style={{ background:"#fff", borderRadius:"8px", overflow:"hidden", border:"1px solid #d1fae5" }}>
+        <R label="Brüt Maaş" val={TL(brut)} color="#1e40af" bg="#f0fdf4" bold />
+        <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic" }}>Çalışan Kesintileri</div>
+        <R label="  SGK + İşsizlik İşçi (%15)" val={`- ${TL(sgkIssizlikIsci)}`} color="#dc2626" />
+        <R label="  Gelir + Damga Vergisi" val={`- ${TL(gelirDamga)}`} color="#dc2626" />
+        <R label="Net Maaş" val={TL(netMaas)} color="#166534" bg="#f0fdf4" bold />
+        <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic" }}>İşveren Maliyeti</div>
+        <R label="  SGK + İşsizlik İşveren (%22.5)" val={`+ ${TL(sgkIssizlikIsv)}`} color="#92400e" />
+        <div style={{ display:"flex", justifyContent:"space-between", padding:"6px 10px", fontSize:"12px", background:"#fef3c7", borderTop:"1px solid #fde68a" }}>
+          <span style={{ color:"#78350f", fontWeight:700 }}>🏛️ Toplam İşveren Maliyeti</span>
+          <span style={{ fontWeight:800, color:"#b45309" }}>{TL(isverenMaliyet)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 //Silinecek//Fatura bilgi yükle//
 function InvoiceEntryExcelUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
@@ -8276,16 +8306,18 @@ function HrDashboard({ onBack, currentUser }) {
                             ).toLocaleString("tr-TR")}
                           </span>
                         </div>
-                        {(() => {
-                          const netToplam = ozet.length > 0
+                        {(()=>{
+                          const _netT = ozet.length > 0
                             ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
                             : personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0);
-                          const { isverenMaliyet, sgkIssizlikIsv } = calcBrutMaas(netToplam);
+                          const _bm = calcBrutMaas(_netT);
                           return (
-                            <div style={{ ...labelSt, paddingLeft:"12px", borderLeft:"3px solid #d1fae5", color:"#065f46" }}>
-                              🏛️ An İtibariyle {ayAdi} {yilStr} Ayı Brüt Maaş Ödemesi Yapılacak:
-                              <span style={amountSt("#065f46")}>₺{isverenMaliyet.toLocaleString("tr-TR")}</span>
-                              <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:400 }}>(net + SGK/İşsizlik işv. ₺{sgkIssizlikIsv.toLocaleString("tr-TR")})</span>
+                            <div style={{ display:"flex", alignItems:"center", gap:"6px", background:"#ecfdf5", border:"1.5px solid #6ee7b7", borderRadius:"8px", padding:"5px 12px" }}>
+                              <span style={{ fontSize:"13px", fontWeight:600, color:"#065f46" }}>
+                                🏛️ An İtibariyle {ayAdi} {yilStr} Ayı Brüt Maaş Ödemesi Yapılacak:
+                              </span>
+                              <span style={{ fontSize:"15px", fontWeight:800, color:"#065f46" }}>₺{_bm.isverenMaliyet.toLocaleString("tr-TR")}</span>
+                              <span style={{ fontSize:"11px", color:"#6b7280", fontWeight:400 }}>(+SGK/İşsizlik işv. ₺{_bm.sgkIssizlikIsv.toLocaleString("tr-TR")})</span>
                             </div>
                           );
                         })()}
@@ -8713,44 +8745,7 @@ function HrDashboard({ onBack, currentUser }) {
                       ))}
                     </div>
                     {/* Brüt maaş breakdown — net_maas girilince otomatik hesaplanır */}
-                    {Number(pForm.net_maas||0) > 0 && (() => {
-                      const { brut, sgkIssizlikIsci, gelirDamga, sgkIssizlikIsv, isverenMaliyet } = calcBrutMaas(pForm.net_maas);
-                      const rowSt = { display:"flex", justifyContent:"space-between", padding:"5px 10px", fontSize:"12px" };
-                      const valSt = (c) => ({ fontWeight:700, color:c||"#374151" });
-                      return (
-                        <div style={{ background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)", border:"1.5px solid #86efac", borderRadius:"12px", padding:"12px 16px", marginBottom:"12px" }}>
-                          <div style={{ fontSize:"12px", fontWeight:700, color:"#065f46", marginBottom:"8px" }}>📊 Bordro Özeti (Tahmini)</div>
-                          <div style={{ background:"#fff", borderRadius:"8px", overflow:"hidden", border:"1px solid #d1fae5" }}>
-                            <div style={{ ...rowSt, background:"#f0fdf4" }}>
-                              <span style={{ color:"#374151" }}>Brüt Maaş</span>
-                              <span style={valSt("#1e40af")}>₺{brut.toLocaleString("tr-TR")}</span>
-                            </div>
-                            <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic", borderBottom:"1px solid #f0fdf4" }}>Çalışan Kesintileri</div>
-                            <div style={rowSt}>
-                              <span style={{ color:"#374151" }}>  SGK + İşsizlik İşçi (%15)</span>
-                              <span style={valSt("#dc2626")}>- ₺{sgkIssizlikIsci.toLocaleString("tr-TR")}</span>
-                            </div>
-                            <div style={rowSt}>
-                              <span style={{ color:"#374151" }}>  Gelir + Damga Vergisi</span>
-                              <span style={valSt("#dc2626")}>- ₺{gelirDamga.toLocaleString("tr-TR")}</span>
-                            </div>
-                            <div style={{ ...rowSt, background:"#f0fdf4", borderTop:"1px solid #d1fae5" }}>
-                              <span style={{ color:"#065f46", fontWeight:700 }}>Net Maaş</span>
-                              <span style={valSt("#166534")}>₺{Number(pForm.net_maas||0).toLocaleString("tr-TR")}</span>
-                            </div>
-                            <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic", borderBottom:"1px solid #f0fdf4" }}>İşveren Maliyeti</div>
-                            <div style={rowSt}>
-                              <span style={{ color:"#374151" }}>  SGK + İşsizlik İşveren (%22.5)</span>
-                              <span style={valSt("#92400e")}>+ ₺{sgkIssizlikIsv.toLocaleString("tr-TR")}</span>
-                            </div>
-                            <div style={{ ...rowSt, background:"#fef3c7", borderTop:"1px solid #fde68a" }}>
-                              <span style={{ color:"#78350f", fontWeight:700 }}>🏛️ Toplam İşveren Maliyeti</span>
-                              <span style={valSt("#b45309")}>₺{isverenMaliyet.toLocaleString("tr-TR")}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                    <BordroOzeti netMaas={Number(pForm.net_maas||0)} />
                     <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
                       <button type="button" className="tab" onClick={()=>setShowPersonelForm(false)}>Vazgeç</button>
                       <button type="submit" className="saveButton">Kaydet</button>
