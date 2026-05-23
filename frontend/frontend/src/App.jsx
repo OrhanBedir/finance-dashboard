@@ -12898,16 +12898,51 @@ function CashFlowPanel({ currentUser, onBack }) {
   const totalTicket = personelList.length * 10000;
   const totalOfis   = ofisList.reduce((s,o) => s + Number(o.aylik_kira||0), 0);
 
+  // ── Gecikmiş ödeme tespiti ──────────────────────────────────────
+  const today       = new Date();
+  const todayGun    = today.getDate();
+  const todayYil    = today.getFullYear();
+  const todayAy     = today.getMonth() + 1;
+  const selYil      = Number(yil);
+  const selAy       = Number(ay);
+  const isPastMonth = selYil < todayYil || (selYil === todayYil && selAy < todayAy);
+  const isCurrMonth = selYil === todayYil && selAy === todayAy;
+  // Ödeme günü geçmiş mi?
+  const paymentOverdue = (payDay) => isPastMonth || (isCurrMonth && todayGun > payDay);
+
+  // Maaş için sarkanlar kontrolü (önceki aya ait)
+  const prevMonthStr = (() => {
+    const d = new Date(selYil, selAy - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  })();
+  const maasOverdue   = paymentOverdue(15) && sarkanlar.some(s => s.donem === prevMonthStr && s.sarkan > 0);
+
+  // ── Spillover (önceki aydan sarkan) ─────────────────────────────
+  const totalSarkan  = sarkanlar.reduce((s,r) => s + Number(r.sarkan||0), 0);
+  const hwDaysAll    = [...Object.keys(hwReceived), ...Object.keys(hwPending)]
+                         .map(Number).filter(n => !isNaN(n) && n > 0);
+  const firstHWDay   = hwDaysAll.length > 0 ? Math.min(...hwDaysAll) : null;
+
   // Kategoriler
   const hwDeductAbs = Object.fromEntries(Object.entries(hwDeduct).map(([k,v])=>[k,Math.abs(v)]));
   const KATEGORILER = [
     { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",               type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived },
     { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",              type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending  },
     { key:"hw_deduct",   label:"↩️ İade Kesinti (H01)",                  type:"expense", color:"#fee2e2", textColor:"#991b1b", byDay: hwDeductAbs },
-    { key:"maas",        label:`👥 ${prevAyAdi} Maaşları`,               type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: totalMaas>0   ? {15: totalMaas}   : {}, note: `${prevAyAdi} ayı hakedilen · Ödeme: 15. gün` },
-    { key:"arac",        label:`🚗 ${prevAyAdi} Araç Kiraları`,           type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: totalArac>0   ? {10: totalArac}   : {}, note: `${prevAyAdi} kirası · Ödeme: 10. gün` },
-    { key:"ticket",      label:"🎫 Ticket'lar",                           type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: totalTicket>0 ? {5:  totalTicket} : {}, note: `${personelList.length} kişi × ₺10.000 · 5. gün` },
-    { key:"ofis",        label:`🏢 ${prevAyAdi} Depo & Ofis Kirası`,      type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0   ? {5:  totalOfis}   : {}, note: `${prevAyAdi} kirası · Ödeme: 5. gün` },
+    { key:"maas",        label:`👥 ${prevAyAdi} Maaşları`,               type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: totalMaas>0   ? {15: totalMaas}   : {}, note: `${prevAyAdi} ayı hakedilen · Ödeme: 15. gün`, overdue: maasOverdue },
+    { key:"arac",        label:`🚗 ${prevAyAdi} Araç Kiraları`,           type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: totalArac>0   ? {10: totalArac}   : {}, note: `${prevAyAdi} kirası · Ödeme: 10. gün`,          overdue: totalArac>0 && paymentOverdue(10) },
+    { key:"ticket",      label:"🎫 Ticket'lar",                           type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: totalTicket>0 ? {5:  totalTicket} : {}, note: `${personelList.length} kişi × ₺10.000 · 5. gün`, overdue: totalTicket>0 && paymentOverdue(5) },
+    { key:"ofis",        label:`🏢 ${prevAyAdi} Depo & Ofis Kirası`,      type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0   ? {5:  totalOfis}   : {}, note: `${prevAyAdi} kirası · Ödeme: 5. gün`,           overdue: totalOfis>0 && paymentOverdue(5) },
+    ...(totalSarkan > 0 && firstHWDay ? [{
+      key:"spillover",
+      label:"⚠️ Önceki Ay Borcu",
+      type:"expense",
+      color:"#fff7ed",
+      textColor:"#c2410c",
+      byDay: { [firstHWDay]: totalSarkan },
+      note: `${sarkanlar.length} aydan sarkan · HW geliri ile ödenmeli (${firstHWDay}. gün)`,
+      overdue: true,
+    }] : []),
     { key:"diger",       label:"📋 Diğer Giderler",                       type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: {} },
   ];
 
@@ -12965,10 +13000,13 @@ function CashFlowPanel({ currentUser, onBack }) {
       hw_received:["BBFCD0","14532D"], hw_pending:["DCFCE7","166534"],
       hw_deduct:  ["FEE2E2","991B1B"], maas:["FECACA","7F1D1D"],
       arac:       ["FEF3C7","92400E"], ticket:["F3E8FF","6B21A8"],
-      ofis:       ["FFF7ED","9A3412"], diger:["F1F5F9","475569"],
+      ofis:       ["FFF7ED","9A3412"], spillover:["FECACA","DC2626"],
+      diger:      ["F1F5F9","475569"],
     };
     KATEGORILER.forEach((kat, ki) => {
-      const [rowBg, rowTc] = ROW_COLORS[kat.key] || ["F9FAFB","374151"];
+      const [rowBg, rowTc] = kat.overdue
+        ? ["FECACA","DC2626"]
+        : (ROW_COLORS[kat.key] || ["F9FAFB","374151"]);
       const rowTotal = Object.values(kat.byDay).reduce((a,b)=>a+Number(b),0);
       const sign = kat.type==="income" ? "+" : "-";
       const zebra = ki%2===0 ? "FAFAFA":"FFFFFF";
@@ -13146,25 +13184,34 @@ function CashFlowPanel({ currentUser, onBack }) {
           <tbody>
             {KATEGORILER.map((kat, ki) => {
               const rowTotal = Object.values(kat.byDay).reduce((a,b)=>a+b,0);
+              const rowBg    = kat.overdue ? "#fff5f5" : (ki%2===0 ? "#fafafa":"#fff");
+              const lblBg    = kat.overdue ? "#fee2e2" : rowBg;
+              const lblBorder= kat.overdue ? "2px solid #fca5a5" : "2px solid #e5e7eb";
               return (
-                <tr key={kat.key} style={{ background: ki%2===0 ? "#fafafa":"#fff" }}>
-                  <td style={{ ...rowLbl, background: ki%2===0?"#fafafa":"#fff", color:kat.textColor, borderRight:"2px solid #e5e7eb", borderBottom:"1px solid #f3f4f6" }}>
-                    {kat.label}
-                    {kat.note && <div style={{ fontSize:"10px", color:"#9ca3af", fontWeight:400 }}>{kat.note}</div>}
+                <tr key={kat.key} style={{ background: rowBg }}>
+                  <td style={{ ...rowLbl, background: lblBg, color:kat.textColor, borderRight:lblBorder, borderBottom:"1px solid #f3f4f6" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:"5px" }}>
+                      {kat.label}
+                      {kat.overdue && <span title="Ödeme gecikmesi!" style={{ fontSize:"11px", color:"#dc2626", fontWeight:800, marginLeft:"4px" }}>❗</span>}
+                    </div>
+                    {kat.note && <div style={{ fontSize:"10px", color: kat.overdue ? "#ef4444" : "#9ca3af", fontWeight:400 }}>{kat.note}</div>}
                   </td>
                   {days.map(d => {
                     const val = kat.byDay[d] || 0;
+                    const cellBg = val!==0
+                      ? (kat.overdue ? "#fecaca" : kat.color)
+                      : (kat.overdue ? "#fff5f5" : (isWeekend(d)?"#f8f9fe":"transparent"));
                     return (
-                      <td key={d} style={{ ...tdSt, background: val!==0 ? kat.color : isWeekend(d)?"#f8f9fe":"transparent", borderBottom:"1px solid #f3f4f6", borderRight:"1px solid #f3f4f6" }}>
+                      <td key={d} style={{ ...tdSt, background: cellBg, borderBottom:"1px solid #f3f4f6", borderRight:"1px solid #f3f4f6" }}>
                         {val!==0 && (
-                          <div style={{ color:kat.textColor, fontWeight:700, fontSize:"10px" }}>
+                          <div style={{ color: kat.overdue ? "#dc2626" : kat.textColor, fontWeight:700, fontSize:"10px" }}>
                             {kat.type==="income" ? "+" : "-"}{fmt(val)}
                           </div>
                         )}
                       </td>
                     );
                   })}
-                  <td style={{ ...tdSt, fontWeight:800, fontSize:"11px", color:kat.textColor, background:kat.color, borderLeft:"2px solid #e5e7eb" }}>
+                  <td style={{ ...tdSt, fontWeight:800, fontSize:"11px", color: kat.overdue ? "#dc2626" : kat.textColor, background: kat.overdue ? "#fecaca" : kat.color, borderLeft: kat.overdue ? "2px solid #fca5a5" : "2px solid #e5e7eb" }}>
                     {rowTotal>0 ? `${kat.type==="income"?"+ ":"- "}₺${rowTotal.toLocaleString("tr-TR",{maximumFractionDigits:0})}` : "—"}
                   </td>
                 </tr>
