@@ -111,6 +111,50 @@ function formatDateOnly(value) {
 
   return str;
 }
+// ─── Brüt Maaş Hesaplama (2026 Türkiye) ─────────────────────────────────────
+// Net = Brüt × (1 - SGK İşçi 14% - İşsizlik İşçi 1% - Gelir+Damga ~15%)
+// Brüt ≈ Net / 0.70
+// İşveren maliyeti = Brüt × (1 + SGK İşv 20.5% + İşsizlik İşv 2%)
+function calcBrutMaas(netMaas) {
+  const net  = Number(netMaas || 0);
+  const brut = Math.round(net / 0.70);
+  const sgkIssizlikIsci = Math.round(brut * 0.15);   // 14% SGK + 1% İşsizlik
+  const gelirDamga      = Math.round(brut - net - sgkIssizlikIsci); // kalan kesinti
+  const sgkIssizlikIsv  = Math.round(brut * 0.225);  // 20.5% SGK + 2% İşsizlik
+  const isverenMaliyet  = brut + sgkIssizlikIsv;
+  return { brut, sgkIssizlikIsci, gelirDamga, sgkIssizlikIsv, isverenMaliyet };
+}
+
+function BordroOzeti({ netMaas }) {
+  if (!netMaas || netMaas <= 0) return null;
+  const { brut, sgkIssizlikIsci, gelirDamga, sgkIssizlikIsv, isverenMaliyet } = calcBrutMaas(netMaas);
+  const R = ({ label, val, color, bg, bold }) => (
+    <div style={{ display:"flex", justifyContent:"space-between", padding:"5px 10px", fontSize:"12px", background: bg||"transparent" }}>
+      <span style={{ color:"#374151", fontWeight: bold?700:400 }}>{label}</span>
+      <span style={{ fontWeight:700, color: color||"#374151" }}>{val}</span>
+    </div>
+  );
+  const TL = (n) => `₺${Number(n).toLocaleString("tr-TR")}`;
+  return (
+    <div style={{ background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)", border:"1.5px solid #86efac", borderRadius:"12px", padding:"12px 16px", marginBottom:"12px" }}>
+      <div style={{ fontSize:"12px", fontWeight:700, color:"#065f46", marginBottom:"8px" }}>📊 Bordro Özeti (Tahmini)</div>
+      <div style={{ background:"#fff", borderRadius:"8px", overflow:"hidden", border:"1px solid #d1fae5" }}>
+        <R label="Brüt Maaş" val={TL(brut)} color="#1e40af" bg="#f0fdf4" bold />
+        <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic" }}>Çalışan Kesintileri</div>
+        <R label="  SGK + İşsizlik İşçi (%15)" val={`- ${TL(sgkIssizlikIsci)}`} color="#dc2626" />
+        <R label="  Gelir + Damga Vergisi" val={`- ${TL(gelirDamga)}`} color="#dc2626" />
+        <R label="Net Maaş" val={TL(netMaas)} color="#166534" bg="#f0fdf4" bold />
+        <div style={{ padding:"4px 10px", fontSize:"11px", color:"#6b7280", fontStyle:"italic" }}>İşveren Maliyeti</div>
+        <R label="  SGK + İşsizlik İşveren (%22.5)" val={`+ ${TL(sgkIssizlikIsv)}`} color="#92400e" />
+        <div style={{ display:"flex", justifyContent:"space-between", padding:"6px 10px", fontSize:"12px", background:"#fef3c7", borderTop:"1px solid #fde68a" }}>
+          <span style={{ color:"#78350f", fontWeight:700 }}>🏛️ Toplam İşveren Maliyeti</span>
+          <span style={{ fontWeight:800, color:"#b45309" }}>{TL(isverenMaliyet)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 //Silinecek//Fatura bilgi yükle//
 function InvoiceEntryExcelUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
@@ -8231,7 +8275,7 @@ function HrDashboard({ onBack, currentUser }) {
       )}
       {tab==="personel" && personelUnlocked && (
         <div>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"16px", flexWrap:"wrap", gap:"12px" }}>
+              <div style={{ marginBottom:"16px" }}>
                 <div>
                   <h2 style={{ margin:0, fontSize:"20px" }}>
                     👤 Personel Listesi
@@ -8262,6 +8306,21 @@ function HrDashboard({ onBack, currentUser }) {
                             ).toLocaleString("tr-TR")}
                           </span>
                         </div>
+                        {(()=>{
+                          const _netT = ozet.length > 0
+                            ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
+                            : personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0);
+                          const _bm = calcBrutMaas(_netT);
+                          return (
+                            <div style={{ display:"flex", alignItems:"center", gap:"6px", background:"#ecfdf5", border:"1.5px solid #6ee7b7", borderRadius:"8px", padding:"5px 12px" }}>
+                              <span style={{ fontSize:"13px", fontWeight:600, color:"#065f46" }}>
+                                🏛️ An İtibariyle {ayAdi} {yilStr} Ayı Brüt Maaş Ödemesi Yapılacak:
+                              </span>
+                              <span style={{ fontSize:"15px", fontWeight:800, color:"#065f46" }}>₺{_bm.isverenMaliyet.toLocaleString("tr-TR")}</span>
+                              <span style={{ fontSize:"11px", color:"#6b7280", fontWeight:400 }}>(+SGK/İşsizlik işv. ₺{_bm.sgkIssizlikIsv.toLocaleString("tr-TR")})</span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })()}
@@ -8322,6 +8381,110 @@ function HrDashboard({ onBack, currentUser }) {
                             <span style={{ background:"#dcfce7", color:"#166534", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>✅ {tamamlandi} tamamlandı</span>
                             {bekleyen>0 && <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>⏳ {bekleyen} bekliyor</span>}
                             <span style={{ color:"#93c5fd", fontSize:"16px", marginLeft:"6px", transition:"transform 0.25s", display:"inline-block", transform: odemeTabloAcik?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
+                          </div>
+                          {/* Filtre satırı — tıklama olayını durduruyoruz, accordion toggle olmasın */}
+                          <div onClick={e=>e.stopPropagation()} style={{ padding:"8px 18px", background:"rgba(0,0,0,0.18)", display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap", borderTop:"1px solid rgba(255,255,255,0.08)" }}>
+                            <select value={yilStr} onChange={e=>setPuantajAy(`${e.target.value}-${ayStr}`)}
+                              style={{ padding:"5px 8px", border:"none", borderRadius:"7px", fontSize:"12px", background:"rgba(255,255,255,0.12)", color:"#fff", fontWeight:600, cursor:"pointer" }}>
+                              {[2024,2025,2026,2027].map(y=><option key={y} value={y} style={{ color:"#1f2937" }}>{y}</option>)}
+                            </select>
+                            <select value={ayStr} onChange={e=>setPuantajAy(`${yilStr}-${e.target.value}`)}
+                              style={{ padding:"5px 8px", border:"none", borderRadius:"7px", fontSize:"12px", background:"rgba(255,255,255,0.12)", color:"#fff", fontWeight:600, cursor:"pointer" }}>
+                              {["01","02","03","04","05","06","07","08","09","10","11","12"].map((m,i)=>(
+                                <option key={m} value={m} style={{ color:"#1f2937" }}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
+                              ))}
+                            </select>
+                            {/* Arama + dropdown */}
+                            <div style={{ position:"relative", minWidth:"160px" }}>
+                              <input
+                                type="text"
+                                placeholder="🔍 Personel ara..."
+                                value={hrSearchText}
+                                autoComplete="off"
+                                onFocus={()=>setHrSearchOpen(true)}
+                                onBlur={()=>setTimeout(()=>setHrSearchOpen(false),150)}
+                                onChange={e=>{ setHrSearchText(e.target.value); setHrSearchOpen(true); if(!e.target.value){ setHrPersonelFilter(""); } }}
+                                style={{ padding:"5px 9px", border:"none", borderRadius:"7px", fontSize:"12px", width:"100%", boxSizing:"border-box", background:"rgba(255,255,255,0.15)", color:"#fff" }}
+                              />
+                              {hrSearchOpen && (
+                                <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"8px", boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:999, maxHeight:"220px", overflowY:"auto" }}>
+                                  <div
+                                    onMouseDown={()=>{ setHrPersonelFilter(""); setHrSearchText(""); setHrSearchOpen(false); setOdemeTabloAcik(false); }}
+                                    style={{ padding:"8px 12px", fontSize:"13px", color:"#6b7280", cursor:"pointer", borderBottom:"1px solid #f3f4f6" }}
+                                    onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                    onMouseLeave={e=>e.currentTarget.style.background=""}
+                                  >👥 Tüm Personel</div>
+                                  {personelList.filter(p=>p.aktif && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
+                                    <div key={p.id}
+                                      onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); setOdemeTabloAcik(true); }}
+                                      style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
+                                      onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                                      onMouseLeave={e=>e.currentTarget.style.background=""}
+                                    >{p.ad_soyad}</div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ flex:1 }} />
+                            <button style={{ padding:"5px 12px", background:"#16a34a", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
+                              onClick={() => {
+                                const today = new Date().toISOString().slice(0,10);
+                                const fmtDate = v => { if (!v) return ""; const d = new Date(v); return isNaN(d)?String(v):`${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`; };
+                                const fmtNum  = v => v ? Number(v).toLocaleString("tr-TR") : "0";
+                                const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi","Net Maaş (₺)","Bankadan (₺)","Elden (₺)","IBAN","Banka Adı","Hesap No","Durum","Bankadan Ödenen (₺)","Elden Ödenen (₺)"];
+                                const cols    = [26,18,14,14,13,14,28,13,13,16,14,12,34,16,18,8,18,16];
+                                const dateKeys = ["dogum_tarihi","ise_giris_tarihi","isten_ayrilma_tarihi"];
+                                const numKeys  = ["net_maas","bankadan_gosterilen","elden_verilen"];
+                                const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","iban","banka_adi","banka_hesap_no","aktif","_banka_odenen","_elden_odenen"];
+                                const odenenByPerId = {};
+                                aylikOdemeler.forEach(o => {
+                                  if (!odenenByPerId[o.personel_id]) odenenByPerId[o.personel_id] = { banka:0, elden:0 };
+                                  odenenByPerId[o.personel_id].banka  += Number(o.bankadan||0);
+                                  odenenByPerId[o.personel_id].elden  += Number(o.elden||0);
+                                });
+                                const headerS = { fill:{ patternType:"solid", fgColor:{ rgb:"1E3A5F" } }, font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3B6EA5"}}, right:{style:"thin",color:{rgb:"3B6EA5"}} } };
+                                const headerMN = { fill:{ patternType:"solid", fgColor:{ rgb:"1E5F3A" } }, font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3BA57A"}}, right:{style:"thin",color:{rgb:"3BA57A"}} } };
+                                const cellS = (ri, isNum, isDurum, val, isMN) => ({ fill:{ patternType:"solid", fgColor:{ rgb: isMN ? (ri%2===0?"ECFDF5":"F0FDF4") : ri%2===0 ? "EFF6FF":"FFFFFF" } }, font:{ sz:10, name:"Calibri", bold: isNum, color:{ rgb: isDurum ? (val==="Aktif"?"166534":"991B1B") : isMN ? "065F46" : isNum ? "1E3A8A" : "1F2937" } }, alignment:{ horizontal: isNum?"right":isDurum?"center":"left", vertical:"center" }, border:{ top:{style:"thin",color:{rgb:"DBEAFE"}}, bottom:{style:"thin",color:{rgb:"DBEAFE"}}, left:{style:"thin",color:{rgb:"DBEAFE"}}, right:{style:"thin",color:{rgb:"DBEAFE"}} } });
+                                const wsData = [headers];
+                                personelList.forEach(p => {
+                                  const ode = odenenByPerId[p.id] || { banka:0, elden:0 };
+                                  wsData.push(keys.map(k => {
+                                    if (k==="aktif") return p[k]?"Aktif":"Pasif";
+                                    if (k==="_banka_odenen") return fmtNum(ode.banka);
+                                    if (k==="_elden_odenen") return fmtNum(ode.elden);
+                                    if (dateKeys.includes(k)) return fmtDate(p[k]);
+                                    if (numKeys.includes(k)) return fmtNum(p[k]);
+                                    return p[k]||"";
+                                  }));
+                                });
+                                const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
+                                ws["!cols"] = cols.map(w=>({wch:w}));
+                                ws["!rows"] = [{ hpt:26 }, ...personelList.map(()=>({hpt:20}))];
+                                headers.forEach((_,ci) => { const a = XLSXStyle.utils.encode_cell({r:0,c:ci}); if (ws[a]) ws[a].s = (ci >= 16) ? headerMN : headerS; });
+                                personelList.forEach((_,ri) => { keys.forEach((k,ci) => { const a = XLSXStyle.utils.encode_cell({r:ri+1,c:ci}); if (!ws[a]) return; const isNum = numKeys.includes(k)||k==="_banka_odenen"||k==="_elden_odenen"; const isDurum = k==="aktif"; const isMN = k==="_banka_odenen"||k==="_elden_odenen"; ws[a].s = cellS(ri,isNum,isDurum,ws[a].v,isMN); }); });
+                                ws["!freeze"] = { xSplit:0, ySplit:1 };
+                                const wb = XLSXStyle.utils.book_new();
+                                XLSXStyle.utils.book_append_sheet(wb, ws, "Personel Listesi");
+                                const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
+                                JSZip.loadAsync(buf).then(zip => {
+                                  const sheetFile = zip.file("xl/worksheets/sheet1.xml");
+                                  return sheetFile.async("string").then(xml => {
+                                    const patched = xml.replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>').replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
+                                    zip.file("xl/worksheets/sheet1.xml", patched);
+                                    return zip.generateAsync({ type:"blob", compression:"STORE" });
+                                  });
+                                }).then(blob => {
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement("a");
+                                  a.href = url; a.download = `ERC_Personel_Listesi_${today}.xlsx`;
+                                  document.body.appendChild(a); a.click();
+                                  document.body.removeChild(a);
+                                  URL.revokeObjectURL(url);
+                                });
+                              }}>📋 Excel İndir</button>
+                            <button style={{ padding:"5px 12px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
+                              onClick={()=>{ setEditingPersonel(null); setPForm({ ad_soyad:"",tc_no:"",dogum_tarihi:"",telefon:"",email:"",unvan:"",bolge:"",ise_giris_tarihi:"",isten_ayrilma_tarihi:"",net_maas:"",bankadan_gosterilen:"",elden_verilen:"",iban:"",banka_adi:"",banka_hesap_no:"",aktif:true }); setShowPersonelForm(true); }}>
+                              + Personel Ekle</button>
                           </div>
                           {/* Alt özet şeridi (her zaman görünür) */}
                           <div style={{ background:"rgba(0,0,0,0.25)", padding:"8px 18px", display:"flex", gap:"0" }}>
@@ -8384,141 +8547,6 @@ function HrDashboard({ onBack, currentUser }) {
                       </div>
                     );
                   })()}
-                </div>
-                <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap", position:"sticky", top:"12px", alignSelf:"flex-start" }}>
-                  <select value={yilStr} onChange={e=>setPuantajAy(`${e.target.value}-${ayStr}`)}
-                    style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px" }}>
-                    {[2024,2025,2026,2027].map(y=><option key={y} value={y}>{y}</option>)}
-                  </select>
-                  <select value={ayStr} onChange={e=>setPuantajAy(`${yilStr}-${e.target.value}`)}
-                    style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px" }}>
-                    {["01","02","03","04","05","06","07","08","09","10","11","12"].map((m,i)=>(
-                      <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
-                    ))}
-                  </select>
-                  {/* Arama + dropdown filtre */}
-                  <div style={{ position:"relative", minWidth:"180px" }}>
-                    <input
-                      type="text"
-                      placeholder="🔍 Personel ara..."
-                      value={hrSearchText}
-                      autoComplete="off"
-                      onFocus={()=>setHrSearchOpen(true)}
-                      onBlur={()=>setTimeout(()=>setHrSearchOpen(false),150)}
-                      onChange={e=>{ setHrSearchText(e.target.value); setHrSearchOpen(true); if(!e.target.value){ setHrPersonelFilter(""); } }}
-                      style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}
-                    />
-                    {hrSearchOpen && (
-                      <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"8px", boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:999, maxHeight:"220px", overflowY:"auto" }}>
-                        <div
-                          onMouseDown={()=>{ setHrPersonelFilter(""); setHrSearchText(""); setHrSearchOpen(false); setOdemeTabloAcik(false); }}
-                          style={{ padding:"8px 12px", fontSize:"13px", color:"#6b7280", cursor:"pointer", borderBottom:"1px solid #f3f4f6" }}
-                          onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
-                          onMouseLeave={e=>e.currentTarget.style.background=""}
-                        >👥 Tüm Personel</div>
-                        {personelList.filter(p=>p.aktif && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
-                          <div key={p.id}
-                            onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); setOdemeTabloAcik(true); }}
-                            style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
-                            onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
-                            onMouseLeave={e=>e.currentTarget.style.background=""}
-                          >{p.ad_soyad}</div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <button style={{ padding:"7px 14px", background:"#16a34a", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}
-                    onClick={() => {
-                      const today = new Date().toISOString().slice(0,10);
-                      const ayAdiEx = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][new Date().getMonth()];
-                      const fmtDate = v => { if (!v) return ""; const d = new Date(v); return isNaN(d)?String(v):`${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`; };
-                      const fmtNum  = v => v ? Number(v).toLocaleString("tr-TR") : "0";
-
-                      const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi","Net Maaş (₺)","Bankadan (₺)","Elden (₺)","IBAN","Banka Adı","Hesap No","Durum"];
-                      const cols    = [26,18,14,14,13,14,28,13,13,16,14,12,34,16,18,8];
-                      const dateKeys = ["dogum_tarihi","ise_giris_tarihi","isten_ayrilma_tarihi"];
-                      const numKeys  = ["net_maas","bankadan_gosterilen","elden_verilen"];
-                      const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","iban","banka_adi","banka_hesap_no","aktif"];
-
-                      // Stil sabitleri
-                      const headerS = {
-                        fill:{ patternType:"solid", fgColor:{ rgb:"1E3A5F" } },
-                        font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" },
-                        alignment:{ horizontal:"center", vertical:"center", wrapText:true },
-                        border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3B6EA5"}}, right:{style:"thin",color:{rgb:"3B6EA5"}} }
-                      };
-                      const cellS = (ri, isNum, isDurum, val) => ({
-                        fill:{ patternType:"solid", fgColor:{ rgb: ri%2===0 ? "EFF6FF":"FFFFFF" } },
-                        font:{ sz:10, name:"Calibri",
-                          bold: isNum,
-                          color:{ rgb: isDurum ? (val==="Aktif"?"166534":"991B1B") : isNum ? "1E3A8A" : "1F2937" }
-                        },
-                        alignment:{ horizontal: isNum?"right":isDurum?"center":"left", vertical:"center" },
-                        border:{ top:{style:"thin",color:{rgb:"DBEAFE"}}, bottom:{style:"thin",color:{rgb:"DBEAFE"}}, left:{style:"thin",color:{rgb:"DBEAFE"}}, right:{style:"thin",color:{rgb:"DBEAFE"}} }
-                      });
-
-                      const wsData = [headers];
-                      personelList.forEach(p => {
-                        wsData.push(keys.map(k => {
-                          if (k==="aktif") return p[k]?"Aktif":"Pasif";
-                          if (dateKeys.includes(k)) return fmtDate(p[k]);
-                          if (numKeys.includes(k)) return fmtNum(p[k]);
-                          return p[k]||"";
-                        }));
-                      });
-
-                      const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
-                      ws["!cols"] = cols.map(w=>({wch:w}));
-                      ws["!rows"] = [{ hpt:26 }, ...personelList.map(()=>({hpt:20}))];
-
-                      // Başlık stilleri
-                      headers.forEach((_,ci) => {
-                        const a = XLSXStyle.utils.encode_cell({r:0,c:ci});
-                        if (ws[a]) ws[a].s = headerS;
-                      });
-                      // Veri satırı stilleri
-                      personelList.forEach((_,ri) => {
-                        keys.forEach((k,ci) => {
-                          const a = XLSXStyle.utils.encode_cell({r:ri+1,c:ci});
-                          if (!ws[a]) return;
-                          const isNum = numKeys.includes(k);
-                          const isDurum = k==="aktif";
-                          ws[a].s = cellS(ri, isNum, isDurum, ws[a].v);
-                        });
-                      });
-
-                      // Başlık satırı dondur
-                      ws["!freeze"] = { xSplit:0, ySplit:1 };
-
-                      const wb = XLSXStyle.utils.book_new();
-                      XLSXStyle.utils.book_append_sheet(wb, ws, "Personel Listesi");
-
-                      // Gridlines kapat: buffer → JSZip STORE → XML patch → download
-                      const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
-                      JSZip.loadAsync(buf).then(zip => {
-                        const sheetFile = zip.file("xl/worksheets/sheet1.xml");
-                        return sheetFile.async("string").then(xml => {
-                          // Basit string replace — regex yerine güvenli
-                          const patched = xml
-                            .replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>')
-                            .replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
-                          zip.file("xl/worksheets/sheet1.xml", patched);
-                          return zip.generateAsync({ type:"blob", compression:"STORE" });
-                        });
-                      }).then(blob => {
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url; a.download = `ERC_Personel_Listesi_${today}.xlsx`;
-                        document.body.appendChild(a); a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      });
-                    }}>
-                    📥 Excel İndir
-                  </button>
-                  <button className="saveButton" onClick={()=>{ setEditingPersonel(null); setPForm({ ad_soyad:"",tc_no:"",dogum_tarihi:"",telefon:"",email:"",unvan:"",bolge:"",ise_giris_tarihi:"",isten_ayrilma_tarihi:"",net_maas:"",bankadan_gosterilen:"",elden_verilen:"",iban:"",banka_adi:"",banka_hesap_no:"",aktif:true }); setShowPersonelForm(true); }}>
-                    + Personel Ekle
-                  </button>
                 </div>
               </div>
 
@@ -8716,6 +8744,8 @@ function HrDashboard({ onBack, currentUser }) {
                         </div>
                       ))}
                     </div>
+                    {/* Brüt maaş breakdown — net_maas girilince otomatik hesaplanır */}
+                    <BordroOzeti netMaas={Number(pForm.net_maas||0)} />
                     <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
                       <button type="button" className="tab" onClick={()=>setShowPersonelForm(false)}>Vazgeç</button>
                       <button type="submit" className="saveButton">Kaydet</button>
@@ -13387,11 +13417,12 @@ function CashFlowPanel({ currentUser, onBack }) {
   const prevDate2  = new Date(Number(yil), Number(ay) - 2, 1);
   const prevAyAdi  = AY_ADLARI[prevDate2.getMonth()];
 
-  // Gider hesapları — maaş: önceki ayın hakedilen toplamı (tahakkuk esası)
+  // Gider hesapları — maaş: önceki ayın hakedilen toplamı (tahakkuk esası) — brüt işveren maliyeti
   const prevMaasHakedilen = prevOzet.reduce((s,o) => s + Number(o.hakedilen_maas||0), 0);
-  const totalMaas   = prevMaasHakedilen > 0
+  const prevMaasNetToplam = prevMaasHakedilen > 0
     ? prevMaasHakedilen
     : personelList.reduce((s,p) => s + Number(p.net_maas||0), 0); // fallback: puantaj yoksa net_maas
+  const totalMaas = calcBrutMaas(prevMaasNetToplam).isverenMaliyet; // brüt işveren maliyeti
   const totalArac   = araclar.reduce((s,a) => s + Number(a.aylik_kira||0), 0);
   const totalTicket = personelList.length * 10000;
   const totalOfis   = ofisList.reduce((s,o) => s + Number(o.aylik_kira||0), 0);
@@ -15142,9 +15173,9 @@ function App() {
   const isAdmin = user?.role === "admin";
   // Rollout erişimi var ama Puantaj görmeyecek kullanıcılar (rol ne olursa olsun rollout gibi davranır)
   const _userEmail = (user?.email || "").toLowerCase().trim();
-  const _PUANTAJ_HARIC = ["hatice.omus@simsektel.com"];
+  const _PUANTAJ_HARIC = ["hatice.omus@simsektel.com", "murat.istek@simsektel.com"];
   const _ROLLOUT_OVERRIDE = ["hatice.omus@simsektel.com"]; // user rolünde olsa bile rollout gibi davranır
-  const _isBolgeMudur = _userEmail === "nurcan.kus@simsektel.com" || _userEmail === "serdar.altinova@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
+  const _isBolgeMudur = _userEmail === "nurcan.kus@simsektel.com" || _userEmail === "serdar.altinova@simsektel.com" || _userEmail === "murat.istek@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
   const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur || _ROLLOUT_OVERRIDE.includes(_userEmail);
   const canSeePuantaj = isRollout && !_PUANTAJ_HARIC.includes(_userEmail);
   const isPersonel = user?.role === "user" && !_isBolgeMudur && !_ROLLOUT_OVERRIDE.includes(_userEmail);
@@ -15207,7 +15238,7 @@ function App() {
   const [page, setPage] = useState(() => {
     const u = (() => { try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; } })();
     const _ue = (u?.email||"").toLowerCase().trim();
-    const bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"];
+    const bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com"];
     const rolloutOverrideEmails = ["hatice.omus@simsektel.com"];
     const isBolge = bolgeMudurEmails.includes(_ue) || ["rollout_mudur","bolge_mudur"].includes((u?.role||"").toLowerCase());
     const isRolloutOverride = rolloutOverrideEmails.includes(_ue);
@@ -15531,7 +15562,7 @@ function App() {
       // Reset page based on the logged-in user's role so switching users works correctly
       const _lu = data.user;
       const _lue = (_lu?.email||"").toLowerCase().trim();
-      const _bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"];
+      const _bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com"];
       const _rolloutOverrideEmails = ["hatice.omus@simsektel.com"];
       const _luIsBolge = _bolgeMudurEmails.includes(_lue) || ["rollout_mudur","bolge_mudur"].includes((_lu?.role||"").toLowerCase());
       const _luIsRolloutOverride = _rolloutOverrideEmails.includes(_lue);
