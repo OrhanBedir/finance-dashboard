@@ -7015,7 +7015,7 @@ function PuantajPanel({ currentUser, onBack }) {
     { key:"GELMEDI",    label:"❌", name:"GELMEDİ" },
     { key:"IZIN",       label:"🏖", name:"İZİN" },
     { key:"RAPOR",      label:"☪️", name:"RAPOR" },
-    { key:"TATIL",      label:"⭕", name:"TATİL" },
+    { key:"TATIL",      label:"⭕", name:"HAFTA TATİLİ" },
     { key:"DINLENME",   label:"💤", name:"DİNLENME" },
     { key:"RESMI_TATIL",label:"🎌", name:"RESMİ TATİL" },
   ];
@@ -7724,7 +7724,7 @@ function HrDashboard({ onBack, currentUser }) {
     { key:"GELMEDI",    label:"❌", color:"#ef4444", name:"GELMEDİ" },
     { key:"IZIN",       label:"🏖", color:"#3b82f6", name:"İZİN" },
     { key:"RAPOR",      label:"☪️", color:"#f59e0b", name:"RAPOR" },
-    { key:"TATIL",      label:"⭕", color:"#9ca3af", name:"TATİL" },
+    { key:"TATIL",      label:"⭕", color:"#9ca3af", name:"HAFTA TATİLİ" },
     { key:"DINLENME",   label:"💤", color:"#7c3aed", name:"DİNLENME" },
     { key:"RESMI_TATIL",label:"🎌", color:"#1d4ed8", name:"RESMİ TATİL" },
   ];
@@ -8127,7 +8127,7 @@ function HrDashboard({ onBack, currentUser }) {
                         { label:"Gelmedi",   emoji:"❌", val:gelmediSay, bg:"#fee2e2", tc:"#991b1b" },
                         { label:"İzin",      emoji:"🏖", val:sc["IZIN"]||0,    bg:"#dbeafe", tc:"#1d4ed8" },
                         { label:"Rapor",     emoji:"☪️", val:sc["RAPOR"]||0,   bg:"#fef3c7", tc:"#92400e" },
-                        { label:"Tatil",     emoji:"⭕", val:sc["TATIL"]||0,   bg:"#f1f5f9", tc:"#64748b" },
+                        { label:"H.Tatili",  emoji:"⭕", val:sc["TATIL"]||0,   bg:"#f1f5f9", tc:"#64748b" },
                         { label:"Dinlenme",  emoji:"💤", val:sc["DINLENME"]||0, bg:"#f3e8ff", tc:"#7c3aed" },
                       ].map(s=>(
                         <div key={s.label} style={{ background:s.bg, borderRadius:"12px", padding:"10px 14px", textAlign:"center", minWidth:"70px" }}>
