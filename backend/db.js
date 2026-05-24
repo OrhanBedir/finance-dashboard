@@ -24,4 +24,9 @@ const remoteConfig = {
 
 const pool = new Pool(isRemote ? remoteConfig : localConfig);
 
+// Uncaught pool errors'ın server'ı çökertmesini önle
+pool.on("error", (err) => {
+  console.error("PostgreSQL pool error (ignored on Render):", err.message);
+});
+
 module.exports = pool;
