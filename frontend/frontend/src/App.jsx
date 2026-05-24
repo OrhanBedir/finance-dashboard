@@ -9734,6 +9734,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [kalemler, setKalemler]   = useState([]);
   const [fotoModal, setFotoModal] = useState(null); // kalem id waiting for photo after new kalem add
   const [extraFotoModal, setExtraFotoModal] = useState(null);
+  const [cezaBelgeKalemId, setCezaBelgeKalemId] = useState(null); // kalem id for ceza tutanagi upload
+  const cezaBelgeInputRef = useRef(null);
   const [uploadFile, setUploadFile] = useState(null);
   const [fisOlmadanAciklama, setFisOlmadanAciklama] = useState("");
   const [pendingKalemTutar, setPendingKalemTutar] = useState(null); // entered amount for OCR comparison
@@ -9859,6 +9861,41 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     setTutarUyariAciklama("");
     setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" }));
     refreshActive(activeForm.id);
+  };
+
+  // Trafik ceza belgesi yükle butonu için — kalemi kaydeder, sonra dosya seçiciyi açar
+  const handleAddKalemWithCeza = async () => {
+    if (!kalemForm.tutar || !kalemForm.tarih) return alert("Tarih ve tutar zorunlu");
+    if (!activeForm) return alert("Önce form oluşturun");
+    const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, plaka: kalemForm.plaka||null, ceza_personel_id: kalemForm.ceza_personel_id||null })
+    });
+    const saved = await r.json();
+    setCezaBelgeKalemId(saved.id);
+    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", plaka:"", ceza_personel_id:"" }));
+    refreshActive(activeForm.id);
+    // Dosya seçiciyi tetikle
+    setTimeout(() => cezaBelgeInputRef.current?.click(), 100);
+  };
+
+  const handleCezaBelgeUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !cezaBelgeKalemId) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      await fetch(`${API_BASE}/hr/masraf-kalem/${cezaBelgeKalemId}/ceza-belge`, {
+        method: "POST",
+        body: fd
+      });
+      alert("✅ Trafik İdari Para Cezası Karar Tutanağı başarıyla yüklendi");
+    } catch {
+      alert("Belge yüklenemedi, lütfen tekrar deneyin");
+    }
+    setCezaBelgeKalemId(null);
+    e.target.value = "";
   };
 
   const handleDeleteKalem = async (kid) => {
@@ -10393,14 +10430,22 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                       <input type="number" value={kalemForm.tutar} onChange={e=>setKalemForm(k=>({...k,tutar:e.target.value}))} placeholder="0.00"
                         style={{ ...inp, fontSize:"18px", fontWeight:700, border:"2px solid #2563eb" }} />
                     </div>
-                    <div style={{ display:"flex", gap:"8px" }}>
+                    <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
                       <button onClick={handleAddKalem}
-                        style={{ flex:1, padding:"11px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer" }}>
+                        style={{ flex:1, padding:"11px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer", minWidth:"180px" }}>
                         ✓ Ekle + Fiş Fotoğrafı Yükle
                       </button>
+                      {kat.isTrafikCeza && (
+                        <button onClick={handleAddKalemWithCeza}
+                          style={{ flex:1, padding:"11px", background:"#b91c1c", color:"#fff", border:"none", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer", minWidth:"180px" }}>
+                          📄 Ekle + Ceza Tutanağı Yükle
+                        </button>
+                      )}
                       <button onClick={()=>setKalemForm(k=>({...k,kategori:""}))}
                         style={{ padding:"11px 16px", background:"#f3f4f6", border:"none", borderRadius:"8px", cursor:"pointer", fontSize:"13px" }}>İptal</button>
                     </div>
+                    {/* Gizli ceza belgesi input */}
+                    <input ref={cezaBelgeInputRef} type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={handleCezaBelgeUpload} />
                   </div>
                 ) : (
                   <button onClick={()=>{ setKalemForm(k=>({...k, kategori:kat.key, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" })); setOpenKats(prev=>{ const s=new Set(prev); s.add(kat.key); return s; }); }}
