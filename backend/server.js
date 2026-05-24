@@ -12182,6 +12182,10 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
   }
 });
 
+app.get("/health", (req, res) => {
+  res.json({ ok: true, ts: Date.now() });
+});
+
 app.listen(PORT, () => {
   console.log(`Server çalışıyor: ${PORT}`);
 });
