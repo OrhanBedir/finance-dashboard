@@ -10431,12 +10431,12 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                         style={{ ...inp, fontSize:"18px", fontWeight:700, border:"2px solid #2563eb" }} />
                     </div>
                     <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
-                      <button onClick={handleAddKalem}
+                      <button type="button" onClick={handleAddKalem}
                         style={{ flex:1, padding:"11px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer", minWidth:"180px" }}>
                         ✓ Ekle + Fiş Fotoğrafı Yükle
                       </button>
                       {kat.isTrafikCeza && (
-                        <button onClick={handleAddKalemWithCeza}
+                        <button type="button" onClick={handleAddKalemWithCeza}
                           style={{ flex:1, padding:"11px", background:"#b91c1c", color:"#fff", border:"none", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer", minWidth:"180px" }}>
                           📄 Ekle + Ceza Tutanağı Yükle
                         </button>
