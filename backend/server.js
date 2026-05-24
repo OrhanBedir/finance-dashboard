@@ -9625,27 +9625,12 @@ app.get("/hr/is-avans/bakiye", async (req, res) => {
 
 app.get("/hr/is-avans", async (req, res) => {
   try {
-    const { email } = req.query;
-    let query, params;
-    if (email) {
-      query = `
-        SELECT t.*, p.ad_soyad as personel_ad
-        FROM is_avans_talep t
-        LEFT JOIN personel p ON t.personel_id = p.id
-        WHERE t.talep_eden_email = $1
-        ORDER BY t.created_at DESC
-      `;
-      params = [email];
-    } else {
-      query = `
-        SELECT t.*, p.ad_soyad as personel_ad
-        FROM is_avans_talep t
-        LEFT JOIN personel p ON t.personel_id = p.id
-        ORDER BY t.created_at DESC
-      `;
-      params = [];
-    }
-    const r = await pool.query(query, params);
+    const r = await pool.query(`
+      SELECT t.*, p.ad_soyad as personel_ad
+      FROM is_avans_talep t
+      LEFT JOIN personel p ON t.personel_id = p.id
+      ORDER BY t.created_at DESC
+    `);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -9898,46 +9883,6 @@ app.get("/hr/masraf-form", async (req, res) => {
       GROUP BY mf.id, p.ad_soyad
       ORDER BY mf.created_at DESC
     `);
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// GET masraf forms filtered by email (for mobile app)
-app.get("/hr/masraf-formlari", async (req, res) => {
-  try {
-    const { email } = req.query;
-    let query, params;
-    if (email) {
-      query = `
-        SELECT mf.id, mf.durum, mf.created_at, mf.tarih, mf.donem, mf.form_no,
-          mf.talep_eden_email, mf.talep_eden_ad,
-          s.isim as site_adi,
-          COALESCE(SUM(mk.tutar),0) as toplam_tutar,
-          COUNT(mk.id) as kalem_sayisi
-        FROM masraf_form mf
-        LEFT JOIN site s ON s.id = mf.site_id
-        LEFT JOIN masraf_kalem mk ON mk.form_id = mf.id
-        WHERE mf.talep_eden_email = $1
-        GROUP BY mf.id, s.isim
-        ORDER BY mf.created_at DESC
-      `;
-      params = [email];
-    } else {
-      query = `
-        SELECT mf.id, mf.durum, mf.created_at, mf.tarih, mf.donem, mf.form_no,
-          mf.talep_eden_email, mf.talep_eden_ad,
-          s.isim as site_adi,
-          COALESCE(SUM(mk.tutar),0) as toplam_tutar,
-          COUNT(mk.id) as kalem_sayisi
-        FROM masraf_form mf
-        LEFT JOIN site s ON s.id = mf.site_id
-        LEFT JOIN masraf_kalem mk ON mk.form_id = mf.id
-        GROUP BY mf.id, s.isim
-        ORDER BY mf.created_at DESC
-      `;
-      params = [];
-    }
-    const { rows } = await pool.query(query, params);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
