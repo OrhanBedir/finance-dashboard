@@ -9892,6 +9892,87 @@ app.get("/hr/masraf-form", async (req, res) => {
 });
 
 // GET masraf forms filtered by email (mobile app)
+// ── Mobil Dashboard: email ile tek seferde tüm kişisel veriler ──────────────
+app.get("/hr/mobile-dashboard", async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ error: "email gerekli" });
+
+    const now = new Date();
+    const ay  = now.getMonth() + 1;
+    const yil = now.getFullYear();
+
+    // 1. Personel bilgisi
+    const personelRes = await pool.query(
+      "SELECT id, ad_soyad, unvan, bolge, email FROM personel WHERE LOWER(email)=LOWER($1) LIMIT 1",
+      [email]
+    );
+    const personel = personelRes.rows[0] || null;
+    const personelId = personel?.id || null;
+
+    // 2. Bu ay puantaj özeti
+    let puantaj = { calisilan: 0, dinlenme: 0, gelmedi: 0, toplam_gun: 0 };
+    if (personelId) {
+      const pRes = await pool.query(
+        `SELECT durum, COUNT(*)::int as sayi FROM puantaj
+         WHERE personel_id=$1 AND EXTRACT(MONTH FROM tarih)=$2 AND EXTRACT(YEAR FROM tarih)=$3
+         GROUP BY durum`,
+        [personelId, ay, yil]
+      );
+      pRes.rows.forEach(r => {
+        if (r.durum === 'CALISDI')   puantaj.calisilan  = r.sayi;
+        if (r.durum === 'DINLENME')  puantaj.dinlenme   = r.sayi;
+        if (r.durum === 'GELMEDI')   puantaj.gelmedi    = r.sayi;
+      });
+      puantaj.toplam_gun = puantaj.calisilan + puantaj.dinlenme + puantaj.gelmedi;
+    }
+
+    // 3. İş avansları (son 5)
+    const avansRes = await pool.query(
+      `SELECT id, tutar, aciklama, gider_turu, bolge, proje, durum, tarih, created_at
+       FROM is_avans_talep WHERE talep_eden_email=$1 ORDER BY created_at DESC LIMIT 5`,
+      [email]
+    );
+    const avanslar = avansRes.rows;
+    const bekleyenAvans = avanslar.filter(a => !['TAMAMLANDI','REDDEDILDI'].includes(a.durum)).length;
+
+    // 4. Masraf formları (son 5)
+    const masrafRes = await pool.query(
+      `SELECT mf.id, mf.durum, mf.created_at, mf.donem, mf.form_no,
+        COALESCE(SUM(mk.tutar),0) as toplam_tutar,
+        COUNT(mk.id)::int as kalem_sayisi
+       FROM masraf_form mf
+       LEFT JOIN masraf_kalem mk ON mk.form_id = mf.id
+       WHERE mf.talep_eden_email=$1
+       GROUP BY mf.id ORDER BY mf.created_at DESC LIMIT 5`,
+      [email]
+    );
+    const masraflar = masrafRes.rows;
+    const bekleyenMasraf = masraflar.filter(f => !['TAMAMLANDI','ODENDI','REDDEDILDI'].includes(f.durum)).length;
+
+    // 5. Ödenmemiş trafik cezaları
+    let cezalar = [];
+    let toplamCeza = 0;
+    if (personelId) {
+      const cezaRes = await pool.query(
+        `SELECT id, tutar, aciklama, tarih FROM avans
+         WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND odendi=false ORDER BY tarih DESC`,
+        [personelId]
+      );
+      cezalar = cezaRes.rows;
+      toplamCeza = cezalar.reduce((s, c) => s + Number(c.tutar || 0), 0);
+    }
+
+    res.json({
+      personel, ay, yil,
+      puantaj,
+      avanslar, bekleyenAvans,
+      masraflar, bekleyenMasraf,
+      cezalar, toplamCeza,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/hr/masraf-formlari", async (req, res) => {
   try {
     const { email } = req.query;
