@@ -9089,9 +9089,9 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
 
       const netMaas = Number(p.net_maas) || 0;
       const dailyRate = netMaas / REFERANS_GUN;
-      // Base salary minus GELMEDI deductions, plus Sunday overtime bonus (1.5x daily rate)
-      const hakedilen = Math.round(netMaas - gelmedi * dailyRate + pazarCalisdi * dailyRate * 1.5);
-      const pazarBonus = Math.round(pazarCalisdi * dailyRate * 1.5);
+      // Pazar/resmi tatil bonusu maaşa EKLENMEZ — dinlenme bakiyesine birikir
+      const hakedilen = Math.round(netMaas - gelmedi * dailyRate);
+      const pazarBonus = 0; // Artık maaşa yansımıyor, dinlenme hakkı olarak birikiyor
 
       const bankaDailyRate = (Number(p.bankadan_gosterilen) || 0) / REFERANS_GUN;
       const eldenDailyRate = (Number(p.elden_verilen) || 0) / REFERANS_GUN;
