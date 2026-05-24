@@ -1,5 +1,14 @@
 require("dotenv").config();
 
+// ── Global hata yakalayıcılar – server çökmesini önler ──────────────────────
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("⚠️  Unhandled Promise Rejection:", reason?.message || reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("⚠️  Uncaught Exception:", err.message);
+});
+// ────────────────────────────────────────────────────────────────────────────
+
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
