@@ -7884,6 +7884,7 @@ function HrDashboard({ onBack, currentUser }) {
   const [avansForm, setAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
   const [isAvansList, setIsAvansList] = useState([]);
   const [isAvansForm, setIsAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
+  const [trafikCezaList, setTrafikCezaList] = useState([]);
   const [pForm, setPForm] = useState({
     ad_soyad:"", tc_no:"", dogum_tarihi:"", telefon:"", email:"", unvan:"", bolge:"",
     ise_giris_tarihi:"", isten_ayrilma_tarihi:"", net_maas:"", bankadan_gosterilen:"",
@@ -7950,6 +7951,16 @@ function HrDashboard({ onBack, currentUser }) {
   useEffect(() => { if (tab==="maas_avans") loadAvans(); }, [tab]);
   useEffect(() => { if (tab==="is_avans") loadIsAvans(); }, [tab]);
   useEffect(() => { if (tab==="personel" && hrPersonelFilter) loadMaasOde(hrPersonelFilter); else setMaasOdeList([]); }, [tab, hrPersonelFilter, puantajAy]);
+  useEffect(() => {
+    if (tab==="personel" && hrPersonelFilter) {
+      fetch(`${API_BASE}/hr/trafik-ceza?personel_id=${hrPersonelFilter}`)
+        .then(r=>r.json())
+        .then(d=>setTrafikCezaList(Array.isArray(d.list)?d.list:[]))
+        .catch(()=>setTrafikCezaList([]));
+    } else {
+      setTrafikCezaList([]);
+    }
+  }, [tab, hrPersonelFilter]);
 
   const handleSavePersonel = async (e) => {
     e.preventDefault();
@@ -8664,6 +8675,8 @@ function HrDashboard({ onBack, currentUser }) {
                 const isAvans = isAvansList
                   .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy))
                   .reduce((s,a)=>s+Number(a.tutar||0), 0);
+                // trafikCezaList is already filtered by personel_id from the API
+                const trafikCezaToplam = trafikCezaList.reduce((s,a)=>s+Number(a.tutar||0), 0);
                 const odenenBuAy = maasOdeList
                   .filter(o => o.donem === puantajAy)
                   .reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0), 0);
@@ -8674,8 +8687,8 @@ function HrDashboard({ onBack, currentUser }) {
                 const hakRatio   = Number(sp.net_maas||0) > 0 ? hakedilen / Number(sp.net_maas) : 1;
                 const proratedBanka = Math.round(Number(sp.bankadan_gosterilen||0) * hakRatio);
                 const proratedElden = Math.round(Number(sp.elden_verilen||0) * hakRatio);
-                // Kalan ödeme = hakedilen - maaş avansı - iş avansı - ödenen bu ay
-                const toplamOdenmesi = Math.max(0, hakedilen - maasAvans - isAvans - odenenBuAy);
+                // Kalan ödeme = hakedilen - maaş avansı - iş avansı - trafik ceza - ödenen bu ay
+                const toplamOdenmesi = Math.max(0, hakedilen - maasAvans - isAvans - trafikCezaToplam - odenenBuAy);
                 return (
                   <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"20px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
                     <div style={{ minWidth:"130px" }}>
@@ -8851,6 +8864,22 @@ function HrDashboard({ onBack, currentUser }) {
                             );
                           })()}
 
+                          {/* Trafik Ceza bloğu — sadece varsa gösterilir */}
+                          {trafikCezaToplam > 0 && (
+                            <div style={{ background:"linear-gradient(135deg,#c2410c,#ea580c)", borderRadius:"12px", padding:"9px 12px" }}>
+                              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: trafikCezaList.length>0?"6px":"0" }}>
+                                <span style={{ fontSize:"10px", fontWeight:700, color:"#fff", textTransform:"uppercase", letterSpacing:"0.04em" }}>🚔 Trafik Cezası</span>
+                                <span style={{ fontSize:"14px", fontWeight:800, color:"#fff" }}>₺{trafikCezaToplam.toLocaleString("tr-TR")}</span>
+                              </div>
+                              {trafikCezaList.map((a,i) => (
+                                <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"10px", color:"#fed7aa", borderTop: i===0?"1px solid rgba(255,255,255,0.3)":"none", paddingTop: i===0?"4px":"2px" }}>
+                                  <span style={{ opacity:0.9, maxWidth:"140px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{a.aciklama||"—"}</span>
+                                  <span style={{ fontWeight:700, color:"#fff" }}>₺{Number(a.tutar||0).toLocaleString("tr-TR")}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
                           {/* Satır 4 — Tamamlandı / Kalan (tam genişlik) */}
                           <div style={cardSt(tamam?"linear-gradient(135deg,#166534,#15803d)":"linear-gradient(135deg,#dc2626,#ef4444)")}>
                             <div style={lbl}>{tamam?"✅ Tamamlandı":"⏳ Kalan Ödeme"}</div>
@@ -8859,6 +8888,7 @@ function HrDashboard({ onBack, currentUser }) {
                               <div>Hakedilen: ₺{hakedilen.toLocaleString("tr-TR")}</div>
                               {maasAvans>0 && <div>- Maaş avansı: ₺{maasAvans.toLocaleString("tr-TR")}</div>}
                               {isAvans>0   && <div>- İş avansı: ₺{isAvans.toLocaleString("tr-TR")}</div>}
+                              {trafikCezaToplam>0 && <div>- Trafik ceza: ₺{trafikCezaToplam.toLocaleString("tr-TR")}</div>}
                               {odenenBuAy>0 && <div>- Ödenen: ₺{odenenBuAy.toLocaleString("tr-TR")}</div>}
                             </div>
                           </div>
@@ -9671,6 +9701,7 @@ const MASRAF_KATEGORILER = [
   { key: "KOPRU",     label: "🛣 Köprü / Otoyol Geçişi",   aciklamaPlaceholder: "Geçiş detayı, plaka",            belgeAciklamaPlaceholder: "HGS/OGS Dekont, Geçiş Makbuzu..." },
   { key: "MALZEME",   label: "🔧 Malzeme / Ekipman",       aciklamaPlaceholder: "Malzeme adı ve detayı",          belgeAciklamaPlaceholder: "Fatura / İrsaliye No...", hasSiteId: true },
   { key: "DIGER",     label: "📦 Diğer",                   aciklamaPlaceholder: "İşin detayı",                    belgeAciklamaPlaceholder: "Fiş / Fatura Açıklaması..." },
+  { key: "TRAFIK_CEZA", label: "🚔 Trafik Cezası",        aciklamaPlaceholder: "Ceza detayı",                    belgeAciklamaPlaceholder: "Ceza belgesi açıklaması...", isTrafikCeza: true },
 ];
 
 function MasrafFormuPanel({ currentUser, onPendingCount }) {
@@ -9697,7 +9728,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [nfPersonelId, setNfPersonelId] = useState("");
   const [nfDonem, setNfDonem]     = useState(thisMonth);
   const [activeForm, setActiveForm] = useState(null); // saved form being edited
-  const [kalemForm, setKalemForm] = useState({ kategori:"YEMEK", tarih:today, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"" });
+  const [kalemForm, setKalemForm] = useState({ kategori:"YEMEK", tarih:today, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" });
   const [openKats, setOpenKats] = useState(new Set()); // collapsed by default
   const toggleKat = (key) => setOpenKats(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
   const [kalemler, setKalemler]   = useState([]);
@@ -9817,7 +9848,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, aciklama: kalemForm.site_id ? `Site ID: ${kalemForm.site_id}${kalemForm.aciklama ? " | " + kalemForm.aciklama : ""}` : kalemForm.aciklama })
+      body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, aciklama: kalemForm.site_id ? `Site ID: ${kalemForm.site_id}${kalemForm.aciklama ? " | " + kalemForm.aciklama : ""}` : kalemForm.aciklama, plaka: kalemForm.plaka||null, ceza_personel_id: kalemForm.ceza_personel_id||null })
     });
     const saved = await r.json();
     // Ask for photo upload
@@ -9826,7 +9857,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     setPendingKalemKategori(kalemForm.kategori);
     setOcrResult(null);
     setTutarUyariAciklama("");
-    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"" }));
+    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" }));
     refreshActive(activeForm.id);
   };
 
@@ -10336,6 +10367,23 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                         <input value={kalemForm.site_id} onChange={e=>setKalemForm(k=>({...k,site_id:e.target.value}))} placeholder="Örn: AI0246, TR-IST-001..." style={inp} />
                       </div>
                     )}
+                    {kat.isTrafikCeza && (
+                      <>
+                        <div style={{ marginBottom:"10px" }}>
+                          <div style={{ fontSize:"10px", fontWeight:700, color:"#c2410c", marginBottom:"3px" }}>🚗 ARAÇ PLAKASI *</div>
+                          <input value={kalemForm.plaka} onChange={e=>setKalemForm(k=>({...k,plaka:e.target.value.toUpperCase()}))} placeholder="Örn: 34ABC123" style={{ ...inp, textTransform:"uppercase" }} />
+                        </div>
+                        <div style={{ marginBottom:"10px" }}>
+                          <div style={{ fontSize:"10px", fontWeight:700, color:"#c2410c", marginBottom:"3px" }}>👤 CEZAYI ALAN PERSONEL</div>
+                          <select value={kalemForm.ceza_personel_id} onChange={e=>setKalemForm(k=>({...k,ceza_personel_id:e.target.value}))} style={inp}>
+                            <option value="">— Personel seçin —</option>
+                            {personelList.map(p=>(
+                              <option key={p.id} value={p.id}>{p.ad_soyad}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </>
+                    )}
                     <div style={{ marginBottom:"10px" }}>
                       <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>AÇIKLAMA — {kat.aciklamaPlaceholder}</div>
                       <input value={kalemForm.aciklama} onChange={e=>setKalemForm(k=>({...k,aciklama:e.target.value}))} placeholder={kat.aciklamaPlaceholder} style={inp} />
@@ -10355,7 +10403,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                     </div>
                   </div>
                 ) : (
-                  <button onClick={()=>{ setKalemForm(k=>({...k, kategori:kat.key, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"" })); setOpenKats(prev=>{ const s=new Set(prev); s.add(kat.key); return s; }); }}
+                  <button onClick={()=>{ setKalemForm(k=>({...k, kategori:kat.key, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" })); setOpenKats(prev=>{ const s=new Set(prev); s.add(kat.key); return s; }); }}
                     style={{ width:"100%", padding:"9px", background:"#f0f9ff", border:"none", borderTop:"1px dashed #93c5fd", color:"#2563eb", fontWeight:600, fontSize:"13px", cursor:"pointer", textAlign:"center" }}>
                     + Bu Bölüme Satır Ekle
                   </button>

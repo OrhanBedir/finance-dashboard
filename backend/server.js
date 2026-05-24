@@ -9950,11 +9950,11 @@ app.delete("/hr/masraf-form/:id", async (req, res) => {
 // POST add kalem
 app.post("/hr/masraf-kalem", async (req, res) => {
   try {
-    const { form_id, kategori, tarih, belge_no, belge_aciklama, aciklama, tutar, fis_var, fis_olmadan_aciklama } = req.body;
+    const { form_id, kategori, tarih, belge_no, belge_aciklama, aciklama, tutar, fis_var, fis_olmadan_aciklama, plaka, ceza_personel_id } = req.body;
     const { rows } = await pool.query(
-      `INSERT INTO masraf_kalem (form_id,kategori,tarih,belge_no,belge_aciklama,aciklama,tutar,fis_var,fis_olmadan_aciklama)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [form_id, kategori, tarih, belge_no||null, belge_aciklama||null, aciklama||null, tutar, fis_var!==false, fis_olmadan_aciklama||null]
+      `INSERT INTO masraf_kalem (form_id,kategori,tarih,belge_no,belge_aciklama,aciklama,tutar,fis_var,fis_olmadan_aciklama,plaka,ceza_personel_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [form_id, kategori, tarih, belge_no||null, belge_aciklama||null, aciklama||null, tutar, fis_var!==false, fis_olmadan_aciklama||null, plaka||null, ceza_personel_id||null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -10050,6 +10050,46 @@ app.delete("/hr/masraf-belge/:id", async (req, res) => {
     await pool.query("DELETE FROM masraf_belge WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /hr/masraf-kalem/:id/ceza-belge — ceza belgesi upload
+app.post("/hr/masraf-kalem/:id/ceza-belge", authMiddleware, masrafUpload.single("file"), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.status(400).json({ error: "Dosya gerekli" });
+    const fname = `${Date.now()}-${req.file.originalname}`;
+    const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype);
+    await pool.query("UPDATE masraf_kalem SET ceza_belge_url=$1 WHERE id=$2", [url, id]);
+    res.json({ ok: true, url });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /hr/masraf-kalem/:id/odeme-belge — ödeme belgesi upload
+app.post("/hr/masraf-kalem/:id/odeme-belge", authMiddleware, masrafUpload.single("file"), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.status(400).json({ error: "Dosya gerekli" });
+    const fname = `${Date.now()}-${req.file.originalname}`;
+    const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype);
+    await pool.query("UPDATE masraf_kalem SET odeme_belge_url=$1 WHERE id=$2", [url, id]);
+    res.json({ ok: true, url });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /hr/trafik-ceza — kişiye ait ödenmemiş trafik ceza avansları
+app.get("/hr/trafik-ceza", authMiddleware, async (req, res) => {
+  try {
+    const { personel_id } = req.query;
+    if (!personel_id) return res.status(400).json({ error: "personel_id gerekli" });
+    const r = await pool.query(
+      `SELECT id, tutar, aciklama, tarih, odendi FROM avans
+       WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND odendi=false
+       ORDER BY tarih DESC`,
+      [personel_id]
+    );
+    const toplam = r.rows.reduce((s,x) => s + Number(x.tutar||0), 0);
+    res.json({ list: r.rows, toplam });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Redirect masraf belge file requests (dosya_yolu is now a full Supabase URL)
@@ -10280,12 +10320,26 @@ app.put("/hr/masraf-form/:id/pm-reddet", async (req, res) => {
 // PUT Direktör onayla (DIREKTOR_BEKLE → TAMAMLANDI) + avans düş
 app.put("/hr/masraf-form/:id/direktor-onayla", async (req, res) => {
   try {
+    const id = req.params.id;
     const { direktor_not } = req.body;
     const formRes = await pool.query(
       `UPDATE masraf_form SET durum='TAMAMLANDI', direktor_not=$1, direktor_onay_tarihi=NOW() WHERE id=$2 RETURNING *`,
-      [direktor_not||null, req.params.id]
+      [direktor_not||null, id]
     );
     const form = formRes.rows[0];
+
+    // TRAFIK_CEZA kalemleri için avans oluştur
+    const cezaKalemler = await pool.query(
+      `SELECT * FROM masraf_kalem WHERE form_id=$1 AND kategori='TRAFIK_CEZA' AND ceza_personel_id IS NOT NULL`,
+      [id]
+    );
+    for (const k of cezaKalemler.rows) {
+      await pool.query(
+        `INSERT INTO avans (personel_id, tarih, tutar, aciklama, avans_turu, odendi) VALUES ($1, NOW(), $2, $3, 'TRAFIK_CEZA', false)`,
+        [k.ceza_personel_id, k.tutar, `Trafik Cezası - ${k.plaka || 'Plaka yok'} (Masraf #${id})`]
+      );
+    }
+
     res.json(form);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -11259,6 +11313,11 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tamamlanma_tarihi DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS qc_closed_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+  // ── Trafik Ceza kolonları ──
+  "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS plaka TEXT",
+  "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_personel_id INTEGER",
+  "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_belge_url TEXT",
+  "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS odeme_belge_url TEXT",
 ];
 
 (async () => {
