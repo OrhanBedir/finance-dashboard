@@ -9916,6 +9916,9 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     }
     const personel = personelRes.rows[0] || null;
     const personelId = personel?.id || null;
+    // Avans/masraf sorgularında gerçek email'i kullan (personel tablosundaki),
+    // yoksa gönderilen email ile dene
+    const queryEmail = personel?.email || email;
 
     // 2. Bu ay puantaj özeti
     let puantaj = { calisilan: 0, dinlenme: 0, gelmedi: 0, toplam_gun: 0 };
@@ -9937,8 +9940,8 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     // 3. İş avansları (son 5)
     const avansRes = await pool.query(
       `SELECT id, tutar, aciklama, gider_turu, bolge, proje, durum, tarih, created_at
-       FROM is_avans_talep WHERE talep_eden_email=$1 ORDER BY created_at DESC LIMIT 5`,
-      [email]
+       FROM is_avans_talep WHERE LOWER(talep_eden_email)=LOWER($1) ORDER BY created_at DESC LIMIT 5`,
+      [queryEmail]
     );
     const avanslar = avansRes.rows;
     const bekleyenAvans = avanslar.filter(a => !['TAMAMLANDI','REDDEDILDI'].includes(a.durum)).length;
@@ -9950,9 +9953,9 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
         COUNT(mk.id)::int as kalem_sayisi
        FROM masraf_form mf
        LEFT JOIN masraf_kalem mk ON mk.form_id = mf.id
-       WHERE mf.talep_eden_email=$1
+       WHERE LOWER(mf.talep_eden_email)=LOWER($1)
        GROUP BY mf.id ORDER BY mf.created_at DESC LIMIT 5`,
-      [email]
+      [queryEmail]
     );
     const masraflar = masrafRes.rows;
     const bekleyenMasraf = masraflar.filter(f => !['TAMAMLANDI','ODENDI','REDDEDILDI'].includes(f.durum)).length;
@@ -9978,7 +9981,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
        JOIN masraf_form mf ON mf.id = mk.form_id
        WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mk.kategori='TRAFIK_CEZA'
        ORDER BY mk.tarih DESC LIMIT 20`,
-      [email]
+      [queryEmail]
     );
     const cezaKalemler = cezaKalemRes.rows;
 
@@ -9986,13 +9989,13 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const bakiyeAvansRes = await pool.query(
       `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep
        WHERE LOWER(talep_eden_email)=LOWER($1) AND durum='TAMAMLANDI'`,
-      [email]
+      [queryEmail]
     );
     const bakiyeMasrafRes = await pool.query(
       `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
        WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mf.durum='ARSIVLENDI'`,
-      [email]
+      [queryEmail]
     );
     const avansToplamOnaylanan = Number(bakiyeAvansRes.rows[0].toplam);
     const masrafToplamArsiv    = Number(bakiyeMasrafRes.rows[0].toplam);
