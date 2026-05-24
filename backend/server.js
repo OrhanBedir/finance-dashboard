@@ -12186,7 +12186,7 @@ app.get("/health", (req, res) => {
   res.json({ ok: true, ts: Date.now() });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server çalışıyor: ${PORT}`);
 });
 
