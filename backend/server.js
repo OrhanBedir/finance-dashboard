@@ -12182,6 +12182,10 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
   }
 });
 
+app.get("/", (req, res) => {
+  res.json({ ok: true, service: "erc-backend" });
+});
+
 app.get("/health", (req, res) => {
   res.json({ ok: true, ts: Date.now() });
 });
