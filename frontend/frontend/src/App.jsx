@@ -9728,7 +9728,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [nfPersonelId, setNfPersonelId] = useState("");
   const [nfDonem, setNfDonem]     = useState(thisMonth);
   const [activeForm, setActiveForm] = useState(null); // saved form being edited
-  const [kalemForm, setKalemForm] = useState({ kategori:"YEMEK", tarih:today, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" });
+  const [kalemForm, setKalemForm] = useState({ kategori:"", tarih:today, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" });
   const [openKats, setOpenKats] = useState(new Set()); // collapsed by default
   const toggleKat = (key) => setOpenKats(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
   const [kalemler, setKalemler]   = useState([]);
