@@ -9963,12 +9963,34 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       toplamCeza = cezalar.reduce((s, c) => s + Number(c.tutar || 0), 0);
     }
 
+    // 6. İş avansı bakiye (onaylanan - arşivlenen masraflar)
+    const bakiyeAvansRes = await pool.query(
+      `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep
+       WHERE LOWER(talep_eden_email)=LOWER($1) AND durum='TAMAMLANDI'`,
+      [email]
+    );
+    const bakiyeMasrafRes = await pool.query(
+      `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
+       JOIN masraf_form mf ON mf.id = mk.form_id
+       WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mf.durum='ARSIVLENDI'`,
+      [email]
+    );
+    const avansToplamOnaylanan = Number(bakiyeAvansRes.rows[0].toplam);
+    const masrafToplamArsiv    = Number(bakiyeMasrafRes.rows[0].toplam);
+    const avansKalan           = avansToplamOnaylanan - masrafToplamArsiv;
+
+    // 7. Bekleyen masraf toplam tutarı
+    const bekleyenMasrafTutar = masraflar
+      .filter(f => !['TAMAMLANDI','ODENDI','REDDEDILDI'].includes(f.durum))
+      .reduce((s, f) => s + Number(f.toplam_tutar || 0), 0);
+
     res.json({
       personel, ay, yil,
       puantaj,
       avanslar, bekleyenAvans,
-      masraflar, bekleyenMasraf,
+      masraflar, bekleyenMasraf, bekleyenMasrafTutar,
       cezalar, toplamCeza,
+      avansKalan, avansToplamOnaylanan,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
