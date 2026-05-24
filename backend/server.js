@@ -11964,10 +11964,8 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
   }
 });
 
-if (process.env.NODE_ENV !== "production" || process.env.LOCAL_SERVER) {
-  app.listen(PORT, () => {
-    console.log(`Server çalışıyor: ${PORT}`);
-  });
-}
+app.listen(PORT, () => {
+  console.log(`Server çalışıyor: ${PORT}`);
+});
 
 module.exports = app;
