@@ -9895,18 +9895,25 @@ app.get("/hr/masraf-form", async (req, res) => {
 // ── Mobil Dashboard: email ile tek seferde tüm kişisel veriler ──────────────
 app.get("/hr/mobile-dashboard", async (req, res) => {
   try {
-    const { email } = req.query;
+    const { email, name } = req.query;
     if (!email) return res.status(400).json({ error: "email gerekli" });
 
     const now = new Date();
     const ay  = now.getMonth() + 1;
     const yil = now.getFullYear();
 
-    // 1. Personel bilgisi
-    const personelRes = await pool.query(
-      "SELECT id, ad_soyad, unvan, bolge, email FROM personel WHERE LOWER(email)=LOWER($1) LIMIT 1",
+    // 1. Personel bilgisi — önce email, sonra ad_soyad ile fallback
+    let personelRes = await pool.query(
+      "SELECT id, ad_soyad, unvan, bolge, email FROM personel WHERE LOWER(TRIM(email))=LOWER(TRIM($1)) AND aktif=true LIMIT 1",
       [email]
     );
+    if (!personelRes.rows[0] && name) {
+      // email eşleşmedi, isimle dene (users.name ↔ personel.ad_soyad)
+      personelRes = await pool.query(
+        "SELECT id, ad_soyad, unvan, bolge, email FROM personel WHERE LOWER(TRIM(ad_soyad))=LOWER(TRIM($1)) AND aktif=true LIMIT 1",
+        [name]
+      );
+    }
     const personel = personelRes.rows[0] || null;
     const personelId = personel?.id || null;
 
@@ -9963,6 +9970,18 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       toplamCeza = cezalar.reduce((s, c) => s + Number(c.tutar || 0), 0);
     }
 
+    // 5b. Masraf formundaki TRAFIK_CEZA kalemleri + ceza belgesi URL
+    const cezaKalemRes = await pool.query(
+      `SELECT mk.id, mk.tutar, mk.aciklama, mk.tarih, mk.plaka, mk.ceza_belge_url, mk.odeme_belge_url,
+              mf.id as form_id, mf.durum as form_durum
+       FROM masraf_kalem mk
+       JOIN masraf_form mf ON mf.id = mk.form_id
+       WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mk.kategori='TRAFIK_CEZA'
+       ORDER BY mk.tarih DESC LIMIT 20`,
+      [email]
+    );
+    const cezaKalemler = cezaKalemRes.rows;
+
     // 6. İş avansı bakiye (onaylanan - arşivlenen masraflar)
     const bakiyeAvansRes = await pool.query(
       `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep
@@ -9985,11 +10004,11 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       .reduce((s, f) => s + Number(f.toplam_tutar || 0), 0);
 
     res.json({
-      personel, ay, yil,
+      personel, personelBulundu: !!personelId, ay, yil,
       puantaj,
       avanslar, bekleyenAvans,
       masraflar, bekleyenMasraf, bekleyenMasrafTutar,
-      cezalar, toplamCeza,
+      cezalar, toplamCeza, cezaKalemler,
       avansKalan, avansToplamOnaylanan,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
