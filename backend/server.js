@@ -8810,6 +8810,7 @@ pool.query(`
     created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(personel_id, tarih)
   );
+  ALTER TABLE puantaj ADD COLUMN IF NOT EXISTS fazla_mesai_saat NUMERIC DEFAULT 0;
   CREATE TABLE IF NOT EXISTS avans (
     id SERIAL PRIMARY KEY,
     personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE,
@@ -9628,10 +9629,19 @@ app.get("/hr/is-avans", async (req, res) => {
     const { email } = req.query;
     let query, params;
     if (email) {
-      query = `SELECT t.*, p.ad_soyad as personel_ad FROM is_avans_talep t LEFT JOIN personel p ON t.personel_id = p.id WHERE t.talep_eden_email = $1 ORDER BY t.created_at DESC`;
+      // Hem talep eden (kendi açtıkları) HEM DE personel olarak (başkası adına açılanlar) göster
+      query = `SELECT t.*, p.ad_soyad as personel_ad, p.email as personel_email
+               FROM is_avans_talep t
+               LEFT JOIN personel p ON t.personel_id = p.id
+               WHERE LOWER(t.talep_eden_email)=LOWER($1)
+                  OR LOWER(p.email)=LOWER($1)
+               ORDER BY t.created_at DESC`;
       params = [email];
     } else {
-      query = `SELECT t.*, p.ad_soyad as personel_ad FROM is_avans_talep t LEFT JOIN personel p ON t.personel_id = p.id ORDER BY t.created_at DESC`;
+      query = `SELECT t.*, p.ad_soyad as personel_ad, p.email as personel_email
+               FROM is_avans_talep t
+               LEFT JOIN personel p ON t.personel_id = p.id
+               ORDER BY t.created_at DESC`;
       params = [];
     }
     const r = await pool.query(query, params);
@@ -9932,7 +9942,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const queryEmail = personel?.email || email;
 
     // 2. Bu ay puantaj özeti
-    let puantaj = { calisilan: 0, dinlenme: 0, gelmedi: 0, toplam_gun: 0 };
+    let puantaj = { calisilan: 0, dinlenme: 0, gelmedi: 0, toplam_gun: 0, fazla_mesai_saat: 0 };
     if (personelId) {
       const pRes = await pool.query(
         `SELECT durum, COUNT(*)::int as sayi FROM puantaj
@@ -9946,6 +9956,14 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
         if (r.durum === 'GELMEDI')   puantaj.gelmedi    = r.sayi;
       });
       puantaj.toplam_gun = puantaj.calisilan + puantaj.dinlenme + puantaj.gelmedi;
+      // Fazla mesai saatlerini topla
+      const fmRes = await pool.query(
+        `SELECT COALESCE(SUM(fazla_mesai_saat),0)::numeric as toplam
+         FROM puantaj
+         WHERE personel_id=$1 AND EXTRACT(MONTH FROM tarih)=$2 AND EXTRACT(YEAR FROM tarih)=$3`,
+        [personelId, ay, yil]
+      );
+      puantaj.fazla_mesai_saat = Number(fmRes.rows[0]?.toplam || 0);
     }
 
     // 3. İş avansları (son 5)

@@ -9735,6 +9735,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [fotoModal, setFotoModal] = useState(null); // kalem id waiting for photo after new kalem add
   const [extraFotoModal, setExtraFotoModal] = useState(null);
   const [cezaBelgeKalemId, setCezaBelgeKalemId] = useState(null); // kalem id for ceza tutanagi upload
+  const [showCezaModal, setShowCezaModal] = useState(false);
   const cezaBelgeInputRef = useRef(null);
   const [uploadFile, setUploadFile] = useState(null);
   const [fisOlmadanAciklama, setFisOlmadanAciklama] = useState("");
@@ -9864,38 +9865,44 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   };
 
   // Trafik ceza belgesi yükle butonu için — kalemi kaydeder, sonra dosya seçiciyi açar
-  const handleAddKalemWithCeza = async () => {
+  // Ceza tutanağı modalını aç
+  const handleAddKalemWithCeza = () => {
     if (!kalemForm.tutar || !kalemForm.tarih) return alert("Tarih ve tutar zorunlu");
     if (!activeForm) return alert("Önce form oluşturun");
-    const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, plaka: kalemForm.plaka||null, ceza_personel_id: kalemForm.ceza_personel_id||null })
-    });
-    const saved = await r.json();
-    setCezaBelgeKalemId(saved.id);
-    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", plaka:"", ceza_personel_id:"" }));
-    refreshActive(activeForm.id);
-    // Dosya seçiciyi tetikle
-    setTimeout(() => cezaBelgeInputRef.current?.click(), 100);
+    setShowCezaModal(true);
   };
 
   const handleCezaBelgeUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (!file || !cezaBelgeKalemId) return;
-    const fd = new FormData();
-    fd.append("file", file);
+    if (!file) return;
+    e.target.value = "";
+    // Önce kalemi kaydet
+    let savedId;
     try {
-      await fetch(`${API_BASE}/hr/masraf-kalem/${cezaBelgeKalemId}/ceza-belge`, {
+      const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, plaka: kalemForm.plaka||null, ceza_personel_id: kalemForm.ceza_personel_id||null })
+      });
+      const saved = await r.json();
+      savedId = saved.id;
+    } catch {
+      return alert("Kalem kaydedilemedi");
+    }
+    // Sonra dosyayı yükle
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      await fetch(`${API_BASE}/hr/masraf-kalem/${savedId}/ceza-belge`, {
         method: "POST",
         body: fd
       });
       alert("✅ Trafik İdari Para Cezası Karar Tutanağı başarıyla yüklendi");
     } catch {
-      alert("Belge yüklenemedi, lütfen tekrar deneyin");
+      alert("Kalem eklendi fakat belge yüklenemedi");
     }
-    setCezaBelgeKalemId(null);
-    e.target.value = "";
+    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", plaka:"", ceza_personel_id:"" }));
+    refreshActive(activeForm.id);
   };
 
   const handleDeleteKalem = async (kid) => {
@@ -10677,6 +10684,34 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
           );
         })()}
 
+        {/* Ceza Tutanağı Yükleme Modalı */}
+        {showCezaModal && (
+          <div onClick={()=>setShowCezaModal(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:1000 }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"28px 24px", width:"100%", maxWidth:"480px", position:"relative" }}>
+              <button onClick={()=>setShowCezaModal(false)}
+                style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"30px", height:"30px", fontSize:"16px", cursor:"pointer" }}>✕</button>
+              <h3 style={{ margin:"0 0 8px", fontSize:"18px" }}>📄 Trafik Ceza Tutanağı Yükle</h3>
+              <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 20px" }}>Tutanağı fotoğraflayın veya dosyadan seçin.</p>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"16px" }}>
+                <label style={{ padding:"16px 12px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"12px", fontWeight:700, fontSize:"14px", cursor:"pointer", textAlign:"center" }}>
+                  📷 Kameradan Çek
+                  <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
+                    onChange={e=>{ const f=e.target.files[0]; if(f){ setShowCezaModal(false); handleCezaBelgeUpload({target:{files:[f],value:""},preventDefault:()=>{}}); } e.target.value=""; }} />
+                </label>
+                <label style={{ padding:"16px 12px", background:"#f0f9ff", color:"#1d4ed8", border:"1.5px solid #bfdbfe", borderRadius:"12px", fontWeight:700, fontSize:"14px", cursor:"pointer", textAlign:"center" }}>
+                  🗂 Dosyadan Seç
+                  <input type="file" accept="image/*,application/pdf" style={{ display:"none" }}
+                    onChange={e=>{ const f=e.target.files[0]; if(f){ setShowCezaModal(false); handleCezaBelgeUpload({target:{files:[f],value:""},preventDefault:()=>{}}); } e.target.value=""; }} />
+                </label>
+              </div>
+              <button onClick={()=>setShowCezaModal(false)}
+                style={{ width:"100%", padding:"12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
+                İptal
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Ek fiş fotoğrafı */}
         {extraFotoModal && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:1000 }}>
@@ -11024,7 +11059,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   };
 
   const load = async () => {
-    const r = await fetch(`${API_BASE}/hr/is-avans`);
+    // Requester kendi avanslarını + kendisi için açılanları görsün; admin tümünü görsün
+    const qs = isRequester && currentUser?.email ? `?email=${encodeURIComponent(currentUser.email)}` : "";
+    const r = await fetch(`${API_BASE}/hr/is-avans${qs}`);
     const data = await r.json();
     setList(data);
     if (onPendingCount) {
@@ -11045,7 +11082,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   useEffect(() => { load(); loadPersonel(); loadBakiye(); }, []);
 
   const visibleList = list.filter(t => {
-    if (isRequester && t.talep_eden_email !== currentUser?.email) return false;
+    // Backend zaten email filtreliyor; burada ekstra kısıtlama yok
+    // (Admin için hepsi gelir, requester için sadece kendi + adına açılanlar)
+    if (false) return false; // placeholder
     if (searchText) {
       const s = searchText.toLowerCase();
       if (!t.talep_eden_ad?.toLowerCase().includes(s) && !t.personel_ad?.toLowerCase().includes(s) && !t.aciklama?.toLowerCase().includes(s)) return false;
@@ -11271,9 +11310,15 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
             const cardBg = needsMyAction ? "#fffbeb" : myPendingRequest ? "#fef2f2" : "#fff";
             return (
               <div key={t.id} style={{ background:cardBg, border:cardBorder, borderRadius:"12px", padding:"14px 16px" }}>
+                {/* Başkası adına açılan talep uyarısı */}
+                {t.talep_eden_email !== currentUser?.email && (
+                  <div style={{ fontSize:"11px", color:"#6b7280", background:"#f3f4f6", borderRadius:"6px", padding:"4px 10px", marginBottom:"8px" }}>
+                    👤 <strong>{t.talep_eden_ad}</strong> tarafından açıldı
+                  </div>
+                )}
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
                   <div>
-                    <div style={{ fontWeight:700, fontSize:"14px" }}>{t.talep_eden_ad}</div>
+                    <div style={{ fontWeight:700, fontSize:"14px" }}>{t.personel_ad || t.talep_eden_ad}</div>
                     <div style={{ fontSize:"12px", color:"#6b7280" }}>{formatDateOnly(t.tarih)}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
