@@ -9942,7 +9942,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const queryEmail = personel?.email || email;
 
     // 2. Bu ay puantaj özeti
-    let puantaj = { calisilan: 0, dinlenme: 0, gelmedi: 0, toplam_gun: 0, fazla_mesai_saat: 0 };
+    let puantaj = { calisilan: 0, dinlenme: 0, gelmedi: 0, toplam_gun: 0, fazla_mesai_gun: 0 };
     if (personelId) {
       const pRes = await pool.query(
         `SELECT durum, COUNT(*)::int as sayi FROM puantaj
@@ -9956,14 +9956,21 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
         if (r.durum === 'GELMEDI')   puantaj.gelmedi    = r.sayi;
       });
       puantaj.toplam_gun = puantaj.calisilan + puantaj.dinlenme + puantaj.gelmedi;
-      // Fazla mesai saatlerini topla
+      // Hafta sonu (Cumartesi=6, Pazar=0) veya resmi tatilde CALISDI kayıtları = fazla mesai günleri
+      // DOW: 0=Pazar, 6=Cumartesi — hafta sonu CALISDI kayıtları = fazla mesai
       const fmRes = await pool.query(
-        `SELECT COALESCE(SUM(fazla_mesai_saat),0)::numeric as toplam
-         FROM puantaj
-         WHERE personel_id=$1 AND EXTRACT(MONTH FROM tarih)=$2 AND EXTRACT(YEAR FROM tarih)=$3`,
+        `SELECT COUNT(*)::int as sayi FROM puantaj
+         WHERE personel_id=$1
+           AND EXTRACT(MONTH FROM tarih)=$2
+           AND EXTRACT(YEAR FROM tarih)=$3
+           AND durum = 'CALISDI'
+           AND EXTRACT(DOW FROM tarih) IN (0, 6)`,
         [personelId, ay, yil]
       );
-      puantaj.fazla_mesai_saat = Number(fmRes.rows[0]?.toplam || 0);
+      // Ayrıca resmi tatil olarak işaretlenmiş çalışılan günler (RESMI_TATIL durumunda CALISDI olarak girilmiş)
+      // Bunu DINLENME sayısıyla da destekliyoruz (her DINLENME = 1 fazla mesai günü karşılığı)
+      const fazlaHaftaSonu = Number(fmRes.rows[0]?.sayi || 0);
+      puantaj.fazla_mesai_gun = fazlaHaftaSonu + puantaj.dinlenme;
     }
 
     // 3. İş avansları (son 5)
