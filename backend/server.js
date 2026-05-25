@@ -9973,11 +9973,16 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       puantaj.fazla_mesai_gun = fazlaHaftaSonu + puantaj.dinlenme;
     }
 
-    // 3. İş avansları (son 5)
+    // 3. İş avansları (son 5) — kendi açtıkları + personel olarak adına açılanlar
     const avansRes = await pool.query(
-      `SELECT id, tutar, aciklama, gider_turu, bolge, proje, durum, tarih, created_at
-       FROM is_avans_talep WHERE LOWER(talep_eden_email)=LOWER($1) ORDER BY created_at DESC LIMIT 5`,
-      [queryEmail]
+      `SELECT t.id, t.tutar, t.aciklama, t.gider_turu, t.bolge, t.proje, t.durum, t.tarih, t.created_at,
+              t.talep_eden_ad, p.ad_soyad as personel_ad
+       FROM is_avans_talep t
+       LEFT JOIN personel p ON p.id = t.personel_id
+       WHERE LOWER(t.talep_eden_email)=LOWER($1)
+          OR (t.personel_id IS NOT NULL AND t.personel_id = $2)
+       ORDER BY t.created_at DESC LIMIT 5`,
+      [queryEmail, personelId]
     );
     const avanslar = avansRes.rows;
     const bekleyenAvans = avanslar.filter(a => !['TAMAMLANDI','REDDEDILDI'].includes(a.durum)).length;
