@@ -9996,19 +9996,22 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     );
     const cezaKalemler = cezaKalemRes.rows;
 
-    // 6. İş avansı bakiye (onaylanan - arşivlenen masraflar)
-    const bakiyeAvansRes = await pool.query(
-      `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep
-       WHERE LOWER(talep_eden_email)=LOWER($1) AND durum='TAMAMLANDI'`,
-      [queryEmail]
-    );
+    // 6. İş avansı bakiye — avans tablosundan (web ile aynı hesaplama)
+    let avansToplamOnaylanan = 0;
+    if (personelId) {
+      const bakiyeAvansRes = await pool.query(
+        `SELECT COALESCE(SUM(tutar),0) as toplam FROM avans
+         WHERE personel_id=$1 AND avans_turu='IS'`,
+        [personelId]
+      );
+      avansToplamOnaylanan = Number(bakiyeAvansRes.rows[0].toplam);
+    }
     const bakiyeMasrafRes = await pool.query(
       `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
        WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mf.durum='ARSIVLENDI'`,
       [queryEmail]
     );
-    const avansToplamOnaylanan = Number(bakiyeAvansRes.rows[0].toplam);
     const masrafToplamArsiv    = Number(bakiyeMasrafRes.rows[0].toplam);
     const avansKalan           = avansToplamOnaylanan - masrafToplamArsiv;
 
