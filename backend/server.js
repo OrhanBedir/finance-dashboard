@@ -9626,17 +9626,52 @@ app.get("/hr/is-avans/bakiye", async (req, res) => {
 
 app.get("/hr/is-avans", async (req, res) => {
   try {
-    const { email } = req.query;
+    const { email, name } = req.query;
     let query, params;
     if (email) {
-      // Hem talep eden (kendi açtıkları) HEM DE personel olarak (başkası adına açılanlar) göster
-      query = `SELECT t.*, p.ad_soyad as personel_ad, p.email as personel_email
-               FROM is_avans_talep t
-               LEFT JOIN personel p ON t.personel_id = p.id
-               WHERE LOWER(t.talep_eden_email)=LOWER($1)
-                  OR LOWER(p.email)=LOWER($1)
-               ORDER BY t.created_at DESC`;
-      params = [email];
+      // personelId bul: önce email ile, sonra name ile (mobil user.email = kullanıcı adı olabilir)
+      const normTr = s => (s||'').toLowerCase()
+        .replace(/ı/g,'i').replace(/İ/g,'i').replace(/ğ/g,'g')
+        .replace(/ü/g,'u').replace(/ş/g,'s').replace(/ö/g,'o').replace(/ç/g,'c');
+      let personelId = null;
+      // email gerçek email gibi görünüyorsa personel tablosunda ara
+      if (email.includes('@')) {
+        const pr = await pool.query(
+          `SELECT id FROM personel WHERE LOWER(TRIM(email))=LOWER(TRIM($1)) AND aktif=true LIMIT 1`,
+          [email]
+        );
+        personelId = pr.rows[0]?.id || null;
+      }
+      // email eşleşmedi ve name varsa isimle ara
+      if (!personelId && name) {
+        const normName = normTr(name.trim());
+        const pr = await pool.query(
+          `SELECT id FROM personel WHERE aktif=true
+             AND LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+               TRIM(ad_soyad),'İ','I'),'Ş','S'),'Ğ','G'),'Ü','U'),'Ö','O'),'Ç','C'))
+               = REPLACE($1,'ı','i') LIMIT 1`,
+          [normName]
+        );
+        personelId = pr.rows[0]?.id || null;
+      }
+      // Hem talep_eden_email hem de personel_id üzerinden eşleştir
+      if (personelId) {
+        query = `SELECT t.*, p.ad_soyad as personel_ad, p.email as personel_email
+                 FROM is_avans_talep t
+                 LEFT JOIN personel p ON t.personel_id = p.id
+                 WHERE LOWER(t.talep_eden_email)=LOWER($1)
+                    OR t.personel_id=$2
+                 ORDER BY t.created_at DESC`;
+        params = [email, personelId];
+      } else {
+        query = `SELECT t.*, p.ad_soyad as personel_ad, p.email as personel_email
+                 FROM is_avans_talep t
+                 LEFT JOIN personel p ON t.personel_id = p.id
+                 WHERE LOWER(t.talep_eden_email)=LOWER($1)
+                    OR LOWER(p.email)=LOWER($1)
+                 ORDER BY t.created_at DESC`;
+        params = [email];
+      }
     } else {
       query = `SELECT t.*, p.ad_soyad as personel_ad, p.email as personel_email
                FROM is_avans_talep t
