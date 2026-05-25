@@ -11132,12 +11132,53 @@ app.delete("/malzeme/fiyat-listesi/:id", authMiddleware, async (req, res) => {
 // GET /malzeme/talepler
 app.get("/malzeme/talepler", authMiddleware, async (req, res) => {
   try {
+    const { email, name } = req.query;
+    let whereClause = "";
+    let params = [];
+
+    if (email) {
+      const normTr = s => (s||'').toLowerCase()
+        .replace(/ı/g,'i').replace(/İ/g,'i').replace(/ğ/g,'g')
+        .replace(/ü/g,'u').replace(/ş/g,'s').replace(/ö/g,'o').replace(/ç/g,'c');
+
+      // Try to find personel_id by email or name
+      let personelId = null;
+      if (email.includes('@')) {
+        const pr = await pool.query(
+          `SELECT id FROM personel WHERE LOWER(TRIM(email))=LOWER(TRIM($1)) AND aktif=true LIMIT 1`, [email]
+        );
+        personelId = pr.rows[0]?.id || null;
+      }
+      if (!personelId && name) {
+        const normName = normTr(name.trim());
+        const pr = await pool.query(
+          `SELECT id FROM personel WHERE aktif=true
+             AND LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+               TRIM(ad_soyad),'İ','I'),'Ş','S'),'Ğ','G'),'Ü','U'),'Ö','O'),'Ç','C'))
+               = REPLACE($1,'ı','i') LIMIT 1`,
+          [normName]
+        );
+        personelId = pr.rows[0]?.id || null;
+      }
+
+      if (personelId) {
+        // Hem kendi açtıkları hem de kendisine açılanlar
+        whereClause = `WHERE LOWER(t.talep_eden_email)=LOWER($1) OR t.talep_edilen_personel=$2`;
+        params = [email, String(personelId)];
+      } else {
+        whereClause = `WHERE LOWER(t.talep_eden_email)=LOWER($1)`;
+        params = [email];
+      }
+    }
+
     const r = await pool.query(
       `SELECT t.*,
         COALESCE((SELECT SUM(k.toplam_tutar) FROM malzeme_talep_kalemleri k WHERE k.talep_id = t.id),0) AS toplam_tutar,
         COALESCE((SELECT COUNT(*) FROM malzeme_talep_kalemleri k WHERE k.talep_id = t.id),0) AS kalem_sayisi
        FROM malzeme_talepler t
-       ORDER BY t.created_at DESC`
+       ${whereClause}
+       ORDER BY t.created_at DESC`,
+      params
     );
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
