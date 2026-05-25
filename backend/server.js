@@ -9902,16 +9902,27 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const ay  = now.getMonth() + 1;
     const yil = now.getFullYear();
 
+    // Türkçe karakter normalizasyonu (ı→i, İ→i, ğ→g, ü→u, ş→s, ö→o, ç→c)
+    const normTr = s => (s||'').toLowerCase()
+      .replace(/ı/g,'i').replace(/İ/g,'i').replace(/ğ/g,'g')
+      .replace(/ü/g,'u').replace(/ş/g,'s').replace(/ö/g,'o').replace(/ç/g,'c');
+
     // 1. Personel bilgisi — önce email, sonra ad_soyad ile fallback
     let personelRes = await pool.query(
       "SELECT id, ad_soyad, unvan, bolge, email FROM personel WHERE LOWER(TRIM(email))=LOWER(TRIM($1)) AND aktif=true LIMIT 1",
       [email]
     );
     if (!personelRes.rows[0] && name) {
-      // email eşleşmedi, isimle dene (users.name ↔ personel.ad_soyad)
+      // Türkçe normalize edilerek ad_soyad ile dene (ı/i, İ/i farkını aşar)
+      const normName = normTr(name.trim());
       personelRes = await pool.query(
-        "SELECT id, ad_soyad, unvan, bolge, email FROM personel WHERE LOWER(TRIM(ad_soyad))=LOWER(TRIM($1)) AND aktif=true LIMIT 1",
-        [name]
+        `SELECT id, ad_soyad, unvan, bolge, email FROM personel
+         WHERE aktif=true
+           AND LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+             TRIM(ad_soyad),'İ','I'),'Ş','S'),'Ğ','G'),'Ü','U'),'Ö','O'),'Ç','C'))
+             = REPLACE($1,'ı','i')
+         LIMIT 1`,
+        [normName]
       );
     }
     const personel = personelRes.rows[0] || null;
