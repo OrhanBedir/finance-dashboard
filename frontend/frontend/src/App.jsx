@@ -14777,6 +14777,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     const NAV   = "1e3a5f";
     const GRN   = "166534";
     const GRLT  = "f0fdf4";
+    const AMBERLT = "fff7ed";
     const border = (c="d1d5db") => ({ top:{style:"thin",color:{rgb:c}}, bottom:{style:"thin",color:{rgb:c}}, left:{style:"thin",color:{rgb:c}}, right:{style:"thin",color:{rgb:c}} });
     const cell = (v, opts={}) => ({
       v, t: typeof v==="number" ? "n" : "s",
@@ -14787,40 +14788,49 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
         border:border(opts.borderColor||"d1d5db"),
       }
     });
-    const empty = () => ({ v:"", t:"s", s:{ border:border("f3f4f6") } });
+    const empty = () => ({ v:"", t:"s", s:{ fill:{fgColor:{rgb:"ffffff"}}, border:border("ffffff") } });
     const R = (...cells) => cells;
-    // Sütunlar: Malzeme Adı | Toplam Stok | Birim | Depoda Kalan | Personelde | Rezerve | Açıklama
-    const COL_W = [{ wch:48 },{ wch:14 },{ wch:10 },{ wch:16 },{ wch:14 },{ wch:12 },{ wch:32 }];
+    const COLS = 9; // A..I
+    // Sütunlar: Malzeme Adı | Toplam | Birim | Kalan | Personelde | Rezerve | İlk Fiyat | Son Fiyat | Açıklama
+    const COL_W = [{ wch:48 },{ wch:13 },{ wch:9 },{ wch:14 },{ wch:13 },{ wch:10 },{ wch:16 },{ wch:16 },{ wch:30 }];
     const r1 = R(
       cell("ERC MÜHENDİSLİK — DEPO STOK RAPORU", {bold:true,sz:14,color:"ffffff",bg:NAV,align:"center"}),
-      ...Array(6).fill(cell("",{bg:NAV}))
+      ...Array(COLS-1).fill(cell("",{bg:NAV}))
     );
     const r2 = R(
       cell(`Rapor Tarihi: ${tarih}`, {bold:true,sz:10,color:"6b7280",bg:"f8fafc",align:"center"}),
-      ...Array(6).fill(cell("",{bg:"f8fafc"}))
+      ...Array(COLS-1).fill(cell("",{bg:"f8fafc"}))
     );
-    const rSpace = R(...Array(7).fill(empty()));
+    const rSpace = R(...Array(COLS).fill(empty()));
     const rHead = R(
-      cell("MALZEME ADI",   {bold:true,color:"ffffff",bg:NAV}),
-      cell("TOPLAM STOK",   {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("BİRİM",         {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("DEPODA KALAN",  {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("PERSONELde",    {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("REZERVE",       {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("AÇIKLAMA",      {bold:true,color:"ffffff",bg:NAV}),
+      cell("MALZEME ADI",    {bold:true,color:"ffffff",bg:NAV}),
+      cell("TOPLAM STOK",    {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("BİRİM",          {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("DEPODA KALAN",   {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("PERSONELde",     {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("REZERVE",        {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("İLK ALIŞ FİYATI",{bold:true,color:"ffffff",bg:"164e63",align:"center"}),
+      cell("SON ALIŞ FİYATI",{bold:true,color:"ffffff",bg:"166534",align:"center"}),
+      cell("AÇIKLAMA",       {bold:true,color:"ffffff",bg:NAV}),
     );
     const rows = depoStok.map((s,i) => {
       const bg = i%2===0 ? "ffffff" : "f8fafc";
       const kalan = Number(s.depoda_kalan||0);
       const kalanColor = kalan < 0 ? "dc2626" : kalan === 0 ? "92400e" : GRN;
+      // Fiyat listesinden eşleştir
+      const fiyatRow = fiyatListe.find(f=>(f.malzeme_adi||"").toLowerCase()===(s.malzeme_adi||"").toLowerCase());
+      const ilkFiyat = fiyatRow?.ilk_fiyat ? Number(fiyatRow.ilk_fiyat) : null;
+      const sonFiyat = fiyatRow?.son_fiyat ? Number(fiyatRow.son_fiyat) : (fiyatRow?.birim_fiyat ? Number(fiyatRow.birim_fiyat) : null);
       return R(
-        cell(s.malzeme_adi||"", {bg, bold:true}),
-        cell(Number(s.toplam_miktar||0), {bg, align:"center"}),
-        cell(s.birim||"Adet", {bg, align:"center"}),
-        cell(kalan, {bg, align:"center", bold:true, color:kalanColor}),
-        cell(Number(s.personelde||0), {bg, align:"center", color:"92400e"}),
-        cell(Number(s.rezerve||0), {bg, align:"center", color:"7c3aed"}),
-        cell(s.aciklama||"", {bg, italic:true, color:"6b7280", wrap:true}),
+        cell(s.malzeme_adi||"",                              {bg, bold:true}),
+        cell(Number(s.toplam_miktar||0),                     {bg, align:"center"}),
+        cell(s.birim||"Adet",                                {bg, align:"center"}),
+        cell(kalan,                                          {bg, align:"center", bold:true, color:kalanColor}),
+        cell(Number(s.personelde||0),                        {bg, align:"center", color:"92400e"}),
+        cell(Number(s.rezerve||0),                           {bg, align:"center", color:"7c3aed"}),
+        ilkFiyat ? cell(ilkFiyat,                            {bg, align:"center", color:"0e7490"}) : cell("—",{bg,align:"center",color:"9ca3af"}),
+        sonFiyat ? cell(sonFiyat,                            {bg, align:"center", bold:true, color:GRN}) : cell("—",{bg,align:"center",color:"9ca3af"}),
+        cell(s.aciklama||"",                                 {bg, italic:true, color:"6b7280", wrap:true}),
       );
     });
     const rToplam = R(
@@ -14828,20 +14838,40 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
       cell(depoStok.reduce((a,s)=>a+Number(s.toplam_miktar||0),0), {bold:true, bg:GRLT, align:"center", color:GRN}),
       empty(),
       cell(depoStok.reduce((a,s)=>a+Number(s.depoda_kalan||0),0), {bold:true, bg:GRLT, align:"center", color:GRN}),
-      empty(), empty(), empty()
+      empty(), empty(), empty(), empty(), empty()
     );
     const data = [r1, r2, rSpace, rHead, ...rows, rSpace, rToplam];
     const ws = XLSXStyle.utils.aoa_to_sheet(data);
     ws["!cols"] = COL_W;
     ws["!rows"] = [{hpt:28},{hpt:18},{hpt:6},{hpt:22},...depoStok.map(()=>({hpt:18})),{hpt:6},{hpt:22}];
     ws["!merges"] = [
-      { s:{r:0,c:0}, e:{r:0,c:6} },
-      { s:{r:1,c:0}, e:{r:1,c:6} },
+      { s:{r:0,c:0}, e:{r:0,c:COLS-1} },
+      { s:{r:1,c:0}, e:{r:1,c:COLS-1} },
     ];
-    ws["!sheetViews"] = [{ showGridLines: false }];
     const wb = XLSXStyle.utils.book_new();
     XLSXStyle.utils.book_append_sheet(wb, ws, "Depo Stok");
-    XLSXStyle.writeFile(wb, `ERC_Depo_Stok_${tarih.replace(/\./g,"-")}.xlsx`);
+    // JSZip ile XML patch yaparak gridlines kapat (xlsx-js-style'da !sheetViews çalışmıyor)
+    const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
+    import("jszip").then(({ default: JSZip }) => {
+      JSZip.loadAsync(buf).then(zip => {
+        const sheetFile = zip.file("xl/worksheets/sheet1.xml");
+        return sheetFile.async("string").then(xml => {
+          const patched = xml
+            .replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>')
+            .replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
+          zip.file("xl/worksheets/sheet1.xml", patched);
+          return zip.generateAsync({ type:"blob", compression:"STORE" });
+        });
+      }).then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `ERC_Depo_Stok_${tarih.replace(/\./g,"-")}.xlsx`;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      });
+    });
   };
 
   // ── SARF ──
