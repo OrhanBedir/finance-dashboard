@@ -14173,6 +14173,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const [tab, setTab] = useState("talepler");
   const [talepler, setTalepler] = useState([]);
   const [talepLoading, setTalepLoading] = useState(false);
+  const [talepArama, setTalepArama] = useState("");
+  const [talepDurumFilter, setTalepDurumFilter] = useState("");
 
   // Form görünümü: null=liste, "yeni"=yeni form, id=düzenleme
   const [formView, setFormView] = useState(null);
@@ -14500,7 +14502,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
   const BOLGELER = ["İzmir","İstanbul","Ankara","Bursa","Antalya","Adana","Samsun","Trabzon","Erzurum","Diyarbakır","Diğer"];
   const PROJELER = ["TT","TC","VF","Diğer"];
-  const SITE_TYPES = ["GF","RT","IB","OUT","Diğer"];
+  const SITE_TYPES = ["5G","LTE","DSS","STANDALONE","GF","RT","IB","OUT","Diğer"];
   const FIRMALAR = ["Şimşek","UBS","FEDERAL","2KX","Diğer"];
 
   // ── LOAD ──
@@ -14727,10 +14729,9 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   };
 
   // ── KALEM SATIRI ──
+  const INP = { height:38, padding:"0 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, boxSizing:"border-box", width:"100%", outline:"none" };
   const renderKalemRow = (k, i) => {
-    // Fiyat listesinden DB fiyatı (varsa)
     const fiyatAc = fiyatListe.find(f => f.malzeme_adi.toLowerCase() === k.malzeme_adi.toLowerCase());
-    // Hardcoded MALZEME_LISTESI'nden autocomplete (API'ye bağımlı değil)
     const q = k.malzeme_adi.toLowerCase();
     const exactMatch = q.length > 0 && MALZEME_LISTESI.some(n => n.toLowerCase() === q);
     const suggestions = !exactMatch && q.length >= 1
@@ -14738,37 +14739,21 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
       : [];
     const toplam = (Number(k.miktar)||0) * (Number(k.birim_fiyat)||0);
     return (
-      <div key={i} style={{ display:"grid", gridTemplateColumns:"2fr 80px 100px 120px 100px 100px 36px", gap:8, marginBottom:10, alignItems:"start" }}>
+      <div key={i} style={{ display:"grid", gridTemplateColumns:"3fr 80px 110px 130px 110px 110px 38px", gap:8, marginBottom:10, alignItems:"start" }}>
         {/* Malzeme adı + autocomplete */}
         <div style={{ position:"relative" }}>
-          <input placeholder="Malzeme adı yazın..." value={k.malzeme_adi}
-            autoComplete="off"
-            onChange={e => {
-              const v = e.target.value;
-              setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:v, birim_fiyat:""} : x));
-            }}
-            style={{ width:"100%",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13,boxSizing:"border-box" }} />
+          <input placeholder="Malzeme adı yazın..." value={k.malzeme_adi} autoComplete="off"
+            onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:e.target.value, birim_fiyat:""} : x))}
+            style={INP} />
           {suggestions.length > 0 && (
-            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#fff",border:"1px solid #d1d5db",borderRadius:6,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:260,overflowY:"auto" }}>
+            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#fff",border:"1px solid #d1d5db",borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:260,overflowY:"auto" }}>
               {suggestions.map((name, idx) => {
                 const dbItem = fiyatListe.find(f => f.malzeme_adi.toLowerCase() === name.toLowerCase());
                 return (
-                  <div key={idx} style={{ padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6",background:"#fff" }}
-                    onMouseDown={e => {
-                      e.preventDefault();
-                      setTalepKalemler(prev => prev.map((x,j) => j===i ? {
-                        ...x,
-                        malzeme_adi: name,
-                        birim: dbItem?.birim || k.birim,
-                        birim_fiyat: dbItem?.birim_fiyat || ""
-                      } : x));
-                    }}>
-                    <div style={{ wordBreak:"break-word", lineHeight:"1.5" }}>{name}</div>
-                    {dbItem && Number(dbItem.birim_fiyat)>0 && (
-                      <div style={{ color:"#9ca3af",fontSize:11,marginTop:2 }}>
-                        {dbItem.birim} · ₺{Number(dbItem.birim_fiyat).toLocaleString("tr-TR")}
-                      </div>
-                    )}
+                  <div key={idx} style={{ padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6" }}
+                    onMouseDown={e => { e.preventDefault(); setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:name, birim:dbItem?.birim||k.birim, birim_fiyat:dbItem?.birim_fiyat||""} : x)); }}>
+                    <div style={{ wordBreak:"break-word", lineHeight:1.5 }}>{name}</div>
+                    {dbItem && Number(dbItem.birim_fiyat)>0 && <div style={{ color:"#9ca3af",fontSize:11,marginTop:2 }}>{dbItem.birim} · ₺{Number(dbItem.birim_fiyat).toLocaleString("tr-TR")}</div>}
                   </div>
                 );
               })}
@@ -14776,37 +14761,39 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           )}
         </div>
         {/* Miktar */}
-        <input type="number" placeholder="Adet" value={k.miktar} min="0"
+        <input type="number" placeholder="0" value={k.miktar} min="0"
           onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, miktar:e.target.value} : x))}
-          style={{ padding:"8px 6px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13,textAlign:"center",width:"100%" }} />
+          style={{ ...INP, textAlign:"center" }} />
         {/* Birim */}
         <select value={k.birim} onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, birim:e.target.value} : x))}
-          style={{ padding:"8px 4px",border:"1px solid #d1d5db",borderRadius:6,fontSize:12,width:"100%" }}>
+          style={{ ...INP, paddingLeft:8 }}>
           {["Adet","Metre","Rulo","Kutu","Kg","Lt","Paket","Set","Takım"].map(u=><option key={u}>{u}</option>)}
         </select>
         {/* Birim Fiyat */}
         <div style={{ position:"relative" }}>
           <input type="number" placeholder="₺ Fiyat" value={k.birim_fiyat}
             onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, birim_fiyat:e.target.value} : x))}
-            style={{ width:"100%",padding:"8px 8px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13,boxSizing:"border-box" }} />
+            style={INP} />
           {fiyatAc && Number(fiyatAc.birim_fiyat)>0 && !k.birim_fiyat && (
-            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:100,background:"#fffbeb",border:"1px solid #fde68a",borderRadius:4,padding:"4px 8px",fontSize:11,cursor:"pointer",whiteSpace:"nowrap" }}
+            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:100,background:"#fffbeb",border:"1px solid #fde68a",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer" }}
               onMouseDown={e=>{e.preventDefault();setTalepKalemler(prev=>prev.map((x,j)=>j===i?{...x,birim_fiyat:fiyatAc.birim_fiyat}:x));}}>
-              DB: ₺{Number(fiyatAc.birim_fiyat).toLocaleString("tr-TR")} kullan
+              💡 DB: ₺{Number(fiyatAc.birim_fiyat).toLocaleString("tr-TR")} kullan
             </div>
           )}
         </div>
-        {/* Toplam */}
-        <div style={{ padding:"8px 8px",border:"1px solid #e5e7eb",borderRadius:6,fontSize:13,fontWeight:700,color:"#15803d",background:"#f0fdf4",textAlign:"right" }}>
+        {/* Toplam (readonly) */}
+        <div style={{ ...INP, display:"flex",alignItems:"center",justifyContent:"flex-end",fontWeight:700,color:toplam>0?"#15803d":"#d1d5db",background:"#f9fafb",border:"1px solid #e5e7eb",userSelect:"none" }}>
           {toplam > 0 ? `₺${toplam.toLocaleString("tr-TR")}` : "—"}
         </div>
         {/* Not */}
-        <input placeholder="Not" value={k.notlar}
+        <input placeholder="Not / açıklama" value={k.notlar}
           onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, notlar:e.target.value} : x))}
-          style={{ padding:"8px 8px",border:"1px solid #d1d5db",borderRadius:6,fontSize:12 }} />
+          style={INP} />
         {/* Sil */}
         <button onClick={() => setTalepKalemler(prev => prev.filter((_,j)=>j!==i))}
-          style={{ padding:"8px",background:"#fee2e2",border:"none",borderRadius:6,color:"#dc2626",cursor:"pointer",fontWeight:700,fontSize:14 }}>✕</button>
+          style={{ height:38, width:38, background:"#fee2e2", border:"1px solid #fecaca", borderRadius:7, color:"#dc2626", cursor:"pointer", fontWeight:700, fontSize:15, display:"flex",alignItems:"center",justifyContent:"center" }}>
+          ✕
+        </button>
       </div>
     );
   };
@@ -14863,6 +14850,56 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             ))}
           </div>
           {d.notlar && <div style={{ padding:"8px 14px",background:"#fffbeb",borderRadius:8,fontSize:13,marginBottom:14,color:"#92400e" }}>📝 {d.notlar}</div>}
+
+          {/* ── Onay Zinciri ── */}
+          {(() => {
+            const ZINCIR = [
+              { key:"talep",       label:"Talep Eden",    kisi: d.talep_eden_ad || "—",             icon:"👤", done: true,                                                                             color:"#0ea5e9" },
+              { key:"nurcan",      label:"1. Onay",       kisi:"Nurcan Kuş",                         icon:"✅", done: ["FIYAT_GIRISI","PM_ONAY","DUZGUN_ONAY","ONAYLANDI","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="NURCAN_ONAY",   color:"#8b5cf6" },
+              { key:"murat",       label:"Fiyat Girişi",  kisi:"Murat İstek",                        icon:"💰", done: ["PM_ONAY","DUZGUN_ONAY","ONAYLANDI","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="FIYAT_GIRISI",   color:"#f59e0b" },
+              { key:"pm",          label:"PM Onayı",      kisi:"Orhan Bedir",                        icon:"✅", done: ["DUZGUN_ONAY","ONAYLANDI","SATINALINACAK","DEPODA"].includes(d.durum),           waiting: d.durum==="PM_ONAY",         color:"#2563eb" },
+              { key:"duzgun",      label:"Direktör Onayı",kisi:"Düzgün Şimşek",                     icon:"✅", done: ["ONAYLANDI","SATINALINACAK","DEPODA"].includes(d.durum),                         waiting: d.durum==="DUZGUN_ONAY",    color:"#0284c7" },
+              { key:"satinalma",   label:"Satın Alma",    kisi:"Onaylandı — Tedarik Sürecinde",     icon:"🛒", done: ["SATINALINACAK","DEPODA"].includes(d.durum),                                    waiting: d.durum==="ONAYLANDI",      color:"#ea580c" },
+              { key:"depo",        label:"Depoya Giriş",  kisi:"Malzeme teslim alındı",             icon:"📦", done: d.durum==="DEPODA",                                                             waiting: d.durum==="SATINALINACAK",  color:"#16a34a" },
+            ];
+            const reddi = d.durum === "REDDEDILDI";
+            return (
+              <div style={{ marginBottom:16, background:"#f8fafc", borderRadius:12, padding:"16px 20px", border:"1px solid #e2e8f0" }}>
+                <div style={{ fontSize:13,fontWeight:700,color:"#374151",marginBottom:14 }}>📊 Onay Zinciri</div>
+                <div style={{ display:"flex", alignItems:"flex-start", gap:0, overflowX:"auto", paddingBottom:4 }}>
+                  {ZINCIR.map((s, idx) => {
+                    const bgColor = reddi ? "#fee2e2" : s.done ? s.color : s.waiting ? "#fef9c3" : "#f1f5f9";
+                    const txtColor = reddi ? "#dc2626" : s.done ? "#fff" : s.waiting ? "#92400e" : "#9ca3af";
+                    const borderColor = s.done ? s.color : s.waiting ? "#fde047" : "#e2e8f0";
+                    return (
+                      <React.Fragment key={s.key}>
+                        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", minWidth:100, maxWidth:120 }}>
+                          <div style={{ width:36, height:36, borderRadius:"50%", background:bgColor, border:`2px solid ${borderColor}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, marginBottom:6, flexShrink:0 }}>
+                            {reddi && idx > 0 ? "✕" : s.done ? "✓" : s.waiting ? "⏳" : "○"}
+                          </div>
+                          <div style={{ fontSize:10, fontWeight:700, color:"#6b7280", textTransform:"uppercase", letterSpacing:"0.4px", textAlign:"center", lineHeight:1.3 }}>{s.label}</div>
+                          <div style={{ fontSize:11, color:s.done?"#374151":s.waiting?"#92400e":"#9ca3af", textAlign:"center", marginTop:3, lineHeight:1.3 }}>{s.kisi}</div>
+                        </div>
+                        {idx < ZINCIR.length - 1 && (
+                          <div style={{ flex:1, height:2, background: s.done ? s.color : "#e2e8f0", marginTop:17, minWidth:16 }} />
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+                {reddi && d.onay_notu && (
+                  <div style={{ marginTop:10, padding:"8px 12px", background:"#fee2e2", borderRadius:8, fontSize:12, color:"#dc2626" }}>
+                    ❌ Red Gerekçesi: {d.onay_notu}
+                  </div>
+                )}
+                {!reddi && d.onay_notu && (
+                  <div style={{ marginTop:10, padding:"8px 12px", background:"#f0fdf4", borderRadius:8, fontSize:12, color:"#15803d" }}>
+                    💬 {d.onay_notu}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Kalemler */}
           <div style={{ overflowX:"auto",marginBottom:16 }}>
@@ -15073,8 +15110,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               </button>
             </div>
             {/* Başlıklar */}
-            <div style={{ display:"grid",gridTemplateColumns:"2fr 80px 100px 120px 100px 100px 36px",gap:8,marginBottom:6 }}>
-              {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not",""].map(h=>(
+            <div style={{ display:"grid",gridTemplateColumns:"3fr 80px 110px 130px 110px 110px 38px",gap:8,marginBottom:6 }}>
+              {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not / Açıklama",""].map(h=>(
                 <div key={h} style={{ fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.3px",padding:"0 2px" }}>{h}</div>
               ))}
             </div>
@@ -15151,57 +15188,135 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
         ))}
       </div>
 
-      <div style={{ padding:16,maxWidth:960,margin:"0 auto" }}>
+      <div style={{ padding:"16px 20px" }}>
 
         {/* ── TALEPLER SEKMESİ ── */}
         {tab==="talepler" && (
           <div>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-              <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f" }}>
-                Malzeme Talepleri {talepLoading&&<span style={{fontSize:12,color:"#9ca3af"}}>yükleniyor…</span>}
+            {/* Üst bar: başlık + filtreler + yeni talep */}
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:14,flexWrap:"wrap" }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10,flex:1,flexWrap:"wrap" }}>
+                <div style={{ fontSize:16,fontWeight:800,color:"#1e3a5f",whiteSpace:"nowrap" }}>
+                  Malzeme Talepleri
+                  {talepLoading && <span style={{fontSize:12,color:"#9ca3af",fontWeight:400,marginLeft:8}}>yükleniyor…</span>}
+                  <span style={{fontSize:13,color:"#6b7280",fontWeight:500,marginLeft:8}}>({talepler.filter(t=>{
+                    if(talepDurumFilter && t.durum!==talepDurumFilter) return false;
+                    if(talepArama) { const q=talepArama.toLowerCase(); return (t.talep_no||"").toLowerCase().includes(q)||(t.talep_eden_ad||"").toLowerCase().includes(q)||(t.bolge||"").toLowerCase().includes(q)||(t.proje||"").toLowerCase().includes(q)||(t.site_id||"").toLowerCase().includes(q); }
+                    return true;
+                  }).length} kayıt)</span>
+                </div>
+                <input
+                  placeholder="🔍 Ara… (no, kişi, bölge, site)"
+                  value={talepArama} onChange={e=>setTalepArama(e.target.value)}
+                  style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,width:220,outline:"none" }}
+                />
+                <select value={talepDurumFilter} onChange={e=>setTalepDurumFilter(e.target.value)}
+                  style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,color:"#374151",cursor:"pointer" }}>
+                  <option value="">Tüm Durumlar</option>
+                  <option value="TASLAK">Taslak</option>
+                  <option value="NURCAN_ONAY">Onay Bekliyor</option>
+                  <option value="FIYAT_GIRISI">Fiyat Girişi</option>
+                  <option value="PM_ONAY">PM Onayında</option>
+                  <option value="DUZGUN_ONAY">Müdür Onayında</option>
+                  <option value="ONAYLANDI">Onaylandı</option>
+                  <option value="SATINALINACAK">Satın Alınacak</option>
+                  <option value="DEPODA">Depoda</option>
+                  <option value="REDDEDILDI">Reddedildi</option>
+                </select>
+                {(talepArama||talepDurumFilter) && (
+                  <button onClick={()=>{setTalepArama("");setTalepDurumFilter("");}}
+                    style={{ padding:"7px 12px",background:"#f3f4f6",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,color:"#6b7280" }}>
+                    ✕ Temizle
+                  </button>
+                )}
               </div>
               <button onClick={()=>{setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);setEditingId(null);setFormView("form");}}
-                style={{ padding:"10px 20px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14 }}>
+                style={{ padding:"10px 22px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
                 + Yeni Talep
               </button>
             </div>
-            {talepler.length===0&&!talepLoading&&<div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>Henüz talep yok.</div>}
-            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
-              {talepler.map(t=>(
-                <div key={t.id}
-                  style={{ background:"#fff",borderRadius:12,padding:"14px 18px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",
-                    borderLeft:`4px solid ${t.durum==="TASLAK"?"#9ca3af":t.durum==="REDDEDILDI"?"#dc2626":t.durum==="DEPODA"?"#15803d":"#1e3a5f"}` }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap" }}>
-                    <div style={{ cursor:"pointer",flex:1 }} onClick={()=>loadDetay(t.id)}>
-                      <div style={{ fontWeight:700,fontSize:15,marginBottom:4 }}>{t.talep_no} · {t.talep_eden_ad}</div>
-                      <div style={{ fontSize:12,color:"#6b7280",display:"flex",gap:12,flexWrap:"wrap" }}>
-                        {t.bolge&&<span>📍 {t.bolge}</span>}
-                        {t.proje&&<span>🏗 {t.proje}</span>}
-                        {t.site_type&&<span>📡 {t.site_type}</span>}
-                        {t.site_id&&<span>🔖 {t.site_id}</span>}
-                        {t.talep_edilen_firma&&<span>🏢 {t.talep_edilen_firma}</span>}
-                        <span>📅 {t.talep_tarihi ? new Date(t.talep_tarihi).toLocaleDateString("tr-TR") : new Date(t.created_at).toLocaleDateString("tr-TR")}</span>
-                        <span>{Number(t.kalem_sayisi)} kalem</span>
-                        {Number(t.toplam_tutar)>0&&<span style={{color:"#15803d",fontWeight:700}}>₺{Number(t.toplam_tutar).toLocaleString("tr-TR")}</span>}
-                      </div>
-                    </div>
-                    <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
-                      {durumBadge(t.durum)}
-                      {["TASLAK","REDDEDILDI"].includes(t.durum) && t.talep_eden_email===currentUser?.email && (<>
-                        <button onClick={()=>openEdit(t)}
-                          style={{ padding:"5px 12px",background:"#dbeafe",color:"#1d4ed8",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:700 }}>
-                          ✏️ Düzenle
-                        </button>
-                        <button onClick={e=>{e.stopPropagation();deleteTalep(t.id);}}
-                          style={{ padding:"5px 12px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:700 }}>
-                          🗑 Sil
-                        </button>
-                      </>)}
-                      <span style={{color:"#9ca3af",fontSize:18,cursor:"pointer"}} onClick={()=>loadDetay(t.id)}>›</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+
+            {/* Tablo */}
+            <div style={{ background:"#fff",borderRadius:14,boxShadow:"0 1px 6px rgba(0,0,0,0.07)",overflow:"hidden" }}>
+              <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
+                <thead>
+                  <tr style={{ background:"#1e3a5f",color:"#fff" }}>
+                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap" }}>Talep No</th>
+                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700 }}>Talep Eden</th>
+                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700 }}>Bölge</th>
+                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700 }}>Proje</th>
+                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap" }}>Site ID</th>
+                    <th style={{ padding:"11px 14px",textAlign:"center",fontWeight:700,whiteSpace:"nowrap" }}>Kalem</th>
+                    <th style={{ padding:"11px 14px",textAlign:"right",fontWeight:700,whiteSpace:"nowrap" }}>Tutar</th>
+                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap" }}>Tarih</th>
+                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700 }}>Durum</th>
+                    <th style={{ padding:"11px 14px",textAlign:"center",fontWeight:700 }}>İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {talepler.filter(t=>{
+                    if(talepDurumFilter && t.durum!==talepDurumFilter) return false;
+                    if(talepArama) { const q=talepArama.toLowerCase(); return (t.talep_no||"").toLowerCase().includes(q)||(t.talep_eden_ad||"").toLowerCase().includes(q)||(t.bolge||"").toLowerCase().includes(q)||(t.proje||"").toLowerCase().includes(q)||(t.site_id||"").toLowerCase().includes(q); }
+                    return true;
+                  }).length===0 && (
+                    <tr><td colSpan={10} style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
+                      {talepLoading ? "Yükleniyor…" : "Kayıt bulunamadı."}
+                    </td></tr>
+                  )}
+                  {talepler.filter(t=>{
+                    if(talepDurumFilter && t.durum!==talepDurumFilter) return false;
+                    if(talepArama) { const q=talepArama.toLowerCase(); return (t.talep_no||"").toLowerCase().includes(q)||(t.talep_eden_ad||"").toLowerCase().includes(q)||(t.bolge||"").toLowerCase().includes(q)||(t.proje||"").toLowerCase().includes(q)||(t.site_id||"").toLowerCase().includes(q); }
+                    return true;
+                  }).map((t,i)=>{
+                    const durumColors = {
+                      TASLAK:"#9ca3af", NURCAN_ONAY:"#d97706", FIYAT_GIRISI:"#7c3aed",
+                      PM_ONAY:"#2563eb", DUZGUN_ONAY:"#0284c7", ONAYLANDI:"#16a34a",
+                      SATINALINACAK:"#ea580c", DEPODA:"#15803d", REDDEDILDI:"#dc2626",
+                    };
+                    const leftColor = durumColors[t.durum] || "#1e3a5f";
+                    return (
+                      <tr key={t.id} style={{ borderBottom:"1px solid #f1f5f9",background:i%2===0?"#fff":"#fafbfc",
+                        borderLeft:`4px solid ${leftColor}`,cursor:"pointer" }}
+                        onClick={()=>loadDetay(t.id)}
+                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                        onMouseLeave={e=>e.currentTarget.style.background=i%2===0?"#fff":"#fafbfc"}
+                      >
+                        <td style={{ padding:"11px 14px",fontWeight:700,color:"#1e3a5f",whiteSpace:"nowrap" }}>{t.talep_no}</td>
+                        <td style={{ padding:"11px 14px",fontWeight:600,color:"#374151" }}>{t.talep_eden_ad}</td>
+                        <td style={{ padding:"11px 14px",color:"#6b7280" }}>{t.bolge||"—"}</td>
+                        <td style={{ padding:"11px 14px",color:"#6b7280" }}>{t.proje||"—"}</td>
+                        <td style={{ padding:"11px 14px",color:"#6b7280",fontFamily:"monospace",fontSize:12 }}>{t.site_id||"—"}</td>
+                        <td style={{ padding:"11px 14px",textAlign:"center",color:"#374151",fontWeight:600 }}>{Number(t.kalem_sayisi)}</td>
+                        <td style={{ padding:"11px 14px",textAlign:"right",fontWeight:700,color:Number(t.toplam_tutar)>0?"#15803d":"#9ca3af" }}>
+                          {Number(t.toplam_tutar)>0 ? `₺${Number(t.toplam_tutar).toLocaleString("tr-TR")}` : "—"}
+                        </td>
+                        <td style={{ padding:"11px 14px",color:"#6b7280",whiteSpace:"nowrap",fontSize:12 }}>
+                          {t.talep_tarihi ? new Date(t.talep_tarihi).toLocaleDateString("tr-TR") : new Date(t.created_at).toLocaleDateString("tr-TR")}
+                        </td>
+                        <td style={{ padding:"11px 14px" }}>{durumBadge(t.durum)}</td>
+                        <td style={{ padding:"8px 10px",textAlign:"center" }} onClick={e=>e.stopPropagation()}>
+                          <div style={{ display:"flex",gap:5,justifyContent:"center" }}>
+                            <button onClick={()=>loadDetay(t.id)}
+                              style={{ padding:"5px 10px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700 }}>
+                              Detay
+                            </button>
+                            {["TASLAK","REDDEDILDI"].includes(t.durum) && t.talep_eden_email===currentUser?.email && (<>
+                              <button onClick={()=>openEdit(t)}
+                                style={{ padding:"5px 8px",background:"#fef3c7",color:"#92400e",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700 }}>
+                                ✏️
+                              </button>
+                              <button onClick={()=>deleteTalep(t.id)}
+                                style={{ padding:"5px 8px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700 }}>
+                                🗑
+                              </button>
+                            </>)}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
