@@ -14635,49 +14635,138 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     const tarihFmt = (d) => {
       if (!d) return "";
       const dt = new Date(d);
-      if (isNaN(dt)) return d;
+      if (isNaN(dt)) return String(d).split("T")[0];
       return `${String(dt.getDate()).padStart(2,"0")}.${String(dt.getMonth()+1).padStart(2,"0")}.${dt.getFullYear()}`;
     };
     const toplam = kalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0);
-    const rows = [
-      ["ERC MÜHENDİSLİK - MALZEME TALEBİ", "", "", "", "", "", ""],
-      [],
-      ["TALEP NO",        t.talep_no||"",              "", "TARİH",       tarihFmt(t.talep_tarihi), "", ""],
-      ["BÖLGE",           t.bolge||"-",                "", "PROJE",       t.proje||"-",             "SİTE TİPİ", t.site_type||"-"],
-      ["SİTE ID",         t.site_id||"-",              "", "", "", "", ""],
-      ["TALEP EDEN",      t.talep_eden_ad||"-",        "", "FİRMA",       t.talep_edilen_firma||"-","", ""],
-      ["TALEP ED. PERS.", t.talep_edilen_personel||"-","", "DURUM",       durumLabel[t.durum]||t.durum||"-", "", ""],
-      ["AÇIKLAMA",        t.notlar||"-",               "", "", "", "", ""],
-      [],
-      ["#", "MALZEME ADI", "MİKTAR", "BİRİM", "BİRİM FİYAT (₺)", "TOPLAM (₺)", "NOT"],
-      ...kalemler.map((k,i) => [
-        i+1,
-        k.malzeme_adi||"",
-        Number(k.miktar||0),
-        k.birim||"Adet",
-        Number(Number(k.birim_fiyat||0).toFixed(2)),
-        Number(Number(k.toplam_tutar||0).toFixed(2)),
-        k.notlar||""
-      ]),
-      [],
-      ["", "", "", "", "GENEL TOPLAM (₺)", Number(toplam.toFixed(2)), ""],
+
+    // ── Stil sabitleri ──────────────────────────────────────────────
+    const NAV   = "1e3a5f"; // koyu lacivert
+    const GOLD  = "f59e0b"; // altın sarısı başlık
+    const LBLU  = "dbeafe"; // açık mavi (etiket bg)
+    const FBLK  = "1f2937"; // yazı rengi
+    const GRN   = "15803d"; // yeşil (toplam)
+    const GRLT  = "dcfce7"; // açık yeşil bg
+    const GRAY  = "f3f4f6"; // açık gri satır
+    const border = (color="d1d5db") => ({
+      top:{style:"thin",color:{rgb:color}}, bottom:{style:"thin",color:{rgb:color}},
+      left:{style:"thin",color:{rgb:color}}, right:{style:"thin",color:{rgb:color}}
+    });
+    const cell = (v, opts={}) => ({
+      v, t: typeof v==="number" ? "n" : "s",
+      s: {
+        font:   { name:"Calibri", sz:opts.sz||11, bold:!!opts.bold, color:{rgb:opts.color||FBLK}, italic:!!opts.italic },
+        fill:   opts.bg ? { patternType:"solid", fgColor:{rgb:opts.bg} } : { patternType:"none" },
+        alignment: { horizontal:opts.align||"left", vertical:"center", wrapText:!!opts.wrap },
+        border: border(opts.borderColor||"d1d5db"),
+      }
+    });
+    const empty = () => ({ v:"", t:"s", s:{ border:border("f3f4f6") } });
+
+    // Cols: A(sıra/etiket) B(malzeme-geniş) C(miktar) D(birim) E(birim fiyat) F(toplam) G(not)
+    const COL_W = [{ wch:6 },{ wch:52 },{ wch:10 },{ wch:10 },{ wch:15 },{ wch:15 },{ wch:28 }];
+
+    // ── Satır üreticileri ───────────────────────────────────────────
+    const R = (...cells) => cells;
+
+    // R1: Ana başlık (A:G birleşik)
+    const r1 = R(
+      cell("ERC MÜHENDİSLİK — MALZEME TALEBİ", {bold:true,sz:15,color:"ffffff",bg:NAV,align:"center"}),
+      ...Array(6).fill(cell("",{bg:NAV}))
+    );
+
+    // R2: Talep No / Tarih / Site ID / Site Tipi
+    const INFO_BG = LBLU;
+    const r2 = R(
+      cell("TALEP NO",{bold:true,bg:INFO_BG,align:"center"}),
+      cell(t.talep_no||"",{bold:true,sz:12}),
+      cell("TARİH",{bold:true,bg:INFO_BG,align:"center"}),
+      cell(tarihFmt(t.talep_tarihi||t.created_at),{align:"center"}),
+      cell("SİTE ID",{bold:true,bg:INFO_BG,align:"center"}),
+      cell(t.site_id||"—",{align:"center"}),
+      cell(t.site_type||"—",{align:"center"})
+    );
+
+    // R3: Bölge / Proje / Firma / Personel
+    const r3 = R(
+      cell("BÖLGE",{bold:true,bg:INFO_BG,align:"center"}),
+      cell(t.bolge||"—",{}),
+      cell("PROJE",{bold:true,bg:INFO_BG,align:"center"}),
+      cell(t.proje||"—",{align:"center"}),
+      cell("FİRMA",{bold:true,bg:INFO_BG,align:"center"}),
+      cell(t.talep_edilen_firma||"—",{align:"center"}),
+      cell(t.talep_edilen_personel||"—",{})
+    );
+
+    // R4: Talep Eden / Durum / Açıklama
+    const r4 = R(
+      cell("TALEP EDEN",{bold:true,bg:INFO_BG,align:"center"}),
+      cell(t.talep_eden_ad||"—",{}),
+      cell("DURUM",{bold:true,bg:INFO_BG,align:"center"}),
+      cell(durumLabel[t.durum]||t.durum||"—",{bold:true}),
+      cell("AÇIKLAMA",{bold:true,bg:INFO_BG,align:"center"}),
+      cell(t.notlar||"—",{wrap:true}),
+      empty()
+    );
+
+    // R5: boş ayırıcı
+    const r5 = Array(7).fill(empty());
+
+    // R6: Tablo başlığı
+    const THEAD_BG = NAV;
+    const r6 = R(
+      cell("#",           {bold:true,color:"ffffff",bg:THEAD_BG,align:"center"}),
+      cell("MALZEME ADI", {bold:true,color:"ffffff",bg:THEAD_BG}),
+      cell("MİKTAR",      {bold:true,color:"ffffff",bg:THEAD_BG,align:"center"}),
+      cell("BİRİM",       {bold:true,color:"ffffff",bg:THEAD_BG,align:"center"}),
+      cell("BİRİM FİYAT (₺)",{bold:true,color:"ffffff",bg:THEAD_BG,align:"right"}),
+      cell("TOPLAM (₺)",  {bold:true,color:"ffffff",bg:THEAD_BG,align:"right"}),
+      cell("NOT",         {bold:true,color:"ffffff",bg:THEAD_BG})
+    );
+
+    // R7…: Kalem satırları (zebra)
+    const kalemRows = kalemler.map((k,i) => {
+      const bg = i%2===0 ? "ffffff" : GRAY;
+      return R(
+        cell(i+1,                              {align:"center",bg}),
+        cell(k.malzeme_adi||"",               {bg,wrap:true}),
+        cell(Number(k.miktar||0),              {align:"center",bg}),
+        cell(k.birim||"Adet",                  {align:"center",bg}),
+        cell(Number((k.birim_fiyat||0).toFixed?Number(k.birim_fiyat||0).toFixed(2):k.birim_fiyat||0), {align:"right",bg}),
+        cell(Number(Number(k.toplam_tutar||0).toFixed(2)), {align:"right",bg,bold:Number(k.toplam_tutar||0)>0,color:Number(k.toplam_tutar||0)>0?GRN:FBLK}),
+        cell(k.notlar||"",                    {bg,wrap:true,italic:true,color:"6b7280"})
+      );
+    });
+
+    // Son: Genel Toplam
+    const rToplam = R(
+      empty(), empty(), empty(), empty(),
+      cell("GENEL TOPLAM (₺)", {bold:true,bg:GRLT,align:"right",color:GRN,borderColor:"86efac"}),
+      cell(Number(toplam.toFixed(2)),          {bold:true,sz:12,bg:GRLT,align:"right",color:GRN,borderColor:"86efac"}),
+      empty()
+    );
+
+    // ── Sayfayı oluştur ──────────────────────────────────────────────
+    const data = [r1, r2, r3, r4, r5, r6, ...kalemRows, r5, rToplam];
+    const ws = XLSXStyle.utils.aoa_to_sheet(data);
+    ws["!cols"] = COL_W;
+    ws["!rows"] = [
+      {hpt:28}, // r1 - başlık yüksek
+      {hpt:20}, // r2
+      {hpt:20}, // r3
+      {hpt:20}, // r4
+      {hpt:8 }, // r5 - boşluk
+      {hpt:22}, // r6 - thead
+      ...kalemler.map(()=>({hpt:18})),
+      {hpt:8 },
+      {hpt:22},
     ];
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    // Kolon genişlikleri
-    ws["!cols"] = [
-      { wch: 22 }, // A - etiket
-      { wch: 36 }, // B - değer (malzeme adı)
-      { wch: 3  }, // C - boşluk
-      { wch: 18 }, // D - etiket2
-      { wch: 22 }, // E - değer2
-      { wch: 12 }, // F - site tipi etiket
-      { wch: 12 }, // G - site tipi değer
+    ws["!merges"] = [
+      { s:{r:0,c:0}, e:{r:0,c:6} },   // Başlık birleşik
     ];
-    // Başlık birleştir (A1:G1)
-    ws["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:6} }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Talep");
-    XLSX.writeFile(wb, `${t.talep_no||"Malzeme_Talebi"}.xlsx`);
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws, "Talep");
+    XLSXStyle.writeFile(wb, `${t.talep_no||"Malzeme_Talebi"}.xlsx`);
   };
 
   // ── SARF ──
@@ -14813,8 +14902,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     const canDuzenle  = isOwner && ["TASLAK","REDDEDILDI"].includes(d.durum);
 
     return (
-      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,overflowY:"auto" }}>
-        <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:760,maxHeight:"92vh",overflowY:"auto",padding:24 }}>
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:24,overflowY:"auto" }}>
+        <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:1100,maxHeight:"94vh",overflowY:"auto",padding:28 }}>
           {/* Başlık */}
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16 }}>
             <div>
