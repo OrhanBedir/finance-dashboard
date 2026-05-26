@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import "./App.css";
 import * as XLSX from "xlsx";
 import * as XLSXStyle from "xlsx-js-style";
@@ -14502,7 +14502,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
   const BOLGELER = ["İzmir","İstanbul","Ankara","Bursa","Antalya","Adana","Samsun","Trabzon","Erzurum","Diyarbakır","Diğer"];
   const PROJELER = ["TT","TC","VF","Diğer"];
-  const SITE_TYPES = ["5G","LTE","DSS","STANDALONE","GF","RT","IB","OUT","Diğer"];
+  const SITE_TYPES = ["5G","LTE","DSS","STANDALONE","Diğer"];
   const FIRMALAR = ["Şimşek","UBS","FEDERAL","2KX","Diğer"];
 
   // ── LOAD ──
