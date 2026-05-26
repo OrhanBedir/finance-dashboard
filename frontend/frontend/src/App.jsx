@@ -15764,6 +15764,7 @@ function App() {
   });
   const [pendingAvansCount, setPendingAvansCount] = useState(0);
   const [pendingMasrafCount, setPendingMasrafCount] = useState(0);
+  const [pendingMalzemeCount, setPendingMalzemeCount] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -15791,6 +15792,20 @@ function App() {
           else if (email === "muhasebe@simsektel.com") mc = mdata.filter(f => f.durum === "TAMAMLANDI").length;
           setPendingMasrafCount(mc);
         }
+        // Malzeme talebi bekleyenleri say
+        try {
+          const mlr = await fetch(`${API_BASE}/malzeme/talepler`, { headers: { Authorization: `Bearer ${token}` } });
+          const mldata = await mlr.json();
+          if (Array.isArray(mldata)) {
+            const email = user.email;
+            let mlc = 0;
+            if (email === "nurcan.kus@simsektel.com")   mlc = mldata.filter(t => t.durum === "NURCAN_ONAY").length;
+            else if (email === "orhan.bedir@simsektel.com") mlc = mldata.filter(t => t.durum === "PM_ONAY").length;
+            else if (email === "murat.istek@simsektel.com") mlc = mldata.filter(t => ["FIYAT_GIRISI","SATINALINACAK"].includes(t.durum)).length;
+            else if (email === "duzgun.simsek@simsektel.com") mlc = mldata.filter(t => t.durum === "DUZGUN_ONAY").length;
+            setPendingMalzemeCount(mlc);
+          }
+        } catch {}
       } catch {}
     };
     fetchPending();
@@ -16370,8 +16385,14 @@ function App() {
               <button
                 className={page === "malzeme" ? "tab activeTab" : "tab"}
                 onClick={() => setPage("malzeme")}
+                style={{ position:"relative" }}
               >
                 📦 Malzeme Yönetimi
+                {pendingMalzemeCount > 0 && (
+                  <span style={{ position:"absolute", top:"-6px", right:"-6px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"11px", fontWeight:700, minWidth:"18px", height:"18px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", lineHeight:1 }}>
+                    {pendingMalzemeCount}
+                  </span>
+                )}
               </button>
             )}
 
@@ -16425,6 +16446,18 @@ function App() {
               {pendingMasrafCount} adet masraf formu onayınızı bekliyor
             </span>
             <span style={{ color:"#b45309", fontSize:"13px", marginLeft:"8px" }}>→ Masraf Formu'na git</span>
+          </div>
+        </div>
+      )}
+
+      {pendingMalzemeCount > 0 && page !== "malzeme" && (
+        <div onClick={() => setPage("malzeme")} style={{ margin:"0 0 0 0", padding:"12px 24px", background:"#f0fdf4", borderBottom:"2px solid #86efac", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer" }}>
+          <span style={{ fontSize:"20px" }}>📦</span>
+          <div>
+            <span style={{ fontWeight:700, color:"#166534", fontSize:"14px" }}>
+              {pendingMalzemeCount} adet malzeme talebi onayınızı bekliyor
+            </span>
+            <span style={{ color:"#15803d", fontSize:"13px", marginLeft:"8px" }}>→ Malzeme Yönetimi'ne git</span>
           </div>
         </div>
       )}
