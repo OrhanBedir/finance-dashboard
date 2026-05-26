@@ -14769,6 +14769,78 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     XLSXStyle.writeFile(wb, `${t.talep_no||"Malzeme_Talebi"}.xlsx`);
   };
 
+  // ── DEPO STOK EXCEL ──
+  const depoStokExcelIndir = () => {
+    const tarih = new Date().toLocaleDateString("tr-TR");
+    const NAV   = "1e3a5f";
+    const GRN   = "166534";
+    const GRLT  = "f0fdf4";
+    const border = (c="d1d5db") => ({ top:{style:"thin",color:{rgb:c}}, bottom:{style:"thin",color:{rgb:c}}, left:{style:"thin",color:{rgb:c}}, right:{style:"thin",color:{rgb:c}} });
+    const cell = (v, opts={}) => ({
+      v, t: typeof v==="number" ? "n" : "s",
+      s: {
+        font:{ bold:!!opts.bold, sz:opts.sz||11, color:{rgb:opts.color||"222222"}, name:"Calibri", italic:!!opts.italic },
+        fill:{ fgColor:{ rgb:opts.bg||"ffffff" } },
+        alignment:{ horizontal:opts.align||"left", vertical:"center", wrapText:!!opts.wrap },
+        border:border(opts.borderColor||"d1d5db"),
+      }
+    });
+    const empty = () => ({ v:"", t:"s", s:{ border:border("f3f4f6") } });
+    const R = (...cells) => cells;
+    // Sütunlar: Malzeme Adı | Toplam Stok | Birim | Depoda Kalan | Personelde | Rezerve | Açıklama
+    const COL_W = [{ wch:48 },{ wch:14 },{ wch:10 },{ wch:16 },{ wch:14 },{ wch:12 },{ wch:32 }];
+    const r1 = R(
+      cell("ERC MÜHENDİSLİK — DEPO STOK RAPORU", {bold:true,sz:14,color:"ffffff",bg:NAV,align:"center"}),
+      ...Array(6).fill(cell("",{bg:NAV}))
+    );
+    const r2 = R(
+      cell(`Rapor Tarihi: ${tarih}`, {bold:true,sz:10,color:"6b7280",bg:"f8fafc",align:"center"}),
+      ...Array(6).fill(cell("",{bg:"f8fafc"}))
+    );
+    const rSpace = R(...Array(7).fill(empty()));
+    const rHead = R(
+      cell("MALZEME ADI",   {bold:true,color:"ffffff",bg:NAV}),
+      cell("TOPLAM STOK",   {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("BİRİM",         {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("DEPODA KALAN",  {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("PERSONELde",    {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("REZERVE",       {bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("AÇIKLAMA",      {bold:true,color:"ffffff",bg:NAV}),
+    );
+    const rows = depoStok.map((s,i) => {
+      const bg = i%2===0 ? "ffffff" : "f8fafc";
+      const kalan = Number(s.depoda_kalan||0);
+      const kalanColor = kalan < 0 ? "dc2626" : kalan === 0 ? "92400e" : GRN;
+      return R(
+        cell(s.malzeme_adi||"", {bg, bold:true}),
+        cell(Number(s.toplam_miktar||0), {bg, align:"center"}),
+        cell(s.birim||"Adet", {bg, align:"center"}),
+        cell(kalan, {bg, align:"center", bold:true, color:kalanColor}),
+        cell(Number(s.personelde||0), {bg, align:"center", color:"92400e"}),
+        cell(Number(s.rezerve||0), {bg, align:"center", color:"7c3aed"}),
+        cell(s.aciklama||"", {bg, italic:true, color:"6b7280", wrap:true}),
+      );
+    });
+    const rToplam = R(
+      cell(`Toplam ${depoStok.length} kalem`, {bold:true, bg:GRLT, color:GRN}),
+      cell(depoStok.reduce((a,s)=>a+Number(s.toplam_miktar||0),0), {bold:true, bg:GRLT, align:"center", color:GRN}),
+      empty(),
+      cell(depoStok.reduce((a,s)=>a+Number(s.depoda_kalan||0),0), {bold:true, bg:GRLT, align:"center", color:GRN}),
+      empty(), empty(), empty()
+    );
+    const data = [r1, r2, rSpace, rHead, ...rows, rSpace, rToplam];
+    const ws = XLSXStyle.utils.aoa_to_sheet(data);
+    ws["!cols"] = COL_W;
+    ws["!rows"] = [{hpt:28},{hpt:18},{hpt:6},{hpt:22},...depoStok.map(()=>({hpt:18})),{hpt:6},{hpt:22}];
+    ws["!merges"] = [
+      { s:{r:0,c:0}, e:{r:0,c:6} },
+      { s:{r:1,c:0}, e:{r:1,c:6} },
+    ];
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws, "Depo Stok");
+    XLSXStyle.writeFile(wb, `ERC_Depo_Stok_${tarih.replace(/\./g,"-")}.xlsx`);
+  };
+
   // ── SARF ──
   const handleSarfSubmit = async () => {
     if (!sarfForm.miktar) { alert("Miktar girin"); return; }
@@ -15329,10 +15401,18 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   </button>
                 )}
               </div>
-              <button onClick={()=>{setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);setEditingId(null);setFormView("form");}}
-                style={{ padding:"10px 22px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
-                + Yeni Talep
-              </button>
+              <div style={{ display:"flex",gap:8 }}>
+                {canSeeDepo && (
+                  <button onClick={depoStokExcelIndir}
+                    style={{ padding:"10px 18px",background:"#16a34a",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6 }}>
+                    📥 Depo Stok Excel
+                  </button>
+                )}
+                <button onClick={()=>{setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);setEditingId(null);setFormView("form");}}
+                  style={{ padding:"10px 22px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
+                  + Yeni Talep
+                </button>
+              </div>
             </div>
 
             {/* Tablo */}
@@ -15425,10 +15505,10 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           <div>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
               <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f" }}>🏭 Depo Stok Durumu</div>
-              {(isAdmin||isPM||isDirektor) && (
+              {(isAdmin||isMurat) && (
                 <button onClick={()=>{setDepoEditModal({id:null});setDepoEditForm({malzeme_adi:"",birim:"Adet",toplam_miktar:"",aciklama:""});}}
                   style={{ padding:"9px 18px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14 }}>
-                  + Manuel Stok Girişi
+                  + Manuel Stok Güncelle
                 </button>
               )}
             </div>
@@ -15456,7 +15536,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                         <div style={{ display:"flex",gap:6 }}>
                           <button onClick={()=>{setSarfModal(s);setSarfForm({miktar:"",personel_ad:"",lokasyon:"",islem_turu:"CIKIS",notlar:""});loadSarf(s.malzeme_adi);}}
                             style={{ padding:"5px 10px",background:"#dbeafe",color:"#1d4ed8",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700 }}>📤 Sarf</button>
-                          {(isAdmin||isPM)&&<button onClick={()=>{setDepoEditModal(s);setDepoEditForm({...s});}}
+                          {(isAdmin||isMurat)&&<button onClick={()=>{setDepoEditModal(s);setDepoEditForm({...s});}}
                             style={{ padding:"5px 10px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:6,cursor:"pointer",fontSize:11 }}>✏️</button>}
                         </div>
                       </td>
