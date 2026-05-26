@@ -11341,19 +11341,25 @@ app.put("/malzeme/talepler/:id/durum", authMiddleware, async (req, res) => {
       }
     }
 
-    // Depo stok güncelle: DEPODA durumuna geçince Yeni Alım kalemlerini depoya ekle
+    // Depo stok güncelle: DEPODA durumuna geçince Yeni Alım kalemlerini depoya ekle + fiyat geçmişi kaydet
     if (durum === "DEPODA") {
+      // Talep no'yu al
+      const talepInfo = await pool.query("SELECT talep_no FROM malzeme_talepler WHERE id=$1", [req.params.id]);
+      const talepNo = talepInfo.rows[0]?.talep_no || null;
+      const bugun = new Date().toISOString().split("T")[0];
+
       const kalemleriDB = await pool.query(
         "SELECT * FROM malzeme_talep_kalemleri WHERE talep_id=$1", [req.params.id]
       );
       for (const k of kalemleriDB.rows) {
+        // Depo stok güncelle
         const existing = await pool.query(
           "SELECT id, toplam_miktar FROM depo_stok WHERE LOWER(malzeme_adi)=LOWER($1) AND LOWER(birim)=LOWER($2)",
           [k.malzeme_adi, k.birim]
         );
         if (existing.rows.length > 0) {
           await pool.query(
-            "UPDATE depo_stok SET toplam_miktar=toplam_miktar+$1 WHERE id=$2",
+            "UPDATE depo_stok SET toplam_miktar=toplam_miktar+$1, updated_at=NOW() WHERE id=$2",
             [k.miktar, existing.rows[0].id]
           );
         } else {
@@ -11361,6 +11367,39 @@ app.put("/malzeme/talepler/:id/durum", authMiddleware, async (req, res) => {
             "INSERT INTO depo_stok (malzeme_adi, birim, toplam_miktar) VALUES ($1,$2,$3)",
             [k.malzeme_adi, k.birim, k.miktar]
           );
+        }
+
+        // Fiyat geçmişi kaydet (sadece fiyat girilmişse)
+        if (k.birim_fiyat && Number(k.birim_fiyat) > 0) {
+          await pool.query(
+            `INSERT INTO malzeme_fiyat_gecmisi (malzeme_adi, birim, birim_fiyat, talep_id, talep_no, miktar, tarih)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [k.malzeme_adi, k.birim||"Adet", k.birim_fiyat, req.params.id, talepNo, k.miktar||1, bugun]
+          );
+
+          // Fiyat listesini güncelle: son_fiyat her zaman güncellenir, ilk_fiyat sadece boşsa
+          const fiyatExist = await pool.query(
+            "SELECT id, ilk_fiyat FROM malzeme_fiyat_listesi WHERE LOWER(malzeme_adi)=LOWER($1)",
+            [k.malzeme_adi]
+          );
+          if (fiyatExist.rows.length > 0) {
+            const row = fiyatExist.rows[0];
+            await pool.query(
+              `UPDATE malzeme_fiyat_listesi
+               SET birim_fiyat=$1, son_fiyat=$1, son_fiyat_tarihi=$2,
+                   ilk_fiyat=COALESCE(ilk_fiyat,$1),
+                   ilk_fiyat_tarihi=COALESCE(ilk_fiyat_tarihi,$2)
+               WHERE id=$3`,
+              [k.birim_fiyat, bugun, fiyatExist.rows[0].id]
+            );
+          } else {
+            // Fiyat listesinde yoksa ekle
+            await pool.query(
+              `INSERT INTO malzeme_fiyat_listesi (malzeme_adi, birim, birim_fiyat, kategori, ilk_fiyat, ilk_fiyat_tarihi, son_fiyat, son_fiyat_tarihi)
+               VALUES ($1,$2,$3,'Genel',$3,$4,$3,$4)`,
+              [k.malzeme_adi, k.birim||"Adet", k.birim_fiyat, bugun]
+            );
+          }
         }
       }
     }
@@ -11386,6 +11425,27 @@ app.get("/malzeme/depo-stok", authMiddleware, async (req, res) => {
       GROUP BY d.id
       ORDER BY d.malzeme_adi
     `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /malzeme/fiyat-gecmisi — malzeme fiyat geçmişi
+app.get("/malzeme/fiyat-gecmisi", authMiddleware, async (req, res) => {
+  try {
+    const { malzeme_adi } = req.query;
+    if (!malzeme_adi) {
+      // Tüm malzemelerin son 2 fiyatı (özet)
+      const r = await pool.query(`
+        SELECT DISTINCT ON (malzeme_adi) malzeme_adi, birim, birim_fiyat, talep_no, tarih
+        FROM malzeme_fiyat_gecmisi
+        ORDER BY malzeme_adi, tarih DESC, id DESC
+      `);
+      return res.json(r.rows);
+    }
+    const r = await pool.query(
+      `SELECT * FROM malzeme_fiyat_gecmisi WHERE LOWER(malzeme_adi)=LOWER($1) ORDER BY tarih DESC, id DESC`,
+      [malzeme_adi]
+    );
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -11588,6 +11648,21 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_personel_id INTEGER",
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_belge_url TEXT",
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS odeme_belge_url TEXT",
+  `CREATE TABLE IF NOT EXISTS malzeme_fiyat_gecmisi (
+  id SERIAL PRIMARY KEY,
+  malzeme_adi TEXT NOT NULL,
+  birim TEXT DEFAULT 'Adet',
+  birim_fiyat NUMERIC(12,2) NOT NULL,
+  talep_id INTEGER,
+  talep_no TEXT,
+  miktar NUMERIC(12,3),
+  tarih DATE DEFAULT CURRENT_DATE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`,
+  "ALTER TABLE malzeme_fiyat_listesi ADD COLUMN IF NOT EXISTS ilk_fiyat NUMERIC(12,2) DEFAULT NULL",
+  "ALTER TABLE malzeme_fiyat_listesi ADD COLUMN IF NOT EXISTS ilk_fiyat_tarihi DATE DEFAULT NULL",
+  "ALTER TABLE malzeme_fiyat_listesi ADD COLUMN IF NOT EXISTS son_fiyat NUMERIC(12,2) DEFAULT NULL",
+  "ALTER TABLE malzeme_fiyat_listesi ADD COLUMN IF NOT EXISTS son_fiyat_tarihi DATE DEFAULT NULL",
 ];
 
 (async () => {

@@ -15133,6 +15133,66 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             </table>
           </div>
 
+          {/* PD Fiyat Karşılaştırma Analizi */}
+          {canDuzgun && detayKalemler.some(k=>Number(k.birim_fiyat||0)>0) && (() => {
+            const kalemleriyle = detayKalemler.filter(k=>Number(k.birim_fiyat||0)>0);
+            const hasUyari = kalemleriyle.some(k=>{
+              const gecmis = fiyatListe.find(f=>f.malzeme_adi?.toLowerCase()===k.malzeme_adi?.toLowerCase());
+              if (!gecmis?.son_fiyat) return false;
+              return (Number(k.birim_fiyat)-Number(gecmis.son_fiyat))/Number(gecmis.son_fiyat)*100 > 15;
+            });
+            return (
+              <div style={{ marginBottom:14, background: hasUyari?"#fff7ed":"#f0fdf4", border:`1.5px solid ${hasUyari?"#fed7aa":"#86efac"}`, borderRadius:10, padding:"12px 16px" }}>
+                <div style={{ fontSize:13,fontWeight:700,color:hasUyari?"#92400e":"#166534",marginBottom:10 }}>
+                  {hasUyari ? "⚠️ Fiyat Artış Analizi — Dikkat!" : "✅ Fiyat Analizi"}
+                </div>
+                <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
+                  <thead>
+                    <tr style={{ borderBottom:"1px solid #e5e7eb" }}>
+                      {["Malzeme","Son Alım Fiyatı","Murat'ın Teklifi","Fark","Artış %"].map(h=>(
+                        <th key={h} style={{ padding:"4px 8px",textAlign:"left",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {kalemleriyle.map((k,i)=>{
+                      const gecmis = fiyatListe.find(f=>f.malzeme_adi?.toLowerCase()===k.malzeme_adi?.toLowerCase());
+                      const sonFiyat = gecmis?.son_fiyat ? Number(gecmis.son_fiyat) : null;
+                      const teklifFiyat = Number(k.birim_fiyat||0);
+                      const fark = sonFiyat ? teklifFiyat - sonFiyat : null;
+                      const artis = sonFiyat && sonFiyat>0 ? (fark/sonFiyat*100) : null;
+                      const alarm = artis !== null && artis > 15;
+                      return (
+                        <tr key={i} style={{ borderBottom:"1px solid #f3f4f6", background: alarm?"#fff7ed":"transparent" }}>
+                          <td style={{ padding:"5px 8px",fontWeight:600,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{k.malzeme_adi}</td>
+                          <td style={{ padding:"5px 8px",color:sonFiyat?"#374151":"#9ca3af" }}>
+                            {sonFiyat ? `₺${sonFiyat.toLocaleString("tr-TR",{minimumFractionDigits:2})}` : "İlk alım"}
+                          </td>
+                          <td style={{ padding:"5px 8px",fontWeight:700,color:"#0284c7" }}>
+                            ₺{teklifFiyat.toLocaleString("tr-TR",{minimumFractionDigits:2})}
+                          </td>
+                          <td style={{ padding:"5px 8px",fontWeight:600,color:fark>0?"#dc2626":fark<0?"#16a34a":"#6b7280" }}>
+                            {fark!==null ? `${fark>0?"+":""}₺${fark.toLocaleString("tr-TR",{minimumFractionDigits:2})}` : "—"}
+                          </td>
+                          <td style={{ padding:"5px 8px" }}>
+                            {artis!==null ? (
+                              <span style={{ padding:"2px 7px",borderRadius:6,fontWeight:700,fontSize:11,
+                                background:alarm?"#fee2e2":artis<0?"#dcfce7":"#fef3c7",
+                                color:alarm?"#dc2626":artis<0?"#15803d":"#92400e" }}>
+                                {artis>0?"▲":"▼"} {Math.abs(artis).toFixed(1)}% {alarm?"🚨":""}
+                              </span>
+                            ) : <span style={{color:"#9ca3af",fontSize:11}}>—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {hasUyari && <div style={{ marginTop:8,fontSize:11,color:"#92400e",fontStyle:"italic" }}>⚠️ %15'in üzerinde fiyat artışı tespit edildi. Onaylamadan önce sorgulayın.</div>}
+              </div>
+            );
+          })()}
+
           {/* Onay notu */}
           {(canNurcan||canMurat||canPM||canDuzgun||canMuratTedarik) && (
             <div style={{ marginBottom:14 }}>
@@ -15632,19 +15692,48 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
                 <thead>
                   <tr style={{ background:"#1e3a5f",color:"#fff" }}>
-                    {["Malzeme Adı","Birim","Birim Fiyat","Kategori",""].map(h=>(
-                      <th key={h} style={{ padding:"10px 14px",textAlign:"left",fontWeight:600 }}>{h}</th>
-                    ))}
+                    <th style={{ padding:"10px 14px",textAlign:"left",fontWeight:600 }}>Malzeme Adı</th>
+                    <th style={{ padding:"10px 14px",textAlign:"left",fontWeight:600 }}>Birim</th>
+                    <th style={{ padding:"10px 14px",textAlign:"center",fontWeight:600 }}>İlk Alım Fiyatı</th>
+                    <th style={{ padding:"10px 14px",textAlign:"center",fontWeight:600 }}>Son Alım Fiyatı</th>
+                    <th style={{ padding:"10px 14px",textAlign:"center",fontWeight:600 }}>Fiyat Değişimi</th>
+                    <th style={{ padding:"10px 14px",textAlign:"left",fontWeight:600 }}>Kategori</th>
+                    <th style={{ padding:"10px 14px" }}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {fiyatListe.filter(f=>!fiyatArama||(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())).length===0&&<tr><td colSpan={5} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>{fiyatArama?"Eşleşen malzeme bulunamadı.":"Fiyat listesi boş."}</td></tr>}
-                  {fiyatListe.filter(f=>!fiyatArama||(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())).map((f,i)=>(
+                  {fiyatListe.filter(f=>!fiyatArama||(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())).length===0&&<tr><td colSpan={7} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>{fiyatArama?"Eşleşen malzeme bulunamadı.":"Fiyat listesi boş."}</td></tr>}
+                  {fiyatListe.filter(f=>!fiyatArama||(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())).map((f,i)=>{
+                    const ilk = Number(f.ilk_fiyat||0);
+                    const son = Number(f.son_fiyat||f.birim_fiyat||0);
+                    const degisim = ilk > 0 && son > 0 ? ((son-ilk)/ilk*100) : null;
+                    const degisimRenk = degisim === null ? "#9ca3af" : degisim > 20 ? "#dc2626" : degisim > 0 ? "#ea580c" : degisim < 0 ? "#15803d" : "#6b7280";
+                    return (
                     <tr key={f.id} style={{ borderBottom:"1px solid #f0f4f8",background:i%2===0?"#fff":"#f8fafc" }}>
                       <td style={{ padding:"9px 14px",fontWeight:600 }}>{f.malzeme_adi}</td>
                       <td style={{ padding:"9px 14px" }}>{f.birim}</td>
-                      <td style={{ padding:"9px 14px",fontWeight:700,color:Number(f.birim_fiyat)>0?"#15803d":"#9ca3af" }}>
-                        {Number(f.birim_fiyat)>0 ? `₺${Number(f.birim_fiyat).toLocaleString("tr-TR")}` : "—"}
+                      <td style={{ padding:"9px 14px",textAlign:"center",color:"#6b7280",fontSize:12 }}>
+                        {ilk > 0 ? (
+                          <div>
+                            <div style={{ fontWeight:600, color:"#374151" }}>₺{ilk.toLocaleString("tr-TR",{minimumFractionDigits:2})}</div>
+                            {f.ilk_fiyat_tarihi && <div style={{ fontSize:10,color:"#9ca3af" }}>{new Date(f.ilk_fiyat_tarihi).toLocaleDateString("tr-TR")}</div>}
+                          </div>
+                        ) : <span style={{color:"#d1d5db"}}>—</span>}
+                      </td>
+                      <td style={{ padding:"9px 14px",textAlign:"center" }}>
+                        {son > 0 ? (
+                          <div>
+                            <div style={{ fontWeight:700,color:"#15803d" }}>₺{son.toLocaleString("tr-TR",{minimumFractionDigits:2})}</div>
+                            {f.son_fiyat_tarihi && <div style={{ fontSize:10,color:"#9ca3af" }}>{new Date(f.son_fiyat_tarihi).toLocaleDateString("tr-TR")}</div>}
+                          </div>
+                        ) : <span style={{color:"#d1d5db"}}>—</span>}
+                      </td>
+                      <td style={{ padding:"9px 14px",textAlign:"center" }}>
+                        {degisim !== null ? (
+                          <span style={{ padding:"3px 8px",borderRadius:8,background:degisim>20?"#fee2e2":degisim>0?"#fff7ed":degisim<0?"#f0fdf4":"#f9fafb", color:degisimRenk,fontWeight:700,fontSize:12 }}>
+                            {degisim > 0 ? "▲" : degisim < 0 ? "▼" : "—"} {Math.abs(degisim).toFixed(1)}%
+                          </span>
+                        ) : <span style={{color:"#d1d5db",fontSize:12}}>Veri yok</span>}
                       </td>
                       <td style={{ padding:"9px 14px" }}><span style={{ padding:"2px 8px",borderRadius:8,background:"#f0f4ff",color:"#3730a3",fontSize:11,fontWeight:600 }}>{f.kategori}</span></td>
                       <td style={{ padding:"9px 10px" }}>
@@ -15656,7 +15745,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                         </div>}
                       </td>
                     </tr>
-                  ))}
+                  );})}
                 </tbody>
               </table>
             </div>
