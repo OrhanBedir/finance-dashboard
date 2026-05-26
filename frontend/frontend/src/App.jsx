@@ -14804,14 +14804,14 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const durumBadge = (d) => {
     const map = {
       TASLAK:        { label:"Taslak",                   color:"#6b7280", bg:"#f3f4f6" },
-      NURCAN_ONAY:   { label:"Nurcan Onayı Bekliyor",    color:"#f59e0b", bg:"#fef3c7" },
-      FIYAT_GIRISI:  { label:"Fiyat Girişi (Murat)",     color:"#8b5cf6", bg:"#ede9fe" },
-      PM_ONAY:       { label:"PM Onayı Bekliyor",         color:"#2563eb", bg:"#dbeafe" },
-      DUZGUN_ONAY:   { label:"Düzgün Onayı Bekliyor",    color:"#0284c7", bg:"#e0f2fe" },
-      ONAYLANDI:     { label:"Onaylandı",                 color:"#16a34a", bg:"#dcfce7" },
-      SATINALINACAK: { label:"Satın Alınacak",            color:"#ea580c", bg:"#ffedd5" },
-      DEPODA:        { label:"Depoda",                    color:"#15803d", bg:"#bbf7d0" },
-      REDDEDILDI:    { label:"Reddedildi",                color:"#dc2626", bg:"#fee2e2" },
+      NURCAN_ONAY:   { label:"Rollout Müdürü Onayı Bekleniyor", color:"#f59e0b", bg:"#fef3c7" },
+      FIYAT_GIRISI:  { label:"Envanter Onayı Bekleniyor",        color:"#8b5cf6", bg:"#ede9fe" },
+      PM_ONAY:       { label:"PM Onayı Bekleniyor",              color:"#2563eb", bg:"#dbeafe" },
+      DUZGUN_ONAY:   { label:"Proje Direktörü Onayı Bekleniyor", color:"#0284c7", bg:"#e0f2fe" },
+      ONAYLANDI:     { label:"Onaylandı",                        color:"#16a34a", bg:"#dcfce7" },
+      SATINALINACAK: { label:"Tedarik Aşamasında",               color:"#ea580c", bg:"#ffedd5" },
+      DEPODA:        { label:"Tedarik Tamamlandı ✓",             color:"#15803d", bg:"#bbf7d0" },
+      REDDEDILDI:    { label:"Reddedildi ✗",                    color:"#dc2626", bg:"#fee2e2" },
     };
     const s = map[d] || { label:d, color:"#6b7280", bg:"#f3f4f6" };
     return <span style={{ padding:"3px 10px",borderRadius:12,fontSize:12,fontWeight:700,color:s.color,background:s.bg,whiteSpace:"nowrap" }}>{s.label}</span>;
@@ -14891,13 +14891,14 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const renderDetayModal = () => {
     if (!detayModal) return null;
     const d = detayModal;
-    const canNurcan   = isNurcan && d.durum==="NURCAN_ONAY";
-    const canMurat    = isMurat  && d.durum==="FIYAT_GIRISI";
-    const canPM       = isPM     && d.durum==="PM_ONAY";
-    const canDuzgun   = isDirektor && d.durum==="DUZGUN_ONAY";
-    const canOnay     = (isPM||isDirektor) && d.durum==="ONAYLANDI";
-    const canDepoda   = (isPM||isDirektor||isNurcan) && d.durum==="SATINALINACAK";
-    const canReddet   = (isNurcan||isPM||isDirektor) && ["NURCAN_ONAY","FIYAT_GIRISI","PM_ONAY","DUZGUN_ONAY"].includes(d.durum);
+    const canNurcan        = isNurcan   && d.durum==="NURCAN_ONAY";
+    const canPM            = isPM       && d.durum==="PM_ONAY";
+    const canMurat         = isMurat    && d.durum==="FIYAT_GIRISI";
+    const canDuzgun        = isDirektor && d.durum==="DUZGUN_ONAY";
+    const canMuratTedarik  = isMurat    && d.durum==="SATINALINACAK";
+    const canOnay          = false; // artık kullanılmıyor
+    const canDepoda        = canMuratTedarik;
+    const canReddet        = (isNurcan||isPM||isMurat||isDirektor) && ["NURCAN_ONAY","PM_ONAY","FIYAT_GIRISI","DUZGUN_ONAY"].includes(d.durum);
     const isOwner     = d.talep_eden_email === currentUser?.email;
     const canDuzenle  = isOwner && ["TASLAK","REDDEDILDI"].includes(d.durum);
 
@@ -14944,12 +14945,12 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           {(() => {
             const ZINCIR = [
               { key:"talep",       label:"Talep Eden",    kisi: d.talep_eden_ad || "—",             icon:"👤", done: true,                                                                             color:"#0ea5e9" },
-              { key:"nurcan",      label:"1. Onay",       kisi:"Nurcan Kuş",                         icon:"✅", done: ["FIYAT_GIRISI","PM_ONAY","DUZGUN_ONAY","ONAYLANDI","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="NURCAN_ONAY",   color:"#8b5cf6" },
-              { key:"murat",       label:"Fiyat Girişi",  kisi:"Murat İstek",                        icon:"💰", done: ["PM_ONAY","DUZGUN_ONAY","ONAYLANDI","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="FIYAT_GIRISI",   color:"#f59e0b" },
-              { key:"pm",          label:"PM Onayı",      kisi:"Orhan Bedir",                        icon:"✅", done: ["DUZGUN_ONAY","ONAYLANDI","SATINALINACAK","DEPODA"].includes(d.durum),           waiting: d.durum==="PM_ONAY",         color:"#2563eb" },
-              { key:"duzgun",      label:"Direktör Onayı",kisi:"Düzgün Şimşek",                     icon:"✅", done: ["ONAYLANDI","SATINALINACAK","DEPODA"].includes(d.durum),                         waiting: d.durum==="DUZGUN_ONAY",    color:"#0284c7" },
-              { key:"satinalma",   label:"Satın Alma",    kisi:"Onaylandı — Tedarik Sürecinde",     icon:"🛒", done: ["SATINALINACAK","DEPODA"].includes(d.durum),                                    waiting: d.durum==="ONAYLANDI",      color:"#ea580c" },
-              { key:"depo",        label:"Depoya Giriş",  kisi:"Malzeme teslim alındı",             icon:"📦", done: d.durum==="DEPODA",                                                             waiting: d.durum==="SATINALINACAK",  color:"#16a34a" },
+              { key:"nurcan",   label:"Rollout Müdürü", kisi:"Nurcan Kuş",    icon:"✅", done: !["TASLAK","NURCAN_ONAY"].includes(d.durum)&&d.durum!=="REDDEDILDI", waiting: d.durum==="NURCAN_ONAY", color:"#8b5cf6" },
+              { key:"pm",       label:"PM Onayı",       kisi:"Orhan Bedir",   icon:"✅", done: ["FIYAT_GIRISI","DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="PM_ONAY", color:"#2563eb" },
+              { key:"murat",    label:"Envanter Onayı", kisi:"Murat İstek",   icon:"✅", done: ["DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="FIYAT_GIRISI", color:"#f59e0b" },
+              { key:"duzgun",   label:"Proje Dir.",     kisi:"Düzgün Şimşek", icon:"✅", done: ["SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="DUZGUN_ONAY", color:"#0284c7" },
+              { key:"tedarik",  label:"Tedarik",        kisi:"Murat İstek",   icon:"🛒", done: d.durum==="DEPODA", waiting: d.durum==="SATINALINACAK", color:"#ea580c" },
+              { key:"depo",     label:"Depoda ✓",       kisi:"Tedarik Tamamlandı", icon:"📦", done: d.durum==="DEPODA", waiting: false, color:"#16a34a" },
             ];
             const reddi = d.durum === "REDDEDILDI";
             return (
@@ -15048,7 +15049,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           </div>
 
           {/* Onay notu */}
-          {(canNurcan||canMurat||canPM||canDuzgun) && (
+          {(canNurcan||canMurat||canPM||canDuzgun||canMuratTedarik) && (
             <div style={{ marginBottom:14 }}>
               <label style={{ fontSize:13,fontWeight:600,display:"block",marginBottom:6 }}>Onay Notu (isteğe bağlı)</label>
               <textarea value={onayNotu} onChange={e=>setOnayNotu(e.target.value)} rows={2}
@@ -15058,12 +15059,11 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
           {/* Aksiyon butonları */}
           <div style={{ display:"flex",gap:10,flexWrap:"wrap" }}>
-            {canNurcan   && <button onClick={()=>updateDurum(d.id,"FIYAT_GIRISI",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Fiyat Girişi</button>}
-            {canMurat    && <button onClick={()=>updateDurum(d.id,"PM_ONAY",detayKalemler,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Fiyatları Kaydet → PM'e Gönder</button>}
-            {canPM       && <button onClick={()=>updateDurum(d.id,"DUZGUN_ONAY",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#0284c7",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Düzgün'e Gönder</button>}
-            {canDuzgun   && <button onClick={()=>updateDurum(d.id,"ONAYLANDI",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#16a34a",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla</button>}
-            {canOnay     && <button onClick={()=>updateDurum(d.id,"SATINALINACAK",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#ea580c",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>🛒 Satın Alınacak</button>}
-            {canDepoda   && <button onClick={()=>updateDurum(d.id,"DEPODA",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#15803d",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>📦 Depoya Girdi</button>}
+            {canNurcan        && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
+            {canPM            && <button onClick={()=>updateDurum(d.id,"FIYAT_GIRISI",null,onayNotu)}  disabled={saving} style={{ padding:"10px 18px",background:"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Envanter Onayına Gönder</button>}
+            {canMurat         && <button onClick={()=>updateDurum(d.id,"DUZGUN_ONAY",detayKalemler,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#0284c7",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Proje Direktörü'ne Gönder</button>}
+            {canDuzgun        && <button onClick={()=>updateDurum(d.id,"SATINALINACAK",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#ea580c",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Tedarik Sürecine Al</button>}
+            {canMuratTedarik  && <button onClick={()=>updateDurum(d.id,"DEPODA",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#15803d",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>📦 Tedarik Tamamlandı — Depoya Giriş</button>}
             {canReddet   && <button onClick={()=>{setRedModal(d);setDetayModal(null);setRedNot("");}} style={{ padding:"10px 18px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>❌ Reddet</button>}
           </div>
         </div>
@@ -15236,11 +15236,11 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             <button onClick={()=>{
               // Hiyerarşiye göre ilk onay adımını belirle:
               // Nurcan Kuş → Orhan Bedir - Murat İstek - Düzgün Şimşek - Murat İstek
-              const submitDurum = isDirektor ? "ONAYLANDI"
-                : isMurat    ? "DUZGUN_ONAY"
-                : isPM       ? "FIYAT_GIRISI"   // Orhan → Nurcan'ı atla, Murat'a git
-                : isNurcan   ? "PM_ONAY"         // Nurcan → kendini atla, Orhan'a git
-                : "NURCAN_ONAY";                 // Diğerleri → Nurcan'dan başla
+              const submitDurum = isDirektor  ? "SATINALINACAK"  // Direktör → tedarik
+                : isMurat   ? "DUZGUN_ONAY"                       // Murat → Düzgün'e
+                : isPM      ? "FIYAT_GIRISI"                       // PM → Murat'a (envanter)
+                : isNurcan  ? "PM_ONAY"                            // Nurcan → PM'e
+                : "NURCAN_ONAY";                                   // Diğerleri → Nurcan'a
               saveTalep(submitDurum);
             }} disabled={saving}
               style={{ padding:"12px 28px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:15 }}>
@@ -15303,12 +15303,12 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,color:"#374151",cursor:"pointer" }}>
                   <option value="">Tüm Durumlar</option>
                   <option value="TASLAK">Taslak</option>
-                  <option value="NURCAN_ONAY">Onay Bekliyor</option>
-                  <option value="FIYAT_GIRISI">Fiyat Girişi</option>
-                  <option value="PM_ONAY">PM Onayında</option>
-                  <option value="DUZGUN_ONAY">Müdür Onayında</option>
+                  <option value="NURCAN_ONAY">Rollout Müdürü Onayı Bekleniyor</option>
+                  <option value="PM_ONAY">PM Onayı Bekleniyor</option>
+                  <option value="FIYAT_GIRISI">Envanter Onayı Bekleniyor</option>
+                  <option value="DUZGUN_ONAY">Proje Direktörü Onayı Bekleniyor</option>
+                  <option value="SATINALINACAK">Tedarik Aşamasında</option>
                   <option value="ONAYLANDI">Onaylandı</option>
-                  <option value="SATINALINACAK">Satın Alınacak</option>
                   <option value="DEPODA">Depoda</option>
                   <option value="REDDEDILDI">Reddedildi</option>
                 </select>
