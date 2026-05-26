@@ -14219,6 +14219,17 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   // Personel listesi
   const [personelListe, setPersonelListe] = useState([]);
 
+  // Malzeme Dağıtım
+  const [dagitim, setDagitim] = useState([]);
+  const [dagitimOzet, setDagitimOzet] = useState([]);
+  const [dagitimModal, setDagitimModal] = useState(false);
+  const [dagitimForm, setDagitimForm] = useState({ malzeme_adi:"", miktar:1, birim:"Adet", alici_tipi:"PERSONEL", alici_personel_id:"", alici_personel_ad:"", alici_personel_email:"", alici_firma:"", site_id:"", bolge:"", notlar:"" });
+  const [sahaCikisModal, setSahaCikisModal] = useState(null);
+  const [sahaCikisForm, setSahaCikisForm] = useState({ saha_site_id:"", saha_notlar:"" });
+  const [iadeModal, setIadeModal] = useState(null);
+  const [iadeNot, setIadeNot] = useState("");
+  const [dagitimArama, setDagitimArama] = useState("");
+
   const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
@@ -14559,9 +14570,66 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const loadSarf = async (malzeme_adi) => {
     try { const r = await fetch(`${API_BASE}/malzeme/sarf?malzeme_adi=${encodeURIComponent(malzeme_adi)}`, { headers }); setSarfListe(await r.json()); } catch {}
   };
+  const loadDagitim = async () => {
+    try {
+      const [r1, r2] = await Promise.all([
+        fetch(`${API_BASE}/malzeme/dagitim`, { headers }),
+        fetch(`${API_BASE}/malzeme/dagitim/ozet`, { headers }),
+      ]);
+      const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+      setDagitim(Array.isArray(d1) ? d1 : []);
+      setDagitimOzet(Array.isArray(d2) ? d2 : []);
+    } catch {}
+  };
+  const loadDagitimPersonel = async () => {
+    if (!currentUser?.email) return;
+    try {
+      const r = await fetch(`${API_BASE}/malzeme/dagitim?personel_email=${encodeURIComponent(currentUser.email)}`, { headers });
+      const d = await r.json();
+      setDagitim(Array.isArray(d) ? d : []);
+    } catch {}
+  };
+  const handleDagitimCikis = async () => {
+    if (!dagitimForm.malzeme_adi || !dagitimForm.miktar) { alert("Malzeme ve miktar zorunlu"); return; }
+    if (dagitimForm.alici_tipi==="PERSONEL" && !dagitimForm.alici_personel_ad) { alert("Personel seçin"); return; }
+    if (dagitimForm.alici_tipi==="TASERON" && !dagitimForm.alici_firma) { alert("Firma adı girin"); return; }
+    setSaving(true);
+    try {
+      const r = await fetch(`${API_BASE}/malzeme/dagitim`, { method:"POST", headers, body: JSON.stringify(dagitimForm) });
+      const d = await r.json();
+      if (d.error) { alert(d.error); return; }
+      setDagitimModal(false);
+      setDagitimForm({ malzeme_adi:"", miktar:1, birim:"Adet", alici_tipi:"PERSONEL", alici_personel_id:"", alici_personel_ad:"", alici_personel_email:"", alici_firma:"", site_id:"", bolge:"", notlar:"" });
+      loadDagitim(); loadDepoStok();
+    } catch (e) { alert(e.message); }
+    setSaving(false);
+  };
+  const handleSahaCikis = async () => {
+    if (!sahaCikisForm.saha_site_id) { alert("Site ID girin"); return; }
+    setSaving(true);
+    try {
+      await fetch(`${API_BASE}/malzeme/dagitim/${sahaCikisModal.id}/saha-cikis`, { method:"PUT", headers, body: JSON.stringify(sahaCikisForm) });
+      setSahaCikisModal(null); setSahaCikisForm({ saha_site_id:"", saha_notlar:"" });
+      canSeeDepo ? loadDagitim() : loadDagitimPersonel();
+    } catch (e) { alert(e.message); }
+    setSaving(false);
+  };
+  const handleIade = async () => {
+    setSaving(true);
+    try {
+      await fetch(`${API_BASE}/malzeme/dagitim/${iadeModal.id}/iade`, { method:"PUT", headers, body: JSON.stringify({ notlar: iadeNot }) });
+      setIadeModal(null); setIadeNot("");
+      canSeeDepo ? loadDagitim() : loadDagitimPersonel();
+      loadDepoStok();
+    } catch (e) { alert(e.message); }
+    setSaving(false);
+  };
 
   useEffect(() => { loadTalepler(); loadFiyatListe(); loadPersonel(); }, []);
-  useEffect(() => { if (tab === "depo") loadDepoStok(); }, [tab]);
+  useEffect(() => {
+    if (tab === "depo") loadDepoStok();
+    if (tab === "dagitim") { canSeeDepo ? loadDagitim() : loadDagitimPersonel(); }
+  }, [tab]);
 
   // ── TALEP KAYDET ──
   const saveTalep = async (durum) => {
@@ -14870,6 +14938,80 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
         document.body.appendChild(a); a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+      });
+    });
+  };
+
+  // ── DAĞITIM EXCEL ──
+  const exportDagitimExcel = () => {
+    const tarih = new Date().toLocaleDateString("tr-TR");
+    const NAV = "1e3a5f";
+    const border = (c="d1d5db") => ({ top:{style:"thin",color:{rgb:c}}, bottom:{style:"thin",color:{rgb:c}}, left:{style:"thin",color:{rgb:c}}, right:{style:"thin",color:{rgb:c}} });
+    const cell = (v, opts={}) => ({
+      v, t: typeof v==="number" ? "n" : "s",
+      s: { font:{bold:!!opts.bold,sz:opts.sz||11,color:{rgb:opts.color||"222222"},name:"Calibri"},
+           fill:{fgColor:{rgb:opts.bg||"ffffff"}},
+           alignment:{horizontal:opts.align||"left",vertical:"center",wrapText:!!opts.wrap},
+           border:border(opts.borderColor||"d1d5db") }
+    });
+    const empty = () => ({ v:"", t:"s", s:{ fill:{fgColor:{rgb:"ffffff"}}, border:border("ffffff") } });
+    const R = (...cells) => cells;
+    const COLS = 9;
+    const COL_W = [{wch:28},{wch:14},{wch:48},{wch:10},{wch:10},{wch:16},{wch:16},{wch:16},{wch:30}];
+    const r1 = R(cell("ERC MÜHENDİSLİK — PERSONEL MALZEME STOK DURUMU",{bold:true,sz:14,color:"ffffff",bg:NAV,align:"center"}),...Array(COLS-1).fill(cell("",{bg:NAV})));
+    const r2 = R(cell(`Rapor Tarihi: ${tarih}`,{bold:true,sz:10,color:"6b7280",bg:"f8fafc",align:"center"}),...Array(COLS-1).fill(cell("",{bg:"f8fafc"})));
+    const rSpace = R(...Array(COLS).fill(empty()));
+    const rHead = R(
+      cell("ALICI / FİRMA",{bold:true,color:"ffffff",bg:NAV}),
+      cell("TİP",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("MALZEME ADI",{bold:true,color:"ffffff",bg:NAV}),
+      cell("MİKTAR",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("BİRİM",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("VERİLME TARİHİ",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("DURUM",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("SAHA SİTE",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
+      cell("NOT",{bold:true,color:"ffffff",bg:NAV}),
+    );
+    const sorted = [...dagitim].filter(d=>d.durum!=="DEPOYA_IADE").sort((a,b)=>(a.alici_personel_ad||a.alici_firma||"").localeCompare(b.alici_personel_ad||b.alici_firma||""));
+    const rows = sorted.map((d,i)=>{
+      const bg = i%2===0 ? "ffffff" : "f8fafc";
+      const durumLabel = d.durum==="PERSONELDE" ? "Üzerinde" : d.durum==="SAHADA" ? "Sahada" : "İade";
+      const durumColor = d.durum==="SAHADA" ? "166534" : d.durum==="PERSONELDE" ? "1d4ed8" : "6b7280";
+      return R(
+        cell(d.alici_tipi==="TASERON" ? (d.alici_firma||"") : (d.alici_personel_ad||""),{bg,bold:true}),
+        cell(d.alici_tipi==="TASERON" ? "Taşeron" : "Personel",{bg,align:"center",color:d.alici_tipi==="TASERON"?"7c3aed":"1d4ed8"}),
+        cell(d.malzeme_adi||"",{bg}),
+        cell(Number(d.miktar||0),{bg,align:"center",bold:true}),
+        cell(d.birim||"Adet",{bg,align:"center"}),
+        cell(d.verilme_tarihi ? new Date(d.verilme_tarihi).toLocaleDateString("tr-TR") : "—",{bg,align:"center",color:"6b7280"}),
+        cell(durumLabel,{bg,align:"center",bold:true,color:durumColor}),
+        cell(d.saha_site_id||"—",{bg,align:"center",color:"15803d"}),
+        cell(d.notlar||"",{bg,italic:true,color:"6b7280",wrap:true}),
+      );
+    });
+    const rTotal = R(
+      cell(`Toplam ${sorted.length} kayıt`,{bold:true,bg:"f0fdf4",color:"166534"}),
+      ...Array(COLS-1).fill(empty())
+    );
+    const data = [r1,r2,rSpace,rHead,...rows,rSpace,rTotal];
+    const ws = XLSXStyle.utils.aoa_to_sheet(data);
+    ws["!cols"] = COL_W;
+    ws["!rows"] = [{hpt:28},{hpt:18},{hpt:6},{hpt:22},...sorted.map(()=>({hpt:18})),{hpt:6},{hpt:20}];
+    ws["!merges"] = [{ s:{r:0,c:0},e:{r:0,c:COLS-1} },{ s:{r:1,c:0},e:{r:1,c:COLS-1} }];
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws, "Personel Stok");
+    const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
+    import("jszip").then(({ default: JSZip }) => {
+      JSZip.loadAsync(buf).then(zip => {
+        return zip.file("xl/worksheets/sheet1.xml").async("string").then(xml => {
+          const patched = xml.replace('<sheetView workbookViewId="0"/>','<sheetView showGridLines="0" workbookViewId="0"/>').replace('<sheetView tabSelected="1" workbookViewId="0"/>','<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
+          zip.file("xl/worksheets/sheet1.xml", patched);
+          return zip.generateAsync({ type:"blob", compression:"STORE" });
+        });
+      }).then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href=url; a.download=`ERC_Personel_Stok_${tarih.replace(/\./g,"-")}.xlsx`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       });
     });
   };
@@ -15442,7 +15584,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
       {/* Tabs */}
       <div style={{ display:"flex",borderBottom:"2px solid #e2e8f0",background:"#fff",padding:"0 16px",gap:4 }}>
         {[["talepler","📋 Talepler"],
-          ...(canSeeDepo?[["depo","🏭 Depo Stok"],["fiyat","💰 Fiyat Listesi"]]:[])
+          ...(canSeeDepo?[["depo","🏭 Depo Stok"],["fiyat","💰 Fiyat Listesi"]]:[]),
+          ["dagitim","📤 Dağıtım"]
         ].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)}
             style={{ padding:"12px 16px",background:"none",border:"none",cursor:"pointer",fontWeight:tab===k?700:400,fontSize:14,
@@ -15781,6 +15924,123 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             </div>
           </div>
         )}
+        {/* ── DAĞITIM ── */}
+        {tab==="dagitim" && (() => {
+          const durumRenk = { PERSONELDE:{ bg:"#dbeafe",c:"#1d4ed8",l:"Üzerinde" }, SAHADA:{ bg:"#dcfce7",c:"#15803d",l:"Sahada" }, DEPOYA_IADE:{ bg:"#f3f4f6",c:"#6b7280",l:"İade Edildi" } };
+          const isPersonel = !canSeeDepo;
+          const liste = isPersonel ? dagitim : dagitim.filter(d=>!dagitimArama || (d.malzeme_adi||"").toLowerCase().includes(dagitimArama.toLowerCase()) || (d.alici_personel_ad||"").toLowerCase().includes(dagitimArama.toLowerCase()) || (d.alici_firma||"").toLowerCase().includes(dagitimArama.toLowerCase()));
+          return (
+            <div>
+              {/* Başlık satırı */}
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap" }}>
+                <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                  <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f" }}>{isPersonel ? "📦 Üzerimdeki Malzemeler" : "📤 Malzeme Dağıtım Takibi"}</div>
+                  <span style={{ fontSize:13,color:"#6b7280" }}>({liste.filter(d=>d.durum!=="DEPOYA_IADE").length} aktif)</span>
+                </div>
+                <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                  {canSeeDepo && (
+                    <div style={{ position:"relative" }}>
+                      <input placeholder="🔍 Malzeme, personel, firma..."
+                        value={dagitimArama} onChange={e=>setDagitimArama(e.target.value)}
+                        style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,width:240,outline:"none" }} />
+                      {dagitimArama && <button onClick={()=>setDagitimArama("")} style={{ position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#9ca3af",fontSize:14 }}>✕</button>}
+                    </div>
+                  )}
+                  {canSeeDepo && (
+                    <button onClick={()=>{ setDagitimModal(true); setDagitimForm({ malzeme_adi:"",miktar:1,birim:"Adet",alici_tipi:"PERSONEL",alici_personel_id:"",alici_personel_ad:"",alici_personel_email:"",alici_firma:"",site_id:"",bolge:"",notlar:"" }); }}
+                      style={{ padding:"9px 18px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
+                      + Malzeme Çıkışı Yap
+                    </button>
+                  )}
+                  {canSeeDepo && (
+                    <button onClick={()=>{ /* Excel */ exportDagitimExcel(); }}
+                      style={{ padding:"9px 16px",background:"#16a34a",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
+                      📥 Excel
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Tablo */}
+              <div style={{ overflowX:"auto",background:"#fff",borderRadius:12,boxShadow:"0 1px 6px rgba(0,0,0,0.07)" }}>
+                <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
+                  <thead>
+                    <tr style={{ background:"#1e3a5f",color:"#fff" }}>
+                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Malzeme</th>
+                      <th style={{ padding:"10px 12px",textAlign:"center",fontWeight:600 }}>Miktar</th>
+                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Birim</th>
+                      {canSeeDepo && <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Alıcı</th>}
+                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Verilme Tarihi</th>
+                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Site / Bölge</th>
+                      <th style={{ padding:"10px 12px",textAlign:"center",fontWeight:600 }}>Durum</th>
+                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Saha Site</th>
+                      <th style={{ padding:"10px 12px",textAlign:"center",fontWeight:600 }}>Tutanak</th>
+                      <th style={{ padding:"10px 12px" }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {liste.length===0 && <tr><td colSpan={10} style={{ padding:32,textAlign:"center",color:"#9ca3af" }}>Kayıt bulunamadı.</td></tr>}
+                    {liste.map((d,i)=>{
+                      const dr = durumRenk[d.durum] || durumRenk.PERSONELDE;
+                      const aktif = d.durum==="PERSONELDE";
+                      return (
+                        <tr key={d.id} style={{ borderBottom:"1px solid #f0f4f8",background:d.durum==="DEPOYA_IADE"?"#fafafa":i%2===0?"#fff":"#f8fafc", opacity:d.durum==="DEPOYA_IADE"?0.6:1 }}>
+                          <td style={{ padding:"9px 12px",fontWeight:600,maxWidth:200 }}>{d.malzeme_adi}</td>
+                          <td style={{ padding:"9px 12px",textAlign:"center",fontWeight:700 }}>{d.miktar}</td>
+                          <td style={{ padding:"9px 12px" }}>{d.birim}</td>
+                          {canSeeDepo && <td style={{ padding:"9px 12px" }}>
+                            {d.alici_tipi==="TASERON"
+                              ? <span style={{ color:"#7c3aed",fontWeight:600 }}>🏢 {d.alici_firma}</span>
+                              : <span style={{ color:"#1d4ed8",fontWeight:600 }}>👤 {d.alici_personel_ad}</span>
+                            }
+                          </td>}
+                          <td style={{ padding:"9px 12px",color:"#6b7280",fontSize:12 }}>{d.verilme_tarihi ? new Date(d.verilme_tarihi).toLocaleDateString("tr-TR") : "—"}</td>
+                          <td style={{ padding:"9px 12px",fontSize:12 }}>{d.site_id||d.bolge||"—"}</td>
+                          <td style={{ padding:"9px 12px",textAlign:"center" }}>
+                            <span style={{ padding:"3px 10px",borderRadius:8,background:dr.bg,color:dr.c,fontWeight:700,fontSize:11 }}>{dr.l}</span>
+                          </td>
+                          <td style={{ padding:"9px 12px",fontSize:12,color:"#15803d" }}>{d.saha_site_id||"—"}</td>
+                          <td style={{ padding:"9px 12px",textAlign:"center" }}>
+                            {d.tutanak_url
+                              ? <a href={d.tutanak_url} target="_blank" rel="noreferrer" style={{ color:"#2563eb",fontWeight:700,fontSize:12 }}>📄 Gör</a>
+                              : (canSeeDepo && aktif ? (
+                                <label style={{ cursor:"pointer",color:"#9ca3af",fontSize:11,padding:"3px 8px",border:"1px dashed #d1d5db",borderRadius:6 }}>
+                                  📎 Yükle
+                                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} onChange={async e=>{
+                                    const file = e.target.files[0]; if(!file) return;
+                                    const fd = new FormData(); fd.append("file", file);
+                                    try {
+                                      const up = await fetch(`${API_BASE}/upload`, { method:"POST", headers:{ Authorization:`Bearer ${token}` }, body:fd });
+                                      const ud = await up.json();
+                                      if (ud.url) {
+                                        await fetch(`${API_BASE}/malzeme/dagitim/${d.id}/tutanak`, { method:"PUT", headers, body:JSON.stringify({ tutanak_url: ud.url }) });
+                                        loadDagitim();
+                                      }
+                                    } catch {}
+                                  }} />
+                                </label>
+                              ) : <span style={{ color:"#d1d5db",fontSize:11 }}>—</span>)
+                            }
+                          </td>
+                          <td style={{ padding:"8px 10px" }}>
+                            {aktif && (
+                              <div style={{ display:"flex",gap:5 }}>
+                                <button onClick={()=>{ setSahaCikisModal(d); setSahaCikisForm({ saha_site_id:"",saha_notlar:"" }); }}
+                                  style={{ padding:"4px 9px",background:"#dcfce7",color:"#15803d",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,whiteSpace:"nowrap" }}>🏗 Sahaya</button>
+                                <button onClick={()=>{ setIadeModal(d); setIadeNot(""); }}
+                                  style={{ padding:"4px 9px",background:"#fef3c7",color:"#92400e",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,whiteSpace:"nowrap" }}>↩ İade</button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* DETAY MODAL */}
@@ -15797,6 +16057,150 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               <button onClick={()=>setRedModal(null)} style={{ padding:"10px 20px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>İptal</button>
               <button onClick={()=>{updateDurum(redModal.id,"REDDEDILDI",null,redNot);setRedModal(null);}}
                 style={{ padding:"10px 20px",background:"#dc2626",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>Reddet</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DAĞITIM ÇIKIŞ MODAL */}
+      {dagitimModal && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2200,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
+          <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:560,padding:28 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+              <h3 style={{ margin:0,fontSize:18,fontWeight:800,color:"#1e3a5f" }}>📤 Malzeme Çıkışı Yap</h3>
+              <button onClick={()=>setDagitimModal(false)} style={{ background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#6b7280" }}>✕</button>
+            </div>
+            <div style={{ display:"grid",gap:12 }}>
+              {/* Malzeme seç */}
+              <div>
+                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Malzeme Adı <span style={{color:"#dc2626"}}>*</span></label>
+                <select value={dagitimForm.malzeme_adi} onChange={e=>{
+                  const found = depoStok.find(s=>s.malzeme_adi===e.target.value);
+                  setDagitimForm(p=>({...p, malzeme_adi:e.target.value, birim:found?.birim||p.birim }));
+                }} style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }}>
+                  <option value="">Depodan malzeme seçin...</option>
+                  {depoStok.filter(s=>Number(s.depoda_kalan||0)>0).map(s=>(
+                    <option key={s.id} value={s.malzeme_adi}>{s.malzeme_adi} (Kalan: {s.depoda_kalan} {s.birim})</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <div>
+                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Miktar <span style={{color:"#dc2626"}}>*</span></label>
+                  <input type="number" min="0.001" step="0.001" value={dagitimForm.miktar} onChange={e=>setDagitimForm(p=>({...p,miktar:e.target.value}))}
+                    style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Birim</label>
+                  <input value={dagitimForm.birim} readOnly style={{ width:"100%",padding:"9px 10px",border:"1px solid #e5e7eb",borderRadius:7,fontSize:13,background:"#f9fafb",boxSizing:"border-box" }} />
+                </div>
+              </div>
+              {/* Alıcı tipi */}
+              <div>
+                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:6 }}>Alıcı Tipi</label>
+                <div style={{ display:"flex",gap:8 }}>
+                  {[["PERSONEL","👤 ERC Personeli"],["TASERON","🏢 Taşeron Firma"]].map(([v,l])=>(
+                    <button key={v} onClick={()=>setDagitimForm(p=>({...p,alici_tipi:v}))}
+                      style={{ flex:1,padding:"8px 0",background:dagitimForm.alici_tipi===v?"#1e3a5f":"#f9fafb",color:dagitimForm.alici_tipi===v?"#fff":"#374151",border:`2px solid ${dagitimForm.alici_tipi===v?"#1e3a5f":"#e5e7eb"}`,borderRadius:8,cursor:"pointer",fontWeight:dagitimForm.alici_tipi===v?700:400,fontSize:13 }}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {dagitimForm.alici_tipi==="PERSONEL" ? (
+                <div>
+                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Personel Seç <span style={{color:"#dc2626"}}>*</span></label>
+                  <select value={dagitimForm.alici_personel_email} onChange={e=>{
+                    const p = personelListe.find(p=>p.email===e.target.value);
+                    setDagitimForm(prev=>({...prev, alici_personel_email:e.target.value, alici_personel_ad:p?.ad_soyad||"", alici_personel_id:p?.id||"" }));
+                  }} style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }}>
+                    <option value="">Personel seçin...</option>
+                    {personelListe.filter(p=>p.aktif!==false).map(p=>(
+                      <option key={p.id} value={p.email}>{p.ad_soyad} — {p.unvan||p.bolge||""}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Taşeron Firma Adı <span style={{color:"#dc2626"}}>*</span></label>
+                  <input value={dagitimForm.alici_firma} onChange={e=>setDagitimForm(p=>({...p,alici_firma:e.target.value}))} placeholder="Firma adı"
+                    style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+                </div>
+              )}
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <div>
+                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Site ID / Bölge</label>
+                  <input value={dagitimForm.site_id} onChange={e=>setDagitimForm(p=>({...p,site_id:e.target.value}))} placeholder="B00008_..."
+                    style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Bölge</label>
+                  <select value={dagitimForm.bolge} onChange={e=>setDagitimForm(p=>({...p,bolge:e.target.value}))} style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }}>
+                    <option value="">Seçin</option>
+                    {["Ankara","İzmir","Antalya"].map(b=><option key={b}>{b}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Not</label>
+                <textarea value={dagitimForm.notlar} onChange={e=>setDagitimForm(p=>({...p,notlar:e.target.value}))} rows={2} placeholder="İsteğe bağlı..."
+                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,resize:"vertical",boxSizing:"border-box" }} />
+              </div>
+            </div>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end",marginTop:18 }}>
+              <button onClick={()=>setDagitimModal(false)} style={{ padding:"10px 22px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>İptal</button>
+              <button onClick={handleDagitimCikis} disabled={saving} style={{ padding:"10px 22px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>
+                {saving ? "Kaydediliyor..." : "📤 Çıkışı Onayla"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SAHA ÇIKIŞ MODAL */}
+      {sahaCikisModal && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2200,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
+          <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:420,padding:28 }}>
+            <h3 style={{ margin:"0 0 6px",fontSize:18,fontWeight:800,color:"#15803d" }}>🏗 Sahaya Çıkış</h3>
+            <p style={{ margin:"0 0 16px",fontSize:13,color:"#6b7280" }}><strong>{sahaCikisModal.malzeme_adi}</strong> — {sahaCikisModal.miktar} {sahaCikisModal.birim}</p>
+            <div style={{ display:"grid",gap:12 }}>
+              <div>
+                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Site ID <span style={{color:"#dc2626"}}>*</span></label>
+                <input value={sahaCikisForm.saha_site_id} onChange={e=>setSahaCikisForm(p=>({...p,saha_site_id:e.target.value}))} placeholder="B00008_NR3500_MWA"
+                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Not</label>
+                <textarea value={sahaCikisForm.saha_notlar} onChange={e=>setSahaCikisForm(p=>({...p,saha_notlar:e.target.value}))} rows={2} placeholder="Kurulum notu..."
+                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,resize:"vertical",boxSizing:"border-box" }} />
+              </div>
+            </div>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end",marginTop:16 }}>
+              <button onClick={()=>setSahaCikisModal(null)} style={{ padding:"10px 20px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>İptal</button>
+              <button onClick={handleSahaCikis} disabled={saving} style={{ padding:"10px 20px",background:"#15803d",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>
+                {saving ? "..." : "✅ Sahaya Çık"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* İADE MODAL */}
+      {iadeModal && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2200,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
+          <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:400,padding:28 }}>
+            <h3 style={{ margin:"0 0 6px",fontSize:18,fontWeight:800,color:"#92400e" }}>↩ Depoya İade</h3>
+            <p style={{ margin:"0 0 16px",fontSize:13,color:"#6b7280" }}><strong>{iadeModal.malzeme_adi}</strong> — {iadeModal.miktar} {iadeModal.birim} depoya geri eklenecek</p>
+            <div>
+              <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>İade Notu</label>
+              <textarea value={iadeNot} onChange={e=>setIadeNot(e.target.value)} rows={2} placeholder="İsteğe bağlı..."
+                style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,resize:"vertical",boxSizing:"border-box" }} />
+            </div>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end",marginTop:16 }}>
+              <button onClick={()=>setIadeModal(null)} style={{ padding:"10px 20px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>İptal</button>
+              <button onClick={handleIade} disabled={saving} style={{ padding:"10px 20px",background:"#92400e",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>
+                {saving ? "..." : "↩ İadeyi Onayla"}
+              </button>
             </div>
           </div>
         </div>

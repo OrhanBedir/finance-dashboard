@@ -11519,6 +11519,151 @@ app.delete("/malzeme/sarf/:id", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── MALZEME DAĞITIM SİSTEMİ ─────────────────────────────────────────────────
+
+// GET /malzeme/dagitim — tüm dağıtım kayıtları (Murat/PM/admin görür)
+app.get("/malzeme/dagitim", authMiddleware, async (req, res) => {
+  try {
+    const { personel_email, durum } = req.query;
+    let where = "WHERE 1=1";
+    const params = [];
+    let idx = 1;
+    if (personel_email) {
+      where += ` AND d.alici_personel_email=LOWER($${idx++})`;
+      params.push(personel_email.toLowerCase());
+    }
+    if (durum) {
+      where += ` AND d.durum=$${idx++}`;
+      params.push(durum);
+    }
+    const r = await pool.query(`
+      SELECT d.*, t.talep_no, t.bolge as talep_bolge
+      FROM malzeme_dagitim d
+      LEFT JOIN malzeme_talepler t ON t.id = d.talep_id
+      ${where}
+      ORDER BY d.verilme_tarihi DESC, d.id DESC
+    `, params);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /malzeme/dagitim — malzeme çıkışı yap (Murat yapar)
+app.post("/malzeme/dagitim", authMiddleware, async (req, res) => {
+  try {
+    const {
+      talep_id, malzeme_adi, miktar, birim,
+      alici_tipi, alici_personel_id, alici_personel_ad, alici_personel_email,
+      alici_firma, site_id, bolge, verilme_tarihi, notlar
+    } = req.body;
+
+    // Depo stoktan düş
+    const stok = await pool.query(
+      "SELECT id, toplam_miktar FROM depo_stok WHERE LOWER(malzeme_adi)=LOWER($1)",
+      [malzeme_adi]
+    );
+    if (stok.rows.length > 0) {
+      await pool.query(
+        "UPDATE depo_stok SET toplam_miktar=GREATEST(0,toplam_miktar-$1), updated_at=NOW() WHERE id=$2",
+        [miktar, stok.rows[0].id]
+      );
+    }
+
+    const r = await pool.query(
+      `INSERT INTO malzeme_dagitim
+        (talep_id, malzeme_adi, miktar, birim, alici_tipi, alici_personel_id, alici_personel_ad, alici_personel_email, alici_firma, site_id, bolge, verilme_tarihi, notlar, durum, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'PERSONELDE',$14) RETURNING *`,
+      [talep_id||null, malzeme_adi, miktar, birim||"Adet",
+       alici_tipi||"PERSONEL", alici_personel_id||null, alici_personel_ad||"", (alici_personel_email||"").toLowerCase(),
+       alici_firma||"", site_id||"", bolge||"",
+       verilme_tarihi||new Date().toISOString().split("T")[0], notlar||"",
+       req.user?.email||""]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /malzeme/dagitim/:id/tutanak — tutanak URL güncelle
+app.put("/malzeme/dagitim/:id/tutanak", authMiddleware, async (req, res) => {
+  try {
+    const { tutanak_url } = req.body;
+    const r = await pool.query(
+      "UPDATE malzeme_dagitim SET tutanak_url=$1, updated_at=NOW() WHERE id=$2 RETURNING *",
+      [tutanak_url, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /malzeme/dagitim/:id/saha-cikis — personel sahaya çıkış yapar
+app.put("/malzeme/dagitim/:id/saha-cikis", authMiddleware, async (req, res) => {
+  try {
+    const { saha_site_id, miktar, saha_notlar } = req.body;
+    const r = await pool.query(
+      `UPDATE malzeme_dagitim
+       SET durum='SAHADA', saha_site_id=$1, saha_cikis_tarihi=CURRENT_DATE, saha_notlar=$2, updated_at=NOW()
+       WHERE id=$3 RETURNING *`,
+      [saha_site_id, saha_notlar||"", req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /malzeme/dagitim/:id/iade — personel depoya iade eder
+app.put("/malzeme/dagitim/:id/iade", authMiddleware, async (req, res) => {
+  try {
+    const { notlar } = req.body;
+    const dag = await pool.query("SELECT * FROM malzeme_dagitim WHERE id=$1", [req.params.id]);
+    if (!dag.rows.length) return res.status(404).json({ error: "Bulunamadı" });
+    const d = dag.rows[0];
+
+    // Depoya geri ekle
+    const stok = await pool.query(
+      "SELECT id FROM depo_stok WHERE LOWER(malzeme_adi)=LOWER($1)",
+      [d.malzeme_adi]
+    );
+    if (stok.rows.length > 0) {
+      await pool.query(
+        "UPDATE depo_stok SET toplam_miktar=toplam_miktar+$1, updated_at=NOW() WHERE id=$2",
+        [d.miktar, stok.rows[0].id]
+      );
+    } else {
+      await pool.query(
+        "INSERT INTO depo_stok (malzeme_adi, birim, toplam_miktar) VALUES ($1,$2,$3)",
+        [d.malzeme_adi, d.birim, d.miktar]
+      );
+    }
+
+    const r = await pool.query(
+      "UPDATE malzeme_dagitim SET durum='DEPOYA_IADE', saha_notlar=$1, updated_at=NOW() WHERE id=$2 RETURNING *",
+      [notlar||"", req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /malzeme/dagitim/ozet — personel bazlı özet (Murat Excel için)
+app.get("/malzeme/dagitim/ozet", authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT
+        COALESCE(alici_personel_ad, alici_firma, 'Bilinmiyor') as alici,
+        alici_tipi, alici_personel_email, alici_firma,
+        malzeme_adi, birim,
+        SUM(CASE WHEN durum='PERSONELDE' THEN miktar ELSE 0 END) as personelde,
+        SUM(CASE WHEN durum='SAHADA' THEN miktar ELSE 0 END) as sahada,
+        SUM(CASE WHEN durum='DEPOYA_IADE' THEN miktar ELSE 0 END) as iade,
+        MIN(verilme_tarihi) as ilk_verilme,
+        MAX(verilme_tarihi) as son_verilme
+      FROM malzeme_dagitim
+      GROUP BY alici, alici_tipi, alici_personel_email, alici_firma, malzeme_adi, birim
+      HAVING SUM(CASE WHEN durum='PERSONELDE' THEN miktar ELSE 0 END) > 0
+         OR  SUM(CASE WHEN durum='SAHADA' THEN miktar ELSE 0 END) > 0
+      ORDER BY alici, malzeme_adi
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Otomatik migration: her deploy/restart'ta eksik kolonları ekle ──
 const AUTO_MIGRATIONS = [
   // ── Malzeme Yönetimi tabloları ──
@@ -11663,6 +11808,32 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE malzeme_fiyat_listesi ADD COLUMN IF NOT EXISTS ilk_fiyat_tarihi DATE DEFAULT NULL",
   "ALTER TABLE malzeme_fiyat_listesi ADD COLUMN IF NOT EXISTS son_fiyat NUMERIC(12,2) DEFAULT NULL",
   "ALTER TABLE malzeme_fiyat_listesi ADD COLUMN IF NOT EXISTS son_fiyat_tarihi DATE DEFAULT NULL",
+  // Malzeme dağıtım sistemi
+  `CREATE TABLE IF NOT EXISTS malzeme_dagitim (
+  id SERIAL PRIMARY KEY,
+  talep_id INTEGER REFERENCES malzeme_talepler(id) ON DELETE SET NULL,
+  malzeme_adi TEXT NOT NULL,
+  miktar NUMERIC(12,3) NOT NULL,
+  birim TEXT DEFAULT 'Adet',
+  alici_tipi TEXT NOT NULL DEFAULT 'PERSONEL',  -- 'PERSONEL' veya 'TASERON'
+  alici_personel_id INTEGER,
+  alici_personel_ad TEXT,
+  alici_personel_email TEXT,
+  alici_firma TEXT,
+  site_id TEXT,
+  bolge TEXT,
+  verilme_tarihi DATE DEFAULT CURRENT_DATE,
+  tutanak_url TEXT,
+  durum TEXT DEFAULT 'PERSONELDE',  -- 'PERSONELDE', 'SAHADA', 'DEPOYA_IADE'
+  saha_site_id TEXT,
+  saha_cikis_tarihi DATE,
+  saha_notlar TEXT,
+  notlar TEXT,
+  created_by TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`,
+  "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS talep_tipi TEXT DEFAULT 'SATIN_ALMA'",
 ];
 
 (async () => {
