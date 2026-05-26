@@ -14836,6 +14836,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
       { s:{r:0,c:0}, e:{r:0,c:6} },
       { s:{r:1,c:0}, e:{r:1,c:6} },
     ];
+    ws["!sheetViews"] = [{ showGridLines: false }];
     const wb = XLSXStyle.utils.book_new();
     XLSXStyle.utils.book_append_sheet(wb, ws, "Depo Stok");
     XLSXStyle.writeFile(wb, `ERC_Depo_Stok_${tarih.replace(/\./g,"-")}.xlsx`);
