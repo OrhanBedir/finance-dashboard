@@ -1,4 +1,9 @@
 {
+  "name": "erc-root",
+  "scripts": {
+    "start": "node server.js",
+    "install-backend": "cd backend && npm install"
+  },
   "dependencies": {
     "exceljs": "^4.4.0",
     "xlsx": "^0.18.5"

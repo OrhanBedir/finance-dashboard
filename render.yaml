@@ -3,8 +3,7 @@ services:
     name: erc-backend
     env: node
     plan: free
-    rootDir: backend
-    buildCommand: npm install
+    buildCommand: cd backend && npm install
     startCommand: node server.js
     envVars:
       - key: DATABASE_URL
