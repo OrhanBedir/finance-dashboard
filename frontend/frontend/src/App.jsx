@@ -14943,15 +14943,26 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
           {/* ── Onay Zinciri ── */}
           {(() => {
+            // Talep edenin rolüne göre hangi adımlar atlanıyor?
+            const tEml = (d.talep_eden_email||"").toLowerCase();
+            const talepEdenPM      = tEml === "orhan.bedir@simsektel.com";
+            const talepEdenNurcan  = tEml === "nurcan.kus@simsektel.com";
+            const talepEdenMurat   = tEml === "murat.istek@simsektel.com";
+            const talepEdenDirektor= tEml === "duzgun.simsek@simsektel.com";
+            // PM talep ederse: Nurcan + PM adımları atlanır → Murat'tan başlar
+            // Nurcan talep ederse: Nurcan adımı atlanır → PM'den başlar
+            // Murat/Direktor talep ederse: sırasıyla kendi adımına kadar atlanır
+            const skipNurcan = talepEdenPM || talepEdenNurcan || talepEdenMurat || talepEdenDirektor;
+            const skipPM     = talepEdenPM || talepEdenMurat || talepEdenDirektor;
             const ZINCIR = [
-              { key:"talep",       label:"Talep Eden",    kisi: d.talep_eden_ad || "—",             icon:"👤", done: true,                                                                             color:"#0ea5e9" },
-              { key:"nurcan",   label:"Rollout Müdürü", kisi:"Nurcan Kuş",    icon:"✅", done: !["TASLAK","NURCAN_ONAY"].includes(d.durum)&&d.durum!=="REDDEDILDI", waiting: d.durum==="NURCAN_ONAY", color:"#8b5cf6" },
-              { key:"pm",       label:"PM Onayı",       kisi:"Orhan Bedir",   icon:"✅", done: ["FIYAT_GIRISI","DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="PM_ONAY", color:"#2563eb" },
-              { key:"murat",    label:"Envanter Onayı", kisi:"Murat İstek",   icon:"✅", done: ["DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="FIYAT_GIRISI", color:"#f59e0b" },
-              { key:"duzgun",   label:"Proje Dir.",     kisi:"Düzgün Şimşek", icon:"✅", done: ["SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="DUZGUN_ONAY", color:"#0284c7" },
-              { key:"tedarik",  label:"Tedarik",        kisi:"Murat İstek",   icon:"🛒", done: d.durum==="DEPODA", waiting: d.durum==="SATINALINACAK", color:"#ea580c" },
-              { key:"depo",     label:"Depoda ✓",       kisi:"Tedarik Tamamlandı", icon:"📦", done: d.durum==="DEPODA", waiting: false, color:"#16a34a" },
-            ];
+              { key:"talep",    label:"Talep Eden",    kisi: d.talep_eden_ad||"—",      done: true,                                                                             color:"#0ea5e9" },
+              { key:"nurcan",   label:"Rollout Müdürü",kisi:"Nurcan Kuş",               done: !skipNurcan && !["TASLAK","NURCAN_ONAY"].includes(d.durum)&&d.durum!=="REDDEDILDI", waiting: !skipNurcan && d.durum==="NURCAN_ONAY", skipped: skipNurcan, color:"#8b5cf6" },
+              { key:"pm",       label:"PM Onayı",      kisi:"Orhan Bedir",              done: !skipPM && ["FIYAT_GIRISI","DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: !skipPM && d.durum==="PM_ONAY", skipped: skipPM, color:"#2563eb" },
+              { key:"murat",    label:"Envanter Onayı",kisi:"Murat İstek",              done: ["DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="FIYAT_GIRISI", color:"#f59e0b" },
+              { key:"duzgun",   label:"Proje Dir.",    kisi:"Düzgün Şimşek",            done: ["SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="DUZGUN_ONAY", color:"#0284c7" },
+              { key:"tedarik",  label:"Tedarik",       kisi:"Murat İstek",              done: d.durum==="DEPODA", waiting: d.durum==="SATINALINACAK", color:"#ea580c" },
+              { key:"depo",     label:"Depoda ✓",      kisi:"Tedarik Tamamlandı",       done: d.durum==="DEPODA", waiting: false, color:"#16a34a" },
+            ].filter(s => !s.skipped); // Atlanacak adımları zincirden çıkar
             const reddi = d.durum === "REDDEDILDI";
             return (
               <div style={{ marginBottom:16, background:"#f8fafc", borderRadius:12, padding:"16px 20px", border:"1px solid #e2e8f0" }}>
@@ -14959,7 +14970,6 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                 <div style={{ display:"flex", alignItems:"flex-start", gap:0, overflowX:"auto", paddingBottom:4 }}>
                   {ZINCIR.map((s, idx) => {
                     const bgColor = reddi ? "#fee2e2" : s.done ? s.color : s.waiting ? "#fef9c3" : "#f1f5f9";
-                    const txtColor = reddi ? "#dc2626" : s.done ? "#fff" : s.waiting ? "#92400e" : "#9ca3af";
                     const borderColor = s.done ? s.color : s.waiting ? "#fde047" : "#e2e8f0";
                     return (
                       <React.Fragment key={s.key}>
