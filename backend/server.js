@@ -11524,13 +11524,28 @@ app.delete("/malzeme/sarf/:id", authMiddleware, async (req, res) => {
 // GET /malzeme/dagitim — tüm dağıtım kayıtları (Murat/PM/admin görür)
 app.get("/malzeme/dagitim", authMiddleware, async (req, res) => {
   try {
-    const { personel_email, durum } = req.query;
+    const { personel_email, personel_ad, durum } = req.query;
     let where = "WHERE 1=1";
     const params = [];
     let idx = 1;
     if (personel_email) {
-      where += ` AND d.alici_personel_email=LOWER($${idx++})`;
+      // email ile eşleştir VEYA users tablosundan bu email'e ait kişiyle eşleştir
+      // Hem stored email hem de users tablosundaki email'e göre ara
+      where += ` AND (
+        LOWER(d.alici_personel_email) = LOWER($${idx})
+        OR (d.alici_personel_email = '' AND LOWER(d.alici_personel_ad) = (
+          SELECT LOWER(name) FROM users WHERE LOWER(email)=LOWER($${idx}) LIMIT 1
+        ))
+        OR (d.alici_personel_email = '' AND d.alici_personel_id IN (
+          SELECT id FROM personel WHERE LOWER(email)=LOWER($${idx}) LIMIT 1
+        ))
+      )`;
       params.push(personel_email.toLowerCase());
+      idx++;
+    }
+    if (personel_ad) {
+      where += ` AND LOWER(d.alici_personel_ad) ILIKE LOWER($${idx++})`;
+      params.push(`%${personel_ad}%`);
     }
     if (durum) {
       where += ` AND d.durum=$${idx++}`;
