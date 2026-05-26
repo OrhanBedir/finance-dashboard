@@ -14175,6 +14175,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const [talepLoading, setTalepLoading] = useState(false);
   const [talepArama, setTalepArama] = useState("");
   const [talepDurumFilter, setTalepDurumFilter] = useState("");
+  const [depoArama, setDepoArama] = useState("");
+  const [fiyatArama, setFiyatArama] = useState("");
 
   // Form görünümü: null=liste, "yeni"=yeni form, id=düzenleme
   const [formView, setFormView] = useState(null);
@@ -15504,14 +15506,32 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
         {/* ── DEPO STOK ── */}
         {tab==="depo" && canSeeDepo && (
           <div>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-              <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f" }}>🏭 Depo Stok Durumu</div>
-              {(isAdmin||isMurat) && (
-                <button onClick={()=>{setDepoEditModal({id:null});setDepoEditForm({malzeme_adi:"",birim:"Adet",toplam_miktar:"",aciklama:""});}}
-                  style={{ padding:"9px 18px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14 }}>
-                  + Manuel Stok Güncelle
-                </button>
-              )}
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap" }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10,flex:1 }}>
+                <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f",whiteSpace:"nowrap" }}>🏭 Depo Stok Durumu</div>
+                <span style={{ fontSize:13,color:"#6b7280",fontWeight:500 }}>
+                  ({(depoArama ? depoStok.filter(s=>(s.malzeme_adi||"").toLowerCase().includes(depoArama.toLowerCase())) : depoStok).length} kalem)
+                </span>
+              </div>
+              <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                <div style={{ position:"relative" }}>
+                  <input
+                    placeholder="🔍 Malzeme ara…"
+                    value={depoArama} onChange={e=>setDepoArama(e.target.value)}
+                    style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,width:220,outline:"none" }}
+                  />
+                  {depoArama && (
+                    <button onClick={()=>setDepoArama("")}
+                      style={{ position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#9ca3af",fontSize:14,padding:0,lineHeight:1 }}>✕</button>
+                  )}
+                </div>
+                {(isAdmin||isMurat) && (
+                  <button onClick={()=>{setDepoEditModal({id:null});setDepoEditForm({malzeme_adi:"",birim:"Adet",toplam_miktar:"",aciklama:""});}}
+                    style={{ padding:"9px 18px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
+                    + Manuel Stok Güncelle
+                  </button>
+                )}
+              </div>
             </div>
             <div style={{ overflowX:"auto",background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
               <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
@@ -15523,8 +15543,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {depoStok.length===0&&<tr><td colSpan={8} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>Depo kaydı yok.</td></tr>}
-                  {depoStok.map((s,i)=>(
+                  {depoStok.filter(s=>!depoArama||(s.malzeme_adi||"").toLowerCase().includes(depoArama.toLowerCase())).length===0&&<tr><td colSpan={8} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>{depoArama?"Eşleşen malzeme bulunamadı.":"Depo kaydı yok."}</td></tr>}
+                  {depoStok.filter(s=>!depoArama||(s.malzeme_adi||"").toLowerCase().includes(depoArama.toLowerCase())).map((s,i)=>(
                     <tr key={s.id} style={{ borderBottom:"1px solid #f0f4f8",background:i%2===0?"#fff":"#f8fafc" }}>
                       <td style={{ padding:"10px 12px",fontWeight:600 }}>{s.malzeme_adi}</td>
                       <td style={{ padding:"10px 12px",textAlign:"center" }}>{Number(s.toplam_miktar).toLocaleString("tr-TR")}</td>
@@ -15552,7 +15572,25 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
         {/* ── FİYAT LİSTESİ ── */}
         {tab==="fiyat" && canSeeDepo && (
           <div>
-            <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f",marginBottom:16 }}>💰 Malzeme Fiyat Listesi</div>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap" }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f" }}>💰 Malzeme Fiyat Listesi</div>
+                <span style={{ fontSize:13,color:"#6b7280",fontWeight:500 }}>
+                  ({(fiyatArama ? fiyatListe.filter(f=>(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())) : fiyatListe).length} kalem)
+                </span>
+              </div>
+              <div style={{ position:"relative" }}>
+                <input
+                  placeholder="🔍 Malzeme veya kategori ara…"
+                  value={fiyatArama} onChange={e=>setFiyatArama(e.target.value)}
+                  style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,width:260,outline:"none" }}
+                />
+                {fiyatArama && (
+                  <button onClick={()=>setFiyatArama("")}
+                    style={{ position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#9ca3af",fontSize:14,padding:0,lineHeight:1 }}>✕</button>
+                )}
+              </div>
+            </div>
             {canEditFiyat && (
               <div style={{ background:"#fff",borderRadius:12,padding:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginBottom:16 }}>
                 <div style={{ fontSize:14,fontWeight:700,marginBottom:12 }}>{fiyatEditId?"✏️ Malzeme Düzenle":"➕ Yeni Malzeme Ekle"}</div>
@@ -15600,8 +15638,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {fiyatListe.length===0&&<tr><td colSpan={5} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>Fiyat listesi boş.</td></tr>}
-                  {fiyatListe.map((f,i)=>(
+                  {fiyatListe.filter(f=>!fiyatArama||(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())).length===0&&<tr><td colSpan={5} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>{fiyatArama?"Eşleşen malzeme bulunamadı.":"Fiyat listesi boş."}</td></tr>}
+                  {fiyatListe.filter(f=>!fiyatArama||(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())).map((f,i)=>(
                     <tr key={f.id} style={{ borderBottom:"1px solid #f0f4f8",background:i%2===0?"#fff":"#f8fafc" }}>
                       <td style={{ padding:"9px 14px",fontWeight:600 }}>{f.malzeme_adi}</td>
                       <td style={{ padding:"9px 14px" }}>{f.birim}</td>
