@@ -408,7 +408,7 @@ app.put(
       const { id } = req.params;
       const { role } = req.body;
 
-      if (!role || !["admin", "user", "rollout_mudur", "genel_mudur"].includes(role)) {
+      if (!role || !["admin", "user", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe"].includes(role)) {
         return res.status(400).json({ ok: false, error: "Geçersiz rol" });
       }
 
