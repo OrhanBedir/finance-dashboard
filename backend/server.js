@@ -229,6 +229,7 @@ app.use((req, res, next) => {
     "https://finance-dashboard-topaz-three.vercel.app",
     "https://finance-dashboard.vercel.app",
     "https://finance-dashboard-3yns.vercel.app",
+    "https://app.omnix.global",
   ];
 
   if (origin && allowedOrigins.includes(origin)) {
@@ -519,6 +520,7 @@ const allowedOrigins = [
   "https://finance-dashboard-topaz-three.vercel.app",
   "https://finance-dashboard.vercel.app",
   "https://finance-dashboard-3yns.vercel.app",
+  "https://app.omnix.global",
 ];
 
 app.use((req, res, next) => {
