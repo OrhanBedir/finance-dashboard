@@ -14160,17 +14160,249 @@ function CashFlowPanel({ currentUser, onBack }) {
   );
 }
 
+// ─── PERSONEL MALZEME PANELİ ─────────────────────────────────────────────────
+function PersonelMalzemePanel({ currentUser }) {
+  const _email = (currentUser?.email || "").toLowerCase();
+  const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
+  const [liste, setListe] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [aktifTab, setAktifTab] = React.useState("PERSONELDE");
+  const [sahaCikisModal, setSahaCikisModal] = React.useState(null);
+  const [sahaSiteId, setSahaSiteId] = React.useState("");
+  const [sahaNot, setSahaNot] = React.useState("");
+  const [iadeModal, setIadeModal] = React.useState(null);
+  const [iadeNot, setIadeNot] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [siteCodeSuggestions2, setSiteCodeSuggestions2] = React.useState([]);
+  const [showSiteDrop2, setShowSiteDrop2] = React.useState(false);
+
+  const API_BASE2 = import.meta.env.VITE_API_BASE || "http://localhost:5001";
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      let r = await fetch(`${API_BASE2}/malzeme/dagitim?personel_email=${encodeURIComponent(_email)}`, { headers });
+      let d = await r.json();
+      if (!Array.isArray(d) || d.length === 0) {
+        const name = currentUser?.name || "";
+        if (name) {
+          const r2 = await fetch(`${API_BASE2}/malzeme/dagitim?personel_ad=${encodeURIComponent(name)}`, { headers });
+          d = await r2.json();
+        }
+      }
+      setListe(Array.isArray(d) ? d : []);
+    } catch {}
+    setLoading(false);
+  };
+
+  React.useEffect(() => { load(); }, []);
+
+  const searchSite2 = async (q) => {
+    if (!q || q.length < 2) { setSiteCodeSuggestions2([]); return; }
+    try {
+      const r = await fetch(`${API_BASE2}/malzeme/site-codes?q=${encodeURIComponent(q)}`, { headers });
+      const d = await r.json();
+      setSiteCodeSuggestions2(Array.isArray(d) ? d : []);
+    } catch { setSiteCodeSuggestions2([]); }
+  };
+
+  const handleSaha = async () => {
+    if (!sahaSiteId.trim()) { alert("Site ID giriniz"); return; }
+    setSaving(true);
+    try {
+      await fetch(`${API_BASE2}/malzeme/dagitim/${sahaCikisModal.id}/saha-cikis`, { method:"PUT", headers, body: JSON.stringify({ saha_site_id: sahaSiteId, saha_notlar: sahaNot }) });
+      setSahaCikisModal(null); setSahaSiteId(""); setSahaNot(""); load();
+    } catch (e) { alert(e.message); }
+    setSaving(false);
+  };
+
+  const handleIade = async () => {
+    setSaving(true);
+    try {
+      await fetch(`${API_BASE2}/malzeme/dagitim/${iadeModal.id}/iade`, { method:"PUT", headers, body: JSON.stringify({ notlar: iadeNot }) });
+      setIadeModal(null); setIadeNot(""); load();
+    } catch (e) { alert(e.message); }
+    setSaving(false);
+  };
+
+  const tabs = [
+    { key:"PERSONELDE", label:"📦 Üzerimdeki", color:"#1d4ed8" },
+    { key:"SAHADA",     label:"🏗 Sahada",     color:"#15803d" },
+    { key:"DEPOYA_IADE",label:"↩ İade",        color:"#6b7280" },
+  ];
+
+  const durumRenk = { PERSONELDE:{bg:"#dbeafe",c:"#1d4ed8",l:"Üzerimde"}, SAHADA:{bg:"#dcfce7",c:"#15803d",l:"Sahada ✓"}, DEPOYA_IADE:{bg:"#f3f4f6",c:"#6b7280",l:"İade Edildi"} };
+
+  const filtered = liste.filter(d => d.durum === aktifTab);
+  const counts = { PERSONELDE: liste.filter(d=>d.durum==="PERSONELDE").length, SAHADA: liste.filter(d=>d.durum==="SAHADA").length, DEPOYA_IADE: liste.filter(d=>d.durum==="DEPOYA_IADE").length };
+
+  if (loading) return <div style={{ textAlign:"center", padding:60, color:"#6b7280" }}>Yükleniyor…</div>;
+
+  return (
+    <div style={{ maxWidth:800, margin:"0 auto" }}>
+      {/* Özet kartlar */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
+        {tabs.map(t => (
+          <div key={t.key} onClick={()=>setAktifTab(t.key)}
+            style={{ background:"#fff", borderRadius:12, padding:"14px 10px", textAlign:"center", cursor:"pointer", border:`2px solid ${aktifTab===t.key?t.color:"#e5e7eb"}`, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+            <div style={{ fontSize:26, fontWeight:800, color:t.color }}>{counts[t.key]}</div>
+            <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>{t.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tab seçici */}
+      <div style={{ display:"flex", borderBottom:"2px solid #e2e8f0", background:"#fff", borderRadius:"10px 10px 0 0", overflow:"hidden", marginBottom:0 }}>
+        {tabs.map(t => (
+          <button key={t.key} onClick={()=>setAktifTab(t.key)}
+            style={{ flex:1, padding:"11px 0", border:"none", background:"none", cursor:"pointer", fontWeight:aktifTab===t.key?700:400, fontSize:13, color:aktifTab===t.key?t.color:"#6b7280", borderBottom:aktifTab===t.key?`3px solid ${t.color}`:"3px solid transparent", marginBottom:-2 }}>
+            {t.label} {counts[t.key]>0?`(${counts[t.key]})`:""}</button>
+        ))}
+      </div>
+
+      {/* Liste */}
+      <div style={{ background:"#fff", borderRadius:"0 0 12px 12px", boxShadow:"0 1px 6px rgba(0,0,0,0.07)", overflow:"hidden" }}>
+        {filtered.length === 0 ? (
+          <div style={{ textAlign:"center", padding:40, color:"#9ca3af" }}>
+            <div style={{ fontSize:40, marginBottom:10 }}>📭</div>
+            <div>Bu kategoride malzeme yok</div>
+            <button onClick={load} style={{ marginTop:12, padding:"6px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:12 }}>Yenile</button>
+          </div>
+        ) : filtered.map((d, i) => {
+          const dr = durumRenk[d.durum] || durumRenk.PERSONELDE;
+          const aktif = d.durum === "PERSONELDE";
+          return (
+            <div key={d.id} style={{ padding:"14px 16px", borderBottom:i<filtered.length-1?"1px solid #f0f4f8":"none" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                <div style={{ fontWeight:700, color:"#1e3a5f", fontSize:14, flex:1, marginRight:10 }}>{d.malzeme_adi}</div>
+                <span style={{ padding:"3px 10px", borderRadius:8, background:dr.bg, color:dr.c, fontWeight:700, fontSize:11, whiteSpace:"nowrap" }}>{dr.l}</span>
+              </div>
+              <div style={{ display:"flex", gap:16, fontSize:12, color:"#6b7280", marginBottom:8, flexWrap:"wrap" }}>
+                <span>📏 {d.miktar} {d.birim}</span>
+                {(d.site_id||d.bolge) && <span>📍 {d.site_id||d.bolge}</span>}
+                {d.saha_site_id && <span>🏗 Saha: {d.saha_site_id}</span>}
+                {d.verilme_tarihi && <span>📅 {new Date(d.verilme_tarihi).toLocaleDateString("tr-TR")}</span>}
+              </div>
+              {d.tutanak_url && (
+                <a href={d.tutanak_url} target="_blank" rel="noreferrer"
+                  style={{ display:"inline-block", marginBottom:8, fontSize:12, color:"#2563eb", fontWeight:600 }}>📄 Tutanağı Gör</a>
+              )}
+              {aktif && (
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <button onClick={()=>{ setSahaCikisModal(d); setSahaSiteId(""); setSahaNot(""); }}
+                    style={{ padding:"6px 14px", background:"#dcfce7", color:"#15803d", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                    🏗 Sahaya Çıkış
+                  </button>
+                  <button onClick={()=>{ setIadeModal(d); setIadeNot(""); }}
+                    style={{ padding:"6px 14px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                    ↩ Depoya İade
+                  </button>
+                  {!d.tutanak_url && (
+                    <label style={{ padding:"6px 14px", background:"#f0f4ff", color:"#2563eb", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                      📎 Tutanak Yükle
+                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} onChange={async e=>{
+                        const file = e.target.files[0]; if(!file) return;
+                        const fd = new FormData(); fd.append("file", file);
+                        try {
+                          const up = await fetch(`${API_BASE2}/upload`, { method:"POST", headers:{ Authorization:`Bearer ${token}` }, body:fd });
+                          const ud = await up.json();
+                          if (ud.url) { await fetch(`${API_BASE2}/malzeme/dagitim/${d.id}/tutanak`, { method:"PUT", headers, body:JSON.stringify({ tutanak_url: ud.url }) }); load(); }
+                        } catch {}
+                      }} />
+                    </label>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Saha Çıkış Modal */}
+      {sahaCikisModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+          <div style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:440, padding:24 }}>
+            <h3 style={{ margin:"0 0 6px", fontSize:17, fontWeight:800, color:"#15803d" }}>🏗 Sahaya Çıkış</h3>
+            <p style={{ margin:"0 0 16px", fontSize:13, color:"#6b7280" }}><strong>{sahaCikisModal.malzeme_adi}</strong> — {sahaCikisModal.miktar} {sahaCikisModal.birim}</p>
+            <div style={{ display:"grid", gap:12 }}>
+              <div style={{ position:"relative" }}>
+                <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4 }}>Site ID <span style={{color:"#dc2626"}}>*</span></label>
+                <input value={sahaSiteId}
+                  onChange={e=>{ setSahaSiteId(e.target.value); searchSite2(e.target.value); setShowSiteDrop2(true); }}
+                  onBlur={()=>setTimeout(()=>setShowSiteDrop2(false),180)}
+                  placeholder="Site kodu yazın..."
+                  style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, boxSizing:"border-box" }} />
+                {showSiteDrop2 && siteCodeSuggestions2.length>0 && (
+                  <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:"1px solid #d1d5db", borderRadius:8, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:9999, maxHeight:180, overflowY:"auto" }}>
+                    {siteCodeSuggestions2.map(s=>(
+                      <div key={s.site_code} onMouseDown={()=>{ setSahaSiteId(s.site_code); setShowSiteDrop2(false); setSiteCodeSuggestions2([]); }}
+                        style={{ padding:"8px 12px", cursor:"pointer", fontSize:13, borderBottom:"1px solid #f3f4f6" }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                        <span style={{ fontWeight:600, color:"#1e3a5f" }}>{s.site_code}</span>
+                        {s.bolge && <span style={{ marginLeft:8, color:"#6b7280", fontSize:11 }}>{s.bolge}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4 }}>Not</label>
+                <textarea value={sahaNot} onChange={e=>setSahaNot(e.target.value)} rows={2} placeholder="Kurulum notu..."
+                  style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, resize:"vertical", boxSizing:"border-box" }} />
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:16 }}>
+              <button onClick={()=>setSahaCikisModal(null)} style={{ padding:"9px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700 }}>İptal</button>
+              <button onClick={handleSaha} disabled={saving} style={{ padding:"9px 20px", background:"#15803d", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700 }}>
+                {saving ? "..." : "✅ Sahaya Çık"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* İade Modal */}
+      {iadeModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+          <div style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:400, padding:24 }}>
+            <h3 style={{ margin:"0 0 6px", fontSize:17, fontWeight:800, color:"#92400e" }}>↩ Depoya İade</h3>
+            <p style={{ margin:"0 0 16px", fontSize:13, color:"#6b7280" }}><strong>{iadeModal.malzeme_adi}</strong> — {iadeModal.miktar} {iadeModal.birim} depoya geri eklenecek</p>
+            <div>
+              <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4 }}>İade Notu</label>
+              <textarea value={iadeNot} onChange={e=>setIadeNot(e.target.value)} rows={2} placeholder="İsteğe bağlı..."
+                style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, resize:"vertical", boxSizing:"border-box" }} />
+            </div>
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:16 }}>
+              <button onClick={()=>setIadeModal(null)} style={{ padding:"9px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700 }}>İptal</button>
+              <button onClick={handleIade} disabled={saving} style={{ padding:"9px 20px", background:"#92400e", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700 }}>
+                {saving ? "..." : "↩ İade Et"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const _email = (currentUser?.email || "").toLowerCase();
   const isAdmin    = currentUser?.role === "admin";
   const isPM       = _email === "orhan.bedir@simsektel.com";
-  const isDirektor = _email === "duzgun.simsek@simsektel.com";
-  const isNurcan   = _email === "nurcan.kus@simsektel.com";
-  const isMurat    = _email === "murat.istek@simsektel.com";
-  const canSeeDepo = isAdmin || isPM || isDirektor || isNurcan || isMurat;
+  const isDirektor   = _email === "duzgun.simsek@simsektel.com";
+  const isNurcan     = _email === "nurcan.kus@simsektel.com";
+  const isMurat      = _email === "murat.istek@simsektel.com";
+  const isBolgeMudur = !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat &&
+    (["rollout_mudur","bolge_mudur"].includes((currentUser?.role||"").toLowerCase()) ||
+     ["serdar.altinova@simsektel.com"].includes(_email));
+  const canSeeDepo   = isAdmin || isPM || isDirektor || isNurcan || isMurat;
   const canEditFiyat = isAdmin || isPM;
 
-  const [tab, setTab] = useState("talepler");
+  const _isPersonelOnly = !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat && !isBolgeMudur;
+  const [tab, setTab] = useState(_isPersonelOnly ? "dagitim" : "talepler");
   const [talepler, setTalepler] = useState([]);
   const [talepLoading, setTalepLoading] = useState(false);
   const [talepArama, setTalepArama] = useState("");
@@ -14229,6 +14461,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const [iadeModal, setIadeModal] = useState(null);
   const [iadeNot, setIadeNot] = useState("");
   const [dagitimArama, setDagitimArama] = useState("");
+  const [dagitimSiteDropdown, setDagitimSiteDropdown] = useState(false);
+  const [sahaSiteDropdown, setSahaSiteDropdown] = useState(false);
 
   const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -15192,15 +15426,17 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           {(() => {
             // Talep edenin rolüne göre hangi adımlar atlanıyor?
             const tEml = (d.talep_eden_email||"").toLowerCase();
-            const talepEdenPM      = tEml === "orhan.bedir@simsektel.com";
-            const talepEdenNurcan  = tEml === "nurcan.kus@simsektel.com";
-            const talepEdenMurat   = tEml === "murat.istek@simsektel.com";
-            const talepEdenDirektor= tEml === "duzgun.simsek@simsektel.com";
+            const talepEdenPM         = tEml === "orhan.bedir@simsektel.com";
+            const talepEdenNurcan     = tEml === "nurcan.kus@simsektel.com";
+            const talepEdenMurat      = tEml === "murat.istek@simsektel.com";
+            const talepEdenDirektor   = tEml === "duzgun.simsek@simsektel.com";
+            const talepEdenBolgeMudur = !talepEdenPM && !talepEdenNurcan && !talepEdenMurat && !talepEdenDirektor &&
+              (["serdar.altinova@simsektel.com"].includes(tEml) || false);
             // PM talep ederse: Nurcan + PM adımları atlanır → Murat'tan başlar
             // Nurcan talep ederse: Nurcan adımı atlanır → PM'den başlar
             // Murat/Direktor talep ederse: sırasıyla kendi adımına kadar atlanır
-            const skipNurcan = talepEdenPM || talepEdenNurcan || talepEdenMurat || talepEdenDirektor;
-            const skipPM     = talepEdenPM || talepEdenMurat || talepEdenDirektor;
+            const skipNurcan = talepEdenPM || talepEdenNurcan || talepEdenMurat || talepEdenDirektor || talepEdenBolgeMudur;
+            const skipPM     = talepEdenPM || talepEdenMurat || talepEdenDirektor; // Bölge Müdürü PM'den geçer
             const ZINCIR = [
               { key:"talep",    label:"Talep Eden",    kisi: d.talep_eden_ad||"—",      done: true,                                                                             color:"#0ea5e9" },
               { key:"nurcan",   label:"Rollout Müdürü",kisi:"Nurcan Kuş",               done: !skipNurcan && !["TASLAK","NURCAN_ONAY"].includes(d.durum)&&d.durum!=="REDDEDILDI", waiting: !skipNurcan && d.durum==="NURCAN_ONAY", skipped: skipNurcan, color:"#8b5cf6" },
@@ -15553,10 +15789,11 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             <button onClick={()=>{
               // Hiyerarşiye göre ilk onay adımını belirle:
               // Nurcan Kuş → Orhan Bedir - Murat İstek - Düzgün Şimşek - Murat İstek
-              const submitDurum = isDirektor  ? "SATINALINACAK"  // Direktör → tedarik
-                : isMurat   ? "DUZGUN_ONAY"                       // Murat → Düzgün'e
-                : isPM      ? "FIYAT_GIRISI"                       // PM → Murat'a (envanter)
-                : isNurcan  ? "PM_ONAY"                            // Nurcan → PM'e
+              const submitDurum = isDirektor    ? "SATINALINACAK"  // Direktör → tedarik
+                : isMurat     ? "DUZGUN_ONAY"                     // Murat → Düzgün'e
+                : isPM        ? "FIYAT_GIRISI"                     // PM → Murat'a (envanter)
+                : isNurcan    ? "PM_ONAY"                          // Nurcan → PM'e
+                : isBolgeMudur? "PM_ONAY"                          // Bölge Müdürü → PM'e (Nurcan atlanır)
                 : "NURCAN_ONAY";                                   // Diğerleri → Nurcan'a
               saveTalep(submitDurum);
             }} disabled={saving}
@@ -15583,9 +15820,9 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
       {/* Tabs */}
       <div style={{ display:"flex",borderBottom:"2px solid #e2e8f0",background:"#fff",padding:"0 16px",gap:4 }}>
-        {[["talepler","📋 Talepler"],
+        {[...(!_isPersonelOnly?[["talepler","📋 Talepler"]]:[]),
           ...(canSeeDepo?[["depo","🏭 Depo Stok"],["fiyat","💰 Fiyat Listesi"]]:[]),
-          ["dagitim","📤 Dağıtım"]
+          ["dagitim",_isPersonelOnly?"📦 Üzerimdeki Malzemeler":"📤 Dağıtım"]
         ].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)}
             style={{ padding:"12px 16px",background:"none",border:"none",cursor:"pointer",fontWeight:tab===k?700:400,fontSize:14,
@@ -15964,6 +16201,18 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               {/* Tablo */}
               <div style={{ overflowX:"auto",background:"#fff",borderRadius:12,boxShadow:"0 1px 6px rgba(0,0,0,0.07)" }}>
                 <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
+                  <colgroup>
+                    <col style={{ width:"28%" }} />
+                    <col style={{ width:"6%" }} />
+                    <col style={{ width:"6%" }} />
+                    {canSeeDepo && <col style={{ width:"16%" }} />}
+                    <col style={{ width:"10%" }} />
+                    <col style={{ width:"10%" }} />
+                    <col style={{ width:"8%" }} />
+                    <col style={{ width:"10%" }} />
+                    <col style={{ width:"8%" }} />
+                    <col style={{ width:"8%" }} />
+                  </colgroup>
                   <thead>
                     <tr style={{ background:"#1e3a5f",color:"#fff" }}>
                       <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Malzeme</th>
@@ -15985,7 +16234,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                       const aktif = d.durum==="PERSONELDE";
                       return (
                         <tr key={d.id} style={{ borderBottom:"1px solid #f0f4f8",background:d.durum==="DEPOYA_IADE"?"#fafafa":i%2===0?"#fff":"#f8fafc", opacity:d.durum==="DEPOYA_IADE"?0.6:1 }}>
-                          <td style={{ padding:"9px 12px",fontWeight:600,maxWidth:200 }}>{d.malzeme_adi}</td>
+                          <td style={{ padding:"9px 12px",fontWeight:600,maxWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }} title={d.malzeme_adi}>{d.malzeme_adi}</td>
                           <td style={{ padding:"9px 12px",textAlign:"center",fontWeight:700 }}>{d.miktar}</td>
                           <td style={{ padding:"9px 12px" }}>{d.birim}</td>
                           {canSeeDepo && <td style={{ padding:"9px 12px" }}>
@@ -16003,7 +16252,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                           <td style={{ padding:"9px 12px",textAlign:"center" }}>
                             {d.tutanak_url
                               ? <a href={d.tutanak_url} target="_blank" rel="noreferrer" style={{ color:"#2563eb",fontWeight:700,fontSize:12 }}>📄 Gör</a>
-                              : (canSeeDepo && aktif ? (
+                              : (aktif ? (
                                 <label style={{ cursor:"pointer",color:"#9ca3af",fontSize:11,padding:"3px 8px",border:"1px dashed #d1d5db",borderRadius:6 }}>
                                   📎 Yükle
                                   <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} onChange={async e=>{
@@ -16014,7 +16263,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                                       const ud = await up.json();
                                       if (ud.url) {
                                         await fetch(`${API_BASE}/malzeme/dagitim/${d.id}/tutanak`, { method:"PUT", headers, body:JSON.stringify({ tutanak_url: ud.url }) });
-                                        loadDagitim();
+                                        canSeeDepo ? loadDagitim() : loadDagitimPersonel();
                                       }
                                     } catch {}
                                   }} />
@@ -16116,9 +16365,19 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   }} style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }}>
                     <option value="">Personel seçin...</option>
                     {personelListe.filter(p=>p.aktif!==false).map(p=>(
-                      <option key={p.id} value={p.email}>{p.ad_soyad} — {p.unvan||p.bolge||""}</option>
+                      <option key={p.id} value={p.email}>{p.ad_soyad} — {p.unvan||p.bolge||""}{!p.email?" ⚠️":""}</option>
                     ))}
                   </select>
+                  {dagitimForm.alici_personel_ad && !dagitimForm.alici_personel_email && (
+                    <div style={{ marginTop:6,padding:"6px 10px",background:"#fef3c7",borderRadius:6,fontSize:11,color:"#92400e" }}>
+                      ⚠️ Bu personelin HR kaydında email yok. Lütfen aşağıya giriş emailini yazın:
+                    </div>
+                  )}
+                  {dagitimForm.alici_personel_ad && !dagitimForm.alici_personel_email && (
+                    <input value={dagitimForm.alici_personel_email} onChange={e=>setDagitimForm(p=>({...p,alici_personel_email:e.target.value}))}
+                      placeholder="personel@simsektel.com"
+                      style={{ marginTop:6,width:"100%",padding:"8px 10px",border:"1px solid #f59e0b",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+                  )}
                 </div>
               ) : (
                 <div>
@@ -16128,10 +16387,28 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                 </div>
               )}
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-                <div>
+                <div style={{ position:"relative" }}>
                   <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Site ID / Bölge</label>
-                  <input value={dagitimForm.site_id} onChange={e=>setDagitimForm(p=>({...p,site_id:e.target.value}))} placeholder="B00008_..."
+                  <input value={dagitimForm.site_id}
+                    onChange={e=>{ setDagitimForm(p=>({...p,site_id:e.target.value})); searchSiteCode(e.target.value); setDagitimSiteDropdown(true); }}
+                    onBlur={()=>setTimeout(()=>setDagitimSiteDropdown(false),180)}
+                    onFocus={()=>{ if(dagitimForm.site_id?.length>=2) setDagitimSiteDropdown(true); }}
+                    placeholder="Site kodu yazın..."
                     style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+                  {dagitimSiteDropdown && siteCodeSuggestions.length>0 && (
+                    <div style={{ position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #d1d5db",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",zIndex:9999,maxHeight:200,overflowY:"auto" }}>
+                      {siteCodeSuggestions.map(s=>(
+                        <div key={s.site_code} onMouseDown={()=>{ setDagitimForm(p=>({...p,site_id:s.site_code,bolge:s.bolge||p.bolge})); setDagitimSiteDropdown(false); setSiteCodeSuggestions([]); }}
+                          style={{ padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f3f4f6",fontSize:13 }}
+                          onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <span style={{ fontWeight:600,color:"#1e3a5f" }}>{s.site_code}</span>
+                          {s.bolge && <span style={{ marginLeft:8,color:"#6b7280",fontSize:11 }}>{s.bolge}</span>}
+                          {s.site_type && <span style={{ marginLeft:6,color:"#9ca3af",fontSize:11 }}>{s.site_type}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Bölge</label>
@@ -16164,10 +16441,28 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             <h3 style={{ margin:"0 0 6px",fontSize:18,fontWeight:800,color:"#15803d" }}>🏗 Sahaya Çıkış</h3>
             <p style={{ margin:"0 0 16px",fontSize:13,color:"#6b7280" }}><strong>{sahaCikisModal.malzeme_adi}</strong> — {sahaCikisModal.miktar} {sahaCikisModal.birim}</p>
             <div style={{ display:"grid",gap:12 }}>
-              <div>
+              <div style={{ position:"relative" }}>
                 <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Site ID <span style={{color:"#dc2626"}}>*</span></label>
-                <input value={sahaCikisForm.saha_site_id} onChange={e=>setSahaCikisForm(p=>({...p,saha_site_id:e.target.value}))} placeholder="B00008_NR3500_MWA"
+                <input value={sahaCikisForm.saha_site_id}
+                  onChange={e=>{ setSahaCikisForm(p=>({...p,saha_site_id:e.target.value})); searchSiteCode(e.target.value); setSahaSiteDropdown(true); }}
+                  onBlur={()=>setTimeout(()=>setSahaSiteDropdown(false),180)}
+                  onFocus={()=>{ if(sahaCikisForm.saha_site_id?.length>=2) setSahaSiteDropdown(true); }}
+                  placeholder="Site kodu yazın..."
                   style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
+                {sahaSiteDropdown && siteCodeSuggestions.length>0 && (
+                  <div style={{ position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #d1d5db",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",zIndex:9999,maxHeight:200,overflowY:"auto" }}>
+                    {siteCodeSuggestions.map(s=>(
+                      <div key={s.site_code} onMouseDown={()=>{ setSahaCikisForm(p=>({...p,saha_site_id:s.site_code})); setSahaSiteDropdown(false); setSiteCodeSuggestions([]); }}
+                        style={{ padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f3f4f6",fontSize:13 }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                        <span style={{ fontWeight:600,color:"#1e3a5f" }}>{s.site_code}</span>
+                        {s.bolge && <span style={{ marginLeft:8,color:"#6b7280",fontSize:11 }}>{s.bolge}</span>}
+                        {s.site_type && <span style={{ marginLeft:6,color:"#9ca3af",fontSize:11 }}>{s.site_type}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Not</label>
@@ -16889,29 +17184,34 @@ function App() {
   if (isPersonel) {
     return (
       <div style={{ minHeight:"100vh", background:"#f8fafc" }}>
-        {/* Mobile top bar */}
+        {/* Top bar */}
         <div style={{ background:"#1e3a5f", color:"#fff", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 8px rgba(0,0,0,0.2)" }}>
           <span style={{ fontWeight:700, fontSize:"16px" }}>ERC Mühendislik</span>
-          <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-            <span style={{ fontSize:"12px", opacity:0.8 }}>{user?.name || user?.email}</span>
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"2px" }}>
             <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.3)", color:"#fff", borderRadius:"8px", padding:"6px 12px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Çıkış</button>
+            <span style={{ fontSize:"11px", opacity:0.7 }}>{user?.name || user?.email}</span>
           </div>
         </div>
         {/* Bottom navigation */}
         <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:100, background:"#fff", borderTop:"1px solid #e5e7eb", display:"flex", height:"64px", boxShadow:"0 -2px 10px rgba(0,0,0,0.08)" }}>
-          <button onClick={()=>setPage("is_avans")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color: page==="is_avans"?"#1e3a5f":"#9ca3af", fontWeight: page==="is_avans"?700:400, fontSize:"11px" }}>
+          <button onClick={()=>setPage("is_avans")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color:page==="is_avans"?"#1e3a5f":"#9ca3af", fontWeight:page==="is_avans"?700:400, fontSize:"11px", position:"relative" }}>
             <span style={{ fontSize:"22px" }}>💳</span>İş Avansı
-            {pendingAvansCount>0 && <span style={{ position:"absolute", top:"8px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingAvansCount}</span>}
+            {pendingAvansCount>0 && <span style={{ position:"absolute", top:"6px", right:"calc(50% - 18px)", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingAvansCount}</span>}
           </button>
-          <button onClick={()=>setPage("masraf")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color: page==="masraf"?"#1e3a5f":"#9ca3af", fontWeight: page==="masraf"?700:400, fontSize:"11px" }}>
+          <button onClick={()=>setPage("masraf")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color:page==="masraf"?"#1e3a5f":"#9ca3af", fontWeight:page==="masraf"?700:400, fontSize:"11px", position:"relative" }}>
             <span style={{ fontSize:"22px" }}>🧾</span>Masraf Formu
-            {pendingMasrafCount>0 && <span style={{ position:"absolute", top:"8px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingMasrafCount}</span>}
+            {pendingMasrafCount>0 && <span style={{ position:"absolute", top:"6px", right:"calc(50% - 18px)", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingMasrafCount}</span>}
+          </button>
+          <button onClick={()=>setPage("malzeme")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color:page==="malzeme"?"#0f4c35":"#9ca3af", fontWeight:page==="malzeme"?700:400, fontSize:"11px" }}>
+            <span style={{ fontSize:"22px" }}>📦</span>Malzemelerim
           </button>
         </div>
-        {/* Content area — default masraf, is_avans seçilince o gösterilir */}
+        {/* Content area */}
         <div style={{ padding:"12px 12px 80px" }}>
           {page === "is_avans"
             ? <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />
+            : page === "malzeme"
+            ? <PersonelMalzemePanel currentUser={user} />
             : <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />
           }
         </div>
@@ -17033,13 +17333,13 @@ function App() {
               )}
             </button>
 
-            {(canSeeMalzeme || isAdmin) && (
+            {(canSeeMalzeme || isAdmin || isPersonel) && (
               <button
                 className={page === "malzeme" ? "tab activeTab" : "tab"}
                 onClick={() => setPage("malzeme")}
                 style={{ position:"relative" }}
               >
-                📦 Malzeme Yönetimi
+                {isPersonel ? "📦 Malzemelerim" : "📦 Malzeme Yönetimi"}
                 {pendingMalzemeCount > 0 && (
                   <span style={{ position:"absolute", top:"-6px", right:"-6px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"11px", fontWeight:700, minWidth:"18px", height:"18px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", lineHeight:1 }}>
                     {pendingMalzemeCount}
@@ -17059,12 +17359,7 @@ function App() {
             )}
 
             {(token || financeToken) && (
-              <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", display:"flex", alignItems:"center", gap:"10px" }}>
-                {user?.name && !isAdmin && !localStorage.getItem("financeToken") && (
-                  <span style={{ fontSize:"13px", fontWeight:600, color:"#1e3a5f", background:"#f0f4ff", border:"1px solid #c7d7fc", borderRadius:"8px", padding:"7px 13px", whiteSpace:"nowrap" }}>
-                    👤 {user.name}
-                  </span>
-                )}
+              <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"2px" }}>
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -17072,6 +17367,11 @@ function App() {
                 >
                   Çıkış Yap
                 </button>
+                {user?.name && (
+                  <span style={{ fontSize:"11px", color:"#6b7280", whiteSpace:"nowrap" }}>
+                    {user.name}
+                  </span>
+                )}
               </div>
             )}
           </>
@@ -17264,9 +17564,12 @@ function App() {
                   onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
                   style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff", cursor: "pointer" }}
                 >
-                  <option value="user">👤 User</option>
+                  <option value="user">👤 Personel</option>
                   <option value="admin">👑 Admin</option>
-                  <option value="rollout_mudur">🏗 Rollout Müdürü</option>
+                  <option value="rollout_mudur">🏗 Bölge Müdürü</option>
+                  <option value="pm">📋 Proje Müdürü</option>
+                  <option value="direktor">🎯 Proje Direktörü</option>
+                  <option value="muhasebe">💼 Muhasebe</option>
                 </select>
                 <button
                   onClick={handleCreateUser}
@@ -17354,12 +17657,12 @@ function App() {
                       {/* Badges */}
                       <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                         <span style={{
-                          background: u.role === "admin" ? "#fef3c7" : u.role === "rollout_mudur" ? "#f0fdf4" : "#eff6ff",
-                          color: u.role === "admin" ? "#92400e" : u.role === "rollout_mudur" ? "#166534" : "#1e40af",
+                          background: u.role === "admin" ? "#fef3c7" : u.role === "rollout_mudur" ? "#f0fdf4" : u.role === "pm" ? "#eff6ff" : u.role === "direktor" ? "#fdf2f8" : u.role === "muhasebe" ? "#f0f9ff" : "#f3f4f6",
+                          color: u.role === "admin" ? "#92400e" : u.role === "rollout_mudur" ? "#166534" : u.role === "pm" ? "#1e40af" : u.role === "direktor" ? "#7e22ce" : u.role === "muhasebe" ? "#0369a1" : "#374151",
                           fontSize: "11px", fontWeight: 700, padding: "3px 10px",
                           borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.05em",
                         }}>
-                          {u.role === "admin" ? "👑 Admin" : u.role === "rollout_mudur" ? "🏗 Rollout" : "👤 User"}
+                          {u.role === "admin" ? "👑 Admin" : u.role === "rollout_mudur" ? "🏗 Bölge Müdürü" : u.role === "pm" ? "📋 Proje Müdürü" : u.role === "direktor" ? "🎯 Proje Direktörü" : u.role === "muhasebe" ? "💼 Muhasebe" : "👤 Personel"}
                         </span>
                         <span style={{
                           background: u.is_active ? "#dcfce7" : "#f3f4f6",
@@ -17395,9 +17698,12 @@ function App() {
                             background: "#f9fafb", color: "#374151",
                           }}
                         >
-                          <option value="user">👤 User</option>
+                          <option value="user">👤 Personel</option>
                           <option value="admin">👑 Admin</option>
-                          <option value="rollout_mudur">🏗 Rollout Müdürü</option>
+                          <option value="rollout_mudur">🏗 Bölge Müdürü</option>
+                          <option value="pm">📋 Proje Müdürü</option>
+                          <option value="direktor">🎯 Proje Direktörü</option>
+                          <option value="muhasebe">💼 Muhasebe</option>
                         </select>
                         <button
                           onClick={() => handleResetPassword(u.id, u.name)}
