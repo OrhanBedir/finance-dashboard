@@ -17222,7 +17222,7 @@ function App() {
               </div>
               {openSections.ik && (
                 <div>
-                  {isAdmin && (
+                  {(isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
                     <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
                       <span>👥</span> İK Paneli
                     </div>
@@ -17267,7 +17267,7 @@ function App() {
               )}
 
               {/* ── DEPO & ENVANTER ── */}
-              {(canSeeMalzeme || isAdmin) && (
+              {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm"].includes(user?.role)) && (
                 <>
                   <div className="sidebar-section-title" onClick={()=>toggleSection('depo')}>
                     <span>Depo & Envanter</span>
