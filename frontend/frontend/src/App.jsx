@@ -15520,7 +15520,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           </div>
         </div>
 
-        <div style={{ maxWidth:880,margin:"0 auto",padding:20 }}>
+        <div style={{ maxWidth:1200,margin:"0 auto",padding:20 }}>
           {/* Talep Bilgileri */}
           <div style={{ background:"#fff",borderRadius:12,padding:20,marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
             <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f",marginBottom:14 }}>📋 Talep Bilgileri</div>
