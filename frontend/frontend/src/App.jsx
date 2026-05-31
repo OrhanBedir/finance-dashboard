@@ -17130,10 +17130,10 @@ function App() {
     <>
       <style>{`
         .app-layout { display: flex; height: 100vh; overflow: hidden; background: #f0f2f5; }
-        .sidebar { width: 240px; background: #0f1623; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width 0.22s ease, opacity 0.22s ease; position: relative; }
-        .sidebar.collapsed { width: 0; opacity: 0; overflow: hidden; }
-        .sidebar-toggle { position: absolute; top: 50%; right: -14px; transform: translateY(-50%); width: 28px; height: 28px; background: #1d4ed8; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.25); transition: right 0.22s ease; flex-shrink: 0; }
-        .sidebar-toggle.collapsed-toggle { right: auto; left: 14px; position: fixed; top: 50%; transform: translateY(-50%); }
+        .sidebar { width: 240px; background: #0f1623; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width 0.22s ease; }
+        .sidebar.collapsed { width: 0; overflow: hidden; }
+        .topbar-toggle { width: 34px; height: 34px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #475569; flex-shrink: 0; transition: background 0.15s; }
+        .topbar-toggle:hover { background: #e2e8f0; color: #0f172a; }
         .sidebar-logo { padding: 20px 16px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; gap: 10px; }
         .sidebar-logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
         .sidebar-section-title { padding: 10px 16px 6px; font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; transition: color 0.15s; }
@@ -17156,16 +17156,7 @@ function App() {
 
       <div className="app-layout">
         {/* ── SIDEBAR ── */}
-        <div className={`sidebar${sidebarCollapsed?' collapsed':''}`} style={{position:'relative'}}>
-          {/* Collapse toggle button */}
-          <button
-            className={`sidebar-toggle${sidebarCollapsed?' collapsed-toggle':''}`}
-            onClick={()=>setSidebarCollapsed(v=>!v)}
-            title={sidebarCollapsed?"Menüyü aç":"Menüyü kapat"}
-          >
-            {sidebarCollapsed ? '›' : '‹'}
-          </button>
-
+        <div className={`sidebar${sidebarCollapsed?' collapsed':''}`}>
           {/* Logo */}
           <div className="sidebar-logo">
             <div className="sidebar-logo-icon">🏗</div>
@@ -17317,6 +17308,13 @@ function App() {
           {/* Topbar */}
           <div className="topbar" onClick={e=>e.stopPropagation()}>
             <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
+              <button
+                className="topbar-toggle"
+                onClick={()=>setSidebarCollapsed(v=>!v)}
+                title={sidebarCollapsed?"Menüyü aç":"Menüyü kapat"}
+              >
+                {sidebarCollapsed ? '☰' : '✕'}
+              </button>
               <div style={{fontSize:16,fontWeight:700,color:'#0f172a'}}>{getPageTitle()}</div>
               <div style={{fontSize:12,color:'#94a3b8'}}>{new Date().toLocaleDateString('tr-TR',{day:'numeric',month:'long',year:'numeric'})}</div>
             </div>
