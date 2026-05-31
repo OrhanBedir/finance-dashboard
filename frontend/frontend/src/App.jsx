@@ -16485,7 +16485,25 @@ function App() {
       return null;
     }
   });
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "direktor";
+
+  // Ünvan görüntüleme fonksiyonu
+  const getUserTitle = (u) => {
+    if (!u) return '';
+    const email = (u.email || '').toLowerCase().trim();
+    if (email === 'serdar.altinova@simsektel.com') return 'Bölge Müdürü';
+    const map = {
+      admin: '👑 Admin',
+      direktor: 'Direktör',
+      rollout_mudur: 'Rollout Müdürü',
+      pm: 'Proje Müdürü',
+      muhasebe: 'Muhasebe',
+      genel_mudur: 'Genel Müdür',
+      user: 'Personel',
+      subcon: 'Taşeron',
+    };
+    return map[u.role] || u.role;
+  };
   // Rollout erişimi var ama Puantaj görmeyecek kullanıcılar (rol ne olursa olsun rollout gibi davranır)
   const _userEmail = (user?.email || "").toLowerCase().trim();
   const _PUANTAJ_HARIC = ["hatice.omus@simsektel.com", "murat.istek@simsektel.com"];
@@ -17280,7 +17298,7 @@ function App() {
               <div className="sidebar-user-avatar">{user?.name?.charAt(0) || '?'}</div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:13,fontWeight:600,color:'#e2e8f0',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user?.name || user?.email}</div>
-                <div style={{fontSize:11,color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user?.role}</div>
+                <div style={{fontSize:11,color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{getUserTitle(user)}</div>
               </div>
             </div>
             <button
@@ -17421,7 +17439,7 @@ function App() {
                         <option value="admin">👑 Admin</option>
                         <option value="rollout_mudur">🏗 Bölge Müdürü</option>
                         <option value="pm">📋 Proje Müdürü</option>
-                        <option value="direktor">🎯 Proje Direktörü</option>
+                        <option value="direktor">🎯 Direktör</option>
                         <option value="muhasebe">💼 Muhasebe</option>
                       </select>
                       <button onClick={handleCreateUser} style={{padding:"11px",background:"#1f2937",color:"#fff",border:"none",borderRadius:"10px",fontWeight:"700",fontSize:"14px",cursor:"pointer",marginTop:"4px"}}>
@@ -17457,7 +17475,7 @@ function App() {
                             </div>
                             <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
                               <span style={{background:u.role==="admin"?"#fef3c7":u.role==="rollout_mudur"?"#f0fdf4":u.role==="pm"?"#eff6ff":u.role==="direktor"?"#fdf2f8":u.role==="muhasebe"?"#f0f9ff":"#f3f4f6",color:u.role==="admin"?"#92400e":u.role==="rollout_mudur"?"#166534":u.role==="pm"?"#1e40af":u.role==="direktor"?"#7e22ce":u.role==="muhasebe"?"#0369a1":"#374151",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",textTransform:"uppercase",letterSpacing:"0.05em"}}>
-                                {u.role==="admin"?"👑 Admin":u.role==="rollout_mudur"?"🏗 Bölge Müdürü":u.role==="pm"?"📋 Proje Müdürü":u.role==="direktor"?"🎯 Proje Direktörü":u.role==="muhasebe"?"💼 Muhasebe":"👤 Personel"}
+                                {u.role==="admin"?"👑 Admin":u.role==="rollout_mudur"?(u.email?.toLowerCase()==="serdar.altinova@simsektel.com"?"📍 Bölge Müdürü":"🏗 Rollout Müdürü"):u.role==="pm"?"📋 Proje Müdürü":u.role==="direktor"?"🎯 Direktör":u.role==="muhasebe"?"💼 Muhasebe":"👤 Personel"}
                               </span>
                               <span style={{background:u.is_active?"#dcfce7":"#f3f4f6",color:u.is_active?"#166534":"#6b7280",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px"}}>
                                 {u.is_active?"Aktif":"Pasif"}
@@ -17472,7 +17490,7 @@ function App() {
                                 <option value="admin">👑 Admin</option>
                                 <option value="rollout_mudur">🏗 Bölge Müdürü</option>
                                 <option value="pm">📋 Proje Müdürü</option>
-                                <option value="direktor">🎯 Proje Direktörü</option>
+                                <option value="direktor">🎯 Direktör</option>
                                 <option value="muhasebe">💼 Muhasebe</option>
                               </select>
                               <button onClick={()=>handleResetPassword(u.id,u.name)} style={{padding:"6px 12px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}} title="Şifre değiştir">
