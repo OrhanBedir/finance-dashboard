@@ -16491,6 +16491,11 @@ function App() {
   const getUserTitle = (u) => {
     if (!u) return '';
     const email = (u.email || '').toLowerCase().trim();
+    // Subcon kullanıcıları → şirket adını göster
+    if (u.role === 'subcon' || String(u.subcon_name || '').trim()) {
+      const company = String(u.subcon_name || '').trim();
+      return company || 'Alt Yüklenici';
+    }
     if (email === 'serdar.altinova@simsektel.com') return 'Bölge Müdürü';
     const map = {
       admin: '👑 Admin',
@@ -16500,7 +16505,6 @@ function App() {
       muhasebe: 'Muhasebe',
       genel_mudur: 'Genel Müdür',
       user: 'Personel',
-      subcon: 'Taşeron',
     };
     return map[u.role] || u.role;
   };
