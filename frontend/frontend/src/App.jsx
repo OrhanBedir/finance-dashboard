@@ -4829,9 +4829,8 @@ function FinanceDashboard({
         }}
       >
         <div>
-          <h1 style={{ margin: "0 0 6px 0" }}>🏗️ ERC Dashboard</h1>
-          <div style={{ fontSize: "14px", color: "#6b7280" }}>
-            Giriş yapan: <b>{user?.name || financeUserEmail}</b>
+          <div style={{ fontSize: "13px", color: "#6b7280" }}>
+            Hoş geldiniz, <b>{user?.name || financeUserEmail}</b>
           </div>
         </div>
 
@@ -5015,94 +5014,95 @@ function FinanceDashboard({
         />
       )}
 
-      <div className="cards">
-        <div className="card ok statCard">
-          <div className="statLabel">
-            {new Date().getFullYear()} Toplam Tahsilat
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"16px", marginBottom:"24px" }}>
+        {/* Toplam Tahsilat */}
+        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
+          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#3b82f6,#6366f1)" }}/>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
+            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>{new Date().getFullYear()} Toplam Tahsilat</div>
+            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#eff6ff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>💰</div>
           </div>
-          <div className="statValue">
-            {formatMoneyByCurrency(summary.total_collections || 0, "TRY")}
-          </div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary.total_collections || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Yıllık kümülatif</div>
         </div>
-
-        <div className="card bekler statCard">
-          <div className="statLabel">Bu Ay Tahsilat</div>
-          <div className="statValue">
-            {formatMoneyByCurrency(summary.this_month_collections || 0, "TRY")}
+        {/* Bu Ay Tahsilat */}
+        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
+          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#10b981,#34d399)" }}/>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
+            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Bu Ay Tahsilat</div>
+            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#ecfdf5", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📈</div>
           </div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary.this_month_collections || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen</div>
         </div>
-
-        <div className="card partial statCard">
-          <div className="statLabel">Bu Ay Kesilen Fatura</div>
-          <div className="statValue">
-            {formatMoneyByCurrency(thisMonthInvoiced || 0, "TRY")}
+        {/* Bu Ay Kesilen Fatura */}
+        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
+          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#f59e0b,#fbbf24)" }}/>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
+            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Bu Ay Kesilen Fatura</div>
+            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>🧾</div>
           </div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(thisMonthInvoiced || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay faturalanan</div>
         </div>
-
-        <div
-          className="card cancel statCard"
-          onClick={handleShowSubconModal}
-          style={{ cursor: "pointer" }}
-        >
-          <div className="statLabel">Gider Kayıt</div>
-          <div className="statValue">
-            {formatMoneyByCurrency(
-              manualInvoiceSummary.totalRemaining || 0,
-              "TRY",
-            )}
+        {/* Gider Kayıt */}
+        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden", cursor:"pointer" }} onClick={handleShowSubconModal}>
+          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#ef4444,#f87171)" }}/>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
+            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Gider Kayıt</div>
+            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#fef2f2", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📉</div>
           </div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalRemaining || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Tıkla: taşeron hakediş</div>
         </div>
       </div>
 
-      <div className="tableWrap">
-        <h3 className="listTitle">Aylık Tahsilat Özeti</h3>
-        <table>
-          <thead>
-            <tr>
-              <th></th>
-              {monthNames.map((m) => (
-                <th key={m}>{m}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td style={{ fontWeight: 700 }}>Tahsilat Yapılan</td>
-              {monthNames.map((m, idx) => (
-                <td key={`received-${m}`}>
-                  {formatMoneyByCurrency(
-                    summary.monthly_received?.[idx + 1] || 0,
-                    "TRY",
-                  )}
-                </td>
-              ))}
-            </tr>
-
-            <tr>
-              <td style={{ fontWeight: 700 }}>Gelecek</td>
-              {monthNames.map((m, idx) => (
-                <td key={`upcoming-${m}`}>
-                  {formatMoneyByCurrency(
-                    summary.monthly_upcoming?.[idx + 1] || 0,
-                    "TRY",
-                  )}
-                </td>
-              ))}
-            </tr>
-
-            <tr>
-              <td style={{ fontWeight: 700 }}>Kesilen Fatura</td>
-              {monthNames.map((m, idx) => (
-                <td key={`invoiced-${m}`}>
-                  {formatMoneyByCurrency(
-                    summary.monthly_invoiced?.[idx + 1] || 0,
-                    "TRY",
-                  )}
-                </td>
-              ))}
-            </tr>
-          </tbody>
-        </table>
+      <div style={{ background:"#fff", borderRadius:"12px", border:"1px solid #e2e8f0", marginBottom:"24px", overflow:"hidden" }}>
+        <div style={{ padding:"18px 20px 14px", borderBottom:"1px solid #f1f5f9", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div>
+            <div style={{ fontSize:"14px", fontWeight:700, color:"#0f172a" }}>Aylık Tahsilat Özeti</div>
+            <div style={{ fontSize:"11px", color:"#64748b", marginTop:"2px" }}>Ocak — Aralık {new Date().getFullYear()}</div>
+          </div>
+          <div style={{ display:"flex", gap:"12px", fontSize:"11px" }}>
+            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"linear-gradient(180deg,#3b82f6,#6366f1)", display:"inline-block" }}></span>Tahsilat</span>
+            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"#10b981", display:"inline-block" }}></span>Gelecek</span>
+            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"#f59e0b", display:"inline-block" }}></span>Fatura</span>
+          </div>
+        </div>
+        <div style={{ padding:"20px" }}>
+          {(() => {
+            const shortNames = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+            const received = shortNames.map((_,i) => summary.monthly_received?.[i+1] || 0);
+            const upcoming = shortNames.map((_,i) => summary.monthly_upcoming?.[i+1] || 0);
+            const invoiced = shortNames.map((_,i) => summary.monthly_invoiced?.[i+1] || 0);
+            const allVals = [...received, ...upcoming, ...invoiced];
+            const maxVal = Math.max(...allVals, 1);
+            const fmt = (v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v/1000)}K` : String(Math.round(v));
+            return (
+              <div style={{ display:"flex", alignItems:"flex-end", gap:"6px", height:"160px" }}>
+                {shortNames.map((name, i) => {
+                  const r = received[i];
+                  const u = upcoming[i];
+                  const inv = invoiced[i];
+                  const rH = Math.max(4, Math.round((r / maxVal) * 120));
+                  const uH = Math.max(u > 0 ? 4 : 0, Math.round((u / maxVal) * 120));
+                  const invH = Math.max(inv > 0 ? 4 : 0, Math.round((inv / maxVal) * 120));
+                  return (
+                    <div key={name} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:"4px", height:"100%", justifyContent:"flex-end" }}>
+                      {r > 0 && <div style={{ fontSize:"8px", color:"#64748b", fontWeight:600, whiteSpace:"nowrap" }}>{fmt(r)}</div>}
+                      <div style={{ width:"100%", display:"flex", gap:"1px", alignItems:"flex-end" }}>
+                        <div style={{ flex:1, height:`${rH}px`, background:"linear-gradient(180deg,#3b82f6,#6366f1)", borderRadius:"3px 3px 0 0", minHeight:r>0?4:0 }}/>
+                        {u > 0 && <div style={{ flex:1, height:`${uH}px`, background:"#10b981", borderRadius:"3px 3px 0 0", minHeight:4 }}/>}
+                        {inv > 0 && <div style={{ flex:1, height:`${invH}px`, background:"#f59e0b", borderRadius:"3px 3px 0 0", minHeight:4 }}/>}
+                      </div>
+                      <div style={{ fontSize:"9px", color:"#94a3b8", fontWeight:500 }}>{name}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
       </div>
 
       <div className="tableWrap">
@@ -16712,6 +16712,8 @@ function App() {
   const [pendingAvansCount, setPendingAvansCount] = useState(0);
   const [pendingMasrafCount, setPendingMasrafCount] = useState(0);
   const [pendingMalzemeCount, setPendingMalzemeCount] = useState(0);
+  const [openSections, setOpenSections] = useState({ anaMeny: true, ik: true, yonetim: true });
+  const toggleSection = (key) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
 
   useEffect(() => {
     if (!user) return;
@@ -17246,7 +17248,11 @@ function App() {
         .sidebar { width: 240px; background: #0f1623; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
         .sidebar-logo { padding: 20px 16px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; gap: 10px; }
         .sidebar-logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
-        .sidebar-section-title { padding: 12px 16px 6px; font-size: 10px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 1px; }
+        .sidebar-section-title { padding: 12px 16px 6px; font-size: 10px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+        .sidebar-section-title:hover { color: #94a3b8; }
+        .sidebar-section-chevron { font-size: 9px; transition: transform 0.2s; }
+        .sidebar-section-chevron.closed { transform: rotate(-90deg); }
+        .sidebar-section-items { overflow: hidden; transition: max-height 0.25s ease; }
         .sidebar-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 1px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #94a3b8; transition: all 0.15s; position: relative; }
         .sidebar-nav-item:hover { background: #1e2a3a; color: #e2e8f0; }
         .sidebar-nav-item.active { background: #1d4ed8; color: #fff; }
@@ -17282,63 +17288,84 @@ function App() {
             </>
           ) : (
             <>
-              <div className="sidebar-section-title">Ana Menü</div>
-              {isAdmin && (
-                <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
-                  <span>📊</span> Finans Paneli
-                </div>
-              )}
-              <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
-                <span>📍</span> Bölge Analizi
+              <div className="sidebar-section-title" onClick={()=>toggleSection('anaMeny')}>
+                <span>Ana Menü</span>
+                <span className={`sidebar-section-chevron ${openSections.anaMeny?'':'closed'}`}>▾</span>
               </div>
-              <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
-                <span>🏗</span> Rollout Data
-              </div>
-              <div className={`sidebar-nav-item ${page==='entry'?'active':''}`} onClick={()=>setPage('entry')}>
-                <span>✏️</span> Günlük İş Girişi
-              </div>
-              {canSeePuantaj && (
-                <div className={`sidebar-nav-item ${page==='puantaj'?'active':''}`} onClick={()=>setPage('puantaj')}>
-                  <span>📋</span> Puantaj
+              {openSections.anaMeny && (
+                <div className="sidebar-section-items">
+                  {isAdmin && (
+                    <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
+                      <span>📊</span> Finans Paneli
+                    </div>
+                  )}
+                  <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
+                    <span>📍</span> Bölge Analizi
+                  </div>
+                  <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
+                    <span>🏗</span> Rollout Data
+                  </div>
+                  <div className={`sidebar-nav-item ${page==='entry'?'active':''}`} onClick={()=>setPage('entry')}>
+                    <span>✏️</span> Günlük İş Girişi
+                  </div>
+                  {canSeePuantaj && (
+                    <div className={`sidebar-nav-item ${page==='puantaj'?'active':''}`} onClick={()=>setPage('puantaj')}>
+                      <span>📋</span> Puantaj
+                    </div>
+                  )}
                 </div>
               )}
 
-              <div className="sidebar-section-title">İnsan Kaynakları</div>
-              <div className={`sidebar-nav-item ${page==='is_avans'?'active':''}`} onClick={()=>setPage('is_avans')}>
-                <span>💳</span> İş Avansı
-                {pendingAvansCount > 0 && <span className="sidebar-badge">{pendingAvansCount}</span>}
+              <div className="sidebar-section-title" onClick={()=>toggleSection('ik')}>
+                <span>İnsan Kaynakları</span>
+                <span className={`sidebar-section-chevron ${openSections.ik?'':'closed'}`}>▾</span>
               </div>
-              <div className={`sidebar-nav-item ${page==='masraf'?'active':''}`} onClick={()=>setPage('masraf')}>
-                <span>🧾</span> Masraf Formu
-                {pendingMasrafCount > 0 && <span className="sidebar-badge">{pendingMasrafCount}</span>}
-              </div>
-              {(canSeeMalzeme || isAdmin) && (
-                <div className={`sidebar-nav-item ${page==='malzeme'?'active':''}`} onClick={()=>setPage('malzeme')}>
-                  <span>📦</span> Malzeme Yönetimi
-                  {pendingMalzemeCount > 0 && <span className="sidebar-badge">{pendingMalzemeCount}</span>}
+              {openSections.ik && (
+                <div className="sidebar-section-items">
+                  <div className={`sidebar-nav-item ${page==='is_avans'?'active':''}`} onClick={()=>setPage('is_avans')}>
+                    <span>💳</span> İş Avansı
+                    {pendingAvansCount > 0 && <span className="sidebar-badge">{pendingAvansCount}</span>}
+                  </div>
+                  <div className={`sidebar-nav-item ${page==='masraf'?'active':''}`} onClick={()=>setPage('masraf')}>
+                    <span>🧾</span> Masraf Formu
+                    {pendingMasrafCount > 0 && <span className="sidebar-badge">{pendingMasrafCount}</span>}
+                  </div>
+                  {(canSeeMalzeme || isAdmin) && (
+                    <div className={`sidebar-nav-item ${page==='malzeme'?'active':''}`} onClick={()=>setPage('malzeme')}>
+                      <span>📦</span> Malzeme Yönetimi
+                      {pendingMalzemeCount > 0 && <span className="sidebar-badge">{pendingMalzemeCount}</span>}
+                    </div>
+                  )}
                 </div>
               )}
 
               {isAdmin && (
                 <>
-                  <div className="sidebar-section-title">Yönetim</div>
-                  <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
-                    <span>👥</span> İK Paneli
+                  <div className="sidebar-section-title" onClick={()=>toggleSection('yonetim')}>
+                    <span>Yönetim</span>
+                    <span className={`sidebar-section-chevron ${openSections.yonetim?'':'closed'}`}>▾</span>
                   </div>
-                  <div className={`sidebar-nav-item ${page==='araclar'?'active':''}`} onClick={()=>setPage('araclar')}>
-                    <span>🚗</span> Araç Yönetimi
-                  </div>
-                  <div className={`sidebar-nav-item ${page==='ofis'?'active':''}`} onClick={()=>setPage('ofis')}>
-                    <span>🏢</span> Ofis & Depo
-                  </div>
-                  {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
-                    <div className={`sidebar-nav-item ${page==='cashflow'?'active':''}`} onClick={()=>setPage('cashflow')}>
-                      <span>💰</span> Nakit Akışı
+                  {openSections.yonetim && (
+                    <div className="sidebar-section-items">
+                      <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
+                        <span>👥</span> İK Paneli
+                      </div>
+                      <div className={`sidebar-nav-item ${page==='araclar'?'active':''}`} onClick={()=>setPage('araclar')}>
+                        <span>🚗</span> Araç Yönetimi
+                      </div>
+                      <div className={`sidebar-nav-item ${page==='ofis'?'active':''}`} onClick={()=>setPage('ofis')}>
+                        <span>🏢</span> Ofis & Depo
+                      </div>
+                      {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
+                        <div className={`sidebar-nav-item ${page==='cashflow'?'active':''}`} onClick={()=>setPage('cashflow')}>
+                          <span>💰</span> Nakit Akışı
+                        </div>
+                      )}
+                      <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
+                        <span>👑</span> Admin Panel
+                      </div>
                     </div>
                   )}
-                  <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
-                    <span>👑</span> Admin Panel
-                  </div>
                 </>
               )}
             </>
