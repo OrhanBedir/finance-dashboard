@@ -17219,527 +17219,337 @@ function App() {
     );
   }
 
+  // Sidebar layout için sayfa başlığı helper
+  const getPageTitle = () => {
+    switch(page) {
+      case "finance": return "Finans Paneli";
+      case "region": return "Bölge Analizi";
+      case "executive": return "Rollout Data";
+      case "entry": return "Günlük İş Girişi";
+      case "puantaj": return "Puantaj";
+      case "is_avans": return "İş Avansı";
+      case "masraf": return "Masraf Formu";
+      case "malzeme": return isPersonel ? "Malzemelerim" : "Malzeme Yönetimi";
+      case "hr": return "İK Paneli";
+      case "araclar": return "Araç Yönetimi";
+      case "ofis": return "Ofis & Depo";
+      case "cashflow": return "Nakit Akışı";
+      case "admin": return "Admin Panel";
+      default: return "ERC Mühendislik";
+    }
+  };
+
   return (
-    <div className="container">
-      <div
-        className="navTabs"
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          gap: "12px",
-          flexWrap: "wrap",
-          marginBottom: "24px",
-          position: "relative",
-          paddingRight: "130px",
-        }}
-      >
-        .
-        {isSubconUser ? (
-          <>
-            <button
-              className={page === "region" ? "tab activeTab" : "tab"}
-              onClick={() => setPage("region")}
-            >
-              Bölge Analizi
-            </button>
+    <>
+      <style>{`
+        .app-layout { display: flex; height: 100vh; overflow: hidden; background: #f0f2f5; }
+        .sidebar { width: 240px; background: #0f1623; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+        .sidebar-logo { padding: 20px 16px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; gap: 10px; }
+        .sidebar-logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+        .sidebar-section-title { padding: 12px 16px 6px; font-size: 10px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 1px; }
+        .sidebar-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 1px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #94a3b8; transition: all 0.15s; position: relative; }
+        .sidebar-nav-item:hover { background: #1e2a3a; color: #e2e8f0; }
+        .sidebar-nav-item.active { background: #1d4ed8; color: #fff; }
+        .sidebar-badge { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #dc2626; color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+        .sidebar-user { margin-top: auto; padding: 12px; border-top: 1px solid #1e2a3a; }
+        .sidebar-user-card { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; background: #1e2a3a; }
+        .sidebar-user-avatar { width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0; }
+        .main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .topbar { background: #fff; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+        .main-content { flex: 1; overflow-y: auto; }
+        .notification-bar { padding: 10px 24px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 13px; flex-shrink: 0; }
+      `}</style>
 
-            {(token || financeToken) && (
-              <button
-                type="button"
-                onClick={handleLogout}
-                style={{
-                  position: "absolute",
-                  right: "0",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "#dc3545",
-                  color: "#fff",
-                  border: "none",
-                  padding: "10px 16px",
-                  borderRadius: "8px",
-                  cursor: "pointer",
-                  fontWeight: "600",
-                }}
-              >
-                Çıkış Yap
-              </button>
-            )}
-          </>
-        ) : (
-          <>
-            {isAdmin && (
-              <button
-                className={page === "finance" ? "tab activeTab" : "tab"}
-                onClick={() => setPage("finance")}
-              >
-                Finans Paneli
-              </button>
-            )}
-
-            <button
-              className={page === "region" ? "tab activeTab" : "tab"}
-              onClick={() => setPage("region")}
-            >
-              Bölge Analizi
-            </button>
-
-            <button
-              className={page === "executive" ? "tab activeTab" : "tab"}
-              onClick={() => setPage("executive")}
-            >
-              Rollout Data
-            </button>
-
-            <button
-              className={page === "entry" ? "tab activeTab" : "tab"}
-              onClick={() => setPage("entry")}
-            >
-              Günlük İş Girişi
-            </button>
-
-            {canSeePuantaj && (
-              <button
-                className={page === "puantaj" ? "tab activeTab" : "tab"}
-                onClick={() => setPage("puantaj")}
-              >
-                📋 Puantaj
-              </button>
-            )}
-
-            <button
-              className={page === "is_avans" ? "tab activeTab" : "tab"}
-              onClick={() => setPage("is_avans")}
-              style={{ position: "relative" }}
-            >
-              İş Avansı
-              {pendingAvansCount > 0 && (
-                <span style={{ position:"absolute", top:"-6px", right:"-6px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"11px", fontWeight:700, minWidth:"18px", height:"18px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", lineHeight:1 }}>
-                  {pendingAvansCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              className={page === "masraf" ? "tab activeTab" : "tab"}
-              onClick={() => setPage("masraf")}
-              style={{ position: "relative" }}
-            >
-              🧾 Masraf Formu
-              {pendingMasrafCount > 0 && (
-                <span style={{ position:"absolute", top:"-6px", right:"-6px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"11px", fontWeight:700, minWidth:"18px", height:"18px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", lineHeight:1 }}>
-                  {pendingMasrafCount}
-                </span>
-              )}
-            </button>
-
-            {(canSeeMalzeme || isAdmin || isPersonel) && (
-              <button
-                className={page === "malzeme" ? "tab activeTab" : "tab"}
-                onClick={() => setPage("malzeme")}
-                style={{ position:"relative" }}
-              >
-                {isPersonel ? "📦 Malzemelerim" : "📦 Malzeme Yönetimi"}
-                {pendingMalzemeCount > 0 && (
-                  <span style={{ position:"absolute", top:"-6px", right:"-6px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"11px", fontWeight:700, minWidth:"18px", height:"18px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", lineHeight:1 }}>
-                    {pendingMalzemeCount}
-                  </span>
-                )}
-              </button>
-            )}
-
-
-            {canSeeMalzeme && false && (
-              <button
-                className={page === "malzeme" ? "tab activeTab" : "tab"}
-                onClick={() => setPage("malzeme")}
-              >
-                📦 Malzeme
-              </button>
-            )}
-
-            {(token || financeToken) && (
-              <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"2px" }}>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  style={{ background:"#dc3545", color:"#fff", border:"none", padding:"10px 16px", borderRadius:"8px", cursor:"pointer", fontWeight:"600", whiteSpace:"nowrap" }}
-                >
-                  Çıkış Yap
-                </button>
-                {user?.name && (
-                  <span style={{ fontSize:"11px", color:"#6b7280", whiteSpace:"nowrap" }}>
-                    {user.name}
-                  </span>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {pendingAvansCount > 0 && page !== "is_avans" && (
-        <div onClick={() => setPage("is_avans")} style={{ margin:"0 0 0 0", padding:"12px 24px", background:"#fef2f2", borderBottom:"2px solid #fca5a5", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer" }}>
-          <span style={{ fontSize:"20px" }}>🔔</span>
-          <div>
-            <span style={{ fontWeight:700, color:"#991b1b", fontSize:"14px" }}>
-              {pendingAvansCount} adet iş avansı talebi onayınızı bekliyor
-            </span>
-            <span style={{ color:"#dc2626", fontSize:"13px", marginLeft:"8px" }}>→ İş Avansı'na git</span>
-          </div>
-        </div>
-      )}
-
-      {pendingMasrafCount > 0 && page !== "masraf" && (
-        <div onClick={() => setPage("masraf")} style={{ margin:"0 0 0 0", padding:"12px 24px", background:"#fff7ed", borderBottom:"2px solid #fed7aa", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer" }}>
-          <span style={{ fontSize:"20px" }}>🧾</span>
-          <div>
-            <span style={{ fontWeight:700, color:"#92400e", fontSize:"14px" }}>
-              {pendingMasrafCount} adet masraf formu onayınızı bekliyor
-            </span>
-            <span style={{ color:"#b45309", fontSize:"13px", marginLeft:"8px" }}>→ Masraf Formu'na git</span>
-          </div>
-        </div>
-      )}
-
-      {pendingMalzemeCount > 0 && page !== "malzeme" && (
-        <div onClick={() => setPage("malzeme")} style={{ margin:"0 0 0 0", padding:"12px 24px", background:"#f0fdf4", borderBottom:"2px solid #86efac", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer" }}>
-          <span style={{ fontSize:"20px" }}>📦</span>
-          <div>
-            <span style={{ fontWeight:700, color:"#166534", fontSize:"14px" }}>
-              {pendingMalzemeCount} adet malzeme talebi onayınızı bekliyor
-            </span>
-            <span style={{ color:"#15803d", fontSize:"13px", marginLeft:"8px" }}>→ Malzeme Yönetimi'ne git</span>
-          </div>
-        </div>
-      )}
-
-      {page === "finance" &&
-        isAdmin &&
-        (financeToken ? (
-          <FinanceDashboard
-            user={user}
-            financeToken={financeToken}
-            financeUserEmail={financeUserEmail}
-            onFinanceLogout={handleFinanceLogout}
-            advanceModalOpen={advanceModalOpen}
-            setAdvanceModalOpen={setAdvanceModalOpen}
-            advanceForm={advanceForm}
-            setAdvanceForm={setAdvanceForm}
-            handleApplyAdvance={handleApplyAdvance}
-            supplierAdvances={supplierAdvances}
-            supplierAdvanceTotal={supplierAdvanceTotal}
-            onGoToAdmin={() => { setPage("admin"); loadAdminUsers(); }}
-            onGoToHr={() => setPage("hr")}
-            onGoToAraclar={() => setPage("araclar")}
-            onGoToOfis={() => setPage("ofis")}
-            onGoToMalzeme={() => setPage("malzeme")}
-            onGoToCashflow={() => setPage("cashflow")}
-            currentUser={user}
-          />
-        ) : (
-          <div
-            style={{
-              maxWidth: "420px",
-              margin: "40px auto",
-              background: "#fff",
-              borderRadius: "20px",
-              padding: "24px",
-              boxShadow: "0 20px 50px rgba(0,0,0,0.08)",
-            }}
-          >
-            <h2 style={{ marginBottom: "18px", textAlign: "center" }}>
-              🔐 Finance Login
-            </h2>
-
-            <form onSubmit={handleFinanceLogin}>
-              <div style={{ display: "grid", gap: "12px" }}>
-                <input
-                  type="email"
-                  placeholder="E-posta"
-                  value={financeLoginEmail}
-                  onChange={(e) => setFinanceLoginEmail(e.target.value)}
-                />
-
-                <input
-                  type="password"
-                  placeholder="Şifre"
-                  value={financeLoginPassword}
-                  onChange={(e) => setFinanceLoginPassword(e.target.value)}
-                />
-
-                <button type="submit" className="saveButton">
-                  {financeLoginLoading ? "Giriş yapılıyor..." : "Giriş Yap"}
-                </button>
-
-                {financeLoginError && (
-                  <div style={{ color: "#b91c1c", fontWeight: 600 }}>
-                    {financeLoginError}
-                  </div>
-                )}
-              </div>
-            </form>
-          </div>
-        ))}
-
-      {page === "hr" && <HrDashboard onBack={() => setPage("finance")} currentUser={user} />}
-      {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
-      {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
-      {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
-      {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
-      {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
-      {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
-      {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
-      {page === "executive" && <RolloutDashboard currentUser={user} />}
-      {page === "region" && (
-        <RegionAnalysis
-          isSubconUser={!isAdmin && !!user?.subcon_name}
-          userSubconName={user?.subcon_name || ""}
-          userPaymentRate={Number(user?.payment_rate || 0.8)}
-        />
-      )}
-      {page === "entry" && <DailyEntry />}
-      {page === "admin" && isAdmin && (
-        <div style={{ maxWidth: "1100px", margin: "24px auto" }}>
-          {/* Header */}
-          <div style={{
-            background: "linear-gradient(135deg, #1f2937 0%, #374151 100%)",
-            borderRadius: "16px",
-            padding: "28px 32px",
-            marginBottom: "24px",
-            display: "flex",
-            alignItems: "center",
-            gap: "16px",
-            color: "#fff",
-          }}>
-            <div style={{ fontSize: "40px" }}>👑</div>
+      <div className="app-layout">
+        {/* ── SIDEBAR ── */}
+        <div className="sidebar">
+          {/* Logo */}
+          <div className="sidebar-logo">
+            <div className="sidebar-logo-icon">🏗</div>
             <div>
-              <h2 style={{ margin: 0, fontSize: "24px", fontWeight: 700 }}>Admin Panel</h2>
-              <p style={{ margin: "4px 0 0", color: "#9ca3af", fontSize: "14px" }}>
-                Kullanıcı yönetimi ve sistem ayarları
-              </p>
-            </div>
-            <div style={{ marginLeft: "auto", textAlign: "right" }}>
-              <div style={{ fontSize: "28px", fontWeight: 700 }}>{adminUsers.length}</div>
-              <div style={{ fontSize: "12px", color: "#9ca3af" }}>Toplam Kullanıcı</div>
+              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>ERC Mühendislik</div>
+              <div style={{fontSize:11,color:'#64748b'}}>Operasyon & Hakediş</div>
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: "20px", alignItems: "start" }}>
-            {/* Yeni Kullanıcı Formu */}
-            <div style={{
-              background: "#fff",
-              borderRadius: "16px",
-              padding: "24px",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.07)",
-              border: "1px solid #f3f4f6",
-            }}>
-              <h3 style={{ margin: "0 0 20px", fontSize: "16px", fontWeight: 700, color: "#1f2937", display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ background: "#f3f4f6", borderRadius: "8px", padding: "6px 8px" }}>➕</span>
-                Yeni Kullanıcı
-              </h3>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <input
-                  placeholder="Ad Soyad"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", outline: "none" }}
-                />
-                <input
-                  placeholder="E-posta adresi"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", outline: "none" }}
-                />
-                <input
-                  placeholder="Şifre"
-                  type="password"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", outline: "none" }}
-                />
-                <select
-                  value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff", cursor: "pointer" }}
-                >
-                  <option value="user">👤 Personel</option>
-                  <option value="admin">👑 Admin</option>
-                  <option value="rollout_mudur">🏗 Bölge Müdürü</option>
-                  <option value="pm">📋 Proje Müdürü</option>
-                  <option value="direktor">🎯 Proje Direktörü</option>
-                  <option value="muhasebe">💼 Muhasebe</option>
-                </select>
-                <button
-                  onClick={handleCreateUser}
-                  style={{
-                    padding: "11px",
-                    background: "#1f2937",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: "10px",
-                    fontWeight: "700",
-                    fontSize: "14px",
-                    cursor: "pointer",
-                    marginTop: "4px",
-                  }}
-                >
-                  Kullanıcı Ekle
-                </button>
+          {/* Navigation */}
+          {isSubconUser ? (
+            <>
+              <div className="sidebar-section-title">Menü</div>
+              <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
+                <span>📍</span> Bölge Analizi
               </div>
-
-              {adminError && (
-                <div style={{ marginTop: "12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "10px 14px", color: "#b91c1c", fontSize: "13px", fontWeight: 600 }}>
-                  {adminError}
+            </>
+          ) : (
+            <>
+              <div className="sidebar-section-title">Ana Menü</div>
+              {isAdmin && (
+                <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
+                  <span>📊</span> Finans Paneli
                 </div>
               )}
-            </div>
-
-            {/* Kullanıcı Listesi */}
-            <div style={{
-              background: "#fff",
-              borderRadius: "16px",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.07)",
-              border: "1px solid #f3f4f6",
-              overflow: "hidden",
-            }}>
-              <div style={{ padding: "20px 24px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1f2937" }}>
-                  Kullanıcılar
-                </h3>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <span style={{ background: "#dcfce7", color: "#166534", fontSize: "12px", fontWeight: 600, padding: "4px 10px", borderRadius: "20px" }}>
-                    {adminUsers.filter(u => u.is_active).length} Aktif
-                  </span>
-                  <span style={{ background: "#fee2e2", color: "#991b1b", fontSize: "12px", fontWeight: 600, padding: "4px 10px", borderRadius: "20px" }}>
-                    {adminUsers.filter(u => !u.is_active).length} Pasif
-                  </span>
-                </div>
+              <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
+                <span>📍</span> Bölge Analizi
               </div>
+              <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
+                <span>🏗</span> Rollout Data
+              </div>
+              <div className={`sidebar-nav-item ${page==='entry'?'active':''}`} onClick={()=>setPage('entry')}>
+                <span>✏️</span> Günlük İş Girişi
+              </div>
+              {canSeePuantaj && (
+                <div className={`sidebar-nav-item ${page==='puantaj'?'active':''}`} onClick={()=>setPage('puantaj')}>
+                  <span>📋</span> Puantaj
+                </div>
+              )}
 
-              {adminLoading ? (
-                <div style={{ padding: "40px", textAlign: "center", color: "#9ca3af" }}>Yükleniyor...</div>
+              <div className="sidebar-section-title">İnsan Kaynakları</div>
+              <div className={`sidebar-nav-item ${page==='is_avans'?'active':''}`} onClick={()=>setPage('is_avans')}>
+                <span>💳</span> İş Avansı
+                {pendingAvansCount > 0 && <span className="sidebar-badge">{pendingAvansCount}</span>}
+              </div>
+              <div className={`sidebar-nav-item ${page==='masraf'?'active':''}`} onClick={()=>setPage('masraf')}>
+                <span>🧾</span> Masraf Formu
+                {pendingMasrafCount > 0 && <span className="sidebar-badge">{pendingMasrafCount}</span>}
+              </div>
+              {(canSeeMalzeme || isAdmin) && (
+                <div className={`sidebar-nav-item ${page==='malzeme'?'active':''}`} onClick={()=>setPage('malzeme')}>
+                  <span>📦</span> Malzeme Yönetimi
+                  {pendingMalzemeCount > 0 && <span className="sidebar-badge">{pendingMalzemeCount}</span>}
+                </div>
+              )}
+
+              {isAdmin && (
+                <>
+                  <div className="sidebar-section-title">Yönetim</div>
+                  <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
+                    <span>👥</span> İK Paneli
+                  </div>
+                  <div className={`sidebar-nav-item ${page==='araclar'?'active':''}`} onClick={()=>setPage('araclar')}>
+                    <span>🚗</span> Araç Yönetimi
+                  </div>
+                  <div className={`sidebar-nav-item ${page==='ofis'?'active':''}`} onClick={()=>setPage('ofis')}>
+                    <span>🏢</span> Ofis & Depo
+                  </div>
+                  {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
+                    <div className={`sidebar-nav-item ${page==='cashflow'?'active':''}`} onClick={()=>setPage('cashflow')}>
+                      <span>💰</span> Nakit Akışı
+                    </div>
+                  )}
+                  <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
+                    <span>👑</span> Admin Panel
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* User info + Logout */}
+          <div className="sidebar-user">
+            <div className="sidebar-user-card">
+              <div className="sidebar-user-avatar">{user?.name?.charAt(0) || '?'}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,color:'#e2e8f0',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user?.name || user?.email}</div>
+                <div style={{fontSize:11,color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user?.role}</div>
+              </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              style={{marginTop:8,width:'100%',padding:'8px',background:'#1e2a3a',border:'1px solid #2d3f55',borderRadius:'8px',color:'#94a3b8',fontSize:12,fontWeight:600,cursor:'pointer'}}
+            >
+              Çıkış Yap
+            </button>
+          </div>
+        </div>
+
+        {/* ── MAIN AREA ── */}
+        <div className="main-area">
+          {/* Topbar */}
+          <div className="topbar">
+            <div style={{fontSize:16,fontWeight:700,color:'#0f172a'}}>{getPageTitle()}</div>
+            <div style={{fontSize:13,color:'#64748b'}}>{user?.email}</div>
+          </div>
+
+          {/* Notification bars */}
+          {pendingAvansCount > 0 && page !== "is_avans" && (
+            <div className="notification-bar" onClick={()=>setPage("is_avans")} style={{background:"#fef2f2",borderBottom:"2px solid #fca5a5"}}>
+              <span style={{fontSize:"18px"}}>🔔</span>
+              <span style={{fontWeight:700,color:"#991b1b"}}>{pendingAvansCount} adet iş avansı talebi onayınızı bekliyor</span>
+              <span style={{color:"#dc2626",marginLeft:"4px"}}>→ git</span>
+            </div>
+          )}
+          {pendingMasrafCount > 0 && page !== "masraf" && (
+            <div className="notification-bar" onClick={()=>setPage("masraf")} style={{background:"#fff7ed",borderBottom:"2px solid #fed7aa"}}>
+              <span style={{fontSize:"18px"}}>🧾</span>
+              <span style={{fontWeight:700,color:"#92400e"}}>{pendingMasrafCount} adet masraf formu onayınızı bekliyor</span>
+              <span style={{color:"#b45309",marginLeft:"4px"}}>→ git</span>
+            </div>
+          )}
+          {pendingMalzemeCount > 0 && page !== "malzeme" && (
+            <div className="notification-bar" onClick={()=>setPage("malzeme")} style={{background:"#f0fdf4",borderBottom:"2px solid #86efac"}}>
+              <span style={{fontSize:"18px"}}>📦</span>
+              <span style={{fontWeight:700,color:"#166534"}}>{pendingMalzemeCount} adet malzeme talebi onayınızı bekliyor</span>
+              <span style={{color:"#15803d",marginLeft:"4px"}}>→ git</span>
+            </div>
+          )}
+
+          {/* Main content */}
+          <div className="main-content">
+            {page === "finance" && isAdmin && (
+              financeToken ? (
+                <FinanceDashboard
+                  user={user}
+                  financeToken={financeToken}
+                  financeUserEmail={financeUserEmail}
+                  onFinanceLogout={handleFinanceLogout}
+                  advanceModalOpen={advanceModalOpen}
+                  setAdvanceModalOpen={setAdvanceModalOpen}
+                  advanceForm={advanceForm}
+                  setAdvanceForm={setAdvanceForm}
+                  handleApplyAdvance={handleApplyAdvance}
+                  supplierAdvances={supplierAdvances}
+                  supplierAdvanceTotal={supplierAdvanceTotal}
+                  onGoToAdmin={() => { setPage("admin"); loadAdminUsers(); }}
+                  onGoToHr={() => setPage("hr")}
+                  onGoToAraclar={() => setPage("araclar")}
+                  onGoToOfis={() => setPage("ofis")}
+                  onGoToMalzeme={() => setPage("malzeme")}
+                  onGoToCashflow={() => setPage("cashflow")}
+                  currentUser={user}
+                />
               ) : (
-                <div>
-                  {adminUsers.map((u, i) => (
-                    <div key={u.id} style={{
-                      display: "grid",
-                      gridTemplateColumns: "44px 1fr auto auto",
-                      alignItems: "center",
-                      gap: "16px",
-                      padding: "14px 24px",
-                      borderBottom: i < adminUsers.length - 1 ? "1px solid #f9fafb" : "none",
-                      background: "#fff",
-                      transition: "background 0.15s",
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#f9fafb"}
-                    onMouseLeave={e => e.currentTarget.style.background = "#fff"}
-                    >
-                      {/* Avatar */}
-                      <div style={{
-                        width: "44px", height: "44px",
-                        borderRadius: "12px",
-                        background: u.role === "admin" ? "linear-gradient(135deg,#fbbf24,#f59e0b)" : "linear-gradient(135deg,#60a5fa,#3b82f6)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: "18px", fontWeight: 700, color: "#fff",
-                        flexShrink: 0,
-                      }}>
-                        {u.name.charAt(0)}
-                      </div>
+                <div style={{maxWidth:"420px",margin:"40px auto",background:"#fff",borderRadius:"20px",padding:"24px",boxShadow:"0 20px 50px rgba(0,0,0,0.08)"}}>
+                  <h2 style={{marginBottom:"18px",textAlign:"center"}}>🔐 Finance Login</h2>
+                  <form onSubmit={handleFinanceLogin}>
+                    <div style={{display:"grid",gap:"12px"}}>
+                      <input type="email" placeholder="E-posta" value={financeLoginEmail} onChange={e=>setFinanceLoginEmail(e.target.value)} />
+                      <input type="password" placeholder="Şifre" value={financeLoginPassword} onChange={e=>setFinanceLoginPassword(e.target.value)} />
+                      <button type="submit" className="saveButton">{financeLoginLoading?"Giriş yapılıyor...":"Giriş Yap"}</button>
+                      {financeLoginError && <div style={{color:"#b91c1c",fontWeight:600}}>{financeLoginError}</div>}
+                    </div>
+                  </form>
+                </div>
+              )
+            )}
 
-                      {/* Info */}
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: "14px", color: "#1f2937" }}>{u.name}</div>
-                        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>{u.email}</div>
-                      </div>
+            {page === "hr" && <HrDashboard onBack={()=>setPage("finance")} currentUser={user} />}
+            {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
+            {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
+            {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
+            {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
+            {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
+            {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
+            {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
+            {page === "executive" && <RolloutDashboard currentUser={user} />}
+            {page === "region" && (
+              <RegionAnalysis
+                isSubconUser={!isAdmin && !!user?.subcon_name}
+                userSubconName={user?.subcon_name || ""}
+                userPaymentRate={Number(user?.payment_rate || 0.8)}
+              />
+            )}
+            {page === "entry" && <DailyEntry />}
+            {page === "admin" && isAdmin && (
+              <div style={{maxWidth:"1100px",margin:"24px auto",padding:"0 16px"}}>
+                <div style={{background:"linear-gradient(135deg,#1f2937 0%,#374151 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",gap:"16px",color:"#fff"}}>
+                  <div style={{fontSize:"40px"}}>👑</div>
+                  <div>
+                    <h2 style={{margin:0,fontSize:"24px",fontWeight:700}}>Admin Panel</h2>
+                    <p style={{margin:"4px 0 0",color:"#9ca3af",fontSize:"14px"}}>Kullanıcı yönetimi ve sistem ayarları</p>
+                  </div>
+                  <div style={{marginLeft:"auto",textAlign:"right"}}>
+                    <div style={{fontSize:"28px",fontWeight:700}}>{adminUsers.length}</div>
+                    <div style={{fontSize:"12px",color:"#9ca3af"}}>Toplam Kullanıcı</div>
+                  </div>
+                </div>
 
-                      {/* Badges */}
-                      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                        <span style={{
-                          background: u.role === "admin" ? "#fef3c7" : u.role === "rollout_mudur" ? "#f0fdf4" : u.role === "pm" ? "#eff6ff" : u.role === "direktor" ? "#fdf2f8" : u.role === "muhasebe" ? "#f0f9ff" : "#f3f4f6",
-                          color: u.role === "admin" ? "#92400e" : u.role === "rollout_mudur" ? "#166534" : u.role === "pm" ? "#1e40af" : u.role === "direktor" ? "#7e22ce" : u.role === "muhasebe" ? "#0369a1" : "#374151",
-                          fontSize: "11px", fontWeight: 700, padding: "3px 10px",
-                          borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.05em",
-                        }}>
-                          {u.role === "admin" ? "👑 Admin" : u.role === "rollout_mudur" ? "🏗 Bölge Müdürü" : u.role === "pm" ? "📋 Proje Müdürü" : u.role === "direktor" ? "🎯 Proje Direktörü" : u.role === "muhasebe" ? "💼 Muhasebe" : "👤 Personel"}
-                        </span>
-                        <span style={{
-                          background: u.is_active ? "#dcfce7" : "#f3f4f6",
-                          color: u.is_active ? "#166534" : "#6b7280",
-                          fontSize: "11px", fontWeight: 700, padding: "3px 10px",
-                          borderRadius: "20px",
-                        }}>
-                          {u.is_active ? "Aktif" : "Pasif"}
-                        </span>
-                      </div>
+                <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:"20px",alignItems:"start"}}>
+                  <div style={{background:"#fff",borderRadius:"16px",padding:"24px",boxShadow:"0 4px 20px rgba(0,0,0,0.07)",border:"1px solid #f3f4f6"}}>
+                    <h3 style={{margin:"0 0 20px",fontSize:"16px",fontWeight:700,color:"#1f2937",display:"flex",alignItems:"center",gap:"8px"}}>
+                      <span style={{background:"#f3f4f6",borderRadius:"8px",padding:"6px 8px"}}>➕</span> Yeni Kullanıcı
+                    </h3>
+                    <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+                      <input placeholder="Ad Soyad" value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
+                      <input placeholder="E-posta adresi" value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
+                      <input placeholder="Şifre" type="password" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
+                      <select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",background:"#fff",cursor:"pointer"}}>
+                        <option value="user">👤 Personel</option>
+                        <option value="admin">👑 Admin</option>
+                        <option value="rollout_mudur">🏗 Bölge Müdürü</option>
+                        <option value="pm">📋 Proje Müdürü</option>
+                        <option value="direktor">🎯 Proje Direktörü</option>
+                        <option value="muhasebe">💼 Muhasebe</option>
+                      </select>
+                      <button onClick={handleCreateUser} style={{padding:"11px",background:"#1f2937",color:"#fff",border:"none",borderRadius:"10px",fontWeight:"700",fontSize:"14px",cursor:"pointer",marginTop:"4px"}}>
+                        Kullanıcı Ekle
+                      </button>
+                    </div>
+                    {adminError && <div style={{marginTop:"12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:"8px",padding:"10px 14px",color:"#b91c1c",fontSize:"13px",fontWeight:600}}>{adminError}</div>}
+                  </div>
 
-                      {/* Actions */}
-                      <div style={{ display: "flex", gap: "6px" }}>
-                        <button
-                          onClick={() => handleToggleActive(u.id)}
-                          style={{
-                            padding: "6px 12px",
-                            background: u.is_active ? "#fef3c7" : "#f0fdf4",
-                            color: u.is_active ? "#92400e" : "#166534",
-                            border: "none", borderRadius: "8px",
-                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                          }}
-                        >
-                          {u.is_active ? "Pasife Al" : "Aktif Et"}
-                        </button>
-                        <select
-                          value={u.role || "user"}
-                          onChange={e => handleAdminRoleChange(u.id, e.target.value)}
-                          style={{
-                            padding: "6px 10px",
-                            border: "1px solid #e5e7eb", borderRadius: "8px",
-                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                            background: "#f9fafb", color: "#374151",
-                          }}
-                        >
-                          <option value="user">👤 Personel</option>
-                          <option value="admin">👑 Admin</option>
-                          <option value="rollout_mudur">🏗 Bölge Müdürü</option>
-                          <option value="pm">📋 Proje Müdürü</option>
-                          <option value="direktor">🎯 Proje Direktörü</option>
-                          <option value="muhasebe">💼 Muhasebe</option>
-                        </select>
-                        <button
-                          onClick={() => handleResetPassword(u.id, u.name)}
-                          style={{
-                            padding: "6px 12px",
-                            background: "#eff6ff",
-                            color: "#1d4ed8",
-                            border: "none", borderRadius: "8px",
-                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                          }}
-                          title="Şifre değiştir"
-                        >
-                          🔑 Şifre
-                        </button>
-                        <button
-                          onClick={() => deleteUser(u.id)}
-                          style={{
-                            padding: "6px 12px",
-                            background: "#fee2e2",
-                            color: "#991b1b",
-                            border: "none", borderRadius: "8px",
-                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                          }}
-                        >
-                          🗑 Sil
-                        </button>
+                  <div style={{background:"#fff",borderRadius:"16px",boxShadow:"0 4px 20px rgba(0,0,0,0.07)",border:"1px solid #f3f4f6",overflow:"hidden"}}>
+                    <div style={{padding:"20px 24px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <h3 style={{margin:0,fontSize:"16px",fontWeight:700,color:"#1f2937"}}>Kullanıcılar</h3>
+                      <div style={{display:"flex",gap:"8px"}}>
+                        <span style={{background:"#dcfce7",color:"#166534",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>u.is_active).length} Aktif</span>
+                        <span style={{background:"#fee2e2",color:"#991b1b",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>!u.is_active).length} Pasif</span>
                       </div>
                     </div>
-                  ))}
+                    {adminLoading ? (
+                      <div style={{padding:"40px",textAlign:"center",color:"#9ca3af"}}>Yükleniyor...</div>
+                    ) : (
+                      <div>
+                        {adminUsers.map((u,i) => (
+                          <div key={u.id} style={{display:"grid",gridTemplateColumns:"44px 1fr auto auto",alignItems:"center",gap:"16px",padding:"14px 24px",borderBottom:i<adminUsers.length-1?"1px solid #f9fafb":"none",background:"#fff",transition:"background 0.15s"}}
+                            onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                            onMouseLeave={e=>e.currentTarget.style.background="#fff"}
+                          >
+                            <div style={{width:"44px",height:"44px",borderRadius:"12px",background:u.role==="admin"?"linear-gradient(135deg,#fbbf24,#f59e0b)":"linear-gradient(135deg,#60a5fa,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",fontWeight:700,color:"#fff",flexShrink:0}}>
+                              {u.name.charAt(0)}
+                            </div>
+                            <div>
+                              <div style={{fontWeight:600,fontSize:"14px",color:"#1f2937"}}>{u.name}</div>
+                              <div style={{fontSize:"12px",color:"#9ca3af",marginTop:"2px"}}>{u.email}</div>
+                            </div>
+                            <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
+                              <span style={{background:u.role==="admin"?"#fef3c7":u.role==="rollout_mudur"?"#f0fdf4":u.role==="pm"?"#eff6ff":u.role==="direktor"?"#fdf2f8":u.role==="muhasebe"?"#f0f9ff":"#f3f4f6",color:u.role==="admin"?"#92400e":u.role==="rollout_mudur"?"#166534":u.role==="pm"?"#1e40af":u.role==="direktor"?"#7e22ce":u.role==="muhasebe"?"#0369a1":"#374151",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",textTransform:"uppercase",letterSpacing:"0.05em"}}>
+                                {u.role==="admin"?"👑 Admin":u.role==="rollout_mudur"?"🏗 Bölge Müdürü":u.role==="pm"?"📋 Proje Müdürü":u.role==="direktor"?"🎯 Proje Direktörü":u.role==="muhasebe"?"💼 Muhasebe":"👤 Personel"}
+                              </span>
+                              <span style={{background:u.is_active?"#dcfce7":"#f3f4f6",color:u.is_active?"#166534":"#6b7280",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px"}}>
+                                {u.is_active?"Aktif":"Pasif"}
+                              </span>
+                            </div>
+                            <div style={{display:"flex",gap:"6px"}}>
+                              <button onClick={()=>handleToggleActive(u.id)} style={{padding:"6px 12px",background:u.is_active?"#fef3c7":"#f0fdf4",color:u.is_active?"#92400e":"#166534",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
+                                {u.is_active?"Pasife Al":"Aktif Et"}
+                              </button>
+                              <select value={u.role||"user"} onChange={e=>handleAdminRoleChange(u.id,e.target.value)} style={{padding:"6px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:"#f9fafb",color:"#374151"}}>
+                                <option value="user">👤 Personel</option>
+                                <option value="admin">👑 Admin</option>
+                                <option value="rollout_mudur">🏗 Bölge Müdürü</option>
+                                <option value="pm">📋 Proje Müdürü</option>
+                                <option value="direktor">🎯 Proje Direktörü</option>
+                                <option value="muhasebe">💼 Muhasebe</option>
+                              </select>
+                              <button onClick={()=>handleResetPassword(u.id,u.name)} style={{padding:"6px 12px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}} title="Şifre değiştir">
+                                🔑 Şifre
+                              </button>
+                              <button onClick={()=>deleteUser(u.id)} style={{padding:"6px 12px",background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
+                                🗑 Sil
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }
 
