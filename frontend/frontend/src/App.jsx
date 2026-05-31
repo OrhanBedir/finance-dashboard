@@ -4818,172 +4818,63 @@ function FinanceDashboard({
 
   return (
     <>
-      <div
-        style={{
-          marginBottom: "14px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: "12px",
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <div style={{ fontSize: "13px", color: "#6b7280" }}>
-            Hoş geldiniz, <b>{user?.name || financeUserEmail}</b>
-          </div>
-        </div>
+      <div style={{ display:"flex", justifyContent:"flex-end", gap:"8px", alignItems:"center", marginBottom:"16px", padding:"0", flexWrap:"wrap" }}>
+        <button
+          type="button"
+          style={{ padding:"7px 13px", borderRadius:"7px", border:"1px solid #e2e8f0", background:"#fff", fontSize:"12px", fontWeight:500, color:"#374151", cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}
+          onClick={() => {
+            setShowInvoiceEntryModal(true);
+            setShowInvoiceFormPanel(false);
+            setShowInvoiceUpload(false);
+            setShowUpload(false);
+            setEditingInvoiceId(null);
+            setInvoiceForm({
+              bolge: "", proje: "", proje_kodu: "", fatura_no: "",
+              fatura_tarihi: "", odeme_tarihi: "", tedarikci: "", rf_montaj_firma: "",
+              fatura_kalemi: "", is_kalemi: "", po_no: "", site_id: "",
+              tutar: "", kdv: "", toplam_tutar: "", odenen_tutar: "",
+              kalan_borc: "", note: "",
+            });
+          }}
+        >
+          🧾 Fatura Girişi
+        </button>
 
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+        <button
+          type="button"
+          style={{ padding:"7px 13px", borderRadius:"7px", border:"1px solid #e2e8f0", background:"#fff", fontSize:"12px", fontWeight:500, color:"#374151", cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}
+          onClick={handleShowSubconSummary}
+        >
+          🏗️ Taşeron Hakediş
+        </button>
+
+        <div style={{ position:"relative" }}>
           <button
             type="button"
-            className="tab smallTab"
-            onClick={onGoToAdmin}
-          >
-            👑 Admin Panel
-          </button>
-
-          <button
-            type="button"
-            className={showInvoiceEntryModal ? "tab activeTab smallTab" : "tab smallTab"}
-            onClick={() => {
-              setShowInvoiceEntryModal(true);
-              setShowInvoiceFormPanel(false);
-              setShowInvoiceUpload(false);
-              setShowUpload(false);
-              setEditingInvoiceId(null);
-              setInvoiceForm({
-                bolge: "", proje: "", proje_kodu: "", fatura_no: "",
-                fatura_tarihi: "", odeme_tarihi: "", tedarikci: "", rf_montaj_firma: "",
-                fatura_kalemi: "", is_kalemi: "", po_no: "", site_id: "",
-                tutar: "", kdv: "", toplam_tutar: "", odenen_tutar: "",
-                kalan_borc: "", note: "",
-              });
-            }}
-          >
-            🧾 Fatura Girişi
-          </button>
-
-          <button
-            type="button"
-            className="tab smallTab"
-            onClick={onGoToHr}
-          >
-            👤 Maaş & Avans
-          </button>
-
-          {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes((currentUser?.email||"").toLowerCase()) && (
-            <button
-              type="button"
-              className="tab smallTab"
-              onClick={onGoToCashflow}
-            >
-              💵 Nakit Akış
-            </button>
-          )}
-
-          <button
-            type="button"
-            className="tab smallTab"
-            onClick={onGoToAraclar}
-          >
-            🚗 Araçlar
-          </button>
-
-          <button
-            type="button"
-            className="tab smallTab"
-            onClick={onGoToOfis}
-          >
-            🏢 Ofis & Depo
-          </button>
-
-          <button
-            type="button"
-            className="tab smallTab"
-            onClick={handleShowSubconSummary}
-          >
-            🏗️ Taşeron Hakediş
-          </button>
-
-          <div style={{ position: "relative", display: "inline-block" }}>
-          <button
-            type="button"
-            className={showFinanceIslemlerMenu ? "tab activeTab smallTab" : "tab smallTab"}
-            onClick={() => setShowFinanceIslemlerMenu((prev) => !prev)}
-            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+            style={{ padding:"7px 13px", borderRadius:"7px", border:"1px solid #e2e8f0", background:"#fff", fontSize:"12px", fontWeight:500, color:"#374151", cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}
+            onClick={() => setShowFinanceIslemlerMenu(prev => !prev)}
           >
             ⚡ İşlemler {showFinanceIslemlerMenu ? "▲" : "▼"}
           </button>
-
           {showFinanceIslemlerMenu && (
-            <div
-              style={{
-                position: "absolute",
-                top: "calc(100% + 6px)",
-                left: 0,
-                background: "#fff",
-                border: "1px solid #e5e7eb",
-                borderRadius: "10px",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                zIndex: 999,
-                minWidth: "200px",
-                overflow: "hidden",
-              }}
-            >
+            <div style={{ position:"absolute", top:"calc(100% + 6px)", right:0, background:"#fff", border:"1px solid #e5e7eb", borderRadius:"10px", boxShadow:"0 8px 24px rgba(0,0,0,0.12)", zIndex:999, minWidth:"200px", overflow:"hidden" }}>
               {[
-                {
-                  label: "📤 HW Payment Yükle",
-                  action: () => {
-                    setShowUpload((prev) => !prev);
-                    if (showInvoiceUpload) setShowInvoiceUpload(false);
-                    setShowFinanceIslemlerMenu(false);
-                  },
-                },
-                {
-                  label: "🧾 HW Fatura Yükle",
-                  action: () => {
-                    setShowInvoiceUpload((prev) => !prev);
-                    if (showUpload) setShowUpload(false);
-                    setShowFinanceIslemlerMenu(false);
-                  },
-                },
-                {
-                  label: "🔩 HW PO Yükle",
-                  action: () => {
-                    setShowFinanceHwPoUpload((prev) => !prev);
-                    setShowFinanceIslemlerMenu(false);
-                  },
-                },
-              ].map((item, i, arr) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={item.action}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "11px 16px",
-                    background: "transparent",
-                    border: "none",
-                    borderBottom: i < arr.length - 1 ? "1px solid #f3f4f6" : "none",
-                    fontSize: "14px",
-                    color: "#1f2937",
-                    cursor: "pointer",
-                    fontWeight: "500",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                { label:"📤 HW Payment Yükle", action:()=>{ setShowUpload(p=>!p); if(showInvoiceUpload) setShowInvoiceUpload(false); setShowFinanceIslemlerMenu(false); } },
+                { label:"🧾 HW Fatura Yükle", action:()=>{ setShowInvoiceUpload(p=>!p); if(showUpload) setShowUpload(false); setShowFinanceIslemlerMenu(false); } },
+                { label:"🔩 HW PO Yükle", action:()=>{ setShowFinanceHwPoUpload(p=>!p); setShowFinanceIslemlerMenu(false); } },
+              ].map((item,i,arr)=>(
+                <button key={i} type="button" onClick={item.action} style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 16px", background:"transparent", border:"none", borderBottom:i<arr.length-1?"1px solid #f3f4f6":"none", fontSize:"14px", color:"#1f2937", cursor:"pointer", fontWeight:"500" }}
+                  onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                  onMouseLeave={e=>e.currentTarget.style.background="transparent"}
                 >
                   {item.label}
                 </button>
               ))}
             </div>
           )}
-          </div>
         </div>
       </div>
+
 
 
       {showUpload && (
@@ -5079,23 +4970,38 @@ function FinanceDashboard({
             const maxVal = Math.max(...allVals, 1);
             const fmt = (v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v/1000)}K` : String(Math.round(v));
             return (
-              <div style={{ display:"flex", alignItems:"flex-end", gap:"6px", height:"160px" }}>
+              <div style={{ display:"flex", alignItems:"flex-end", gap:"4px", height:"180px", paddingBottom:"20px", position:"relative" }}>
                 {shortNames.map((name, i) => {
                   const r = received[i];
                   const u = upcoming[i];
                   const inv = invoiced[i];
-                  const rH = Math.max(4, Math.round((r / maxVal) * 120));
-                  const uH = Math.max(u > 0 ? 4 : 0, Math.round((u / maxVal) * 120));
-                  const invH = Math.max(inv > 0 ? 4 : 0, Math.round((inv / maxVal) * 120));
+                  const rH = Math.max(r>0?6:0, Math.round((r / maxVal) * 130));
+                  const uH = Math.max(u > 0 ? 6 : 0, Math.round((u / maxVal) * 130));
+                  const invH = Math.max(inv > 0 ? 6 : 0, Math.round((inv / maxVal) * 130));
                   return (
-                    <div key={name} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:"4px", height:"100%", justifyContent:"flex-end" }}>
-                      {r > 0 && <div style={{ fontSize:"8px", color:"#64748b", fontWeight:600, whiteSpace:"nowrap" }}>{fmt(r)}</div>}
-                      <div style={{ width:"100%", display:"flex", gap:"1px", alignItems:"flex-end" }}>
-                        <div style={{ flex:1, height:`${rH}px`, background:"linear-gradient(180deg,#3b82f6,#6366f1)", borderRadius:"3px 3px 0 0", minHeight:r>0?4:0 }}/>
-                        {u > 0 && <div style={{ flex:1, height:`${uH}px`, background:"#10b981", borderRadius:"3px 3px 0 0", minHeight:4 }}/>}
-                        {inv > 0 && <div style={{ flex:1, height:`${invH}px`, background:"#f59e0b", borderRadius:"3px 3px 0 0", minHeight:4 }}/>}
+                    <div key={name} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", height:"100%", justifyContent:"flex-end" }}>
+                      <div style={{ width:"100%", display:"flex", gap:"1px", alignItems:"flex-end", position:"relative" }}>
+                        {/* Tahsilat bar */}
+                        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
+                          {r > 0 && <div style={{ fontSize:"7px", color:"#3b82f6", fontWeight:700, whiteSpace:"nowrap", marginBottom:"1px", lineHeight:1 }}>{fmt(r)}</div>}
+                          <div style={{ width:"100%", height:`${rH}px`, background:"linear-gradient(180deg,#3b82f6,#6366f1)", borderRadius:"3px 3px 0 0" }}/>
+                        </div>
+                        {/* Gelecek bar */}
+                        {u > 0 && (
+                          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
+                            <div style={{ fontSize:"7px", color:"#10b981", fontWeight:700, whiteSpace:"nowrap", marginBottom:"1px", lineHeight:1 }}>{fmt(u)}</div>
+                            <div style={{ width:"100%", height:`${uH}px`, background:"#10b981", borderRadius:"3px 3px 0 0" }}/>
+                          </div>
+                        )}
+                        {/* Fatura bar */}
+                        {inv > 0 && (
+                          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
+                            <div style={{ fontSize:"7px", color:"#f59e0b", fontWeight:700, whiteSpace:"nowrap", marginBottom:"1px", lineHeight:1 }}>{fmt(inv)}</div>
+                            <div style={{ width:"100%", height:`${invH}px`, background:"#f59e0b", borderRadius:"3px 3px 0 0" }}/>
+                          </div>
+                        )}
                       </div>
-                      <div style={{ fontSize:"9px", color:"#94a3b8", fontWeight:500 }}>{name}</div>
+                      <div style={{ fontSize:"9px", color:"#94a3b8", fontWeight:500, marginTop:"3px", whiteSpace:"nowrap" }}>{name}</div>
                     </div>
                   );
                 })}
@@ -5105,75 +5011,53 @@ function FinanceDashboard({
         </div>
       </div>
 
-      <div className="tableWrap">
-        <h3 className="listTitle">Gelecek Tahsilat Planı</h3>
-
-        <div className="cards" style={{ marginBottom: "18px" }}>
-          <div
-            style={{
-              background: "#4caf50",
-              color: "#fff",
-              padding: "22px",
-              borderRadius: "14px",
-              minWidth: "260px",
-              textAlign: "center",
-              fontWeight: 700,
-            }}
-          >
-            <div style={{ fontSize: "16px", marginBottom: "10px" }}>
-              Bugün Tahsil Edilen
-            </div>
-            <div style={{ fontSize: "22px" }}>
-              {formatMoneyByCurrency(
-                upcomingSummary.today_received_total || 0,
-                "TRY",
-              )}
-            </div>
-          </div>
-
-          <div className="card bekler statCard">
-            <div className="statLabel">Bu Hafta Gelecek</div>
-            <div className="statValue">
-              {formatMoneyByCurrency(upcomingSummary.week_total || 0, "TRY")}
-            </div>
-          </div>
-
-          <div
-            className="card cancel statCard"
-            onClick={handleShowOverdues}
-            style={{ cursor: "pointer" }}
-          >
-            <div className="statLabel">Geciken Ödeme</div>
-            <div className="statValue">
-              {formatMoneyByCurrency(upcomingSummary.overdue_total || 0, "TRY")}
-            </div>
+      <div style={{ background:"#fff", borderRadius:"12px", border:"1px solid #e2e8f0", marginBottom:"24px", overflow:"hidden" }}>
+        <div style={{ padding:"18px 20px 14px", borderBottom:"1px solid #f1f5f9", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div>
+            <div style={{ fontSize:"14px", fontWeight:700, color:"#0f172a" }}>Gelecek Tahsilat Planı</div>
+            <div style={{ fontSize:"11px", color:"#64748b", marginTop:"2px" }}>Önümüzdeki 30 gün</div>
           </div>
         </div>
-
-        <table>
+        {/* Summary strip */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)" }}>
+          <div style={{ padding:"16px 20px", borderRight:"1px solid #f1f5f9", textAlign:"center" }}>
+            <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"4px", fontWeight:500 }}>✅ Bugün Tahsil Edilen</div>
+            <div style={{ fontSize:"20px", fontWeight:800, color:"#10b981" }}>{formatMoneyByCurrency(upcomingSummary.today_received_total||0,"TRY")}</div>
+          </div>
+          <div style={{ padding:"16px 20px", borderRight:"1px solid #f1f5f9", textAlign:"center" }}>
+            <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"4px", fontWeight:500 }}>📅 Bu Hafta Gelecek</div>
+            <div style={{ fontSize:"20px", fontWeight:800, color:"#3b82f6" }}>{formatMoneyByCurrency(upcomingSummary.week_total||0,"TRY")}</div>
+          </div>
+          <div onClick={handleShowOverdues} style={{ padding:"16px 20px", textAlign:"center", cursor:"pointer", background:upcomingSummary.overdue_total>0?"#fef2f2":undefined }}>
+            <div style={{ fontSize:"11px", color:upcomingSummary.overdue_total>0?"#991b1b":"#64748b", marginBottom:"4px", fontWeight:500 }}>⚠️ Geciken Ödeme</div>
+            <div style={{ fontSize:"20px", fontWeight:800, color:upcomingSummary.overdue_total>0?"#dc2626":"#0f172a" }}>{formatMoneyByCurrency(upcomingSummary.overdue_total||0,"TRY")}</div>
+          </div>
+        </div>
+        {/* Upcoming rows */}
+        <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead>
-            <tr>
-              <th>Gün</th>
-              <th>Tarih</th>
-              <th>Gelecek Tutar</th>
+            <tr style={{ background:"#f8fafc" }}>
+              <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gün</th>
+              <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Tarih</th>
+              <th style={{ padding:"10px 16px", textAlign:"right", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gelecek Tutar</th>
             </tr>
           </thead>
           <tbody>
             {upcomingRows.length === 0 ? (
-              <EmptyRow colSpan={3} text="Gelecek tahsilat bulunamadı" />
+              <tr><td colSpan={3} style={{ textAlign:"center", padding:"28px", color:"#94a3b8", fontSize:"13px" }}>Gelecek tahsilat bulunamadı</td></tr>
             ) : (
               upcomingRows.map((row, index) => (
-                <tr key={index} style={row.amount < 0 ? { background:"#fff5f5" } : {}}>
-                  <td>{row.day_name || "-"}</td>
-                  <td>{formatDateOnly(row.due_date)}</td>
-                  <td>
-                    <div style={{ fontWeight:700, color: row.amount < 0 ? "#dc2626" : "#1a7f45" }}>
+                <tr key={index} style={{ borderBottom:"1px solid #f1f5f9", background:row.amount<0?"#fff5f5":undefined }}>
+                  <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{row.day_name || "-"}</td>
+                  <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{formatDateOnly(row.due_date)}</td>
+                  <td style={{ padding:"12px 16px", textAlign:"right" }}>
+                    <div style={{ fontWeight:700, color:row.amount<0?"#dc2626":"#10b981", fontSize:"14px" }}>
                       {formatMoneyByCurrency(row.amount || 0, row.currency || "TRY")}
                     </div>
                     {row.deduction_amount < 0 && (
                       <div style={{ fontSize:11, color:"#dc2626", marginTop:2 }}>
-                        Brüt: {formatMoneyByCurrency(row.gross_amount || 0, row.currency || "TRY")}
-                        &nbsp;|&nbsp;İade Kesinti: {formatMoneyByCurrency(row.deduction_amount || 0, row.currency || "TRY")}
+                        Brüt: {formatMoneyByCurrency(row.gross_amount||0, row.currency||"TRY")}
+                        &nbsp;|&nbsp;Kesinti: {formatMoneyByCurrency(row.deduction_amount||0, row.currency||"TRY")}
                       </div>
                     )}
                   </td>
@@ -16712,8 +16596,9 @@ function App() {
   const [pendingAvansCount, setPendingAvansCount] = useState(0);
   const [pendingMasrafCount, setPendingMasrafCount] = useState(0);
   const [pendingMalzemeCount, setPendingMalzemeCount] = useState(0);
-  const [openSections, setOpenSections] = useState({ anaMeny: true, ik: true, yonetim: true });
+  const [openSections, setOpenSections] = useState({ anaMeny: true, ik: false, muhasebe: false, depo: false });
   const toggleSection = (key) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -17245,14 +17130,17 @@ function App() {
     <>
       <style>{`
         .app-layout { display: flex; height: 100vh; overflow: hidden; background: #f0f2f5; }
-        .sidebar { width: 240px; background: #0f1623; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+        .sidebar { width: 240px; background: #0f1623; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width 0.22s ease, opacity 0.22s ease; position: relative; }
+        .sidebar.collapsed { width: 0; opacity: 0; overflow: hidden; }
+        .sidebar-toggle { position: absolute; top: 50%; right: -14px; transform: translateY(-50%); width: 28px; height: 28px; background: #1d4ed8; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.25); transition: right 0.22s ease; flex-shrink: 0; }
+        .sidebar-toggle.collapsed-toggle { right: auto; left: 14px; position: fixed; top: 50%; transform: translateY(-50%); }
         .sidebar-logo { padding: 20px 16px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; gap: 10px; }
         .sidebar-logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
-        .sidebar-section-title { padding: 12px 16px 6px; font-size: 10px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+        .sidebar-section-title { padding: 10px 16px 6px; font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; transition: color 0.15s; }
         .sidebar-section-title:hover { color: #94a3b8; }
-        .sidebar-section-chevron { font-size: 9px; transition: transform 0.2s; }
+        .sidebar-section-chevron { font-size: 11px; color: #64748b; transition: transform 0.2s; line-height: 1; }
+        .sidebar-section-chevron.open { transform: rotate(0deg); }
         .sidebar-section-chevron.closed { transform: rotate(-90deg); }
-        .sidebar-section-items { overflow: hidden; transition: max-height 0.25s ease; }
         .sidebar-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 1px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #94a3b8; transition: all 0.15s; position: relative; }
         .sidebar-nav-item:hover { background: #1e2a3a; color: #e2e8f0; }
         .sidebar-nav-item.active { background: #1d4ed8; color: #fff; }
@@ -17260,15 +17148,24 @@ function App() {
         .sidebar-user { margin-top: auto; padding: 12px; border-top: 1px solid #1e2a3a; }
         .sidebar-user-card { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; background: #1e2a3a; }
         .sidebar-user-avatar { width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0; }
-        .main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
         .topbar { background: #fff; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
-        .main-content { flex: 1; overflow-y: auto; }
+        .main-content { flex: 1; overflow-y: auto; padding: 0; }
         .notification-bar { padding: 10px 24px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 13px; flex-shrink: 0; }
       `}</style>
 
       <div className="app-layout">
         {/* ── SIDEBAR ── */}
-        <div className="sidebar">
+        <div className={`sidebar${sidebarCollapsed?' collapsed':''}`} style={{position:'relative'}}>
+          {/* Collapse toggle button */}
+          <button
+            className={`sidebar-toggle${sidebarCollapsed?' collapsed-toggle':''}`}
+            onClick={()=>setSidebarCollapsed(v=>!v)}
+            title={sidebarCollapsed?"Menüyü aç":"Menüyü kapat"}
+          >
+            {sidebarCollapsed ? '›' : '‹'}
+          </button>
+
           {/* Logo */}
           <div className="sidebar-logo">
             <div className="sidebar-logo-icon">🏗</div>
@@ -17288,40 +17185,52 @@ function App() {
             </>
           ) : (
             <>
+              {/* ── ANA MENÜ ── */}
               <div className="sidebar-section-title" onClick={()=>toggleSection('anaMeny')}>
                 <span>Ana Menü</span>
-                <span className={`sidebar-section-chevron ${openSections.anaMeny?'':'closed'}`}>▾</span>
+                <span className={`sidebar-section-chevron ${openSections.anaMeny?'open':'closed'}`}>▾</span>
               </div>
               {openSections.anaMeny && (
-                <div className="sidebar-section-items">
+                <div>
                   {isAdmin && (
                     <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
                       <span>📊</span> Finans Paneli
                     </div>
                   )}
                   <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
-                    <span>📍</span> Bölge Analizi
+                    <span>🗺</span> Bölge Analizi
                   </div>
                   <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
-                    <span>🏗</span> Rollout Data
+                    <span>📡</span> Rollout Data
                   </div>
                   <div className={`sidebar-nav-item ${page==='entry'?'active':''}`} onClick={()=>setPage('entry')}>
                     <span>✏️</span> Günlük İş Girişi
                   </div>
                   {canSeePuantaj && (
                     <div className={`sidebar-nav-item ${page==='puantaj'?'active':''}`} onClick={()=>setPage('puantaj')}>
-                      <span>📋</span> Puantaj
+                      <span>⏱</span> Puantaj
+                    </div>
+                  )}
+                  {isAdmin && (
+                    <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
+                      <span>👑</span> Admin Panel
                     </div>
                   )}
                 </div>
               )}
 
+              {/* ── İNSAN KAYNAKLARI ── */}
               <div className="sidebar-section-title" onClick={()=>toggleSection('ik')}>
                 <span>İnsan Kaynakları</span>
-                <span className={`sidebar-section-chevron ${openSections.ik?'':'closed'}`}>▾</span>
+                <span className={`sidebar-section-chevron ${openSections.ik?'open':'closed'}`}>▾</span>
               </div>
               {openSections.ik && (
-                <div className="sidebar-section-items">
+                <div>
+                  {isAdmin && (
+                    <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
+                      <span>👥</span> İK Paneli
+                    </div>
+                  )}
                   <div className={`sidebar-nav-item ${page==='is_avans'?'active':''}`} onClick={()=>setPage('is_avans')}>
                     <span>💳</span> İş Avansı
                     {pendingAvansCount > 0 && <span className="sidebar-badge">{pendingAvansCount}</span>}
@@ -17330,40 +17239,54 @@ function App() {
                     <span>🧾</span> Masraf Formu
                     {pendingMasrafCount > 0 && <span className="sidebar-badge">{pendingMasrafCount}</span>}
                   </div>
-                  {(canSeeMalzeme || isAdmin) && (
-                    <div className={`sidebar-nav-item ${page==='malzeme'?'active':''}`} onClick={()=>setPage('malzeme')}>
-                      <span>📦</span> Malzeme Yönetimi
-                      {pendingMalzemeCount > 0 && <span className="sidebar-badge">{pendingMalzemeCount}</span>}
-                    </div>
-                  )}
                 </div>
               )}
 
+              {/* ── MUHASEBE ── */}
               {isAdmin && (
                 <>
-                  <div className="sidebar-section-title" onClick={()=>toggleSection('yonetim')}>
-                    <span>Yönetim</span>
-                    <span className={`sidebar-section-chevron ${openSections.yonetim?'':'closed'}`}>▾</span>
+                  <div className="sidebar-section-title" onClick={()=>toggleSection('muhasebe')}>
+                    <span>Muhasebe</span>
+                    <span className={`sidebar-section-chevron ${openSections.muhasebe?'open':'closed'}`}>▾</span>
                   </div>
-                  {openSections.yonetim && (
-                    <div className="sidebar-section-items">
-                      <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
-                        <span>👥</span> İK Paneli
-                      </div>
-                      <div className={`sidebar-nav-item ${page==='araclar'?'active':''}`} onClick={()=>setPage('araclar')}>
-                        <span>🚗</span> Araç Yönetimi
-                      </div>
-                      <div className={`sidebar-nav-item ${page==='ofis'?'active':''}`} onClick={()=>setPage('ofis')}>
-                        <span>🏢</span> Ofis & Depo
-                      </div>
+                  {openSections.muhasebe && (
+                    <div>
                       {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
                         <div className={`sidebar-nav-item ${page==='cashflow'?'active':''}`} onClick={()=>setPage('cashflow')}>
-                          <span>💰</span> Nakit Akışı
+                          <span>🏦</span> Nakit Akışı
                         </div>
                       )}
-                      <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
-                        <span>👑</span> Admin Panel
+                      <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
+                        <span>💰</span> Finans Paneli
                       </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* ── DEPO & ENVANTER ── */}
+              {(canSeeMalzeme || isAdmin) && (
+                <>
+                  <div className="sidebar-section-title" onClick={()=>toggleSection('depo')}>
+                    <span>Depo & Envanter</span>
+                    <span className={`sidebar-section-chevron ${openSections.depo?'open':'closed'}`}>▾</span>
+                  </div>
+                  {openSections.depo && (
+                    <div>
+                      <div className={`sidebar-nav-item ${page==='malzeme'?'active':''}`} onClick={()=>setPage('malzeme')}>
+                        <span>📦</span> Malzeme Yönetimi
+                        {pendingMalzemeCount > 0 && <span className="sidebar-badge">{pendingMalzemeCount}</span>}
+                      </div>
+                      {isAdmin && (
+                        <>
+                          <div className={`sidebar-nav-item ${page==='araclar'?'active':''}`} onClick={()=>setPage('araclar')}>
+                            <span>🚗</span> Araç Yönetimi
+                          </div>
+                          <div className={`sidebar-nav-item ${page==='ofis'?'active':''}`} onClick={()=>setPage('ofis')}>
+                            <span>🏢</span> Ofis & Depo
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </>
@@ -17390,11 +17313,14 @@ function App() {
         </div>
 
         {/* ── MAIN AREA ── */}
-        <div className="main-area">
+        <div className="main-area" onClick={()=>{ if(!sidebarCollapsed) setSidebarCollapsed(true); }}>
           {/* Topbar */}
-          <div className="topbar">
-            <div style={{fontSize:16,fontWeight:700,color:'#0f172a'}}>{getPageTitle()}</div>
-            <div style={{fontSize:13,color:'#64748b'}}>{user?.email}</div>
+          <div className="topbar" onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
+              <div style={{fontSize:16,fontWeight:700,color:'#0f172a'}}>{getPageTitle()}</div>
+              <div style={{fontSize:12,color:'#94a3b8'}}>{new Date().toLocaleDateString('tr-TR',{day:'numeric',month:'long',year:'numeric'})}</div>
+            </div>
+            <div style={{fontSize:13,color:'#64748b'}}>{user?.name || user?.email}</div>
           </div>
 
           {/* Notification bars */}
@@ -17421,9 +17347,10 @@ function App() {
           )}
 
           {/* Main content */}
-          <div className="main-content">
+          <div className="main-content" onClick={e=>e.stopPropagation()}>
             {page === "finance" && isAdmin && (
               financeToken ? (
+                <div style={{padding:"24px 28px"}}>
                 <FinanceDashboard
                   user={user}
                   financeToken={financeToken}
@@ -17444,6 +17371,7 @@ function App() {
                   onGoToCashflow={() => setPage("cashflow")}
                   currentUser={user}
                 />
+                </div>
               ) : (
                 <div style={{maxWidth:"420px",margin:"40px auto",background:"#fff",borderRadius:"20px",padding:"24px",boxShadow:"0 20px 50px rgba(0,0,0,0.08)"}}>
                   <h2 style={{marginBottom:"18px",textAlign:"center"}}>🔐 Finance Login</h2>
