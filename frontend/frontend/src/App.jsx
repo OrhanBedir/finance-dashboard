@@ -17205,14 +17205,6 @@ function App() {
                       <span>👥</span> İK Paneli
                     </div>
                   )}
-                  <div className={`sidebar-nav-item ${page==='is_avans'?'active':''}`} onClick={()=>setPage('is_avans')}>
-                    <span>💳</span> İş Avansı
-                    {pendingAvansCount > 0 && <span className="sidebar-badge">{pendingAvansCount}</span>}
-                  </div>
-                  <div className={`sidebar-nav-item ${page==='masraf'?'active':''}`} onClick={()=>setPage('masraf')}>
-                    <span>🧾</span> Masraf Formu
-                    {pendingMasrafCount > 0 && <span className="sidebar-badge">{pendingMasrafCount}</span>}
-                  </div>
                 </div>
               )}
 
@@ -17233,6 +17225,14 @@ function App() {
                       </div>
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('taseron_hakedis'); }}>
                         <span>🏗️</span> Taşeron Hakediş
+                      </div>
+                      <div className={`sidebar-nav-item ${page==='is_avans'?'active':''}`} onClick={()=>setPage('is_avans')}>
+                        <span>💳</span> İş Avansı
+                        {pendingAvansCount > 0 && <span className="sidebar-badge">{pendingAvansCount}</span>}
+                      </div>
+                      <div className={`sidebar-nav-item ${page==='masraf'?'active':''}`} onClick={()=>setPage('masraf')}>
+                        <span>📄</span> Masraf Formu
+                        {pendingMasrafCount > 0 && <span className="sidebar-badge">{pendingMasrafCount}</span>}
                       </div>
                       {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
                         <div className={`sidebar-nav-item ${page==='cashflow'?'active':''}`} onClick={()=>setPage('cashflow')}>
