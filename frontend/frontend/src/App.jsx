@@ -17449,7 +17449,7 @@ function App() {
             )}
             {page === "entry" && <DailyEntry />}
             {page === "admin" && isAdmin && (
-              <div style={{maxWidth:"1100px",margin:"24px auto",padding:"0 16px"}}>
+              <div style={{maxWidth:"1440px",margin:"24px auto",padding:"0 20px"}}>
                 <div style={{background:"linear-gradient(135deg,#1f2937 0%,#374151 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",gap:"16px",color:"#fff"}}>
                   <div style={{fontSize:"40px"}}>👑</div>
                   <div>
@@ -17462,7 +17462,7 @@ function App() {
                   </div>
                 </div>
 
-                <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:"20px",alignItems:"start"}}>
+                <div style={{display:"grid",gridTemplateColumns:"320px 1fr",gap:"24px",alignItems:"start"}}>
                   <div style={{background:"#fff",borderRadius:"16px",padding:"24px",boxShadow:"0 4px 20px rgba(0,0,0,0.07)",border:"1px solid #f3f4f6"}}>
                     <h3 style={{margin:"0 0 20px",fontSize:"16px",fontWeight:700,color:"#1f2937",display:"flex",alignItems:"center",gap:"8px"}}>
                       <span style={{background:"#f3f4f6",borderRadius:"8px",padding:"6px 8px"}}>➕</span> Yeni Kullanıcı
@@ -17499,30 +17499,34 @@ function App() {
                     ) : (
                       <div>
                         {adminUsers.map((u,i) => (
-                          <div key={u.id} style={{display:"grid",gridTemplateColumns:"44px 1fr auto auto",alignItems:"center",gap:"16px",padding:"14px 24px",borderBottom:i<adminUsers.length-1?"1px solid #f9fafb":"none",background:"#fff",transition:"background 0.15s"}}
+                          <div key={u.id} style={{display:"grid",gridTemplateColumns:"48px 1fr 180px auto",alignItems:"center",gap:"20px",padding:"16px 28px",borderBottom:i<adminUsers.length-1?"1px solid #f3f4f6":"none",background:"#fff",transition:"background 0.15s"}}
                             onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                             onMouseLeave={e=>e.currentTarget.style.background="#fff"}
                           >
-                            <div style={{width:"44px",height:"44px",borderRadius:"12px",background:u.role==="admin"?"linear-gradient(135deg,#fbbf24,#f59e0b)":"linear-gradient(135deg,#60a5fa,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",fontWeight:700,color:"#fff",flexShrink:0}}>
+                            {/* Avatar */}
+                            <div style={{width:"48px",height:"48px",borderRadius:"14px",background:u.role==="admin"?"linear-gradient(135deg,#fbbf24,#f59e0b)":"linear-gradient(135deg,#60a5fa,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"20px",fontWeight:700,color:"#fff",flexShrink:0}}>
                               {u.name.charAt(0)}
                             </div>
-                            <div>
-                              <div style={{fontWeight:600,fontSize:"14px",color:"#1f2937"}}>{u.name}</div>
-                              <div style={{fontSize:"12px",color:"#9ca3af",marginTop:"2px"}}>{u.email}</div>
+                            {/* Ad + email */}
+                            <div style={{minWidth:0}}>
+                              <div style={{fontWeight:700,fontSize:"15px",color:"#1f2937",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name}</div>
+                              <div style={{fontSize:"12px",color:"#9ca3af",marginTop:"2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
                             </div>
-                            <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
-                              <span style={{background:u.role==="admin"?"#fef3c7":u.role==="rollout_mudur"?"#f0fdf4":u.role==="pm"?"#eff6ff":u.role==="direktor"?"#fdf2f8":u.role==="muhasebe"?"#f0f9ff":"#f3f4f6",color:u.role==="admin"?"#92400e":u.role==="rollout_mudur"?"#166534":u.role==="pm"?"#1e40af":u.role==="direktor"?"#7e22ce":u.role==="muhasebe"?"#0369a1":"#374151",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",textTransform:"uppercase",letterSpacing:"0.05em"}}>
+                            {/* Rol + Durum badge */}
+                            <div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
+                              <span style={{background:u.role==="admin"?"#fef3c7":u.role==="rollout_mudur"?"#f0fdf4":u.role==="pm"?"#eff6ff":u.role==="direktor"?"#fdf2f8":u.role==="muhasebe"?"#f0f9ff":"#f3f4f6",color:u.role==="admin"?"#92400e":u.role==="rollout_mudur"?"#166534":u.role==="pm"?"#1e40af":u.role==="direktor"?"#7e22ce":u.role==="muhasebe"?"#0369a1":"#374151",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",textTransform:"uppercase",letterSpacing:"0.05em",display:"inline-block",width:"fit-content"}}>
                                 {u.role==="admin"?"👑 Admin":u.role==="rollout_mudur"?(u.email?.toLowerCase()==="serdar.altinova@simsektel.com"?"📍 Bölge Müdürü":"🏗 Rollout Müdürü"):u.role==="pm"?"📋 Proje Müdürü":u.role==="direktor"?"🎯 Direktör":u.role==="muhasebe"?"💼 Muhasebe":"👤 Personel"}
                               </span>
-                              <span style={{background:u.is_active?"#dcfce7":"#f3f4f6",color:u.is_active?"#166534":"#6b7280",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px"}}>
-                                {u.is_active?"Aktif":"Pasif"}
+                              <span style={{background:u.is_active?"#dcfce7":"#f3f4f6",color:u.is_active?"#166534":"#6b7280",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",display:"inline-block",width:"fit-content"}}>
+                                {u.is_active?"✓ Aktif":"Pasif"}
                               </span>
                             </div>
-                            <div style={{display:"flex",gap:"6px"}}>
-                              <button onClick={()=>handleToggleActive(u.id)} style={{padding:"6px 12px",background:u.is_active?"#fef3c7":"#f0fdf4",color:u.is_active?"#92400e":"#166534",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
+                            {/* Aksiyonlar */}
+                            <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"nowrap"}}>
+                              <button onClick={()=>handleToggleActive(u.id)} style={{padding:"7px 14px",background:u.is_active?"#fef3c7":"#f0fdf4",color:u.is_active?"#92400e":"#166534",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
                                 {u.is_active?"Pasife Al":"Aktif Et"}
                               </button>
-                              <select value={u.role||"user"} onChange={e=>handleAdminRoleChange(u.id,e.target.value)} style={{padding:"6px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:"#f9fafb",color:"#374151"}}>
+                              <select value={u.role||"user"} onChange={e=>handleAdminRoleChange(u.id,e.target.value)} style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:"#f9fafb",color:"#374151"}}>
                                 <option value="user">👤 Personel</option>
                                 <option value="admin">👑 Admin</option>
                                 <option value="rollout_mudur">🏗 Bölge Müdürü</option>
@@ -17530,10 +17534,10 @@ function App() {
                                 <option value="direktor">🎯 Direktör</option>
                                 <option value="muhasebe">💼 Muhasebe</option>
                               </select>
-                              <button onClick={()=>handleResetPassword(u.id,u.name)} style={{padding:"6px 12px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}} title="Şifre değiştir">
+                              <button onClick={()=>handleResetPassword(u.id,u.name)} style={{padding:"7px 14px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}} title="Şifre değiştir">
                                 🔑 Şifre
                               </button>
-                              <button onClick={()=>deleteUser(u.id)} style={{padding:"6px 12px",background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
+                              <button onClick={()=>deleteUser(u.id)} style={{padding:"7px 14px",background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
                                 🗑 Sil
                               </button>
                             </div>
