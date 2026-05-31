@@ -10900,8 +10900,10 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const isPM = _email === "orhan.bedir@simsektel.com";
   const isDirektor = _email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = _email === "muhasebe@simsektel.com";
-  const isRolloutMudur = _email === "nurcan.kus@simsektel.com" || _email === "serdar.altinova@simsektel.com" || (currentUser?.role || "").toLowerCase() === "rollout_mudur";
-  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isRolloutMudur;
+  // Nurcan: herkesi görebilir, herkes için talep edebilir (yönetici yetkisi)
+  const isNurcan = _email === "nurcan.kus@simsektel.com";
+  // isRequester: sadece kendi avanslarını görür — Serdar ve diğer normal kullanıcılar
+  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isNurcan;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const loadBakiye = async () => {
@@ -11031,7 +11033,8 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const myPendingCount =
     isPM ? list.filter(t => t.durum === "TALEP").length :
     isDirektor ? list.filter(t => t.durum === "PM_ONAY").length :
-    isMuhasebe ? list.filter(t => t.durum === "DIREKTOR_ONAY").length : 0;
+    isMuhasebe ? list.filter(t => t.durum === "DIREKTOR_ONAY").length :
+    isNurcan ? list.filter(t => t.durum === "TALEP").length : 0;
 
   const NotTooltipEl = notTooltip.visible ? (() => {
     const TW = 300;
@@ -11331,14 +11334,17 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
             </div>
             <form onSubmit={handleSave}>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
-                  Personel
-                  <select value={form.personel_id} onChange={e => setForm(f => ({...f, personel_id: e.target.value}))}
-                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", background: "#fff" }}>
-                    <option value="">Seçiniz (opsiyonel)</option>
-                    {personelList.filter(p => p.aktif).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
-                  </select>
-                </label>
+                {/* Personel seçimi: sadece yöneticiler ve Nurcan görebilir */}
+                {(isPM || isDirektor || isMuhasebe || isNurcan) && (
+                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                    Personel
+                    <select value={form.personel_id} onChange={e => setForm(f => ({...f, personel_id: e.target.value}))}
+                      style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", background: "#fff" }}>
+                      <option value="">Seçiniz (opsiyonel)</option>
+                      {personelList.filter(p => p.aktif).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+                    </select>
+                  </label>
+                )}
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Gider Türü <span style={{ color: "#dc2626" }}>*</span>
                   <select required value={form.gider_turu} onChange={e => setForm(f => ({...f, gider_turu: e.target.value}))}
@@ -17245,7 +17251,7 @@ function App() {
               </div>
               {openSections.ik && (
                 <div>
-                  {(isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
+                  {isAdmin && (
                     <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
                       <span>👥</span> İK Paneli
                     </div>
