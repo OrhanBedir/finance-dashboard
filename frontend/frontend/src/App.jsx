@@ -3544,6 +3544,8 @@ function FinanceDashboard({
   onGoToMalzeme,
   onGoToCashflow,
   currentUser,
+  actionTrigger,
+  onActionHandled,
 }) {
   function parseDateTR(dateStr) {
     const [day, month, year] = dateStr.split(".");
@@ -4161,6 +4163,28 @@ function FinanceDashboard({
       alert(err.message || "Taşeron hakediş özeti alınamadı");
     }
   };
+
+  // Sidebar action trigger handler
+  useEffect(() => {
+    if (!actionTrigger) return;
+    if (actionTrigger === 'fatura_girisi') {
+      setShowInvoiceEntryModal(true);
+      setShowInvoiceFormPanel(false);
+      setShowInvoiceUpload(false);
+      setShowUpload(false);
+      setEditingInvoiceId(null);
+      setInvoiceForm({ bolge:"", proje:"", proje_kodu:"", fatura_no:"", fatura_tarihi:"", odeme_tarihi:"", tedarikci:"", rf_montaj_firma:"", fatura_kalemi:"", is_kalemi:"", po_no:"", site_id:"", tutar:"", kdv:"", toplam_tutar:"", odenen_tutar:"", kalan_borc:"", note:"" });
+    } else if (actionTrigger === 'taseron_hakedis') {
+      handleShowSubconSummary();
+    } else if (actionTrigger === 'hw_payment') {
+      setShowUpload(true); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false);
+    } else if (actionTrigger === 'hw_fatura') {
+      setShowInvoiceUpload(true); setShowUpload(false); setShowFinanceHwPoUpload(false);
+    } else if (actionTrigger === 'hw_po') {
+      setShowFinanceHwPoUpload(true); setShowUpload(false); setShowInvoiceUpload(false);
+    }
+    onActionHandled?.();
+  }, [actionTrigger]);
 
   useEffect(() => {
     if (showInvoiceEntryModal) {
@@ -4818,62 +4842,6 @@ function FinanceDashboard({
 
   return (
     <>
-      <div style={{ display:"flex", justifyContent:"flex-end", gap:"8px", alignItems:"center", marginBottom:"16px", padding:"0", flexWrap:"wrap" }}>
-        <button
-          type="button"
-          style={{ padding:"7px 13px", borderRadius:"7px", border:"1px solid #e2e8f0", background:"#fff", fontSize:"12px", fontWeight:500, color:"#374151", cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}
-          onClick={() => {
-            setShowInvoiceEntryModal(true);
-            setShowInvoiceFormPanel(false);
-            setShowInvoiceUpload(false);
-            setShowUpload(false);
-            setEditingInvoiceId(null);
-            setInvoiceForm({
-              bolge: "", proje: "", proje_kodu: "", fatura_no: "",
-              fatura_tarihi: "", odeme_tarihi: "", tedarikci: "", rf_montaj_firma: "",
-              fatura_kalemi: "", is_kalemi: "", po_no: "", site_id: "",
-              tutar: "", kdv: "", toplam_tutar: "", odenen_tutar: "",
-              kalan_borc: "", note: "",
-            });
-          }}
-        >
-          🧾 Fatura Girişi
-        </button>
-
-        <button
-          type="button"
-          style={{ padding:"7px 13px", borderRadius:"7px", border:"1px solid #e2e8f0", background:"#fff", fontSize:"12px", fontWeight:500, color:"#374151", cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}
-          onClick={handleShowSubconSummary}
-        >
-          🏗️ Taşeron Hakediş
-        </button>
-
-        <div style={{ position:"relative" }}>
-          <button
-            type="button"
-            style={{ padding:"7px 13px", borderRadius:"7px", border:"1px solid #e2e8f0", background:"#fff", fontSize:"12px", fontWeight:500, color:"#374151", cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}
-            onClick={() => setShowFinanceIslemlerMenu(prev => !prev)}
-          >
-            ⚡ İşlemler {showFinanceIslemlerMenu ? "▲" : "▼"}
-          </button>
-          {showFinanceIslemlerMenu && (
-            <div style={{ position:"absolute", top:"calc(100% + 6px)", right:0, background:"#fff", border:"1px solid #e5e7eb", borderRadius:"10px", boxShadow:"0 8px 24px rgba(0,0,0,0.12)", zIndex:999, minWidth:"200px", overflow:"hidden" }}>
-              {[
-                { label:"📤 HW Payment Yükle", action:()=>{ setShowUpload(p=>!p); if(showInvoiceUpload) setShowInvoiceUpload(false); setShowFinanceIslemlerMenu(false); } },
-                { label:"🧾 HW Fatura Yükle", action:()=>{ setShowInvoiceUpload(p=>!p); if(showUpload) setShowUpload(false); setShowFinanceIslemlerMenu(false); } },
-                { label:"🔩 HW PO Yükle", action:()=>{ setShowFinanceHwPoUpload(p=>!p); setShowFinanceIslemlerMenu(false); } },
-              ].map((item,i,arr)=>(
-                <button key={i} type="button" onClick={item.action} style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 16px", background:"transparent", border:"none", borderBottom:i<arr.length-1?"1px solid #f3f4f6":"none", fontSize:"14px", color:"#1f2937", cursor:"pointer", fontWeight:"500" }}
-                  onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
-                  onMouseLeave={e=>e.currentTarget.style.background="transparent"}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
 
 
 
@@ -16599,6 +16567,7 @@ function App() {
   const [openSections, setOpenSections] = useState({ anaMeny: true, ik: false, muhasebe: false, depo: false });
   const toggleSection = (key) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [financeActionTrigger, setFinanceActionTrigger] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -17207,6 +17176,20 @@ function App() {
                       <span>👑</span> Admin Panel
                     </div>
                   )}
+                  {isAdmin && (
+                    <>
+                      <div style={{margin:'4px 8px 2px',height:'1px',background:'#1e2a3a'}}/>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); }}>
+                        <span>📤</span> HW Payment Yükle
+                      </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura'); }}>
+                        <span>🧾</span> HW Fatura Yükle
+                      </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); }}>
+                        <span>🔩</span> HW PO Yükle
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -17242,14 +17225,20 @@ function App() {
                   </div>
                   {openSections.muhasebe && (
                     <div>
+                      <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
+                        <span>📊</span> Finans Paneli
+                      </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); }}>
+                        <span>🧾</span> Fatura Girişi
+                      </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('taseron_hakedis'); }}>
+                        <span>🏗️</span> Taşeron Hakediş
+                      </div>
                       {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
                         <div className={`sidebar-nav-item ${page==='cashflow'?'active':''}`} onClick={()=>setPage('cashflow')}>
                           <span>🏦</span> Nakit Akışı
                         </div>
                       )}
-                      <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
-                        <span>💰</span> Finans Paneli
-                      </div>
                     </div>
                   )}
                 </>
@@ -17368,6 +17357,8 @@ function App() {
                   onGoToMalzeme={() => setPage("malzeme")}
                   onGoToCashflow={() => setPage("cashflow")}
                   currentUser={user}
+                  actionTrigger={financeActionTrigger}
+                  onActionHandled={() => setFinanceActionTrigger(null)}
                 />
                 </div>
               ) : (
