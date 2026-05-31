@@ -17254,7 +17254,7 @@ function App() {
               )}
 
               {/* ── MUHASEBE ── */}
-              {isAdmin && (
+              {(isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
                 <>
                   <div className="sidebar-section-title" onClick={()=>toggleSection('muhasebe')}>
                     <span>Muhasebe</span>
@@ -17262,15 +17262,19 @@ function App() {
                   </div>
                   {openSections.muhasebe && (
                     <div>
-                      <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
-                        <span>📊</span> Finans Paneli
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); }}>
-                        <span>🧾</span> Fatura Girişi
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('taseron_hakedis'); }}>
-                        <span>🏗️</span> Taşeron Hakediş
-                      </div>
+                      {isAdmin && (
+                        <>
+                          <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
+                            <span>📊</span> Finans Paneli
+                          </div>
+                          <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); }}>
+                            <span>🧾</span> Fatura Girişi
+                          </div>
+                          <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('taseron_hakedis'); }}>
+                            <span>🏗️</span> Taşeron Hakediş
+                          </div>
+                        </>
+                      )}
                       <div className={`sidebar-nav-item ${page==='is_avans'?'active':''}`} onClick={()=>setPage('is_avans')}>
                         <span>💳</span> İş Avansı
                         {pendingAvansCount > 0 && <span className="sidebar-badge">{pendingAvansCount}</span>}
