@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -13,111 +13,123 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiGet } from "../api";
 
-const STATUS_COLORS = {
-  TASLAK:    { bg: "#F3F4F6", text: "#6B7280", label: "Taslak" },
-  PM_BEKLE:  { bg: "#FEF3C7", text: "#92400E", label: "PM Onayında" },
-  ONAYLANDI: { bg: "#D1FAE5", text: "#065F46", label: "Onaylandı" },
-  REDDEDILDI:{ bg: "#FEE2E2", text: "#991B1B", label: "Reddedildi" },
-  ODENDI:    { bg: "#DBEAFE", text: "#1E40AF", label: "Ödendi" },
-  GONDERILDI:{ bg: "#FEF3C7", text: "#92400E", label: "Gönderildi" },
-  BEKLEMEDE: { bg: "#FEF3C7", text: "#92400E", label: "Beklemede" },
-};
-
-function statusStyle(s) {
-  return STATUS_COLORS[s] || { bg: "#F3F4F6", text: "#6B7280", label: s };
-}
-
 function fmtTL(val) {
-  const n = Number(val) || 0;
   try {
-    return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₺";
+    const n = Math.round(Number(val) || 0);
+    const s = n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return s + " ₺";
   } catch (_) {
-    return n.toFixed(2).replace(".", ",") + " ₺";
+    return "0 ₺";
   }
 }
 
 function fmtDate(d) {
-  if (!d) return "";
   try {
+    if (!d) return "";
     const dt = new Date(d);
-    const gun = String(dt.getDate()).padStart(2, "0");
-    const aylar = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
-    const ay = aylar[dt.getMonth()] || "";
-    const yil = dt.getFullYear();
-    return `${gun} ${ay} ${yil}`;
+    if (isNaN(dt.getTime())) return "";
+    const g = String(dt.getDate()).padStart(2, "0");
+    const aylar = ["Oca","Sub","Mar","Nis","May","Haz","Tem","Agu","Eyl","Eki","Kas","Ara"];
+    return g + " " + (aylar[dt.getMonth()] || "") + " " + dt.getFullYear();
   } catch (_) {
-    return String(d).slice(0, 10);
+    return "";
   }
 }
 
+const DURUM_MAP = {
+  TASLAK:     { label: "Taslak",      bg: "#F3F4F6", fg: "#6B7280" },
+  PM_BEKLE:   { label: "PM Onayinda", bg: "#FEF3C7", fg: "#92400E" },
+  ONAYLANDI:  { label: "Onaylandi",   bg: "#D1FAE5", fg: "#065F46" },
+  REDDEDILDI: { label: "Reddedildi",  bg: "#FEE2E2", fg: "#991B1B" },
+  ODENDI:     { label: "Odendi",      bg: "#DBEAFE", fg: "#1E40AF" },
+  TAMAMLANDI: { label: "Tamamlandi",  bg: "#DBEAFE", fg: "#1E40AF" },
+  GONDERILDI: { label: "Gonderildi",  bg: "#FEF3C7", fg: "#92400E" },
+  BEKLEMEDE:  { label: "Beklemede",   bg: "#FEF3C7", fg: "#92400E" },
+};
+
+function getBadge(durum) {
+  return DURUM_MAP[durum] || { label: durum || "?", bg: "#F3F4F6", fg: "#6B7280" };
+}
+
 export default function HomeScreen({ user, onLogout, navigation }) {
-  const [avanslar, setAvanslar]     = useState([]);
-  const [masraflar, setMasraflar]   = useState([]);
-  const [loading, setLoading]       = useState(true);
+  const [avanslar, setAvanslar] = useState([]);
+  const [masraflar, setMasraflar] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
+  const fetchData = async (isRefresh) => {
     try {
-      const email = encodeURIComponent((user?.email || "").toLowerCase().trim());
-      const name  = encodeURIComponent((user?.name  || "").trim());
-      const data  = await apiGet(`/hr/mobile-dashboard?email=${email}&name=${name}`);
-      if (data && !data.error) {
-        setAvanslar(Array.isArray(data.avanslar)  ? data.avanslar  : []);
-        setMasraflar(Array.isArray(data.masraflar) ? data.masraflar : []);
+      if (isRefresh) setRefreshing(true);
+      const email = encodeURIComponent(String(user && user.email ? user.email : "").toLowerCase().trim());
+      const name  = encodeURIComponent(String(user && user.name  ? user.name  : "").trim());
+      const data  = await apiGet("/hr/mobile-dashboard?email=" + email + "&name=" + name);
+      if (data && typeof data === "object" && !data.error) {
+        if (Array.isArray(data.avanslar))  setAvanslar(data.avanslar);
+        if (Array.isArray(data.masraflar)) setMasraflar(data.masraflar);
       }
-    } catch (e) {
-      console.log("Dashboard fetch error:", e?.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    } catch (err) {
+      // sessizce devam et
     }
-  }, [user]);
+    setLoading(false);
+    setRefreshing(false);
+  };
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchData(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLogout = () => {
-    Alert.alert("Çıkış", "Çıkış yapmak istediğinize emin misiniz?", [
-      { text: "İptal", style: "cancel" },
+    Alert.alert("Cikis", "Cikis yapmak istiyor musunuz?", [
+      { text: "Iptal", style: "cancel" },
       {
-        text: "Çıkış Yap",
+        text: "Cikis Yap",
         style: "destructive",
         onPress: async () => {
-          await AsyncStorage.multiRemove(["token", "user"]);
+          try {
+            await AsyncStorage.multiRemove(["token", "user"]);
+          } catch (_) {}
           onLogout();
         },
       },
     ]);
   };
 
-  // --- Stats --- (API zaten kişiye özel döndürüyor, client filtresi gerek yok)
-  const pendingAvans = avanslar
-    .filter(a => !["TAMAMLANDI", "REDDEDILDI"].includes(a.durum))
-    .reduce((s, a) => s + (Number(a.tutar) || 0), 0);
+  const initial = user && user.name ? String(user.name).charAt(0).toUpperCase() : "?";
+  const firstName = user && user.name ? String(user.name).split(" ")[0] : "Kullanici";
 
-  const pendingMasraf = masraflar
-    .filter(m => !["TAMAMLANDI", "ODENDI", "REDDEDILDI"].includes(m.durum))
-    .reduce((s, m) => s + (Number(m.toplam_tutar || m.tutar) || 0), 0);
+  // Stats
+  const pendingAvans = avanslar.reduce((s, a) => {
+    try {
+      if (!["TAMAMLANDI","REDDEDILDI","ODENDI"].includes(a.durum)) {
+        return s + (Number(a.tutar) || 0);
+      }
+    } catch (_) {}
+    return s;
+  }, 0);
 
-  const recentAvanslar  = avanslar.slice(0, 5);
-  const recentMasraflar = masraflar.slice(0, 5);
-
-  const initial = (user?.name || "?").charAt(0).toUpperCase();
-  const isAdmin = ["admin", "muhasebe"].includes(user?.role?.toLowerCase());
+  const pendingMasraf = masraflar.reduce((s, m) => {
+    try {
+      if (!["TAMAMLANDI","ODENDI","REDDEDILDI"].includes(m.durum)) {
+        return s + (Number(m.toplam_tutar || m.tutar) || 0);
+      }
+    } catch (_) {}
+    return s;
+  }, 0);
 
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>ERC Operasyon</Text>
-            <Text style={styles.headerSub}>Hakediş Takip</Text>
+            <Text style={styles.htitle}>ERC Operasyon</Text>
+            <Text style={styles.hsub}>Hakedis Takip</Text>
           </View>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initial}</Text>
+            <Text style={styles.avatarTxt}>{initial}</Text>
           </View>
         </View>
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <View style={styles.center}>
           <ActivityIndicator size="large" color="#1D4ED8" />
         </View>
       </SafeAreaView>
@@ -126,283 +138,213 @@ export default function HomeScreen({ user, onLogout, navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>ERC Operasyon</Text>
-          <Text style={styles.headerSub}>Hakediş Takip</Text>
+          <Text style={styles.htitle}>ERC Operasyon</Text>
+          <Text style={styles.hsub}>Hakedis Takip</Text>
         </View>
-        <TouchableOpacity onPress={handleLogout} activeOpacity={0.8}>
+        <TouchableOpacity onPress={handleLogout}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initial}</Text>
+            <Text style={styles.avatarTxt}>{initial}</Text>
           </View>
         </TouchableOpacity>
       </View>
 
       <ScrollView
         contentContainerStyle={styles.body}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchData(true)} tintColor="#1D4ED8" />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => fetchData(true)}
+            tintColor="#1D4ED8"
+          />
+        }
       >
-        {/* Karşılama */}
-        <View style={styles.welcomeRow}>
-          <View>
-            <Text style={styles.welcomeHi}>Merhaba, {user?.name?.split(" ")[0] || "Kullanıcı"} 👋</Text>
-            <Text style={styles.welcomeSub}>{user?.role || "Personel"}</Text>
-          </View>
-        </View>
+        {/* Karsilama */}
+        <Text style={styles.hi}>Merhaba, {firstName} 👋</Text>
+        <Text style={styles.hiSub}>{user && user.role ? String(user.role) : "Personel"}</Text>
 
-        {/* Stat Kartları */}
+        {/* Stat Kartlari */}
         <View style={styles.statsRow}>
-          <View style={[styles.statCard, { backgroundColor: "#EFF6FF", borderColor: "#BFDBFE" }]}>
+          <View style={[styles.statCard, styles.statBlue]}>
             <Text style={styles.statIcon}>💰</Text>
             <Text style={[styles.statVal, { color: "#1D4ED8" }]}>{fmtTL(pendingAvans)}</Text>
-            <Text style={styles.statLabel}>Bekleyen İş Avansı</Text>
+            <Text style={styles.statLabel}>Bekleyen Is Avansi</Text>
           </View>
-          <View style={[styles.statCard, { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" }]}>
+          <View style={[styles.statCard, styles.statGreen]}>
             <Text style={styles.statIcon}>🧾</Text>
             <Text style={[styles.statVal, { color: "#059669" }]}>{fmtTL(pendingMasraf)}</Text>
             <Text style={styles.statLabel}>Bekleyen Masraf</Text>
           </View>
         </View>
 
-        {/* Hızlı İşlemler */}
-        <Text style={styles.sectionTitle}>Hızlı İşlemler</Text>
-        <View style={styles.actionGrid}>
-          <ActionBtn
-            icon="💰"
-            label="İş Avansı"
-            desc="Yeni talep oluştur"
-            color="#1D4ED8"
+        {/* Butonlar */}
+        <Text style={styles.secTitle}>Hizli Islemler</Text>
+        <View style={styles.btnGrid}>
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderTopColor: "#1D4ED8" }]}
             onPress={() => navigation.navigate("IsAvans")}
-          />
-          <ActionBtn
-            icon="🧾"
-            label="Masraf Formu"
-            desc="Harcama girişi yap"
-            color="#059669"
+            activeOpacity={0.8}
+          >
+            <Text style={styles.btnIcon}>💰</Text>
+            <Text style={[styles.btnLabel, { color: "#1D4ED8" }]}>Is Avansi</Text>
+            <Text style={styles.btnDesc}>Yeni talep olustur</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderTopColor: "#059669" }]}
             onPress={() => navigation.navigate("MasrafForm")}
-          />
-          <ActionBtn
-            icon="📦"
-            label="Malzeme Talebi"
-            desc="Malzeme talep et"
-            color="#7C3AED"
-            onPress={() => Alert.alert("Yakında", "Malzeme modülü yakında aktif olacak.")}
-          />
-          <ActionBtn
-            icon="🏗️"
-            label="Üzerimdeki"
-            desc="Malzemelerimi gör"
-            color="#D97706"
-            onPress={() => Alert.alert("Yakında", "Bu özellik yakında aktif olacak.")}
-          />
+            activeOpacity={0.8}
+          >
+            <Text style={styles.btnIcon}>🧾</Text>
+            <Text style={[styles.btnLabel, { color: "#059669" }]}>Masraf Formu</Text>
+            <Text style={styles.btnDesc}>Harcama girisi yap</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderTopColor: "#7C3AED" }]}
+            onPress={() => Alert.alert("Yakinда", "Malzeme modulu yakinда aktif olacak.")}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.btnIcon}>📦</Text>
+            <Text style={[styles.btnLabel, { color: "#7C3AED" }]}>Malzeme Talebi</Text>
+            <Text style={styles.btnDesc}>Malzeme talep et</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderTopColor: "#D97706" }]}
+            onPress={() => Alert.alert("Yakinда", "Bu ozellik yakinда aktif olacak.")}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.btnIcon}>🏗️</Text>
+            <Text style={[styles.btnLabel, { color: "#D97706" }]}>Uzerimdeki</Text>
+            <Text style={styles.btnDesc}>Malzemelerimi gor</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* İş Avanslarım */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>İş Avanslarım</Text>
-          <Text style={styles.sectionCount}>{myAvanslar.length} kayıt</Text>
-        </View>
-
-        {recentAvanslar.length === 0 ? (
-          <EmptyCard text="Henüz iş avansı talebiniz yok." />
+        {/* Is Avanslari */}
+        <Text style={styles.secTitle}>Is Avanslаrim ({avanslar.length})</Text>
+        {avanslar.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyTxt}>Henuz is avansi talebiniz yok.</Text>
+          </View>
         ) : (
-          recentAvanslar.map((a) => {
-            const st = statusStyle(a.durum);
-            return (
-              <View key={a.id} style={styles.listCard}>
-                <View style={styles.listCardTop}>
-                  <Text style={styles.listCardTitle} numberOfLines={1}>{a.proje || a.proje_kodu || a.gider_turu || "—"}</Text>
-                  <View style={[styles.badge, { backgroundColor: st.bg }]}>
-                    <Text style={[styles.badgeText, { color: st.text }]}>{st.label}</Text>
+          avanslar.slice(0, 5).map((a, idx) => {
+            try {
+              const b = getBadge(a.durum);
+              return (
+                <View key={a.id || idx} style={styles.card}>
+                  <View style={styles.cardRow}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>
+                      {String(a.proje || a.proje_kodu || a.gider_turu || "-")}
+                    </Text>
+                    <View style={[styles.badge, { backgroundColor: b.bg }]}>
+                      <Text style={[styles.badgeTxt, { color: b.fg }]}>{b.label}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.cardRow}>
+                    <Text style={styles.cardAmt}>{fmtTL(a.tutar)}</Text>
+                    <Text style={styles.cardDate}>{fmtDate(a.created_at)}</Text>
                   </View>
                 </View>
-                <View style={styles.listCardRow}>
-                  <Text style={styles.listCardAmount}>{fmtTL(a.tutar)}</Text>
-                  <Text style={styles.listCardDate}>{fmtDate(a.created_at)}</Text>
-                </View>
-                {!!a.aciklama && (
-                  <Text style={styles.listCardDesc} numberOfLines={1}>{a.aciklama}</Text>
-                )}
-              </View>
-            );
+              );
+            } catch (_) { return null; }
           })
         )}
 
-        {/* Masraf Formlarım */}
-        <View style={[styles.sectionHeader, { marginTop: 8 }]}>
-          <Text style={styles.sectionTitle}>Masraf Formlarım</Text>
-          <Text style={styles.sectionCount}>{myMasraflar.length} kayıt</Text>
-        </View>
-
-        {recentMasraflar.length === 0 ? (
-          <EmptyCard text="Henüz masraf formunuz yok." />
+        {/* Masraf Formlari */}
+        <Text style={[styles.secTitle, { marginTop: 8 }]}>Masraf Formlarim ({masraflar.length})</Text>
+        {masraflar.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyTxt}>Henuz masraf formunuz yok.</Text>
+          </View>
         ) : (
-          recentMasraflar.map((m) => {
-            const st = statusStyle(m.durum);
-            return (
-              <View key={m.id} style={styles.listCard}>
-                <View style={styles.listCardTop}>
-                  <Text style={styles.listCardTitle} numberOfLines={1}>{m.form_no || m.donem || "Masraf Formu"}</Text>
-                  <View style={[styles.badge, { backgroundColor: st.bg }]}>
-                    <Text style={[styles.badgeText, { color: st.text }]}>{st.label}</Text>
+          masraflar.slice(0, 5).map((m, idx) => {
+            try {
+              const b = getBadge(m.durum);
+              return (
+                <View key={m.id || idx} style={styles.card}>
+                  <View style={styles.cardRow}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>
+                      {String(m.form_no || m.donem || "Masraf Formu")}
+                    </Text>
+                    <View style={[styles.badge, { backgroundColor: b.bg }]}>
+                      <Text style={[styles.badgeTxt, { color: b.fg }]}>{b.label}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.cardRow}>
+                    <Text style={styles.cardAmt}>{fmtTL(m.toplam_tutar || m.tutar)}</Text>
+                    <Text style={styles.cardDate}>{fmtDate(m.created_at)}</Text>
                   </View>
                 </View>
-                <View style={styles.listCardRow}>
-                  <Text style={styles.listCardAmount}>{fmtTL(m.toplam_tutar || m.tutar)}</Text>
-                  <Text style={styles.listCardDate}>{fmtDate(m.created_at)}</Text>
-                </View>
-              </View>
-            );
+              );
+            } catch (_) { return null; }
           })
         )}
 
-        {/* Çıkış */}
+        {/* Cikis */}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
-          <Text style={styles.logoutText}>🚪  Çıkış Yap</Text>
+          <Text style={styles.logoutTxt}>🚪  Cikis Yap</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function ActionBtn({ icon, label, desc, color, onPress }) {
-  return (
-    <TouchableOpacity style={[styles.actionBtn, { borderTopColor: color, borderTopWidth: 3 }]} onPress={onPress} activeOpacity={0.85}>
-      <Text style={styles.actionIcon}>{icon}</Text>
-      <Text style={[styles.actionLabel, { color }]}>{label}</Text>
-      <Text style={styles.actionDesc}>{desc}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function EmptyCard({ text }) {
-  return (
-    <View style={styles.emptyCard}>
-      <Text style={styles.emptyText}>{text}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F0F4FF" },
+  safe:       { flex: 1, backgroundColor: "#F0F4FF" },
+  center:     { flex: 1, justifyContent: "center", alignItems: "center" },
+  header:     { flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                backgroundColor: "#1D4ED8", paddingHorizontal: 20, paddingVertical: 16, paddingTop: 20 },
+  htitle:     { color: "#fff", fontSize: 18, fontWeight: "800" },
+  hsub:       { color: "#BFDBFE", fontSize: 12, marginTop: 2 },
+  avatar:     { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.2)",
+                borderWidth: 2, borderColor: "#fff", alignItems: "center", justifyContent: "center" },
+  avatarTxt:  { color: "#fff", fontWeight: "700", fontSize: 16 },
 
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#1D4ED8",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingTop: 20,
-  },
-  headerTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
-  headerSub:   { color: "#BFDBFE", fontSize: 12, marginTop: 2 },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#ffffff30",
-    borderWidth: 2,
-    borderColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  body:       { padding: 16, paddingBottom: 48 },
+  hi:         { fontSize: 22, fontWeight: "800", color: "#111827", marginTop: 4 },
+  hiSub:      { fontSize: 13, color: "#6B7280", marginTop: 3, marginBottom: 16 },
 
-  body: { padding: 16, paddingBottom: 48 },
+  statsRow:   { flexDirection: "row", marginBottom: 20 },
+  statCard:   { flex: 1, borderRadius: 14, borderWidth: 1, padding: 14, alignItems: "center",
+                marginHorizontal: 4,
+                shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.06, shadowRadius: 6, elevation: 3 },
+  statBlue:   { backgroundColor: "#EFF6FF", borderColor: "#BFDBFE" },
+  statGreen:  { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" },
+  statIcon:   { fontSize: 24, marginBottom: 6 },
+  statVal:    { fontSize: 15, fontWeight: "800", marginBottom: 3, textAlign: "center" },
+  statLabel:  { fontSize: 11, color: "#6B7280", textAlign: "center" },
 
-  welcomeRow: { marginBottom: 16 },
-  welcomeHi:  { fontSize: 22, fontWeight: "800", color: "#111827" },
-  welcomeSub: { fontSize: 13, color: "#6B7280", marginTop: 3 },
+  secTitle:   { fontSize: 16, fontWeight: "800", color: "#111827", marginBottom: 10 },
 
-  statsRow: { flexDirection: "row", gap: 12, marginBottom: 20 },
-  statCard: {
-    flex: 1,
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 14,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  statIcon:  { fontSize: 24, marginBottom: 6 },
-  statVal:   { fontSize: 15, fontWeight: "800", marginBottom: 3, textAlign: "center" },
-  statLabel: { fontSize: 11, color: "#6B7280", textAlign: "center" },
+  btnGrid:    { flexDirection: "row", flexWrap: "wrap", marginBottom: 24, marginHorizontal: -5 },
+  actionBtn:  { width: "48%", backgroundColor: "#fff", borderRadius: 14, padding: 14,
+                borderTopWidth: 3, marginHorizontal: "1%", marginBottom: 10,
+                shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.07, shadowRadius: 6, elevation: 3 },
+  btnIcon:    { fontSize: 26, marginBottom: 8 },
+  btnLabel:   { fontSize: 14, fontWeight: "800", marginBottom: 3 },
+  btnDesc:    { fontSize: 11, color: "#9CA3AF" },
 
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  sectionTitle:  { fontSize: 16, fontWeight: "800", color: "#111827", marginBottom: 10 },
-  sectionCount:  { fontSize: 12, color: "#9CA3AF", marginBottom: 10 },
+  card:       { backgroundColor: "#fff", borderRadius: 12, padding: 14, marginBottom: 10,
+                shadowColor: "#000", shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
+  cardRow:    { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  cardTitle:  { fontSize: 14, fontWeight: "700", color: "#111827", flex: 1, marginRight: 8 },
+  cardAmt:    { fontSize: 15, fontWeight: "800", color: "#1D4ED8" },
+  cardDate:   { fontSize: 12, color: "#9CA3AF" },
 
-  actionGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 24,
-  },
-  actionBtn: {
-    width: "47.5%",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 14,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  actionIcon:  { fontSize: 26, marginBottom: 8 },
-  actionLabel: { fontSize: 14, fontWeight: "800", marginBottom: 3 },
-  actionDesc:  { fontSize: 11, color: "#9CA3AF" },
+  badge:      { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
+  badgeTxt:   { fontSize: 11, fontWeight: "700" },
 
-  listCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  listCardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  listCardTitle: { fontSize: 14, fontWeight: "700", color: "#111827", flex: 1, marginRight: 8 },
-  listCardRow:   { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  listCardAmount:{ fontSize: 15, fontWeight: "800", color: "#1D4ED8" },
-  listCardDate:  { fontSize: 12, color: "#9CA3AF" },
-  listCardDesc:  { fontSize: 12, color: "#6B7280", marginTop: 6 },
+  emptyBox:   { backgroundColor: "#fff", borderRadius: 12, padding: 20, alignItems: "center",
+                marginBottom: 10, borderWidth: 1, borderColor: "#E5E7EB" },
+  emptyTxt:   { fontSize: 13, color: "#9CA3AF" },
 
-  badge: {
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  badgeText: { fontSize: 11, fontWeight: "700" },
-
-  emptyCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 20,
-    alignItems: "center",
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderStyle: "dashed",
-  },
-  emptyText: { fontSize: 13, color: "#9CA3AF" },
-
-  logoutBtn: {
-    marginTop: 24,
-    backgroundColor: "#FEE2E2",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#FECACA",
-  },
-  logoutText: { fontSize: 15, fontWeight: "700", color: "#DC2626" },
+  logoutBtn:  { marginTop: 24, backgroundColor: "#FEE2E2", borderRadius: 12,
+                paddingVertical: 14, alignItems: "center",
+                borderWidth: 1, borderColor: "#FECACA" },
+  logoutTxt:  { fontSize: 15, fontWeight: "700", color: "#DC2626" },
 });
