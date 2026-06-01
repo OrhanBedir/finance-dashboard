@@ -29,7 +29,11 @@ function statusStyle(s) {
 
 function fmtTL(val) {
   const n = Number(val) || 0;
-  return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₺";
+  try {
+    return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₺";
+  } catch (_) {
+    return n.toFixed(2).replace(".", ",") + " ₺";
+  }
 }
 
 function fmtDate(d) {
@@ -47,14 +51,19 @@ export default function HomeScreen({ user, onLogout, navigation }) {
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
-      const email = encodeURIComponent(user?.email || "");
-      const name  = encodeURIComponent(user?.name  || "");
+      const email = encodeURIComponent((user?.email || "").toLowerCase().trim());
+      const name  = encodeURIComponent((user?.name  || "").trim());
       const data  = await apiGet(`/hr/mobile-dashboard?email=${email}&name=${name}`);
-      setAvanslar(Array.isArray(data?.avanslar)  ? data.avanslar  : []);
-      setMasraflar(Array.isArray(data?.masraflar) ? data.masraflar : []);
-    } catch (_) {}
-    setLoading(false);
-    setRefreshing(false);
+      if (data && !data.error) {
+        setAvanslar(Array.isArray(data.avanslar)  ? data.avanslar  : []);
+        setMasraflar(Array.isArray(data.masraflar) ? data.masraflar : []);
+      }
+    } catch (e) {
+      console.log("Dashboard fetch error:", e?.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [user]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
