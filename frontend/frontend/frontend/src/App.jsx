@@ -14889,7 +14889,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   // ── EXCEL EXPORT ──
   const excelIndir = (t, kalemler) => {
     const durumLabel = {
-      TASLAK:"Taslak", NURCAN_ONAY:"Nurcan Onayı Bekliyor", FIYAT_GIRISI:"Fiyat Girişi (Murat)",
+      TASLAK:"Taslak", NURCAN_ONAY:"Nurcan Onayı Bekliyor", ROLLOUT_BEKLE:"Rollout Müdürü Onayı Bekleniyor", FIYAT_GIRISI:"Fiyat Girişi (Murat)",
       PM_ONAY:"PM Onayı (Orhan Bedir)", DUZGUN_ONAY:"Düzgün Onayı Bekliyor",
       ONAYLANDI:"Onaylandı", SATINALINACAK:"Satın Alınacak", DEPODA:"Depoda", REDDEDILDI:"Reddedildi"
     };
@@ -15243,6 +15243,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     const map = {
       TASLAK:        { label:"Taslak",                   color:"#6b7280", bg:"#f3f4f6" },
       NURCAN_ONAY:   { label:"Rollout Müdürü Onayı Bekleniyor", color:"#f59e0b", bg:"#fef3c7" },
+      ROLLOUT_BEKLE: { label:"Rollout Müdürü Onayı Bekleniyor", color:"#f59e0b", bg:"#fef3c7" },
       FIYAT_GIRISI:  { label:"Envanter Onayı Bekleniyor",        color:"#8b5cf6", bg:"#ede9fe" },
       PM_ONAY:       { label:"PM Onayı Bekleniyor",              color:"#2563eb", bg:"#dbeafe" },
       DUZGUN_ONAY:   { label:"Proje Direktörü Onayı Bekleniyor", color:"#0284c7", bg:"#e0f2fe" },
@@ -15284,6 +15285,32 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   </div>
                 );
               })}
+            </div>
+          )}
+          {q.length >= 3 && !exactMatch && !suggestions.some(s => s.toLowerCase() === q) && (
+            <div style={{ marginTop:2, textAlign:"right" }}>
+              <button
+                type="button"
+                onMouseDown={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const token2 = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+                    const headers2 = { "Content-Type":"application/json", Authorization:`Bearer ${token2}` };
+                    const newName = k.malzeme_adi.trim().toUpperCase();
+                    const r = await fetch(`${API_BASE}/malzeme/fiyat-listesi`, {
+                      method:"POST", headers:headers2,
+                      body: JSON.stringify({ malzeme_adi: newName, birim: k.birim||"Adet", birim_fiyat:0, kategori:"" })
+                    });
+                    const d2 = await r.json();
+                    if (d2.error) { alert(d2.error); return; }
+                    loadFiyatListe();
+                    alert(`"${newName}" malzeme listesine eklendi.`);
+                  } catch(err) { alert(err.message); }
+                }}
+                style={{ fontSize:11, color:"#6b7280", background:"none", border:"none", cursor:"pointer", textDecoration:"underline", padding:"2px 4px" }}
+              >
+                + Listeye ekle
+              </button>
             </div>
           )}
         </div>
@@ -15329,14 +15356,17 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const renderDetayModal = () => {
     if (!detayModal) return null;
     const d = detayModal;
-    const canNurcan        = isNurcan   && d.durum==="NURCAN_ONAY";
+    const _detayUserRole = (currentUser?.role || "").toLowerCase();
+    const _isRolloutMudurDetay = _detayUserRole === "rollout_mudur" || _detayUserRole === "bolge_mudur";
+    const canRollout       = _isRolloutMudurDetay && d.durum==="ROLLOUT_BEKLE";
+    const canNurcan        = isNurcan   && (d.durum==="NURCAN_ONAY" || d.durum==="ROLLOUT_BEKLE");
     const canPM            = isPM       && d.durum==="PM_ONAY";
     const canMurat         = isMurat    && d.durum==="FIYAT_GIRISI";
     const canDuzgun        = isDirektor && d.durum==="DUZGUN_ONAY";
     const canMuratTedarik  = isMurat    && d.durum==="SATINALINACAK";
-    const canOnay          = false; // artık kullanılmıyor
+    const canOnay          = false;
     const canDepoda        = canMuratTedarik;
-    const canReddet        = (isNurcan||isPM||isMurat||isDirektor) && ["NURCAN_ONAY","PM_ONAY","FIYAT_GIRISI","DUZGUN_ONAY"].includes(d.durum);
+    const canReddet        = (isNurcan||isPM||isMurat||isDirektor||_isRolloutMudurDetay) && ["ROLLOUT_BEKLE","NURCAN_ONAY","PM_ONAY","FIYAT_GIRISI","DUZGUN_ONAY"].includes(d.durum);
     const isOwner     = d.talep_eden_email === currentUser?.email;
     const canDuzenle  = isOwner && ["TASLAK","REDDEDILDI"].includes(d.durum);
 
@@ -15396,7 +15426,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             const skipPM     = talepEdenPM || talepEdenMurat || talepEdenDirektor; // Bölge Müdürü PM'den geçer
             const ZINCIR = [
               { key:"talep",    label:"Talep Eden",    kisi: d.talep_eden_ad||"—",      done: true,                                                                             color:"#0ea5e9" },
-              { key:"nurcan",   label:"Rollout Müdürü",kisi:"Nurcan Kuş",               done: !skipNurcan && !["TASLAK","NURCAN_ONAY"].includes(d.durum)&&d.durum!=="REDDEDILDI", waiting: !skipNurcan && d.durum==="NURCAN_ONAY", skipped: skipNurcan, color:"#8b5cf6" },
+              { key:"nurcan",   label:"Rollout Müdürü",kisi:"Nurcan Kuş",               done: !skipNurcan && !["TASLAK","NURCAN_ONAY","ROLLOUT_BEKLE"].includes(d.durum)&&d.durum!=="REDDEDILDI", waiting: !skipNurcan && (d.durum==="NURCAN_ONAY" || d.durum==="ROLLOUT_BEKLE"), skipped: skipNurcan, color:"#8b5cf6" },
               { key:"pm",       label:"PM Onayı",      kisi:"Orhan Bedir",              done: !skipPM && ["FIYAT_GIRISI","DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: !skipPM && d.durum==="PM_ONAY", skipped: skipPM, color:"#2563eb" },
               { key:"murat",    label:"Envanter Onayı",kisi:"Murat İstek",              done: ["DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="FIYAT_GIRISI", color:"#f59e0b" },
               { key:"duzgun",   label:"Proje Dir.",    kisi:"Düzgün Şimşek",            done: ["SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="DUZGUN_ONAY", color:"#0284c7" },
@@ -15569,6 +15599,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
           {/* Aksiyon butonları */}
           <div style={{ display:"flex",gap:10,flexWrap:"wrap" }}>
+            {canRollout       && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
             {canNurcan        && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
             {canPM            && <button onClick={()=>updateDurum(d.id,"FIYAT_GIRISI",null,onayNotu)}  disabled={saving} style={{ padding:"10px 18px",background:"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Envanter Onayına Gönder</button>}
             {canMurat         && <button onClick={()=>updateDurum(d.id,"DUZGUN_ONAY",detayKalemler,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#0284c7",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Proje Direktörü'ne Gönder</button>}
@@ -15746,12 +15777,14 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             <button onClick={()=>{
               // Hiyerarşiye göre ilk onay adımını belirle:
               // Nurcan Kuş → Orhan Bedir - Murat İstek - Düzgün Şimşek - Murat İstek
-              const submitDurum = isDirektor    ? "SATINALINACAK"  // Direktör → tedarik
-                : isMurat     ? "DUZGUN_ONAY"                     // Murat → Düzgün'e
-                : isPM        ? "FIYAT_GIRISI"                     // PM → Murat'a (envanter)
-                : isNurcan    ? "PM_ONAY"                          // Nurcan → PM'e
-                : isBolgeMudur? "PM_ONAY"                          // Bölge Müdürü → PM'e (Nurcan atlanır)
-                : "NURCAN_ONAY";                                   // Diğerleri → Nurcan'a
+              const userRole = (currentUser?.role || "").toLowerCase();
+              const isRolloutMudur = userRole === "rollout_mudur" || userRole === "bolge_mudur";
+              const submitDurum = isDirektor    ? "FIYAT_GIRISI"         // Direktör → Murat fiyat
+                : isMurat       ? "DUZGUN_ONAY"                          // Murat → PD'ye
+                : isPM          ? "FIYAT_GIRISI"                         // PM → Murat'a
+                : isNurcan      ? "PM_ONAY"                              // Nurcan → PM'e
+                : isRolloutMudur? "PM_ONAY"                              // Rollout/Bölge Müd. → PM'e
+                : "ROLLOUT_BEKLE";                                       // Personel → Rollout Müdürüne
               saveTalep(submitDurum);
             }} disabled={saving}
               style={{ padding:"12px 28px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:15 }}>
@@ -15816,6 +15849,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   <option value="">Tüm Durumlar</option>
                   <option value="TASLAK">Taslak</option>
                   <option value="NURCAN_ONAY">Rollout Müdürü Onayı Bekleniyor</option>
+                  <option value="ROLLOUT_BEKLE">Rollout Müdürü Onayı Bekleniyor</option>
                   <option value="PM_ONAY">PM Onayı Bekleniyor</option>
                   <option value="FIYAT_GIRISI">Envanter Onayı Bekleniyor</option>
                   <option value="DUZGUN_ONAY">Proje Direktörü Onayı Bekleniyor</option>
@@ -15878,7 +15912,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                     return true;
                   }).map((t,i)=>{
                     const durumColors = {
-                      TASLAK:"#9ca3af", NURCAN_ONAY:"#d97706", FIYAT_GIRISI:"#7c3aed",
+                      TASLAK:"#9ca3af", NURCAN_ONAY:"#d97706", ROLLOUT_BEKLE:"#f59e0b", FIYAT_GIRISI:"#7c3aed",
                       PM_ONAY:"#2563eb", DUZGUN_ONAY:"#0284c7", ONAYLANDI:"#16a34a",
                       SATINALINACAK:"#ea580c", DEPODA:"#15803d", REDDEDILDI:"#dc2626",
                     };
@@ -16797,6 +16831,7 @@ function App() {
             const email = user.email;
             let mlc = 0;
             if (email === "nurcan.kus@simsektel.com")   mlc = mldata.filter(t => t.durum === "NURCAN_ONAY").length;
+            else if (["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase()))  mlc = mldata.filter(t => t.durum === "ROLLOUT_BEKLE").length;
             else if (email === "orhan.bedir@simsektel.com") mlc = mldata.filter(t => t.durum === "PM_ONAY").length;
             else if (email === "murat.istek@simsektel.com") mlc = mldata.filter(t => ["FIYAT_GIRISI","SATINALINACAK"].includes(t.durum)).length;
             else if (email === "duzgun.simsek@simsektel.com") mlc = mldata.filter(t => t.durum === "DUZGUN_ONAY").length;

@@ -11309,11 +11309,17 @@ app.delete("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /malzeme/bekleyen-count (Murat için bildirim sayısı)
+// GET /malzeme/bekleyen-count (rol bazlı bildirim sayısı)
 app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
   try {
+    const role = (req.user?.role || "").toLowerCase();
+    const email = (req.user?.email || "").toLowerCase();
+    let durum = "FIYAT_GIRISI"; // default: Murat
+    if (role === "rollout_mudur" || role === "bolge_mudur") durum = "ROLLOUT_BEKLE";
+    else if (email === "orhan.bedir@simsektel.com") durum = "PM_ONAY";
+    else if (email === "duzgun.simsek@simsektel.com") durum = "DUZGUN_ONAY";
     const r = await pool.query(
-      "SELECT COUNT(*) FROM malzeme_talepler WHERE durum='FIYAT_GIRISI'"
+      "SELECT COUNT(*) FROM malzeme_talepler WHERE durum=$1", [durum]
     );
     res.json({ count: Number(r.rows[0].count) });
   } catch (e) { res.json({ count: 0 }); }
