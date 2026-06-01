@@ -4951,25 +4951,25 @@ function FinanceDashboard({
                       <div style={{ width:"100%", display:"flex", gap:"1px", alignItems:"flex-end", position:"relative" }}>
                         {/* Tahsilat bar */}
                         <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
-                          {r > 0 && <div style={{ fontSize:"7px", color:"#3b82f6", fontWeight:700, whiteSpace:"nowrap", marginBottom:"1px", lineHeight:1 }}>{fmt(r)}</div>}
+                          {r > 0 && <div style={{ fontSize:"10px", color:"#1d4ed8", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(r)}</div>}
                           <div style={{ width:"100%", height:`${rH}px`, background:"linear-gradient(180deg,#3b82f6,#6366f1)", borderRadius:"3px 3px 0 0" }}/>
                         </div>
                         {/* Gelecek bar */}
                         {u > 0 && (
                           <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
-                            <div style={{ fontSize:"7px", color:"#10b981", fontWeight:700, whiteSpace:"nowrap", marginBottom:"1px", lineHeight:1 }}>{fmt(u)}</div>
+                            <div style={{ fontSize:"10px", color:"#059669", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(u)}</div>
                             <div style={{ width:"100%", height:`${uH}px`, background:"#10b981", borderRadius:"3px 3px 0 0" }}/>
                           </div>
                         )}
                         {/* Fatura bar */}
                         {inv > 0 && (
                           <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
-                            <div style={{ fontSize:"7px", color:"#f59e0b", fontWeight:700, whiteSpace:"nowrap", marginBottom:"1px", lineHeight:1 }}>{fmt(inv)}</div>
+                            <div style={{ fontSize:"10px", color:"#b45309", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(inv)}</div>
                             <div style={{ width:"100%", height:`${invH}px`, background:"#f59e0b", borderRadius:"3px 3px 0 0" }}/>
                           </div>
                         )}
                       </div>
-                      <div style={{ fontSize:"9px", color:"#94a3b8", fontWeight:500, marginTop:"3px", whiteSpace:"nowrap" }}>{name}</div>
+                      <div style={{ fontSize:"11px", color:"#64748b", fontWeight:600, marginTop:"4px", whiteSpace:"nowrap" }}>{name}</div>
                     </div>
                   );
                 })}
@@ -17157,13 +17157,13 @@ function App() {
         .topbar-toggle:hover { background: #e2e8f0; color: #0f172a; }
         .sidebar-logo { padding: 20px 16px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; gap: 10px; }
         .sidebar-logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
-        .sidebar-section-title { padding: 10px 16px 6px; font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; transition: color 0.15s; }
-        .sidebar-section-title:hover { color: #94a3b8; }
-        .sidebar-section-chevron { font-size: 11px; color: #64748b; transition: transform 0.2s; line-height: 1; }
+        .sidebar-section-title { padding: 10px 16px 6px; font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.8px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; transition: color 0.15s; }
+        .sidebar-section-title:hover { color: #cbd5e1; }
+        .sidebar-section-chevron { font-size: 12px; color: #94a3b8; transition: transform 0.2s; line-height: 1; }
         .sidebar-section-chevron.open { transform: rotate(0deg); }
         .sidebar-section-chevron.closed { transform: rotate(-90deg); }
-        .sidebar-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 1px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #94a3b8; transition: all 0.15s; position: relative; }
-        .sidebar-nav-item:hover { background: #1e2a3a; color: #e2e8f0; }
+        .sidebar-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 1px 8px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; color: #cbd5e1; transition: all 0.15s; position: relative; }
+        .sidebar-nav-item:hover { background: #1e2a3a; color: #f1f5f9; }
         .sidebar-nav-item.active { background: #1d4ed8; color: #fff; }
         .sidebar-badge { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #dc2626; color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
         .sidebar-user { margin-top: auto; padding: 12px; border-top: 1px solid #1e2a3a; }
