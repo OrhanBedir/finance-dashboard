@@ -38,8 +38,16 @@ function fmtTL(val) {
 
 function fmtDate(d) {
   if (!d) return "";
-  const dt = new Date(d);
-  return dt.toLocaleDateString("tr-TR", { day: "2-digit", month: "short", year: "numeric" });
+  try {
+    const dt = new Date(d);
+    const gun = String(dt.getDate()).padStart(2, "0");
+    const aylar = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+    const ay = aylar[dt.getMonth()] || "";
+    const yil = dt.getFullYear();
+    return `${gun} ${ay} ${yil}`;
+  } catch (_) {
+    return String(d).slice(0, 10);
+  }
 }
 
 export default function HomeScreen({ user, onLogout, navigation }) {
