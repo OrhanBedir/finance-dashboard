@@ -47,16 +47,15 @@ export default function HomeScreen({ user, onLogout, navigation }) {
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
-      const [av, ma] = await Promise.all([
-        apiGet("/hr/is-avans"),
-        apiGet("/hr/masraf"),
-      ]);
-      setAvanslar(Array.isArray(av) ? av : []);
-      setMasraflar(Array.isArray(ma) ? ma : []);
+      const email = encodeURIComponent(user?.email || "");
+      const name  = encodeURIComponent(user?.name  || "");
+      const data  = await apiGet(`/hr/mobile-dashboard?email=${email}&name=${name}`);
+      setAvanslar(Array.isArray(data?.avanslar)  ? data.avanslar  : []);
+      setMasraflar(Array.isArray(data?.masraflar) ? data.masraflar : []);
     } catch (_) {}
     setLoading(false);
     setRefreshing(false);
-  }, []);
+  }, [user]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -74,21 +73,17 @@ export default function HomeScreen({ user, onLogout, navigation }) {
     ]);
   };
 
-  // --- Stats ---
-  const myEmail = user?.email?.toLowerCase() || "";
-  const myAvanslar   = avanslar.filter(a => (a.talep_eden_email || "").toLowerCase() === myEmail);
-  const myMasraflar  = masraflar.filter(m => (m.talep_eden_email || "").toLowerCase() === myEmail);
-
-  const pendingAvans = myAvanslar
-    .filter(a => !["ODENDI", "REDDEDILDI"].includes(a.durum))
+  // --- Stats --- (API zaten kişiye özel döndürüyor, client filtresi gerek yok)
+  const pendingAvans = avanslar
+    .filter(a => !["TAMAMLANDI", "REDDEDILDI"].includes(a.durum))
     .reduce((s, a) => s + (Number(a.tutar) || 0), 0);
 
-  const pendingMasraf = myMasraflar
-    .filter(m => !["ODENDI", "REDDEDILDI"].includes(m.durum))
+  const pendingMasraf = masraflar
+    .filter(m => !["TAMAMLANDI", "ODENDI", "REDDEDILDI"].includes(m.durum))
     .reduce((s, m) => s + (Number(m.toplam_tutar || m.tutar) || 0), 0);
 
-  const recentAvanslar  = [...myAvanslar].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
-  const recentMasraflar = [...myMasraflar].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
+  const recentAvanslar  = avanslar.slice(0, 5);
+  const recentMasraflar = masraflar.slice(0, 5);
 
   const initial = (user?.name || "?").charAt(0).toUpperCase();
   const isAdmin = ["admin", "muhasebe"].includes(user?.role?.toLowerCase());
@@ -200,7 +195,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
             return (
               <View key={a.id} style={styles.listCard}>
                 <View style={styles.listCardTop}>
-                  <Text style={styles.listCardTitle} numberOfLines={1}>{a.proje_kodu || "—"}</Text>
+                  <Text style={styles.listCardTitle} numberOfLines={1}>{a.proje || a.proje_kodu || a.gider_turu || "—"}</Text>
                   <View style={[styles.badge, { backgroundColor: st.bg }]}>
                     <Text style={[styles.badgeText, { color: st.text }]}>{st.label}</Text>
                   </View>
@@ -231,7 +226,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
             return (
               <View key={m.id} style={styles.listCard}>
                 <View style={styles.listCardTop}>
-                  <Text style={styles.listCardTitle} numberOfLines={1}>{m.proje_kodu || m.aciklama || "Masraf Formu"}</Text>
+                  <Text style={styles.listCardTitle} numberOfLines={1}>{m.form_no || m.donem || "Masraf Formu"}</Text>
                   <View style={[styles.badge, { backgroundColor: st.bg }]}>
                     <Text style={[styles.badgeText, { color: st.text }]}>{st.label}</Text>
                   </View>
