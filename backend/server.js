@@ -11611,47 +11611,97 @@ app.put("/malzeme/dagitim/:id/tutanak", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /malzeme/dagitim/:id/saha-cikis — personel sahaya çıkış yapar
+// PUT /malzeme/dagitim/:id/saha-cikis — personel sahaya çıkış yapar (miktar ile)
 app.put("/malzeme/dagitim/:id/saha-cikis", authMiddleware, async (req, res) => {
   try {
-    const { saha_site_id, miktar, saha_notlar } = req.body;
+    const { saha_site_id, saha_kullanim_miktar, saha_notlar } = req.body;
+    if (!saha_site_id) return res.status(400).json({ error: "Site ID zorunludur" });
+    // Mevcut kaydı al
+    const dag = await pool.query("SELECT * FROM malzeme_dagitim WHERE id=$1", [req.params.id]);
+    if (!dag.rows.length) return res.status(404).json({ error: "Bulunamadı" });
+    const d = dag.rows[0];
+    const kullanilan = saha_kullanim_miktar ? Number(saha_kullanim_miktar) : d.miktar;
+    if (kullanilan <= 0) return res.status(400).json({ error: "Miktar 0'dan büyük olmalı" });
+    if (kullanilan > d.miktar) return res.status(400).json({ error: `Miktarı aşıyor (max: ${d.miktar})` });
+
+    // Kullanılan miktarı SAHADA olarak güncelle
     const r = await pool.query(
       `UPDATE malzeme_dagitim
-       SET durum='SAHADA', saha_site_id=$1, saha_cikis_tarihi=CURRENT_DATE, saha_notlar=$2, updated_at=NOW()
-       WHERE id=$3 RETURNING *`,
-      [saha_site_id, saha_notlar||"", req.params.id]
+       SET durum='SAHADA', saha_site_id=$1, saha_cikis_tarihi=CURRENT_DATE,
+           saha_kullanim_miktar=$2, saha_notlar=$3, updated_at=NOW()
+       WHERE id=$4 RETURNING *`,
+      [saha_site_id, kullanilan, saha_notlar||"", req.params.id]
+    );
+
+    // Eğer kalan varsa depoya geri ekle
+    const kalan = d.miktar - kullanilan;
+    if (kalan > 0) {
+      const stok = await pool.query(
+        "SELECT id FROM depo_stok WHERE LOWER(malzeme_adi)=LOWER($1)", [d.malzeme_adi]
+      );
+      if (stok.rows.length > 0) {
+        await pool.query("UPDATE depo_stok SET toplam_miktar=toplam_miktar+$1, updated_at=NOW() WHERE id=$2", [kalan, stok.rows[0].id]);
+      } else {
+        await pool.query("INSERT INTO depo_stok (malzeme_adi, birim, toplam_miktar) VALUES ($1,$2,$3)", [d.malzeme_adi, d.birim, kalan]);
+      }
+    }
+
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /malzeme/dagitim/:id/iade — personel depoya iade talebi gönderir (Murat onayına gider)
+app.put("/malzeme/dagitim/:id/iade", authMiddleware, async (req, res) => {
+  try {
+    const { notlar, iade_miktar } = req.body;
+    const dag = await pool.query("SELECT * FROM malzeme_dagitim WHERE id=$1", [req.params.id]);
+    if (!dag.rows.length) return res.status(404).json({ error: "Bulunamadı" });
+    const d = dag.rows[0];
+    const miktar = iade_miktar ? Number(iade_miktar) : d.miktar;
+
+    // Murat onayına gönder (stok henüz güncellenmez)
+    const r = await pool.query(
+      "UPDATE malzeme_dagitim SET durum='IADE_BEKLEMEDE', iade_miktar=$1, saha_notlar=$2, iade_talep_tarihi=NOW(), updated_at=NOW() WHERE id=$3 RETURNING *",
+      [miktar, notlar||"", req.params.id]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /malzeme/dagitim/:id/iade — personel depoya iade eder
-app.put("/malzeme/dagitim/:id/iade", authMiddleware, async (req, res) => {
+// PUT /malzeme/dagitim/:id/iade-onayla — Murat İstek iadeyi onaylar, stok güncellenir
+app.put("/malzeme/dagitim/:id/iade-onayla", authMiddleware, async (req, res) => {
   try {
-    const { notlar } = req.body;
     const dag = await pool.query("SELECT * FROM malzeme_dagitim WHERE id=$1", [req.params.id]);
     if (!dag.rows.length) return res.status(404).json({ error: "Bulunamadı" });
     const d = dag.rows[0];
+    if (d.durum !== "IADE_BEKLEMEDE") return res.status(400).json({ error: "Bu kayıt iade beklemede değil" });
+
+    const iadeMiktar = d.iade_miktar || d.miktar;
 
     // Depoya geri ekle
     const stok = await pool.query(
-      "SELECT id FROM depo_stok WHERE LOWER(malzeme_adi)=LOWER($1)",
-      [d.malzeme_adi]
+      "SELECT id FROM depo_stok WHERE LOWER(malzeme_adi)=LOWER($1)", [d.malzeme_adi]
     );
     if (stok.rows.length > 0) {
-      await pool.query(
-        "UPDATE depo_stok SET toplam_miktar=toplam_miktar+$1, updated_at=NOW() WHERE id=$2",
-        [d.miktar, stok.rows[0].id]
-      );
+      await pool.query("UPDATE depo_stok SET toplam_miktar=toplam_miktar+$1, updated_at=NOW() WHERE id=$2", [iadeMiktar, stok.rows[0].id]);
     } else {
-      await pool.query(
-        "INSERT INTO depo_stok (malzeme_adi, birim, toplam_miktar) VALUES ($1,$2,$3)",
-        [d.malzeme_adi, d.birim, d.miktar]
-      );
+      await pool.query("INSERT INTO depo_stok (malzeme_adi, birim, toplam_miktar) VALUES ($1,$2,$3)", [d.malzeme_adi, d.birim, iadeMiktar]);
     }
 
     const r = await pool.query(
-      "UPDATE malzeme_dagitim SET durum='DEPOYA_IADE', saha_notlar=$1, updated_at=NOW() WHERE id=$2 RETURNING *",
+      "UPDATE malzeme_dagitim SET durum='DEPOYA_IADE', iade_onay_tarihi=NOW(), updated_at=NOW() WHERE id=$2 RETURNING *",
+      [req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /malzeme/dagitim/:id/iade-reddet — Murat İstek iadeyi reddeder
+app.put("/malzeme/dagitim/:id/iade-reddet", authMiddleware, async (req, res) => {
+  try {
+    const { notlar } = req.body;
+    const r = await pool.query(
+      "UPDATE malzeme_dagitim SET durum='PERSONELDE', iade_miktar=NULL, saha_notlar=$1, updated_at=NOW() WHERE id=$2 RETURNING *",
       [notlar||"", req.params.id]
     );
     res.json(r.rows[0]);
@@ -11805,6 +11855,11 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tamamlanma_tarihi DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS qc_closed_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+  // ── Malzeme dağıtım yeni kolonlar ──
+  "ALTER TABLE malzeme_dagitim ADD COLUMN IF NOT EXISTS saha_kullanim_miktar NUMERIC(12,3)",
+  "ALTER TABLE malzeme_dagitim ADD COLUMN IF NOT EXISTS iade_miktar NUMERIC(12,3)",
+  "ALTER TABLE malzeme_dagitim ADD COLUMN IF NOT EXISTS iade_talep_tarihi TIMESTAMP",
+  "ALTER TABLE malzeme_dagitim ADD COLUMN IF NOT EXISTS iade_onay_tarihi TIMESTAMP",
   // ── Trafik Ceza kolonları ──
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS plaka TEXT",
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_personel_id INTEGER",
