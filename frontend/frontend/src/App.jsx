@@ -7712,8 +7712,9 @@ function hesaplaVergi(netBankadan) {
 function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
+  const _isNurcanHR = _hrEmail === "nurcan.kus@simsektel.com";
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
-  const [tab, setTab] = useState("personel");
+  const [tab, setTab] = useState(_isNurcanHR ? "isg" : "personel");
   const [personelList, setPersonelList] = useState([]);
   const [isgTurleri, setIsgTurleri] = useState([]);
   const [isgUyarilar, setIsgUyarilar] = useState([]);
@@ -17251,7 +17252,7 @@ function App() {
               </div>
               {openSections.ik && (
                 <div>
-                  {isAdmin && (
+                  {(isAdmin || user?.email === "nurcan.kus@simsektel.com") && (
                     <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
                       <span>👥</span> İK Paneli
                     </div>
