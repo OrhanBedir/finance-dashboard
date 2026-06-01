@@ -7742,6 +7742,10 @@ function HrDashboard({ onBack, currentUser }) {
     ad_soyad:"", tc_no:"", dogum_tarihi:"", telefon:"", email:"", unvan:"", bolge:"",
     ise_giris_tarihi:"", isten_ayrilma_tarihi:"", net_maas:"", bankadan_gosterilen:"",
     elden_verilen:"", iban:"", banka_adi:"", banka_hesap_no:"", aktif: true,
+    // ISG/RFQ alanları
+    ekip_bilgisi:"", alt_yuklenici:"", firma_tipi:"simsek", isdp_account:"", iresource_giris:"",
+    kkd_zimmet_tarihi:"", mesleki_yeterlilik_durum:"", mesleki_yeterlilik_tarihi:"",
+    elektrik_isi:false, yuksekte_calisma:false, arac_kullanim:false,
   });
   const [isgForm, setIsgForm] = useState({ egitim_turu:"", egitim_tarihi:"", gecerlilik_yil:2 });
   const [isgBelgeDosya, setIsgBelgeDosya] = useState(null);
@@ -7757,10 +7761,18 @@ function HrDashboard({ onBack, currentUser }) {
   const [notText, setNotText] = useState("");
   const [notFile, setNotFile] = useState(null);
   const [notSaving, setNotSaving] = useState(false);
+  // ISG yeni alanlar
+  const [isgFirmaTip, setIsgFirmaTip] = useState("simsek"); // "simsek" | "taseron"
+  const [isgMatris, setIsgMatris] = useState([]); // matris view için
+  const [isgMatrisFiltre, setIsgMatrisFiltre] = useState("tumu"); // "tumu"|"doldu"|"yaklasan"|"gecerli"
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
     setPersonelList(await r.json());
+  };
+  const loadIsgMatris = async () => {
+    const r = await fetch(`${API_BASE}/hr/isg/matris`);
+    setIsgMatris(await r.json());
   };
   const loadIsgUyarilar = async () => {
     const r = await fetch(`${API_BASE}/hr/isg/uyarilar`);
@@ -7798,7 +7810,7 @@ function HrDashboard({ onBack, currentUser }) {
     setPersonelIsg(isg);
   };
 
-  useEffect(() => { loadPersonel(); loadIsgTurleri(); loadIsgUyarilar(); }, []);
+  useEffect(() => { loadPersonel(); loadIsgTurleri(); loadIsgUyarilar(); loadIsgMatris(); }, []);
   useEffect(() => { if (tab==="puantaj" || tab==="personel") { loadPuantaj(); loadOzet(); } }, [tab, puantajAy]);
   useEffect(() => { if (tab==="personel") { loadAvans(); loadIsAvans(); loadAylikOdemeler(); } }, [tab, puantajAy]);
   useEffect(() => { if (tab==="maas_avans") loadAvans(); }, [tab]);
@@ -7826,7 +7838,17 @@ function HrDashboard({ onBack, currentUser }) {
   };
   const handleEditPersonel = (p) => {
     setEditingPersonel(p);
-    setPForm({ ...p, dogum_tarihi: p.dogum_tarihi?.split("T")[0]||"", ise_giris_tarihi: p.ise_giris_tarihi?.split("T")[0]||"", isten_ayrilma_tarihi: p.isten_ayrilma_tarihi?.split("T")[0]||"" });
+    setPForm({ ...p,
+      dogum_tarihi: p.dogum_tarihi?.split("T")[0]||"",
+      ise_giris_tarihi: p.ise_giris_tarihi?.split("T")[0]||"",
+      isten_ayrilma_tarihi: p.isten_ayrilma_tarihi?.split("T")[0]||"",
+      kkd_zimmet_tarihi: p.kkd_zimmet_tarihi?.split("T")[0]||"",
+      mesleki_yeterlilik_tarihi: p.mesleki_yeterlilik_tarihi?.split("T")[0]||"",
+      ekip_bilgisi: p.ekip_bilgisi||"", alt_yuklenici: p.alt_yuklenici||"",
+      firma_tipi: p.firma_tipi||"simsek", isdp_account: p.isdp_account||"",
+      iresource_giris: p.iresource_giris||"", mesleki_yeterlilik_durum: p.mesleki_yeterlilik_durum||"",
+      elektrik_isi: !!p.elektrik_isi, yuksekte_calisma: !!p.yuksekte_calisma, arac_kullanim: !!p.arac_kullanim,
+    });
     setShowPersonelForm(true);
   };
   const handleToggleAktif = async (p) => {
@@ -7944,14 +7966,31 @@ function HrDashboard({ onBack, currentUser }) {
   const handleTumBelgeleriIndir = async () => {
     if (!selectedPersonel) return;
     const zip = new JSZip();
-    const belgeAdiMap = {
-      FOTOGRAF:"Fotograf", TC_KIMLIK:"TC_Kimlik", EHLIYET:"Ehliyet",
-      SAGLIK_RAPORU:"Saglik_Raporu", SGK_BILDIRGE:"SGK_Bildirge", DIGER_BELGE:"Diger_Belge"
-    };
+    const kisiAdi = selectedPersonel.ad_soyad.replace(/\s+/g, "_");
+    const kok = zip.folder(kisiAdi);
     const fetchBuf = async (url) => {
       const r = await fetch(url);
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.arrayBuffer();
+    };
+    // ── Klasör eşleşmeleri ──
+    const KLASOR_MAP = {
+      fotograf:      "01_Fotograf",
+      tc_kimlik:     "02_TC_Kimlik",
+      ehliyet:       "03_Ehliyet",
+      saglik_raporu: "04_Saglik_Raporu",
+      sgk_bildirge:  "05_SGK_Bildirge",
+      diger:         "09_Diger_Belgeler",
+    };
+    const ISG_KLASOR_MAP = {
+      "Sağlık Raporu":        "04_Saglik_Raporu",
+      "HUAWEI 10 Mutlak Kural":"06_ISG_Sertifikalari",
+      "Temel İSG":             "06_ISG_Sertifikalari",
+      "ELEKTRİK İSG":         "06_ISG_Sertifikalari",
+      "Yüksekte Çalışma":     "06_ISG_Sertifikalari",
+      "Kurtarma Eğitimi":     "06_ISG_Sertifikalari",
+      "Güvenli Sürüş":        "06_ISG_Sertifikalari",
+      "İlkyardım":             "06_ISG_Sertifikalari",
     };
     let count = 0;
     // Personel belgeleri
@@ -7959,9 +7998,10 @@ function HrDashboard({ onBack, currentUser }) {
       if (!b.dosya_yolu) continue;
       try {
         const ext = (b.dosya_yolu.split(".").pop().split("?")[0] || "bin").toLowerCase();
-        const ad = (belgeAdiMap[b.belge_turu] || b.belge_turu) + "." + ext;
+        const klasorAdi = KLASOR_MAP[b.belge_turu] || "09_Diger_Belgeler";
+        const dosyaAdi = `${b.belge_turu}.${ext}`;
         const buf = await fetchBuf(b.dosya_yolu);
-        zip.folder("Personel_Belgeleri").file(ad, buf);
+        kok.folder(klasorAdi).file(dosyaAdi, buf);
         count++;
       } catch(e) {}
     }
@@ -7970,9 +8010,10 @@ function HrDashboard({ onBack, currentUser }) {
       if (!i.belge_yolu) continue;
       try {
         const ext = (i.belge_yolu.split(".").pop().split("?")[0] || "bin").toLowerCase();
-        const ad = i.egitim_turu.replace(/[/\\:*?"<>|]/g, "_") + "." + ext;
+        const klasorAdi = ISG_KLASOR_MAP[i.egitim_turu] || "06_ISG_Sertifikalari";
+        const dosyaAdi = `${i.egitim_turu.replace(/[/\\:*?"<>|]/g, "_")}.${ext}`;
         const buf = await fetchBuf(i.belge_yolu);
-        zip.folder("ISG_Egitimleri").file(ad, buf);
+        kok.folder(klasorAdi).file(dosyaAdi, buf);
         count++;
       } catch(e) {}
     }
@@ -7980,7 +8021,7 @@ function HrDashboard({ onBack, currentUser }) {
     const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `${selectedPersonel.ad_soyad.replace(/\s+/g,"_")}_Belgeler.zip`;
+    a.href = url; a.download = `${kisiAdi}_Belgeler.zip`;
     a.click(); URL.revokeObjectURL(url);
   };
   const handleIsgBelgeUpload = async (personelId, isgId, file) => {
@@ -8788,6 +8829,40 @@ function HrDashboard({ onBack, currentUser }) {
                     </div>
                     {/* Bordro özeti — sadece bankadan gösterilen kısım üzerinden vergi hesabı */}
                     <BordroOzeti bankadan={Number(pForm.bankadan_gosterilen||0)} elden={Number(pForm.elden_verilen||0)} />
+                    {/* ── ISG / RFQ Ek Alanlar ── */}
+                    <div style={{ marginTop:"14px", marginBottom:"8px", fontWeight:700, fontSize:"13px", color:"#374151", borderTop:"1px solid #f3f4f6", paddingTop:"12px" }}>🎓 ISG / RFQ Bilgileri</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"12px", marginBottom:"12px" }}>
+                      {[["Ekip Bilgisi","ekip_bilgisi"],["Alt Yüklenici / Firma","alt_yuklenici"],["ISDP Account","isdp_account"],["İResource Girişi","iresource_giris"],
+                        ["Mesleki Yeterlilik Durumu","mesleki_yeterlilik_durum"]].map(([l,n])=>(
+                        <div key={n}>
+                          <label style={labelSt}>{l}</label>
+                          <input value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} />
+                        </div>
+                      ))}
+                      <div>
+                        <label style={labelSt}>Firma Tipi</label>
+                        <select value={pForm.firma_tipi||"simsek"} onChange={e=>setPForm(f=>({...f,firma_tipi:e.target.value}))} style={inputSt}>
+                          <option value="simsek">Şimşek</option>
+                          <option value="taseron">Taşeron</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={labelSt}>KKD Zimmet Tarihi</label>
+                        <input type="date" value={pForm.kkd_zimmet_tarihi||""} onChange={e=>setPForm(f=>({...f,kkd_zimmet_tarihi:e.target.value}))} style={inputSt} />
+                      </div>
+                      <div>
+                        <label style={labelSt}>Mesleki Yet. Tarihi</label>
+                        <input type="date" value={pForm.mesleki_yeterlilik_tarihi||""} onChange={e=>setPForm(f=>({...f,mesleki_yeterlilik_tarihi:e.target.value}))} style={inputSt} />
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:"20px", marginBottom:"12px" }}>
+                      {[["Elektrik işi yapacak","elektrik_isi"],["Yüksekte çalışacak","yuksekte_calisma"],["Araç kullanacak","arac_kullanim"]].map(([l,n])=>(
+                        <label key={n} style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>
+                          <input type="checkbox" checked={!!pForm[n]} onChange={e=>setPForm(f=>({...f,[n]:e.target.checked}))} />
+                          {l}
+                        </label>
+                      ))}
+                    </div>
                     <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
                       <button type="button" className="tab" onClick={()=>setShowPersonelForm(false)}>Vazgeç</button>
                       <button type="submit" className="saveButton">Kaydet</button>
@@ -9282,24 +9357,55 @@ function HrDashboard({ onBack, currentUser }) {
             </div>
           )}
 
-          {/* Personel Seçici */}
-          <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"20px" }}>
+          {/* ── Üst bar: başlık + Excel butonları ── */}
+          <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"14px", flexWrap:"wrap" }}>
             <h2 style={{ margin:0, fontSize:"20px" }}>🎓 ISG / Belgeler</h2>
+            <a href={`${API_BASE}/hr/excel/isg?tip=hw`}
+              style={{ padding:"7px 14px", background:"#1e3a5f", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>
+              📥 HW RFQ Excel
+            </a>
+            <a href={`${API_BASE}/hr/excel/isg?tip=simsek`}
+              style={{ padding:"7px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>
+              📥 Şimşek RFQ Excel
+            </a>
+            {selectedPersonel && (
+              <a href={`${API_BASE}/hr/excel/isg?personel_id=${selectedPersonel.id}`}
+                style={{ padding:"7px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>
+                📥 {selectedPersonel.ad_soyad.split(" ")[0]} Excel
+              </a>
+            )}
+          </div>
+
+          {/* ── Şimşek / Taşeron Toggle + Personel Seç ── */}
+          <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"20px", flexWrap:"wrap" }}>
+            <div style={{ display:"flex", background:"#f3f4f6", borderRadius:"10px", padding:"3px", gap:"2px" }}>
+              {[["simsek","🏢 Şimşek"],["taseron","🔧 Taşeron"]].map(([val,lbl])=>(
+                <button key={val} onClick={()=>{ setIsgFirmaTip(val); setSelectedPersonel(null); }}
+                  style={{ padding:"6px 16px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700,
+                    background: isgFirmaTip===val?"#fff":"transparent",
+                    color: isgFirmaTip===val?"#1f2937":"#9ca3af",
+                    boxShadow: isgFirmaTip===val?"0 1px 4px rgba(0,0,0,0.1)":"none" }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
             <select
               value={selectedPersonel?.id || ""}
               onChange={e => {
                 const p = personelList.find(x => String(x.id) === e.target.value);
                 if (p) loadPersonelDetail(p); else setSelectedPersonel(null);
               }}
-              style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", minWidth:"200px" }}
+              style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", minWidth:"220px" }}
             >
               <option value="">— Personel Seç —</option>
-              {personelList.filter(p=>p.aktif).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+              {personelList
+                .filter(p => p.aktif && (isgFirmaTip === "taseron" ? (p.firma_tipi||"simsek")==="taseron" : (p.firma_tipi||"simsek")==="simsek"))
+                .map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
             </select>
           </div>
 
           {!selectedPersonel ? (
-            <div style={{ ...secSt, textAlign:"center", color:"#9ca3af", padding:"40px" }}>
+            <div style={{ ...secSt, textAlign:"center", color:"#9ca3af", padding:"32px" }}>
               Belgelerini ve ISG kayıtlarını görmek için yukarıdan personel seçin.
             </div>
           ) : (
@@ -9309,6 +9415,8 @@ function HrDashboard({ onBack, currentUser }) {
                 <span style={{ marginLeft:"10px", background: selectedPersonel.aktif?"#dcfce7":"#f3f4f6", color: selectedPersonel.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>
                   {selectedPersonel.aktif?"Aktif":"Pasif"}
                 </span>
+                {selectedPersonel.ekip_bilgisi && <span style={{ marginLeft:"8px", background:"#eff6ff", color:"#1d4ed8", padding:"3px 10px", borderRadius:"20px", fontSize:"12px" }}>{selectedPersonel.ekip_bilgisi}</span>}
+                {selectedPersonel.alt_yuklenici && <span style={{ marginLeft:"8px", background:"#f3f4f6", color:"#374151", padding:"3px 10px", borderRadius:"20px", fontSize:"12px" }}>{selectedPersonel.alt_yuklenici}</span>}
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"16px" }}>
                 {/* Belgeler */}
@@ -9407,6 +9515,129 @@ function HrDashboard({ onBack, currentUser }) {
               </div>
             </div>
           )}
+
+          {/* ── ISG Eğitim Matris Tablosu ── */}
+          {(() => {
+            const RFQ_KOLONLAR = [
+              { tur:"Sağlık Raporu",         kisa:"Sağlık" },
+              { tur:"HUAWEI 10 Mutlak Kural",kisa:"HW 10" },
+              { tur:"Temel İSG",             kisa:"Temel İSG" },
+              { tur:"ELEKTRİK İSG",          kisa:"Elektrik" },
+              { tur:"Yüksekte Çalışma",      kisa:"Yüksek" },
+              { tur:"Kurtarma Eğitimi",      kisa:"Kurtarma" },
+              { tur:"Güvenli Sürüş",         kisa:"Sürüş" },
+              { tur:"İlkyardım",             kisa:"İlkyardım" },
+            ];
+            const now = new Date();
+            const soon30 = new Date(now.getTime() + 30*86400000);
+
+            const egitimDurum = (egitimler, tur) => {
+              const eg = egitimler?.find(e => e.egitim_turu === tur);
+              if (!eg) return { durum:"YOK", kalan:null, eg:null };
+              const bitis = new Date(eg.bitis_tarihi);
+              const kalan = Math.round((bitis - now) / 86400000);
+              const durum = bitis < now ? "DOLDU" : bitis < soon30 ? "YAKLASAN" : "GECERLI";
+              return { durum, kalan, eg };
+            };
+
+            // Filtre uygula
+            let liste = isgMatris.filter(p => p.aktif);
+            if (isgMatrisFiltre !== "tumu") {
+              liste = liste.filter(p => {
+                return RFQ_KOLONLAR.some(k => {
+                  const { durum } = egitimDurum(p.egitimler, k.tur);
+                  if (isgMatrisFiltre === "doldu")    return durum === "DOLDU";
+                  if (isgMatrisFiltre === "yaklasan") return durum === "YAKLASAN";
+                  if (isgMatrisFiltre === "gecerli")  return durum === "GECERLI";
+                  return true;
+                });
+              });
+            }
+            // Sıralama: DOLDU → YAKLASAN → GECERLI → YOK
+            const siraNo = d => d==="DOLDU"?0:d==="YAKLASAN"?1:d==="GECERLI"?2:3;
+            liste = [...liste].sort((a, b) => {
+              const aMin = Math.min(...RFQ_KOLONLAR.map(k => siraNo(egitimDurum(a.egitimler, k.tur).durum)));
+              const bMin = Math.min(...RFQ_KOLONLAR.map(k => siraNo(egitimDurum(b.egitimler, k.tur).durum)));
+              return aMin - bMin;
+            });
+
+            const dolduSayisi   = isgMatris.filter(p=>p.aktif&&RFQ_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="DOLDU")).length;
+            const yakSayisi     = isgMatris.filter(p=>p.aktif&&RFQ_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="YAKLASAN")).length;
+
+            return (
+              <div style={{ marginTop:"24px" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"12px", flexWrap:"wrap" }}>
+                  <h3 style={{ margin:0, fontSize:"16px", fontWeight:700 }}>📊 ISG Eğitim Takibi</h3>
+                  {/* Filtre butonları */}
+                  <div style={{ display:"flex", gap:"6px" }}>
+                    {[["tumu","Tümü","#6b7280"],["doldu",`🔴 Süresi Dolan (${dolduSayisi})`,"#991b1b"],["yaklasan",`🟡 Yaklaşan (${yakSayisi})`,"#92400e"],["gecerli","✅ Güncel","#166534"]].map(([val,lbl,color])=>(
+                      <button key={val} onClick={()=>setIsgMatrisFiltre(val)}
+                        style={{ padding:"5px 12px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:700,
+                          background: isgMatrisFiltre===val?"#1e3a5f":"#f3f4f6",
+                          color: isgMatrisFiltre===val?"#fff":color }}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ overflowX:"auto", borderRadius:"12px", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px" }}>
+                    <thead>
+                      <tr style={{ background:"#1e3a5f" }}>
+                        <th style={{ padding:"10px 12px", textAlign:"left", color:"#fff", fontWeight:700, whiteSpace:"nowrap", minWidth:160 }}>Personel</th>
+                        <th style={{ padding:"10px 8px", color:"#fff", fontWeight:700, whiteSpace:"nowrap" }}>Ekip</th>
+                        {RFQ_KOLONLAR.map(k=>(
+                          <th key={k.tur} style={{ padding:"10px 8px", color:"#fff", fontWeight:700, whiteSpace:"nowrap", textAlign:"center", fontSize:"11px" }}>{k.kisa}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {liste.length === 0 && (
+                        <tr><td colSpan={2+RFQ_KOLONLAR.length} style={{ padding:"24px", textAlign:"center", color:"#9ca3af" }}>Kayıt yok</td></tr>
+                      )}
+                      {liste.map((p, pi) => (
+                        <tr key={p.id} style={{ background: pi%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6" }}>
+                          <td style={{ padding:"8px 12px", fontWeight:600, whiteSpace:"nowrap" }}>
+                            {p.ad_soyad}
+                            <div style={{ fontSize:"11px", color:"#9ca3af", fontWeight:400 }}>{p.unvan}</div>
+                          </td>
+                          <td style={{ padding:"8px", textAlign:"center", color:"#6b7280", whiteSpace:"nowrap" }}>{p.ekip_bilgisi||"—"}</td>
+                          {RFQ_KOLONLAR.map(k => {
+                            const { durum, kalan, eg } = egitimDurum(p.egitimler, k.tur);
+                            const bg   = durum==="DOLDU"?"#fef2f2":durum==="YAKLASAN"?"#fffbeb":durum==="GECERLI"?"#f0fdf4":"#f9fafb";
+                            const clr  = durum==="DOLDU"?"#991b1b":durum==="YAKLASAN"?"#92400e":durum==="GECERLI"?"#166534":"#d1d5db";
+                            const ico  = durum==="DOLDU"?"🔴":durum==="YAKLASAN"?"🟡":durum==="GECERLI"?"✅":"—";
+                            return (
+                              <td key={k.tur} style={{ padding:"6px 8px", textAlign:"center", background:bg }}>
+                                {durum==="YOK" ? <span style={{ color:"#d1d5db", fontSize:"16px" }}>—</span> : (
+                                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"2px" }}>
+                                    <span style={{ fontSize:"14px" }}>{ico}</span>
+                                    {kalan !== null && (
+                                      <span style={{ fontSize:"10px", fontWeight:700, color:clr }}>
+                                        {kalan < 0 ? `${Math.abs(kalan)}g geçti` : `${kalan}g kaldı`}
+                                      </span>
+                                    )}
+                                    {eg?.belge_yolu && (
+                                      <a href={eg.belge_yolu} target="_blank" rel="noreferrer" style={{ fontSize:"10px", color:"#3b82f6" }}>📎</a>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {dolduSayisi===0 && yakSayisi===0 && (
+                  <div style={{ marginTop:"12px", ...secSt, textAlign:"center", color:"#166534", background:"#f0fdf4", padding:"14px" }}>
+                    ✅ Tüm ISG eğitimleri güncel, sorun yok.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -9501,41 +9732,10 @@ function HrDashboard({ onBack, currentUser }) {
         );
       })()}
 
-      {/* ===== ISG SEKMESİ ===== */}
-      {tab==="isg" && (
-        <div>
-          <div style={{ display:"flex", alignItems:"center", gap:"16px", marginBottom:"16px" }}>
-            <h2 style={{ margin:0 }}>🎓 ISG Eğitim Takibi</h2>
-            <a href={`${API_BASE}/hr/excel/isg`}
-              style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>
-              📥 ISG Excel İndir
-            </a>
-          </div>
-          {isgUyarilar.length > 0 ? (
-            <div>
-              <div style={{ marginBottom:"16px", fontWeight:700, color:"#991b1b" }}>⚠️ Dikkat Gerektiren Eğitimler</div>
-              <div style={{ display:"grid", gap:"8px" }}>
-                {isgUyarilar.map(u => (
-                  <div key={u.id} style={{ background: u.durum==="SURESI_DOLDU"?"#fef2f2":"#fffbeb", borderRadius:"12px", padding:"12px 18px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <div>
-                      <div style={{ fontWeight:700, color: u.durum==="SURESI_DOLDU"?"#991b1b":"#92400e" }}>{u.ad_soyad} — {u.egitim_turu}</div>
-                      <div style={{ fontSize:"12px", color:"#9ca3af", marginTop:"2px" }}>Bitiş: {u.bitis_tarihi?.split("T")[0]}</div>
-                    </div>
-                    <span style={{ background: u.durum==="SURESI_DOLDU"?"#fee2e2":"#fef3c7", color: u.durum==="SURESI_DOLDU"?"#991b1b":"#92400e", padding:"4px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>
-                      {u.durum==="SURESI_DOLDU"?"🔴 SÜRESİ DOLDU":"🟡 30 GÜN KALDI"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div style={{ ...secSt, textAlign:"center", color:"#166534", background:"#f0fdf4" }}>
-              ✅ Tüm ISG eğitimleri güncel, sorun yok.
-            </div>
-          )}
-          <div style={{ marginTop:"20px", color:"#6b7280", fontSize:"13px" }}>
-            Personel eğitimlerini düzenlemek için <b>👤 Personel</b> sekmesinden personeli seçin → Detay / Belgeler.
-          </div>
+      {/* ===== ISG EĞİTİM TAKİBİ (2. blok — puantaj altında) ===== */}
+      {tab==="isg_takip" && (
+        <div style={{ color:"#6b7280", fontSize:"13px", padding:"20px" }}>
+          ISG takibi ISG / Belgeler sekmesindedir.
         </div>
       )}
     </div>

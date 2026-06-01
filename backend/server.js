@@ -8740,26 +8740,36 @@ app.delete("/invoice-entries/:id/belge", async (req, res) => {
 const uploadPersonelBelge = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const uploadPuantajBelge = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
-// ISG eğitim türleri (sabit liste)
+// ISG eğitim türleri (sabit liste) — rfq_kolon: Huawei RFQ Excel kolonuyla eşleşme
 const ISG_EGITIM_TURLERI = [
-  { tur: "Temel İSG Eğitimi", gecerlilik_yil: 2 },
-  { tur: "İlk Yardım Eğitimi", gecerlilik_yil: 3 },
+  // ── RFQ ana eğitimler ──
+  { tur: "Sağlık Raporu",              gecerlilik_yil: 1, rfq_kolon: "saglik" },
+  { tur: "HUAWEI 10 Mutlak Kural",     gecerlilik_yil: 1, rfq_kolon: "hw10" },
+  { tur: "Temel İSG",                  gecerlilik_yil: 1, rfq_kolon: "temel_isg" },
+  { tur: "ELEKTRİK İSG",              gecerlilik_yil: 1, rfq_kolon: "elektrik", kosullu: true },
+  { tur: "Yüksekte Çalışma",          gecerlilik_yil: 2, rfq_kolon: "yuksek", kosullu: true },
+  { tur: "Kurtarma Eğitimi",          gecerlilik_yil: 2, rfq_kolon: "kurtarma" },
+  { tur: "Güvenli Sürüş",             gecerlilik_yil: 2, rfq_kolon: "guvensurus", kosullu: true },
+  { tur: "İlkyardım",                  gecerlilik_yil: 3, rfq_kolon: "ilkyardim" },
+  // ── Ek eğitimler ──
+  { tur: "Temel İSG Eğitimi",          gecerlilik_yil: 2 },
+  { tur: "İlk Yardım Eğitimi",         gecerlilik_yil: 3 },
   { tur: "Yangın Söndürme ve Tahliye Eğitimi", gecerlilik_yil: 1 },
-  { tur: "Yüksekte Çalışma Eğitimi", gecerlilik_yil: 3 },
+  { tur: "Yüksekte Çalışma Eğitimi",   gecerlilik_yil: 3 },
   { tur: "Elektrik İş Güvenliği Eğitimi", gecerlilik_yil: 3 },
-  { tur: "KKD Kullanımı Eğitimi", gecerlilik_yil: 2 },
+  { tur: "KKD Kullanımı Eğitimi",      gecerlilik_yil: 2 },
   { tur: "Elle Taşıma İşleri Eğitimi", gecerlilik_yil: 2 },
-  { tur: "Ergonomi Eğitimi", gecerlilik_yil: 2 },
+  { tur: "Ergonomi Eğitimi",           gecerlilik_yil: 2 },
   { tur: "Acil Durum ve Tahliye Eğitimi", gecerlilik_yil: 1 },
-  { tur: "Kimyasal Maddeler Eğitimi", gecerlilik_yil: 2 },
-  { tur: "Gürültü ve Titreşim Eğitimi", gecerlilik_yil: 2 },
+  { tur: "Kimyasal Maddeler Eğitimi",  gecerlilik_yil: 2 },
+  { tur: "Gürültü ve Titreşim Eğitimi",gecerlilik_yil: 2 },
   { tur: "Anten ve Baz İstasyonu Güvenliği", gecerlilik_yil: 2 },
   { tur: "İş Ekipmanları Kullanımı Eğitimi", gecerlilik_yil: 3 },
-  { tur: "Kazı ve Zemin Güvenliği Eğitimi", gecerlilik_yil: 2 },
-  { tur: "Trafik ve Karayolu Güvenliği", gecerlilik_yil: 2 },
+  { tur: "Kazı ve Zemin Güvenliği Eğitimi",  gecerlilik_yil: 2 },
+  { tur: "Trafik ve Karayolu Güvenliği",     gecerlilik_yil: 2 },
   { tur: "Stres ve Zorbalık Önleme Eğitimi", gecerlilik_yil: 2 },
-  { tur: "Ortam Ölçümleri Bilgilendirme", gecerlilik_yil: 2 },
-  { tur: "İş Kazası ve Ramak Kala Bildirimi", gecerlilik_yil: 2 },
+  { tur: "Ortam Ölçümleri Bilgilendirme",    gecerlilik_yil: 2 },
+  { tur: "İş Kazası ve Ramak Kala Bildirimi",gecerlilik_yil: 2 },
 ];
 
 app.get("/hr/isg-egitim-turleri", (req, res) => res.json(ISG_EGITIM_TURLERI));
@@ -8848,13 +8858,22 @@ app.get("/hr/personel", async (req, res) => {
 app.post("/hr/personel", async (req, res) => {
   try {
     const { ad_soyad, tc_no, dogum_tarihi, telefon, email, unvan, bolge, ise_giris_tarihi,
-      net_maas, bankadan_gosterilen, elden_verilen, iban, banka_adi, banka_hesap_no } = req.body;
+      net_maas, bankadan_gosterilen, elden_verilen, iban, banka_adi, banka_hesap_no,
+      ekip_bilgisi, alt_yuklenici, firma_tipi, isdp_account, iresource_giris,
+      kkd_zimmet_tarihi, mesleki_yeterlilik_durum, mesleki_yeterlilik_tarihi,
+      elektrik_isi, yuksekte_calisma, arac_kullanim } = req.body;
     const r = await pool.query(
       `INSERT INTO personel (ad_soyad,tc_no,dogum_tarihi,telefon,email,unvan,bolge,ise_giris_tarihi,
-        net_maas,bankadan_gosterilen,elden_verilen,iban,banka_adi,banka_hesap_no)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+        net_maas,bankadan_gosterilen,elden_verilen,iban,banka_adi,banka_hesap_no,
+        ekip_bilgisi,alt_yuklenici,firma_tipi,isdp_account,iresource_giris,
+        kkd_zimmet_tarihi,mesleki_yeterlilik_durum,mesleki_yeterlilik_tarihi,
+        elektrik_isi,yuksekte_calisma,arac_kullanim)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
       [ad_soyad,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
-       net_maas||0,bankadan_gosterilen||0,elden_verilen||0,iban,banka_adi,banka_hesap_no]
+       net_maas||0,bankadan_gosterilen||0,elden_verilen||0,iban,banka_adi,banka_hesap_no,
+       ekip_bilgisi||null,alt_yuklenici||null,firma_tipi||"simsek",isdp_account||null,iresource_giris||null,
+       kkd_zimmet_tarihi||null,mesleki_yeterlilik_durum||null,mesleki_yeterlilik_tarihi||null,
+       elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -8865,14 +8884,24 @@ app.put("/hr/personel/:id", async (req, res) => {
     const { id } = req.params;
     const { ad_soyad, tc_no, dogum_tarihi, telefon, email, unvan, bolge, ise_giris_tarihi,
       isten_ayrilma_tarihi, net_maas, bankadan_gosterilen, elden_verilen, iban, banka_adi,
-      banka_hesap_no, aktif } = req.body;
+      banka_hesap_no, aktif,
+      ekip_bilgisi, alt_yuklenici, firma_tipi, isdp_account, iresource_giris,
+      kkd_zimmet_tarihi, mesleki_yeterlilik_durum, mesleki_yeterlilik_tarihi,
+      elektrik_isi, yuksekte_calisma, arac_kullanim } = req.body;
     const r = await pool.query(
       `UPDATE personel SET ad_soyad=$1,tc_no=$2,dogum_tarihi=$3,telefon=$4,email=$5,unvan=$6,
         bolge=$7,ise_giris_tarihi=$8,isten_ayrilma_tarihi=$9,net_maas=$10,bankadan_gosterilen=$11,
-        elden_verilen=$12,iban=$13,banka_adi=$14,banka_hesap_no=$15,aktif=$16 WHERE id=$17 RETURNING *`,
+        elden_verilen=$12,iban=$13,banka_adi=$14,banka_hesap_no=$15,aktif=$16,
+        ekip_bilgisi=$17,alt_yuklenici=$18,firma_tipi=$19,isdp_account=$20,iresource_giris=$21,
+        kkd_zimmet_tarihi=$22,mesleki_yeterlilik_durum=$23,mesleki_yeterlilik_tarihi=$24,
+        elektrik_isi=$25,yuksekte_calisma=$26,arac_kullanim=$27
+       WHERE id=$28 RETURNING *`,
       [ad_soyad,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
        isten_ayrilma_tarihi||null,net_maas||0,bankadan_gosterilen||0,elden_verilen||0,
-       iban,banka_adi,banka_hesap_no,aktif!==undefined?aktif:true,id]
+       iban,banka_adi,banka_hesap_no,aktif!==undefined?aktif:true,
+       ekip_bilgisi||null,alt_yuklenici||null,firma_tipi||"simsek",isdp_account||null,iresource_giris||null,
+       kkd_zimmet_tarihi||null,mesleki_yeterlilik_durum||null,mesleki_yeterlilik_tarihi||null,
+       elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,id]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -9322,6 +9351,29 @@ app.get("/finance/sarkan-odemeler", requireFinanceAuth, async (req, res) => {
 });
 
 // ISG uyarı özeti (süresi biten/bitecek eğitimler)
+// GET /hr/isg/matris — tüm personel × tüm ISG eğitimler (matrix view için)
+app.get("/hr/isg/matris", async (req, res) => {
+  try {
+    const personelRows = await pool.query(
+      "SELECT id,ad_soyad,unvan,aktif,firma_tipi,elektrik_isi,yuksekte_calisma,arac_kullanim,ekip_bilgisi,alt_yuklenici FROM personel ORDER BY aktif DESC, ad_soyad ASC"
+    );
+    const isgRows = await pool.query(
+      "SELECT * FROM personel_isg ORDER BY personel_id, egitim_turu, bitis_tarihi DESC"
+    );
+    // Her personel için son geçerli eğitimi bul
+    const map = {};
+    for (const eg of isgRows.rows) {
+      const key = `${eg.personel_id}__${eg.egitim_turu}`;
+      if (!map[key]) map[key] = eg; // ORDER BY bitis_tarihi DESC → ilk = en yeni
+    }
+    const result = personelRows.rows.map(p => ({
+      ...p,
+      egitimler: Object.values(map).filter(e => e.personel_id === p.id),
+    }));
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/hr/isg/uyarilar", async (req, res) => {
   try {
     const r = await pool.query(`
@@ -9511,58 +9563,279 @@ app.get("/hr/excel/puantaj", async (req, res) => {
   } catch (e) { console.error("PUANTAJ EXCEL ERROR:", e.message); res.status(500).json({ error: e.message }); }
 });
 
+// ── Yardımcı: Excel tarih serial → "YYYY-MM-DD" (ExcelJS bazen sayı döner)
+function excelDateFmt(v) {
+  if (!v) return "";
+  if (v instanceof Date) return v.toISOString().split("T")[0];
+  return String(v).split("T")[0];
+}
+
+// ── Kalan gün hesapla
+function kalanGun(bitisDateStr) {
+  if (!bitisDateStr) return null;
+  const bitis = new Date(bitisDateStr);
+  const now = new Date();
+  return Math.round((bitis - now) / 86400000);
+}
+
+// ── ARGB renk: kırmızı/sarı/yeşil
+function kalanGunArgb(gun) {
+  if (gun === null || gun === undefined) return null;
+  if (gun < 0)   return "FFFEE2E2"; // kırmızı
+  if (gun <= 30) return "FFFFFBEB"; // sarı
+  return "FFF0FDF4"; // yeşil
+}
+
+// ── Hücreyi renklendir
+function rfqCell(ws, rowNo, colNo, value, bgArgb, bold, fontArgb) {
+  const cell = ws.getCell(rowNo, colNo);
+  cell.value = value ?? "";
+  cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  if (bgArgb) cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: bgArgb } };
+  if (bold || fontArgb) cell.font = { bold: !!bold, color: fontArgb ? { argb: fontArgb } : undefined, name:"Calibri", size:9 };
+  else cell.font = { name:"Calibri", size:9 };
+  cell.border = {
+    top:{ style:"thin", color:{ argb:"FFD1D5DB" } },
+    bottom:{ style:"thin", color:{ argb:"FFD1D5DB" } },
+    left:{ style:"thin", color:{ argb:"FFD1D5DB" } },
+    right:{ style:"thin", color:{ argb:"FFD1D5DB" } },
+  };
+  return cell;
+}
+
+// GET /hr/excel/isg?tip=hw|simsek&personel_id=X
 app.get("/hr/excel/isg", async (req, res) => {
   try {
+    const { tip, personel_id } = req.query; // tip: "hw" (aktif) | "simsek" (tümü)
     const ExcelJS = require("exceljs");
     const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("ISG Eğitimleri");
+    wb.creator = "ERC Dashboard";
+    wb.created = new Date();
 
-    const personelList = await pool.query("SELECT * FROM personel WHERE aktif=true ORDER BY ad_soyad");
-    const isgList = await pool.query(`
-      SELECT i.*, p.ad_soyad, p.unvan FROM personel_isg i
-      JOIN personel p ON i.personel_id=p.id
-      WHERE p.aktif=true ORDER BY p.ad_soyad, i.egitim_turu
-    `);
+    const ws = wb.addWorksheet("RFQ", { views:[{ showGridLines:false }] });
 
-    const headers = ["Personel", "Unvan", "Eğitim Türü", "Başlangıç", "Bitiş", "Durum"];
-    const hr = ws.addRow(headers);
-    hr.eachCell(cell => {
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
-      cell.alignment = { horizontal: "center" };
-    });
+    // ── Personel listesi ──
+    let pQuery = "SELECT * FROM personel";
+    const pParams = [];
+    if (personel_id) {
+      pQuery += " WHERE id=$1";
+      pParams.push(personel_id);
+    } else if (tip === "hw") {
+      pQuery += " WHERE aktif=true";
+    }
+    // tip==="simsek" → tüm personeller (aktif+pasif)
+    pQuery += " ORDER BY aktif DESC, ad_soyad ASC";
+    const personelRows = await pool.query(pQuery, pParams);
 
-    const now = new Date();
-    const soon = new Date(Date.now() + 30 * 86400000);
-
-    for (const eg of isgList.rows) {
-      const bitis = new Date(eg.bitis_tarihi);
-      const expired = bitis < now;
-      const expiring = bitis < soon && !expired;
-      const durum = expired ? "SÜRESİ DOLDU" : expiring ? "YAKLAŞIYOR (30 gün)" : "Geçerli";
-      const r = ws.addRow([
-        eg.ad_soyad, eg.unvan || "",
-        eg.egitim_turu,
-        eg.egitim_tarihi?.toISOString?.().split("T")[0] || "",
-        eg.bitis_tarihi?.toISOString?.().split("T")[0] || "",
-        durum,
-      ]);
-      if (expired) {
-        r.eachCell(cell => { cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFFEE2E2" } }; });
-        r.getCell(6).font = { bold: true, color: { argb: "FF991B1B" } };
-      } else if (expiring) {
-        r.eachCell(cell => { cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFFFFBEB" } }; });
-        r.getCell(6).font = { bold: true, color: { argb: "FF92400E" } };
-      }
+    // ── ISG eğitimleri ──
+    const isgRows = await pool.query(
+      "SELECT * FROM personel_isg ORDER BY personel_id, egitim_turu, bitis_tarihi DESC"
+    );
+    const isgByPersonel = {};
+    for (const eg of isgRows.rows) {
+      const pid = eg.personel_id;
+      if (!isgByPersonel[pid]) isgByPersonel[pid] = {};
+      if (!isgByPersonel[pid][eg.egitim_turu]) isgByPersonel[pid][eg.egitim_turu] = eg;
     }
 
-    ws.columns.forEach((col, i) => { col.width = [22, 16, 36, 14, 14, 22][i] || 16; });
+    // ── Satır 1: Başlık ──
+    const NAVY  = "FF1E3A5F";
+    const WHITE = "FFFFFFFF";
+    const ORANGE= "FFD97706";
+    const RED   = "FF991B1B";
+    const GREEN = "FF166534";
+
+    ws.mergeCells("A1:AZ1");
+    const r1 = ws.getCell("A1");
+    r1.value = `${tip === "hw" ? "ŞIMŞEK HABERLEŞME" : "ŞİMŞEK HABERLEŞME"}  RFQ TABLOSU`;
+    r1.font = { bold:true, size:14, color:{ argb:WHITE }, name:"Calibri" };
+    r1.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:NAVY } };
+    r1.alignment = { horizontal:"center", vertical:"middle" };
+    ws.getRow(1).height = 28;
+
+    // ── Satır 2: ISG Sorumlusu ──
+    ws.mergeCells("A2:H2");
+    ws.getCell("A2").value = "Firma ISG Sorumlusu : Sultan Yeniçeri";
+    ws.mergeCells("I2:R2");
+    ws.getCell("I2").value = "Mail Adresi : sultan.yeniceri@simsektel.com";
+    ws.mergeCells("S2:AZ2");
+    ws.getCell("S2").value = "Telefon No: 5330165678";
+    for (const ref of ["A2","I2","S2"]) {
+      const c = ws.getCell(ref);
+      c.font = { bold:true, size:10, name:"Calibri" };
+      c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFEFF6FF" } };
+      c.alignment = { vertical:"middle" };
+      c.border = { bottom:{ style:"medium", color:{ argb:NAVY } } };
+    }
+    ws.getRow(2).height = 22;
+
+    // ── Satır 3: Başlıklar (52 kolon) ──
+    const HEADERS = [
+      "Sıra No","Çalışma Durumu","Ekip Bilgisi","Adı Soyadı","TC Kimlik Numarası",
+      "Firma Adı","Alt Yüklenici","Görevi","Mesleki Yeterlilik Durumu","Mesleki Yeterlilik Tarihi",
+      "İşe Giriş (SGK) Tarihi",
+      "Sağlık Raporu Tarihi","Sağlık Raporu Geçerlilik Tarihi (1 YIL)","Geçerlilik Süresi\n(Kalan Gün)","Sağlık Raporu Alınan Yer",
+      "KKD Zimmet Tarihi",
+      "HUAWEI 10 Mutlak Kural /\nBaşlangıç Eğitimi Tarihi","HUAWEI 10 Mutlak Kural /\nGeçerlilik Tarihi","HUAWEI 10 Mutlak Kural\nKalan Gün",
+      "Temel İSG\nEğitim Tarihi","Temel İSG\nGeçerlilik Tarihi (1 YIL)","Geçerlilik Süresi\n(Kalan Gün)","Temel İSG\nEğitim Firması",
+      "ELEKTRİK işi yapacak mı?","EİSG Eğitim Tarihi","ELEKTRİK Eğitim Geçerlilik Tarihi (1 YIL)","Geçerlilik Süresi\n(Kalan Gün)","ELEKTRİK\nEğitim Firması",
+      "Yüksekte Çalışacak mı","Y. ÇALIŞMA Eğitim Tarihi","Y.ÇALIŞMA Geçerlilik Tarihi (2 YIL)","Geçerlilik Süresi\n(Kalan Gün)","Y. ÇALIŞMA Eğitim Firması",
+      "Kurtarma Eğitimi Var mı","Kurtarma Eğitim Tarihi","Kurtarma Geçerlilik Tarihi (2 YIL)","Geçerlilik Süresi\n(Kalan Gün)","Kurtarma Eğitim Firması",
+      "ARAÇ kullanacak mı?","GÜVENLİ SÜRÜŞ\nEğitim Tarihi","GÜV. SÜRÜŞ\nGeçerlilik Tarihi(2 YIL)","Geçerlilik Süresi\n(Kalan Gün)","GÜV. SÜRÜŞ\nEğitim Firması",
+      "İlkyardım Eğitimi Var mı?","İLKYARDIM\nEğitim Tarihi","İLKYARDIM\nGeçerlilik Tarihi (3 YIL)","Geçerlilik Süresi\n(Kalan Gün)","İLKYARDIM\nEğitim Firma",
+      "Mail Adresi","Telefon","ISDP Account","İresource Girişi Yapıldı mı?"
+    ];
+
+    const hRow = ws.getRow(3);
+    hRow.height = 52;
+    HEADERS.forEach((h, i) => {
+      const cell = hRow.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold:true, color:{ argb:WHITE }, name:"Calibri", size:9 };
+      cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:NAVY } };
+      cell.alignment = { horizontal:"center", vertical:"middle", wrapText:true };
+      cell.border = { top:{ style:"thin", color:{ argb:"FF3B6EA5" } }, bottom:{ style:"thin", color:{ argb:"FF3B6EA5" } }, left:{ style:"thin", color:{ argb:"FF3B6EA5" } }, right:{ style:"thin", color:{ argb:"FF3B6EA5" } } };
+    });
+
+    // ── Veri satırları ──
+    const now = new Date();
+    for (const [pi, p] of personelRows.rows.entries()) {
+      const rowNo = pi + 4;
+      const isg = isgByPersonel[p.id] || {};
+      const bg = pi % 2 === 0 ? "FFFFFFFF" : "FFEFF6FF";
+
+      // ISG eğitimlerine kısayol
+      const saglik   = isg["Sağlık Raporu"];
+      const hw10     = isg["HUAWEI 10 Mutlak Kural"];
+      const temelIsg = isg["Temel İSG"];
+      const elektrik = isg["ELEKTRİK İSG"];
+      const yuksek   = isg["Yüksekte Çalışma"];
+      const kurtarma = isg["Kurtarma Eğitimi"];
+      const surus    = isg["Güvenli Sürüş"];
+      const ilkYardim= isg["İlkyardım"];
+
+      const saglikGun   = kalanGun(saglik?.bitis_tarihi);
+      const hw10Gun     = kalanGun(hw10?.bitis_tarihi);
+      const temelGun    = kalanGun(temelIsg?.bitis_tarihi);
+      const elektrikGun = kalanGun(elektrik?.bitis_tarihi);
+      const yuksekGun   = kalanGun(yuksek?.bitis_tarihi);
+      const kurtarmaGun = kalanGun(kurtarma?.bitis_tarihi);
+      const surusGun    = kalanGun(surus?.bitis_tarihi);
+      const ilkYardimGun= kalanGun(ilkYardim?.bitis_tarihi);
+
+      const calismaDurumu = p.aktif ? "Uygun Değil" : "Pasif"; // gerçek durum kullanıcı girer
+
+      const vals = [
+        pi + 1,
+        calismaDurumu,
+        p.ekip_bilgisi || "",
+        p.ad_soyad,
+        p.tc_no || "",
+        "HUAWEI",
+        p.alt_yuklenici || "ŞİMŞEK HABERLEŞME",
+        p.unvan || "",
+        p.mesleki_yeterlilik_durum || "",
+        excelDateFmt(p.mesleki_yeterlilik_tarihi),
+        excelDateFmt(p.ise_giris_tarihi),
+        // Sağlık
+        excelDateFmt(saglik?.egitim_tarihi),
+        excelDateFmt(saglik?.bitis_tarihi),
+        saglikGun !== null ? `${saglikGun} Gün` : "",
+        "",  // Sağlık Raporu Alınan Yer
+        // KKD
+        excelDateFmt(p.kkd_zimmet_tarihi),
+        // HUAWEI 10
+        excelDateFmt(hw10?.egitim_tarihi),
+        excelDateFmt(hw10?.bitis_tarihi),
+        hw10Gun !== null ? `${hw10Gun} Gün` : "",
+        // Temel ISG
+        excelDateFmt(temelIsg?.egitim_tarihi),
+        excelDateFmt(temelIsg?.bitis_tarihi),
+        temelGun !== null ? `${temelGun} Gün` : "",
+        "",  // Temel ISG Eğitim Firması
+        // ELEKTRİK
+        p.elektrik_isi ? "Evet" : "Hayır",
+        excelDateFmt(elektrik?.egitim_tarihi),
+        excelDateFmt(elektrik?.bitis_tarihi),
+        elektrikGun !== null ? `${elektrikGun} Gün` : "",
+        "",  // Elektrik Eğitim Firması
+        // Yüksekte
+        p.yuksekte_calisma ? "Evet" : "Hayır",
+        excelDateFmt(yuksek?.egitim_tarihi),
+        excelDateFmt(yuksek?.bitis_tarihi),
+        yuksekGun !== null ? `${yuksekGun} Gün` : "",
+        "",  // Yüksekte Çalışma Eğitim Firması
+        // Kurtarma
+        kurtarma ? "Evet" : "Hayır",
+        excelDateFmt(kurtarma?.egitim_tarihi),
+        excelDateFmt(kurtarma?.bitis_tarihi),
+        kurtarmaGun !== null ? `${kurtarmaGun} Gün` : "",
+        "",  // Kurtarma Eğitim Firması
+        // Güvenli Sürüş
+        p.arac_kullanim ? "Evet" : "Hayır",
+        excelDateFmt(surus?.egitim_tarihi),
+        excelDateFmt(surus?.bitis_tarihi),
+        surusGun !== null ? `${surusGun} Gün` : "",
+        "",  // Sürüş Eğitim Firması
+        // İlkyardım
+        ilkYardim ? "Evet" : "Hayır",
+        excelDateFmt(ilkYardim?.egitim_tarihi),
+        excelDateFmt(ilkYardim?.bitis_tarihi),
+        ilkYardimGun !== null ? `${ilkYardimGun} Gün` : "",
+        "",  // İlkyardım Eğitim Firma
+        // İletişim
+        p.email || "",
+        p.telefon || "",
+        p.isdp_account || "",
+        p.iresource_giris || "",
+      ];
+
+      const row = ws.getRow(rowNo);
+      row.height = 18;
+      vals.forEach((v, i) => {
+        const colNo = i + 1;
+        // "Kalan Gün" kolonlarına özel renklendirme
+        const isKalanGunCol = [14,19,22,27,32,37,42,47].includes(colNo);
+        let cellBg = bg;
+        let bold = false;
+        let fontColor;
+        if (isKalanGunCol) {
+          const gunVal = parseInt(String(v));
+          if (!isNaN(gunVal)) {
+            cellBg = kalanGunArgb(gunVal);
+            if (gunVal < 0)   { bold = true; fontColor = "FF991B1B"; }
+            else if (gunVal <= 30) { bold = true; fontColor = "FF92400E"; }
+            else { bold = true; fontColor = "FF166534"; }
+          }
+        }
+        rfqCell(ws, rowNo, colNo, v, cellBg, bold, fontColor);
+      });
+    }
+
+    // ── Kolon genişlikleri ──
+    const COL_WIDTHS = [
+      6,14,10,22,16, 10,20,16,14,14, 14, // 1-11
+      14,14,10,18, 14, // 12-16
+      14,14,10, // 17-19
+      14,14,10,16, // 20-23
+      10,14,14,10,16, // 24-28
+      10,14,14,10,16, // 29-33
+      10,14,14,10,16, // 34-38
+      10,14,14,10,16, // 39-43
+      10,14,14,10,16, // 44-48
+      22,14,18,14,    // 49-52
+    ];
+    COL_WIDTHS.forEach((w, i) => { if (ws.getColumn(i+1)) ws.getColumn(i+1).width = w; });
+
+    const fname = tip === "simsek"
+      ? `Simsek_ISG_RFQ_${new Date().toISOString().split("T")[0]}.xlsx`
+      : `Huawei_RFQ_${new Date().toISOString().split("T")[0]}.xlsx`;
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename=isg_egitimler.xlsx`);
+    res.setHeader("Content-Disposition", `attachment; filename=${fname}`);
     await wb.xlsx.write(res);
     res.end();
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error("RFQ EXCEL ERROR:", e.message); res.status(500).json({ error: e.message }); }
 });
 
 // ============================================================
@@ -11962,6 +12235,18 @@ const AUTO_MIGRATIONS = [
 )`,
   "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS talep_tipi TEXT DEFAULT 'SATIN_ALMA'",
   "ALTER TABLE malzeme_talep_kalemleri ADD COLUMN IF NOT EXISTS dagitim_yapildi BOOLEAN DEFAULT FALSE",
+  // ── Personel ISG / RFQ alanları ──
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS ekip_bilgisi TEXT",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS alt_yuklenici TEXT",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS firma_tipi TEXT DEFAULT 'simsek'",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS isdp_account TEXT",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS iresource_giris TEXT",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS kkd_zimmet_tarihi DATE",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS mesleki_yeterlilik_durum TEXT",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS mesleki_yeterlilik_tarihi DATE",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS elektrik_isi BOOLEAN DEFAULT FALSE",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS yuksekte_calisma BOOLEAN DEFAULT FALSE",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS arac_kullanim BOOLEAN DEFAULT FALSE",
 ];
 
 (async () => {
