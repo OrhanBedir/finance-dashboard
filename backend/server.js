@@ -10431,15 +10431,41 @@ app.get("/hr/masraf-form/:id", async (req, res) => {
 // POST create form
 app.post("/hr/masraf-form", async (req, res) => {
   try {
-    const { personel_id, talep_eden_email, talep_eden_ad, donem } = req.body;
+    const {
+      personel_id, talep_eden_email,
+      talep_eden_ad, talep_eden,   // mobil "talep_eden" alias
+      donem,
+      durum,                        // mobil başlangıç durumu
+      kalemler,                     // mobil all-in-one kalem dizisi
+    } = req.body;
+
+    const adSoyad = talep_eden_ad || talep_eden || null;
+    const now = new Date();
+    const formDonem = donem || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    const formDurum = durum || "TASLAK";
+
     const noRes = await pool.query(`SELECT COALESCE(MAX(form_no), 0) + 1 AS next_no FROM masraf_form`);
     const nextNo = noRes.rows[0].next_no;
     const { rows } = await pool.query(
-      `INSERT INTO masraf_form (personel_id,talep_eden_email,talep_eden_ad,donem,form_no)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [personel_id, talep_eden_email, talep_eden_ad, donem, nextNo]
+      `INSERT INTO masraf_form (personel_id,talep_eden_email,talep_eden_ad,donem,form_no,durum)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [personel_id||null, talep_eden_email, adSoyad, formDonem, nextNo, formDurum]
     );
-    res.json(rows[0]);
+    const form = rows[0];
+
+    // Mobil all-in-one: kalemler dizisi varsa hepsini kaydet
+    if (Array.isArray(kalemler) && kalemler.length > 0) {
+      for (const k of kalemler) {
+        await pool.query(
+          `INSERT INTO masraf_kalem (form_id,kategori,tarih,aciklama,tutar,fis_var)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [form.id, k.kategori||"Diğer", k.tarih||now.toISOString().split("T")[0],
+           k.aciklama||"", Number(k.tutar)||0, k.fis_var!==false]
+        );
+      }
+    }
+
+    res.json(form);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
