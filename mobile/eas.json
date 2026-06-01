@@ -13,6 +13,12 @@
       },
       "distribution": "internal"
     },
+    "testflight": {
+      "distribution": "store",
+      "ios": {
+        "simulator": false
+      }
+    },
     "production": {
       "android": {
         "buildType": "apk"
@@ -20,6 +26,15 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6775361138"
+      }
+    },
+    "testflight": {
+      "ios": {
+        "ascAppId": "6775361138"
+      }
+    }
   }
 }
