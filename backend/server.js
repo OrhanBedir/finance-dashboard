@@ -11714,6 +11714,55 @@ app.put("/malzeme/dagitim/:id/iade-reddet", authMiddleware, async (req, res) => 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT /malzeme/talepler/:id/kalem-dagitildi — kalem dağıtım tamamlandı işaretle
+app.put("/malzeme/talepler/:id/kalem-dagitildi", authMiddleware, async (req, res) => {
+  try {
+    const { kalem_id } = req.body;
+    if (!kalem_id) return res.status(400).json({ error: "kalem_id gerekli" });
+    await pool.query(
+      "UPDATE malzeme_talep_kalemleri SET dagitim_yapildi = true WHERE id = $1",
+      [kalem_id]
+    );
+    // Tüm kalemler tamamlandıysa talebi DEPODA yap
+    const kalemleri = await pool.query(
+      "SELECT dagitim_yapildi FROM malzeme_talep_kalemleri WHERE talep_id = $1",
+      [req.params.id]
+    );
+    const allDone = kalemleri.rows.length > 0 && kalemleri.rows.every(k => k.dagitim_yapildi);
+    if (allDone) {
+      await pool.query(
+        "UPDATE malzeme_talepler SET durum = 'DEPODA', updated_at = NOW() WHERE id = $1",
+        [req.params.id]
+      );
+    }
+    res.json({ ok: true, allDone });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /malzeme/depo-stok-ekle — satın alınan malzemeyi depoya ekle
+app.post("/malzeme/depo-stok-ekle", authMiddleware, async (req, res) => {
+  try {
+    const { malzeme_adi, birim, miktar } = req.body;
+    if (!malzeme_adi || !miktar) return res.status(400).json({ error: "malzeme_adi ve miktar gerekli" });
+    const existing = await pool.query(
+      "SELECT id FROM depo_stok WHERE LOWER(malzeme_adi) = LOWER($1)",
+      [malzeme_adi]
+    );
+    if (existing.rows.length > 0) {
+      await pool.query(
+        "UPDATE depo_stok SET toplam_miktar = toplam_miktar + $1, updated_at = NOW() WHERE id = $2",
+        [miktar, existing.rows[0].id]
+      );
+    } else {
+      await pool.query(
+        "INSERT INTO depo_stok (malzeme_adi, birim, toplam_miktar) VALUES ($1, $2, $3)",
+        [malzeme_adi, birim || "Adet", miktar]
+      );
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /malzeme/dagitim/ozet — personel bazlı özet (Murat Excel için)
 app.get("/malzeme/dagitim/ozet", authMiddleware, async (req, res) => {
   try {
@@ -11912,6 +11961,7 @@ const AUTO_MIGRATIONS = [
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`,
   "ALTER TABLE malzeme_talepler ADD COLUMN IF NOT EXISTS talep_tipi TEXT DEFAULT 'SATIN_ALMA'",
+  "ALTER TABLE malzeme_talep_kalemleri ADD COLUMN IF NOT EXISTS dagitim_yapildi BOOLEAN DEFAULT FALSE",
 ];
 
 (async () => {

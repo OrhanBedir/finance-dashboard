@@ -15476,16 +15476,19 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
               <thead>
                 <tr style={{ background:"#1e3a5f",color:"#fff" }}>
-                  {["#","Malzeme Adı","Miktar","Birim","Birim Fiyat","Toplam","Temin Türü","Not"].map(h=>(
+                  {["#","Malzeme Adı","Miktar","Birim","Birim Fiyat","Toplam","Temin Türü","Not",...(canMuratTedarik?["İşlem"]:[])].map(h=>(
                     <th key={h} style={{ padding:"8px 10px",textAlign:"left",fontWeight:600,whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {detayKalemler.map((k,i)=>(
-                  <tr key={k.id} style={{ borderBottom:"1px solid #e5e7eb",background:i%2===0?"#fff":"#f9fafb" }}>
+                  <tr key={k.id} style={{ borderBottom:"1px solid #e5e7eb",background:k.dagitim_yapildi?"#f0fdf4":i%2===0?"#fff":"#f9fafb",opacity:k.dagitim_yapildi?0.7:1 }}>
                     <td style={{ padding:"8px 10px",color:"#9ca3af" }}>{i+1}</td>
-                    <td style={{ padding:"8px 10px",fontWeight:600 }}>{k.malzeme_adi}</td>
+                    <td style={{ padding:"8px 10px",fontWeight:600 }}>
+                      {k.malzeme_adi}
+                      {k.dagitim_yapildi && <span style={{ marginLeft:6,fontSize:10,background:"#bbf7d0",color:"#166534",borderRadius:4,padding:"1px 6px",fontWeight:700 }}>✓ Dağıtıldı</span>}
+                    </td>
                     <td style={{ padding:"8px 10px",textAlign:"center" }}>{k.miktar}</td>
                     <td style={{ padding:"8px 10px" }}>{k.birim}</td>
                     <td style={{ padding:"8px 10px" }}>
@@ -15513,6 +15516,70 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                       ) : "—")}
                     </td>
                     <td style={{ padding:"8px 10px",color:"#6b7280",fontSize:12 }}>{k.notlar}</td>
+                    {canMuratTedarik && (
+                      <td style={{ padding:"6px 8px" }}>
+                        {k.dagitim_yapildi ? (
+                          <span style={{ fontSize:11,color:"#16a34a",fontWeight:700 }}>✓ Tamam</span>
+                        ) : k.temin_turu === "Depo Stok" ? (
+                          <button
+                            disabled={saving}
+                            onClick={async ()=>{
+                              setSaving(true);
+                              try {
+                                const tkn = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
+                                const hdrs = {"Content-Type":"application/json",Authorization:`Bearer ${tkn}`};
+                                // Depoya Giriş + Dağıtım kaydı
+                                const r = await fetch(`${API_BASE}/malzeme/dagitim`,{method:"POST",headers:hdrs,body:JSON.stringify({
+                                  malzeme_adi:k.malzeme_adi, miktar:k.miktar, birim:k.birim||"Adet",
+                                  alici_tipi:"PERSONEL",
+                                  alici_personel_ad: d.talep_edilen_personel||d.talep_eden_ad,
+                                  alici_personel_email: d.talep_eden_email,
+                                  site_id: d.site_id||"", bolge: d.bolge||"",
+                                  notlar:`MT Talep: ${d.talep_no} - Depo Stok dağıtımı`,
+                                  talep_kalem_id: k.id
+                                })});
+                                const rd = await r.json();
+                                if (rd.error){ alert(rd.error); setSaving(false); return; }
+                                // Kalem dagitim_yapildi işaretle
+                                await fetch(`${API_BASE}/malzeme/talepler/${d.id}/kalem-dagitildi`,{method:"PUT",headers:hdrs,body:JSON.stringify({kalem_id:k.id})});
+                                setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,dagitim_yapildi:true}:x));
+                                // Eğer tüm kalemler dağıtıldı/tamamlandı ise DEPODA'ya çek
+                                const yeniKalemler = detayKalemler.map((x,j)=>j===i?{...x,dagitim_yapildi:true}:x);
+                                const hepsiTamam = yeniKalemler.every(x=>x.dagitim_yapildi||(x.temin_turu!=="Depo Stok"));
+                                // Not: Yeni Alım kalemler için ayrıca "Satın Alındı" tıklanacak
+                              } catch(e){ alert(e.message); }
+                              setSaving(false);
+                            }}
+                            style={{ padding:"4px 10px",background:"#065f46",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:11,whiteSpace:"nowrap" }}>
+                            📦 Dağıtım Yap
+                          </button>
+                        ) : k.temin_turu === "Yeni Alım" ? (
+                          <button
+                            disabled={saving}
+                            onClick={async ()=>{
+                              if(!window.confirm(`"${k.malzeme_adi}" satın alındı ve depoya girişi yapıldı mı?`)) return;
+                              setSaving(true);
+                              try {
+                                const tkn = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
+                                const hdrs = {"Content-Type":"application/json",Authorization:`Bearer ${tkn}`};
+                                // Depoya Giriş yap
+                                const stokR = await fetch(`${API_BASE}/malzeme/depo-stok-ekle`,{method:"POST",headers:hdrs,body:JSON.stringify({
+                                  malzeme_adi:k.malzeme_adi, birim:k.birim||"Adet", miktar:k.miktar,
+                                  talep_no:d.talep_no, notlar:"Yeni Alım - MT Talep"
+                                })});
+                                const stokD = await stokR.json();
+                                if(stokD.error){ alert(stokD.error); setSaving(false); return; }
+                                await fetch(`${API_BASE}/malzeme/talepler/${d.id}/kalem-dagitildi`,{method:"PUT",headers:hdrs,body:JSON.stringify({kalem_id:k.id})});
+                                setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,dagitim_yapildi:true}:x));
+                              } catch(e){ alert(e.message); }
+                              setSaving(false);
+                            }}
+                            style={{ padding:"4px 10px",background:"#1d4ed8",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:11,whiteSpace:"nowrap" }}>
+                            🛒 Satın Alındı
+                          </button>
+                        ) : <span style={{ fontSize:11,color:"#9ca3af" }}>—</span>}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -15522,7 +15589,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   <td style={{ padding:"8px 10px",color:"#15803d",fontSize:15 }}>
                     ₺{detayKalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0).toLocaleString("tr-TR")}
                   </td>
-                  <td colSpan={2}></td>
+                  <td colSpan={canMuratTedarik?3:2}></td>
                 </tr>
               </tfoot>
             </table>
