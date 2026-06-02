@@ -3311,8 +3311,9 @@ function FinanceUploadInline({ onClose, onUploaded }) {
         );
       }
 
+      const uploadedTime = data.uploaded_at ? new Date(data.uploaded_at).toLocaleString("tr-TR") : "";
       setMessage(
-        `✅ HW Payment raporu yüklendi. Eklenen kayıt: ${data.inserted || 0}`,
+        `✅ HW Payment raporu yüklendi. Eklenen kayıt: ${data.inserted || 0}${uploadedTime ? ` — ${uploadedTime}` : ""}`,
       );
       setFile(null);
 
@@ -3632,6 +3633,7 @@ function FinanceDashboard({
   const [overdueRows, setOverdueRows] = useState([]);
   const [showOverdueModal, setShowOverdueModal] = useState(false);
   const [summary, setSummary] = useState(null);
+  const [hwLastUpload, setHwLastUpload] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -4703,18 +4705,21 @@ function FinanceDashboard({
         upcomingData,
         manualInvoiceData,
         salaryData,
+        lastUploadData,
       ] = await Promise.all([
         fetchJson(`${API_BASE}/finance/summary`, { withAuth: true }),
         fetchJson(paymentsUrl, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/upcoming-payments`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/invoice-entry/list`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/salary/list`, { withAuth: true }),
+        fetchJson(`${API_BASE}/finance/hw-payment/last-upload`).catch(() => ({ ok: true, last_upload: null })),
       ]);
 
       console.log("MANUAL INVOICE DATA:", manualInvoiceData.rows);
       setSalaryRows(salaryData.rows || []);
       setManualInvoiceRows(manualInvoiceData.rows || []);
       setSummary(summaryData.summary || null);
+      setHwLastUpload(lastUploadData.last_upload || null);
       setPaymentRows(paymentsData.rows || []);
       setUpcomingRows(upcomingData.rows || []);
       setOverdueRows(upcomingData.overdue_rows || []);
@@ -4893,6 +4898,11 @@ function FinanceDashboard({
           </div>
           <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary.this_month_collections || 0, "TRY")}</div>
           <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen</div>
+          {hwLastUpload?.uploaded_at && (
+            <div style={{ fontSize:"10px", color:"#94a3b8", marginTop:"6px", borderTop:"1px solid #f1f5f9", paddingTop:"6px" }}>
+              🕒 Son HW yükleme: {new Date(hwLastUpload.uploaded_at).toLocaleString("tr-TR")} ({hwLastUpload.row_count} kayıt)
+            </div>
+          )}
         </div>
         {/* Bu Ay Kesilen Fatura */}
         <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>

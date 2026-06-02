@@ -8038,9 +8038,13 @@ app.post(
 
       await pool.query(`DELETE FROM hw_payment_rows`);
 
+      const uploadedAt = new Date().toISOString();
       let inserted = 0;
 
-      for (let i = 1; i < rows.length; i++) {
+      // HW Excel has 2 header rows: row[0] = English, row[1] = Chinese → start at i=2
+      const firstDataRow = (rows.length > 1 && typeof rows[1][0] === 'string' && /[一-鿿]/.test(String(rows[1][0] || ''))) ? 2 : 1;
+
+      for (let i = firstDataRow; i < rows.length; i++) {
         const row = rows[i] || [];
 
         const invoiceNo = row[0];
@@ -8109,9 +8113,10 @@ app.post(
             payment_method,
             supplier_code,
             supplier_name,
-            currency
+            currency,
+            upload_batch
           )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
           `,
           [
             invoiceNo ? String(invoiceNo).trim() : null,
@@ -8126,6 +8131,7 @@ app.post(
             supplierCode ? String(supplierCode).trim() : null,
             supplierName ? String(supplierName).trim() : null,
             normalizeCurrency(currency),
+            uploadedAt,
           ],
         );
 
@@ -8135,6 +8141,7 @@ app.post(
       res.json({
         ok: true,
         inserted,
+        uploaded_at: uploadedAt,
         message: "HW Payment raporu yüklendi",
         sheet_name: firstSheetName,
       });
@@ -8144,6 +8151,38 @@ app.post(
     }
   },
 );
+
+/* ================== HW PAYMENT LAST UPLOAD INFO ================== */
+app.get("/finance/hw-payment/last-upload", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        upload_batch,
+        COUNT(*) AS row_count,
+        SUM(COALESCE(payment_amount, 0)) AS total_payment,
+        MIN(payment_date) AS min_date,
+        MAX(payment_date) AS max_date
+      FROM hw_payment_rows
+      WHERE upload_batch IS NOT NULL
+      GROUP BY upload_batch
+      ORDER BY upload_batch DESC
+      LIMIT 1
+    `);
+    const row = result.rows[0];
+    res.json({
+      ok: true,
+      last_upload: row ? {
+        uploaded_at: row.upload_batch,
+        row_count: Number(row.row_count),
+        total_payment: Number(row.total_payment || 0),
+        min_date: row.min_date,
+        max_date: row.max_date,
+      } : null,
+    });
+  } catch (err) {
+    res.json({ ok: true, last_upload: null });
+  }
+});
 
 /* ================== FINANCE PAYMENTS LIST ================== */
 app.get("/finance/payments/list", requireFinanceAuth, async (req, res) => {
