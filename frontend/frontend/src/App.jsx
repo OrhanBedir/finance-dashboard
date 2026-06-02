@@ -12613,6 +12613,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       const lastColLetter = String.fromCharCode(64 + NCOLS);
       const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
+      const autoFilterRef = `A2:${lastColLetter}2`;
 
       const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
       const zip = await JSZip.loadAsync(buf);
@@ -12628,10 +12629,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`,
         );
 
+      // autoFilter'ı </sheetData> hemen sonrasına ekle (OOXML sıralaması için)
       if (!xml.includes("<autoFilter")) {
         xml = xml.replace(
-          "</worksheet>",
-          `<autoFilter ref="A2:${lastColLetter}2"/></worksheet>`,
+          "</sheetData>",
+          `</sheetData><autoFilter ref="${autoFilterRef}"/>`,
         );
       }
 
@@ -17776,8 +17778,9 @@ function App() {
       const _rolloutOverrideEmails = ["hatice.omus@simsektel.com"];
       const _luIsBolge = _bolgeMudurEmails.includes(_lue) || ["rollout_mudur","bolge_mudur"].includes((_lu?.role||"").toLowerCase());
       const _luIsRolloutOverride = _rolloutOverrideEmails.includes(_lue);
+      const _luIsSubcon = !!_lu?.subcon_name || (_lu?.role || "").toLowerCase() === "subcon";
       if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("masraf");
-      else if (_luIsBolge) setPage("region");
+      else if (_luIsBolge || _luIsSubcon) setPage("region");
       else setPage("finance");
 
       setFinanceLoginEmail("");
