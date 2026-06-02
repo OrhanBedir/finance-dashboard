@@ -10331,15 +10331,18 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       toplamCeza = cezalar.reduce((s, c) => s + Number(c.tutar || 0), 0);
     }
 
-    // 5b. Masraf formundaki TRAFIK_CEZA kalemleri + ceza belgesi URL
+    // 5b. Masraf formundaki TRAFIK_CEZA kalemleri:
+    //     - Bu kişinin oluşturduğu formlardan VEYA
+    //     - ceza_personel_id ile bu kişiye atanmış olanlar
     const cezaKalemRes = await pool.query(
       `SELECT mk.id, mk.tutar, mk.aciklama, mk.tarih, mk.plaka, mk.ceza_belge_url, mk.odeme_belge_url,
               mf.id as form_id, mf.durum as form_durum
        FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
-       WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mk.kategori='TRAFIK_CEZA'
+       WHERE mk.kategori='TRAFIK_CEZA'
+         AND (LOWER(mf.talep_eden_email)=LOWER($1) OR ($2::int IS NOT NULL AND mk.ceza_personel_id=$2::int))
        ORDER BY mk.tarih DESC LIMIT 20`,
-      [queryEmail]
+      [queryEmail, personelId]
     );
     const cezaKalemler = cezaKalemRes.rows;
 
@@ -10529,6 +10532,56 @@ app.put("/hr/masraf-kalem/:id", async (req, res) => {
       [fis_var ?? null, fis_olmadan_aciklama||null, tutar_uyari_aciklama||null, req.params.id]
     );
     res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT ceza_personel_id güncelle (Trafik Ceza kalemi için)
+// Eğer form zaten TAMAMLANDI/ARŞİVLENDİ ise avans kaydı da otomatik oluşturulur
+app.put("/hr/masraf-kalem/:id/ceza-personel", async (req, res) => {
+  try {
+    const { ceza_personel_id } = req.body;
+    const kalemId = req.params.id;
+
+    // Önceki ceza_personel_id ile oluşmuş avansı sil (değişti ise)
+    const oldKalem = await pool.query("SELECT * FROM masraf_kalem WHERE id=$1", [kalemId]);
+    const old = oldKalem.rows[0];
+    if (old?.ceza_personel_id && old.ceza_personel_id !== Number(ceza_personel_id)) {
+      // Eski avansı iptal et
+      await pool.query(
+        `DELETE FROM avans WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND aciklama LIKE $2`,
+        [old.ceza_personel_id, `%Masraf #%`]
+      );
+    }
+
+    // Güncelle
+    const { rows } = await pool.query(
+      "UPDATE masraf_kalem SET ceza_personel_id=$1 WHERE id=$2 RETURNING *",
+      [ceza_personel_id || null, kalemId]
+    );
+    const kalem = rows[0];
+
+    // Form durumunu kontrol et: TAMAMLANDI veya ARŞİVLENDİ ise avans oluştur
+    if (ceza_personel_id && kalem) {
+      const formRes = await pool.query("SELECT durum, id FROM masraf_form WHERE id=$1", [kalem.form_id]);
+      const form = formRes.rows[0];
+      if (form && ['TAMAMLANDI','ARSIVLENDI'].includes(form.durum)) {
+        // Duplicate önle: aynı kalem için avans zaten var mı?
+        const dupChk = await pool.query(
+          `SELECT id FROM avans WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND aciklama LIKE $2`,
+          [ceza_personel_id, `%Masraf #${form.id}%`]
+        );
+        if (dupChk.rowCount === 0) {
+          await pool.query(
+            `INSERT INTO avans (personel_id, tarih, tutar, aciklama, avans_turu, odendi)
+             VALUES ($1, NOW(), $2, $3, 'TRAFIK_CEZA', false)`,
+            [ceza_personel_id, kalem.tutar,
+             `Trafik Cezası - ${kalem.plaka || 'Plaka yok'} (Masraf #${form.id})`]
+          );
+        }
+      }
+    }
+
+    res.json(kalem);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

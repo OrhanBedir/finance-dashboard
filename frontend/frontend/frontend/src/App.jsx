@@ -10296,6 +10296,18 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     const needsDirektorAction = isDirektor && viewForm.durum === "DIREKTOR_BEKLE";
     const isOwner = currentUser?.email === viewForm.talep_eden_email;
     const canDelete = (isOwner || isPM) && viewForm.durum !== "TAMAMLANDI";
+    const canEditCeza = isPM || isDirektor || isOwner;
+
+    const handleCezaPersonelAta = async (kalemId, cezaPersonelId) => {
+      await fetch(`${API_BASE}/hr/masraf-kalem/${kalemId}/ceza-personel`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ceza_personel_id: cezaPersonelId || null }),
+      });
+      // Formu yenile
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${viewForm.id}`);
+      setViewForm(await r.json());
+    };
 
     const handleDeleteView = async () => {
       if (!window.confirm("Bu masraf formu silinecek. Emin misiniz?")) return;
@@ -10347,11 +10359,36 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                 const ocrFark = tutarFarkiVar(k);
                 const rowBg = ocrFark ? "#fef2f2" : !k.fis_var ? "#fff7ed" : i%2===0 ? "#fff" : "#fafafa";
                 return (
-                  <tr key={k.id} style={{ background: rowBg, borderBottom:"1px solid #f3f4f6", borderLeft: ocrFark ? "4px solid #dc2626" : "4px solid transparent" }}>
+                  <tr key={k.id} style={{ background: rowBg, borderBottom:"1px solid #f3f4f6", borderLeft: ocrFark ? "4px solid #dc2626" : k.kategori==="TRAFIK_CEZA" ? "4px solid #ea580c" : "4px solid transparent" }}>
                     <td style={{ padding:"10px 12px" }}>{kat?.label||k.kategori}</td>
                     <td style={{ padding:"10px 12px", whiteSpace:"nowrap" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR") : ""}</td>
                     <td style={{ padding:"10px 12px" }}>{k.belge_no||"—"}</td>
-                    <td style={{ padding:"10px 12px" }}>{k.aciklama||k.belge_aciklama||"—"}{!k.fis_var&&<div style={{ fontSize:"11px",color:"#dc2626" }}>Fişsiz: {k.fis_olmadan_aciklama}</div>}</td>
+                    <td style={{ padding:"10px 12px" }}>
+                      {k.aciklama||k.belge_aciklama||"—"}
+                      {!k.fis_var&&<div style={{ fontSize:"11px",color:"#dc2626" }}>Fişsiz: {k.fis_olmadan_aciklama}</div>}
+                      {/* Trafik cezası ise — ceza kimin üzerine? */}
+                      {k.kategori==="TRAFIK_CEZA" && (
+                        <div style={{ marginTop:"6px", display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap" }}>
+                          <span style={{ fontSize:"10px", fontWeight:700, color:"#ea580c" }}>🚔 Ceza kime:</span>
+                          {canEditCeza ? (
+                            <select
+                              defaultValue={k.ceza_personel_id||""}
+                              onChange={e => handleCezaPersonelAta(k.id, e.target.value)}
+                              style={{ fontSize:"11px", padding:"2px 6px", borderRadius:"6px", border:"1px solid #ea580c", background:"#fff7ed", color:"#9a3412", cursor:"pointer" }}
+                            >
+                              <option value="">— Atanmadı —</option>
+                              {personelList.filter(p=>p.aktif).map(p=>(
+                                <option key={p.id} value={p.id}>{p.ad_soyad}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span style={{ fontSize:"11px", color:"#9a3412", fontWeight:600 }}>
+                              {personelList.find(p=>String(p.id)===String(k.ceza_personel_id))?.ad_soyad || "Atanmadı"}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ padding:"10px 12px", fontWeight:700 }}>
                       ₺{Number(k.tutar).toLocaleString("tr-TR")}
                       {ocrFark && (
