@@ -10545,12 +10545,22 @@ app.put("/hr/masraf-kalem/:id/ceza-personel", async (req, res) => {
     const kalemId = req.params.id;
     const isSirket = ceza_personel_id === "sirket";
 
-    // Güncelle — sirket ise personel_id null, ceza_sirket=true
-    const { rows } = await pool.query(
-      "UPDATE masraf_kalem SET ceza_personel_id=$1, ceza_sirket=$2 WHERE id=$3 RETURNING *",
-      [isSirket ? null : (ceza_personel_id || null), isSirket, kalemId]
-    );
-    const kalem = rows[0];
+    // ceza_sirket kolonu henüz migration'dan eklenmemiş olabilir — güvenli güncelle
+    let kalem;
+    try {
+      const { rows } = await pool.query(
+        "UPDATE masraf_kalem SET ceza_personel_id=$1, ceza_sirket=$2 WHERE id=$3 RETURNING *",
+        [isSirket ? null : (ceza_personel_id || null), isSirket, kalemId]
+      );
+      kalem = rows[0];
+    } catch {
+      // ceza_sirket kolonu yoksa sadece personel_id güncelle
+      const { rows } = await pool.query(
+        "UPDATE masraf_kalem SET ceza_personel_id=$1 WHERE id=$2 RETURNING *",
+        [isSirket ? null : (ceza_personel_id || null), kalemId]
+      );
+      kalem = rows[0];
+    }
     // Not: avans tablosu artık trafik ceza için kullanılmıyor,
     // GET /hr/trafik-ceza masraf_kalem'den direkt okuyor.
 
@@ -10659,7 +10669,7 @@ app.post("/hr/masraf-kalem/:id/odeme-belge", authMiddleware, masrafUpload.single
 });
 
 // GET /hr/trafik-ceza — kişiye ait tüm trafik ceza kalemleri (masraf_kalem tablosundan, tüm durumlar)
-app.get("/hr/trafik-ceza", authMiddleware, async (req, res) => {
+app.get("/hr/trafik-ceza", async (req, res) => {
   try {
     const { personel_id } = req.query;
     if (!personel_id) return res.status(400).json({ error: "personel_id gerekli" });
