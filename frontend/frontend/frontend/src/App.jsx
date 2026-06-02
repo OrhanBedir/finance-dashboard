@@ -14692,6 +14692,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const [fiyatListe, setFiyatListe] = useState([]);
   const [fiyatForm, setFiyatForm] = useState({ malzeme_adi:"", birim:"Adet", birim_fiyat:"", kategori:"Genel" });
   const [fiyatEditId, setFiyatEditId] = useState(null);
+  // Yeni malzeme ekleme mini-modal (her satır için {rowIdx, adi, birim, birim_fiyat, kategori})
+  const [yeniMalzemePopup, setYeniMalzemePopup] = useState(null);
 
   // Personel listesi
   const [personelListe, setPersonelListe] = useState([]);
@@ -15620,21 +15622,57 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
   // ── KALEM SATIRI ──
   const INP = { height:38, padding:"0 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, boxSizing:"border-box", width:"100%", outline:"none" };
+
+  // DB + statik liste birleşik autocomplete
+  const buildCombinedList = () => {
+    const dbNames = fiyatListe.map(f => f.malzeme_adi).filter(Boolean);
+    const all = [...new Set([...dbNames, ...MALZEME_LISTESI])];
+    return all.sort((a, b) => a.localeCompare(b, "tr"));
+  };
+
   const renderKalemRow = (k, i) => {
     const fiyatAc = fiyatListe.find(f => f.malzeme_adi.toLowerCase() === k.malzeme_adi.toLowerCase());
-    const q = k.malzeme_adi.toLowerCase();
-    const exactMatch = q.length > 0 && MALZEME_LISTESI.some(n => n.toLowerCase() === q);
+    const q = k.malzeme_adi.toLowerCase().trim();
+    const COMBINED = buildCombinedList();
+    const exactMatch = q.length > 0 && COMBINED.some(n => n.toLowerCase() === q);
     const suggestions = !exactMatch && q.length >= 1
-      ? MALZEME_LISTESI.filter(n => n.toLowerCase().includes(q)).slice(0, 14)
+      ? COMBINED.filter(n => n.toLowerCase().includes(q)).slice(0, 14)
       : [];
     const toplam = (Number(k.miktar)||0) * (Number(k.birim_fiyat)||0);
+    const isInDB = fiyatListe.some(f => f.malzeme_adi.toLowerCase() === q) || MALZEME_LISTESI.some(n => n.toLowerCase() === q);
+
     return (
       <div key={i} style={{ display:"grid", gridTemplateColumns:"3fr 80px 110px 130px 110px 110px 38px", gap:8, marginBottom:10, alignItems:"start" }}>
-        {/* Malzeme adı + autocomplete */}
+        {/* Malzeme adı + autocomplete + Yeni ekle butonu */}
         <div style={{ position:"relative" }}>
-          <input placeholder="Malzeme adı yazın..." value={k.malzeme_adi} autoComplete="off"
-            onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:e.target.value, birim_fiyat:""} : x))}
-            style={INP} />
+          <div style={{ display:"flex", gap:5, alignItems:"center" }}>
+            <input placeholder="Malzeme adı yazın..." value={k.malzeme_adi} autoComplete="off"
+              onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:e.target.value, birim_fiyat:""} : x))}
+              style={{ ...INP, flex:1 }} />
+            {/* Yeni Malzeme Ekle butonu — her zaman görünür */}
+            <button
+              type="button"
+              title="Yeni malzeme ekle / veritabanına kaydet"
+              onClick={() => setYeniMalzemePopup({
+                rowIdx: i,
+                adi: k.malzeme_adi.trim().toUpperCase(),
+                birim: k.birim || "Adet",
+                birim_fiyat: "",
+                kategori: "Genel",
+              })}
+              style={{
+                flexShrink:0, height:38, padding:"0 10px",
+                background: isInDB && q.length>0 ? "#f0fdf4" : "#eff6ff",
+                border: `1px solid ${isInDB && q.length>0 ? "#86efac" : "#bfdbfe"}`,
+                borderRadius:7, cursor:"pointer", fontSize:18, lineHeight:1,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                color: isInDB && q.length>0 ? "#16a34a" : "#2563eb",
+                transition:"all 0.15s",
+              }}
+            >
+              {isInDB && q.length>0 ? "✓" : "+"}
+            </button>
+          </div>
           {suggestions.length > 0 && (
             <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#fff",border:"1px solid #d1d5db",borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:260,overflowY:"auto" }}>
               {suggestions.map((name, idx) => {
@@ -15647,32 +15685,6 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   </div>
                 );
               })}
-            </div>
-          )}
-          {q.length >= 3 && !exactMatch && !suggestions.some(s => s.toLowerCase() === q) && (
-            <div style={{ marginTop:2, textAlign:"right" }}>
-              <button
-                type="button"
-                onMouseDown={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const token2 = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
-                    const headers2 = { "Content-Type":"application/json", Authorization:`Bearer ${token2}` };
-                    const newName = k.malzeme_adi.trim().toUpperCase();
-                    const r = await fetch(`${API_BASE}/malzeme/fiyat-listesi`, {
-                      method:"POST", headers:headers2,
-                      body: JSON.stringify({ malzeme_adi: newName, birim: k.birim||"Adet", birim_fiyat:0, kategori:"" })
-                    });
-                    const d2 = await r.json();
-                    if (d2.error) { alert(d2.error); return; }
-                    loadFiyatListe();
-                    alert(`"${newName}" malzeme listesine eklendi.`);
-                  } catch(err) { alert(err.message); }
-                }}
-                style={{ fontSize:11, color:"#6b7280", background:"none", border:"none", cursor:"pointer", textDecoration:"underline", padding:"2px 4px" }}
-              >
-                + Listeye ekle
-              </button>
             </div>
           )}
         </div>
@@ -16046,6 +16058,86 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     const toplamGenel = talepKalemler.reduce((s,k)=>s+(Number(k.miktar)||0)*(Number(k.birim_fiyat)||0),0);
     return (
       <div style={{ minHeight:"100vh",background:"#f1f5f9",fontFamily:"Inter,sans-serif" }}>
+
+        {/* ── YENİ MALZEME EKLE POPUP ─────────────────────────────── */}
+        {yeniMalzemePopup && (
+          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}
+            onClick={e=>{ if(e.target===e.currentTarget) setYeniMalzemePopup(null); }}>
+            <div style={{ background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:420,boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+                <div>
+                  <div style={{ fontSize:18,fontWeight:800,color:"#1e3a5f" }}>📦 Yeni Malzeme Ekle</div>
+                  <div style={{ fontSize:12,color:"#9ca3af",marginTop:2 }}>Malzeme kataloğuna eklenecek</div>
+                </div>
+                <button onClick={()=>setYeniMalzemePopup(null)} style={{ background:"#f3f4f6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6b7280" }}>✕</button>
+              </div>
+              {/* Malzeme Adı */}
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:11,fontWeight:700,color:"#374151",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em" }}>Malzeme Adı *</div>
+                <input
+                  value={yeniMalzemePopup.adi}
+                  onChange={e=>setYeniMalzemePopup(p=>({...p,adi:e.target.value.toUpperCase()}))}
+                  placeholder="Malzeme adını yazın..."
+                  style={{ width:"100%",height:40,padding:"0 12px",border:"2px solid #2563eb",borderRadius:9,fontSize:13,boxSizing:"border-box",outline:"none",fontWeight:600 }}
+                  autoFocus
+                />
+              </div>
+              {/* Birim + Fiyat */}
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14 }}>
+                <div>
+                  <div style={{ fontSize:11,fontWeight:700,color:"#374151",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em" }}>Birim</div>
+                  <select value={yeniMalzemePopup.birim} onChange={e=>setYeniMalzemePopup(p=>({...p,birim:e.target.value}))}
+                    style={{ width:"100%",height:40,padding:"0 10px",border:"1px solid #d1d5db",borderRadius:9,fontSize:13,boxSizing:"border-box" }}>
+                    {["Adet","Metre","Rulo","Kutu","Kg","Lt","Paket","Set","Takım"].map(u=><option key={u}>{u}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize:11,fontWeight:700,color:"#374151",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em" }}>Birim Fiyat (₺)</div>
+                  <input type="number" value={yeniMalzemePopup.birim_fiyat}
+                    onChange={e=>setYeniMalzemePopup(p=>({...p,birim_fiyat:e.target.value}))}
+                    placeholder="0"
+                    style={{ width:"100%",height:40,padding:"0 12px",border:"1px solid #d1d5db",borderRadius:9,fontSize:13,boxSizing:"border-box",outline:"none" }}
+                  />
+                </div>
+              </div>
+              {/* Kategori */}
+              <div style={{ marginBottom:20 }}>
+                <div style={{ fontSize:11,fontWeight:700,color:"#374151",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em" }}>Kategori</div>
+                <select value={yeniMalzemePopup.kategori} onChange={e=>setYeniMalzemePopup(p=>({...p,kategori:e.target.value}))}
+                  style={{ width:"100%",height:40,padding:"0 10px",border:"1px solid #d1d5db",borderRadius:9,fontSize:13,boxSizing:"border-box" }}>
+                  {["Genel","Optik","Kablo","Pasif Ekipman","Aktif Ekipman","Enerji","Güvenlik","Diğer"].map(k=><option key={k}>{k}</option>)}
+                </select>
+              </div>
+              {/* Butonlar */}
+              <div style={{ display:"flex",gap:10 }}>
+                <button onClick={()=>setYeniMalzemePopup(null)}
+                  style={{ flex:1,height:42,background:"#f3f4f6",border:"none",borderRadius:10,fontSize:13,fontWeight:600,color:"#6b7280",cursor:"pointer" }}>
+                  İptal
+                </button>
+                <button onClick={async()=>{
+                  const ad = (yeniMalzemePopup.adi||"").trim().toUpperCase();
+                  if(!ad){ alert("Malzeme adı boş olamaz"); return; }
+                  const token2 = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
+                  const h2 = {"Content-Type":"application/json",Authorization:`Bearer ${token2}`};
+                  const r = await fetch(`${API_BASE}/malzeme/fiyat-listesi`,{
+                    method:"POST",headers:h2,
+                    body:JSON.stringify({malzeme_adi:ad,birim:yeniMalzemePopup.birim||"Adet",birim_fiyat:Number(yeniMalzemePopup.birim_fiyat)||0,kategori:yeniMalzemePopup.kategori||"Genel"})
+                  });
+                  const d2=await r.json();
+                  if(d2.error){ alert(d2.error); return; }
+                  // Talepte o satırın adını da güncelle
+                  setTalepKalemler(prev=>prev.map((x,j)=>j===yeniMalzemePopup.rowIdx?{...x,malzeme_adi:ad,birim:yeniMalzemePopup.birim||x.birim,birim_fiyat:yeniMalzemePopup.birim_fiyat||x.birim_fiyat}:x));
+                  loadFiyatListe();
+                  setYeniMalzemePopup(null);
+                }}
+                  style={{ flex:2,height:42,background:"linear-gradient(135deg,#1d4ed8,#2563eb)",border:"none",borderRadius:10,fontSize:14,fontWeight:700,color:"#fff",cursor:"pointer" }}>
+                  ✓ Kataloğa Ekle
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div style={{ background:"#1e3a5f",color:"#fff",padding:"16px 20px",display:"flex",alignItems:"center",gap:12 }}>
           <button onClick={()=>{setFormView(null);setEditingId(null);setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);}}
