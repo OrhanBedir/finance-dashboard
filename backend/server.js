@@ -11697,6 +11697,16 @@ app.delete("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// DELETE /malzeme/talepler-tumu — TÜM malzeme taleplerini sil (tek seferlik temizlik)
+app.delete("/malzeme/talepler-tumu", async (req, res) => {
+  try {
+    const sayim = await pool.query("SELECT COUNT(*) as sayi FROM malzeme_talepler");
+    await pool.query("DELETE FROM malzeme_talep_kalemleri");
+    await pool.query("DELETE FROM malzeme_talepler");
+    res.json({ ok: true, silinen: Number(sayim.rows[0].sayi) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /malzeme/bekleyen-count (rol bazlı bildirim sayısı)
 app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
   try {
