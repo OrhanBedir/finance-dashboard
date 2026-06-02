@@ -8769,7 +8769,10 @@ function HrDashboard({ onBack, currentUser }) {
                               </div>
                               {trafikCezaList.map((a,i) => (
                                 <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"10px", color:"#fed7aa", borderTop: i===0?"1px solid rgba(255,255,255,0.3)":"none", paddingTop: i===0?"4px":"2px" }}>
-                                  <span style={{ opacity:0.9, maxWidth:"140px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{a.aciklama||"—"}</span>
+                                  <span style={{ opacity:0.9, maxWidth:"130px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                    {a.aciklama||a.plaka||"—"}
+                                    {a.kaynak==="BEKLEMEDE" && <span style={{ marginLeft:"4px", background:"#fbbf24", color:"#78350f", borderRadius:"4px", padding:"0 4px", fontSize:"9px", fontWeight:700 }}>BEKL.</span>}
+                                  </span>
                                   <span style={{ fontWeight:700, color:"#fff" }}>₺{Number(a.tutar||0).toLocaleString("tr-TR")}</span>
                                 </div>
                               ))}
@@ -9851,7 +9854,18 @@ function HrDashboard({ onBack, currentUser }) {
 }
 
 const GIDER_TURLERI = ["Yol","Konaklama","Akşam Yemeği","Yakıt","Malzeme","Ekipman","Diğer"];
-const BOLGELER = ["İzmir","Antalya","Ankara"];
+const BOLGELER = [
+  // Marmara
+  "İstanbul","Tekirdağ","Edirne","Kırklareli","Çanakkale",
+  "Bursa","Balıkesir","Kocaeli","Sakarya","Bolu","Yalova","Bilecik","Düzce",
+  // Ege
+  "İzmir","Manisa","Aydın","Denizli","Muğla","Uşak","Afyonkarahisar","Kütahya",
+  // İç Anadolu
+  "Ankara","Konya","Eskişehir","Kayseri","Sivas","Yozgat",
+  "Aksaray","Nevşehir","Niğde","Kırşehir","Kırıkkale","Çankırı","Karaman",
+  // Akdeniz
+  "Antalya","İsparta","Burdur","Mersin","Adana","Hatay","Kahramanmaraş","Osmaniye",
+];
 const PROJELER = ["TT - Türk Telekom","TC - Türkcell","VF - Vodafone"];
 
 const MASRAF_KATEGORILER = [

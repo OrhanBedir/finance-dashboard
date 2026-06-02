@@ -10462,11 +10462,19 @@ app.post("/hr/masraf-form", async (req, res) => {
 
     // Mobil all-in-one: kalemler dizisi varsa hepsini kaydet
     if (Array.isArray(kalemler) && kalemler.length > 0) {
+      const KAT_NORM = {
+        "Yemek":"YEMEK","yemek":"YEMEK","Yakıt":"YAKIT","yakıt":"YAKIT","Yakit":"YAKIT",
+        "Konaklama":"KONAKLAMA","konaklama":"KONAKLAMA",
+        "Yol & Ulaşım":"ULASIM","Ulaşım":"ULASIM","Yol":"ULASIM",
+        "Malzeme":"MALZEME","malzeme":"MALZEME","Köprü":"KOPRU",
+        "Diğer":"DIGER","diğer":"DIGER","Diger":"DIGER",
+      };
       for (const k of kalemler) {
+        const katNorm = KAT_NORM[k.kategori] || k.kategori || "DIGER";
         await pool.query(
           `INSERT INTO masraf_kalem (form_id,kategori,tarih,aciklama,tutar,fis_var)
            VALUES ($1,$2,$3,$4,$5,$6)`,
-          [form.id, k.kategori||"Diğer", k.tarih||now.toISOString().split("T")[0],
+          [form.id, katNorm, k.tarih||now.toISOString().split("T")[0],
            k.aciklama||"", Number(k.tutar)||0, k.fis_var!==false]
         );
       }
@@ -10487,7 +10495,16 @@ app.delete("/hr/masraf-form/:id", async (req, res) => {
 // POST add kalem
 app.post("/hr/masraf-kalem", async (req, res) => {
   try {
-    const { form_id, kategori, tarih, belge_no, belge_aciklama, aciklama, tutar, fis_var, fis_olmadan_aciklama, plaka, ceza_personel_id } = req.body;
+    const { form_id, tarih, belge_no, belge_aciklama, aciklama, tutar, fis_var, fis_olmadan_aciklama, plaka, ceza_personel_id } = req.body;
+    // Mobil Türkçe kategori adlarını büyük harfe normalize et
+    const KAT_NORMALIZE = {
+      "Yemek":"YEMEK","yemek":"YEMEK","Yakıt":"YAKIT","yakıt":"YAKIT","Yakit":"YAKIT",
+      "Konaklama":"KONAKLAMA","konaklama":"KONAKLAMA",
+      "Yol & Ulaşım":"ULASIM","Ulaşım":"ULASIM","Yol":"ULASIM","ulasim":"ULASIM",
+      "Malzeme":"MALZEME","malzeme":"MALZEME","Köprü":"KOPRU","Köprü/Otoyol":"KOPRU",
+      "Diğer":"DIGER","diğer":"DIGER","Diger":"DIGER",
+    };
+    const kategori = KAT_NORMALIZE[req.body.kategori] || req.body.kategori;
     const { rows } = await pool.query(
       `INSERT INTO masraf_kalem (form_id,kategori,tarih,belge_no,belge_aciklama,aciklama,tutar,fis_var,fis_olmadan_aciklama,plaka,ceza_personel_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
@@ -10618,14 +10635,33 @@ app.get("/hr/trafik-ceza", authMiddleware, async (req, res) => {
   try {
     const { personel_id } = req.query;
     if (!personel_id) return res.status(400).json({ error: "personel_id gerekli" });
+
+    // 1) Direktör onaylı cezalar (avans tablosundan)
     const r = await pool.query(
-      `SELECT id, tutar, aciklama, tarih, odendi FROM avans
+      `SELECT id, tutar, aciklama, tarih, odendi, null as masraf_form_id, null as form_durum, 'ONAYLANDI' as kaynak
+       FROM avans
        WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND odendi=false
        ORDER BY tarih DESC`,
       [personel_id]
     );
-    const toplam = r.rows.reduce((s,x) => s + Number(x.tutar||0), 0);
-    res.json({ list: r.rows, toplam });
+
+    // 2) Henüz onaylanmamış bekleyen cezalar (masraf_kalem'den)
+    const pending = await pool.query(
+      `SELECT mk.id, mk.tutar, mk.aciklama, mk.tarih, false as odendi,
+              mf.id as masraf_form_id, mf.durum as form_durum, 'BEKLEMEDE' as kaynak,
+              mk.plaka
+       FROM masraf_kalem mk
+       JOIN masraf_form mf ON mf.id = mk.form_id
+       WHERE mk.ceza_personel_id=$1
+         AND mk.kategori='TRAFIK_CEZA'
+         AND mf.durum NOT IN ('TAMAMLANDI','REDDEDILDI')
+       ORDER BY mk.tarih DESC`,
+      [personel_id]
+    );
+
+    const list = [...r.rows, ...pending.rows];
+    const toplam = list.reduce((s,x) => s + Number(x.tutar||0), 0);
+    res.json({ list, toplam });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -10902,7 +10938,21 @@ app.get("/hr/masraf-form/:id/excel", async (req, res) => {
     if (!formRes.rows[0]) return res.status(404).json({ error: "Bulunamadı" });
     const form = formRes.rows[0];
     const kalemler = await pool.query("SELECT * FROM masraf_kalem WHERE form_id=$1 ORDER BY tarih,id", [form.id]);
-    const rows = kalemler.rows;
+
+    // Mobil'den gelen Türkçe kategori adlarını Excel key'lerine normalize et
+    const MOBIL_KAT_MAP = {
+      "Yemek": "YEMEK", "yemek": "YEMEK",
+      "Yakıt": "YAKIT", "yakıt": "YAKIT", "Yakit": "YAKIT",
+      "Konaklama": "KONAKLAMA", "konaklama": "KONAKLAMA",
+      "Yol & Ulaşım": "ULASIM", "Ulaşım": "ULASIM", "Yol": "ULASIM",
+      "Malzeme": "MALZEME", "malzeme": "MALZEME",
+      "Köprü": "KOPRU", "Köprü/Otoyol": "KOPRU",
+      "Diğer": "DIGER", "diğer": "DIGER", "Diger": "DIGER",
+    };
+    const rows = kalemler.rows.map(r => ({
+      ...r,
+      kategori: MOBIL_KAT_MAP[r.kategori] || r.kategori,
+    }));
 
     const KATS = [
       { key: "YEMEK", label: "YİYECEK VE İÇECEK GİDERLERİ", aciklamaLabel: "AÇIKLAMA (PROJE VEYA İŞ ADI)" },
