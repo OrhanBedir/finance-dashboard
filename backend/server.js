@@ -10536,36 +10536,37 @@ app.put("/hr/masraf-kalem/:id", async (req, res) => {
 });
 
 // PUT ceza_personel_id güncelle (Trafik Ceza kalemi için)
-// Eğer form zaten TAMAMLANDI/ARŞİVLENDİ ise avans kaydı da otomatik oluşturulur
+// ceza_personel_id = personel id    → o personele yaz, avans kaydı oluştur
+// ceza_personel_id = "sirket"       → şirket gideri, ceza_sirket=true, avans yok
+// ceza_personel_id = "" / null      → atanmadı
 app.put("/hr/masraf-kalem/:id/ceza-personel", async (req, res) => {
   try {
     const { ceza_personel_id } = req.body;
     const kalemId = req.params.id;
+    const isSirket = ceza_personel_id === "sirket";
 
-    // Önceki ceza_personel_id ile oluşmuş avansı sil (değişti ise)
+    // Önceki atama varsa oluşmuş avansı temizle
     const oldKalem = await pool.query("SELECT * FROM masraf_kalem WHERE id=$1", [kalemId]);
     const old = oldKalem.rows[0];
-    if (old?.ceza_personel_id && old.ceza_personel_id !== Number(ceza_personel_id)) {
-      // Eski avansı iptal et
+    if (old?.ceza_personel_id) {
       await pool.query(
         `DELETE FROM avans WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND aciklama LIKE $2`,
         [old.ceza_personel_id, `%Masraf #%`]
       );
     }
 
-    // Güncelle
+    // Güncelle — sirket ise personel_id null, ceza_sirket=true
     const { rows } = await pool.query(
-      "UPDATE masraf_kalem SET ceza_personel_id=$1 WHERE id=$2 RETURNING *",
-      [ceza_personel_id || null, kalemId]
+      "UPDATE masraf_kalem SET ceza_personel_id=$1, ceza_sirket=$2 WHERE id=$3 RETURNING *",
+      [isSirket ? null : (ceza_personel_id || null), isSirket, kalemId]
     );
     const kalem = rows[0];
 
-    // Form durumunu kontrol et: TAMAMLANDI veya ARŞİVLENDİ ise avans oluştur
-    if (ceza_personel_id && kalem) {
+    // Gerçek personel seçildiyse avans oluştur (form onaylıysa)
+    if (!isSirket && ceza_personel_id && kalem) {
       const formRes = await pool.query("SELECT durum, id FROM masraf_form WHERE id=$1", [kalem.form_id]);
       const form = formRes.rows[0];
       if (form && ['TAMAMLANDI','ARSIVLENDI'].includes(form.durum)) {
-        // Duplicate önle: aynı kalem için avans zaten var mı?
         const dupChk = await pool.query(
           `SELECT id FROM avans WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND aciklama LIKE $2`,
           [ceza_personel_id, `%Masraf #${form.id}%`]
@@ -12333,6 +12334,7 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_personel_id INTEGER",
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_belge_url TEXT",
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS odeme_belge_url TEXT",
+  "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_sirket BOOLEAN DEFAULT FALSE",
   `CREATE TABLE IF NOT EXISTS malzeme_fiyat_gecmisi (
   id SERIAL PRIMARY KEY,
   malzeme_adi TEXT NOT NULL,

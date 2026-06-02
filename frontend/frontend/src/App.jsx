@@ -10372,18 +10372,21 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                           <span style={{ fontSize:"10px", fontWeight:700, color:"#ea580c" }}>🚔 Ceza kime:</span>
                           {canEditCeza ? (
                             <select
-                              defaultValue={k.ceza_personel_id||""}
+                              defaultValue={k.ceza_sirket ? "sirket" : (k.ceza_personel_id||"")}
                               onChange={e => handleCezaPersonelAta(k.id, e.target.value)}
                               style={{ fontSize:"11px", padding:"2px 6px", borderRadius:"6px", border:"1px solid #ea580c", background:"#fff7ed", color:"#9a3412", cursor:"pointer" }}
                             >
                               <option value="">— Atanmadı —</option>
+                              <option value="sirket">🏢 ŞİMŞEK (Şirket)</option>
                               {personelList.filter(p=>p.aktif).map(p=>(
                                 <option key={p.id} value={p.id}>{p.ad_soyad}</option>
                               ))}
                             </select>
                           ) : (
                             <span style={{ fontSize:"11px", color:"#9a3412", fontWeight:600 }}>
-                              {personelList.find(p=>String(p.id)===String(k.ceza_personel_id))?.ad_soyad || "Atanmadı"}
+                              {k.ceza_sirket
+                                ? "🏢 ŞİMŞEK (Şirket)"
+                                : (personelList.find(p=>String(p.id)===String(k.ceza_personel_id))?.ad_soyad || "Atanmadı")}
                             </span>
                           )}
                         </div>
