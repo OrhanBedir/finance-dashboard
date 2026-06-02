@@ -12484,9 +12484,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     }));
   };
 
-  const handleExportRegionExcel = () => {
+  const handleExportRegionExcel = async () => {
     try {
-      // Analiz değerini hesapla (tabloda görünen mantıkla aynı)
+      const dateStr = new Date().toLocaleDateString("tr-TR");
+      const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
+
       const getAnaliz = (row) => {
         if (row.status === "PO_BEKLER") return "Eksik";
         if (Number(row.done_qty || 0) === 0) return "Giriş Yok";
@@ -12495,39 +12497,153 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         return "Eksik";
       };
 
-      // sortedRows zaten filtreli — filtreyi yansıtır
-      const data = sortedRows.map((row) => ({
-        "Bölge":           getRegion(row.site_code, row.project_code),
-        "Status":          row.status || "",
-        "Analiz":          getAnaliz(row),
-        "Project":         row.project_code || "",
-        "Site Code":       row.site_code || "",
-        "Item Description": row.item_description || "",
-        "Item Code":       row.item_code || "",
-        "OnAir Date":      row.onair_date || "",
-        "Done Qty":        Number(row.done_qty || 0),
-        "Requested Qty":   Number(row.requested_qty || 0),
-        "Billed Qty":      Number(row.billed_qty || 0),
-        "Currency":        row.currency || "",
-        "Unit Price":      Number(row.unit_price || 0),
-        "Şimşek Toplam Hakedis": Number(row.total_done_amount || 0),
-        "Taşeron":         row.subcon_name || "",
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(data);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Region Analysis");
-
-      // Sütun genişlikleri
-      ws["!cols"] = [
-        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 22 },
-        { wch: 45 }, { wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 14 },
-        { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 20 }, { wch: 18 },
+      const headers = [
+        "Bölge", "Status", "Analiz", "Project Code", "Site Code",
+        "Item Description", "Item Code", "OnAir Date",
+        "Done Qty", "Requested Qty", "Billed Qty",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Taşeron",
       ];
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 14, 16, 14, 18, 20, 18];
+      const NCOLS = headers.length;
 
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const searchSuffix = regionSearch.trim() ? `-${regionSearch.trim().replace(/[^a-zA-Z0-9_]/g,"_")}` : "";
-      XLSX.writeFile(wb, `region_analysis_${dateStr}${searchSuffix}.xlsx`);
+      const titleStyle = {
+        fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
+        font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        alignment: { horizontal: "center", vertical: "center" },
+      };
+      const headerStyle = {
+        fill: { patternType: "solid", fgColor: { rgb: "203864" } },
+        font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        border: {
+          top: { style: "thin", color: { rgb: "B7C9E2" } },
+          bottom: { style: "thin", color: { rgb: "B7C9E2" } },
+          left: { style: "thin", color: { rgb: "B7C9E2" } },
+          right: { style: "thin", color: { rgb: "B7C9E2" } },
+        },
+      };
+      const cellBorder = {
+        top: { style: "hair", color: { rgb: "E5E7EB" } },
+        bottom: { style: "hair", color: { rgb: "E5E7EB" } },
+        left: { style: "hair", color: { rgb: "E5E7EB" } },
+        right: { style: "hair", color: { rgb: "E5E7EB" } },
+      };
+      const cellStyle = (isEven, isNum) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "F8FAFC" : "FFFFFF" } },
+        font: { sz: 11, name: "Calibri", color: { rgb: "111827" } },
+        alignment: { horizontal: isNum ? "right" : "left", vertical: "middle" },
+        border: cellBorder,
+      });
+      const federalStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const statusStyle = (status, isEven) => {
+        const base = cellStyle(isEven, false);
+        const s = String(status || "").toUpperCase();
+        const colors = { OK: "15803D", PO_BEKLER: "D97706", CANCEL: "B91C1C", PARTIAL: "2563EB" };
+        if (colors[s]) return { ...base, font: { ...base.font, bold: true, color: { rgb: colors[s] } } };
+        return base;
+      };
+
+      const aoa = [];
+
+      const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
+      titleRow[0] = { v: `BÖLGE ANALİZİ${searchSuffix} (${dateStr})`, s: titleStyle };
+      aoa.push(titleRow);
+
+      aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
+
+      sortedRows.forEach((row, idx) => {
+        const isEven = idx % 2 === 1;
+        const isUSD = normalizeCurrency(row.currency) === "USD";
+        const unitPrice = Number(row.unit_price || 0);
+        const doneQty = Number(row.done_qty || 0);
+        const usdBirimFiyat = isUSD ? unitPrice : 0;
+        const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
+        const toplamHakedis = Number(row.total_done_amount || 0);
+        const federalHakedis = toplamHakedis * 0.80;
+
+        aoa.push([
+          { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
+          { v: row.status || "",                                  s: statusStyle(row.status, isEven) },
+          { v: getAnaliz(row),                                    s: cellStyle(isEven, false) },
+          { v: row.project_code || "",                            s: cellStyle(isEven, false) },
+          { v: row.site_code || "",                               s: cellStyle(isEven, false) },
+          { v: row.item_description || "",                        s: cellStyle(isEven, false) },
+          { v: row.item_code || "",                               s: cellStyle(isEven, false) },
+          { v: row.onair_date || "",                              s: cellStyle(isEven, false) },
+          { v: doneQty,                                           s: cellStyle(isEven, true) },
+          { v: Number(row.requested_qty || 0),                    s: cellStyle(isEven, true) },
+          { v: Number(row.billed_qty || 0),                       s: cellStyle(isEven, true) },
+          { v: row.currency || "",                                s: cellStyle(isEven, false) },
+          { v: usdBirimFiyat,                                     s: cellStyle(isEven, true) },
+          { v: usdToplamFiyat,                                    s: cellStyle(isEven, true) },
+          { v: unitPrice,                                         s: cellStyle(isEven, true) },
+          { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
+          { v: federalHakedis,                                    s: federalStyle(isEven) },
+          { v: row.subcon_name || "",                             s: cellStyle(isEven, false) },
+        ]);
+      });
+
+      const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
+
+      aoa.forEach((row, ri) => {
+        row.forEach((cell, ci) => {
+          const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
+          if (!ws[addr]) ws[addr] = { v: cell.v };
+          ws[addr].s = cell.s;
+        });
+      });
+
+      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
+      ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
+      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...sortedRows.map(() => ({ hpt: 20 }))];
+
+      const wb = XLSXStyle.utils.book_new();
+      XLSXStyle.utils.book_append_sheet(wb, ws, "Bölge Analizi");
+
+      const dateFile = new Date().toISOString().slice(0, 10);
+      const searchSuffixFile = regionSearch.trim()
+        ? `-${regionSearch.trim().replace(/[^a-zA-Z0-9_]/g, "_")}`
+        : "";
+      const fileName = `bolge_analizi_${dateFile}${searchSuffixFile}.xlsx`;
+
+      const lastColLetter = String.fromCharCode(64 + NCOLS);
+      const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
+
+      const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
+      const zip = await JSZip.loadAsync(buf);
+      let xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
+
+      xml = xml
+        .replace(
+          '<sheetView workbookViewId="0"/>',
+          `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`,
+        )
+        .replace(
+          '<sheetView tabSelected="1" workbookViewId="0"/>',
+          `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`,
+        );
+
+      if (!xml.includes("<autoFilter")) {
+        xml = xml.replace(
+          "</worksheet>",
+          `<autoFilter ref="A2:${lastColLetter}2"/></worksheet>`,
+        );
+      }
+
+      zip.file("xl/worksheets/sheet1.xml", xml);
+      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error("REGION ANALYSIS EXCEL ERROR:", err);
       alert(`Excel indirilemedi:\n${err.message}`);
