@@ -11486,6 +11486,27 @@ app.get("/malzeme/fiyat-listesi", authMiddleware, async (req, res) => {
 });
 
 // POST /malzeme/fiyat-listesi
+// POST /malzeme/fiyat-listesi/bulk — toplu malzeme ekle (tek seferlik import)
+app.post("/malzeme/fiyat-listesi/bulk", async (req, res) => {
+  try {
+    const { malzemeler } = req.body; // [{malzeme_adi, birim?, birim_fiyat?, kategori?}]
+    if (!Array.isArray(malzemeler)) return res.status(400).json({ error: "malzemeler array gerekli" });
+    // Önce tabloyu temizle
+    await pool.query("DELETE FROM malzeme_fiyat_listesi");
+    let eklendi = 0;
+    for (const m of malzemeler) {
+      if (!m.malzeme_adi?.trim()) continue;
+      await pool.query(
+        `INSERT INTO malzeme_fiyat_listesi (malzeme_adi, birim, birim_fiyat, kategori)
+         VALUES ($1,$2,$3,$4)`,
+        [m.malzeme_adi.trim(), m.birim || "Adet", m.birim_fiyat || 0, m.kategori || "Genel"]
+      );
+      eklendi++;
+    }
+    res.json({ ok: true, eklendi });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post("/malzeme/fiyat-listesi", authMiddleware, async (req, res) => {
   try {
     const { malzeme_adi, birim, birim_fiyat, kategori } = req.body;
