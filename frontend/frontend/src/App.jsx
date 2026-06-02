@@ -7765,6 +7765,8 @@ function HrDashboard({ onBack, currentUser }) {
   const [isgFirmaTip, setIsgFirmaTip] = useState("simsek"); // "simsek" | "taseron"
   const [isgMatris, setIsgMatris] = useState([]); // matris view için
   const [isgMatrisFiltre, setIsgMatrisFiltre] = useState("tumu"); // "tumu"|"doldu"|"yaklasan"|"gecerli"
+  const [isgMatrisPersonel, setIsgMatrisPersonel] = useState(""); // personel id filtresi
+  const [isgMatrisEgitim, setIsgMatrisEgitim] = useState(""); // eğitim türü filtresi
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
@@ -9518,16 +9520,24 @@ function HrDashboard({ onBack, currentUser }) {
 
           {/* ── ISG Eğitim Matris Tablosu ── */}
           {(() => {
-            const RFQ_KOLONLAR = [
-              { tur:"Sağlık Raporu",         kisa:"Sağlık" },
-              { tur:"HUAWEI 10 Mutlak Kural",kisa:"HW 10" },
-              { tur:"Temel İSG",             kisa:"Temel İSG" },
-              { tur:"ELEKTRİK İSG",          kisa:"Elektrik" },
-              { tur:"Yüksekte Çalışma",      kisa:"Yüksek" },
-              { tur:"Kurtarma Eğitimi",      kisa:"Kurtarma" },
-              { tur:"Güvenli Sürüş",         kisa:"Sürüş" },
-              { tur:"İlkyardım",             kisa:"İlkyardım" },
+            // Tüm takip edilen eğitim türleri (RFQ ana + ek belgeler)
+            const TUM_KOLONLAR = [
+              { tur:"Sağlık Raporu",              kisa:"Sağlık" },
+              { tur:"HUAWEI 10 Mutlak Kural",     kisa:"HW 10" },
+              { tur:"RF İSG Eğitimi",             kisa:"RF İSG" },
+              { tur:"Temel İSG",                  kisa:"Temel İSG" },
+              { tur:"ELEKTRİK İSG",               kisa:"Elektrik" },
+              { tur:"Yüksekte Çalışma",           kisa:"Yüksek" },
+              { tur:"Kurtarma Eğitimi",           kisa:"Kurtarma" },
+              { tur:"Güvenli Sürüş",              kisa:"Sürüş" },
+              { tur:"İlkyardım",                  kisa:"İlkyardım" },
+              { tur:"Mesleki Yeterlilik Belgesi", kisa:"Mes.Yet." },
+              { tur:"Araç Kullanma Taahhütnamesi",kisa:"Araç Taah." },
+              { tur:"Sağlık Taahhütnamesi",       kisa:"Sağlık Taah." },
+              { tur:"SGK Giriş Bildirgesi",       kisa:"SGK Bildir." },
+              { tur:"Ek 2 Belgesi",               kisa:"Ek 2" },
             ];
+
             const now = new Date();
             const soon30 = new Date(now.getTime() + 30*86400000);
 
@@ -9536,15 +9546,33 @@ function HrDashboard({ onBack, currentUser }) {
               if (!eg) return { durum:"YOK", kalan:null, eg:null };
               const bitis = new Date(eg.bitis_tarihi);
               const kalan = Math.round((bitis - now) / 86400000);
+              // Çok uzun geçerlilikliler (taahhüt vs) her zaman geçerli göster
               const durum = bitis < now ? "DOLDU" : bitis < soon30 ? "YAKLASAN" : "GECERLI";
               return { durum, kalan, eg };
             };
 
-            // Filtre uygula
+            const siraNo = d => d==="DOLDU"?0:d==="YAKLASAN"?1:d==="GECERLI"?2:3;
+
+            // Eğitim seçiliyse → sadece o eğitim için tek sütun + kişi listesi
+            const seciliEgitim = isgMatrisEgitim
+              ? TUM_KOLONLAR.find(k => k.tur === isgMatrisEgitim)
+              : null;
+
+            // Görüntülenecek kolonlar
+            const gorunenKolonlar = seciliEgitim ? [seciliEgitim] : TUM_KOLONLAR;
+
+            // Temel filtre: aktif personel
             let liste = isgMatris.filter(p => p.aktif);
+
+            // Personel filtresi
+            if (isgMatrisPersonel) {
+              liste = liste.filter(p => String(p.id) === isgMatrisPersonel);
+            }
+
+            // Durum filtresi — eğitim seçiliyse sadece o eğitim üzerinden filtrele
             if (isgMatrisFiltre !== "tumu") {
               liste = liste.filter(p => {
-                return RFQ_KOLONLAR.some(k => {
+                return gorunenKolonlar.some(k => {
                   const { durum } = egitimDurum(p.egitimler, k.tur);
                   if (isgMatrisFiltre === "doldu")    return durum === "DOLDU";
                   if (isgMatrisFiltre === "yaklasan") return durum === "YAKLASAN";
@@ -9553,68 +9581,148 @@ function HrDashboard({ onBack, currentUser }) {
                 });
               });
             }
-            // Sıralama: DOLDU → YAKLASAN → GECERLI → YOK
-            const siraNo = d => d==="DOLDU"?0:d==="YAKLASAN"?1:d==="GECERLI"?2:3;
+
+            // Eğitim seçiliyse o eğitime göre sırala, yoksa tüm eğitimlere göre
             liste = [...liste].sort((a, b) => {
-              const aMin = Math.min(...RFQ_KOLONLAR.map(k => siraNo(egitimDurum(a.egitimler, k.tur).durum)));
-              const bMin = Math.min(...RFQ_KOLONLAR.map(k => siraNo(egitimDurum(b.egitimler, k.tur).durum)));
+              const aMin = Math.min(...gorunenKolonlar.map(k => siraNo(egitimDurum(a.egitimler, k.tur).durum)));
+              const bMin = Math.min(...gorunenKolonlar.map(k => siraNo(egitimDurum(b.egitimler, k.tur).durum)));
               return aMin - bMin;
             });
 
-            const dolduSayisi   = isgMatris.filter(p=>p.aktif&&RFQ_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="DOLDU")).length;
-            const yakSayisi     = isgMatris.filter(p=>p.aktif&&RFQ_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="YAKLASAN")).length;
+            // Sayaçlar — tüm aktif personel üzerinden (filtreden bağımsız)
+            const tamListe = isgMatris.filter(p => p.aktif);
+            const dolduSayisi = tamListe.filter(p=>TUM_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="DOLDU")).length;
+            const yakSayisi   = tamListe.filter(p=>TUM_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="YAKLASAN")).length;
+
+            // Eğitim seçiliyse o eğitim için özet
+            let egitimOzetMesaj = null;
+            if (seciliEgitim) {
+              const doluSay    = tamListe.filter(p=>egitimDurum(p.egitimler,seciliEgitim.tur).durum==="DOLDU").length;
+              const yakSay     = tamListe.filter(p=>egitimDurum(p.egitimler,seciliEgitim.tur).durum==="YAKLASAN").length;
+              const gecerliSay = tamListe.filter(p=>egitimDurum(p.egitimler,seciliEgitim.tur).durum==="GECERLI").length;
+              const yokSay     = tamListe.filter(p=>egitimDurum(p.egitimler,seciliEgitim.tur).durum==="YOK").length;
+              egitimOzetMesaj = { doluSay, yakSay, gecerliSay, yokSay };
+            }
 
             return (
               <div style={{ marginTop:"24px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"12px", flexWrap:"wrap" }}>
-                  <h3 style={{ margin:0, fontSize:"16px", fontWeight:700 }}>📊 ISG Eğitim Takibi</h3>
-                  {/* Filtre butonları */}
-                  <div style={{ display:"flex", gap:"6px" }}>
-                    {[["tumu","Tümü","#6b7280"],["doldu",`🔴 Süresi Dolan (${dolduSayisi})`,"#991b1b"],["yaklasan",`🟡 Yaklaşan (${yakSayisi})`,"#92400e"],["gecerli","✅ Güncel","#166534"]].map(([val,lbl,color])=>(
-                      <button key={val} onClick={()=>setIsgMatrisFiltre(val)}
-                        style={{ padding:"5px 12px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:700,
-                          background: isgMatrisFiltre===val?"#1e3a5f":"#f3f4f6",
-                          color: isgMatrisFiltre===val?"#fff":color }}>
-                        {lbl}
+                {/* ── Başlık + Filtreler ── */}
+                <div style={{ background:"#fff", borderRadius:"14px", padding:"16px 20px", marginBottom:"12px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"14px" }}>
+                    <h3 style={{ margin:0, fontSize:"16px", fontWeight:700 }}>📊 ISG Eğitim Takibi</h3>
+                    <span style={{ fontSize:"12px", color:"#6b7280" }}>{liste.length} personel</span>
+                    {(isgMatrisPersonel || isgMatrisEgitim || isgMatrisFiltre!=="tumu") && (
+                      <button onClick={()=>{ setIsgMatrisPersonel(""); setIsgMatrisEgitim(""); setIsgMatrisFiltre("tumu"); }}
+                        style={{ marginLeft:"auto", fontSize:"11px", padding:"3px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", cursor:"pointer", fontWeight:600 }}>
+                        ✕ Filtreleri Temizle
                       </button>
-                    ))}
+                    )}
                   </div>
+                  <div style={{ display:"flex", gap:"10px", flexWrap:"wrap", alignItems:"flex-end" }}>
+                    {/* Personel filtresi */}
+                    <div>
+                      <div style={{ fontSize:"11px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>👤 Personel</div>
+                      <select value={isgMatrisPersonel} onChange={e=>setIsgMatrisPersonel(e.target.value)}
+                        style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", minWidth:"180px",
+                          background: isgMatrisPersonel?"#eff6ff":"#fff", borderColor: isgMatrisPersonel?"#3b82f6":"#e5e7eb" }}>
+                        <option value="">— Tüm Personel —</option>
+                        {isgMatris.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+                      </select>
+                    </div>
+                    {/* Eğitim türü filtresi */}
+                    <div>
+                      <div style={{ fontSize:"11px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>🎓 Eğitim Türü</div>
+                      <select value={isgMatrisEgitim} onChange={e=>setIsgMatrisEgitim(e.target.value)}
+                        style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", minWidth:"200px",
+                          background: isgMatrisEgitim?"#eff6ff":"#fff", borderColor: isgMatrisEgitim?"#3b82f6":"#e5e7eb" }}>
+                        <option value="">— Tüm Eğitimler —</option>
+                        {TUM_KOLONLAR.map(k=><option key={k.tur} value={k.tur}>{k.tur}</option>)}
+                      </select>
+                    </div>
+                    {/* Durum filtresi */}
+                    <div>
+                      <div style={{ fontSize:"11px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>📋 Durum</div>
+                      <div style={{ display:"flex", gap:"5px" }}>
+                        {[["tumu","Tümü","#6b7280"],["doldu",`🔴 Doldu (${dolduSayisi})`,"#991b1b"],["yaklasan",`🟡 Yaklaşan (${yakSayisi})`,"#92400e"],["gecerli","✅ Güncel","#166534"]].map(([val,lbl,color])=>(
+                          <button key={val} onClick={()=>setIsgMatrisFiltre(val)}
+                            style={{ padding:"6px 12px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:700,
+                              background: isgMatrisFiltre===val?"#1e3a5f":"#f3f4f6",
+                              color: isgMatrisFiltre===val?"#fff":color }}>
+                            {lbl}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Eğitim seçiliyse özet kartlar */}
+                  {egitimOzetMesaj && (
+                    <div style={{ display:"flex", gap:"10px", marginTop:"14px", flexWrap:"wrap" }}>
+                      {[
+                        { label:"🔴 Süresi Doldu",  val:egitimOzetMesaj.doluSay,    bg:"#fef2f2", clr:"#991b1b" },
+                        { label:"🟡 30 Gün İçinde", val:egitimOzetMesaj.yakSay,     bg:"#fffbeb", clr:"#92400e" },
+                        { label:"✅ Güncel",         val:egitimOzetMesaj.gecerliSay, bg:"#f0fdf4", clr:"#166534" },
+                        { label:"— Girilmemiş",     val:egitimOzetMesaj.yokSay,     bg:"#f9fafb", clr:"#6b7280" },
+                      ].map(c=>(
+                        <div key={c.label} style={{ background:c.bg, borderRadius:"10px", padding:"8px 16px", textAlign:"center", minWidth:90 }}>
+                          <div style={{ fontSize:"18px", fontWeight:800, color:c.clr }}>{c.val}</div>
+                          <div style={{ fontSize:"11px", fontWeight:600, color:c.clr }}>{c.label}</div>
+                        </div>
+                      ))}
+                      <div style={{ display:"flex", alignItems:"center", fontSize:"12px", color:"#6b7280", marginLeft:"4px" }}>
+                        toplam {tamListe.length} personel için
+                        <b style={{ marginLeft:4, color:"#1e3a5f" }}>{seciliEgitim.tur}</b>
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* ── Tablo ── */}
                 <div style={{ overflowX:"auto", borderRadius:"12px", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
                   <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px" }}>
                     <thead>
                       <tr style={{ background:"#1e3a5f" }}>
-                        <th style={{ padding:"10px 12px", textAlign:"left", color:"#fff", fontWeight:700, whiteSpace:"nowrap", minWidth:160 }}>Personel</th>
+                        <th style={{ padding:"10px 12px", textAlign:"left", color:"#fff", fontWeight:700, whiteSpace:"nowrap", minWidth:160, position:"sticky", left:0, zIndex:1, background:"#1e3a5f" }}>Personel</th>
                         <th style={{ padding:"10px 8px", color:"#fff", fontWeight:700, whiteSpace:"nowrap" }}>Ekip</th>
-                        {RFQ_KOLONLAR.map(k=>(
-                          <th key={k.tur} style={{ padding:"10px 8px", color:"#fff", fontWeight:700, whiteSpace:"nowrap", textAlign:"center", fontSize:"11px" }}>{k.kisa}</th>
+                        {gorunenKolonlar.map(k=>(
+                          <th key={k.tur} style={{ padding:"10px 8px", color:"#fff", fontWeight:700, whiteSpace:"nowrap", textAlign:"center", fontSize:"11px",
+                            background: isgMatrisEgitim===k.tur?"#2563eb":"#1e3a5f" }}>{k.kisa}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {liste.length === 0 && (
-                        <tr><td colSpan={2+RFQ_KOLONLAR.length} style={{ padding:"24px", textAlign:"center", color:"#9ca3af" }}>Kayıt yok</td></tr>
+                        <tr><td colSpan={2+gorunenKolonlar.length} style={{ padding:"24px", textAlign:"center", color:"#9ca3af" }}>Filtre sonucu boş</td></tr>
                       )}
                       {liste.map((p, pi) => (
                         <tr key={p.id} style={{ background: pi%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6" }}>
-                          <td style={{ padding:"8px 12px", fontWeight:600, whiteSpace:"nowrap" }}>
-                            {p.ad_soyad}
+                          <td style={{ padding:"8px 12px", fontWeight:600, whiteSpace:"nowrap", position:"sticky", left:0, background: pi%2===0?"#fff":"#f9fafb", zIndex:1 }}>
+                            <button onClick={()=>setIsgMatrisPersonel(isgMatrisPersonel===String(p.id)?"":String(p.id))}
+                              style={{ background:"none", border:"none", cursor:"pointer", fontWeight:600, fontSize:"12px", color:"#1f2937", padding:0, textAlign:"left" }}>
+                              {p.ad_soyad}
+                            </button>
                             <div style={{ fontSize:"11px", color:"#9ca3af", fontWeight:400 }}>{p.unvan}</div>
                           </td>
                           <td style={{ padding:"8px", textAlign:"center", color:"#6b7280", whiteSpace:"nowrap" }}>{p.ekip_bilgisi||"—"}</td>
-                          {RFQ_KOLONLAR.map(k => {
+                          {gorunenKolonlar.map(k => {
                             const { durum, kalan, eg } = egitimDurum(p.egitimler, k.tur);
-                            const bg   = durum==="DOLDU"?"#fef2f2":durum==="YAKLASAN"?"#fffbeb":durum==="GECERLI"?"#f0fdf4":"#f9fafb";
-                            const clr  = durum==="DOLDU"?"#991b1b":durum==="YAKLASAN"?"#92400e":durum==="GECERLI"?"#166534":"#d1d5db";
-                            const ico  = durum==="DOLDU"?"🔴":durum==="YAKLASAN"?"🟡":durum==="GECERLI"?"✅":"—";
+                            const bg  = durum==="DOLDU"?"#fef2f2":durum==="YAKLASAN"?"#fffbeb":durum==="GECERLI"?"#f0fdf4":"#f9fafb";
+                            const clr = durum==="DOLDU"?"#991b1b":durum==="YAKLASAN"?"#92400e":durum==="GECERLI"?"#166534":"#d1d5db";
+                            const ico = durum==="DOLDU"?"🔴":durum==="YAKLASAN"?"🟡":durum==="GECERLI"?"✅":"—";
                             return (
-                              <td key={k.tur} style={{ padding:"6px 8px", textAlign:"center", background:bg }}>
-                                {durum==="YOK" ? <span style={{ color:"#d1d5db", fontSize:"16px" }}>—</span> : (
-                                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"2px" }}>
-                                    <span style={{ fontSize:"14px" }}>{ico}</span>
+                              <td key={k.tur} style={{ padding:"6px 8px", textAlign:"center", background:bg,
+                                outline: isgMatrisEgitim===k.tur?"2px solid #3b82f6":"none", outlineOffset:"-2px" }}>
+                                {durum==="YOK" ? <span style={{ color:"#d1d5db", fontSize:"15px" }}>—</span> : (
+                                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"1px" }}>
+                                    <span style={{ fontSize:"13px" }}>{ico}</span>
                                     {kalan !== null && (
                                       <span style={{ fontSize:"10px", fontWeight:700, color:clr }}>
-                                        {kalan < 0 ? `${Math.abs(kalan)}g geçti` : `${kalan}g kaldı`}
+                                        {kalan < 0 ? `${Math.abs(kalan)}g geçti` : `${kalan}g`}
+                                      </span>
+                                    )}
+                                    {eg?.egitim_tarihi && (
+                                      <span style={{ fontSize:"9px", color:"#9ca3af" }}>
+                                        {eg.egitim_tarihi?.split("T")[0]?.slice(0,7)}
                                       </span>
                                     )}
                                     {eg?.belge_yolu && (
@@ -9630,7 +9738,7 @@ function HrDashboard({ onBack, currentUser }) {
                     </tbody>
                   </table>
                 </div>
-                {dolduSayisi===0 && yakSayisi===0 && (
+                {dolduSayisi===0 && yakSayisi===0 && !isgMatrisPersonel && !isgMatrisEgitim && (
                   <div style={{ marginTop:"12px", ...secSt, textAlign:"center", color:"#166534", background:"#f0fdf4", padding:"14px" }}>
                     ✅ Tüm ISG eğitimleri güncel, sorun yok.
                   </div>

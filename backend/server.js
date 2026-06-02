@@ -8751,6 +8751,13 @@ const ISG_EGITIM_TURLERI = [
   { tur: "Kurtarma Eğitimi",          gecerlilik_yil: 2, rfq_kolon: "kurtarma" },
   { tur: "Güvenli Sürüş",             gecerlilik_yil: 2, rfq_kolon: "guvensurus", kosullu: true },
   { tur: "İlkyardım",                  gecerlilik_yil: 3, rfq_kolon: "ilkyardim" },
+  // ── Huawei / saha özel ──
+  { tur: "RF İSG Eğitimi",             gecerlilik_yil: 1, rfq_kolon: "rf_isg" },
+  { tur: "Mesleki Yeterlilik Belgesi", gecerlilik_yil: 5 },
+  { tur: "Araç Kullanma Taahhütnamesi",gecerlilik_yil: 99 },
+  { tur: "Sağlık Taahhütnamesi",       gecerlilik_yil: 1 },
+  { tur: "SGK Giriş Bildirgesi",       gecerlilik_yil: 99 },
+  { tur: "Ek 2 Belgesi",               gecerlilik_yil: 99 },
   // ── Ek eğitimler ──
   { tur: "Temel İSG Eğitimi",          gecerlilik_yil: 2 },
   { tur: "İlk Yardım Eğitimi",         gecerlilik_yil: 3 },
