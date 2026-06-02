@@ -10467,6 +10467,7 @@ app.post("/hr/masraf-form", async (req, res) => {
         "Konaklama":"KONAKLAMA","konaklama":"KONAKLAMA",
         "Yol & Ulaşım":"ULASIM","Ulaşım":"ULASIM","Yol":"ULASIM",
         "Malzeme":"MALZEME","malzeme":"MALZEME","Köprü":"KOPRU",
+        "Trafik Cezaşı":"TRAFIK_CEZA","trafik cezaşı":"TRAFIK_CEZA",
         "Diğer":"DIGER","diğer":"DIGER","Diger":"DIGER",
       };
       for (const k of kalemler) {
@@ -10502,6 +10503,7 @@ app.post("/hr/masraf-kalem", async (req, res) => {
       "Konaklama":"KONAKLAMA","konaklama":"KONAKLAMA",
       "Yol & Ulaşım":"ULASIM","Ulaşım":"ULASIM","Yol":"ULASIM","ulasim":"ULASIM",
       "Malzeme":"MALZEME","malzeme":"MALZEME","Köprü":"KOPRU","Köprü/Otoyol":"KOPRU",
+      "Trafik Cezası":"TRAFIK_CEZA","trafik cezası":"TRAFIK_CEZA","Trafik Cezasi":"TRAFIK_CEZA",
       "Diğer":"DIGER","diğer":"DIGER","Diger":"DIGER",
     };
     const kategori = KAT_NORMALIZE[req.body.kategori] || req.body.kategori;
@@ -10947,6 +10949,7 @@ app.get("/hr/masraf-form/:id/excel", async (req, res) => {
       "Yol & Ulaşım": "ULASIM", "Ulaşım": "ULASIM", "Yol": "ULASIM",
       "Malzeme": "MALZEME", "malzeme": "MALZEME",
       "Köprü": "KOPRU", "Köprü/Otoyol": "KOPRU",
+      "Trafik Cezası": "TRAFIK_CEZA", "trafik cezası": "TRAFIK_CEZA", "Trafik Cezasi": "TRAFIK_CEZA",
       "Diğer": "DIGER", "diğer": "DIGER", "Diger": "DIGER",
     };
     const rows = kalemler.rows.map(r => ({
@@ -10955,13 +10958,14 @@ app.get("/hr/masraf-form/:id/excel", async (req, res) => {
     }));
 
     const KATS = [
-      { key: "YEMEK", label: "YİYECEK VE İÇECEK GİDERLERİ", aciklamaLabel: "AÇIKLAMA (PROJE VEYA İŞ ADI)" },
-      { key: "YAKIT", label: "ARAÇ YAKIT VE BAKIM GİDERLERİ", aciklamaLabel: "AÇIKLAMA (ARAÇ PLAKA NO)" },
-      { key: "KONAKLAMA", label: "KONAKLAMA GİDERLERİ", aciklamaLabel: "AÇIKLAMA (KAÇ GECE, KİŞİ SAYISI)" },
-      { key: "ULASIM", label: "ULAŞIM GİDERLERİ", aciklamaLabel: "AÇIKLAMA (BİNİŞ SAATİ, GÜZERGAH)" },
-      { key: "KOPRU", label: "KÖPRÜ / OTOYOL GEÇİŞ GİDERLERİ", aciklamaLabel: "AÇIKLAMA (GEÇİŞ DETAYI)" },
-      { key: "MALZEME", label: "MALZEME GİDERLERİ", aciklamaLabel: "AÇIKLAMA (MALZEME DETAYI)" },
-      { key: "DIGER", label: "DİĞER GİDERLER", aciklamaLabel: "AÇIKLAMA (İŞİN DETAYI)" },
+      { key: "YEMEK",       label: "YİYECEK VE İÇECEK GİDERLERİ",      aciklamaLabel: "AÇIKLAMA (PROJE VEYA İŞ ADI)" },
+      { key: "YAKIT",       label: "ARAÇ YAKIT VE BAKIM GİDERLERİ",     aciklamaLabel: "AÇIKLAMA (ARAÇ PLAKA NO)" },
+      { key: "KONAKLAMA",   label: "KONAKLAMA GİDERLERİ",               aciklamaLabel: "AÇIKLAMA (KAÇ GECE, KİŞİ SAYISI)" },
+      { key: "ULASIM",      label: "ULAŞIM GİDERLERİ",                  aciklamaLabel: "AÇIKLAMA (BİNİŞ SAATİ, GÜZERGAH)" },
+      { key: "KOPRU",       label: "KÖPRÜ / OTOYOL GEÇİŞ GİDERLERİ",   aciklamaLabel: "AÇIKLAMA (GEÇİŞ DETAYI)" },
+      { key: "MALZEME",     label: "MALZEME GİDERLERİ",                 aciklamaLabel: "AÇIKLAMA (MALZEME DETAYI)" },
+      { key: "TRAFIK_CEZA", label: "TRAFİK CEZASI GİDERLERİ",          aciklamaLabel: "AÇIKLAMA (PLAKA / CEZA DETAYI)" },
+      { key: "DIGER",       label: "DİĞER GİDERLER",                    aciklamaLabel: "AÇIKLAMA (İŞİN DETAYI)" },
     ];
 
     const ExcelJS = require("exceljs");
