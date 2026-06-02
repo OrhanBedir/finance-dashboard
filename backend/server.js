@@ -11486,26 +11486,6 @@ app.get("/malzeme/fiyat-listesi", authMiddleware, async (req, res) => {
 });
 
 // POST /malzeme/fiyat-listesi
-// POST /malzeme/fiyat-listesi/bulk — toplu malzeme ekle (tek seferlik import)
-app.post("/malzeme/fiyat-listesi/bulk", async (req, res) => {
-  try {
-    const { malzemeler } = req.body; // [{malzeme_adi, birim?, birim_fiyat?, kategori?}]
-    if (!Array.isArray(malzemeler)) return res.status(400).json({ error: "malzemeler array gerekli" });
-    // Önce tabloyu temizle
-    await pool.query("DELETE FROM malzeme_fiyat_listesi");
-    let eklendi = 0;
-    for (const m of malzemeler) {
-      if (!m.malzeme_adi?.trim()) continue;
-      await pool.query(
-        `INSERT INTO malzeme_fiyat_listesi (malzeme_adi, birim, birim_fiyat, kategori)
-         VALUES ($1,$2,$3,$4)`,
-        [m.malzeme_adi.trim(), m.birim || "Adet", m.birim_fiyat || 0, m.kategori || "Genel"]
-      );
-      eklendi++;
-    }
-    res.json({ ok: true, eklendi });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 
 app.post("/malzeme/fiyat-listesi", authMiddleware, async (req, res) => {
   try {
@@ -11718,15 +11698,6 @@ app.delete("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// DELETE /malzeme/talepler-tumu — TÜM malzeme taleplerini sil (tek seferlik temizlik)
-app.delete("/malzeme/talepler-tumu", async (req, res) => {
-  try {
-    const sayim = await pool.query("SELECT COUNT(*) as sayi FROM malzeme_talepler");
-    await pool.query("DELETE FROM malzeme_talep_kalemleri");
-    await pool.query("DELETE FROM malzeme_talepler");
-    res.json({ ok: true, silinen: Number(sayim.rows[0].sayi) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 
 // GET /malzeme/bekleyen-count (rol bazlı bildirim sayısı)
 app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
