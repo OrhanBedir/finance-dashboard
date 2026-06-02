@@ -10007,11 +10007,54 @@ app.get("/hr/is-avans", async (req, res) => {
 
 app.post("/hr/is-avans", async (req, res) => {
   try {
-    const { personel_id, talep_eden_email, talep_eden_ad, tutar, aciklama, not_aciklama, tarih, gider_turu, bolge, proje } = req.body;
+    const {
+      personel_id,
+      talep_eden_email,
+      talep_eden_ad, talep_eden,          // mobil "talep_eden" gönderebilir
+      tutar,
+      aciklama,
+      not_aciklama,
+      tarih,
+      gider_turu,
+      bolge,
+      proje, proje_kodu,                  // mobil "proje_kodu" gönderebilir
+      banka_adi,
+      iban,
+    } = req.body;
+
+    const adFinal    = talep_eden_ad || talep_eden || "";
+    const projeFinal = proje || proje_kodu || null;
+    const tarihFinal = tarih || new Date().toISOString().split("T")[0]; // bugün default
+
+    if (!adFinal)           return res.status(400).json({ error: "talep_eden_ad zorunlu" });
+    if (!talep_eden_email)  return res.status(400).json({ error: "talep_eden_email zorunlu" });
+    if (!tutar)             return res.status(400).json({ error: "tutar zorunlu" });
+
+    // banka_adi / iban kolonları yoksa ekle (ilk çalışmada oluşturulur)
+    await pool.query(`
+      ALTER TABLE is_avans_talep
+        ADD COLUMN IF NOT EXISTS banka_adi TEXT,
+        ADD COLUMN IF NOT EXISTS iban      TEXT
+    `).catch(() => {});
+
     const r = await pool.query(
-      `INSERT INTO is_avans_talep (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [personel_id || null, talep_eden_email, talep_eden_ad, tutar, aciklama, not_aciklama, tarih, gider_turu || null, bolge || null, proje || null]
+      `INSERT INTO is_avans_talep
+         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [
+        personel_id || null,
+        talep_eden_email,
+        adFinal,
+        tutar,
+        aciklama || null,
+        not_aciklama || null,
+        tarihFinal,
+        gider_turu || null,
+        bolge || null,
+        projeFinal,
+        banka_adi || null,
+        iban || null,
+      ]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
