@@ -10545,42 +10545,14 @@ app.put("/hr/masraf-kalem/:id/ceza-personel", async (req, res) => {
     const kalemId = req.params.id;
     const isSirket = ceza_personel_id === "sirket";
 
-    // Önceki atama varsa oluşmuş avansı temizle
-    const oldKalem = await pool.query("SELECT * FROM masraf_kalem WHERE id=$1", [kalemId]);
-    const old = oldKalem.rows[0];
-    if (old?.ceza_personel_id) {
-      await pool.query(
-        `DELETE FROM avans WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND aciklama LIKE $2`,
-        [old.ceza_personel_id, `%Masraf #%`]
-      );
-    }
-
     // Güncelle — sirket ise personel_id null, ceza_sirket=true
     const { rows } = await pool.query(
       "UPDATE masraf_kalem SET ceza_personel_id=$1, ceza_sirket=$2 WHERE id=$3 RETURNING *",
       [isSirket ? null : (ceza_personel_id || null), isSirket, kalemId]
     );
     const kalem = rows[0];
-
-    // Gerçek personel seçildiyse avans oluştur (form onaylıysa)
-    if (!isSirket && ceza_personel_id && kalem) {
-      const formRes = await pool.query("SELECT durum, id FROM masraf_form WHERE id=$1", [kalem.form_id]);
-      const form = formRes.rows[0];
-      if (form && ['TAMAMLANDI','ARSIVLENDI'].includes(form.durum)) {
-        const dupChk = await pool.query(
-          `SELECT id FROM avans WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND aciklama LIKE $2`,
-          [ceza_personel_id, `%Masraf #${form.id}%`]
-        );
-        if (dupChk.rowCount === 0) {
-          await pool.query(
-            `INSERT INTO avans (personel_id, tarih, tutar, aciklama, avans_turu, odendi)
-             VALUES ($1, NOW(), $2, $3, 'TRAFIK_CEZA', false)`,
-            [ceza_personel_id, kalem.tutar,
-             `Trafik Cezası - ${kalem.plaka || 'Plaka yok'} (Masraf #${form.id})`]
-          );
-        }
-      }
-    }
+    // Not: avans tablosu artık trafik ceza için kullanılmıyor,
+    // GET /hr/trafik-ceza masraf_kalem'den direkt okuyor.
 
     res.json(kalem);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -10686,36 +10658,28 @@ app.post("/hr/masraf-kalem/:id/odeme-belge", authMiddleware, masrafUpload.single
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /hr/trafik-ceza — kişiye ait ödenmemiş trafik ceza avansları
+// GET /hr/trafik-ceza — kişiye ait tüm trafik ceza kalemleri (masraf_kalem tablosundan, tüm durumlar)
 app.get("/hr/trafik-ceza", authMiddleware, async (req, res) => {
   try {
     const { personel_id } = req.query;
     if (!personel_id) return res.status(400).json({ error: "personel_id gerekli" });
 
-    // 1) Direktör onaylı cezalar (avans tablosundan)
+    // masraf_kalem tablosundan direkt oku — avans tablosuna bağımlılık yok
+    // REDDEDILDI formlar hariç hepsi göster
     const r = await pool.query(
-      `SELECT id, tutar, aciklama, tarih, odendi, null as masraf_form_id, null as form_durum, 'ONAYLANDI' as kaynak
-       FROM avans
-       WHERE personel_id=$1 AND avans_turu='TRAFIK_CEZA' AND odendi=false
-       ORDER BY tarih DESC`,
-      [personel_id]
-    );
-
-    // 2) Henüz onaylanmamış bekleyen cezalar (masraf_kalem'den)
-    const pending = await pool.query(
-      `SELECT mk.id, mk.tutar, mk.aciklama, mk.tarih, false as odendi,
-              mf.id as masraf_form_id, mf.durum as form_durum, 'BEKLEMEDE' as kaynak,
-              mk.plaka
+      `SELECT mk.id, mk.tutar, mk.aciklama, mk.tarih, mk.plaka,
+              mf.id as masraf_form_id, mf.durum as form_durum,
+              CASE WHEN mf.durum IN ('TAMAMLANDI','ARSIVLENDI') THEN 'ONAYLANDI' ELSE 'BEKLEMEDE' END as kaynak
        FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
        WHERE mk.ceza_personel_id=$1
          AND mk.kategori='TRAFIK_CEZA'
-         AND mf.durum NOT IN ('TAMAMLANDI','REDDEDILDI')
+         AND mf.durum NOT IN ('REDDEDILDI')
        ORDER BY mk.tarih DESC`,
       [personel_id]
     );
 
-    const list = [...r.rows, ...pending.rows];
+    const list = r.rows;
     const toplam = list.reduce((s,x) => s + Number(x.tutar||0), 0);
     res.json({ list, toplam });
   } catch(e) { res.status(500).json({ error: e.message }); }
