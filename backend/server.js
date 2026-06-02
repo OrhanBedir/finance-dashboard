@@ -10447,16 +10447,27 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const masrafToplamArsiv    = Number(bakiyeMasrafRes.rows[0].toplam);
     const avansKalan           = avansToplamOnaylanan - masrafToplamArsiv;
 
-    // 7. Bekleyen masraf toplam tutarı
+    // 7. Bekleyen masraf toplam tutarı (sadece onaya gönderilmiş formlar — TASLAK hariç)
+    const ONAY_DURUMLAR = ['PM_BEKLE','DIREKTOR_BEKLE'];
     const bekleyenMasrafTutar = masraflar
-      .filter(f => !['TAMAMLANDI','ODENDI','REDDEDILDI'].includes(f.durum))
+      .filter(f => ONAY_DURUMLAR.includes(f.durum))
       .reduce((s, f) => s + Number(f.toplam_tutar || 0), 0);
+
+    // 8. Taslak masraf toplam tutarı (ayrıca gönder)
+    const taslakMasrafTutar = masraflar
+      .filter(f => f.durum === 'TASLAK')
+      .reduce((s, f) => s + Number(f.toplam_tutar || 0), 0);
+    const taslakMasrafCount = masraflar.filter(f => f.durum === 'TASLAK').length;
+
+    // Bekleyen sayısını da sadece onaya gönderilmişlerle sınırla
+    const bekleyenMasrafCount = masraflar.filter(f => ONAY_DURUMLAR.includes(f.durum)).length;
 
     res.json({
       personel, personelBulundu: !!personelId, ay, yil,
       puantaj,
       avanslar, bekleyenAvans,
-      masraflar, bekleyenMasraf, bekleyenMasrafTutar,
+      masraflar, bekleyenMasraf: bekleyenMasrafCount, bekleyenMasrafTutar,
+      taslakMasrafTutar, taslakMasrafCount,
       cezalar, toplamCeza, cezaKalemler,
       avansKalan, avansToplamOnaylanan,
     });
