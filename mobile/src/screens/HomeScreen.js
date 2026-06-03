@@ -11,7 +11,7 @@ import {
   RefreshControl,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { apiGet } from "../api";
+import { apiGet, apiPut } from "../api";
 
 function fmtTL(val) {
   try {
@@ -50,14 +50,21 @@ function fmtDate(d) {
 const AYLAR = ["Ocak","Subat","Mart","Nisan","Mayis","Haziran","Temmuz","Agustos","Eylul","Ekim","Kasim","Aralik"];
 
 const DURUM_MAP = {
-  TASLAK:     { label: "Taslak",      bg: "#F3F4F6", fg: "#6B7280" },
-  PM_BEKLE:   { label: "PM Onayinda", bg: "#FEF3C7", fg: "#92400E" },
-  ONAYLANDI:  { label: "Onaylandi",   bg: "#D1FAE5", fg: "#065F46" },
-  REDDEDILDI: { label: "Reddedildi",  bg: "#FEE2E2", fg: "#991B1B" },
-  ODENDI:     { label: "Odendi",      bg: "#DBEAFE", fg: "#1E40AF" },
-  TAMAMLANDI: { label: "Tamamlandi",  bg: "#DBEAFE", fg: "#1E40AF" },
-  GONDERILDI: { label: "Gonderildi",  bg: "#FEF3C7", fg: "#92400E" },
-  BEKLEMEDE:  { label: "Beklemede",   bg: "#FEF3C7", fg: "#92400E" },
+  // Masraf form statüleri
+  TASLAK:          { label: "Taslak",              bg: "#F3F4F6", fg: "#6B7280" },
+  PM_BEKLE:        { label: "PM Onayinda",          bg: "#FEF3C7", fg: "#92400E" },
+  DIREKTOR_BEKLE:  { label: "Direktor Onayinda",    bg: "#FED7AA", fg: "#9A3412" },
+  ONAYLANDI:       { label: "Onaylandi",            bg: "#D1FAE5", fg: "#065F46" },
+  REDDEDILDI:      { label: "Reddedildi",           bg: "#FEE2E2", fg: "#991B1B" },
+  ODENDI:          { label: "Odendi",               bg: "#DBEAFE", fg: "#1E40AF" },
+  TAMAMLANDI:      { label: "Tamamlandi",           bg: "#DBEAFE", fg: "#1E40AF" },
+  GONDERILDI:      { label: "Gonderildi",           bg: "#FEF3C7", fg: "#92400E" },
+  BEKLEMEDE:       { label: "Beklemede",            bg: "#FEF3C7", fg: "#92400E" },
+  // Is Avansi talep statüleri
+  TALEP:           { label: "Talep Edildi",         bg: "#F3F4F6", fg: "#374151" },
+  PM_ONAY:         { label: "Direktor Onayinda",    bg: "#FED7AA", fg: "#92400E" },
+  DIREKTOR_ONAY:   { label: "Onaylandi · Odeme Bekler", bg: "#DCFCE7", fg: "#166534" },
+  MUHASEBE_ONAY:   { label: "Muhasebe Onayinda",   bg: "#FEF9C3", fg: "#713F12" },
 };
 
 function getBadge(durum) {
@@ -71,10 +78,16 @@ export default function HomeScreen({ user, onLogout, navigation }) {
   const [cezaKalemler, setCezaKalemler] = useState([]);
   const [avansKalan, setAvansKalan]     = useState(0);
   const [bekleyenMasrafTutar, setBekleyenMasrafTutar] = useState(0);
+  const [taslakMasrafTutar, setTaslakMasrafTutar]     = useState(0);
+  const [taslakMasrafCount, setTaslakMasrafCount]     = useState(0);
   const [personelUnvan, setPersonelUnvan] = useState("");
   const [ayYil, setAyYil]               = useState({ ay: 0, yil: 0 });
   const [loading, setLoading]           = useState(true);
   const [refreshing, setRefreshing]     = useState(false);
+  const [onayBekleyenAvanslar, setOnayBekleyenAvanslar] = useState([]);
+  const [isPM, setIsPM]                 = useState(false);
+  const [isDirektor, setIsDirektor]     = useState(false);
+  const [onayYukleniyor, setOnayYukleniyor] = useState(null); // id of item being processed
 
   const fetchData = async (isRefresh) => {
     try {
@@ -87,10 +100,15 @@ export default function HomeScreen({ user, onLogout, navigation }) {
         if (Array.isArray(data.masraflar))     setMasraflar(data.masraflar);
         if (data.puantaj)                      setPuantaj(data.puantaj);
         if (Array.isArray(data.cezaKalemler)) setCezaKalemler(data.cezaKalemler);
-        if (typeof data.avansKalan === "number")          setAvansKalan(data.avansKalan);
+        if (typeof data.avansKalan === "number")           setAvansKalan(data.avansKalan);
         if (typeof data.bekleyenMasrafTutar === "number") setBekleyenMasrafTutar(data.bekleyenMasrafTutar);
+        if (typeof data.taslakMasrafTutar === "number")   setTaslakMasrafTutar(data.taslakMasrafTutar);
+        if (typeof data.taslakMasrafCount === "number")   setTaslakMasrafCount(data.taslakMasrafCount);
         if (data.personel && data.personel.unvan)         setPersonelUnvan(data.personel.unvan);
         if (data.ay && data.yil) setAyYil({ ay: data.ay, yil: data.yil });
+        if (Array.isArray(data.onayBekleyenAvanslar)) setOnayBekleyenAvanslar(data.onayBekleyenAvanslar);
+        if (typeof data.isPM === "boolean")      setIsPM(data.isPM);
+        if (typeof data.isDirektor === "boolean") setIsDirektor(data.isDirektor);
       }
     } catch (_) {}
     setLoading(false);
@@ -114,6 +132,62 @@ export default function HomeScreen({ user, onLogout, navigation }) {
         },
       },
     ]);
+  };
+
+  // --- Onay / red işlemleri ---
+  const handleOnayla = (item) => {
+    Alert.alert(
+      "Avans Onayla",
+      `${item.talep_eden_ad || "Personel"} — ${fmtTL(item.tutar)}\n${item.proje || item.gider_turu || ""}`,
+      [
+        { text: "Iptal", style: "cancel" },
+        {
+          text: "Onayla",
+          onPress: async () => {
+            try {
+              setOnayYukleniyor(item.id);
+              const endpoint = isDirektor
+                ? `/hr/is-avans/${item.id}/direktor-onayla`
+                : `/hr/is-avans/${item.id}/onayla`;
+              await apiPut(endpoint, {});
+              await fetchData(false);
+            } catch (e) {
+              Alert.alert("Hata", e?.message || "Onay islemi basarisiz.");
+            } finally {
+              setOnayYukleniyor(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleReddet = (item) => {
+    Alert.alert(
+      "Avansi Reddet",
+      `${item.talep_eden_ad || "Personel"} — ${fmtTL(item.tutar)}\nReddetmek istediginizden emin misiniz?`,
+      [
+        { text: "Iptal", style: "cancel" },
+        {
+          text: "Reddet",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setOnayYukleniyor(item.id);
+              await apiPut(`/hr/is-avans/${item.id}/reddet`, {
+                red_aciklama: "Mobil uygulama uzerinden reddedildi.",
+                reddeden_email: user?.email || "",
+              });
+              await fetchData(false);
+            } catch (e) {
+              Alert.alert("Hata", e?.message || "Red islemi basarisiz.");
+            } finally {
+              setOnayYukleniyor(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const initial   = user && user.name ? String(user.name).charAt(0).toUpperCase() : "?";
@@ -172,13 +246,36 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           <Text style={styles.bigCardSub}>Sirketten alinan pesiN  henuz kapAtilmadi</Text>
         </View>
 
-        <View style={[styles.bigCard, styles.bigCardBlue]}>
-          <Text style={[styles.bigCardLabel, { color: "#1E40AF" }]}>ONAY BEKLEYEN MASRAF</Text>
-          <Text style={[styles.bigCardVal, { color: "#1D4ED8" }]}>{fmtTLDecimal(bekleyenMasrafTutar)}</Text>
-          <Text style={styles.bigCardSub}>
-            {masraflar.filter(m => { try { return !["TAMAMLANDI","ODENDI","REDDEDILDI"].includes(m.durum); } catch (_) { return false; } }).length} form muhasebe onayinda
-          </Text>
-        </View>
+        {/* Onay bekleyen masraf (gerçekten onaya gönderilmiş) */}
+        {bekleyenMasrafTutar > 0 && (
+          <View style={[styles.bigCard, styles.bigCardBlue]}>
+            <Text style={[styles.bigCardLabel, { color: "#1E40AF" }]}>ONAY BEKLEYen MASRAF</Text>
+            <Text style={[styles.bigCardVal, { color: "#1D4ED8" }]}>{fmtTLDecimal(bekleyenMasrafTutar)}</Text>
+            <Text style={styles.bigCardSub}>
+              {masraflar.filter(m => { try { return ["PM_BEKLE","DIREKTOR_BEKLE"].includes(m.durum); } catch (_) { return false; } }).length} form onay sürecinde
+            </Text>
+          </View>
+        )}
+
+        {/* Taslak masraf formu (onaya gönderilmemiş) */}
+        {taslakMasrafTutar > 0 && (
+          <View style={[styles.bigCard, { borderLeftColor: "#9CA3AF" }]}>
+            <Text style={[styles.bigCardLabel, { color: "#6B7280" }]}>TASLAK MASRAF FORMU</Text>
+            <Text style={[styles.bigCardVal, { color: "#374151" }]}>{fmtTLDecimal(taslakMasrafTutar)}</Text>
+            <Text style={styles.bigCardSub}>
+              {taslakMasrafCount} form taslakta — onaya gönderilmedi
+            </Text>
+          </View>
+        )}
+
+        {/* Hiç bekleyen/taslak masraf yoksa boş kart */}
+        {bekleyenMasrafTutar === 0 && taslakMasrafTutar === 0 && (
+          <View style={[styles.bigCard, styles.bigCardBlue]}>
+            <Text style={[styles.bigCardLabel, { color: "#1E40AF" }]}>MASRAF FORMU</Text>
+            <Text style={[styles.bigCardVal, { color: "#1D4ED8" }]}>₺0,00</Text>
+            <Text style={styles.bigCardSub}>Bekleyen masraf formu yok</Text>
+          </View>
+        )}
 
         {/* Puantaj Ozeti */}
         {puantaj && (
@@ -283,6 +380,61 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           </View>
         )}
 
+        {/* Onay Bekleyen Avans Talepleri (PM veya Direktor icin) */}
+        {(isPM || isDirektor) && (
+          <>
+            <View style={styles.onayHeader}>
+              <Text style={styles.onayTitle}>
+                {"⏳"} ONAY BEKLEYEN AVANS ({onayBekleyenAvanslar.length})
+              </Text>
+            </View>
+            {onayBekleyenAvanslar.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyTxt}>Onay bekleyen avans talebi yok.</Text>
+              </View>
+            ) : (
+              onayBekleyenAvanslar.map((a, idx) => {
+                const loading = onayYukleniyor === a.id;
+                return (
+                  <View key={a.id || idx} style={styles.onayCard}>
+                    <View style={styles.cardRow}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.onayCardName} numberOfLines={1}>
+                          {a.talep_eden_ad || "Personel"}
+                        </Text>
+                        <Text style={styles.onayCardSub} numberOfLines={1}>
+                          {[a.proje, a.gider_turu, a.bolge].filter(Boolean).join(" · ")}
+                        </Text>
+                        <Text style={styles.cardDate}>{fmtDate(a.tarih || a.created_at)}</Text>
+                      </View>
+                      <Text style={styles.onayCardAmt}>{fmtTL(a.tutar)}</Text>
+                    </View>
+                    <View style={styles.onayBtnRow}>
+                      <TouchableOpacity
+                        style={[styles.onayBtn, styles.onayBtnGreen, loading && { opacity: 0.5 }]}
+                        onPress={() => !loading && handleOnayla(a)}
+                        activeOpacity={0.8}
+                      >
+                        {loading
+                          ? <ActivityIndicator size="small" color="#fff" />
+                          : <Text style={styles.onayBtnTxt}>{"✓"} Onayla</Text>
+                        }
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.onayBtn, styles.onayBtnRed, loading && { opacity: 0.5 }]}
+                        onPress={() => !loading && handleReddet(a)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.onayBtnTxt}>{"✗"} Reddet</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </>
+        )}
+
         {/* Is Avanslarim */}
         <Text style={styles.secTitle}>Is Avanslarim ({avanslar.length})</Text>
         {avanslar.length === 0 ? (
@@ -323,12 +475,19 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           masraflar.slice(0, 5).map((m, idx) => {
             try {
               const b = getBadge(m.durum);
+              // Dönem formatla: "2026-05" → "Mayıs 2026"
+              const AYLAR_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+              const donemLabel = m.donem
+                ? (() => { const [yil, ay] = String(m.donem).split("-"); return (AYLAR_TR[parseInt(ay)-1] || ay) + " " + yil; })()
+                : "Masraf Formu";
+              const formNo = m.form_no ? `MF.${String(m.form_no).padStart(3,"0")}` : (m.id ? `#${m.id}` : "");
               return (
                 <View key={m.id || idx} style={styles.card}>
                   <View style={styles.cardRow}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>
-                      {String(m.form_no || m.donem || "Masraf Formu")}
-                    </Text>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>{donemLabel}</Text>
+                      {formNo ? <Text style={{ fontSize: 11, color: "#9CA3AF", marginTop: 1 }}>{formNo}</Text> : null}
+                    </View>
                     <View style={[styles.badgePill, { backgroundColor: b.bg }]}>
                       <Text style={[styles.badgePillTxt, { color: b.fg }]}>{b.label}</Text>
                     </View>
@@ -436,4 +595,21 @@ const styles = StyleSheet.create({
   logoutBtn:{ marginTop: 24, backgroundColor: "#FEE2E2", borderRadius: 12,
               paddingVertical: 14, alignItems: "center", borderWidth: 1, borderColor: "#FECACA" },
   logoutTxt:{ fontSize: 15, fontWeight: "700", color: "#DC2626" },
+
+  // Onay bekleyen avans bölümü
+  onayHeader:{ flexDirection: "row", alignItems: "center", marginTop: 20, marginBottom: 10,
+               backgroundColor: "#FFF7ED", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
+               borderLeftWidth: 4, borderLeftColor: "#F97316" },
+  onayTitle: { fontSize: 13, fontWeight: "800", color: "#C2410C", letterSpacing: 0.5 },
+  onayCard:  { backgroundColor: "#fff", borderRadius: 12, padding: 14, marginBottom: 10,
+               borderLeftWidth: 4, borderLeftColor: "#F97316",
+               shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.07, shadowRadius: 4, elevation: 2 },
+  onayCardName: { fontSize: 14, fontWeight: "800", color: "#111827" },
+  onayCardSub:  { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  onayCardAmt:  { fontSize: 17, fontWeight: "900", color: "#D97706" },
+  onayBtnRow:   { flexDirection: "row", marginTop: 10, gap: 8 },
+  onayBtn:      { flex: 1, borderRadius: 8, paddingVertical: 10, alignItems: "center", justifyContent: "center" },
+  onayBtnGreen: { backgroundColor: "#16A34A" },
+  onayBtnRed:   { backgroundColor: "#DC2626" },
+  onayBtnTxt:   { color: "#fff", fontWeight: "800", fontSize: 14 },
 });
