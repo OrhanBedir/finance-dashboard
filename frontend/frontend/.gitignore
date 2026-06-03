@@ -16,3 +16,4 @@ frontend/backend/
 
 # build output
 frontend/dist/
+.vercel

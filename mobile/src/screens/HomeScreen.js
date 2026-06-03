@@ -85,9 +85,11 @@ export default function HomeScreen({ user, onLogout, navigation }) {
   const [loading, setLoading]           = useState(true);
   const [refreshing, setRefreshing]     = useState(false);
   const [onayBekleyenAvanslar, setOnayBekleyenAvanslar] = useState([]);
+  const [onayBekleyenMalzemeler, setOnayBekleyenMalzemeler] = useState([]);
   const [isPM, setIsPM]                 = useState(false);
   const [isDirektor, setIsDirektor]     = useState(false);
   const [onayYukleniyor, setOnayYukleniyor] = useState(null); // id of item being processed
+  const [malzemeOnayYukleniyor, setMalzemeOnayYukleniyor] = useState(null);
 
   const fetchData = async (isRefresh) => {
     try {
@@ -107,6 +109,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
         if (data.personel && data.personel.unvan)         setPersonelUnvan(data.personel.unvan);
         if (data.ay && data.yil) setAyYil({ ay: data.ay, yil: data.yil });
         if (Array.isArray(data.onayBekleyenAvanslar)) setOnayBekleyenAvanslar(data.onayBekleyenAvanslar);
+        if (Array.isArray(data.onayBekleyenMalzemeler)) setOnayBekleyenMalzemeler(data.onayBekleyenMalzemeler);
         if (typeof data.isPM === "boolean")      setIsPM(data.isPM);
         if (typeof data.isDirektor === "boolean") setIsDirektor(data.isDirektor);
       }
@@ -183,6 +186,63 @@ export default function HomeScreen({ user, onLogout, navigation }) {
               Alert.alert("Hata", e?.message || "Red islemi basarisiz.");
             } finally {
               setOnayYukleniyor(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // --- Malzeme onay / red işlemleri ---
+  const handleMalzemeOnayla = (item) => {
+    const kalemTxt = item.kalem_sayisi > 0 ? ` · ${item.kalem_sayisi} kalem` : "";
+    Alert.alert(
+      "Malzeme Talebini Onayla",
+      `${item.talep_no} — ${item.talep_eden_ad || "?"}\n${[item.bolge, item.proje, item.site_id].filter(Boolean).join(" / ")}${kalemTxt}`,
+      [
+        { text: "Iptal", style: "cancel" },
+        {
+          text: "Onayla",
+          onPress: async () => {
+            try {
+              setMalzemeOnayYukleniyor(item.id);
+              await apiPut(`/malzeme/talepler/${item.id}/durum`, {
+                durum: "FIYAT_GIRISI",
+                onay_notu: "Mobil uygulama uzerinden onaylandi.",
+              });
+              await fetchData(false);
+            } catch (e) {
+              Alert.alert("Hata", e?.message || "Onay islemi basarisiz.");
+            } finally {
+              setMalzemeOnayYukleniyor(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleMalzemeReddet = (item) => {
+    Alert.alert(
+      "Malzeme Talebini Reddet",
+      `${item.talep_no} — ${item.talep_eden_ad || "?"}\nReddetmek istediginizden emin misiniz?`,
+      [
+        { text: "Iptal", style: "cancel" },
+        {
+          text: "Reddet",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setMalzemeOnayYukleniyor(item.id);
+              await apiPut(`/malzeme/talepler/${item.id}/durum`, {
+                durum: "REDDEDILDI",
+                notlar: "Mobil uygulama uzerinden reddedildi.",
+              });
+              await fetchData(false);
+            } catch (e) {
+              Alert.alert("Hata", e?.message || "Red islemi basarisiz.");
+            } finally {
+              setMalzemeOnayYukleniyor(null);
             }
           },
         },
@@ -432,6 +492,58 @@ export default function HomeScreen({ user, onLogout, navigation }) {
                 );
               })
             )}
+          </>
+        )}
+
+        {/* Onay Bekleyen Malzeme Talepleri (PM icin) */}
+        {isPM && onayBekleyenMalzemeler.length > 0 && (
+          <>
+            <View style={[styles.onayHeader, { borderLeftColor: "#8B5CF6" }]}>
+              <Text style={[styles.onayTitle, { color: "#6D28D9" }]}>
+                {"📦"} ONAY BEKLEYEN MALZEME ({onayBekleyenMalzemeler.length})
+              </Text>
+            </View>
+            {onayBekleyenMalzemeler.map((m, idx) => {
+              const loading = malzemeOnayYukleniyor === m.id;
+              const subtxt = [m.bolge, m.proje, m.site_id].filter(Boolean).join(" / ");
+              return (
+                <View key={m.id || idx} style={[styles.onayCard, { borderLeftColor: "#8B5CF6" }]}>
+                  <View style={styles.cardRow}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={styles.onayCardName} numberOfLines={1}>
+                        {m.talep_no} — {m.talep_eden_ad || "?"}
+                      </Text>
+                      {subtxt ? <Text style={styles.onayCardSub} numberOfLines={1}>{subtxt}</Text> : null}
+                      <Text style={styles.cardDate}>{fmtDate(m.created_at)}</Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={[styles.onayCardAmt, { color: "#7C3AED", fontSize: 13 }]}>
+                        {m.kalem_sayisi} kalem
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.onayBtnRow}>
+                    <TouchableOpacity
+                      style={[styles.onayBtn, styles.onayBtnGreen, loading && { opacity: 0.5 }]}
+                      onPress={() => !loading && handleMalzemeOnayla(m)}
+                      activeOpacity={0.8}
+                    >
+                      {loading
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Text style={styles.onayBtnTxt}>{"✓"} Onayla</Text>
+                      }
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.onayBtn, styles.onayBtnRed, loading && { opacity: 0.5 }]}
+                      onPress={() => !loading && handleMalzemeReddet(m)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.onayBtnTxt}>{"✗"} Reddet</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
           </>
         )}
 

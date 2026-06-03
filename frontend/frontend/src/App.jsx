@@ -12567,6 +12567,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
 
+
       sortedRows.forEach((row, idx) => {
         const isEven = idx % 2 === 1;
         const isUSD = normalizeCurrency(row.currency) === "USD";
