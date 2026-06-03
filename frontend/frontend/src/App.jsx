@@ -11368,6 +11368,12 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     load(); loadBakiye();
   };
 
+  // Direktör, TALEP veya PM_ONAY durumundaki talepleri doğrudan onaylar (PM adımını atlar)
+  const handleDirektorDogrudan = async (id) => {
+    await fetch(`${API_BASE}/hr/is-avans/${id}/direktor-onayla`, { method: "PUT" });
+    load(); loadBakiye();
+  };
+
   const handleReddet = async () => {
     if (!redText.trim()) { alert("Red açıklaması girilmeden reddedilemez!"); return; }
     try {
@@ -11578,9 +11584,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                     </>
                   )}
-                  {isDirektor && t.durum==="PM_ONAY" && (
+                  {isDirektor && (t.durum==="PM_ONAY" || t.durum==="TALEP") && (
                     <>
-                      <button onClick={()=>handleOnayla(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
+                      <button onClick={()=>handleDirektorDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                     </>
                   )}
@@ -11672,9 +11678,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                         </>
                       )}
-                      {isDirektor && t.durum === "PM_ONAY" && (
+                      {isDirektor && (t.durum === "PM_ONAY" || t.durum === "TALEP") && (
                         <>
-                          <button onClick={() => handleOnayla(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
+                          <button onClick={() => handleDirektorDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                         </>
                       )}

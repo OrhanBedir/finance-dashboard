@@ -10030,6 +10030,13 @@ app.post("/hr/is-avans", async (req, res) => {
     if (!talep_eden_email)  return res.status(400).json({ error: "talep_eden_email zorunlu" });
     if (!tutar)             return res.status(400).json({ error: "tutar zorunlu" });
 
+    // PM'in kendi talebi → PM adımını atla, doğrudan Direktör onayına gönder
+    const PM_EMAIL = "orhan.bedir@simsektel.com";
+    const today = new Date().toISOString().split("T")[0];
+    const isPMSubmitter = talep_eden_email.toLowerCase() === PM_EMAIL.toLowerCase();
+    const durumFinal = isPMSubmitter ? "PM_ONAY" : "TALEP";
+    const pmOnayTarihi = isPMSubmitter ? today : null;
+
     // banka_adi / iban kolonları yoksa ekle (ilk çalışmada oluşturulur)
     await pool.query(`
       ALTER TABLE is_avans_talep
@@ -10039,8 +10046,8 @@ app.post("/hr/is-avans", async (req, res) => {
 
     const r = await pool.query(
       `INSERT INTO is_avans_talep
-         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [
         personel_id || null,
         talep_eden_email,
@@ -10054,6 +10061,8 @@ app.post("/hr/is-avans", async (req, res) => {
         projeFinal,
         banka_adi || null,
         iban || null,
+        durumFinal,
+        pmOnayTarihi,
       ]
     );
     res.json(r.rows[0]);
@@ -10117,6 +10126,25 @@ app.put("/hr/is-avans/:id/onayla", async (req, res) => {
     }
 
     const updated = await pool.query(updateSql, updateParams);
+    res.json(updated.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Direktör — TALEP veya PM_ONAY'ı doğrudan DIREKTOR_ONAY'a taşır (PM adımını atlar)
+app.put("/hr/is-avans/:id/direktor-onayla", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
+    if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
+    const talep = row.rows[0];
+    if (!["TALEP","PM_ONAY"].includes(talep.durum)) {
+      return res.status(400).json({ error: "Bu durumda direktör onayı yapılamaz" });
+    }
+    const today = new Date().toISOString().split("T")[0];
+    const updated = await pool.query(
+      "UPDATE is_avans_talep SET durum='DIREKTOR_ONAY', pm_onay_tarihi=$1, direktor_onay_tarihi=$1 WHERE id=$2 RETURNING *",
+      [today, id]
+    );
     res.json(updated.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
