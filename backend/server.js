@@ -10490,6 +10490,30 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     // Bekleyen sayısını da sadece onaya gönderilmişlerle sınırla
     const bekleyenMasrafCount = masraflar.filter(f => ONAY_DURUMLAR.includes(f.durum)).length;
 
+    // 9. Kullanıcının rolüne göre onay bekleyen iş avansları
+    //    PM  → durum='TALEP' olanlar
+    //    Direktör → durum='PM_ONAY' olanlar
+    const PM_EMAIL_CONST       = 'orhan.bedir@simsektel.com';
+    const DIREKTOR_EMAIL_CONST = 'duzgun.simsek@simsektel.com';
+    const userEmailLower = (queryEmail || '').toLowerCase().trim();
+    const isPM       = userEmailLower === PM_EMAIL_CONST.toLowerCase();
+    const isDirektor = userEmailLower === DIREKTOR_EMAIL_CONST.toLowerCase();
+
+    let onayBekleyenAvanslar = [];
+    if (isPM || isDirektor) {
+      const bekleyenDurum = isDirektor ? 'PM_ONAY' : 'TALEP';
+      const onayRes = await pool.query(
+        `SELECT id, tutar, aciklama, gider_turu, bolge, proje, durum, tarih, created_at,
+                talep_eden_ad, talep_eden_email
+         FROM is_avans_talep
+         WHERE durum=$1
+         ORDER BY created_at ASC
+         LIMIT 20`,
+        [bekleyenDurum]
+      );
+      onayBekleyenAvanslar = onayRes.rows;
+    }
+
     res.json({
       personel, personelBulundu: !!personelId, ay, yil,
       puantaj,
@@ -10498,6 +10522,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       taslakMasrafTutar, taslakMasrafCount,
       cezalar, toplamCeza, cezaKalemler,
       avansKalan, avansToplamOnaylanan,
+      onayBekleyenAvanslar, isPM, isDirektor,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
