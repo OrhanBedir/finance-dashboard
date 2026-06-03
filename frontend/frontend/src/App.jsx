@@ -10459,6 +10459,25 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
           </div>
         )}
 
+        {/* Onay not modal — viewForm'un early return'ü nedeniyle buraya eklenmeli */}
+        {notModal && (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}
+            onClick={()=>{setNotModal(null);setNotText("");}}>
+            <div style={{ background:"#fff", borderRadius:"16px", padding:"28px", width:"90%", maxWidth:"420px" }}
+              onClick={e=>e.stopPropagation()}>
+              <h3 style={{ margin:"0 0 16px" }}>✅ Onay Notu (opsiyonel)</h3>
+              <textarea value={notText} onChange={e=>setNotText(e.target.value)} rows={3} placeholder="Not eklemek ister misiniz?"
+                style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box", resize:"vertical" }} />
+              <div style={{ display:"flex", gap:"10px", marginTop:"14px" }}>
+                <button onClick={notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
+                  style={{ flex:1, padding:"12px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Onayla</button>
+                <button onClick={()=>{setNotModal(null);setNotText("");}}
+                  style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Red modal — viewForm'un early return'ü nedeniyle buraya eklenmeli */}
         {redModal && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}
