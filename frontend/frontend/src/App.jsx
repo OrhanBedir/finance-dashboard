@@ -16412,13 +16412,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
           {/* Malzeme Kalemleri */}
           <div style={{ background:"#fff",borderRadius:12,padding:20,marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-              <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f" }}>📦 Malzeme Kalemleri</div>
-              <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}])}
-                style={{ padding:"7px 14px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700 }}>
-                + Kalem Ekle
-              </button>
-            </div>
+            <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f",marginBottom:14 }}>📦 Malzeme Kalemleri</div>
             {/* Başlıklar */}
             <div style={{ display:"grid",gridTemplateColumns:"3fr 80px 110px 130px 110px 110px 38px",gap:8,marginBottom:6 }}>
               {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not / Açıklama",""].map(h=>(
@@ -16426,14 +16420,18 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               ))}
             </div>
             {talepKalemler.map((k,i)=>renderKalemRow(k,i))}
-            {/* Genel Toplam */}
-            {toplamGenel > 0 && (
-              <div style={{ display:"flex",justifyContent:"flex-end",marginTop:12,paddingTop:12,borderTop:"2px solid #e5e7eb" }}>
+            {/* Alt: Kalem Ekle + Genel Toplam */}
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12,paddingTop:12,borderTop:"2px solid #e5e7eb" }}>
+              <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}])}
+                style={{ padding:"8px 18px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:700 }}>
+                + Kalem Ekle
+              </button>
+              {toplamGenel > 0 && (
                 <div style={{ fontSize:16,fontWeight:800,color:"#15803d" }}>
                   Genel Toplam: ₺{toplamGenel.toLocaleString("tr-TR")}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Açıklama */}
