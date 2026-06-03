@@ -440,19 +440,15 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           </View>
         )}
 
-        {/* Onay Bekleyen Avans Talepleri (PM veya Direktor icin) */}
-        {(isPM || isDirektor) && (
+        {/* Onay Bekleyen Avans Talepleri (PM veya Direktor icin) — sadece bekleyen varsa goster */}
+        {(isPM || isDirektor) && onayBekleyenAvanslar.length > 0 && (
           <>
             <View style={styles.onayHeader}>
               <Text style={styles.onayTitle}>
                 {"⏳"} ONAY BEKLEYEN AVANS ({onayBekleyenAvanslar.length})
               </Text>
             </View>
-            {onayBekleyenAvanslar.length === 0 ? (
-              <View style={styles.emptyBox}>
-                <Text style={styles.emptyTxt}>Onay bekleyen avans talebi yok.</Text>
-              </View>
-            ) : (
+            {(
               onayBekleyenAvanslar.map((a, idx) => {
                 const loading = onayYukleniyor === a.id;
                 return (
