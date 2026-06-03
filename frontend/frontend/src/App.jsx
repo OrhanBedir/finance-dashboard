@@ -7723,8 +7723,11 @@ function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
+  const _isMuhasebe = currentUser?.role === "muhasebe";
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
-  const [tab, setTab] = useState(_isNurcanHR ? "isg" : "personel");
+  // Muhasebe → maaş sekmelerini (personel, maas_avans) gizle, is_avans'tan başla
+  // Nurcan → isg'den başla  / Diğerleri → personel'den başla
+  const [tab, setTab] = useState(_isMuhasebe ? "is_avans" : (_isNurcanHR ? "isg" : "personel"));
   const [personelList, setPersonelList] = useState([]);
   const [isgTurleri, setIsgTurleri] = useState([]);
   const [isgUyarilar, setIsgUyarilar] = useState([]);
@@ -8180,7 +8183,9 @@ function HrDashboard({ onBack, currentUser }) {
 
       {/* Sekmeler */}
       <div style={{ display:"flex", gap:"8px", marginBottom:"20px" }}>
-        {[["personel","👤 Personel Maaş"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["puantaj","📋 Puantaj"],["isg","🎓 ISG / Belgeler"]].map(([k,l]) => (
+        {[["personel","👤 Personel Maaş"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["puantaj","📋 Puantaj"],["isg","🎓 ISG / Belgeler"]]
+        .filter(([k]) => !_isMuhasebe || !["personel","maas_avans"].includes(k))
+        .map(([k,l]) => (
           <button key={k} onClick={()=>{
             if (k === "personel" && !personelUnlocked) {
               const pwd = prompt("Personel bilgileri için şifre giriniz:");
@@ -17375,7 +17380,7 @@ function App() {
   const _ROLLOUT_OVERRIDE = ["hatice.omus@simsektel.com"]; // user rolünde olsa bile rollout gibi davranır
   const _isBolgeMudur = _userEmail === "nurcan.kus@simsektel.com" || _userEmail === "serdar.altinova@simsektel.com" || _userEmail === "murat.istek@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
   const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur || _ROLLOUT_OVERRIDE.includes(_userEmail);
-  const canSeePuantaj = isRollout && !_PUANTAJ_HARIC.includes(_userEmail);
+  const canSeePuantaj = (isRollout || user?.role === "muhasebe") && !_PUANTAJ_HARIC.includes(_userEmail);
   const isPersonel = user?.role === "user" && !_isBolgeMudur && !_ROLLOUT_OVERRIDE.includes(_userEmail);
   const canSeeMalzeme = [
     "nurcan.kus@simsektel.com",
@@ -18085,7 +18090,7 @@ function App() {
               </div>
               {openSections.ik && (
                 <div>
-                  {(isAdmin || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
+                  {(isAdmin || user?.role === "muhasebe" || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
                     <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
                       <span>👥</span> İK Paneli
                     </div>
@@ -18134,7 +18139,7 @@ function App() {
               )}
 
               {/* ── DEPO & ENVANTER ── */}
-              {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm"].includes(user?.role)) && (
+              {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
                 <>
                   <div className="sidebar-section-title" onClick={()=>toggleSection('depo')}>
                     <span>Depo & Envanter</span>
