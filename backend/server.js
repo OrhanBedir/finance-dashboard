@@ -10514,6 +10514,21 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       onayBekleyenAvanslar = onayRes.rows;
     }
 
+    // 10. PM için onay bekleyen malzeme talepleri (durum='PM_ONAY')
+    let onayBekleyenMalzemeler = [];
+    if (isPM) {
+      const malzRes = await pool.query(
+        `SELECT t.id, t.talep_no, t.talep_eden_ad, t.talep_eden_email,
+                t.durum, t.bolge, t.proje, t.site_id, t.notlar, t.created_at,
+                COALESCE((SELECT COUNT(*) FROM malzeme_talep_kalemleri k WHERE k.talep_id=t.id),0)::int AS kalem_sayisi
+         FROM malzeme_talepler t
+         WHERE t.durum = 'PM_ONAY'
+         ORDER BY t.created_at ASC
+         LIMIT 20`
+      );
+      onayBekleyenMalzemeler = malzRes.rows;
+    }
+
     res.json({
       personel, personelBulundu: !!personelId, ay, yil,
       puantaj,
@@ -10523,6 +10538,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       cezalar, toplamCeza, cezaKalemler,
       avansKalan, avansToplamOnaylanan,
       onayBekleyenAvanslar, isPM, isDirektor,
+      onayBekleyenMalzemeler,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
