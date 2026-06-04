@@ -16010,8 +16010,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
               <thead>
                 <tr style={{ background:"#1e3a5f",color:"#fff" }}>
-                  {["#","Malzeme Adı","Miktar","Birim","Birim Fiyat","Toplam","Temin Türü","Not",...(canMuratTedarik?["İşlem"]:[])].map(h=>(
-                    <th key={h} style={{ padding:"8px 10px",textAlign:"left",fontWeight:600,whiteSpace:"nowrap" }}>{h}</th>
+                  {["#","Malzeme Adı","Miktar","Birim","Birim Fiyat","Toplam","Temin Türü","Not",...(canMuratTedarik?["İşlem"]:[]),...(canMurat?[""]:[])].map((h,hi)=>(
+                    <th key={hi} style={{ padding:"8px 10px",textAlign:"left",fontWeight:600,whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -16029,7 +16029,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                             }}
                             onFocus={()=>setDetayAcIdx(i)}
                             onBlur={()=>setTimeout(()=>setDetayAcIdx(null),150)}
-                            style={{ width:"100%",minWidth:160,padding:"4px 6px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,fontWeight:600,background:"#faf5ff" }} />
+                            style={{ width:"100%",minWidth:160,padding:"4px 8px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,fontWeight:600,background:"#faf5ff",textAlign:"center" }} />
                           {detayAcIdx===i && (()=>{
                             const q=(k.malzeme_adi||"").toLowerCase().trim();
                             const COMBINED=[...new Set([...fiyatListe.map(f=>f.malzeme_adi).filter(Boolean),...(typeof MALZEME_LISTESI!=="undefined"?MALZEME_LISTESI:[])].sort((a,b)=>a.localeCompare(b,"tr")))];
@@ -16175,8 +16175,35 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                         ) : <span style={{ fontSize:11,color:"#9ca3af" }}>—</span>}
                       </td>
                     )}
+                    {canMurat && (
+                      <td style={{ padding:"4px 6px",textAlign:"center" }}>
+                        {!k.dagitim_yapildi && (
+                          <button
+                            title="Bu kalemi sil"
+                            onClick={()=>{
+                              if(detayKalemler.length<=1){alert("En az bir kalem olmalı");return;}
+                              if(!window.confirm("Bu kalemi listeden silmek istiyor musunuz?"))return;
+                              setDetayKalemler(prev=>prev.filter((_,j)=>j!==i));
+                            }}
+                            style={{ width:26,height:26,padding:0,background:"#fee2e2",color:"#dc2626",border:"1px solid #fca5a5",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:14,lineHeight:1 }}>
+                            ×
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
+                {canMurat && (
+                  <tr>
+                    <td colSpan={10} style={{ padding:"6px 10px" }}>
+                      <button
+                        onClick={()=>setDetayKalemler(prev=>[...prev,{id:`new_${Date.now()}`,malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:0,toplam_tutar:0,temin_turu:"",notlar:""}])}
+                        style={{ padding:"6px 16px",background:"#16a34a",color:"#fff",border:"none",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:12 }}>
+                        + Kalem Ekle
+                      </button>
+                    </td>
+                  </tr>
+                )}
               </tbody>
               <tfoot>
                 <tr style={{ background:"#f0f9ff",fontWeight:700 }}>
@@ -16184,7 +16211,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   <td style={{ padding:"8px 10px",color:"#15803d",fontSize:15 }}>
                     ₺{detayKalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0).toLocaleString("tr-TR")}
                   </td>
-                  <td colSpan={canMuratTedarik?3:2}></td>
+                  <td colSpan={canMuratTedarik?4:canMurat?3:2}></td>
                 </tr>
               </tfoot>
             </table>
