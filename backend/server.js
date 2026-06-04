@@ -8958,31 +8958,44 @@ function parseTurkishInvoice(rawText) {
   }
 
   // ── TUTARLAR ───────────────────────────────────────────────────────────────
-  // e-fatura'da etiket ve tutar çoğu zaman aynı satırda değil → her iki yöntem
+  // e-fatura'da etiket ve tutar ayrı satırlarda olabilir.
+  // Özel durum: "Hesaplanan GERÇEK USULDE KATMA" + "DEĞER VERGİSİ(%20)" gibi
+  // iki satıra bölünmüş etiketler için bitişik satırları da kontrol et.
   const findAmount = (labelRe) => {
-    const numRe = /([\d.,]+)\s*(?:TL|₺)?/;
-    // Etiket + tutar aynı satırda
-    for (const l of lines) {
-      if (labelRe.test(l)) {
-        const m = l.match(/([\d.]+,\d{2})/);
-        if (m) return m[1];
-        // Sonraki satır tutar
-        const idx = lines.indexOf(l);
-        if (idx >= 0 && idx + 1 < lines.length) {
-          const m2 = lines[idx + 1].match(/([\d.]+,\d{2})/);
+    for (let i = 0; i < lines.length; i++) {
+      const matchSingle   = labelRe.test(lines[i]);
+      // İki satır birleşik eşleme (etiket iki satıra bölünmüşse)
+      const matchCombined = !matchSingle && i + 1 < lines.length
+                            && labelRe.test(lines[i] + " " + lines[i + 1]);
+      if (matchSingle || matchCombined) {
+        // Aynı satırda sayı: SADECE tek-satır eşleşmesinde kontrol et.
+        // matchCombined'da lines[i] bir değer satırı olabilir (13.333,33 TL gibi),
+        // o yüzden atla.
+        if (matchSingle) {
+          const m = lines[i].match(/([\d.]+,\d{2})/);
+          if (m) return m[1];
+        }
+        // Sayıyı sonraki 1-3 satırda ara
+        const searchFrom = matchCombined ? i + 2 : i + 1;
+        for (let j = searchFrom; j < Math.min(searchFrom + 3, lines.length); j++) {
+          const m2 = lines[j].match(/([\d.]+,\d{2})/);
           if (m2) return m2[1];
         }
       }
     }
-    // flat arama
-    const flatM = flat.match(new RegExp(labelRe.source + "[^\\d]*(\\d[\\d.,]+)", "i"));
-    if (flatM) return flatM[1];
+    // flat metin araması (alternation'ı (?:...) ile grupla)
+    const flatM = flat.match(new RegExp("(?:" + labelRe.source + ")[^\\d]{0,50}(\\d[\\d.,]+)", "i"));
+    if (flatM) for (let k = 1; k < flatM.length; k++) if (flatM[k]?.trim()) return flatM[k].trim();
     return "";
   };
 
-  const toplam_raw  = findAmount(/[ÖO]DENECEK\s*TUTAR|VERGİLER\s*DAHİL\s*TOPLAM|GENEL\s*TOPLAM|TOPLAM\s*TUTAR/i);
-  const kdv_raw     = findAmount(/KATMA\s*DE[ĞG]ER\s*VERG[İI]|HESAPLANAN.*KDV|KDV\s*TUTARI|KDV\s*%\d/i);
-  const matrah_raw  = findAmount(/MAL\s*H[İI]ZMET\s*TOPLAM|MATRAH|KDV\s*HAR[İI][ÇC]|ARA\s*TOPLAM/i);
+  // toplam: "Ödenecek Tutar" veya "Vergiler Dahil Toplam Tutar" — TOPLAM\s*TUTAR yok
+  // (çünkü "Mal Hizmet Toplam Tutarı" da eşleşir ve yanlış değer verir)
+  const toplam_raw  = findAmount(/[ÖO]DENECEK\s*TUTAR|VERGiLER\s*DAHiL\s*TOPLAM|VERGİLER\s*DAHİL\s*TOPLAM|GENEL\s*TOPLAM/i);
+  // kdv: "DEĞER VERGİSİ" veya "KATMA DEĞER VERG" (iki satırda gelirse combined match)
+  const kdv_raw     = findAmount(/KATMA\s*DE[ĞG]ER\s*VERG|DEĞER\s*VERGİSİ|DEGER\s*VERGISI|KDV\s*TUTARI|KDV\s*%\d/i);
+  // matrah: "Mal Hizmet Toplam Tutarı" + genel TOPLAM\s*TUTAR
+  const matrah_raw  = findAmount(/MAL\s*H[İI]ZMET\s*TOPLAM|MATRAH|KDV\s*HAR[İI][ÇC]|ARA\s*TOPLAM|TOPLAM\s*TUTAR/i);
 
   console.log("[parseTurkishInvoice]", { fatura_no, fatura_tarihi, tedarikci, toplam_raw, kdv_raw, matrah_raw });
 
