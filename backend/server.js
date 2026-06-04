@@ -4001,6 +4001,8 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       odenen_tutar,
       kalan_borc,
       note,
+      fatura_turu,
+      bagli_fatura_id,
       temp_belge_key, // PDF önceden yüklendiyse geçici dosya yolu
     } = req.body;
 
@@ -4025,11 +4027,13 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         toplam_tutar,
         odenen_tutar,
         kalan_borc,
-        note
+        note,
+        fatura_turu,
+        bagli_fatura_id
       )
       VALUES
       (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
       )
       RETURNING *
       `,
@@ -4052,6 +4056,8 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         Number(odenen_tutar || 0),
         Number(kalan_borc || 0),
         note || null,
+        fatura_turu || 'GELEN',
+        bagli_fatura_id ? Number(bagli_fatura_id) : null,
       ],
     );
 
@@ -4093,9 +4099,10 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
 app.get("/finance/invoice-entry/list", async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT *
-      FROM invoice_entries
-      ORDER BY fatura_tarihi DESC NULLS LAST, id DESC
+      SELECT ie.*, bf.fatura_no AS bagli_fatura_no
+      FROM invoice_entries ie
+      LEFT JOIN invoice_entries bf ON bf.id = ie.bagli_fatura_id
+      ORDER BY ie.created_at DESC
     `);
 
     res.json({ ok: true, rows: result.rows || [] });
@@ -8031,6 +8038,38 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
   }
 });
 
+// GET /finance/subcon-hakedis-detail?subcon=Federal
+app.get("/finance/subcon-hakedis-detail", authMiddleware, async (req, res) => {
+  try {
+    const subconQ = (req.query.subcon || "").trim().toLowerCase();
+    if (!subconQ || subconQ.length < 2) return res.json({ ok: true, rows: [], total_hakedis: 0 });
+    const usdTryRate = await getTcmbUsdTrySellingRate();
+    const result = await pool.query(`
+      SELECT
+        mw.site_code, mw.bolge, mw.project_code, mw.item_description, mw.item_code,
+        COALESCE(mw.done_qty, 0) AS done_qty, mw.subcon_name,
+        COALESCE(pr.unit_price, 0) AS unit_price,
+        COALESCE(pr.currency, 'TRY') AS currency,
+        COALESCE(mw.done_qty, 0) * COALESCE(pr.unit_price, 0) AS done_amount
+      FROM master_works mw
+      LEFT JOIN po_rows pr
+        ON pr.project_code = mw.project_code
+       AND pr.site_code = mw.site_code
+       AND pr.item_code = mw.item_code
+      WHERE LOWER(TRIM(mw.subcon_name)) LIKE $1 AND COALESCE(mw.done_qty, 0) > 0
+      ORDER BY mw.bolge, mw.site_code
+    `, [`%${subconQ}%`]);
+    let totalHakedis = 0;
+    const rows = result.rows.map(row => {
+      const doneAmt = Number(row.done_amount || 0);
+      const amtTL = String(row.currency||'TRY').toUpperCase() === 'USD' ? doneAmt * Number(usdTryRate || 0) : doneAmt;
+      totalHakedis += amtTL;
+      return { site_code: row.site_code, bolge: row.bolge, project_code: row.project_code, item_description: row.item_description, done_qty: Number(row.done_qty||0), unit_price: Number(row.unit_price||0), currency: row.currency, done_amount_tl: Math.round(amtTL*100)/100 };
+    });
+    res.json({ ok: true, rows, total_hakedis: Math.round(totalHakedis*100)/100, subcon: req.query.subcon });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 /* ================== FINANCE HW PAYMENT UPLOAD ================== */
 app.post(
   "/finance/hw-payment/upload",
@@ -8734,6 +8773,8 @@ app.get("/test-db", async (req, res) => {
 // DB kolonları ekle (idempotent)
 pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS belge_path TEXT`).catch(() => {});
 pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS odeme_tarihi DATE`).catch(() => {});
+pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS fatura_turu TEXT DEFAULT 'GELEN'`).catch(() => {});
+pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS bagli_fatura_id INTEGER`).catch(() => {});
 
 // ─── FATURA PARSE HELPERs ────────────────────────────────────────────────────
 function parseTurkishInvoice(text) {

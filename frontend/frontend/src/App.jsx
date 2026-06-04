@@ -3934,11 +3934,16 @@ function FinanceDashboard({
     odenen_tutar: "",
     kalan_borc: "",
     note: "",
+    fatura_turu: "GELEN",
+    bagli_fatura_id: "",
     belge_path: "",
   });
 
   // Fatura PDF otomatik doldurma
   const [pdfParsing, setPdfParsing] = useState(false);
+  const [hakedisData, setHakedisData] = useState(null);
+  const [hakedisModal, setHakedisModal] = useState(false);
+  const [hakedisLoading, setHakedisLoading] = useState(false);
   const [pdfTempKey, setPdfTempKey] = useState("");
   const [pdfFilled, setPdfFilled] = useState(null); // { count, fields[] }
   const [pdfFileName, setPdfFileName] = useState("");
@@ -4182,7 +4187,7 @@ function FinanceDashboard({
       setShowInvoiceUpload(false);
       setShowUpload(false);
       setEditingInvoiceId(null);
-      setInvoiceForm({ bolge:"", proje:"", proje_kodu:"", fatura_no:"", fatura_tarihi:"", odeme_tarihi:"", tedarikci:"", rf_montaj_firma:"", fatura_kalemi:"", is_kalemi:"", po_no:"", site_id:"", tutar:"", kdv:"", toplam_tutar:"", odenen_tutar:"", kalan_borc:"", note:"" });
+      setInvoiceForm({ bolge:"", proje:"", proje_kodu:"", fatura_no:"", fatura_tarihi:"", odeme_tarihi:"", tedarikci:"", rf_montaj_firma:"", fatura_kalemi:"", is_kalemi:"", po_no:"", site_id:"", tutar:"", kdv:"", toplam_tutar:"", odenen_tutar:"", kalan_borc:"", note:"", fatura_turu:"GELEN", bagli_fatura_id:"" });
     } else if (actionTrigger === 'taseron_hakedis') {
       handleShowSubconSummary();
     } else if (actionTrigger === 'hw_payment') {
@@ -4452,6 +4457,8 @@ function FinanceDashboard({
       odenen_tutar: row.odenen_tutar ?? "",
       kalan_borc: row.kalan_borc ?? "",
       note: row.note || "",
+      fatura_turu: row.fatura_turu || "GELEN",
+      bagli_fatura_id: row.bagli_fatura_id || "",
     });
 
     setShowUpload(false);
@@ -4500,6 +4507,8 @@ function FinanceDashboard({
         toplam_tutar: Number(invoiceForm.toplam_tutar || 0),
         odenen_tutar: Number(invoiceForm.odenen_tutar || 0),
         kalan_borc: Number(invoiceForm.kalan_borc || 0),
+        fatura_turu: invoiceForm.fatura_turu || "GELEN",
+        bagli_fatura_id: invoiceForm.bagli_fatura_id ? Number(invoiceForm.bagli_fatura_id) : null,
         note: invoiceForm.note,
         ...(pdfTempKey && !editingInvoiceId ? { temp_belge_key: pdfTempKey } : {}),
       };
@@ -4548,6 +4557,8 @@ function FinanceDashboard({
         odenen_tutar: "",
         kalan_borc: "",
         note: "",
+        fatura_turu: "GELEN",
+        bagli_fatura_id: "",
       });
       setEditingInvoiceId(null);
       setShowInvoiceFormPanel(false);
@@ -4822,27 +4833,41 @@ function FinanceDashboard({
     return filteredManualInvoiceRows.reduce(
       (acc, row) => {
         const total = Number(row.toplam_tutar || 0);
-        const paid = Number(row.odenen_tutar || 0);
+        const paid = Number(row.odened_tutar || row.odenen_tutar || 0);
         const remaining = Number(row.kalan_borc || 0);
-
-        acc.totalAmount += total;
-        acc.totalPaid += paid;
-        acc.totalRemaining += remaining;
-
-        if (remaining > 0) acc.waitingCount += 1;
-        if (paid > 0) acc.paidCount += 1;
-
+        const turu = row.fatura_turu || 'GELEN';
+        if (turu === 'IADE') {
+          acc.totalIade += total;
+        } else {
+          acc.totalGelen += total;
+          acc.totalPaid += paid;
+          acc.totalRemaining += remaining;
+          if (remaining > 0) acc.waitingCount += 1;
+          if (paid > 0) acc.paidCount += 1;
+        }
+        acc.totalAmount += (turu === 'IADE' ? -total : total);
         return acc;
       },
-      {
-        totalAmount: 0,
-        totalPaid: 0,
-        totalRemaining: 0,
-        waitingCount: 0,
-        paidCount: 0,
-      },
+      { totalGelen: 0, totalIade: 0, totalPaid: 0, totalRemaining: 0, totalAmount: 0, waitingCount: 0, paidCount: 0 },
     );
   }, [filteredManualInvoiceRows]);
+
+  // Tedarikçi aramasına göre hakediş yükle
+  useEffect(() => {
+    const q = manualInvoiceSearch.trim();
+    if (!q || q.length < 2) { setHakedisData(null); return; }
+    const t = setTimeout(async () => {
+      setHakedisLoading(true);
+      try {
+        const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+        const r = await fetch(`${API_BASE}/finance/subcon-hakedis-detail?subcon=${encodeURIComponent(q)}`, { headers:{ Authorization:`Bearer ${tkn}` } });
+        const d = await r.json();
+        if (d.ok && d.total_hakedis > 0) setHakedisData(d); else setHakedisData(null);
+      } catch { setHakedisData(null); }
+      setHakedisLoading(false);
+    }, 700);
+    return () => clearTimeout(t);
+  }, [manualInvoiceSearch]);
 
   if (loading) return <div className="loading">Yükleniyor...</div>;
 
@@ -5290,6 +5315,44 @@ function FinanceDashboard({
         </div>
       )}
 
+      {hakedisModal && hakedisData && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:10001,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}
+          onClick={()=>setHakedisModal(false)}>
+          <div style={{ background:"#fff",borderRadius:16,padding:24,width:"100%",maxWidth:820,maxHeight:"80vh",overflow:"auto",boxShadow:"0 20px 40px rgba(0,0,0,0.25)" }}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+              <h3 style={{ margin:0,fontSize:17,fontWeight:800,color:"#1e3a5f" }}>🏗️ {hakedisData.subcon} — Hakediş Detayı</h3>
+              <button onClick={()=>setHakedisModal(false)} style={{ background:"#f3f4f6",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontWeight:700 }}>✕ Kapat</button>
+            </div>
+            <div style={{ background:"#faf5ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"10px 16px",marginBottom:14,fontWeight:700,color:"#6d28d9",fontSize:15 }}>
+              Toplam Hakediş: {formatMoneyByCurrency(hakedisData.total_hakedis,"TRY")}
+            </div>
+            <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
+              <thead>
+                <tr style={{ background:"#1e3a5f",color:"#fff" }}>
+                  {["Bölge","Site","Proje","Malzeme / Hizmet","Miktar","Birim Fiyat","Tutar (₺)"].map(h=>(
+                    <th key={h} style={{ padding:"7px 10px",textAlign:"left",fontWeight:600,whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {hakedisData.rows.map((r,i)=>(
+                  <tr key={i} style={{ borderBottom:"1px solid #e5e7eb",background:i%2===0?"#fff":"#f9fafb" }}>
+                    <td style={{ padding:"6px 10px" }}>{r.bolge||"-"}</td>
+                    <td style={{ padding:"6px 10px",fontWeight:600 }}>{r.site_code||"-"}</td>
+                    <td style={{ padding:"6px 10px" }}>{r.project_code||"-"}</td>
+                    <td style={{ padding:"6px 10px",maxWidth:200,wordBreak:"break-word" }}>{r.item_description||"-"}</td>
+                    <td style={{ padding:"6px 10px",textAlign:"center" }}>{r.done_qty}</td>
+                    <td style={{ padding:"6px 10px",textAlign:"right" }}>{r.currency==="USD"?`$${r.unit_price}`:formatTRY(r.unit_price)}</td>
+                    <td style={{ padding:"6px 10px",textAlign:"right",fontWeight:700,color:"#7c3aed" }}>{formatTRY(r.done_amount_tl)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {showInvoiceEntryModal && (
         <div
           style={{
@@ -5418,6 +5481,8 @@ function FinanceDashboard({
                     odened_tutar: "",
                     kalan_borc: "",
                     note: "",
+                    fatura_turu: "GELEN",
+                    bagli_fatura_id: "",
                   });
                   setShowInvoiceFormPanel(true);
                 }}
@@ -5434,50 +5499,33 @@ function FinanceDashboard({
             </div>
 
             {/* SUMMARY */}
-            <div
-              style={{
-                padding: "16px 24px",
-                display: "flex",
-                gap: "12px",
-                flexWrap: "wrap",
-                borderBottom: "1px solid #e5e7eb",
-                flexShrink: 0,
-              }}
-            >
-              <div className="card ok statCard" style={{ minWidth: "220px" }}>
-                <div className="statLabel">Toplam Tutar</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalAmount || 0,
-                    "TRY",
-                  )}
-                </div>
+            <div style={{ padding:"12px 24px", display:"flex", gap:"10px", flexWrap:"wrap", borderBottom:"1px solid #e5e7eb", flexShrink:0, background:"#f8fafc" }}>
+              <div style={{ flex:"1 1 140px", background:"#f0fdf4", border:"1.5px solid #86efac", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#166534", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>📥 Toplam Gelen</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#15803d" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalGelen||0,"TRY")}</div>
               </div>
-
-              <div
-                className="card bekler statCard"
-                style={{ minWidth: "220px" }}
-              >
-                <div className="statLabel">Toplam Ödenen</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalPaid || 0,
-                    "TRY",
-                  )}
-                </div>
+              <div style={{ flex:"1 1 140px", background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#9a3412", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>↩️ Toplam İade</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#ea580c" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalIade||0,"TRY")}</div>
               </div>
-
-              <div
-                className="card cancel statCard"
-                style={{ minWidth: "220px" }}
-              >
-                <div className="statLabel">Kalan Borç</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalRemaining || 0,
-                    "TRY",
-                  )}
-                </div>
+              <div style={{ flex:"1 1 140px", background:"#fff1f2", border:"1.5px solid #fecdd3", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#9f1239", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>⚖️ Net Borç</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#be123c" }}>{formatMoneyByCurrency((manualInvoiceSummary.totalGelen||0)-(manualInvoiceSummary.totalIade||0),"TRY")}</div>
+              </div>
+              <div style={{ flex:"1 1 140px", background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#1e40af", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>💳 Toplam Ödenen</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#1d4ed8" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalPaid||0,"TRY")}</div>
+              </div>
+              <div style={{ flex:"1 1 140px", background:"#fef2f2", border:"1.5px solid #fecaca", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#991b1b", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>🔴 Kalan Borç</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#dc2626" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalRemaining||0,"TRY")}</div>
+              </div>
+              <div onClick={()=>{ if(hakedisData) setHakedisModal(true); }}
+                style={{ flex:"1 1 140px", background:hakedisData?"#faf5ff":"#f9fafb", border:`1.5px solid ${hakedisData?"#c4b5fd":"#e5e7eb"}`, borderRadius:12, padding:"10px 14px", cursor:hakedisData?"pointer":"default" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:hakedisData?"#6d28d9":"#6b7280", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>🏗️ Hakediş{hakedisData?" ↗":""}</div>
+                {hakedisLoading ? <div style={{ fontSize:12,color:"#9ca3af" }}>Yükleniyor...</div>
+                  : hakedisData ? <div style={{ fontSize:16,fontWeight:800,color:"#7c3aed" }}>{formatMoneyByCurrency(hakedisData.total_hakedis||0,"TRY")}</div>
+                  : <div style={{ fontSize:12,color:"#9ca3af" }}>Tedarikçi ara →</div>}
               </div>
             </div>
 
@@ -5494,6 +5542,7 @@ function FinanceDashboard({
                 <table>
                   <thead>
                     <tr>
+                      <th>Tür</th>
                       <th>Bölge</th>
                       <th>Proje</th>
                       <th>Proje Kodu</th>
@@ -5510,10 +5559,11 @@ function FinanceDashboard({
                   </thead>
                   <tbody>
                     {filteredManualInvoiceRows.length === 0 ? (
-                      <EmptyRow colSpan={12} text="Kayıt bulunamadı" />
+                      <EmptyRow colSpan={13} text="Kayıt bulunamadı" />
                     ) : (
                       filteredManualInvoiceRows.map((row, index) => (
                         <tr key={row.id ?? index}>
+                          <td><span style={{ padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:700, background:row.fatura_turu==='IADE'?"#fff7ed":"#f0fdf4", color:row.fatura_turu==='IADE'?"#c2410c":"#166534", border:`1px solid ${row.fatura_turu==='IADE'?"#fed7aa":"#86efac"}` }}>{row.fatura_turu==='IADE'?'↩ İade':'↓ Gelen'}</span></td>
                           <td>{row.bolge || "-"}</td>
                           <td>{row.proje || "-"}</td>
                           <td>{row.proje_kodu || "-"}</td>
@@ -5679,6 +5729,27 @@ function FinanceDashboard({
                         {pdfParsing && <div style={{ width:24, height:24, border:"3px solid #93c5fd", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />}
                       </div>
                     </div>
+
+                    {/* Fatura Türü */}
+                    {!editingInvoiceId && (
+                    <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                      <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Fatura Türü:</span>
+                      {[["GELEN","📥 Gelen Fatura (Alış)","#166534","#f0fdf4","#86efac"],["IADE","↩️ İade Fatura (Kesilen)","#c2410c","#fff7ed","#fed7aa"]].map(([val,lbl,col,bg,brd])=>(
+                        <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:invoiceForm.fatura_turu===val?bg:"#f9fafb", border:`1.5px solid ${invoiceForm.fatura_turu===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:invoiceForm.fatura_turu===val?col:"#6b7280" }}>
+                          <input type="radio" name="fatura_turu" value={val} checked={invoiceForm.fatura_turu===val} onChange={()=>setInvoiceForm(p=>({...p,fatura_turu:val}))} style={{ display:"none" }} />{lbl}
+                        </label>
+                      ))}
+                      {invoiceForm.fatura_turu==='IADE' && (
+                        <select value={invoiceForm.bagli_fatura_id||""} onChange={e=>setInvoiceForm(p=>({...p,bagli_fatura_id:e.target.value}))}
+                          style={{ flex:1, minWidth:200, padding:"7px 12px", border:"1.5px solid #fed7aa", borderRadius:8, fontSize:13 }}>
+                          <option value="">— Bağlı Fatura Seç (opsiyonel)</option>
+                          {manualInvoiceRows.filter(r=>r.fatura_turu!=='IADE').map(r=>(
+                            <option key={r.id} value={r.id}>{r.fatura_no} — {r.tedarikci} — {formatTRY(r.toplam_tutar)}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    )}
 
                     {/* BÖLÜM 1: Proje Bilgileri */}
                     <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
