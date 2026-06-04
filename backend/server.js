@@ -4001,6 +4001,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       odenen_tutar,
       kalan_borc,
       note,
+      temp_belge_key, // PDF önceden yüklendiyse geçici dosya yolu
     } = req.body;
 
     const result = await pool.query(
@@ -4054,9 +4055,31 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       ],
     );
 
+    const newRow = result.rows[0];
+
+    // Geçici PDF varsa belge_path olarak bağla
+    if (temp_belge_key && newRow.id) {
+      const finalFilename = `fatura-${newRow.id}-${Date.now()}.pdf`;
+      try {
+        // Supabase storage: temp dosyayı kalıcı konuma kopyala
+        const { data: srcData } = await supabase.storage.from(BUCKET).download(temp_belge_key);
+        if (srcData) {
+          const arrBuf = await srcData.arrayBuffer();
+          const buf = Buffer.from(arrBuf);
+          const { url } = await uploadToStorage("fatura-belgeler", finalFilename, buf, "application/pdf");
+          await pool.query("UPDATE invoice_entries SET belge_path=$1 WHERE id=$2", [url, newRow.id]);
+          newRow.belge_path = url;
+          // Temp dosyayı sil
+          supabase.storage.from(BUCKET).remove([temp_belge_key]).catch(() => {});
+        }
+      } catch (e) {
+        console.error("[invoice-add] temp belge link error:", e.message);
+      }
+    }
+
     res.json({
       ok: true,
-      row: result.rows[0],
+      row: newRow,
     });
   } catch (err) {
     console.error("MANUAL INVOICE ADD ERROR:", err);
@@ -8711,6 +8734,140 @@ app.get("/test-db", async (req, res) => {
 // DB kolonları ekle (idempotent)
 pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS belge_path TEXT`).catch(() => {});
 pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS odeme_tarihi DATE`).catch(() => {});
+
+// ─── FATURA PARSE HELPERs ────────────────────────────────────────────────────
+function parseTurkishInvoice(text) {
+  const full = text.replace(/\r/g, " ").replace(/\n/g, " ").replace(/\s{2,}/g, " ");
+
+  const find = (patterns) => {
+    for (const p of patterns) {
+      const m = full.match(p);
+      if (m) for (let i = 1; i < m.length; i++) if (m[i]?.trim()) return m[i].trim();
+    }
+    return "";
+  };
+
+  const parseTRNum = (s) => {
+    if (!s) return "";
+    s = s.replace(/\s/g, "");
+    if (/\d,\d{1,2}$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+    else s = s.replace(/,/g, "");
+    const n = parseFloat(s);
+    return isNaN(n) ? "" : String(Math.round(n * 100) / 100);
+  };
+
+  const fatura_no = find([
+    /(?:FATURA\s*NO|ETTN)[^:]*[:\|#\s]\s*([A-Z0-9\-\/\.]{5,40})/i,
+    /NO\s*[:\|]\s*([A-Z0-9\/\-\.]{4,30})/i,
+  ]);
+
+  const dateRaw = find([
+    /(?:D[Üü]ZENLEME\s*TAR[İI]H[İI]|FATURA\s*TAR[İI]H[İI]|TAR[İI]H)\s*[:\|]?\s*(\d{2}[.\/-]\d{2}[.\/-]\d{4})/i,
+    /(\d{2}[.\/]\d{2}[.\/]\d{4})/,
+  ]);
+  let fatura_tarihi = "";
+  if (dateRaw) {
+    const p = dateRaw.split(/[.\/\-]/);
+    if (p[2]?.length === 4) fatura_tarihi = `${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;
+  }
+
+  const tedarikci = find([
+    /(?:SATICI\s*[Uu]NVAN[Iİi]|SATICI\s*ADI|SATICI)[^:]*[:\|]\s*([^\|]{5,80}?)(?:\s{3,}|VKN|V\.K)/i,
+    /(?:UNVANI|[Ff]irma\s*[Aa]d[ıi])\s*[:\|]\s*([^\|]{5,60})/i,
+  ]);
+
+  const toplam_raw = find([
+    /(?:[ÖO]DENECEK\s*TUTAR|GENEL\s*TOPLAM|TOPLAM\s*TUTAR)\s*[:\|₺TL\s]*([\d.,]+)/i,
+    /TOPLAM\s*[:\|]?\s*([\d.,]+)/i,
+  ]);
+
+  const kdv_raw = find([
+    /(?:HESAPLANAN\s*KDV|KDV\s*TUTARI|KDV\s*%\d+[^:]*|KATMA\s*DE[Ğg]ER\s*VERG[İI])\s*[:\|₺\s]*([\d.,]+)/i,
+    /KDV\s+([\d.,]+)/i,
+  ]);
+
+  const matrah_raw = find([
+    /(?:MATRAH|VERG[İI]\s*MATRAHI|KDV\s*HAR[İI][CÇ]|ARA\s*TOPLAM)\s*[:\|₺\s]*([\d.,]+)/i,
+  ]);
+
+  return {
+    fatura_no,
+    fatura_tarihi,
+    tedarikci,
+    tutar: parseTRNum(matrah_raw),
+    kdv: parseTRNum(kdv_raw),
+    toplam_tutar: parseTRNum(toplam_raw),
+  };
+}
+
+// POST /invoice-parse — PDF/resim yükle, OCR ile fatura alanlarını çıkar
+const uploadInvoiceParse = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+app.post("/invoice-parse", authMiddleware, uploadInvoiceParse.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  const isPDF = ext === ".pdf" || req.file.mimetype === "application/pdf";
+
+  let pdfBuffer = req.file.buffer;
+  if (!isPDF) {
+    // Resmi PDF'e dönüştür
+    const PDFDocument = require("pdfkit");
+    pdfBuffer = await new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ autoFirstPage: false, margin: 20 });
+      const chunks = [];
+      doc.on("data", c => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+      try {
+        const img = doc.openImage(req.file.buffer);
+        const maxW = 555, maxH = 802;
+        const ratio = Math.min(maxW / img.width, maxH / img.height);
+        doc.addPage({ size: [img.width * ratio + 40, img.height * ratio + 40] });
+        doc.image(req.file.buffer, 20, 20, { width: img.width * ratio });
+        doc.end();
+      } catch (e) { reject(e); }
+    });
+  }
+
+  // Supabase'e geçici yükle
+  const tempFilename = `fatura-temp/tmp-${Date.now()}.pdf`;
+  let tempUrl = null;
+  try {
+    const { url } = await uploadToStorage("fatura-belgeler", tempFilename, pdfBuffer, "application/pdf");
+    tempUrl = url;
+  } catch (e) {
+    console.error("[invoice-parse] storage error:", e.message);
+  }
+
+  // OCR
+  let ocrText = "";
+  try {
+    const apiKey = process.env.OCR_SPACE_KEY || "helloworld";
+    const base64 = pdfBuffer.toString("base64");
+    const mimeType = "application/pdf";
+    const body = new URLSearchParams({
+      base64Image: `data:${mimeType};base64,${base64}`,
+      language: "tur",
+      isOverlayRequired: "false",
+      detectOrientation: "true",
+      scale: "true",
+      OCREngine: isPDF ? "1" : "2",
+    });
+    const ocrResp = await fetch("https://api.ocr.space/parse/image", {
+      method: "POST",
+      headers: { apikey: apiKey, "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      signal: AbortSignal.timeout(15000),
+    });
+    const ocrJson = await ocrResp.json();
+    ocrText = (ocrJson?.ParsedResults || []).map(r => r.ParsedText || "").join("\n");
+    console.log("[invoice-parse] OCR snippet:", ocrText.slice(0, 400));
+  } catch (e) {
+    console.error("[invoice-parse] OCR error:", e.message);
+  }
+
+  const parsed = parseTurkishInvoice(ocrText);
+  res.json({ ok: true, parsed, temp_key: tempFilename, temp_url: tempUrl });
+});
 
 app.post(
   "/invoice-entries/:id/belge",

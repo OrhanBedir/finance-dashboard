@@ -3937,6 +3937,13 @@ function FinanceDashboard({
     belge_path: "",
   });
 
+  // Fatura PDF otomatik doldurma
+  const [pdfParsing, setPdfParsing] = useState(false);
+  const [pdfTempKey, setPdfTempKey] = useState("");
+  const [pdfFilled, setPdfFilled] = useState(null); // { count, fields[] }
+  const [pdfFileName, setPdfFileName] = useState("");
+  const invoicePdfRef = useRef(null);
+
   const [salaryForm, setSalaryForm] = useState({
     ad_soyad: "",
     unvan: "",
@@ -4494,6 +4501,7 @@ function FinanceDashboard({
         odenen_tutar: Number(invoiceForm.odenen_tutar || 0),
         kalan_borc: Number(invoiceForm.kalan_borc || 0),
         note: invoiceForm.note,
+        ...(pdfTempKey && !editingInvoiceId ? { temp_belge_key: pdfTempKey } : {}),
       };
       console.log("MANUAL INVOICE PAYLOAD:", payload);
 
@@ -4519,6 +4527,7 @@ function FinanceDashboard({
           body: JSON.stringify(payload),
         });
       }
+      setPdfTempKey(""); setPdfFilled(null); setPdfFileName("");
 
       setInvoiceForm({
         bolge: "",
@@ -5610,6 +5619,67 @@ function FinanceDashboard({
                 <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px", background: "#f8fafc" }}>
                   <form onSubmit={handleSaveManualInvoice}>
 
+                    {/* BÖLÜM 0: PDF Otomatik Doldurma */}
+                    <div style={{ background: pdfFilled ? "#f0fdf4" : "#eff6ff", borderRadius:"14px", padding:"16px 20px", marginBottom:"16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", border: pdfFilled ? "1.5px solid #86efac" : "1.5px dashed #93c5fd" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: pdfFilled ? 10 : 0 }}>
+                        <span style={{ fontSize:22 }}>{pdfParsing ? "⚙️" : pdfFilled ? "✅" : "📄"}</span>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontWeight:700, fontSize:13, color: pdfFilled ? "#166534" : "#1d4ed8" }}>
+                            {pdfParsing ? "Fatura okunuyor..." : pdfFilled ? `${pdfFilled.count} alan otomatik dolduruldu — kontrol edin` : "PDF Yükle → Otomatik Doldur"}
+                          </div>
+                          {!pdfFilled && !pdfParsing && <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>Fatura PDF'ini yükleyin, alanlar otomatik dolsun</div>}
+                          {pdfFilled && <div style={{ fontSize:11, color:"#166534", marginTop:2 }}>📎 {pdfFileName} · Doldurulan: {pdfFilled.fields.join(", ")}</div>}
+                        </div>
+                        {!pdfParsing && (
+                          <label style={{ cursor:"pointer", padding:"8px 16px", background: pdfFilled ? "#16a34a" : "#2563eb", color:"#fff", borderRadius:8, fontSize:12, fontWeight:700, flexShrink:0 }}>
+                            {pdfFilled ? "🔄 Değiştir" : "📎 PDF Seç"}
+                            <input ref={invoicePdfRef} type="file" accept=".pdf,image/*" style={{ display:"none" }}
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                setPdfFileName(file.name);
+                                setPdfParsing(true);
+                                setPdfFilled(null);
+                                try {
+                                  const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+                                  const fd = new FormData();
+                                  fd.append("file", file);
+                                  const r = await fetch(`${API_BASE}/invoice-parse`, {
+                                    method:"POST",
+                                    headers: { Authorization:`Bearer ${tkn}` },
+                                    body: fd,
+                                  });
+                                  const data = await r.json();
+                                  if (!data.ok) { alert("OCR hatası: " + (data.error||"bilinmeyen")); return; }
+                                  const p = data.parsed || {};
+                                  setPdfTempKey(data.temp_key || "");
+                                  // Sadece boş alanları doldur, mevcut girişleri koru
+                                  const filled = [];
+                                  setInvoiceForm(prev => {
+                                    const next = { ...prev };
+                                    if (p.fatura_no && !prev.fatura_no)   { next.fatura_no = p.fatura_no;       filled.push("Fatura No"); }
+                                    if (p.fatura_tarihi && !prev.fatura_tarihi) { next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
+                                    if (p.tedarikci && !prev.tedarikci)   { next.tedarikci = p.tedarikci;       filled.push("Tedarikçi"); }
+                                    if (p.tutar && !prev.tutar)           { next.tutar = p.tutar;               filled.push("Tutar"); }
+                                    if (p.kdv && !prev.kdv)               { next.kdv = p.kdv;                   filled.push("KDV"); }
+                                    if (p.toplam_tutar && !prev.toplam_tutar) { next.toplam_tutar = p.toplam_tutar; filled.push("Toplam"); }
+                                    return next;
+                                  });
+                                  setPdfFilled({ count: filled.length || 0, fields: filled.length ? filled : ["Belge yüklendi"] });
+                                } catch (err) {
+                                  alert("PDF işleme hatası: " + err.message);
+                                } finally {
+                                  setPdfParsing(false);
+                                  if (invoicePdfRef.current) invoicePdfRef.current.value = "";
+                                }
+                              }}
+                            />
+                          </label>
+                        )}
+                        {pdfParsing && <div style={{ width:24, height:24, border:"3px solid #93c5fd", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />}
+                      </div>
+                    </div>
+
                     {/* BÖLÜM 1: Proje Bilgileri */}
                     <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
                       <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
@@ -5706,7 +5776,18 @@ function FinanceDashboard({
                           <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
                           Fatura Belgesi (PDF / Fotoğraf)
                         </div>
-                        <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
+                        {pdfTempKey && !editingInvoiceId ? (
+                          <div style={{ border:"1.5px solid #86efac", borderRadius:10, padding:"14px 16px", background:"#f0fdf4", display:"flex", alignItems:"center", gap:10 }}>
+                            <span style={{ fontSize:28 }}>📄</span>
+                            <div style={{ flex:1 }}>
+                              <div style={{ fontWeight:600, fontSize:13, color:"#166534" }}>Belge Hazır</div>
+                              <div style={{ fontSize:11, color:"#9ca3af" }}>{pdfFileName}</div>
+                            </div>
+                            <button type="button" onClick={()=>{setPdfTempKey("");setPdfFilled(null);setPdfFileName("");}} style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Kaldır</button>
+                          </div>
+                        ) : (
+                          <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
+                        )}
                       </div>
                     </div>
 
