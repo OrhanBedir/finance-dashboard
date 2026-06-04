@@ -12517,53 +12517,61 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         return;
       }
 
-      const savedToken =
-        localStorage.getItem("financeToken") || localStorage.getItem("token");
+      // detailRows'u doğrudan kullan — backend filter hatalarından bağımsız,
+      // kullanıcının gördüğü ile birebir aynı satırlar
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
 
-      // Başlık "Bölge - Tip" formatındaysa bölgeyi al, değilse boş bırak
-      const regionName = String(detailTitle || "").includes(" - ")
-        ? String(detailTitle || "").split(" - ")[0].trim()
-        : "";
-      const exportType = detailTitle.includes("Faturalanmamış")
-        ? "NOT_INVOICED"
-        : detailTitle.includes("İptal")
-        ? "PO_IPTAL"
-        : "PO_BEKLER";
+      const headers = [
+        "Bölge", "Status", "QC Durum", "Kabul Durum", "Kabul Not",
+        "Project Code", "Site Code", "Item Code", "Item Description",
+        "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
+        "Birim Fiyat", "Para Birimi", "Toplam Tutar", "Taşeron", "OnAir Date", "RF Not"
+      ];
 
-      const params = new URLSearchParams({
-        region: regionName,
-        type: exportType,
-        subcon: isSubconUser ? userSubconName : "",
+      const data = detailRows.map(row => {
+        const unitPrice = Number(row.unit_price || 0);
+        const doneQty   = Number(row.done_qty   || 0);
+        const currency  = normalizeCurrency(row.currency);
+        return [
+          getRegion(row.site_code, row.project_code) || "",
+          row.status || "",
+          row.qc_durum || "NOK",
+          row.kabul_durum || "NOK",
+          row.kabul_not || "",
+          row.project_code || "",
+          row.site_code || "",
+          row.item_code || "",
+          row.item_description || "",
+          doneQty,
+          Number(row.requested_qty || 0),
+          Number(row.billed_qty    || 0),
+          Number(row.due_qty       || 0),
+          unitPrice,
+          currency,
+          Math.round(doneQty * unitPrice * 100) / 100,
+          row.subcon_name || "",
+          row.onair_date  || "",
+          row.note        || "",
+        ];
       });
 
-      const response = await fetch(
-        `${API_BASE}/export/detail-excel?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: savedToken ? `Bearer ${savedToken}` : "",
-          },
-        },
-      );
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("DETAIL EXCEL EXPORT ERROR:", errorText);
-        alert(`Excel indirilemedi:\n${errorText}`);
-        return;
-      }
+      // Kolon genişlikleri
+      ws["!cols"] = [
+        {wch:10},{wch:12},{wch:10},{wch:12},{wch:24},
+        {wch:14},{wch:22},{wch:18},{wch:45},
+        {wch:10},{wch:13},{wch:10},{wch:10},
+        {wch:12},{wch:10},{wch:14},{wch:20},{wch:12},{wch:24}
+      ];
 
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${regionName}_${exportType}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(url);
+      XLSX.utils.book_append_sheet(wb, ws, "Detay");
+      const regionName = String(detailTitle || "").includes(" - ")
+        ? String(detailTitle || "").split(" - ")[0].trim()
+        : "Tüm";
+      const safeTitle = detailTitle.replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ _-]/g, "").slice(0, 40);
+      XLSX.writeFile(wb, `${safeTitle}_${new Date().toISOString().slice(0,10)}.xlsx`);
     } catch (err) {
       console.error("DETAIL EXCEL EXPORT ERROR:", err);
       alert(`Excel indirilemedi:\n${err.message}`);
