@@ -8852,9 +8852,48 @@ function parseTurkishInvoice(rawText) {
     return "";
   };
 
+  // ── E-FATURA TABLOSU: Konum tabanlı eşleme ──────────────────────────────────
+  // pdfminer e-fatura'yı sütun-önce okur:
+  //   Özelleştirme No: / Senaryo: / Fatura Tipi: / Fatura No: / Fatura Tarihi: / Fatura Saati:
+  //   ...ardından değerler:
+  //   TR1.2 / TICARIFATURA / SATIS / ERS2026000000115 / 18-05-2026 / 20:43:54
+  // Çözüm: etiketi bul, kaçıncı sırada olduğunu say, aynı sıradaki değeri al.
+  const EF_LABEL_ORDER = [
+    "Özelleştirme No:", "Senaryo:", "Fatura Tipi:",
+    "Fatura No:", "Fatura Tarihi:", "Fatura Saati:",
+  ];
+  const efIdx = {}; // label → satır indeksi
+  for (let i = 0; i < lines.length; i++) {
+    const norm = lines[i].replace(/\s+/g, " ").trim();
+    for (const lbl of EF_LABEL_ORDER) {
+      if (norm.toLowerCase() === lbl.toLowerCase()) { efIdx[lbl] = i; break; }
+    }
+  }
+  let efFaturaNo = "", efTarihi = "";
+  const efFound = EF_LABEL_ORDER.filter(l => l in efIdx);
+  if (efFound.length >= 3 && "Fatura No:" in efIdx) {
+    const lastLabelLine = Math.max(...efFound.map(l => efIdx[l]));
+    // Son etiketten sonraki satırlardaki değerleri topla
+    const vals = [];
+    for (let i = lastLabelLine + 1; i < lines.length && vals.length < efFound.length; i++) {
+      if (lines[i].trim()) vals.push(lines[i].trim());
+    }
+    // Satır sırasına göre etiket → değer eşleme
+    const sortedEfLabels = efFound.slice().sort((a, b) => efIdx[a] - efIdx[b]);
+    sortedEfLabels.forEach((lbl, i) => {
+      const val = vals[i] || "";
+      if (lbl === "Fatura No:") efFaturaNo = val;
+      if (lbl === "Fatura Tarihi:") {
+        const dm = val.match(/(\d{2}[-./]\d{2}[-./]\d{4})/);
+        efTarihi = dm ? dm[1] : val;
+      }
+    });
+  }
+
   // ── FATURA NO ──────────────────────────────────────────────────────────────
-  // e-fatura formatında etiket ve değer ayrı satırda olabilir
-  let fatura_no = findAfterLabel(
+  // Önce e-fatura konum tabanlı sonuç, yoksa genel arama
+  let fatura_no = efFaturaNo;
+  if (!fatura_no) fatura_no = findAfterLabel(
     /^fatura\s*no\s*:?\s*$/i,
     /^([A-Z0-9]{5,40})$/i
   );
@@ -8862,11 +8901,14 @@ function parseTurkishInvoice(rawText) {
     /FATURA\s*NO\s*[:\|]?\s*([A-Z0-9][A-Z0-9\-\/\.]{4,39})/i,
     /\bFATURA\s*NO\b[^A-Z0-9]*([A-Z0-9]{5,40})/i,
   ]);
-  // ETTN UUID'ini fatura no olarak alma
+  // ETTN UUID'ini veya bilinen Senaryo değerlerini fatura no olarak alma
   if (/^[0-9a-f\-]{30,}$/i.test(fatura_no)) fatura_no = "";
+  if (/^(TICARIFATURA|EARSIVFATURA|SATIS|ALIS)$/i.test(fatura_no)) fatura_no = "";
 
   // ── FATURA TARİHİ ──────────────────────────────────────────────────────────
-  let dateRaw = findAfterLabel(
+  // Önce e-fatura konum tabanlı sonuç, yoksa genel arama
+  let dateRaw = efTarihi;
+  if (!dateRaw) dateRaw = findAfterLabel(
     /^fatura\s*tar[iİ]h[iİ]\s*:?\s*$/i,
     /(\d{2}[-./]\d{2}[-./]\d{4})/
   );

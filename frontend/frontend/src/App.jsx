@@ -5236,16 +5236,16 @@ function FinanceDashboard({
                                   if (!data.ok) { alert("OCR hatası: " + (data.error||"bilinmeyen")); return; }
                                   const p = data.parsed || {};
                                   setPdfTempKey(data.temp_key || "");
-                                  // Sadece boş alanları doldur, mevcut girişleri koru
+                                  // PDF'den gelen tüm değerleri yaz (mevcut değerlerin üzerine yazar)
                                   const filled = [];
                                   setInvoiceForm(prev => {
                                     const next = { ...prev };
-                                    if (p.fatura_no && !prev.fatura_no)   { next.fatura_no = p.fatura_no;       filled.push("Fatura No"); }
-                                    if (p.fatura_tarihi && !prev.fatura_tarihi) { next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
-                                    if (p.tedarikci && !prev.tedarikci)   { next.tedarikci = p.tedarikci;       filled.push("Tedarikçi"); }
-                                    if (p.tutar && !prev.tutar)           { next.tutar = p.tutar;               filled.push("Tutar"); }
-                                    if (p.kdv && !prev.kdv)               { next.kdv = p.kdv;                   filled.push("KDV"); }
-                                    if (p.toplam_tutar && !prev.toplam_tutar) { next.toplam_tutar = p.toplam_tutar; filled.push("Toplam"); }
+                                    if (p.fatura_no)    { next.fatura_no = p.fatura_no;         filled.push("Fatura No"); }
+                                    if (p.fatura_tarihi){ next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
+                                    if (p.tedarikci)    { next.tedarikci = p.tedarikci;         filled.push("Tedarikçi"); }
+                                    if (p.tutar)        { next.tutar = p.tutar;                 filled.push("Tutar"); }
+                                    if (p.kdv)          { next.kdv = p.kdv;                     filled.push("KDV"); }
+                                    if (p.toplam_tutar) { next.toplam_tutar = p.toplam_tutar;   filled.push("Toplam"); }
                                     return next;
                                   });
                                   setPdfFilled({ count: filled.length || 0, fields: filled.length ? filled : ["Belge yüklendi"] });
