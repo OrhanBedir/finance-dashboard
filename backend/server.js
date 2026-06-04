@@ -11828,6 +11828,30 @@ app.put("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /malzeme/ara?q=... — malzeme adı autocomplete (fiyat listesi + geçmiş taleplerden)
+app.get("/malzeme/ara", authMiddleware, async (req, res) => {
+  try {
+    const q = `%${(req.query.q || "").toUpperCase()}%`;
+    const r = await pool.query(`
+      SELECT malzeme_adi, birim, birim_fiyat
+      FROM malzeme_fiyat_listesi
+      WHERE UPPER(malzeme_adi) LIKE $1
+      UNION
+      SELECT DISTINCT malzeme_adi, birim, NULL AS birim_fiyat
+      FROM malzeme_talep_kalemleri
+      WHERE UPPER(malzeme_adi) LIKE $1
+        AND malzeme_adi IS NOT NULL AND malzeme_adi != ''
+        AND NOT EXISTS (
+          SELECT 1 FROM malzeme_fiyat_listesi fl
+          WHERE UPPER(fl.malzeme_adi) = UPPER(malzeme_talep_kalemleri.malzeme_adi)
+        )
+      ORDER BY malzeme_adi
+      LIMIT 15
+    `, [q]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /malzeme/site-codes — rollout_progress'teki tüm site kodları (autocomplete için)
 app.get("/malzeme/site-codes", authMiddleware, async (req, res) => {
   try {

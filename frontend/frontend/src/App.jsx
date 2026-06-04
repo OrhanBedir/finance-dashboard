@@ -14835,6 +14835,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   // Detay modal
   const [detayModal, setDetayModal] = useState(null);
   const [detayKalemler, setDetayKalemler] = useState([]);
+  const [detayAcIdx, setDetayAcIdx] = useState(null); // autocomplete için hangi satır açık
   const [onayNotu, setOnayNotu] = useState("");
   const [redModal, setRedModal] = useState(null);
   const [redNot, setRedNot] = useState("");
@@ -16020,9 +16021,43 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                     <td style={{ padding:"8px 10px",color:"#9ca3af" }}>{i+1}</td>
                     <td style={{ padding:"8px 10px",fontWeight:600 }}>
                       {canMurat && !k.dagitim_yapildi ? (
-                        <input type="text" value={k.malzeme_adi}
-                          onChange={e=>setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,malzeme_adi:e.target.value}:x))}
-                          style={{ width:"100%",minWidth:160,padding:"4px 6px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,fontWeight:600,background:"#faf5ff" }} />
+                        <div style={{ position:"relative" }}>
+                          <input type="text" value={k.malzeme_adi} autoComplete="off"
+                            onChange={e=>{
+                              setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,malzeme_adi:e.target.value}:x));
+                              setDetayAcIdx(i);
+                            }}
+                            onFocus={()=>setDetayAcIdx(i)}
+                            onBlur={()=>setTimeout(()=>setDetayAcIdx(null),150)}
+                            style={{ width:"100%",minWidth:160,padding:"4px 6px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,fontWeight:600,background:"#faf5ff" }} />
+                          {detayAcIdx===i && (()=>{
+                            const q=(k.malzeme_adi||"").toLowerCase().trim();
+                            const COMBINED=[...new Set([...fiyatListe.map(f=>f.malzeme_adi).filter(Boolean),...(typeof MALZEME_LISTESI!=="undefined"?MALZEME_LISTESI:[])].sort((a,b)=>a.localeCompare(b,"tr")))];
+                            const exact=q.length>0&&COMBINED.some(n=>n.toLowerCase()===q);
+                            const sugg=!exact&&q.length>=1?COMBINED.filter(n=>n.toLowerCase().includes(q)).slice(0,14):[];
+                            return sugg.length>0?(
+                              <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:300,background:"#fff",border:"1px solid #a78bfa",borderRadius:6,boxShadow:"0 4px 16px rgba(124,58,237,0.15)",maxHeight:240,overflowY:"auto" }}>
+                                {sugg.map((name,idx)=>{
+                                  const dbItem=fiyatListe.find(f=>f.malzeme_adi.toLowerCase()===name.toLowerCase());
+                                  return(
+                                    <div key={idx}
+                                      onMouseDown={e=>{
+                                        e.preventDefault();
+                                        setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,malzeme_adi:name,birim:dbItem?.birim||x.birim}:x));
+                                        setDetayAcIdx(null);
+                                      }}
+                                      style={{ padding:"7px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6",background:"#fff" }}
+                                      onMouseEnter={e=>e.currentTarget.style.background="#f5f3ff"}
+                                      onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                                      <div style={{ wordBreak:"break-word",lineHeight:1.5,fontWeight:600 }}>{name}</div>
+                                      {dbItem&&Number(dbItem.birim_fiyat)>0&&<div style={{ color:"#9ca3af",fontSize:11,marginTop:2 }}>{dbItem.birim} · ₺{Number(dbItem.birim_fiyat).toLocaleString("tr-TR")}</div>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ):null;
+                          })()}
+                        </div>
                       ) : (
                         <>
                           {k.malzeme_adi}
