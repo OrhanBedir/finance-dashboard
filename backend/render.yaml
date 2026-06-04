@@ -3,7 +3,7 @@ services:
     name: erc-backend
     env: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install && pip install pdfminer.six
     startCommand: node server.js
     envVars:
       - key: DATABASE_URL

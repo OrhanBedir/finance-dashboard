@@ -1587,6 +1587,7 @@ function DailyEntry() {
   const [rows, setRows] = useState([]);
   const [siteEntries, setSiteEntries] = useState([]);
   const [showSubconDrop, setShowSubconDrop] = useState(false);
+  const [subconList, setSubconList] = useState([]);
 
   const [projectCodes, setProjectCodes] = useState([]);
   const [itemOptions, setItemOptions] = useState([]);
@@ -1755,6 +1756,15 @@ function DailyEntry() {
     }
   };
 
+  const loadSubcons = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE}/subcons`);
+      setSubconList(data.subcons || []);
+    } catch (err) {
+      console.error("LOAD SUBCONS ERROR:", err);
+    }
+  };
+
   const loadSitePoRows = async (projectCode, siteCode) => {
     if (!siteCode) {
       setPoRows([]);
@@ -1843,6 +1853,7 @@ function DailyEntry() {
     loadRows();
     loadProjectCodes();
     loadItems();
+    loadSubcons();
   }, []);
 
   useEffect(() => {
@@ -2021,7 +2032,12 @@ function DailyEntry() {
     setMessage("");
     setItemCodeSearch("");
     setItemDescriptionSearch("");
-    setForm(initialForm);
+    // Preserve site_code so the useEffect doesn't clear the tables
+    setForm({
+      ...initialForm,
+      site_code: siteSearchCode,
+      site_type: detectSiteTypeFromSiteCode(siteSearchCode),
+    });
     setShowItemCodeList(false);
     setShowItemDescriptionList(false);
     setShowEntryModal(false);
@@ -2065,6 +2081,9 @@ function DailyEntry() {
     setShowItemDescriptionList(false);
 
     try {
+      // Normalize subcon name to UPPERCASE
+      const normalizedSubcon = (form.subcon_name || "").trim().toUpperCase();
+
       const payload = {
         site_type: detectSiteTypeFromSiteCode(form.site_code),
         project_code: form.project_code,
@@ -2072,13 +2091,25 @@ function DailyEntry() {
         item_code: form.item_code,
         item_description: form.item_description,
         done_qty: Number(form.done_qty || 0),
-        subcon_name: form.subcon_name,
+        subcon_name: normalizedSubcon,
         onair_date: form.onair_date || null,
         note: form.note,
         qc_durum: form.qc_durum,
         kabul_durum: form.kabul_durum,
         kabul_not: form.kabul_not,
       };
+
+      // Save new subcon to master list if not already there
+      if (normalizedSubcon && !subconList.includes(normalizedSubcon)) {
+        try {
+          await fetch(`${API_BASE}/subcons`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subcon_name: normalizedSubcon }),
+          });
+          setSubconList(prev => [...prev, normalizedSubcon].sort((a, b) => a.localeCompare(b, "tr")));
+        } catch (_) { /* non-critical */ }
+      }
 
       if (editingId) {
         await fetchJson(`${API_BASE}/master/${editingId}`, {
@@ -2204,348 +2235,129 @@ function DailyEntry() {
     }
   };
 
+  // shared th style for sticky headers
+  const thSt = (bg = "#1e293b") => ({ position:"sticky", top:0, background:bg, zIndex:2, color:"#fff", fontWeight:700, fontSize:12, padding:"10px 12px", textAlign:"left", whiteSpace:"nowrap", letterSpacing:"0.03em" });
+  const thStLight = () => ({ position:"sticky", top:0, background:"#1e293b", zIndex:2, color:"#94a3b8", fontWeight:600, fontSize:11, padding:"9px 12px", textAlign:"left", whiteSpace:"nowrap", letterSpacing:"0.04em", textTransform:"uppercase" });
+  const statBadge = (val, label, color) => (
+    <div style={{ background:`${color}22`, border:`1px solid ${color}55`, borderRadius:8, padding:"5px 12px", display:"flex", flexDirection:"column", alignItems:"center", minWidth:90 }}>
+      <div style={{ fontSize:11, color:`${color}cc`, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em" }}>{label}</div>
+      <div style={{ fontSize:14, fontWeight:800, color }}>{val}</div>
+    </div>
+  );
+
   return (
     <>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: "12px",
-          flexWrap: "wrap",
-          marginBottom: "8px",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "28px", lineHeight: 1.1 }}>
-          📋 Günlük İş Girişi
-        </h1>
-
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ position: "relative", display: "inline-block" }}>
-            <button
-              type="button"
-              className={showDailyIslemlerMenu ? "tab uploadTab activeTab" : "tab uploadTab"}
+      {/* ═══ PAGE HEADER BANNER ═══ */}
+      <div style={{ background:"linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1d4ed8 100%)", borderRadius:16, padding:"18px 24px", marginBottom:18, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+          <div style={{ width:48, height:48, borderRadius:14, background:"rgba(255,255,255,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, flexShrink:0 }}>📡</div>
+          <div>
+            <div style={{ color:"#fff", fontWeight:800, fontSize:20, letterSpacing:"-0.3px" }}>Günlük İş Girişi</div>
+            <div style={{ color:"rgba(255,255,255,0.55)", fontSize:12, marginTop:2 }}>Rollout · Saha Veri Yönetimi</div>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+          {/* İşlemler dropdown */}
+          <div style={{ position:"relative" }}>
+            <button type="button"
               onClick={() => setShowDailyIslemlerMenu((prev) => !prev)}
-              style={{ display: "flex", alignItems: "center", gap: "6px" }}
-            >
+              style={{ height:38, padding:"0 16px", background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.25)", borderRadius:9, color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
               ⚡ İşlemler {showDailyIslemlerMenu ? "▲" : "▼"}
             </button>
-
             {showDailyIslemlerMenu && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 6px)",
-                  right: 0,
-                  background: "#fff",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "10px",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                  zIndex: 999,
-                  minWidth: "200px",
-                  overflow: "hidden",
-                }}
-              >
+              <div style={{ position:"absolute", top:"calc(100% + 6px)", right:0, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.15)", zIndex:999, minWidth:210, overflow:"hidden" }}>
                 {[
-                  {
-                    label: "📊 QC Yükle",
-                    action: () => {
-                      setShowQcUpload((prev) => !prev);
-                      setShowBoqUpload(false);
-                      setShowHwPoUpload(false);
-                      setShowCompletedImport(false);
-                      setShowDailyIslemlerMenu(false);
-                    },
-                  },
-                  {
-                    label: "📋 BoQ Yükle",
-                    action: () => {
-                      setShowBoqUpload((prev) => !prev);
-                      setShowQcUpload(false);
-                      setShowHwPoUpload(false);
-                      setShowCompletedImport(false);
-                      setShowDailyIslemlerMenu(false);
-                    },
-                  },
-                  {
-                    label: "🚀 Rollout Yükle",
-                    action: () => {
-                      setShowRolloutUpload(true);
-                      setShowDailyIslemlerMenu(false);
-                    },
-                  },
-                  {
-                    label: "✅ Tamamlanan Import",
-                    action: () => {
-                      setShowCompletedImport((prev) => !prev);
-                      setShowBoqUpload(false);
-                      setShowQcUpload(false);
-                      setShowHwPoUpload(false);
-                      setShowDailyIslemlerMenu(false);
-                    },
-                  },
-                ].map((item, i, arr) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={item.action}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "11px 16px",
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: i < arr.length - 1 ? "1px solid #f3f4f6" : "none",
-                      fontSize: "14px",
-                      color: "#1f2937",
-                      cursor: "pointer",
-                      fontWeight: "500",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                  >
+                  { label:"📊 QC Yükle", action:() => { setShowQcUpload((p)=>!p); setShowBoqUpload(false); setShowHwPoUpload(false); setShowCompletedImport(false); setShowDailyIslemlerMenu(false); } },
+                  { label:"📋 BoQ Yükle", action:() => { setShowBoqUpload((p)=>!p); setShowQcUpload(false); setShowHwPoUpload(false); setShowCompletedImport(false); setShowDailyIslemlerMenu(false); } },
+                  { label:"🚀 Rollout Yükle", action:() => { setShowRolloutUpload(true); setShowDailyIslemlerMenu(false); } },
+                  { label:"✅ Tamamlanan Import", action:() => { setShowCompletedImport((p)=>!p); setShowBoqUpload(false); setShowQcUpload(false); setShowHwPoUpload(false); setShowDailyIslemlerMenu(false); } },
+                ].map((item,i,arr) => (
+                  <button key={i} type="button" onClick={item.action}
+                    style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 16px", background:"transparent", border:"none", borderBottom:i<arr.length-1?"1px solid #f3f4f6":"none", fontSize:14, color:"#1f2937", cursor:"pointer", fontWeight:500 }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                     {item.label}
                   </button>
                 ))}
               </div>
             )}
           </div>
-
-          <button
-            type="button"
-            className="excelBtn"
-            onClick={handleExportAllEntriesExcel}
-          >
-            Tüm İşleri Excel İndir
+          {/* Tüm İşleri Excel */}
+          <button type="button" onClick={handleExportAllEntriesExcel}
+            style={{ height:38, padding:"0 18px", background:"rgba(255,255,255,0.92)", border:"none", borderRadius:9, color:"#1d4ed8", fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+            📥 Tüm İşleri Excel
           </button>
         </div>
       </div>
 
-      {showBoqUpload && (
-        <BoQUploadInline
-          onClose={() => setShowBoqUpload(false)}
-          onUploaded={refreshAll}
-        />
-      )}
+      {/* Upload panels */}
+      {showBoqUpload && <BoQUploadInline onClose={() => setShowBoqUpload(false)} onUploaded={refreshAll} />}
+      {showHwPoUpload && <HWPoUploadInline onClose={() => setShowHwPoUpload(false)} onUploaded={refreshAll} />}
+      {showRolloutUpload && <RolloutUploadInline onClose={() => setShowRolloutUpload(false)} onUploaded={refreshAll} />}
+      {showCompletedImport && <CompletedWorksImportInline onClose={() => setShowCompletedImport(false)} onImported={refreshAll} />}
+      {showQcUpload && <QCUploadInline onClose={() => setShowQcUpload(false)} onUploaded={refreshAll} />}
 
-      {showHwPoUpload && (
-        <HWPoUploadInline
-          onClose={() => setShowHwPoUpload(false)}
-          onUploaded={refreshAll}
-        />
-      )}
-      {showRolloutUpload && (
-        <RolloutUploadInline
-          onClose={() => setShowRolloutUpload(false)}
-          onUploaded={refreshAll}
-        />
-      )}
-
-      {showCompletedImport && (
-        <CompletedWorksImportInline
-          onClose={() => setShowCompletedImport(false)}
-          onImported={refreshAll}
-        />
-      )}
-
-      {showQcUpload && (
-        <QCUploadInline
-          onClose={() => setShowQcUpload(false)}
-          onUploaded={refreshAll}
-        />
-      )}
-
-      <div className="entryPanel">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "end",
-            gap: "16px",
-            flexWrap: "wrap",
-          }}
-        >
-          <div
-            style={{ display: "flex", justifyContent: "center", width: "100%" }}
-          >
-            <div style={{ width: "420px" }}>
-              <label
-                style={{
-                  display: "block",
-                  fontWeight: "700",
-                  marginBottom: "8px",
-                  color: "#374151",
-                  textAlign: "center",
-                }}
-              >
-                Site Code
-              </label>
-
-              <div style={{ display: "flex", gap: "10px" }}>
-                <input
-                  value={siteSearchCode}
-                  onChange={handleSiteSearchChange}
-                  placeholder="Site ID giriniz"
-                  style={{
-                    flex: 1,
-                    padding: "12px 14px",
-                    border: "1px solid #d1d5db",
-                    borderRadius: "10px",
-                    fontSize: "14px",
-                    outline: "none",
-                  }}
-                />
-
-                <button
-                  type="button"
-                  className="saveButton"
-                  onClick={handleOpenEntryModal}
-                  disabled={!siteSearchCode}
-                  style={{
-                    padding: "12px 18px",
-                    borderRadius: "10px",
-                  }}
-                >
-                  Veri Gir
-                </button>
-              </div>
-            </div>
+      {/* ═══ SITE CODE SEARCH CARD ═══ */}
+      <div style={{ background:"#fff", borderRadius:14, padding:"22px 28px", marginBottom:18, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", border:"1.5px solid #e2e8f0" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:12, flexWrap:"wrap" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#64748b", letterSpacing:"0.05em", textTransform:"uppercase" }}>🔎 Saha Kodu ile Ara</div>
+          <div style={{ display:"flex", gap:10, width:"100%", maxWidth:520 }}>
+            <input
+              value={siteSearchCode}
+              onChange={handleSiteSearchChange}
+              placeholder="Site ID giriniz — örn: AT8227_NS_WM"
+              style={{ flex:1, height:48, padding:"0 16px", border:"2px solid #e2e8f0", borderRadius:12, fontSize:15, outline:"none", transition:"border 0.15s", fontWeight:500 }}
+              onFocus={e=>e.currentTarget.style.border="2px solid #3b82f6"}
+              onBlur={e=>e.currentTarget.style.border="2px solid #e2e8f0"}
+            />
+            <button type="button" onClick={handleOpenEntryModal} disabled={!siteSearchCode}
+              style={{ height:48, padding:"0 26px", background:siteSearchCode?"linear-gradient(135deg,#1d4ed8,#4f46e5)":"#cbd5e1", border:"none", borderRadius:12, color:"#fff", fontSize:14, fontWeight:700, cursor:siteSearchCode?"pointer":"not-allowed", boxShadow:siteSearchCode?"0 4px 12px rgba(79,70,229,0.35)":"none", display:"flex", alignItems:"center", gap:7, whiteSpace:"nowrap" }}>
+              📡 Veri Gir
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="tableWrap">
-        <h3 className="listTitle">Bu Saha İçin Açılmış PO Kalemleri</h3>
-        <div style={{ marginBottom: "10px", fontSize: "14px" }}>
-          <strong>Toplam Adet:</strong> {poSummary.totalQty} &nbsp; | &nbsp;
-          <strong>Toplam Tutar:</strong> {formatTRY(poSummary.totalAmount)}
+      {/* ═══ PO KALEMLERİ CARD ═══ */}
+      <div style={{ background:"#fff", borderRadius:14, marginBottom:16, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", overflow:"hidden", border:"1.5px solid #e2e8f0" }}>
+        {/* Card header */}
+        <div style={{ background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)", padding:"13px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div style={{ color:"#fff", fontWeight:700, fontSize:14, display:"flex", alignItems:"center", gap:8 }}>
+            <span>📦</span> Bu Saha İçin Açılmış PO Kalemleri
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            {statBadge(poSummary.totalQty, "Toplam Adet", "#60a5fa")}
+            {statBadge(formatTRY(poSummary.totalAmount), "Toplam Tutar", "#34d399")}
+          </div>
         </div>
-
-        <div
-          style={{
-            maxHeight: "38vh",
-            overflowY: "auto",
-            overflowX: "auto",
-          }}
-        >
-          <table>
+        {/* Table */}
+        <div style={{ maxHeight:"35vh", overflowY:"auto", overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
               <tr>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  PO No
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Project Code
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Site Code
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Item Code
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Item Description
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Requested Qty
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Due Qty
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Currency
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Unit Price
-                </th>
+                {["PO No","Project Code","Site Code","Item Code","Item Description","Req. Qty","Due Qty","Currency","Unit Price"].map(h => (
+                  <th key={h} style={thStLight()}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {poRows.length === 0 ? (
-                <EmptyRow
-                  colSpan={9}
-                  text="Bu saha için PO kalemi bulunamadı"
-                />
+                <EmptyRow colSpan={9} text="Bu saha için PO kalemi bulunamadı" />
               ) : (
                 poRows.map((row, index) => (
-                  <tr key={`${row.po_no || "no-po"}-${row.item_code}-${index}`}>
-                    <td>{row.po_no || "-"}</td>
-                    <td>{row.project_code || "-"}</td>
-                    <td>{row.site_code || "-"}</td>
-                    <td>{row.item_code || "-"}</td>
-                    <td>{row.item_description || "-"}</td>
-                    <td>{row.requested_qty ?? "-"}</td>
-                    <td>{row.due_qty ?? "-"}</td>
-                    <td>{row.currency || "-"}</td>
-                    <td>
-                      {Number(row.unit_price || 0) === 0
-                        ? "-"
-                        : formatMoneyByCurrency(row.unit_price, row.currency)}
-                    </td>
+                  <tr key={`${row.po_no||"no-po"}-${row.item_code}-${index}`}
+                    style={{ borderBottom:"1px solid #f1f5f9" }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <td style={{ padding:"9px 12px", fontSize:13 }}>{row.po_no || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13 }}>{row.project_code || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13, fontWeight:600 }}>{row.site_code || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:12, fontFamily:"monospace" }}>{row.item_code || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:12, maxWidth:280 }}>{row.item_description || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13, textAlign:"center", fontWeight:600 }}>{row.requested_qty ?? "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13, textAlign:"center", fontWeight:600, color: Number(row.due_qty||0) > 0 ? "#dc2626" : "#16a34a" }}>{row.due_qty ?? "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:12 }}>{row.currency || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13, fontWeight:600 }}>{Number(row.unit_price||0)===0 ? "-" : formatMoneyByCurrency(row.unit_price, row.currency)}</td>
                   </tr>
                 ))
               )}
@@ -2554,222 +2366,32 @@ function DailyEntry() {
         </div>
       </div>
 
-      <div className="tableWrap">
-        <div className="tableWrap">
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr auto 1fr auto",
-              alignItems: "center",
-              gap: "12px",
-              marginBottom: "14px",
-            }}
-          >
-            <div style={{ fontSize: "14px", textAlign: "left" }}>
-              <strong>Toplam Adet:</strong> {entrySummary.totalQty} {" | "}
-              <strong>Toplam Tutar:</strong>{" "}
-              {formatTRY(entrySummary.totalAmount)}
-            </div>
-
-            <h3
-              className="listTitle"
-              style={{ margin: 0, textAlign: "center" }}
-            >
-              Bu Saha İçin Girilmiş İşler
-            </h3>
-
-            <div style={{ fontSize: "14px", textAlign: "right" }}>
-              <strong>Fark Adet:</strong> {farkQty} {" | "}
-              <strong>Fark Tutar:</strong> {formatTRY(farkTutar)}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              style={{
-                padding: "10px 16px",
-                background: "#e5e7eb",
-                border: "none",
-                borderRadius: "8px",
-                fontWeight: "600",
-                cursor: "pointer",
-              }}
-            >
-              Excel İndir
+      {/* ═══ GİRİLMİŞ İŞLER CARD ═══ */}
+      <div style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", overflow:"hidden", border:"1.5px solid #e2e8f0" }}>
+        {/* Card header */}
+        <div style={{ background:"linear-gradient(135deg,#0f4c2a,#15803d)", padding:"13px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
+          <div style={{ color:"#fff", fontWeight:700, fontSize:14, display:"flex", alignItems:"center", gap:8 }}>
+            <span>✅</span> Bu Saha İçin Girilmiş İşler
+          </div>
+          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+            {statBadge(entrySummary.totalQty, "Toplam Adet", "#86efac")}
+            {statBadge(formatTRY(entrySummary.totalAmount), "Toplam Tutar", "#86efac")}
+            {statBadge(farkQty, "Fark Adet", farkQty > 0 ? "#fca5a5" : "#86efac")}
+            {statBadge(formatTRY(farkTutar), "Fark Tutar", farkTutar > 0 ? "#fca5a5" : "#86efac")}
+            <button type="button" onClick={handleExportExcel}
+              style={{ height:36, padding:"0 16px", background:"rgba(255,255,255,0.9)", border:"none", borderRadius:8, color:"#15803d", fontSize:12, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
+              📥 Excel
             </button>
           </div>
         </div>
-
-        <div
-          style={{
-            maxHeight: "38vh",
-            overflowY: "auto",
-            overflowX: "auto",
-          }}
-        >
-          <table>
+        {/* Table */}
+        <div style={{ maxHeight:"40vh", overflowY:"auto", overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
               <tr>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Saha Türü
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Project
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Site
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Item Code
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Item Description
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Done Qty
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Requested Qty
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Fark
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Analiz
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Taşeron
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  OnAir
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  RF Not
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  İşlem
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  QC Durum
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Kabul Durum
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Kabul Not
-                </th>
+                {["Saha Türü","Project","Site","Item Code","Item Description","Done Qty","Req. Qty","Fark","Analiz","Taşeron","OnAir","RF Not","İşlem","QC","Kabul","Kabul Not"].map(h => (
+                  <th key={h} style={thStLight()}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -2777,79 +2399,53 @@ function DailyEntry() {
                 <EmptyRow colSpan={16} text="Bu saha için giriş yapılmamış" />
               ) : (
                 siteEntries.map((row, index) => {
-                  const analysis = getQtyAnalysis(
-                    row.done_qty,
-                    row.requested_qty,
-                  );
-
+                  const analysis = getQtyAnalysis(row.done_qty, row.requested_qty);
+                  const tdSt = { padding:"8px 12px", fontSize:12, borderBottom:"1px solid #f1f5f9", verticalAlign:"middle" };
                   return (
-                    <tr key={`${row.id}-${index}`}>
-                      <td>{row.site_type}</td>
-                      <td>{row.project_code}</td>
-                      <td>{row.site_code}</td>
-                      <td>{row.item_code}</td>
-                      <td title={row.item_description}>
+                    <tr key={`${row.id}-${index}`}
+                      onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <td style={tdSt}>
+                        <span style={{ background:"#dbeafe", color:"#1d4ed8", borderRadius:5, padding:"2px 7px", fontSize:11, fontWeight:700 }}>{row.site_type}</span>
+                      </td>
+                      <td style={{ ...tdSt, fontFamily:"monospace", fontSize:11 }}>{row.project_code}</td>
+                      <td style={{ ...tdSt, fontWeight:700, color:"#1e3a5f" }}>{row.site_code}</td>
+                      <td style={{ ...tdSt, fontFamily:"monospace", fontSize:11 }}>{row.item_code}</td>
+                      <td style={{ ...tdSt, maxWidth:220 }} title={row.item_description}>
                         <div className="desc-cell">{row.item_description}</div>
                       </td>
-                      <td>{row.done_qty}</td>
-                      <td>{row.requested_qty ?? "-"}</td>
-                      <td>{analysis.diff}</td>
-                      <td>
-                        <span className={`analysisBadge ${analysis.className}`}>
-                          {analysis.label}
-                        </span>
+                      <td style={{ ...tdSt, fontWeight:800, fontSize:14, textAlign:"center", color:"#1d4ed8" }}>{row.done_qty}</td>
+                      <td style={{ ...tdSt, textAlign:"center" }}>{row.requested_qty ?? "-"}</td>
+                      <td style={{ ...tdSt, textAlign:"center", fontWeight:700, color: analysis.diff > 0 ? "#dc2626" : "#16a34a" }}>{analysis.diff}</td>
+                      <td style={tdSt}>
+                        <span className={`analysisBadge ${analysis.className}`}>{analysis.label}</span>
                       </td>
-                      <td>{row.subcon_name}</td>
-                      <td>{formatDateTR(row.onair_date)}</td>
-                      <td>{row.note}</td>
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "8px",
-                            flexWrap: "nowrap",
-                            justifyContent: "center",
-                            alignItems: "center",
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="tab"
-                            style={{
-                              padding: "8px 14px",
-                              minWidth: "86px",
-                              borderRadius: "10px",
-                              fontWeight: "600",
-                              whiteSpace: "nowrap",
-                            }}
-                            onClick={() => handleEdit(row)}
-                            title="Kaydı düzenle"
-                          >
-                            Düzenle
+                      <td style={{ ...tdSt, fontSize:11 }}>{row.subcon_name}</td>
+                      <td style={{ ...tdSt, whiteSpace:"nowrap" }}>{formatDateTR(row.onair_date)}</td>
+                      <td style={{ ...tdSt, maxWidth:120, fontSize:11, color:"#6b7280" }}>{row.note}</td>
+                      <td style={tdSt}>
+                        <div style={{ display:"flex", gap:6, justifyContent:"center" }}>
+                          <button type="button" onClick={() => handleEdit(row)}
+                            style={{ padding:"5px 12px", background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:7, fontSize:12, fontWeight:700, color:"#1d4ed8", cursor:"pointer", whiteSpace:"nowrap" }}>
+                            ✏️ Düzenle
                           </button>
-
-                          <button
-                            type="button"
-                            className="tab"
-                            style={{
-                              padding: "8px 14px",
-                              minWidth: "70px",
-                              borderRadius: "10px",
-                              fontWeight: "600",
-                              whiteSpace: "nowrap",
-                              background: "#fee2e2",
-                              color: "#991b1b",
-                            }}
-                            onClick={() => handleDelete(row)}
-                            title="Kaydı sil"
-                          >
-                            Sil
+                          <button type="button" onClick={() => handleDelete(row)}
+                            style={{ padding:"5px 10px", background:"#fff1f2", border:"1px solid #fecaca", borderRadius:7, fontSize:12, fontWeight:700, color:"#dc2626", cursor:"pointer" }}>
+                            🗑
                           </button>
                         </div>
                       </td>
-                      <td>{row.qc_durum || "-"}</td>
-                      <td>{row.kabul_durum || "-"}</td>
-                      <td>{row.kabul_not || "-"}</td>
+                      <td style={tdSt}>
+                        <span style={{ background:row.qc_durum==="OK"?"#f0fdf4":"#fff1f2", color:row.qc_durum==="OK"?"#15803d":"#dc2626", border:`1px solid ${row.qc_durum==="OK"?"#bbf7d0":"#fecaca"}`, borderRadius:5, padding:"2px 8px", fontSize:11, fontWeight:700 }}>
+                          {row.qc_durum==="OK"?"✓ OK":"✗ NOK"}
+                        </span>
+                      </td>
+                      <td style={tdSt}>
+                        <span style={{ background:row.kabul_durum==="OK"?"#f0fdf4":"#fff1f2", color:row.kabul_durum==="OK"?"#15803d":"#dc2626", border:`1px solid ${row.kabul_durum==="OK"?"#bbf7d0":"#fecaca"}`, borderRadius:5, padding:"2px 8px", fontSize:11, fontWeight:700 }}>
+                          {row.kabul_durum==="OK"?"✓ OK":"✗ NOK"}
+                        </span>
+                      </td>
+                      <td style={{ ...tdSt, maxWidth:140, fontSize:11, color:"#6b7280" }}>{row.kabul_not || "-"}</td>
                     </tr>
                   );
                 })
@@ -2875,344 +2471,259 @@ function DailyEntry() {
         >
           <div
             style={{
-              background: "#fff",
+              background: "#f1f5f9",
               width: "100%",
-              maxWidth: "1100px",
-              maxHeight: "90vh",
-              overflow: "auto",
+              maxWidth: "960px",
+              maxHeight: "92vh",
+              display: "flex",
+              flexDirection: "column",
               borderRadius: "20px",
-              padding: "24px",
-              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+              overflow: "hidden",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "12px",
-                flexWrap: "wrap",
-                marginBottom: "18px",
-              }}
-            >
-              <h3 style={{ margin: 0 }}>
-                {editingId ? "Kaydı Düzenle" : "Yeni Veri Girişi"}
-              </h3>
-
-              <button type="button" className="tab" onClick={handleCancelEdit}>
-                Kapat
+            {/* ── HEADER ── */}
+            <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1d4ed8 100%)", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
+                  📡
+                </div>
+                <div>
+                  <div style={{ color: "#fff", fontWeight: 800, fontSize: 17, letterSpacing: "-0.3px" }}>
+                    {editingId ? "Kaydı Düzenle" : "Yeni Veri Girişi"}
+                  </div>
+                  <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, marginTop: 2 }}>
+                    Günlük İş Girişi · Rollout Takip
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelEdit}
+                style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.12)", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
+              >
+                ×
               </button>
             </div>
 
-            <form className="entryForm" onSubmit={handleSave}>
-              <div className="formGrid">
-                <div className="formGroup">
-                  <label>Saha Türü</label>
-                  <select
-                    name="site_type"
-                    value={form.site_type}
-                    onChange={handleChange}
-                  >
-                    <option value="5G">5G</option>
-                    <option value="DSS">DSS</option>
-                    <option value="LTE">LTE</option>
-                    <option value="STANDALONE">STANDALONE</option>
-                    <option value="Diğer">Diğer</option>
-                  </select>
-                </div>
+            {/* ── SCROLLABLE FORM ── */}
+            <form onSubmit={handleSave} style={{ overflowY: "auto", flex: 1, padding: "20px 24px 24px" }}>
 
-                <div className="formGroup">
-                  <label>Project Code</label>
-                  <select
-                    name="project_code"
-                    value={form.project_code}
-                    onChange={handleChange}
-                    required
-                  >
-                    <option value="">Seçiniz</option>
-                    <option value="56A0SJC">56A0SJC</option>
-                    <option value="56A0QEF">56A0QEF</option>
-                    <option value="56A0NCD">56A0NCD</option>
-                    <option value="56A0TCT">56A0TCT</option>
-                    {projectCodes
-                      .filter(
-                        (p) =>
-                          ![
-                            "56A0SJC",
-                            "56A0QEF",
-                            "56A0NCD",
-                            "56A0TCT",
-                          ].includes(p.project_code),
-                      )
-                      .map((p, i) => (
-                        <option
-                          key={`${p.project_code}-${i}`}
-                          value={p.project_code}
-                        >
-                          {p.project_code}
-                        </option>
+              {/* SECTION 1 – Saha Bilgileri */}
+              <div style={{ background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderLeft: "4px solid #3b82f6" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>🏗️</span> Saha Bilgileri
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Saha Türü</label>
+                    <select name="site_type" value={form.site_type} onChange={handleChange}
+                      style={{ width: "100%", height: 40, padding: "0 10px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fafafa", outline: "none" }}>
+                      <option value="5G">5G</option>
+                      <option value="DSS">DSS</option>
+                      <option value="LTE">LTE</option>
+                      <option value="STANDALONE">STANDALONE</option>
+                      <option value="Diğer">Diğer</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Project Code <span style={{ color: "#dc2626" }}>*</span></label>
+                    <select name="project_code" value={form.project_code} onChange={handleChange} required
+                      style={{ width: "100%", height: 40, padding: "0 10px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fafafa", outline: "none" }}>
+                      <option value="">Seçiniz</option>
+                      <option value="56A0SJC">56A0SJC</option>
+                      <option value="56A0QEF">56A0QEF</option>
+                      <option value="56A0NCD">56A0NCD</option>
+                      <option value="56A0TCT">56A0TCT</option>
+                      {projectCodes.filter((p) => !["56A0SJC","56A0QEF","56A0NCD","56A0TCT"].includes(p.project_code)).map((p, i) => (
+                        <option key={`${p.project_code}-${i}`} value={p.project_code}>{p.project_code}</option>
                       ))}
-                  </select>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Site Code <span style={{ color: "#dc2626" }}>*</span></label>
+                    <input name="site_code" value={form.site_code} onChange={handleChange} placeholder="Örn: AT8227_NS_WM" required
+                      style={{ width: "100%", height: 40, padding: "0 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fafafa", outline: "none" }} />
+                  </div>
                 </div>
+              </div>
 
-                <div className="formGroup">
-                  <label>Site Code</label>
-                  <input
-                    name="site_code"
-                    value={form.site_code}
-                    onChange={handleChange}
-                    placeholder="Örn: AT8227_NS_WM"
-                    required
-                  />
+              {/* SECTION 2 – İş Kalemi */}
+              <div style={{ background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderLeft: "4px solid #8b5cf6" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>📋</span> İş Kalemi
                 </div>
-
-                <div className="formGroup">
-                  <label>Done Qty</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="done_qty"
-                    value={form.done_qty}
-                    onChange={handleChange}
-                    placeholder="Örn: 2"
-                    required
-                  />
-                </div>
-
-                <div className="formGroup" style={{ position:"relative" }}>
-                  <label>Subcon Name</label>
-                  <input
-                    name="subcon_name"
-                    value={form.subcon_name}
-                    onChange={handleChange}
-                    onFocus={()=>setShowSubconDrop(true)}
-                    onBlur={()=>setTimeout(()=>setShowSubconDrop(false),150)}
-                    placeholder="Taşeron adı yazın..."
-                    autoComplete="off"
-                  />
-                  {showSubconDrop && (() => {
-                    const q = (form.subcon_name||"").toLowerCase().trim();
-                    const allSubcons = [...new Set(rows.map(r=>r.subcon_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"tr"));
-                    const sugg = allSubcons.filter(n => !q || n.toLowerCase().includes(q));
-                    return sugg.length > 0 ? (
-                      <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:300,background:"#fff",border:"1px solid #d1d5db",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",maxHeight:200,overflowY:"auto" }}>
-                        {sugg.map((name,i)=>(
-                          <div key={i}
-                            onMouseDown={e=>{e.preventDefault(); setForm(prev=>({...prev,subcon_name:name})); setShowSubconDrop(false);}}
-                            style={{ padding:"8px 14px",cursor:"pointer",fontSize:13,borderBottom:"1px solid #f3f4f6" }}
-                            onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"}
-                            onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
-                            {name}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null;
-                  })()}
-                </div>
-
-                <div className="formGroup">
-                  <label>OnAir Date</label>
-                  <DatePicker
-                    selected={parseTRDateToDate(form.onair_date)}
-                    onChange={(date) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        onair_date: formatDateToTR(date),
-                      }))
-                    }
-                    dateFormat="dd.MM.yyyy"
-                    placeholderText="GG.AA.YYYY"
-                    className="datePickerInput"
-                    isClearable
-                    showPopperArrow={false}
-                  />
-                </div>
-
-                <div
-                  className="formGroup"
-                  style={{ position: "relative" }}
-                  ref={itemCodeBoxRef}
-                >
-                  <label>Item Code</label>
-
+                {/* Item Description – full width search bar */}
+                <div style={{ position: "relative", marginBottom: 12 }} ref={itemDescriptionBoxRef}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>🔎 Item Description <span style={{ color: "#dc2626" }}>*</span></label>
                   <input
                     type="text"
-                    value={itemCodeSearch}
-                    onChange={(e) => {
-                      setItemCodeSearch(e.target.value);
-                      setShowItemCodeList(true);
-                    }}
-                    onFocus={() => setShowItemCodeList(true)}
-                    placeholder="Item code filtrele..."
+                    value={itemDescriptionSearch}
+                    onChange={(e) => { setItemDescriptionSearch(e.target.value); setShowItemDescriptionList(true); }}
+                    onFocus={() => setShowItemDescriptionList(true)}
+                    placeholder={itemOptions.length === 0 ? "Kayıt bulunamadı" : "İş kalemini yazarak arayın..."}
                     disabled={itemOptions.length === 0}
+                    style={{ width: "100%", height: 44, padding: "0 14px 0 40px", border: `2px solid ${form.item_description ? "#8b5cf6" : "#e2e8f0"}`, borderRadius: 9, fontSize: 13, boxSizing: "border-box", background: form.item_description ? "#faf5ff" : "#fafafa", outline: "none", fontWeight: form.item_description ? 600 : 400 }}
                   />
-
-                  {showItemCodeList && filteredItemCodes.length > 0 && (
+                  <span style={{ position: "absolute", left: 13, top: "calc(50% + 10px)", transform: "translateY(-50%)", fontSize: 16, pointerEvents: "none" }}>🔍</span>
+                  {/* hidden input for HTML5 required validation */}
+                  <input type="text" value={form.item_description} required readOnly style={{ position: "absolute", opacity: 0, width: 1, height: 1, pointerEvents: "none" }} tabIndex={-1} />
+                  {showItemDescriptionList && filteredItemDescriptions.length > 0 && (
                     <div className="filterDropdown">
-                      {filteredItemCodes.map((item, idx) => (
-                        <div
-                          key={`${item.item_code}-${idx}`}
-                          className="filterDropdownItem"
-                          onMouseDown={() => handleItemCodePick(item)}
-                        >
-                          {item.item_code}
+                      {filteredItemDescriptions.map((item, idx) => (
+                        <div key={`${item.item_code}-${idx}`} className="filterDropdownItem" onMouseDown={() => handleItemDescriptionPick(item)}>
+                          {item.item_description}
                         </div>
                       ))}
                     </div>
                   )}
-
-                  <select
-                    name="item_code"
-                    value={form.item_code}
-                    onChange={handleChange}
-                    required
-                    disabled={itemOptions.length === 0}
-                    style={{ marginTop: "8px" }}
-                  >
-                    <option value="">
-                      {itemOptions.length === 0
-                        ? "Kayıt bulunamadı"
-                        : "Seçiniz"}
-                    </option>
-                    {itemOptions.map((item, idx) => (
-                      <option
-                        key={`${item.item_code}-${idx}`}
-                        value={item.item_code}
-                      >
-                        {item.item_code}
-                      </option>
-                    ))}
-                  </select>
                 </div>
-
-                <div
-                  className="formGroup formGroupWide"
-                  style={{ position: "relative" }}
-                  ref={itemDescriptionBoxRef}
-                >
-                  <label className="itemDescLabel">
-                    🔎 Item Description (Buradan arayın)
-                  </label>
-
-                  <input
-                    className="itemDescHighlight"
-                    type="text"
-                    value={itemDescriptionSearch}
-                    onChange={(e) => {
-                      setItemDescriptionSearch(e.target.value);
-                      setShowItemDescriptionList(true);
-                    }}
-                    onFocus={() => setShowItemDescriptionList(true)}
-                    placeholder="🔎 Aramak için item description yazın..."
-                    disabled={itemOptions.length === 0}
-                  />
-
-                  {showItemDescriptionList &&
-                    filteredItemDescriptions.length > 0 && (
+                {/* Item Code + Done Qty – 2 column */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 180px", gap: 12 }}>
+                  <div style={{ position: "relative" }} ref={itemCodeBoxRef}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Item Code <span style={{ color: "#dc2626" }}>*</span></label>
+                    <input type="text" value={itemCodeSearch}
+                      onChange={(e) => { setItemCodeSearch(e.target.value); setShowItemCodeList(true); }}
+                      onFocus={() => setShowItemCodeList(true)}
+                      placeholder={itemOptions.length === 0 ? "Kayıt bulunamadı" : "Kod filtrele veya seçin..."}
+                      disabled={itemOptions.length === 0}
+                      style={{ width: "100%", height: 40, padding: "0 12px", border: `1.5px solid ${form.item_code ? "#10b981" : "#e2e8f0"}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: form.item_code ? "#f0fdf4" : "#fafafa", outline: "none", fontWeight: form.item_code ? 700 : 400 }} />
+                    {/* hidden input for HTML5 required validation */}
+                    <input type="text" name="item_code_hidden" value={form.item_code} required readOnly style={{ position: "absolute", opacity: 0, width: 1, height: 1, pointerEvents: "none" }} tabIndex={-1} />
+                    {showItemCodeList && filteredItemCodes.length > 0 && (
                       <div className="filterDropdown">
-                        {filteredItemDescriptions.map((item, idx) => (
-                          <div
-                            key={`${item.item_code}-${idx}`}
-                            className="filterDropdownItem"
-                            onMouseDown={() => handleItemDescriptionPick(item)}
-                          >
-                            {item.item_description}
+                        {filteredItemCodes.map((item, idx) => (
+                          <div key={`${item.item_code}-${idx}`} className="filterDropdownItem" onMouseDown={() => handleItemCodePick(item)}>
+                            {item.item_code}
                           </div>
                         ))}
                       </div>
                     )}
-
-                  <select
-                    name="item_description"
-                    value={form.item_description}
-                    onChange={handleDescriptionChange}
-                    required
-                    disabled={itemOptions.length === 0}
-                    style={{ marginTop: "8px" }}
-                  >
-                    <option value="">
-                      {itemOptions.length === 0
-                        ? "Kayıt bulunamadı"
-                        : "Seçiniz"}
-                    </option>
-                    {itemOptions.map((item, idx) => (
-                      <option
-                        key={`${item.item_code}-${idx}`}
-                        value={item.item_description}
-                      >
-                        {item.item_description}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="formGroup">
-                  <label>QC Durum</label>
-                  <select
-                    name="qc_durum"
-                    value={form.qc_durum}
-                    onChange={handleChange}
-                  >
-                    <option value="OK">OK</option>
-                    <option value="NOK">NOK</option>
-                  </select>
-                </div>
-
-                <div className="formGroup">
-                  <label>Kabul Durum</label>
-                  <select
-                    name="kabul_durum"
-                    value={form.kabul_durum}
-                    onChange={handleChange}
-                  >
-                    <option value="OK">OK</option>
-                    <option value="NOK">NOK</option>
-                  </select>
-                </div>
-
-                <div className="formGroup formGroupWide">
-                  <label>RF Not</label>
-                  <textarea
-                    name="note"
-                    value={form.note}
-                    onChange={handleChange}
-                    placeholder="RF ile ilgili not giriniz"
-                    rows={3}
-                  />
-                </div>
-
-                <div className="formGroup formGroupWide">
-                  <label>Kabul Not</label>
-                  <textarea
-                    name="kabul_not"
-                    value={form.kabul_not}
-                    onChange={handleChange}
-                    placeholder="Kabul ile ilgili not"
-                    rows={3}
-                  />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Done Qty <span style={{ color: "#dc2626" }}>*</span></label>
+                    <input type="number" step="1" min="0" name="done_qty" value={form.done_qty} onChange={handleChange} placeholder="0" required
+                      style={{ width: "100%", height: 40, padding: "0 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 15, fontWeight: 700, boxSizing: "border-box", background: "#fafafa", outline: "none", textAlign: "center", marginTop: 0 }} />
+                  </div>
                 </div>
               </div>
 
-              <div className="entryActions" style={{ gap: "10px" }}>
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={handleCancelEdit}
-                >
+              {/* SECTION 3 – Taşeron & Tarih */}
+              <div style={{ background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderLeft: "4px solid #10b981" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>👷</span> Taşeron & Tarih
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div style={{ position: "relative" }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Subcon Name</label>
+                    <input
+                      name="subcon_name"
+                      value={form.subcon_name}
+                      onChange={e => setForm(prev => ({ ...prev, subcon_name: e.target.value.toUpperCase() }))}
+                      onFocus={() => setShowSubconDrop(true)}
+                      onBlur={() => setTimeout(() => setShowSubconDrop(false), 150)}
+                      placeholder="TAŞERON ADI YAZIN..."
+                      autoComplete="off"
+                      style={{ width: "100%", height: 40, padding: "0 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fafafa", outline: "none", textTransform: "uppercase", letterSpacing: "0.02em" }}
+                    />
+                    {showSubconDrop && (() => {
+                      const q = (form.subcon_name || "").trim().toUpperCase();
+                      const sugg = subconList.filter(n => !q || n.includes(q));
+                      return sugg.length > 0 ? (
+                        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 300, background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", maxHeight: 220, overflowY: "auto" }}>
+                          {sugg.map((name, i) => (
+                            <div key={i}
+                              onMouseDown={e => { e.preventDefault(); setForm(prev => ({ ...prev, subcon_name: name })); setShowSubconDrop(false); }}
+                              style={{ padding: "9px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 8 }}
+                              onMouseEnter={e => e.currentTarget.style.background = "#f0fdf4"}
+                              onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                              <span style={{ fontSize: 15 }}>👷</span>
+                              <span style={{ fontWeight: 600 }}>{name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>OnAir Date</label>
+                    <DatePicker
+                      selected={parseTRDateToDate(form.onair_date)}
+                      onChange={(date) => setForm((prev) => ({ ...prev, onair_date: formatDateToTR(date) }))}
+                      dateFormat="dd.MM.yyyy"
+                      placeholderText="GG.AA.YYYY"
+                      className="datePickerInput"
+                      isClearable
+                      showPopperArrow={false}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 4 – Durum & Notlar */}
+              <div style={{ background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderLeft: "4px solid #f59e0b" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>✅</span> Durum & Notlar
+                </div>
+                {/* QC + Kabul Durum */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>QC Durum</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {["OK","NOK"].map(v => (
+                        <button key={v} type="button"
+                          onClick={() => setForm(prev => ({ ...prev, qc_durum: v }))}
+                          style={{ flex: 1, height: 40, border: "2px solid", borderColor: form.qc_durum === v ? (v === "OK" ? "#16a34a" : "#dc2626") : "#e2e8f0", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", background: form.qc_durum === v ? (v === "OK" ? "#f0fdf4" : "#fff1f2") : "#fafafa", color: form.qc_durum === v ? (v === "OK" ? "#16a34a" : "#dc2626") : "#9ca3af", transition: "all 0.15s" }}>
+                          {v === "OK" ? "✓ OK" : "✗ NOK"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Kabul Durum</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {["OK","NOK"].map(v => (
+                        <button key={v} type="button"
+                          onClick={() => setForm(prev => ({ ...prev, kabul_durum: v }))}
+                          style={{ flex: 1, height: 40, border: "2px solid", borderColor: form.kabul_durum === v ? (v === "OK" ? "#16a34a" : "#dc2626") : "#e2e8f0", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", background: form.kabul_durum === v ? (v === "OK" ? "#f0fdf4" : "#fff1f2") : "#fafafa", color: form.kabul_durum === v ? (v === "OK" ? "#16a34a" : "#dc2626") : "#9ca3af", transition: "all 0.15s" }}>
+                          {v === "OK" ? "✓ OK" : "✗ NOK"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {/* RF Not + Kabul Not */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>RF Not</label>
+                    <textarea name="note" value={form.note} onChange={handleChange} placeholder="RF ile ilgili not giriniz..." rows={3}
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", resize: "vertical", outline: "none", fontFamily: "inherit", background: "#fafafa" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Kabul Not</label>
+                    <textarea name="kabul_not" value={form.kabul_not} onChange={handleChange} placeholder="Kabul ile ilgili not..." rows={3}
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", resize: "vertical", outline: "none", fontFamily: "inherit", background: "#fafafa" }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* FOOTER ACTIONS */}
+              {message && (
+                <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#166534", fontWeight: 600 }}>
+                  ✓ {message}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button type="button" onClick={handleCancelEdit}
+                  style={{ padding: "0 24px", height: 44, borderRadius: 10, border: "1.5px solid #e2e8f0", background: "#fff", fontSize: 14, fontWeight: 600, color: "#6b7280", cursor: "pointer" }}>
                   Kapat
                 </button>
-
-                <button type="submit" className="saveButton" disabled={saving}>
-                  {saving
-                    ? "Kaydediliyor..."
-                    : editingId
-                      ? "Güncelle"
-                      : "Kaydet"}
+                <button type="submit" disabled={saving}
+                  style={{ padding: "0 32px", height: 44, borderRadius: 10, border: "none", background: saving ? "#94a3b8" : "linear-gradient(135deg,#1d4ed8,#4f46e5)", fontSize: 14, fontWeight: 700, color: "#fff", cursor: saving ? "not-allowed" : "pointer", boxShadow: saving ? "none" : "0 4px 12px rgba(79,70,229,0.35)" }}>
+                  {saving ? "⏳ Kaydediliyor..." : editingId ? "✓ Güncelle" : "✓ Kaydet"}
                 </button>
               </div>
-
-              {message && <div className="entryMessage">{message}</div>}
             </form>
           </div>
         </div>

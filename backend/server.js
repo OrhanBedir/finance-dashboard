@@ -8802,71 +8802,217 @@ pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS fatura_turu TEX
 pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS bagli_fatura_id INTEGER`).catch(() => {});
 
 // ─── FATURA PARSE HELPERs ────────────────────────────────────────────────────
-function parseTurkishInvoice(text) {
-  const full = text.replace(/\r/g, " ").replace(/\n/g, " ").replace(/\s{2,}/g, " ");
+function parseTurkishInvoice(rawText) {
+  // ── Yardımcı: TR para sayısı → JS float ──────────────────────────────────
+  const parseTRNum = (s) => {
+    if (!s) return "";
+    s = s.replace(/\s|TL|₺/g, "").trim();
+    if (!s) return "";
+    // 66.666,67 → nokta=binlik, virgül=ondalık
+    if (/\d\.\d{3},\d/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+    // 66,666.67 → virgül=binlik, nokta=ondalık (OCR bazen ters çevirir)
+    else if (/\d,\d{3}\.\d/.test(s)) s = s.replace(/,/g, "");
+    // 66.666 → son 3 basamak → binlik nokta
+    else if (/^\d+\.\d{3}$/.test(s)) s = s.replace(".", "");
+    // 66,67 tek virgül → ondalık
+    else s = s.replace(/\./g, "").replace(",", ".");
+    const n = parseFloat(s);
+    return isNaN(n) ? "" : String(Math.round(n * 100) / 100);
+  };
 
-  const find = (patterns) => {
+  // ── E-fatura PDF'leri iki sütun içerir: etiketler bir sütunda, değerler
+  //    diğer sütunda → pdfminer bunları ayrı satırlar olarak verir.
+  //    findAfterLabel: etiketi bul, ardından gelen satırlarda değeri ara ──────
+  const lines = rawText.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const flat  = rawText.replace(/\r/g, " ").replace(/\n/g, " ").replace(/\s{2,}/g, " ");
+
+  // Etiketten sonra ilk geçerli satırı döndür
+  const findAfterLabel = (labelRe, valueRe) => {
+    for (let i = 0; i < lines.length; i++) {
+      if (labelRe.test(lines[i])) {
+        // Aynı satırda değer var mı? (tek-satır format)
+        const inLine = lines[i].match(valueRe);
+        if (inLine) return inLine[1] || inLine[0];
+        // Sonraki satırlarda ara (en fazla 5 satır)
+        for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+          const m = lines[j].match(valueRe);
+          if (m) return m[1] || m[0];
+        }
+      }
+    }
+    return "";
+  };
+
+  // flat içinde tek-satır formatı için arama
+  const findFlat = (patterns) => {
     for (const p of patterns) {
-      const m = full.match(p);
+      const m = flat.match(p);
       if (m) for (let i = 1; i < m.length; i++) if (m[i]?.trim()) return m[i].trim();
     }
     return "";
   };
 
-  const parseTRNum = (s) => {
-    if (!s) return "";
-    s = s.replace(/\s/g, "");
-    if (/\d,\d{1,2}$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
-    else s = s.replace(/,/g, "");
-    const n = parseFloat(s);
-    return isNaN(n) ? "" : String(Math.round(n * 100) / 100);
-  };
-
-  const fatura_no = find([
-    /(?:FATURA\s*NO|ETTN)[^:]*[:\|#\s]\s*([A-Z0-9\-\/\.]{5,40})/i,
-    /NO\s*[:\|]\s*([A-Z0-9\/\-\.]{4,30})/i,
+  // ── FATURA NO ──────────────────────────────────────────────────────────────
+  // e-fatura formatında etiket ve değer ayrı satırda olabilir
+  let fatura_no = findAfterLabel(
+    /^fatura\s*no\s*:?\s*$/i,
+    /^([A-Z0-9]{5,40})$/i
+  );
+  if (!fatura_no) fatura_no = findFlat([
+    /FATURA\s*NO\s*[:\|]?\s*([A-Z0-9][A-Z0-9\-\/\.]{4,39})/i,
+    /\bFATURA\s*NO\b[^A-Z0-9]*([A-Z0-9]{5,40})/i,
   ]);
+  // ETTN UUID'ini fatura no olarak alma
+  if (/^[0-9a-f\-]{30,}$/i.test(fatura_no)) fatura_no = "";
 
-  const dateRaw = find([
-    /(?:D[Üü]ZENLEME\s*TAR[İI]H[İI]|FATURA\s*TAR[İI]H[İI]|TAR[İI]H)\s*[:\|]?\s*(\d{2}[.\/-]\d{2}[.\/-]\d{4})/i,
-    /(\d{2}[.\/]\d{2}[.\/]\d{4})/,
+  // ── FATURA TARİHİ ──────────────────────────────────────────────────────────
+  let dateRaw = findAfterLabel(
+    /^fatura\s*tar[iİ]h[iİ]\s*:?\s*$/i,
+    /(\d{2}[-./]\d{2}[-./]\d{4})/
+  );
+  if (!dateRaw) dateRaw = findFlat([
+    /FATURA\s*TAR[İI]H[İI]\s*[:\|]?\s*(\d{2}[-./]\d{2}[-./]\d{4})/i,
+    /D[ÜÜ]ZENLEME\s*TAR[İI]H[İI]\s*[:\|]?\s*(\d{2}[-./]\d{2}[-./]\d{4})/i,
+    /(\d{2}[-./]\d{2}[-./]\d{4})/,
   ]);
   let fatura_tarihi = "";
   if (dateRaw) {
-    const p = dateRaw.split(/[.\/\-]/);
+    const p = dateRaw.split(/[-./]/);
     if (p[2]?.length === 4) fatura_tarihi = `${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;
   }
 
-  const tedarikci = find([
-    /(?:SATICI\s*[Uu]NVAN[Iİi]|SATICI\s*ADI|SATICI)[^:]*[:\|]\s*([^\|]{5,80}?)(?:\s{3,}|VKN|V\.K)/i,
-    /(?:UNVANI|[Ff]irma\s*[Aa]d[ıi])\s*[:\|]\s*([^\|]{5,60})/i,
+  // ── TEDARİKÇİ (satıcı/kesici) ──────────────────────────────────────────────
+  // E-fatura'da "SAYIN" → alıcı, ondan önce gelen ilk ad → satıcı
+  // Satıcı genellikle metnin en başında, TCKN/VKN bilgileriyle birlikte gelir
+  let tedarikci = "";
+  // 1) SATICI etiketi ile başlayan satır
+  tedarikci = findFlat([
+    /(?:SATICI\s*[Üü]NVAN[Iiİ]|SATICI\s*AD[Iİ]|SATICI)[^:]*:\s*([^\|]{5,80}?)(?:\s{3,}|VKN|V\.K|$)/i,
+    /UNVANI\s*:\s*([^\|]{5,60})/i,
   ]);
+  // 2) e-fatura PDF: TCKN/VKN/Vergi Dairesi bloğundan önceki ilk isim satırı
+  if (!tedarikci) {
+    // Metni satırlara böl, SAYIN'dan önceki kısmı al
+    const sayinIdx = lines.findIndex(l => /^SAYIN$/i.test(l));
+    const sellerLines = sayinIdx > 0 ? lines.slice(0, sayinIdx) : lines;
+    // İlk gerçek isim satırı (sadece harf ve boşluk, en az 3 kelime veya en az 10 karakter)
+    for (const l of sellerLines) {
+      if (/^[A-ZÇŞĞÜÖİa-zçşğüöı\s\.]{8,70}$/.test(l) && !/^(SUBENO|MERSISNO|HIZMETNO|TICARETSICILNO|e-FATURA|e-ARŞİV|SAYIN)$/i.test(l)) {
+        tedarikci = l.toUpperCase();
+        break;
+      }
+    }
+  }
+  // 3) Firma adı satırlarını birleştir (Limited Şirketi vs.)
+  if (tedarikci && !/LTD|A\.Ş|ANONİM|LİMİTED/i.test(tedarikci)) {
+    // Tedarikçi satırından sonraki satır unvan eki olabilir
+    const tIdx = lines.findIndex(l => l.toUpperCase().includes(tedarikci.split(" ")[0]));
+    if (tIdx >= 0 && tIdx + 1 < lines.length) {
+      const next = lines[tIdx + 1].trim();
+      if (/LTD|A\.Ş|ANONİM|LİMİTED|TİCARET|SANAYİ|ŞİRKETİ/i.test(next)) {
+        tedarikci = (tedarikci + " " + next.toUpperCase()).trim();
+      }
+    }
+  }
 
-  const toplam_raw = find([
-    /(?:[ÖO]DENECEK\s*TUTAR|GENEL\s*TOPLAM|TOPLAM\s*TUTAR)\s*[:\|₺TL\s]*([\d.,]+)/i,
-    /TOPLAM\s*[:\|]?\s*([\d.,]+)/i,
-  ]);
+  // ── TUTARLAR ───────────────────────────────────────────────────────────────
+  // e-fatura'da etiket ve tutar çoğu zaman aynı satırda değil → her iki yöntem
+  const findAmount = (labelRe) => {
+    const numRe = /([\d.,]+)\s*(?:TL|₺)?/;
+    // Etiket + tutar aynı satırda
+    for (const l of lines) {
+      if (labelRe.test(l)) {
+        const m = l.match(/([\d.]+,\d{2})/);
+        if (m) return m[1];
+        // Sonraki satır tutar
+        const idx = lines.indexOf(l);
+        if (idx >= 0 && idx + 1 < lines.length) {
+          const m2 = lines[idx + 1].match(/([\d.]+,\d{2})/);
+          if (m2) return m2[1];
+        }
+      }
+    }
+    // flat arama
+    const flatM = flat.match(new RegExp(labelRe.source + "[^\\d]*(\\d[\\d.,]+)", "i"));
+    if (flatM) return flatM[1];
+    return "";
+  };
 
-  const kdv_raw = find([
-    /(?:HESAPLANAN\s*KDV|KDV\s*TUTARI|KDV\s*%\d+[^:]*|KATMA\s*DE[Ğg]ER\s*VERG[İI])\s*[:\|₺\s]*([\d.,]+)/i,
-    /KDV\s+([\d.,]+)/i,
-  ]);
+  const toplam_raw  = findAmount(/[ÖO]DENECEK\s*TUTAR|VERGİLER\s*DAHİL\s*TOPLAM|GENEL\s*TOPLAM|TOPLAM\s*TUTAR/i);
+  const kdv_raw     = findAmount(/KATMA\s*DE[ĞG]ER\s*VERG[İI]|HESAPLANAN.*KDV|KDV\s*TUTARI|KDV\s*%\d/i);
+  const matrah_raw  = findAmount(/MAL\s*H[İI]ZMET\s*TOPLAM|MATRAH|KDV\s*HAR[İI][ÇC]|ARA\s*TOPLAM/i);
 
-  const matrah_raw = find([
-    /(?:MATRAH|VERG[İI]\s*MATRAHI|KDV\s*HAR[İI][CÇ]|ARA\s*TOPLAM)\s*[:\|₺\s]*([\d.,]+)/i,
-  ]);
+  console.log("[parseTurkishInvoice]", { fatura_no, fatura_tarihi, tedarikci, toplam_raw, kdv_raw, matrah_raw });
 
   return {
     fatura_no,
     fatura_tarihi,
     tedarikci,
-    tutar: parseTRNum(matrah_raw),
-    kdv: parseTRNum(kdv_raw),
+    tutar:        parseTRNum(matrah_raw),
+    kdv:          parseTRNum(kdv_raw),
     toplam_tutar: parseTRNum(toplam_raw),
   };
 }
 
-// POST /invoice-parse — PDF/resim yükle, OCR ile fatura alanlarını çıkar
+// PDF metin çıkarma — önce Python pdfminer (dijital PDF), yoksa OCR.space
+async function extractPdfText(pdfBuffer, isPDF) {
+  // ── 1. Python pdfminer (dijital/e-fatura PDF'leri için en iyi) ────────────
+  if (isPDF) {
+    try {
+      const { execFile } = require("child_process");
+      const os = require("os");
+      const tmpFile = path.join(os.tmpdir(), `invoice_${Date.now()}.pdf`);
+      require("fs").writeFileSync(tmpFile, pdfBuffer);
+      const text = await new Promise((resolve, reject) => {
+        execFile("python3", [
+          "-c",
+          `import sys; from pdfminer.high_level import extract_text; print(extract_text(sys.argv[1]))`,
+          tmpFile,
+        ], { timeout: 15000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+          try { require("fs").unlinkSync(tmpFile); } catch (_) {}
+          if (err) return reject(err);
+          resolve(stdout);
+        });
+      });
+      if (text && text.trim().length > 50) {
+        console.log("[invoice-parse] pdfminer snippet:", text.slice(0, 300));
+        return text;
+      }
+    } catch (e) {
+      console.warn("[invoice-parse] pdfminer failed, falling back to OCR:", e.message);
+    }
+  }
+
+  // ── 2. OCR.space (taramalı PDF veya resim için fallback) ──────────────────
+  try {
+    const apiKey = process.env.OCR_SPACE_KEY || "helloworld";
+    const base64 = pdfBuffer.toString("base64");
+    const mimeType = isPDF ? "application/pdf" : "image/jpeg";
+    const body = new URLSearchParams({
+      base64Image: `data:${mimeType};base64,${base64}`,
+      language: "tur",
+      isOverlayRequired: "false",
+      detectOrientation: "true",
+      scale: "true",
+      OCREngine: "2",
+    });
+    const ocrResp = await fetch("https://api.ocr.space/parse/image", {
+      method: "POST",
+      headers: { apikey: apiKey, "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      signal: AbortSignal.timeout(20000),
+    });
+    const ocrJson = await ocrResp.json();
+    const text = (ocrJson?.ParsedResults || []).map(r => r.ParsedText || "").join("\n");
+    console.log("[invoice-parse] OCR snippet:", text.slice(0, 300));
+    return text;
+  } catch (e) {
+    console.error("[invoice-parse] OCR error:", e.message);
+    return "";
+  }
+}
+
+// POST /invoice-parse — PDF/resim yükle, metin çıkar, fatura alanlarını doldur
 const uploadInvoiceParse = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 app.post("/invoice-parse", authMiddleware, uploadInvoiceParse.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
@@ -8904,34 +9050,8 @@ app.post("/invoice-parse", authMiddleware, uploadInvoiceParse.single("file"), as
     console.error("[invoice-parse] storage error:", e.message);
   }
 
-  // OCR
-  let ocrText = "";
-  try {
-    const apiKey = process.env.OCR_SPACE_KEY || "helloworld";
-    const base64 = pdfBuffer.toString("base64");
-    const mimeType = "application/pdf";
-    const body = new URLSearchParams({
-      base64Image: `data:${mimeType};base64,${base64}`,
-      language: "tur",
-      isOverlayRequired: "false",
-      detectOrientation: "true",
-      scale: "true",
-      OCREngine: isPDF ? "1" : "2",
-    });
-    const ocrResp = await fetch("https://api.ocr.space/parse/image", {
-      method: "POST",
-      headers: { apikey: apiKey, "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-      signal: AbortSignal.timeout(15000),
-    });
-    const ocrJson = await ocrResp.json();
-    ocrText = (ocrJson?.ParsedResults || []).map(r => r.ParsedText || "").join("\n");
-    console.log("[invoice-parse] OCR snippet:", ocrText.slice(0, 400));
-  } catch (e) {
-    console.error("[invoice-parse] OCR error:", e.message);
-  }
-
-  const parsed = parseTurkishInvoice(ocrText);
+  const pdfText = await extractPdfText(pdfBuffer, isPDF);
+  const parsed  = parseTurkishInvoice(pdfText);
   res.json({ ok: true, parsed, temp_key: tempFilename, temp_url: tempUrl });
 });
 
