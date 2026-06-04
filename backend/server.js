@@ -2560,6 +2560,31 @@ app.get("/setup-db", async (req, res) => {
       );
     `);
 
+    // Subcons master list
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS subcons (
+        id SERIAL PRIMARY KEY,
+        subcon_name TEXT UNIQUE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Normalize existing subcon names in master_works to UPPERCASE
+    await pool.query(`
+      UPDATE master_works
+      SET subcon_name = UPPER(TRIM(subcon_name))
+      WHERE subcon_name IS NOT NULL AND subcon_name != '';
+    `);
+
+    // Seed subcons table from master_works distinct values
+    await pool.query(`
+      INSERT INTO subcons (subcon_name)
+      SELECT DISTINCT UPPER(TRIM(subcon_name))
+      FROM master_works
+      WHERE subcon_name IS NOT NULL AND TRIM(subcon_name) != ''
+      ON CONFLICT (subcon_name) DO NOTHING;
+    `);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS finance_salary (
        id SERIAL PRIMARY KEY,
@@ -13484,6 +13509,34 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => {
   res.json({ ok: true, ts: Date.now() });
+});
+
+// ── SUBCONS MASTER LIST ──────────────────────────────────────────────────────
+app.get("/subcons", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT subcon_name FROM subcons ORDER BY subcon_name ASC"
+    );
+    res.json({ subcons: result.rows.map(r => r.subcon_name) });
+  } catch (err) {
+    console.error("GET /subcons ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/subcons", async (req, res) => {
+  try {
+    const name = (req.body.subcon_name || "").trim().toUpperCase();
+    if (!name) return res.status(400).json({ error: "subcon_name boş olamaz" });
+    await pool.query(
+      "INSERT INTO subcons (subcon_name) VALUES ($1) ON CONFLICT (subcon_name) DO NOTHING",
+      [name]
+    );
+    res.json({ ok: true, subcon_name: name });
+  } catch (err) {
+    console.error("POST /subcons ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
