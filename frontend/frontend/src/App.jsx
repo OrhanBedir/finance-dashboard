@@ -1586,6 +1586,7 @@ function DailyEntry() {
   const [form, setForm] = useState(initialForm);
   const [rows, setRows] = useState([]);
   const [siteEntries, setSiteEntries] = useState([]);
+  const [showSubconDrop, setShowSubconDrop] = useState(false);
 
   const [projectCodes, setProjectCodes] = useState([]);
   const [itemOptions, setItemOptions] = useState([]);
@@ -2979,14 +2980,35 @@ function DailyEntry() {
                   />
                 </div>
 
-                <div className="formGroup">
+                <div className="formGroup" style={{ position:"relative" }}>
                   <label>Subcon Name</label>
                   <input
                     name="subcon_name"
                     value={form.subcon_name}
                     onChange={handleChange}
-                    placeholder="Taşeron adı"
+                    onFocus={()=>setShowSubconDrop(true)}
+                    onBlur={()=>setTimeout(()=>setShowSubconDrop(false),150)}
+                    placeholder="Taşeron adı yazın..."
+                    autoComplete="off"
                   />
+                  {showSubconDrop && (() => {
+                    const q = (form.subcon_name||"").toLowerCase().trim();
+                    const allSubcons = [...new Set(rows.map(r=>r.subcon_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"tr"));
+                    const sugg = allSubcons.filter(n => !q || n.toLowerCase().includes(q));
+                    return sugg.length > 0 ? (
+                      <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:300,background:"#fff",border:"1px solid #d1d5db",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",maxHeight:200,overflowY:"auto" }}>
+                        {sugg.map((name,i)=>(
+                          <div key={i}
+                            onMouseDown={e=>{e.preventDefault(); setForm(prev=>({...prev,subcon_name:name})); setShowSubconDrop(false);}}
+                            style={{ padding:"8px 14px",cursor:"pointer",fontSize:13,borderBottom:"1px solid #f3f4f6" }}
+                            onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"}
+                            onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                            {name}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
 
                 <div className="formGroup">
@@ -3150,23 +3172,23 @@ function DailyEntry() {
                 </div>
 
                 <div className="formGroup formGroupWide">
-                  <label>Kabul Not</label>
-                  <textarea
-                    name="kabul_not"
-                    value={form.kabul_not}
-                    onChange={handleChange}
-                    placeholder="Kabul ile ilgili not"
-                    rows={3}
-                  />
-                </div>
-
-                <div className="formGroup formGroupWide">
                   <label>RF Not</label>
                   <textarea
                     name="note"
                     value={form.note}
                     onChange={handleChange}
                     placeholder="RF ile ilgili not giriniz"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="formGroup formGroupWide">
+                  <label>Kabul Not</label>
+                  <textarea
+                    name="kabul_not"
+                    value={form.kabul_not}
+                    onChange={handleChange}
+                    placeholder="Kabul ile ilgili not"
                     rows={3}
                   />
                 </div>
