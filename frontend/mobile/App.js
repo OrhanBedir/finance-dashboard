@@ -14,8 +14,6 @@ import LoginScreen from "./src/screens/LoginScreen";
 import HomeScreen from "./src/screens/HomeScreen";
 import IsAvansScreen from "./src/screens/IsAvansScreen";
 import MasrafFormScreen from "./src/screens/MasrafFormScreen";
-import MalzemeScreen from "./src/screens/MalzemeScreen";
-import UzerimdekiMalzemelerScreen from "./src/screens/UzerimdekiMalzemelerScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -74,12 +72,6 @@ export default function App() {
           </Stack.Screen>
           <Stack.Screen name="MasrafForm">
             {(props) => <MasrafFormScreen {...props} user={user} />}
-          </Stack.Screen>
-          <Stack.Screen name="Malzeme">
-            {(props) => <MalzemeScreen {...props} user={user} />}
-          </Stack.Screen>
-          <Stack.Screen name="UzerimdekiMalzemeler">
-            {(props) => <UzerimdekiMalzemelerScreen {...props} user={user} />}
           </Stack.Screen>
         </Stack.Navigator>
       </NavigationContainer>

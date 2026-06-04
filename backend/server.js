@@ -11889,14 +11889,26 @@ app.put("/malzeme/talepler/:id/durum", authMiddleware, async (req, res) => {
     vals.push(req.params.id);
     await pool.query(`UPDATE malzeme_talepler SET ${fields.join(",")} WHERE id=$${idx}`, vals);
 
-    // Kalem fiyatları + temin türü güncelle (Murat aşaması)
+    // Kalem fiyatları + temin türü + düzeltme güncelle (Murat aşaması)
     if (Array.isArray(kalemler)) {
       for (const k of kalemler) {
         await pool.query(
           `UPDATE malzeme_talep_kalemleri
-           SET birim_fiyat=$1, toplam_tutar=$2, temin_turu=$3, notlar=$4
-           WHERE id=$5`,
-          [k.birim_fiyat||0, k.toplam_tutar||(k.miktar*(k.birim_fiyat||0)), k.temin_turu||"", k.notlar||"", k.id]
+           SET birim_fiyat=$1, toplam_tutar=$2, temin_turu=$3, notlar=$4,
+               malzeme_adi=COALESCE(NULLIF($5,''), malzeme_adi),
+               miktar=COALESCE(NULLIF($6::text,'')::numeric, miktar),
+               birim=COALESCE(NULLIF($7,''), birim)
+           WHERE id=$8`,
+          [
+            k.birim_fiyat||0,
+            k.toplam_tutar||(k.miktar*(k.birim_fiyat||0)),
+            k.temin_turu||"",
+            k.notlar||"",
+            k.malzeme_adi||"",
+            k.miktar != null ? String(k.miktar) : "",
+            k.birim||"",
+            k.id
+          ]
         );
       }
     }

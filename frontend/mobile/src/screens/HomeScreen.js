@@ -9,7 +9,6 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
-  Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiGet, apiPut } from "../api";
@@ -91,7 +90,6 @@ export default function HomeScreen({ user, onLogout, navigation }) {
   const [isDirektor, setIsDirektor]     = useState(false);
   const [onayYukleniyor, setOnayYukleniyor] = useState(null); // id of item being processed
   const [malzemeOnayYukleniyor, setMalzemeOnayYukleniyor] = useState(null);
-  const [inceleAvans, setInceleAvans] = useState(null); // avans detail modal
 
   const fetchData = async (isRefresh) => {
     try {
@@ -403,7 +401,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
 
         <TouchableOpacity
           style={styles.wideBtn}
-          onPress={() => navigation.navigate("Malzeme")}
+          onPress={() => Alert.alert("Yakin", "Malzeme modulu yakin zamanda aktif olacak.")}
           activeOpacity={0.8}
         >
           <Text style={styles.wideBtnIcon}>{"🔧"}</Text>
@@ -413,7 +411,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
 
         <TouchableOpacity
           style={[styles.wideBtn, { backgroundColor: "#1D4ED8", marginTop: 10 }]}
-          onPress={() => navigation.navigate("UzerimdekiMalzemeler")}
+          onPress={() => Alert.alert("Yakin", "Uzerimdeki malzemeler modulu yakin zamanda aktif olacak.")}
           activeOpacity={0.8}
         >
           <Text style={styles.wideBtnIcon}>{"📦"}</Text>
@@ -442,15 +440,19 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           </View>
         )}
 
-        {/* Onay Bekleyen Avans Talepleri (PM veya Direktor icin) — sadece bekleyen varsa goster */}
-        {(isPM || isDirektor) && onayBekleyenAvanslar.length > 0 && (
+        {/* Onay Bekleyen Avans Talepleri (PM veya Direktor icin) */}
+        {(isPM || isDirektor) && (
           <>
             <View style={styles.onayHeader}>
               <Text style={styles.onayTitle}>
                 {"⏳"} ONAY BEKLEYEN AVANS ({onayBekleyenAvanslar.length})
               </Text>
             </View>
-            {(
+            {onayBekleyenAvanslar.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyTxt}>Onay bekleyen avans talebi yok.</Text>
+              </View>
+            ) : (
               onayBekleyenAvanslar.map((a, idx) => {
                 const loading = onayYukleniyor === a.id;
                 return (
@@ -468,13 +470,6 @@ export default function HomeScreen({ user, onLogout, navigation }) {
                       <Text style={styles.onayCardAmt}>{fmtTL(a.tutar)}</Text>
                     </View>
                     <View style={styles.onayBtnRow}>
-                      <TouchableOpacity
-                        style={[styles.onayBtn, styles.onayBtnIncele]}
-                        onPress={() => setInceleAvans(a)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={styles.onayBtnInceleTxt}>{"🔍"} İncele</Text>
-                      </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.onayBtn, styles.onayBtnGreen, loading && { opacity: 0.5 }]}
                         onPress={() => !loading && handleOnayla(a)}
@@ -624,83 +619,6 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           <Text style={styles.logoutTxt}>{"🚪"}  Cikis Yap</Text>
         </TouchableOpacity>
       </ScrollView>
-
-      {/* ── Avans Detay Modal ── */}
-      <Modal
-        visible={!!inceleAvans}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setInceleAvans(null)}
-      >
-        <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
-          {/* Modal Header */}
-          <View style={styles.modalHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.modalTitle}>Is Avansi Detayi</Text>
-              <Text style={styles.modalSub}>{inceleAvans?.talep_eden_ad || ""}</Text>
-            </View>
-            <TouchableOpacity onPress={() => setInceleAvans(null)} style={{ padding: 4 }}>
-              <Text style={{ fontSize: 22, color: "#93C5FD" }}>{"✕"}</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-            {/* Tutar */}
-            <View style={styles.modalAmtBox}>
-              <Text style={styles.modalAmtLabel}>TALEP TUTAR</Text>
-              <Text style={styles.modalAmt}>{fmtTLDecimal(inceleAvans?.tutar)}</Text>
-            </View>
-
-            {/* Detay Satırlari */}
-            {[
-              ["Talep Eden",   inceleAvans?.talep_eden_ad],
-              ["E-posta",      inceleAvans?.talep_eden_email],
-              ["Gider Türü",   inceleAvans?.gider_turu],
-              ["Proje",        inceleAvans?.proje],
-              ["Bölge",        inceleAvans?.bolge],
-              ["Tarih",        fmtDate(inceleAvans?.tarih || inceleAvans?.created_at)],
-            ].filter(([, v]) => v).map(([label, value]) => (
-              <View key={label} style={styles.modalRow}>
-                <Text style={styles.modalRowLabel}>{label}</Text>
-                <Text style={styles.modalRowVal}>{value}</Text>
-              </View>
-            ))}
-
-            {/* Açıklama */}
-            {inceleAvans?.aciklama ? (
-              <View style={styles.modalAciklamaBox}>
-                <Text style={styles.modalAciklamaLabel}>AÇIKLAMA / GEREKÇE</Text>
-                <Text style={styles.modalAciklamaTxt}>{inceleAvans.aciklama}</Text>
-              </View>
-            ) : null}
-
-            {/* Aksiyon Butonları */}
-            <View style={styles.modalBtnRow}>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnRed]}
-                onPress={() => {
-                  setInceleAvans(null);
-                  setTimeout(() => handleReddet(inceleAvans), 300);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.modalBtnTxt}>{"✗"} Reddet</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnGreen]}
-                onPress={() => {
-                  setInceleAvans(null);
-                  setTimeout(() => handleOnayla(inceleAvans), 300);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.modalBtnTxt}>{"✓"} Onayla</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-
     </SafeAreaView>
   );
 }
@@ -802,33 +720,8 @@ const styles = StyleSheet.create({
   onayCardSub:  { fontSize: 12, color: "#6B7280", marginTop: 2 },
   onayCardAmt:  { fontSize: 17, fontWeight: "900", color: "#D97706" },
   onayBtnRow:   { flexDirection: "row", marginTop: 10, gap: 8 },
-  onayBtn:         { flex: 1, borderRadius: 8, paddingVertical: 10, alignItems: "center", justifyContent: "center" },
-  onayBtnGreen:    { backgroundColor: "#16A34A" },
-  onayBtnRed:      { backgroundColor: "#DC2626" },
-  onayBtnTxt:      { color: "#fff", fontWeight: "800", fontSize: 14 },
-  onayBtnIncele:   { backgroundColor: "#EFF6FF", borderWidth: 1.5, borderColor: "#BFDBFE" },
-  onayBtnInceleTxt:{ color: "#1D4ED8", fontWeight: "800", fontSize: 13 },
-
-  // Avans Detay Modal
-  modalHeader:     { backgroundColor: "#1E3A5F", flexDirection: "row", alignItems: "flex-start",
-                     paddingHorizontal: 20, paddingVertical: 16 },
-  modalTitle:      { fontSize: 18, fontWeight: "800", color: "#fff" },
-  modalSub:        { fontSize: 12, color: "#93C5FD", marginTop: 2 },
-  modalAmtBox:     { backgroundColor: "#FFF7ED", borderRadius: 14, padding: 20, alignItems: "center",
-                     marginBottom: 20, borderLeftWidth: 5, borderLeftColor: "#F97316" },
-  modalAmtLabel:   { fontSize: 11, fontWeight: "800", color: "#D97706", letterSpacing: 1, marginBottom: 6 },
-  modalAmt:        { fontSize: 36, fontWeight: "900", color: "#111827" },
-  modalRow:        { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
-                     paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  modalRowLabel:   { fontSize: 12, color: "#9CA3AF", fontWeight: "600", flex: 1 },
-  modalRowVal:     { fontSize: 14, color: "#111827", fontWeight: "700", flex: 2, textAlign: "right" },
-  modalAciklamaBox:{ backgroundColor: "#F0FDF4", borderRadius: 10, padding: 14, marginTop: 16,
-                     borderLeftWidth: 4, borderLeftColor: "#16A34A" },
-  modalAciklamaLabel:{ fontSize: 11, fontWeight: "800", color: "#15803D", letterSpacing: 0.5, marginBottom: 6 },
-  modalAciklamaTxt:{ fontSize: 14, color: "#1F2937", lineHeight: 22 },
-  modalBtnRow:     { flexDirection: "row", gap: 12, marginTop: 28 },
-  modalBtn:        { flex: 1, borderRadius: 12, paddingVertical: 16, alignItems: "center" },
-  modalBtnGreen:   { backgroundColor: "#16A34A" },
-  modalBtnRed:     { backgroundColor: "#DC2626" },
-  modalBtnTxt:     { color: "#fff", fontWeight: "800", fontSize: 16 },
+  onayBtn:      { flex: 1, borderRadius: 8, paddingVertical: 10, alignItems: "center", justifyContent: "center" },
+  onayBtnGreen: { backgroundColor: "#16A34A" },
+  onayBtnRed:   { backgroundColor: "#DC2626" },
+  onayBtnTxt:   { color: "#fff", fontWeight: "800", fontSize: 14 },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import "./App.css";
 import * as XLSX from "xlsx";
 import * as XLSXStyle from "xlsx-js-style";
@@ -3311,9 +3311,8 @@ function FinanceUploadInline({ onClose, onUploaded }) {
         );
       }
 
-      const uploadedTime = data.uploaded_at ? new Date(data.uploaded_at).toLocaleString("tr-TR") : "";
       setMessage(
-        `✅ HW Payment raporu yüklendi. Eklenen kayıt: ${data.inserted || 0}${uploadedTime ? ` — ${uploadedTime}` : ""}`,
+        `✅ HW Payment raporu yüklendi. Eklenen kayıt: ${data.inserted || 0}`,
       );
       setFile(null);
 
@@ -3545,8 +3544,6 @@ function FinanceDashboard({
   onGoToMalzeme,
   onGoToCashflow,
   currentUser,
-  actionTrigger,
-  onActionHandled,
 }) {
   function parseDateTR(dateStr) {
     const [day, month, year] = dateStr.split(".");
@@ -3633,7 +3630,6 @@ function FinanceDashboard({
   const [overdueRows, setOverdueRows] = useState([]);
   const [showOverdueModal, setShowOverdueModal] = useState(false);
   const [summary, setSummary] = useState(null);
-  const [hwLastUpload, setHwLastUpload] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -4166,28 +4162,6 @@ function FinanceDashboard({
     }
   };
 
-  // Sidebar action trigger handler
-  useEffect(() => {
-    if (!actionTrigger) return;
-    if (actionTrigger === 'fatura_girisi') {
-      setShowInvoiceEntryModal(true);
-      setShowInvoiceFormPanel(false);
-      setShowInvoiceUpload(false);
-      setShowUpload(false);
-      setEditingInvoiceId(null);
-      setInvoiceForm({ bolge:"", proje:"", proje_kodu:"", fatura_no:"", fatura_tarihi:"", odeme_tarihi:"", tedarikci:"", rf_montaj_firma:"", fatura_kalemi:"", is_kalemi:"", po_no:"", site_id:"", tutar:"", kdv:"", toplam_tutar:"", odenen_tutar:"", kalan_borc:"", note:"" });
-    } else if (actionTrigger === 'taseron_hakedis') {
-      handleShowSubconSummary();
-    } else if (actionTrigger === 'hw_payment') {
-      setShowUpload(true); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false);
-    } else if (actionTrigger === 'hw_fatura') {
-      setShowInvoiceUpload(true); setShowUpload(false); setShowFinanceHwPoUpload(false);
-    } else if (actionTrigger === 'hw_po') {
-      setShowFinanceHwPoUpload(true); setShowUpload(false); setShowInvoiceUpload(false);
-    }
-    onActionHandled?.();
-  }, [actionTrigger]);
-
   useEffect(() => {
     if (showInvoiceEntryModal) {
       document.body.style.overflow = "hidden";
@@ -4705,21 +4679,18 @@ function FinanceDashboard({
         upcomingData,
         manualInvoiceData,
         salaryData,
-        lastUploadData,
       ] = await Promise.all([
         fetchJson(`${API_BASE}/finance/summary`, { withAuth: true }),
         fetchJson(paymentsUrl, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/upcoming-payments`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/invoice-entry/list`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/salary/list`, { withAuth: true }),
-        fetchJson(`${API_BASE}/finance/hw-payment/last-upload`).catch(() => ({ ok: true, last_upload: null })),
       ]);
 
       console.log("MANUAL INVOICE DATA:", manualInvoiceData.rows);
       setSalaryRows(salaryData.rows || []);
       setManualInvoiceRows(manualInvoiceData.rows || []);
       setSummary(summaryData.summary || null);
-      setHwLastUpload(lastUploadData.last_upload || null);
       setPaymentRows(paymentsData.rows || []);
       setUpcomingRows(upcomingData.rows || []);
       setOverdueRows(upcomingData.overdue_rows || []);
@@ -4847,7 +4818,173 @@ function FinanceDashboard({
 
   return (
     <>
+      <div
+        style={{
+          marginBottom: "14px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "12px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <h1 style={{ margin: "0 0 6px 0" }}>🏗️ ERC Dashboard</h1>
+          <div style={{ fontSize: "14px", color: "#6b7280" }}>
+            Giriş yapan: <b>{user?.name || financeUserEmail}</b>
+          </div>
+        </div>
 
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={onGoToAdmin}
+          >
+            👑 Admin Panel
+          </button>
+
+          <button
+            type="button"
+            className={showInvoiceEntryModal ? "tab activeTab smallTab" : "tab smallTab"}
+            onClick={() => {
+              setShowInvoiceEntryModal(true);
+              setShowInvoiceFormPanel(false);
+              setShowInvoiceUpload(false);
+              setShowUpload(false);
+              setEditingInvoiceId(null);
+              setInvoiceForm({
+                bolge: "", proje: "", proje_kodu: "", fatura_no: "",
+                fatura_tarihi: "", odeme_tarihi: "", tedarikci: "", rf_montaj_firma: "",
+                fatura_kalemi: "", is_kalemi: "", po_no: "", site_id: "",
+                tutar: "", kdv: "", toplam_tutar: "", odenen_tutar: "",
+                kalan_borc: "", note: "",
+              });
+            }}
+          >
+            🧾 Fatura Girişi
+          </button>
+
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={onGoToHr}
+          >
+            👤 Maaş & Avans
+          </button>
+
+          {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes((currentUser?.email||"").toLowerCase()) && (
+            <button
+              type="button"
+              className="tab smallTab"
+              onClick={onGoToCashflow}
+            >
+              💵 Nakit Akış
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={onGoToAraclar}
+          >
+            🚗 Araçlar
+          </button>
+
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={onGoToOfis}
+          >
+            🏢 Ofis & Depo
+          </button>
+
+          <button
+            type="button"
+            className="tab smallTab"
+            onClick={handleShowSubconSummary}
+          >
+            🏗️ Taşeron Hakediş
+          </button>
+
+          <div style={{ position: "relative", display: "inline-block" }}>
+          <button
+            type="button"
+            className={showFinanceIslemlerMenu ? "tab activeTab smallTab" : "tab smallTab"}
+            onClick={() => setShowFinanceIslemlerMenu((prev) => !prev)}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            ⚡ İşlemler {showFinanceIslemlerMenu ? "▲" : "▼"}
+          </button>
+
+          {showFinanceIslemlerMenu && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                left: 0,
+                background: "#fff",
+                border: "1px solid #e5e7eb",
+                borderRadius: "10px",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                zIndex: 999,
+                minWidth: "200px",
+                overflow: "hidden",
+              }}
+            >
+              {[
+                {
+                  label: "📤 HW Payment Yükle",
+                  action: () => {
+                    setShowUpload((prev) => !prev);
+                    if (showInvoiceUpload) setShowInvoiceUpload(false);
+                    setShowFinanceIslemlerMenu(false);
+                  },
+                },
+                {
+                  label: "🧾 HW Fatura Yükle",
+                  action: () => {
+                    setShowInvoiceUpload((prev) => !prev);
+                    if (showUpload) setShowUpload(false);
+                    setShowFinanceIslemlerMenu(false);
+                  },
+                },
+                {
+                  label: "🔩 HW PO Yükle",
+                  action: () => {
+                    setShowFinanceHwPoUpload((prev) => !prev);
+                    setShowFinanceIslemlerMenu(false);
+                  },
+                },
+              ].map((item, i, arr) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={item.action}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "11px 16px",
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: i < arr.length - 1 ? "1px solid #f3f4f6" : "none",
+                    fontSize: "14px",
+                    color: "#1f2937",
+                    cursor: "pointer",
+                    fontWeight: "500",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+          </div>
+        </div>
+      </div>
 
 
       {showUpload && (
@@ -4878,164 +5015,165 @@ function FinanceDashboard({
         />
       )}
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"16px", marginBottom:"24px" }}>
-        {/* Toplam Tahsilat */}
-        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#3b82f6,#6366f1)" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>{new Date().getFullYear()} Toplam Tahsilat</div>
-            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#eff6ff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>💰</div>
+      <div className="cards">
+        <div className="card ok statCard">
+          <div className="statLabel">
+            {new Date().getFullYear()} Toplam Tahsilat
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary.total_collections || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Yıllık kümülatif</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(summary.total_collections || 0, "TRY")}
+          </div>
         </div>
-        {/* Bu Ay Tahsilat */}
-        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#10b981,#34d399)" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Bu Ay Tahsilat</div>
-            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#ecfdf5", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📈</div>
+
+        <div className="card bekler statCard">
+          <div className="statLabel">Bu Ay Tahsilat</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(summary.this_month_collections || 0, "TRY")}
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary.this_month_collections || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen</div>
-          {hwLastUpload?.uploaded_at && (
-            <div style={{ fontSize:"10px", color:"#94a3b8", marginTop:"6px", borderTop:"1px solid #f1f5f9", paddingTop:"6px" }}>
-              🕒 Son HW yükleme: {new Date(hwLastUpload.uploaded_at).toLocaleString("tr-TR")} ({hwLastUpload.row_count} kayıt)
-            </div>
-          )}
         </div>
-        {/* Bu Ay Kesilen Fatura */}
-        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#f59e0b,#fbbf24)" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Bu Ay Kesilen Fatura</div>
-            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>🧾</div>
+
+        <div className="card partial statCard">
+          <div className="statLabel">Bu Ay Kesilen Fatura</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(thisMonthInvoiced || 0, "TRY")}
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(thisMonthInvoiced || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay faturalanan</div>
         </div>
-        {/* Gider Kayıt */}
-        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden", cursor:"pointer" }} onClick={handleShowSubconModal}>
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#ef4444,#f87171)" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Gider Kayıt</div>
-            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#fef2f2", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📉</div>
+
+        <div
+          className="card cancel statCard"
+          onClick={handleShowSubconModal}
+          style={{ cursor: "pointer" }}
+        >
+          <div className="statLabel">Gider Kayıt</div>
+          <div className="statValue">
+            {formatMoneyByCurrency(
+              manualInvoiceSummary.totalRemaining || 0,
+              "TRY",
+            )}
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalRemaining || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Tıkla: taşeron hakediş</div>
         </div>
       </div>
 
-      <div style={{ background:"#fff", borderRadius:"12px", border:"1px solid #e2e8f0", marginBottom:"24px", overflow:"hidden" }}>
-        <div style={{ padding:"18px 20px 14px", borderBottom:"1px solid #f1f5f9", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <div>
-            <div style={{ fontSize:"14px", fontWeight:700, color:"#0f172a" }}>Aylık Tahsilat Özeti</div>
-            <div style={{ fontSize:"11px", color:"#64748b", marginTop:"2px" }}>Ocak — Aralık {new Date().getFullYear()}</div>
-          </div>
-          <div style={{ display:"flex", gap:"12px", fontSize:"11px" }}>
-            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"linear-gradient(180deg,#3b82f6,#6366f1)", display:"inline-block" }}></span>Tahsilat</span>
-            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"#10b981", display:"inline-block" }}></span>Gelecek</span>
-            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"#f59e0b", display:"inline-block" }}></span>Fatura</span>
-          </div>
-        </div>
-        <div style={{ padding:"20px" }}>
-          {(() => {
-            const shortNames = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
-            const received = shortNames.map((_,i) => summary.monthly_received?.[i+1] || 0);
-            const upcoming = shortNames.map((_,i) => summary.monthly_upcoming?.[i+1] || 0);
-            const invoiced = shortNames.map((_,i) => summary.monthly_invoiced?.[i+1] || 0);
-            const allVals = [...received, ...upcoming, ...invoiced];
-            const maxVal = Math.max(...allVals, 1);
-            const fmt = (v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v/1000)}K` : String(Math.round(v));
-            return (
-              <div style={{ display:"flex", alignItems:"flex-end", gap:"4px", height:"180px", paddingBottom:"20px", position:"relative" }}>
-                {shortNames.map((name, i) => {
-                  const r = received[i];
-                  const u = upcoming[i];
-                  const inv = invoiced[i];
-                  const rH = Math.max(r>0?6:0, Math.round((r / maxVal) * 130));
-                  const uH = Math.max(u > 0 ? 6 : 0, Math.round((u / maxVal) * 130));
-                  const invH = Math.max(inv > 0 ? 6 : 0, Math.round((inv / maxVal) * 130));
-                  return (
-                    <div key={name} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", height:"100%", justifyContent:"flex-end" }}>
-                      <div style={{ width:"100%", display:"flex", gap:"1px", alignItems:"flex-end", position:"relative" }}>
-                        {/* Tahsilat bar */}
-                        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
-                          {r > 0 && <div style={{ fontSize:"10px", color:"#1d4ed8", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(r)}</div>}
-                          <div style={{ width:"100%", height:`${rH}px`, background:"linear-gradient(180deg,#3b82f6,#6366f1)", borderRadius:"3px 3px 0 0" }}/>
-                        </div>
-                        {/* Gelecek bar */}
-                        {u > 0 && (
-                          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
-                            <div style={{ fontSize:"10px", color:"#059669", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(u)}</div>
-                            <div style={{ width:"100%", height:`${uH}px`, background:"#10b981", borderRadius:"3px 3px 0 0" }}/>
-                          </div>
-                        )}
-                        {/* Fatura bar */}
-                        {inv > 0 && (
-                          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
-                            <div style={{ fontSize:"10px", color:"#b45309", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(inv)}</div>
-                            <div style={{ width:"100%", height:`${invH}px`, background:"#f59e0b", borderRadius:"3px 3px 0 0" }}/>
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ fontSize:"11px", color:"#64748b", fontWeight:600, marginTop:"4px", whiteSpace:"nowrap" }}>{name}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
-        </div>
-      </div>
-
-      <div style={{ background:"#fff", borderRadius:"12px", border:"1px solid #e2e8f0", marginBottom:"24px", overflow:"hidden" }}>
-        <div style={{ padding:"18px 20px 14px", borderBottom:"1px solid #f1f5f9", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <div>
-            <div style={{ fontSize:"14px", fontWeight:700, color:"#0f172a" }}>Gelecek Tahsilat Planı</div>
-            <div style={{ fontSize:"11px", color:"#64748b", marginTop:"2px" }}>Önümüzdeki 30 gün</div>
-          </div>
-        </div>
-        {/* Summary strip */}
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)" }}>
-          <div style={{ padding:"16px 20px", borderRight:"1px solid #f1f5f9", textAlign:"center" }}>
-            <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"4px", fontWeight:500 }}>✅ Bugün Tahsil Edilen</div>
-            <div style={{ fontSize:"20px", fontWeight:800, color:"#10b981" }}>{formatMoneyByCurrency(upcomingSummary.today_received_total||0,"TRY")}</div>
-          </div>
-          <div style={{ padding:"16px 20px", borderRight:"1px solid #f1f5f9", textAlign:"center" }}>
-            <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"4px", fontWeight:500 }}>📅 Bu Hafta Gelecek</div>
-            <div style={{ fontSize:"20px", fontWeight:800, color:"#3b82f6" }}>{formatMoneyByCurrency(upcomingSummary.week_total||0,"TRY")}</div>
-          </div>
-          <div onClick={handleShowOverdues} style={{ padding:"16px 20px", textAlign:"center", cursor:"pointer", background:upcomingSummary.overdue_total>0?"#fef2f2":undefined }}>
-            <div style={{ fontSize:"11px", color:upcomingSummary.overdue_total>0?"#991b1b":"#64748b", marginBottom:"4px", fontWeight:500 }}>⚠️ Geciken Ödeme</div>
-            <div style={{ fontSize:"20px", fontWeight:800, color:upcomingSummary.overdue_total>0?"#dc2626":"#0f172a" }}>{formatMoneyByCurrency(upcomingSummary.overdue_total||0,"TRY")}</div>
-          </div>
-        </div>
-        {/* Upcoming rows */}
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
+      <div className="tableWrap">
+        <h3 className="listTitle">Aylık Tahsilat Özeti</h3>
+        <table>
           <thead>
-            <tr style={{ background:"#f8fafc" }}>
-              <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gün</th>
-              <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Tarih</th>
-              <th style={{ padding:"10px 16px", textAlign:"right", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gelecek Tutar</th>
+            <tr>
+              <th></th>
+              {monthNames.map((m) => (
+                <th key={m}>{m}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={{ fontWeight: 700 }}>Tahsilat Yapılan</td>
+              {monthNames.map((m, idx) => (
+                <td key={`received-${m}`}>
+                  {formatMoneyByCurrency(
+                    summary.monthly_received?.[idx + 1] || 0,
+                    "TRY",
+                  )}
+                </td>
+              ))}
+            </tr>
+
+            <tr>
+              <td style={{ fontWeight: 700 }}>Gelecek</td>
+              {monthNames.map((m, idx) => (
+                <td key={`upcoming-${m}`}>
+                  {formatMoneyByCurrency(
+                    summary.monthly_upcoming?.[idx + 1] || 0,
+                    "TRY",
+                  )}
+                </td>
+              ))}
+            </tr>
+
+            <tr>
+              <td style={{ fontWeight: 700 }}>Kesilen Fatura</td>
+              {monthNames.map((m, idx) => (
+                <td key={`invoiced-${m}`}>
+                  {formatMoneyByCurrency(
+                    summary.monthly_invoiced?.[idx + 1] || 0,
+                    "TRY",
+                  )}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="tableWrap">
+        <h3 className="listTitle">Gelecek Tahsilat Planı</h3>
+
+        <div className="cards" style={{ marginBottom: "18px" }}>
+          <div
+            style={{
+              background: "#4caf50",
+              color: "#fff",
+              padding: "22px",
+              borderRadius: "14px",
+              minWidth: "260px",
+              textAlign: "center",
+              fontWeight: 700,
+            }}
+          >
+            <div style={{ fontSize: "16px", marginBottom: "10px" }}>
+              Bugün Tahsil Edilen
+            </div>
+            <div style={{ fontSize: "22px" }}>
+              {formatMoneyByCurrency(
+                upcomingSummary.today_received_total || 0,
+                "TRY",
+              )}
+            </div>
+          </div>
+
+          <div className="card bekler statCard">
+            <div className="statLabel">Bu Hafta Gelecek</div>
+            <div className="statValue">
+              {formatMoneyByCurrency(upcomingSummary.week_total || 0, "TRY")}
+            </div>
+          </div>
+
+          <div
+            className="card cancel statCard"
+            onClick={handleShowOverdues}
+            style={{ cursor: "pointer" }}
+          >
+            <div className="statLabel">Geciken Ödeme</div>
+            <div className="statValue">
+              {formatMoneyByCurrency(upcomingSummary.overdue_total || 0, "TRY")}
+            </div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Gün</th>
+              <th>Tarih</th>
+              <th>Gelecek Tutar</th>
             </tr>
           </thead>
           <tbody>
             {upcomingRows.length === 0 ? (
-              <tr><td colSpan={3} style={{ textAlign:"center", padding:"28px", color:"#94a3b8", fontSize:"13px" }}>Gelecek tahsilat bulunamadı</td></tr>
+              <EmptyRow colSpan={3} text="Gelecek tahsilat bulunamadı" />
             ) : (
               upcomingRows.map((row, index) => (
-                <tr key={index} style={{ borderBottom:"1px solid #f1f5f9", background:row.amount<0?"#fff5f5":undefined }}>
-                  <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{row.day_name || "-"}</td>
-                  <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{formatDateOnly(row.due_date)}</td>
-                  <td style={{ padding:"12px 16px", textAlign:"right" }}>
-                    <div style={{ fontWeight:700, color:row.amount<0?"#dc2626":"#10b981", fontSize:"14px" }}>
+                <tr key={index} style={row.amount < 0 ? { background:"#fff5f5" } : {}}>
+                  <td>{row.day_name || "-"}</td>
+                  <td>{formatDateOnly(row.due_date)}</td>
+                  <td>
+                    <div style={{ fontWeight:700, color: row.amount < 0 ? "#dc2626" : "#1a7f45" }}>
                       {formatMoneyByCurrency(row.amount || 0, row.currency || "TRY")}
                     </div>
                     {row.deduction_amount < 0 && (
                       <div style={{ fontSize:11, color:"#dc2626", marginTop:2 }}>
-                        Brüt: {formatMoneyByCurrency(row.gross_amount||0, row.currency||"TRY")}
-                        &nbsp;|&nbsp;Kesinti: {formatMoneyByCurrency(row.deduction_amount||0, row.currency||"TRY")}
+                        Brüt: {formatMoneyByCurrency(row.gross_amount || 0, row.currency || "TRY")}
+                        &nbsp;|&nbsp;İade Kesinti: {formatMoneyByCurrency(row.deduction_amount || 0, row.currency || "TRY")}
                       </div>
                     )}
                   </td>
@@ -7722,12 +7860,8 @@ function hesaplaVergi(netBankadan) {
 function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
-  const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
-  const _isMuhasebe = currentUser?.role === "muhasebe";
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
-  // Muhasebe → maaş sekmelerini (personel, maas_avans) gizle, is_avans'tan başla
-  // Nurcan → isg'den başla  / Diğerleri → personel'den başla
-  const [tab, setTab] = useState(_isMuhasebe ? "is_avans" : (_isNurcanHR ? "isg" : "personel"));
+  const [tab, setTab] = useState("personel");
   const [personelList, setPersonelList] = useState([]);
   const [isgTurleri, setIsgTurleri] = useState([]);
   const [isgUyarilar, setIsgUyarilar] = useState([]);
@@ -7750,15 +7884,10 @@ function HrDashboard({ onBack, currentUser }) {
   const [avansForm, setAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
   const [isAvansList, setIsAvansList] = useState([]);
   const [isAvansForm, setIsAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
-  const [trafikCezaList, setTrafikCezaList] = useState([]);
   const [pForm, setPForm] = useState({
     ad_soyad:"", tc_no:"", dogum_tarihi:"", telefon:"", email:"", unvan:"", bolge:"",
     ise_giris_tarihi:"", isten_ayrilma_tarihi:"", net_maas:"", bankadan_gosterilen:"",
     elden_verilen:"", iban:"", banka_adi:"", banka_hesap_no:"", aktif: true,
-    // ISG/RFQ alanları
-    ekip_bilgisi:"", alt_yuklenici:"", firma_tipi:"simsek", isdp_account:"", iresource_giris:"",
-    kkd_zimmet_tarihi:"", mesleki_yeterlilik_durum:"", mesleki_yeterlilik_tarihi:"",
-    elektrik_isi:false, yuksekte_calisma:false, arac_kullanim:false,
   });
   const [isgForm, setIsgForm] = useState({ egitim_turu:"", egitim_tarihi:"", gecerlilik_yil:2 });
   const [isgBelgeDosya, setIsgBelgeDosya] = useState(null);
@@ -7774,20 +7903,10 @@ function HrDashboard({ onBack, currentUser }) {
   const [notText, setNotText] = useState("");
   const [notFile, setNotFile] = useState(null);
   const [notSaving, setNotSaving] = useState(false);
-  // ISG yeni alanlar
-  const [isgFirmaTip, setIsgFirmaTip] = useState("simsek"); // "simsek" | "taseron"
-  const [isgMatris, setIsgMatris] = useState([]); // matris view için
-  const [isgMatrisFiltre, setIsgMatrisFiltre] = useState("tumu"); // "tumu"|"doldu"|"yaklasan"|"gecerli"
-  const [isgMatrisPersonel, setIsgMatrisPersonel] = useState(""); // personel id filtresi
-  const [isgMatrisEgitim, setIsgMatrisEgitim] = useState(""); // eğitim türü filtresi
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
     setPersonelList(await r.json());
-  };
-  const loadIsgMatris = async () => {
-    const r = await fetch(`${API_BASE}/hr/isg/matris`);
-    setIsgMatris(await r.json());
   };
   const loadIsgUyarilar = async () => {
     const r = await fetch(`${API_BASE}/hr/isg/uyarilar`);
@@ -7825,22 +7944,12 @@ function HrDashboard({ onBack, currentUser }) {
     setPersonelIsg(isg);
   };
 
-  useEffect(() => { loadPersonel(); loadIsgTurleri(); loadIsgUyarilar(); loadIsgMatris(); }, []);
+  useEffect(() => { loadPersonel(); loadIsgTurleri(); loadIsgUyarilar(); }, []);
   useEffect(() => { if (tab==="puantaj" || tab==="personel") { loadPuantaj(); loadOzet(); } }, [tab, puantajAy]);
   useEffect(() => { if (tab==="personel") { loadAvans(); loadIsAvans(); loadAylikOdemeler(); } }, [tab, puantajAy]);
   useEffect(() => { if (tab==="maas_avans") loadAvans(); }, [tab]);
   useEffect(() => { if (tab==="is_avans") loadIsAvans(); }, [tab]);
   useEffect(() => { if (tab==="personel" && hrPersonelFilter) loadMaasOde(hrPersonelFilter); else setMaasOdeList([]); }, [tab, hrPersonelFilter, puantajAy]);
-  useEffect(() => {
-    if (tab==="personel" && hrPersonelFilter) {
-      fetch(`${API_BASE}/hr/trafik-ceza?personel_id=${hrPersonelFilter}`)
-        .then(r=>r.json())
-        .then(d=>setTrafikCezaList(Array.isArray(d.list)?d.list:[]))
-        .catch(()=>setTrafikCezaList([]));
-    } else {
-      setTrafikCezaList([]);
-    }
-  }, [tab, hrPersonelFilter]);
 
   const handleSavePersonel = async (e) => {
     e.preventDefault();
@@ -7853,17 +7962,7 @@ function HrDashboard({ onBack, currentUser }) {
   };
   const handleEditPersonel = (p) => {
     setEditingPersonel(p);
-    setPForm({ ...p,
-      dogum_tarihi: p.dogum_tarihi?.split("T")[0]||"",
-      ise_giris_tarihi: p.ise_giris_tarihi?.split("T")[0]||"",
-      isten_ayrilma_tarihi: p.isten_ayrilma_tarihi?.split("T")[0]||"",
-      kkd_zimmet_tarihi: p.kkd_zimmet_tarihi?.split("T")[0]||"",
-      mesleki_yeterlilik_tarihi: p.mesleki_yeterlilik_tarihi?.split("T")[0]||"",
-      ekip_bilgisi: p.ekip_bilgisi||"", alt_yuklenici: p.alt_yuklenici||"",
-      firma_tipi: p.firma_tipi||"simsek", isdp_account: p.isdp_account||"",
-      iresource_giris: p.iresource_giris||"", mesleki_yeterlilik_durum: p.mesleki_yeterlilik_durum||"",
-      elektrik_isi: !!p.elektrik_isi, yuksekte_calisma: !!p.yuksekte_calisma, arac_kullanim: !!p.arac_kullanim,
-    });
+    setPForm({ ...p, dogum_tarihi: p.dogum_tarihi?.split("T")[0]||"", ise_giris_tarihi: p.ise_giris_tarihi?.split("T")[0]||"", isten_ayrilma_tarihi: p.isten_ayrilma_tarihi?.split("T")[0]||"" });
     setShowPersonelForm(true);
   };
   const handleToggleAktif = async (p) => {
@@ -7981,31 +8080,14 @@ function HrDashboard({ onBack, currentUser }) {
   const handleTumBelgeleriIndir = async () => {
     if (!selectedPersonel) return;
     const zip = new JSZip();
-    const kisiAdi = selectedPersonel.ad_soyad.replace(/\s+/g, "_");
-    const kok = zip.folder(kisiAdi);
+    const belgeAdiMap = {
+      FOTOGRAF:"Fotograf", TC_KIMLIK:"TC_Kimlik", EHLIYET:"Ehliyet",
+      SAGLIK_RAPORU:"Saglik_Raporu", SGK_BILDIRGE:"SGK_Bildirge", DIGER_BELGE:"Diger_Belge"
+    };
     const fetchBuf = async (url) => {
       const r = await fetch(url);
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.arrayBuffer();
-    };
-    // ── Klasör eşleşmeleri ──
-    const KLASOR_MAP = {
-      fotograf:      "01_Fotograf",
-      tc_kimlik:     "02_TC_Kimlik",
-      ehliyet:       "03_Ehliyet",
-      saglik_raporu: "04_Saglik_Raporu",
-      sgk_bildirge:  "05_SGK_Bildirge",
-      diger:         "09_Diger_Belgeler",
-    };
-    const ISG_KLASOR_MAP = {
-      "Sağlık Raporu":        "04_Saglik_Raporu",
-      "HUAWEI 10 Mutlak Kural":"06_ISG_Sertifikalari",
-      "Temel İSG":             "06_ISG_Sertifikalari",
-      "ELEKTRİK İSG":         "06_ISG_Sertifikalari",
-      "Yüksekte Çalışma":     "06_ISG_Sertifikalari",
-      "Kurtarma Eğitimi":     "06_ISG_Sertifikalari",
-      "Güvenli Sürüş":        "06_ISG_Sertifikalari",
-      "İlkyardım":             "06_ISG_Sertifikalari",
     };
     let count = 0;
     // Personel belgeleri
@@ -8013,10 +8095,9 @@ function HrDashboard({ onBack, currentUser }) {
       if (!b.dosya_yolu) continue;
       try {
         const ext = (b.dosya_yolu.split(".").pop().split("?")[0] || "bin").toLowerCase();
-        const klasorAdi = KLASOR_MAP[b.belge_turu] || "09_Diger_Belgeler";
-        const dosyaAdi = `${b.belge_turu}.${ext}`;
+        const ad = (belgeAdiMap[b.belge_turu] || b.belge_turu) + "." + ext;
         const buf = await fetchBuf(b.dosya_yolu);
-        kok.folder(klasorAdi).file(dosyaAdi, buf);
+        zip.folder("Personel_Belgeleri").file(ad, buf);
         count++;
       } catch(e) {}
     }
@@ -8025,10 +8106,9 @@ function HrDashboard({ onBack, currentUser }) {
       if (!i.belge_yolu) continue;
       try {
         const ext = (i.belge_yolu.split(".").pop().split("?")[0] || "bin").toLowerCase();
-        const klasorAdi = ISG_KLASOR_MAP[i.egitim_turu] || "06_ISG_Sertifikalari";
-        const dosyaAdi = `${i.egitim_turu.replace(/[/\\:*?"<>|]/g, "_")}.${ext}`;
+        const ad = i.egitim_turu.replace(/[/\\:*?"<>|]/g, "_") + "." + ext;
         const buf = await fetchBuf(i.belge_yolu);
-        kok.folder(klasorAdi).file(dosyaAdi, buf);
+        zip.folder("ISG_Egitimleri").file(ad, buf);
         count++;
       } catch(e) {}
     }
@@ -8036,7 +8116,7 @@ function HrDashboard({ onBack, currentUser }) {
     const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `${kisiAdi}_Belgeler.zip`;
+    a.href = url; a.download = `${selectedPersonel.ad_soyad.replace(/\s+/g,"_")}_Belgeler.zip`;
     a.click(); URL.revokeObjectURL(url);
   };
   const handleIsgBelgeUpload = async (personelId, isgId, file) => {
@@ -8183,9 +8263,7 @@ function HrDashboard({ onBack, currentUser }) {
 
       {/* Sekmeler */}
       <div style={{ display:"flex", gap:"8px", marginBottom:"20px" }}>
-        {[["personel","👤 Personel Maaş"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["puantaj","📋 Puantaj"],["isg","🎓 ISG / Belgeler"]]
-        .filter(([k]) => !_isMuhasebe || !["personel","maas_avans"].includes(k))
-        .map(([k,l]) => (
+        {[["personel","👤 Personel Maaş"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["puantaj","📋 Puantaj"],["isg","🎓 ISG / Belgeler"]].map(([k,l]) => (
           <button key={k} onClick={()=>{
             if (k === "personel" && !personelUnlocked) {
               const pwd = prompt("Personel bilgileri için şifre giriniz:");
@@ -8586,8 +8664,6 @@ function HrDashboard({ onBack, currentUser }) {
                 const isAvans = isAvansList
                   .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy))
                   .reduce((s,a)=>s+Number(a.tutar||0), 0);
-                // trafikCezaList is already filtered by personel_id from the API
-                const trafikCezaToplam = trafikCezaList.reduce((s,a)=>s+Number(a.tutar||0), 0);
                 const odenenBuAy = maasOdeList
                   .filter(o => o.donem === puantajAy)
                   .reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0), 0);
@@ -8598,8 +8674,8 @@ function HrDashboard({ onBack, currentUser }) {
                 const hakRatio   = Number(sp.net_maas||0) > 0 ? hakedilen / Number(sp.net_maas) : 1;
                 const proratedBanka = Math.round(Number(sp.bankadan_gosterilen||0) * hakRatio);
                 const proratedElden = Math.round(Number(sp.elden_verilen||0) * hakRatio);
-                // Kalan ödeme = hakedilen - maaş avansı - iş avansı - trafik ceza - ödenen bu ay
-                const toplamOdenmesi = Math.max(0, hakedilen - maasAvans - isAvans - trafikCezaToplam - odenenBuAy);
+                // Kalan ödeme = hakedilen - maaş avansı - iş avansı - ödenen bu ay
+                const toplamOdenmesi = Math.max(0, hakedilen - maasAvans - isAvans - odenenBuAy);
                 return (
                   <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"20px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
                     <div style={{ minWidth:"130px" }}>
@@ -8775,25 +8851,6 @@ function HrDashboard({ onBack, currentUser }) {
                             );
                           })()}
 
-                          {/* Trafik Ceza bloğu — sadece varsa gösterilir */}
-                          {trafikCezaToplam > 0 && (
-                            <div style={{ background:"linear-gradient(135deg,#c2410c,#ea580c)", borderRadius:"12px", padding:"9px 12px" }}>
-                              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: trafikCezaList.length>0?"6px":"0" }}>
-                                <span style={{ fontSize:"10px", fontWeight:700, color:"#fff", textTransform:"uppercase", letterSpacing:"0.04em" }}>🚔 Trafik Cezası</span>
-                                <span style={{ fontSize:"14px", fontWeight:800, color:"#fff" }}>₺{trafikCezaToplam.toLocaleString("tr-TR")}</span>
-                              </div>
-                              {trafikCezaList.map((a,i) => (
-                                <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"10px", color:"#fed7aa", borderTop: i===0?"1px solid rgba(255,255,255,0.3)":"none", paddingTop: i===0?"4px":"2px" }}>
-                                  <span style={{ opacity:0.9, maxWidth:"130px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                                    {a.aciklama||a.plaka||"—"}
-                                    {a.kaynak==="BEKLEMEDE" && <span style={{ marginLeft:"4px", background:"#fbbf24", color:"#78350f", borderRadius:"4px", padding:"0 4px", fontSize:"9px", fontWeight:700 }}>BEKL.</span>}
-                                  </span>
-                                  <span style={{ fontWeight:700, color:"#fff" }}>₺{Number(a.tutar||0).toLocaleString("tr-TR")}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
                           {/* Satır 4 — Tamamlandı / Kalan (tam genişlik) */}
                           <div style={cardSt(tamam?"linear-gradient(135deg,#166534,#15803d)":"linear-gradient(135deg,#dc2626,#ef4444)")}>
                             <div style={lbl}>{tamam?"✅ Tamamlandı":"⏳ Kalan Ödeme"}</div>
@@ -8802,7 +8859,6 @@ function HrDashboard({ onBack, currentUser }) {
                               <div>Hakedilen: ₺{hakedilen.toLocaleString("tr-TR")}</div>
                               {maasAvans>0 && <div>- Maaş avansı: ₺{maasAvans.toLocaleString("tr-TR")}</div>}
                               {isAvans>0   && <div>- İş avansı: ₺{isAvans.toLocaleString("tr-TR")}</div>}
-                              {trafikCezaToplam>0 && <div>- Trafik ceza: ₺{trafikCezaToplam.toLocaleString("tr-TR")}</div>}
                               {odenenBuAy>0 && <div>- Ödenen: ₺{odenenBuAy.toLocaleString("tr-TR")}</div>}
                             </div>
                           </div>
@@ -8849,40 +8905,6 @@ function HrDashboard({ onBack, currentUser }) {
                     </div>
                     {/* Bordro özeti — sadece bankadan gösterilen kısım üzerinden vergi hesabı */}
                     <BordroOzeti bankadan={Number(pForm.bankadan_gosterilen||0)} elden={Number(pForm.elden_verilen||0)} />
-                    {/* ── ISG / RFQ Ek Alanlar ── */}
-                    <div style={{ marginTop:"14px", marginBottom:"8px", fontWeight:700, fontSize:"13px", color:"#374151", borderTop:"1px solid #f3f4f6", paddingTop:"12px" }}>🎓 ISG / RFQ Bilgileri</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"12px", marginBottom:"12px" }}>
-                      {[["Ekip Bilgisi","ekip_bilgisi"],["Alt Yüklenici / Firma","alt_yuklenici"],["ISDP Account","isdp_account"],["İResource Girişi","iresource_giris"],
-                        ["Mesleki Yeterlilik Durumu","mesleki_yeterlilik_durum"]].map(([l,n])=>(
-                        <div key={n}>
-                          <label style={labelSt}>{l}</label>
-                          <input value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} />
-                        </div>
-                      ))}
-                      <div>
-                        <label style={labelSt}>Firma Tipi</label>
-                        <select value={pForm.firma_tipi||"simsek"} onChange={e=>setPForm(f=>({...f,firma_tipi:e.target.value}))} style={inputSt}>
-                          <option value="simsek">Şimşek</option>
-                          <option value="taseron">Taşeron</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={labelSt}>KKD Zimmet Tarihi</label>
-                        <input type="date" value={pForm.kkd_zimmet_tarihi||""} onChange={e=>setPForm(f=>({...f,kkd_zimmet_tarihi:e.target.value}))} style={inputSt} />
-                      </div>
-                      <div>
-                        <label style={labelSt}>Mesleki Yet. Tarihi</label>
-                        <input type="date" value={pForm.mesleki_yeterlilik_tarihi||""} onChange={e=>setPForm(f=>({...f,mesleki_yeterlilik_tarihi:e.target.value}))} style={inputSt} />
-                      </div>
-                    </div>
-                    <div style={{ display:"flex", gap:"20px", marginBottom:"12px" }}>
-                      {[["Elektrik işi yapacak","elektrik_isi"],["Yüksekte çalışacak","yuksekte_calisma"],["Araç kullanacak","arac_kullanim"]].map(([l,n])=>(
-                        <label key={n} style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>
-                          <input type="checkbox" checked={!!pForm[n]} onChange={e=>setPForm(f=>({...f,[n]:e.target.checked}))} />
-                          {l}
-                        </label>
-                      ))}
-                    </div>
                     <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
                       <button type="button" className="tab" onClick={()=>setShowPersonelForm(false)}>Vazgeç</button>
                       <button type="submit" className="saveButton">Kaydet</button>
@@ -9377,55 +9399,24 @@ function HrDashboard({ onBack, currentUser }) {
             </div>
           )}
 
-          {/* ── Üst bar: başlık + Excel butonları ── */}
-          <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"14px", flexWrap:"wrap" }}>
+          {/* Personel Seçici */}
+          <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"20px" }}>
             <h2 style={{ margin:0, fontSize:"20px" }}>🎓 ISG / Belgeler</h2>
-            <a href={`${API_BASE}/hr/excel/isg?tip=hw`}
-              style={{ padding:"7px 14px", background:"#1e3a5f", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>
-              📥 HW RFQ Excel
-            </a>
-            <a href={`${API_BASE}/hr/excel/isg?tip=simsek`}
-              style={{ padding:"7px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>
-              📥 Şimşek RFQ Excel
-            </a>
-            {selectedPersonel && (
-              <a href={`${API_BASE}/hr/excel/isg?personel_id=${selectedPersonel.id}`}
-                style={{ padding:"7px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>
-                📥 {selectedPersonel.ad_soyad.split(" ")[0]} Excel
-              </a>
-            )}
-          </div>
-
-          {/* ── Şimşek / Taşeron Toggle + Personel Seç ── */}
-          <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"20px", flexWrap:"wrap" }}>
-            <div style={{ display:"flex", background:"#f3f4f6", borderRadius:"10px", padding:"3px", gap:"2px" }}>
-              {[["simsek","🏢 Şimşek"],["taseron","🔧 Taşeron"]].map(([val,lbl])=>(
-                <button key={val} onClick={()=>{ setIsgFirmaTip(val); setSelectedPersonel(null); }}
-                  style={{ padding:"6px 16px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700,
-                    background: isgFirmaTip===val?"#fff":"transparent",
-                    color: isgFirmaTip===val?"#1f2937":"#9ca3af",
-                    boxShadow: isgFirmaTip===val?"0 1px 4px rgba(0,0,0,0.1)":"none" }}>
-                  {lbl}
-                </button>
-              ))}
-            </div>
             <select
               value={selectedPersonel?.id || ""}
               onChange={e => {
                 const p = personelList.find(x => String(x.id) === e.target.value);
                 if (p) loadPersonelDetail(p); else setSelectedPersonel(null);
               }}
-              style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", minWidth:"220px" }}
+              style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", minWidth:"200px" }}
             >
               <option value="">— Personel Seç —</option>
-              {personelList
-                .filter(p => p.aktif && (isgFirmaTip === "taseron" ? (p.firma_tipi||"simsek")==="taseron" : (p.firma_tipi||"simsek")==="simsek"))
-                .map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+              {personelList.filter(p=>p.aktif).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
             </select>
           </div>
 
           {!selectedPersonel ? (
-            <div style={{ ...secSt, textAlign:"center", color:"#9ca3af", padding:"32px" }}>
+            <div style={{ ...secSt, textAlign:"center", color:"#9ca3af", padding:"40px" }}>
               Belgelerini ve ISG kayıtlarını görmek için yukarıdan personel seçin.
             </div>
           ) : (
@@ -9435,8 +9426,6 @@ function HrDashboard({ onBack, currentUser }) {
                 <span style={{ marginLeft:"10px", background: selectedPersonel.aktif?"#dcfce7":"#f3f4f6", color: selectedPersonel.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>
                   {selectedPersonel.aktif?"Aktif":"Pasif"}
                 </span>
-                {selectedPersonel.ekip_bilgisi && <span style={{ marginLeft:"8px", background:"#eff6ff", color:"#1d4ed8", padding:"3px 10px", borderRadius:"20px", fontSize:"12px" }}>{selectedPersonel.ekip_bilgisi}</span>}
-                {selectedPersonel.alt_yuklenici && <span style={{ marginLeft:"8px", background:"#f3f4f6", color:"#374151", padding:"3px 10px", borderRadius:"20px", fontSize:"12px" }}>{selectedPersonel.alt_yuklenici}</span>}
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"16px" }}>
                 {/* Belgeler */}
@@ -9535,235 +9524,6 @@ function HrDashboard({ onBack, currentUser }) {
               </div>
             </div>
           )}
-
-          {/* ── ISG Eğitim Matris Tablosu ── */}
-          {(() => {
-            // Tüm takip edilen eğitim türleri (RFQ ana + ek belgeler)
-            const TUM_KOLONLAR = [
-              { tur:"Sağlık Raporu",              kisa:"Sağlık" },
-              { tur:"HUAWEI 10 Mutlak Kural",     kisa:"HW 10" },
-              { tur:"RF İSG Eğitimi",             kisa:"RF İSG" },
-              { tur:"Temel İSG",                  kisa:"Temel İSG" },
-              { tur:"ELEKTRİK İSG",               kisa:"Elektrik" },
-              { tur:"Yüksekte Çalışma",           kisa:"Yüksek" },
-              { tur:"Kurtarma Eğitimi",           kisa:"Kurtarma" },
-              { tur:"Güvenli Sürüş",              kisa:"Sürüş" },
-              { tur:"İlkyardım",                  kisa:"İlkyardım" },
-              { tur:"Mesleki Yeterlilik Belgesi", kisa:"Mes.Yet." },
-              { tur:"Araç Kullanma Taahhütnamesi",kisa:"Araç Taah." },
-              { tur:"Sağlık Taahhütnamesi",       kisa:"Sağlık Taah." },
-              { tur:"SGK Giriş Bildirgesi",       kisa:"SGK Bildir." },
-              { tur:"Ek 2 Belgesi",               kisa:"Ek 2" },
-            ];
-
-            const now = new Date();
-            const soon30 = new Date(now.getTime() + 30*86400000);
-
-            const egitimDurum = (egitimler, tur) => {
-              const eg = egitimler?.find(e => e.egitim_turu === tur);
-              if (!eg) return { durum:"YOK", kalan:null, eg:null };
-              const bitis = new Date(eg.bitis_tarihi);
-              const kalan = Math.round((bitis - now) / 86400000);
-              // Çok uzun geçerlilikliler (taahhüt vs) her zaman geçerli göster
-              const durum = bitis < now ? "DOLDU" : bitis < soon30 ? "YAKLASAN" : "GECERLI";
-              return { durum, kalan, eg };
-            };
-
-            const siraNo = d => d==="DOLDU"?0:d==="YAKLASAN"?1:d==="GECERLI"?2:3;
-
-            // Eğitim seçiliyse → sadece o eğitim için tek sütun + kişi listesi
-            const seciliEgitim = isgMatrisEgitim
-              ? TUM_KOLONLAR.find(k => k.tur === isgMatrisEgitim)
-              : null;
-
-            // Görüntülenecek kolonlar
-            const gorunenKolonlar = seciliEgitim ? [seciliEgitim] : TUM_KOLONLAR;
-
-            // Temel filtre: aktif personel
-            let liste = isgMatris.filter(p => p.aktif);
-
-            // Personel filtresi
-            if (isgMatrisPersonel) {
-              liste = liste.filter(p => String(p.id) === isgMatrisPersonel);
-            }
-
-            // Durum filtresi — eğitim seçiliyse sadece o eğitim üzerinden filtrele
-            if (isgMatrisFiltre !== "tumu") {
-              liste = liste.filter(p => {
-                return gorunenKolonlar.some(k => {
-                  const { durum } = egitimDurum(p.egitimler, k.tur);
-                  if (isgMatrisFiltre === "doldu")    return durum === "DOLDU";
-                  if (isgMatrisFiltre === "yaklasan") return durum === "YAKLASAN";
-                  if (isgMatrisFiltre === "gecerli")  return durum === "GECERLI";
-                  return true;
-                });
-              });
-            }
-
-            // Eğitim seçiliyse o eğitime göre sırala, yoksa tüm eğitimlere göre
-            liste = [...liste].sort((a, b) => {
-              const aMin = Math.min(...gorunenKolonlar.map(k => siraNo(egitimDurum(a.egitimler, k.tur).durum)));
-              const bMin = Math.min(...gorunenKolonlar.map(k => siraNo(egitimDurum(b.egitimler, k.tur).durum)));
-              return aMin - bMin;
-            });
-
-            // Sayaçlar — tüm aktif personel üzerinden (filtreden bağımsız)
-            const tamListe = isgMatris.filter(p => p.aktif);
-            const dolduSayisi = tamListe.filter(p=>TUM_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="DOLDU")).length;
-            const yakSayisi   = tamListe.filter(p=>TUM_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="YAKLASAN")).length;
-
-            // Eğitim seçiliyse o eğitim için özet
-            let egitimOzetMesaj = null;
-            if (seciliEgitim) {
-              const doluSay    = tamListe.filter(p=>egitimDurum(p.egitimler,seciliEgitim.tur).durum==="DOLDU").length;
-              const yakSay     = tamListe.filter(p=>egitimDurum(p.egitimler,seciliEgitim.tur).durum==="YAKLASAN").length;
-              const gecerliSay = tamListe.filter(p=>egitimDurum(p.egitimler,seciliEgitim.tur).durum==="GECERLI").length;
-              const yokSay     = tamListe.filter(p=>egitimDurum(p.egitimler,seciliEgitim.tur).durum==="YOK").length;
-              egitimOzetMesaj = { doluSay, yakSay, gecerliSay, yokSay };
-            }
-
-            return (
-              <div style={{ marginTop:"24px" }}>
-                {/* ── Başlık + Filtreler ── */}
-                <div style={{ background:"#fff", borderRadius:"14px", padding:"16px 20px", marginBottom:"12px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"14px" }}>
-                    <h3 style={{ margin:0, fontSize:"16px", fontWeight:700 }}>📊 ISG Eğitim Takibi</h3>
-                    <span style={{ fontSize:"12px", color:"#6b7280" }}>{liste.length} personel</span>
-                    {(isgMatrisPersonel || isgMatrisEgitim || isgMatrisFiltre!=="tumu") && (
-                      <button onClick={()=>{ setIsgMatrisPersonel(""); setIsgMatrisEgitim(""); setIsgMatrisFiltre("tumu"); }}
-                        style={{ marginLeft:"auto", fontSize:"11px", padding:"3px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", cursor:"pointer", fontWeight:600 }}>
-                        ✕ Filtreleri Temizle
-                      </button>
-                    )}
-                  </div>
-                  <div style={{ display:"flex", gap:"10px", flexWrap:"wrap", alignItems:"flex-end" }}>
-                    {/* Personel filtresi */}
-                    <div>
-                      <div style={{ fontSize:"11px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>👤 Personel</div>
-                      <select value={isgMatrisPersonel} onChange={e=>setIsgMatrisPersonel(e.target.value)}
-                        style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", minWidth:"180px",
-                          background: isgMatrisPersonel?"#eff6ff":"#fff", borderColor: isgMatrisPersonel?"#3b82f6":"#e5e7eb" }}>
-                        <option value="">— Tüm Personel —</option>
-                        {isgMatris.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
-                      </select>
-                    </div>
-                    {/* Eğitim türü filtresi */}
-                    <div>
-                      <div style={{ fontSize:"11px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>🎓 Eğitim Türü</div>
-                      <select value={isgMatrisEgitim} onChange={e=>setIsgMatrisEgitim(e.target.value)}
-                        style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", minWidth:"200px",
-                          background: isgMatrisEgitim?"#eff6ff":"#fff", borderColor: isgMatrisEgitim?"#3b82f6":"#e5e7eb" }}>
-                        <option value="">— Tüm Eğitimler —</option>
-                        {TUM_KOLONLAR.map(k=><option key={k.tur} value={k.tur}>{k.tur}</option>)}
-                      </select>
-                    </div>
-                    {/* Durum filtresi */}
-                    <div>
-                      <div style={{ fontSize:"11px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>📋 Durum</div>
-                      <div style={{ display:"flex", gap:"5px" }}>
-                        {[["tumu","Tümü","#6b7280"],["doldu",`🔴 Doldu (${dolduSayisi})`,"#991b1b"],["yaklasan",`🟡 Yaklaşan (${yakSayisi})`,"#92400e"],["gecerli","✅ Güncel","#166534"]].map(([val,lbl,color])=>(
-                          <button key={val} onClick={()=>setIsgMatrisFiltre(val)}
-                            style={{ padding:"6px 12px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:700,
-                              background: isgMatrisFiltre===val?"#1e3a5f":"#f3f4f6",
-                              color: isgMatrisFiltre===val?"#fff":color }}>
-                            {lbl}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Eğitim seçiliyse özet kartlar */}
-                  {egitimOzetMesaj && (
-                    <div style={{ display:"flex", gap:"10px", marginTop:"14px", flexWrap:"wrap" }}>
-                      {[
-                        { label:"🔴 Süresi Doldu",  val:egitimOzetMesaj.doluSay,    bg:"#fef2f2", clr:"#991b1b" },
-                        { label:"🟡 30 Gün İçinde", val:egitimOzetMesaj.yakSay,     bg:"#fffbeb", clr:"#92400e" },
-                        { label:"✅ Güncel",         val:egitimOzetMesaj.gecerliSay, bg:"#f0fdf4", clr:"#166534" },
-                        { label:"— Girilmemiş",     val:egitimOzetMesaj.yokSay,     bg:"#f9fafb", clr:"#6b7280" },
-                      ].map(c=>(
-                        <div key={c.label} style={{ background:c.bg, borderRadius:"10px", padding:"8px 16px", textAlign:"center", minWidth:90 }}>
-                          <div style={{ fontSize:"18px", fontWeight:800, color:c.clr }}>{c.val}</div>
-                          <div style={{ fontSize:"11px", fontWeight:600, color:c.clr }}>{c.label}</div>
-                        </div>
-                      ))}
-                      <div style={{ display:"flex", alignItems:"center", fontSize:"12px", color:"#6b7280", marginLeft:"4px" }}>
-                        toplam {tamListe.length} personel için
-                        <b style={{ marginLeft:4, color:"#1e3a5f" }}>{seciliEgitim.tur}</b>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Tablo ── */}
-                <div style={{ overflowX:"auto", borderRadius:"12px", boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px" }}>
-                    <thead>
-                      <tr style={{ background:"#1e3a5f" }}>
-                        <th style={{ padding:"10px 12px", textAlign:"left", color:"#fff", fontWeight:700, whiteSpace:"nowrap", minWidth:160, position:"sticky", left:0, zIndex:1, background:"#1e3a5f" }}>Personel</th>
-                        <th style={{ padding:"10px 8px", color:"#fff", fontWeight:700, whiteSpace:"nowrap" }}>Ekip</th>
-                        {gorunenKolonlar.map(k=>(
-                          <th key={k.tur} style={{ padding:"10px 8px", color:"#fff", fontWeight:700, whiteSpace:"nowrap", textAlign:"center", fontSize:"11px",
-                            background: isgMatrisEgitim===k.tur?"#2563eb":"#1e3a5f" }}>{k.kisa}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {liste.length === 0 && (
-                        <tr><td colSpan={2+gorunenKolonlar.length} style={{ padding:"24px", textAlign:"center", color:"#9ca3af" }}>Filtre sonucu boş</td></tr>
-                      )}
-                      {liste.map((p, pi) => (
-                        <tr key={p.id} style={{ background: pi%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6" }}>
-                          <td style={{ padding:"8px 12px", fontWeight:600, whiteSpace:"nowrap", position:"sticky", left:0, background: pi%2===0?"#fff":"#f9fafb", zIndex:1 }}>
-                            <button onClick={()=>setIsgMatrisPersonel(isgMatrisPersonel===String(p.id)?"":String(p.id))}
-                              style={{ background:"none", border:"none", cursor:"pointer", fontWeight:600, fontSize:"12px", color:"#1f2937", padding:0, textAlign:"left" }}>
-                              {p.ad_soyad}
-                            </button>
-                            <div style={{ fontSize:"11px", color:"#9ca3af", fontWeight:400 }}>{p.unvan}</div>
-                          </td>
-                          <td style={{ padding:"8px", textAlign:"center", color:"#6b7280", whiteSpace:"nowrap" }}>{p.ekip_bilgisi||"—"}</td>
-                          {gorunenKolonlar.map(k => {
-                            const { durum, kalan, eg } = egitimDurum(p.egitimler, k.tur);
-                            const bg  = durum==="DOLDU"?"#fef2f2":durum==="YAKLASAN"?"#fffbeb":durum==="GECERLI"?"#f0fdf4":"#f9fafb";
-                            const clr = durum==="DOLDU"?"#991b1b":durum==="YAKLASAN"?"#92400e":durum==="GECERLI"?"#166534":"#d1d5db";
-                            const ico = durum==="DOLDU"?"🔴":durum==="YAKLASAN"?"🟡":durum==="GECERLI"?"✅":"—";
-                            return (
-                              <td key={k.tur} style={{ padding:"6px 8px", textAlign:"center", background:bg,
-                                outline: isgMatrisEgitim===k.tur?"2px solid #3b82f6":"none", outlineOffset:"-2px" }}>
-                                {durum==="YOK" ? <span style={{ color:"#d1d5db", fontSize:"15px" }}>—</span> : (
-                                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"1px" }}>
-                                    <span style={{ fontSize:"13px" }}>{ico}</span>
-                                    {kalan !== null && (
-                                      <span style={{ fontSize:"10px", fontWeight:700, color:clr }}>
-                                        {kalan < 0 ? `${Math.abs(kalan)}g geçti` : `${kalan}g`}
-                                      </span>
-                                    )}
-                                    {eg?.egitim_tarihi && (
-                                      <span style={{ fontSize:"9px", color:"#9ca3af" }}>
-                                        {eg.egitim_tarihi?.split("T")[0]?.slice(0,7)}
-                                      </span>
-                                    )}
-                                    {eg?.belge_yolu && (
-                                      <a href={eg.belge_yolu} target="_blank" rel="noreferrer" style={{ fontSize:"10px", color:"#3b82f6" }}>📎</a>
-                                    )}
-                                  </div>
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {dolduSayisi===0 && yakSayisi===0 && !isgMatrisPersonel && !isgMatrisEgitim && (
-                  <div style={{ marginTop:"12px", ...secSt, textAlign:"center", color:"#166534", background:"#f0fdf4", padding:"14px" }}>
-                    ✅ Tüm ISG eğitimleri güncel, sorun yok.
-                  </div>
-                )}
-              </div>
-            );
-          })()}
         </div>
       )}
 
@@ -9858,10 +9618,41 @@ function HrDashboard({ onBack, currentUser }) {
         );
       })()}
 
-      {/* ===== ISG EĞİTİM TAKİBİ (2. blok — puantaj altında) ===== */}
-      {tab==="isg_takip" && (
-        <div style={{ color:"#6b7280", fontSize:"13px", padding:"20px" }}>
-          ISG takibi ISG / Belgeler sekmesindedir.
+      {/* ===== ISG SEKMESİ ===== */}
+      {tab==="isg" && (
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:"16px", marginBottom:"16px" }}>
+            <h2 style={{ margin:0 }}>🎓 ISG Eğitim Takibi</h2>
+            <a href={`${API_BASE}/hr/excel/isg`}
+              style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>
+              📥 ISG Excel İndir
+            </a>
+          </div>
+          {isgUyarilar.length > 0 ? (
+            <div>
+              <div style={{ marginBottom:"16px", fontWeight:700, color:"#991b1b" }}>⚠️ Dikkat Gerektiren Eğitimler</div>
+              <div style={{ display:"grid", gap:"8px" }}>
+                {isgUyarilar.map(u => (
+                  <div key={u.id} style={{ background: u.durum==="SURESI_DOLDU"?"#fef2f2":"#fffbeb", borderRadius:"12px", padding:"12px 18px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontWeight:700, color: u.durum==="SURESI_DOLDU"?"#991b1b":"#92400e" }}>{u.ad_soyad} — {u.egitim_turu}</div>
+                      <div style={{ fontSize:"12px", color:"#9ca3af", marginTop:"2px" }}>Bitiş: {u.bitis_tarihi?.split("T")[0]}</div>
+                    </div>
+                    <span style={{ background: u.durum==="SURESI_DOLDU"?"#fee2e2":"#fef3c7", color: u.durum==="SURESI_DOLDU"?"#991b1b":"#92400e", padding:"4px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>
+                      {u.durum==="SURESI_DOLDU"?"🔴 SÜRESİ DOLDU":"🟡 30 GÜN KALDI"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ ...secSt, textAlign:"center", color:"#166534", background:"#f0fdf4" }}>
+              ✅ Tüm ISG eğitimleri güncel, sorun yok.
+            </div>
+          )}
+          <div style={{ marginTop:"20px", color:"#6b7280", fontSize:"13px" }}>
+            Personel eğitimlerini düzenlemek için <b>👤 Personel</b> sekmesinden personeli seçin → Detay / Belgeler.
+          </div>
         </div>
       )}
     </div>
@@ -9869,18 +9660,7 @@ function HrDashboard({ onBack, currentUser }) {
 }
 
 const GIDER_TURLERI = ["Yol","Konaklama","Akşam Yemeği","Yakıt","Malzeme","Ekipman","Diğer"];
-const BOLGELER = [
-  // Marmara
-  "İstanbul","Tekirdağ","Edirne","Kırklareli","Çanakkale",
-  "Bursa","Balıkesir","Kocaeli","Sakarya","Bolu","Yalova","Bilecik","Düzce",
-  // Ege
-  "İzmir","Manisa","Aydın","Denizli","Muğla","Uşak","Afyonkarahisar","Kütahya",
-  // İç Anadolu
-  "Ankara","Konya","Eskişehir","Kayseri","Sivas","Yozgat",
-  "Aksaray","Nevşehir","Niğde","Kırşehir","Kırıkkale","Çankırı","Karaman",
-  // Akdeniz
-  "Antalya","İsparta","Burdur","Mersin","Adana","Hatay","Kahramanmaraş","Osmaniye",
-];
+const BOLGELER = ["İzmir","Antalya","Ankara"];
 const PROJELER = ["TT - Türk Telekom","TC - Türkcell","VF - Vodafone"];
 
 const MASRAF_KATEGORILER = [
@@ -9891,7 +9671,6 @@ const MASRAF_KATEGORILER = [
   { key: "KOPRU",     label: "🛣 Köprü / Otoyol Geçişi",   aciklamaPlaceholder: "Geçiş detayı, plaka",            belgeAciklamaPlaceholder: "HGS/OGS Dekont, Geçiş Makbuzu..." },
   { key: "MALZEME",   label: "🔧 Malzeme / Ekipman",       aciklamaPlaceholder: "Malzeme adı ve detayı",          belgeAciklamaPlaceholder: "Fatura / İrsaliye No...", hasSiteId: true },
   { key: "DIGER",     label: "📦 Diğer",                   aciklamaPlaceholder: "İşin detayı",                    belgeAciklamaPlaceholder: "Fiş / Fatura Açıklaması..." },
-  { key: "TRAFIK_CEZA", label: "🚔 Trafik Cezası",        aciklamaPlaceholder: "Ceza detayı",                    belgeAciklamaPlaceholder: "Ceza belgesi açıklaması...", isTrafikCeza: true },
 ];
 
 function MasrafFormuPanel({ currentUser, onPendingCount }) {
@@ -9918,15 +9697,12 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [nfPersonelId, setNfPersonelId] = useState("");
   const [nfDonem, setNfDonem]     = useState(thisMonth);
   const [activeForm, setActiveForm] = useState(null); // saved form being edited
-  const [kalemForm, setKalemForm] = useState({ kategori:"", tarih:today, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" });
+  const [kalemForm, setKalemForm] = useState({ kategori:"YEMEK", tarih:today, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"" });
   const [openKats, setOpenKats] = useState(new Set()); // collapsed by default
   const toggleKat = (key) => setOpenKats(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
   const [kalemler, setKalemler]   = useState([]);
   const [fotoModal, setFotoModal] = useState(null); // kalem id waiting for photo after new kalem add
   const [extraFotoModal, setExtraFotoModal] = useState(null);
-  const [cezaBelgeKalemId, setCezaBelgeKalemId] = useState(null); // kalem id for ceza tutanagi upload
-  const [showCezaModal, setShowCezaModal] = useState(false);
-  const cezaBelgeInputRef = useRef(null);
   const [uploadFile, setUploadFile] = useState(null);
   const [fisOlmadanAciklama, setFisOlmadanAciklama] = useState("");
   const [pendingKalemTutar, setPendingKalemTutar] = useState(null); // entered amount for OCR comparison
@@ -10041,7 +9817,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, aciklama: kalemForm.site_id ? `Site ID: ${kalemForm.site_id}${kalemForm.aciklama ? " | " + kalemForm.aciklama : ""}` : kalemForm.aciklama, plaka: kalemForm.plaka||null, ceza_personel_id: kalemForm.ceza_personel_id||null })
+      body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, aciklama: kalemForm.site_id ? `Site ID: ${kalemForm.site_id}${kalemForm.aciklama ? " | " + kalemForm.aciklama : ""}` : kalemForm.aciklama })
     });
     const saved = await r.json();
     // Ask for photo upload
@@ -10050,48 +9826,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     setPendingKalemKategori(kalemForm.kategori);
     setOcrResult(null);
     setTutarUyariAciklama("");
-    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" }));
-    refreshActive(activeForm.id);
-  };
-
-  // Trafik ceza belgesi yükle butonu için — kalemi kaydeder, sonra dosya seçiciyi açar
-  // Ceza tutanağı modalını aç
-  const handleAddKalemWithCeza = () => {
-    if (!kalemForm.tutar || !kalemForm.tarih) return alert("Tarih ve tutar zorunlu");
-    if (!activeForm) return alert("Önce form oluşturun");
-    setShowCezaModal(true);
-  };
-
-  const handleCezaBelgeUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
-    // Önce kalemi kaydet
-    let savedId;
-    try {
-      const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, plaka: kalemForm.plaka||null, ceza_personel_id: kalemForm.ceza_personel_id||null })
-      });
-      const saved = await r.json();
-      savedId = saved.id;
-    } catch {
-      return alert("Kalem kaydedilemedi");
-    }
-    // Sonra dosyayı yükle
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      await fetch(`${API_BASE}/hr/masraf-kalem/${savedId}/ceza-belge`, {
-        method: "POST",
-        body: fd
-      });
-      alert("✅ Trafik İdari Para Cezası Karar Tutanağı başarıyla yüklendi");
-    } catch {
-      alert("Kalem eklendi fakat belge yüklenemedi");
-    }
-    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", plaka:"", ceza_personel_id:"" }));
+    setKalemForm(k => ({ ...k, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"" }));
     refreshActive(activeForm.id);
   };
 
@@ -10311,18 +10046,6 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     const needsDirektorAction = isDirektor && viewForm.durum === "DIREKTOR_BEKLE";
     const isOwner = currentUser?.email === viewForm.talep_eden_email;
     const canDelete = (isOwner || isPM) && viewForm.durum !== "TAMAMLANDI";
-    const canEditCeza = isPM || isDirektor || isOwner;
-
-    const handleCezaPersonelAta = async (kalemId, cezaPersonelId) => {
-      await fetch(`${API_BASE}/hr/masraf-kalem/${kalemId}/ceza-personel`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ceza_personel_id: cezaPersonelId || null }),
-      });
-      // Formu yenile
-      const r = await fetch(`${API_BASE}/hr/masraf-form/${viewForm.id}`);
-      setViewForm(await r.json());
-    };
 
     const handleDeleteView = async () => {
       if (!window.confirm("Bu masraf formu silinecek. Emin misiniz?")) return;
@@ -10374,39 +10097,11 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                 const ocrFark = tutarFarkiVar(k);
                 const rowBg = ocrFark ? "#fef2f2" : !k.fis_var ? "#fff7ed" : i%2===0 ? "#fff" : "#fafafa";
                 return (
-                  <tr key={k.id} style={{ background: rowBg, borderBottom:"1px solid #f3f4f6", borderLeft: ocrFark ? "4px solid #dc2626" : k.kategori==="TRAFIK_CEZA" ? "4px solid #ea580c" : "4px solid transparent" }}>
+                  <tr key={k.id} style={{ background: rowBg, borderBottom:"1px solid #f3f4f6", borderLeft: ocrFark ? "4px solid #dc2626" : "4px solid transparent" }}>
                     <td style={{ padding:"10px 12px" }}>{kat?.label||k.kategori}</td>
                     <td style={{ padding:"10px 12px", whiteSpace:"nowrap" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR") : ""}</td>
                     <td style={{ padding:"10px 12px" }}>{k.belge_no||"—"}</td>
-                    <td style={{ padding:"10px 12px" }}>
-                      {k.aciklama||k.belge_aciklama||"—"}
-                      {!k.fis_var&&<div style={{ fontSize:"11px",color:"#dc2626" }}>Fişsiz: {k.fis_olmadan_aciklama}</div>}
-                      {/* Trafik cezası ise — ceza kimin üzerine? */}
-                      {k.kategori==="TRAFIK_CEZA" && (
-                        <div style={{ marginTop:"6px", display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap" }}>
-                          <span style={{ fontSize:"10px", fontWeight:700, color:"#ea580c" }}>🚔 Ceza kime:</span>
-                          {canEditCeza ? (
-                            <select
-                              defaultValue={k.ceza_sirket ? "sirket" : (k.ceza_personel_id||"")}
-                              onChange={e => handleCezaPersonelAta(k.id, e.target.value)}
-                              style={{ fontSize:"11px", padding:"2px 6px", borderRadius:"6px", border:"1px solid #ea580c", background:"#fff7ed", color:"#9a3412", cursor:"pointer" }}
-                            >
-                              <option value="">— Atanmadı —</option>
-                              <option value="sirket">🏢 ŞİMŞEK (Şirket)</option>
-                              {personelList.filter(p=>p.aktif).map(p=>(
-                                <option key={p.id} value={p.id}>{p.ad_soyad}</option>
-                              ))}
-                            </select>
-                          ) : (
-                            <span style={{ fontSize:"11px", color:"#9a3412", fontWeight:600 }}>
-                              {k.ceza_sirket
-                                ? "🏢 ŞİMŞEK (Şirket)"
-                                : (personelList.find(p=>String(p.id)===String(k.ceza_personel_id))?.ad_soyad || "Atanmadı")}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </td>
+                    <td style={{ padding:"10px 12px" }}>{k.aciklama||k.belge_aciklama||"—"}{!k.fis_var&&<div style={{ fontSize:"11px",color:"#dc2626" }}>Fişsiz: {k.fis_olmadan_aciklama}</div>}</td>
                     <td style={{ padding:"10px 12px", fontWeight:700 }}>
                       ₺{Number(k.tutar).toLocaleString("tr-TR")}
                       {ocrFark && (
@@ -10456,25 +10151,6 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
               style={{ padding:"12px 24px", background:"#dc2626", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}>
               ❌ Reddet
             </button>
-          </div>
-        )}
-
-        {/* Onay not modal — viewForm'un early return'ü nedeniyle buraya eklenmeli */}
-        {notModal && (
-          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}
-            onClick={()=>{setNotModal(null);setNotText("");}}>
-            <div style={{ background:"#fff", borderRadius:"16px", padding:"28px", width:"90%", maxWidth:"420px" }}
-              onClick={e=>e.stopPropagation()}>
-              <h3 style={{ margin:"0 0 16px" }}>✅ Onay Notu (opsiyonel)</h3>
-              <textarea value={notText} onChange={e=>setNotText(e.target.value)} rows={3} placeholder="Not eklemek ister misiniz?"
-                style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box", resize:"vertical" }} />
-              <div style={{ display:"flex", gap:"10px", marginTop:"14px" }}>
-                <button onClick={notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
-                  style={{ flex:1, padding:"12px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Onayla</button>
-                <button onClick={()=>{setNotModal(null);setNotText("");}}
-                  style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
-              </div>
-            </div>
           </div>
         )}
 
@@ -10660,23 +10336,6 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                         <input value={kalemForm.site_id} onChange={e=>setKalemForm(k=>({...k,site_id:e.target.value}))} placeholder="Örn: AI0246, TR-IST-001..." style={inp} />
                       </div>
                     )}
-                    {kat.isTrafikCeza && (
-                      <>
-                        <div style={{ marginBottom:"10px" }}>
-                          <div style={{ fontSize:"10px", fontWeight:700, color:"#c2410c", marginBottom:"3px" }}>🚗 ARAÇ PLAKASI *</div>
-                          <input value={kalemForm.plaka} onChange={e=>setKalemForm(k=>({...k,plaka:e.target.value.toUpperCase()}))} placeholder="Örn: 34ABC123" style={{ ...inp, textTransform:"uppercase" }} />
-                        </div>
-                        <div style={{ marginBottom:"10px" }}>
-                          <div style={{ fontSize:"10px", fontWeight:700, color:"#c2410c", marginBottom:"3px" }}>👤 CEZAYI ALAN PERSONEL</div>
-                          <select value={kalemForm.ceza_personel_id} onChange={e=>setKalemForm(k=>({...k,ceza_personel_id:e.target.value}))} style={inp}>
-                            <option value="">— Personel seçin —</option>
-                            {personelList.map(p=>(
-                              <option key={p.id} value={p.id}>{p.ad_soyad}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </>
-                    )}
                     <div style={{ marginBottom:"10px" }}>
                       <div style={{ fontSize:"10px", fontWeight:700, color:"#1e40af", marginBottom:"3px" }}>AÇIKLAMA — {kat.aciklamaPlaceholder}</div>
                       <input value={kalemForm.aciklama} onChange={e=>setKalemForm(k=>({...k,aciklama:e.target.value}))} placeholder={kat.aciklamaPlaceholder} style={inp} />
@@ -10686,25 +10345,17 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                       <input type="number" value={kalemForm.tutar} onChange={e=>setKalemForm(k=>({...k,tutar:e.target.value}))} placeholder="0.00"
                         style={{ ...inp, fontSize:"18px", fontWeight:700, border:"2px solid #2563eb" }} />
                     </div>
-                    <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
-                      <button type="button" onClick={handleAddKalem}
-                        style={{ flex:1, padding:"11px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer", minWidth:"180px" }}>
+                    <div style={{ display:"flex", gap:"8px" }}>
+                      <button onClick={handleAddKalem}
+                        style={{ flex:1, padding:"11px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer" }}>
                         ✓ Ekle + Fiş Fotoğrafı Yükle
                       </button>
-                      {kat.isTrafikCeza && (
-                        <button type="button" onClick={handleAddKalemWithCeza}
-                          style={{ flex:1, padding:"11px", background:"#b91c1c", color:"#fff", border:"none", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer", minWidth:"180px" }}>
-                          📄 Ekle + Ceza Tutanağı Yükle
-                        </button>
-                      )}
                       <button onClick={()=>setKalemForm(k=>({...k,kategori:""}))}
                         style={{ padding:"11px 16px", background:"#f3f4f6", border:"none", borderRadius:"8px", cursor:"pointer", fontSize:"13px" }}>İptal</button>
                     </div>
-                    {/* Gizli ceza belgesi input */}
-                    <input ref={cezaBelgeInputRef} type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={handleCezaBelgeUpload} />
                   </div>
                 ) : (
-                  <button onClick={()=>{ setKalemForm(k=>({...k, kategori:kat.key, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"", plaka:"", ceza_personel_id:"" })); setOpenKats(prev=>{ const s=new Set(prev); s.add(kat.key); return s; }); }}
+                  <button onClick={()=>{ setKalemForm(k=>({...k, kategori:kat.key, belge_no:"", belge_aciklama:"", aciklama:"", tutar:"", site_id:"" })); setOpenKats(prev=>{ const s=new Set(prev); s.add(kat.key); return s; }); }}
                     style={{ width:"100%", padding:"9px", background:"#f0f9ff", border:"none", borderTop:"1px dashed #93c5fd", color:"#2563eb", fontWeight:600, fontSize:"13px", cursor:"pointer", textAlign:"center" }}>
                     + Bu Bölüme Satır Ekle
                   </button>
@@ -10932,34 +10583,6 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
             </div>
           );
         })()}
-
-        {/* Ceza Tutanağı Yükleme Modalı */}
-        {showCezaModal && (
-          <div onClick={()=>setShowCezaModal(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:1000 }}>
-            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"28px 24px", width:"100%", maxWidth:"480px", position:"relative" }}>
-              <button onClick={()=>setShowCezaModal(false)}
-                style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"30px", height:"30px", fontSize:"16px", cursor:"pointer" }}>✕</button>
-              <h3 style={{ margin:"0 0 8px", fontSize:"18px" }}>📄 Trafik Ceza Tutanağı Yükle</h3>
-              <p style={{ fontSize:"13px", color:"#6b7280", margin:"0 0 20px" }}>Tutanağı fotoğraflayın veya dosyadan seçin.</p>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"16px" }}>
-                <label style={{ padding:"16px 12px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"12px", fontWeight:700, fontSize:"14px", cursor:"pointer", textAlign:"center" }}>
-                  📷 Kameradan Çek
-                  <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
-                    onChange={e=>{ const f=e.target.files[0]; if(f){ setShowCezaModal(false); handleCezaBelgeUpload({target:{files:[f],value:""},preventDefault:()=>{}}); } e.target.value=""; }} />
-                </label>
-                <label style={{ padding:"16px 12px", background:"#f0f9ff", color:"#1d4ed8", border:"1.5px solid #bfdbfe", borderRadius:"12px", fontWeight:700, fontSize:"14px", cursor:"pointer", textAlign:"center" }}>
-                  🗂 Dosyadan Seç
-                  <input type="file" accept="image/*,application/pdf" style={{ display:"none" }}
-                    onChange={e=>{ const f=e.target.files[0]; if(f){ setShowCezaModal(false); handleCezaBelgeUpload({target:{files:[f],value:""},preventDefault:()=>{}}); } e.target.value=""; }} />
-                </label>
-              </div>
-              <button onClick={()=>setShowCezaModal(false)}
-                style={{ width:"100%", padding:"12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
-                İptal
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Ek fiş fotoğrafı */}
         {extraFotoModal && (
@@ -11297,10 +10920,8 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const isPM = _email === "orhan.bedir@simsektel.com";
   const isDirektor = _email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = _email === "muhasebe@simsektel.com";
-  // Nurcan: herkesi görebilir, herkes için talep edebilir (yönetici yetkisi)
-  const isNurcan = _email === "nurcan.kus@simsektel.com";
-  // isRequester: sadece kendi avanslarını görür — Serdar ve diğer normal kullanıcılar
-  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isNurcan;
+  const isRolloutMudur = _email === "nurcan.kus@simsektel.com" || _email === "serdar.altinova@simsektel.com" || (currentUser?.role || "").toLowerCase() === "rollout_mudur";
+  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isRolloutMudur;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const loadBakiye = async () => {
@@ -11310,9 +10931,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   };
 
   const load = async () => {
-    // Requester kendi avanslarını + kendisi için açılanları görsün; admin tümünü görsün
-    const qs = isRequester && currentUser?.email ? `?email=${encodeURIComponent(currentUser.email)}` : "";
-    const r = await fetch(`${API_BASE}/hr/is-avans${qs}`);
+    const r = await fetch(`${API_BASE}/hr/is-avans`);
     const data = await r.json();
     setList(data);
     if (onPendingCount) {
@@ -11333,9 +10952,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   useEffect(() => { load(); loadPersonel(); loadBakiye(); }, []);
 
   const visibleList = list.filter(t => {
-    // Backend zaten email filtreliyor; burada ekstra kısıtlama yok
-    // (Admin için hepsi gelir, requester için sadece kendi + adına açılanlar)
-    if (false) return false; // placeholder
+    if (isRequester && t.talep_eden_email !== currentUser?.email) return false;
     if (searchText) {
       const s = searchText.toLowerCase();
       if (!t.talep_eden_ad?.toLowerCase().includes(s) && !t.personel_ad?.toLowerCase().includes(s) && !t.aciklama?.toLowerCase().includes(s)) return false;
@@ -11392,12 +11009,6 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     load(); loadBakiye();
   };
 
-  // Direktör, TALEP veya PM_ONAY durumundaki talepleri doğrudan onaylar (PM adımını atlar)
-  const handleDirektorDogrudan = async (id) => {
-    await fetch(`${API_BASE}/hr/is-avans/${id}/direktor-onayla`, { method: "PUT" });
-    load(); loadBakiye();
-  };
-
   const handleReddet = async () => {
     if (!redText.trim()) { alert("Red açıklaması girilmeden reddedilemez!"); return; }
     try {
@@ -11436,8 +11047,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const myPendingCount =
     isPM ? list.filter(t => t.durum === "TALEP").length :
     isDirektor ? list.filter(t => t.durum === "PM_ONAY").length :
-    isMuhasebe ? list.filter(t => t.durum === "DIREKTOR_ONAY").length :
-    isNurcan ? list.filter(t => t.durum === "TALEP").length : 0;
+    isMuhasebe ? list.filter(t => t.durum === "DIREKTOR_ONAY").length : 0;
 
   const NotTooltipEl = notTooltip.visible ? (() => {
     const TW = 300;
@@ -11568,15 +11178,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
             const cardBg = needsMyAction ? "#fffbeb" : myPendingRequest ? "#fef2f2" : "#fff";
             return (
               <div key={t.id} style={{ background:cardBg, border:cardBorder, borderRadius:"12px", padding:"14px 16px" }}>
-                {/* Başkası adına açılan talep uyarısı */}
-                {t.talep_eden_email !== currentUser?.email && (
-                  <div style={{ fontSize:"11px", color:"#6b7280", background:"#f3f4f6", borderRadius:"6px", padding:"4px 10px", marginBottom:"8px" }}>
-                    👤 <strong>{t.talep_eden_ad}</strong> tarafından açıldı
-                  </div>
-                )}
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
                   <div>
-                    <div style={{ fontWeight:700, fontSize:"14px" }}>{t.personel_ad || t.talep_eden_ad}</div>
+                    <div style={{ fontWeight:700, fontSize:"14px" }}>{t.talep_eden_ad}</div>
                     <div style={{ fontSize:"12px", color:"#6b7280" }}>{formatDateOnly(t.tarih)}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
@@ -11608,9 +11212,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                     </>
                   )}
-                  {isDirektor && (t.durum==="PM_ONAY" || t.durum==="TALEP") && (
+                  {isDirektor && t.durum==="PM_ONAY" && (
                     <>
-                      <button onClick={()=>handleDirektorDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
+                      <button onClick={()=>handleOnayla(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                     </>
                   )}
@@ -11702,9 +11306,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                         </>
                       )}
-                      {isDirektor && (t.durum === "PM_ONAY" || t.durum === "TALEP") && (
+                      {isDirektor && t.durum === "PM_ONAY" && (
                         <>
-                          <button onClick={() => handleDirektorDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
+                          <button onClick={() => handleOnayla(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                         </>
                       )}
@@ -11737,17 +11341,14 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
             </div>
             <form onSubmit={handleSave}>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                {/* Personel seçimi: sadece yöneticiler ve Nurcan görebilir */}
-                {(isPM || isDirektor || isMuhasebe || isNurcan) && (
-                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
-                    Personel
-                    <select value={form.personel_id} onChange={e => setForm(f => ({...f, personel_id: e.target.value}))}
-                      style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", background: "#fff" }}>
-                      <option value="">Seçiniz (opsiyonel)</option>
-                      {personelList.filter(p => p.aktif).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
-                    </select>
-                  </label>
-                )}
+                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                  Personel
+                  <select value={form.personel_id} onChange={e => setForm(f => ({...f, personel_id: e.target.value}))}
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", background: "#fff" }}>
+                    <option value="">Seçiniz (opsiyonel)</option>
+                    {personelList.filter(p => p.aktif).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+                  </select>
+                </label>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Gider Türü <span style={{ color: "#dc2626" }}>*</span>
                   <select required value={form.gider_turu} onChange={e => setForm(f => ({...f, gider_turu: e.target.value}))}
@@ -12514,11 +12115,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     }));
   };
 
-  const handleExportRegionExcel = async () => {
+  const handleExportRegionExcel = () => {
     try {
-      const dateStr = new Date().toLocaleDateString("tr-TR");
-      const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
-
+      // Analiz değerini hesapla (tabloda görünen mantıkla aynı)
       const getAnaliz = (row) => {
         if (row.status === "PO_BEKLER") return "Eksik";
         if (Number(row.done_qty || 0) === 0) return "Giriş Yok";
@@ -12527,156 +12126,39 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         return "Eksik";
       };
 
-      const headers = [
-        "Bölge", "Status", "Analiz", "Project Code", "Site Code",
-        "Item Description", "Item Code", "OnAir Date",
-        "Done Qty", "Requested Qty", "Billed Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Taşeron",
+      // sortedRows zaten filtreli — filtreyi yansıtır
+      const data = sortedRows.map((row) => ({
+        "Bölge":           getRegion(row.site_code, row.project_code),
+        "Status":          row.status || "",
+        "Analiz":          getAnaliz(row),
+        "Project":         row.project_code || "",
+        "Site Code":       row.site_code || "",
+        "Item Description": row.item_description || "",
+        "Item Code":       row.item_code || "",
+        "OnAir Date":      row.onair_date || "",
+        "Done Qty":        Number(row.done_qty || 0),
+        "Requested Qty":   Number(row.requested_qty || 0),
+        "Billed Qty":      Number(row.billed_qty || 0),
+        "Currency":        row.currency || "",
+        "Unit Price":      Number(row.unit_price || 0),
+        "Şimşek Toplam Hakedis": Number(row.total_done_amount || 0),
+        "Taşeron":         row.subcon_name || "",
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Region Analysis");
+
+      // Sütun genişlikleri
+      ws["!cols"] = [
+        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 22 },
+        { wch: 45 }, { wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 14 },
+        { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 20 }, { wch: 18 },
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 14, 16, 14, 18, 20, 18];
-      const NCOLS = headers.length;
 
-      const titleStyle = {
-        fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
-        font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
-        alignment: { horizontal: "center", vertical: "center" },
-      };
-      const headerStyle = {
-        fill: { patternType: "solid", fgColor: { rgb: "203864" } },
-        font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
-        alignment: { horizontal: "center", vertical: "center", wrapText: true },
-        border: {
-          top: { style: "thin", color: { rgb: "B7C9E2" } },
-          bottom: { style: "thin", color: { rgb: "B7C9E2" } },
-          left: { style: "thin", color: { rgb: "B7C9E2" } },
-          right: { style: "thin", color: { rgb: "B7C9E2" } },
-        },
-      };
-      const cellBorder = {
-        top: { style: "hair", color: { rgb: "E5E7EB" } },
-        bottom: { style: "hair", color: { rgb: "E5E7EB" } },
-        left: { style: "hair", color: { rgb: "E5E7EB" } },
-        right: { style: "hair", color: { rgb: "E5E7EB" } },
-      };
-      const cellStyle = (isEven, isNum) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "F8FAFC" : "FFFFFF" } },
-        font: { sz: 11, name: "Calibri", color: { rgb: "111827" } },
-        alignment: { horizontal: isNum ? "right" : "left", vertical: "middle" },
-        border: cellBorder,
-      });
-      const federalStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const statusStyle = (status, isEven) => {
-        const base = cellStyle(isEven, false);
-        const s = String(status || "").toUpperCase();
-        const colors = { OK: "15803D", PO_BEKLER: "D97706", CANCEL: "B91C1C", PARTIAL: "2563EB" };
-        if (colors[s]) return { ...base, font: { ...base.font, bold: true, color: { rgb: colors[s] } } };
-        return base;
-      };
-
-      const aoa = [];
-
-      const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
-      titleRow[0] = { v: `BÖLGE ANALİZİ${searchSuffix} (${dateStr})`, s: titleStyle };
-      aoa.push(titleRow);
-
-      aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
-
-
-      sortedRows.forEach((row, idx) => {
-        const isEven = idx % 2 === 1;
-        const isUSD = normalizeCurrency(row.currency) === "USD";
-        const unitPrice = Number(row.unit_price || 0);
-        const doneQty = Number(row.done_qty || 0);
-        const usdBirimFiyat = isUSD ? unitPrice : 0;
-        const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
-        const toplamHakedis = Number(row.total_done_amount || 0);
-        const federalHakedis = toplamHakedis * 0.80;
-
-        aoa.push([
-          { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
-          { v: row.status || "",                                  s: statusStyle(row.status, isEven) },
-          { v: getAnaliz(row),                                    s: cellStyle(isEven, false) },
-          { v: row.project_code || "",                            s: cellStyle(isEven, false) },
-          { v: row.site_code || "",                               s: cellStyle(isEven, false) },
-          { v: row.item_description || "",                        s: cellStyle(isEven, false) },
-          { v: row.item_code || "",                               s: cellStyle(isEven, false) },
-          { v: row.onair_date || "",                              s: cellStyle(isEven, false) },
-          { v: doneQty,                                           s: cellStyle(isEven, true) },
-          { v: Number(row.requested_qty || 0),                    s: cellStyle(isEven, true) },
-          { v: Number(row.billed_qty || 0),                       s: cellStyle(isEven, true) },
-          { v: row.currency || "",                                s: cellStyle(isEven, false) },
-          { v: usdBirimFiyat,                                     s: cellStyle(isEven, true) },
-          { v: usdToplamFiyat,                                    s: cellStyle(isEven, true) },
-          { v: unitPrice,                                         s: cellStyle(isEven, true) },
-          { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
-          { v: federalHakedis,                                    s: federalStyle(isEven) },
-          { v: row.subcon_name || "",                             s: cellStyle(isEven, false) },
-        ]);
-      });
-
-      const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
-
-      aoa.forEach((row, ri) => {
-        row.forEach((cell, ci) => {
-          const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
-          if (!ws[addr]) ws[addr] = { v: cell.v };
-          ws[addr].s = cell.s;
-        });
-      });
-
-      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
-      ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
-      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...sortedRows.map(() => ({ hpt: 20 }))];
-
-      const wb = XLSXStyle.utils.book_new();
-      XLSXStyle.utils.book_append_sheet(wb, ws, "Bölge Analizi");
-
-      const dateFile = new Date().toISOString().slice(0, 10);
-      const searchSuffixFile = regionSearch.trim()
-        ? `-${regionSearch.trim().replace(/[^a-zA-Z0-9_]/g, "_")}`
-        : "";
-      const fileName = `bolge_analizi_${dateFile}${searchSuffixFile}.xlsx`;
-
-      const lastColLetter = String.fromCharCode(64 + NCOLS);
-      const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
-      const autoFilterRef = `A2:${lastColLetter}2`;
-
-      const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
-      const zip = await JSZip.loadAsync(buf);
-      let xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
-
-      xml = xml
-        .replace(
-          '<sheetView workbookViewId="0"/>',
-          `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`,
-        )
-        .replace(
-          '<sheetView tabSelected="1" workbookViewId="0"/>',
-          `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`,
-        );
-
-      // autoFilter'ı </sheetData> hemen sonrasına ekle (OOXML sıralaması için)
-      if (!xml.includes("<autoFilter")) {
-        xml = xml.replace(
-          "</sheetData>",
-          `</sheetData><autoFilter ref="${autoFilterRef}"/>`,
-        );
-      }
-
-      zip.file("xl/worksheets/sheet1.xml", xml);
-      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      a.click();
-      URL.revokeObjectURL(url);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const searchSuffix = regionSearch.trim() ? `-${regionSearch.trim().replace(/[^a-zA-Z0-9_]/g,"_")}` : "";
+      XLSX.writeFile(wb, `region_analysis_${dateStr}${searchSuffix}.xlsx`);
     } catch (err) {
       console.error("REGION ANALYSIS EXCEL ERROR:", err);
       alert(`Excel indirilemedi:\n${err.message}`);
@@ -12698,14 +12180,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     whiteSpace: "nowrap",
   };
 
-  const _subconKey = String(userSubconName || "").toLowerCase();
-  // Her taşeron için iş tipine göre ayrı hakediş oranları
-  const subconRateMap = {
-    ubs:     { rf: 0.75, gizleme: 0.90, genel: 0.75 },
-    federal: { rf: 0.80, gizleme: 0.80, genel: 0.80 },
-  };
-  const subconRates = subconRateMap[_subconKey] || { rf: 1, gizleme: 1, genel: 1 };
-  const subconRate  = subconRates.genel; // geriye dönük hesaplamalar için
+  const subconRate =
+    String(userSubconName || "").toLowerCase() === "federal"
+      ? 0.8
+      : String(userSubconName || "").toLowerCase() === "ubs"
+        ? 0.75
+        : 1;
 
   const subconSummary = {
     hakedis: executiveSummary.completed * subconRate,
@@ -12747,28 +12227,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             <>
               <Row label="Toplam Hakediş" value={subconSummary.hakedis} />
 
-              {/* ── Hakediş Oranları: RF & Gizleme ── */}
-              <div style={{ padding:"12px 16px", borderBottom:"1px solid #e5e7eb", background:"#fff" }}>
-                <div style={{ fontSize:"12px", color:"#6b7280", marginBottom:"10px", fontWeight:500 }}>Hakediş Oranları</div>
-                <div style={{ display:"flex", gap:"10px" }}>
-                  {/* RF */}
-                  <div style={{ flex:1, background:"linear-gradient(135deg,#eff6ff,#dbeafe)", border:"1px solid #bfdbfe", borderRadius:"10px", padding:"12px 10px", textAlign:"center", position:"relative", overflow:"hidden" }}>
-                    <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#3b82f6,#6366f1)", borderRadius:"10px 10px 0 0" }} />
-                    <div style={{ fontSize:"22px", fontWeight:"800", color:"#1d4ed8", letterSpacing:"-0.5px" }}>
-                      %{Math.round(subconRates.rf * 100)}
-                    </div>
-                    <div style={{ fontSize:"11px", color:"#3b82f6", fontWeight:"600", marginTop:"3px", textTransform:"uppercase", letterSpacing:"0.5px" }}>RF</div>
-                  </div>
-                  {/* Gizleme */}
-                  <div style={{ flex:1, background:"linear-gradient(135deg,#f0fdf4,#dcfce7)", border:"1px solid #bbf7d0", borderRadius:"10px", padding:"12px 10px", textAlign:"center", position:"relative", overflow:"hidden" }}>
-                    <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#10b981,#059669)", borderRadius:"10px 10px 0 0" }} />
-                    <div style={{ fontSize:"22px", fontWeight:"800", color:"#065f46", letterSpacing:"-0.5px" }}>
-                      %{Math.round(subconRates.gizleme * 100)}
-                    </div>
-                    <div style={{ fontSize:"11px", color:"#10b981", fontWeight:"600", marginTop:"3px", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gizleme</div>
-                  </div>
-                </div>
-              </div>
+              <Row label="Hakediş Oranı" value={subconRate * 100} isPercent />
 
               <Row label="Hakediş Tutarı" value={subconSummary.hakedis} />
 
@@ -14563,256 +14022,19 @@ function CashFlowPanel({ currentUser, onBack }) {
   );
 }
 
-// ─── PERSONEL MALZEME PANELİ ─────────────────────────────────────────────────
-function PersonelMalzemePanel({ currentUser }) {
-  const _email = (currentUser?.email || "").toLowerCase();
-  const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
-  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-
-  const [liste, setListe] = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
-  const [aktifTab, setAktifTab] = React.useState("PERSONELDE");
-  const [sahaCikisModal, setSahaCikisModal] = React.useState(null);
-  const [sahaSiteId, setSahaSiteId] = React.useState("");
-  const [sahaNot, setSahaNot] = React.useState("");
-  const [iadeModal, setIadeModal] = React.useState(null);
-  const [iadeNot, setIadeNot] = React.useState("");
-  const [saving, setSaving] = React.useState(false);
-  const [siteCodeSuggestions2, setSiteCodeSuggestions2] = React.useState([]);
-  const [showSiteDrop2, setShowSiteDrop2] = React.useState(false);
-
-  const API_BASE2 = import.meta.env.VITE_API_BASE || "http://localhost:5001";
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      let r = await fetch(`${API_BASE2}/malzeme/dagitim?personel_email=${encodeURIComponent(_email)}`, { headers });
-      let d = await r.json();
-      if (!Array.isArray(d) || d.length === 0) {
-        const name = currentUser?.name || "";
-        if (name) {
-          const r2 = await fetch(`${API_BASE2}/malzeme/dagitim?personel_ad=${encodeURIComponent(name)}`, { headers });
-          d = await r2.json();
-        }
-      }
-      setListe(Array.isArray(d) ? d : []);
-    } catch {}
-    setLoading(false);
-  };
-
-  React.useEffect(() => { load(); }, []);
-
-  const searchSite2 = async (q) => {
-    if (!q || q.length < 2) { setSiteCodeSuggestions2([]); return; }
-    try {
-      const r = await fetch(`${API_BASE2}/malzeme/site-codes?q=${encodeURIComponent(q)}`, { headers });
-      const d = await r.json();
-      setSiteCodeSuggestions2(Array.isArray(d) ? d : []);
-    } catch { setSiteCodeSuggestions2([]); }
-  };
-
-  const handleSaha = async () => {
-    if (!sahaSiteId.trim()) { alert("Site ID giriniz"); return; }
-    setSaving(true);
-    try {
-      await fetch(`${API_BASE2}/malzeme/dagitim/${sahaCikisModal.id}/saha-cikis`, { method:"PUT", headers, body: JSON.stringify({ saha_site_id: sahaSiteId, saha_notlar: sahaNot }) });
-      setSahaCikisModal(null); setSahaSiteId(""); setSahaNot(""); load();
-    } catch (e) { alert(e.message); }
-    setSaving(false);
-  };
-
-  const handleIade = async () => {
-    setSaving(true);
-    try {
-      await fetch(`${API_BASE2}/malzeme/dagitim/${iadeModal.id}/iade`, { method:"PUT", headers, body: JSON.stringify({ notlar: iadeNot }) });
-      setIadeModal(null); setIadeNot(""); load();
-    } catch (e) { alert(e.message); }
-    setSaving(false);
-  };
-
-  const tabs = [
-    { key:"PERSONELDE",     label:"📦 Üzerimdeki", color:"#1d4ed8" },
-    { key:"SAHADA",         label:"🏗 Sahada",     color:"#15803d" },
-    { key:"IADE_BEKLEMEDE", label:"⏳ İade Onayı", color:"#d97706" },
-    { key:"DEPOYA_IADE",    label:"↩ İade Edildi", color:"#6b7280" },
-  ];
-
-  const durumRenk = { PERSONELDE:{bg:"#dbeafe",c:"#1d4ed8",l:"Üzerimde"}, SAHADA:{bg:"#dcfce7",c:"#15803d",l:"Sahada ✓"}, IADE_BEKLEMEDE:{bg:"#fef3c7",c:"#d97706",l:"İade Onayı Bekleniyor"}, DEPOYA_IADE:{bg:"#f3f4f6",c:"#6b7280",l:"İade Edildi"} };
-
-  const filtered = liste.filter(d => d.durum === aktifTab);
-  const counts = { PERSONELDE: liste.filter(d=>d.durum==="PERSONELDE").length, SAHADA: liste.filter(d=>d.durum==="SAHADA").length, IADE_BEKLEMEDE: liste.filter(d=>d.durum==="IADE_BEKLEMEDE").length, DEPOYA_IADE: liste.filter(d=>d.durum==="DEPOYA_IADE").length };
-
-  if (loading) return <div style={{ textAlign:"center", padding:60, color:"#6b7280" }}>Yükleniyor…</div>;
-
-  return (
-    <div style={{ maxWidth:800, margin:"0 auto" }}>
-      {/* Özet kartlar */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
-        {tabs.map(t => (
-          <div key={t.key} onClick={()=>setAktifTab(t.key)}
-            style={{ background:"#fff", borderRadius:12, padding:"14px 10px", textAlign:"center", cursor:"pointer", border:`2px solid ${aktifTab===t.key?t.color:"#e5e7eb"}`, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-            <div style={{ fontSize:26, fontWeight:800, color:t.color }}>{counts[t.key]}</div>
-            <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>{t.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Tab seçici */}
-      <div style={{ display:"flex", borderBottom:"2px solid #e2e8f0", background:"#fff", borderRadius:"10px 10px 0 0", overflow:"hidden", marginBottom:0 }}>
-        {tabs.map(t => (
-          <button key={t.key} onClick={()=>setAktifTab(t.key)}
-            style={{ flex:1, padding:"11px 0", border:"none", background:"none", cursor:"pointer", fontWeight:aktifTab===t.key?700:400, fontSize:13, color:aktifTab===t.key?t.color:"#6b7280", borderBottom:aktifTab===t.key?`3px solid ${t.color}`:"3px solid transparent", marginBottom:-2 }}>
-            {t.label} {counts[t.key]>0?`(${counts[t.key]})`:""}</button>
-        ))}
-      </div>
-
-      {/* Liste */}
-      <div style={{ background:"#fff", borderRadius:"0 0 12px 12px", boxShadow:"0 1px 6px rgba(0,0,0,0.07)", overflow:"hidden" }}>
-        {filtered.length === 0 ? (
-          <div style={{ textAlign:"center", padding:40, color:"#9ca3af" }}>
-            <div style={{ fontSize:40, marginBottom:10 }}>📭</div>
-            <div>Bu kategoride malzeme yok</div>
-            <button onClick={load} style={{ marginTop:12, padding:"6px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:12 }}>Yenile</button>
-          </div>
-        ) : filtered.map((d, i) => {
-          const dr = durumRenk[d.durum] || durumRenk.PERSONELDE;
-          const aktif = d.durum === "PERSONELDE";
-          return (
-            <div key={d.id} style={{ padding:"14px 16px", borderBottom:i<filtered.length-1?"1px solid #f0f4f8":"none" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
-                <div style={{ fontWeight:700, color:"#1e3a5f", fontSize:14, flex:1, marginRight:10 }}>{d.malzeme_adi}</div>
-                <span style={{ padding:"3px 10px", borderRadius:8, background:dr.bg, color:dr.c, fontWeight:700, fontSize:11, whiteSpace:"nowrap" }}>{dr.l}</span>
-              </div>
-              <div style={{ display:"flex", gap:16, fontSize:12, color:"#6b7280", marginBottom:8, flexWrap:"wrap" }}>
-                <span>📏 {d.miktar} {d.birim}</span>
-                {(d.site_id||d.bolge) && <span>📍 {d.site_id||d.bolge}</span>}
-                {d.saha_site_id && <span>🏗 Saha: {d.saha_site_id}</span>}
-                {d.verilme_tarihi && <span>📅 {new Date(d.verilme_tarihi).toLocaleDateString("tr-TR")}</span>}
-              </div>
-              {d.tutanak_url && (
-                <a href={d.tutanak_url} target="_blank" rel="noreferrer"
-                  style={{ display:"inline-block", marginBottom:8, fontSize:12, color:"#2563eb", fontWeight:600 }}>📄 Tutanağı Gör</a>
-              )}
-              {aktif && (
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                  <button onClick={()=>{ setSahaCikisModal(d); setSahaSiteId(""); setSahaNot(""); }}
-                    style={{ padding:"6px 14px", background:"#dcfce7", color:"#15803d", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                    🏗 Sahaya Çıkış
-                  </button>
-                  <button onClick={()=>{ setIadeModal(d); setIadeNot(""); }}
-                    style={{ padding:"6px 14px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                    ↩ Depoya İade
-                  </button>
-                  {!d.tutanak_url && (
-                    <label style={{ padding:"6px 14px", background:"#f0f4ff", color:"#2563eb", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                      📎 Tutanak Yükle
-                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} onChange={async e=>{
-                        const file = e.target.files[0]; if(!file) return;
-                        const fd = new FormData(); fd.append("file", file);
-                        try {
-                          const up = await fetch(`${API_BASE2}/upload`, { method:"POST", headers:{ Authorization:`Bearer ${token}` }, body:fd });
-                          const ud = await up.json();
-                          if (ud.url) { await fetch(`${API_BASE2}/malzeme/dagitim/${d.id}/tutanak`, { method:"PUT", headers, body:JSON.stringify({ tutanak_url: ud.url }) }); load(); }
-                        } catch {}
-                      }} />
-                    </label>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Saha Çıkış Modal */}
-      {sahaCikisModal && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-          <div style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:440, padding:24 }}>
-            <h3 style={{ margin:"0 0 6px", fontSize:17, fontWeight:800, color:"#15803d" }}>🏗 Sahaya Çıkış</h3>
-            <p style={{ margin:"0 0 16px", fontSize:13, color:"#6b7280" }}><strong>{sahaCikisModal.malzeme_adi}</strong> — {sahaCikisModal.miktar} {sahaCikisModal.birim}</p>
-            <div style={{ display:"grid", gap:12 }}>
-              <div style={{ position:"relative" }}>
-                <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4 }}>Site ID <span style={{color:"#dc2626"}}>*</span></label>
-                <input value={sahaSiteId}
-                  onChange={e=>{ setSahaSiteId(e.target.value); searchSite2(e.target.value); setShowSiteDrop2(true); }}
-                  onBlur={()=>setTimeout(()=>setShowSiteDrop2(false),180)}
-                  placeholder="Site kodu yazın..."
-                  style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, boxSizing:"border-box" }} />
-                {showSiteDrop2 && siteCodeSuggestions2.length>0 && (
-                  <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:"1px solid #d1d5db", borderRadius:8, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:9999, maxHeight:180, overflowY:"auto" }}>
-                    {siteCodeSuggestions2.map(s=>(
-                      <div key={s.site_code} onMouseDown={()=>{ setSahaSiteId(s.site_code); setShowSiteDrop2(false); setSiteCodeSuggestions2([]); }}
-                        style={{ padding:"8px 12px", cursor:"pointer", fontSize:13, borderBottom:"1px solid #f3f4f6" }}
-                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
-                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <span style={{ fontWeight:600, color:"#1e3a5f" }}>{s.site_code}</span>
-                        {s.bolge && <span style={{ marginLeft:8, color:"#6b7280", fontSize:11 }}>{s.bolge}</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4 }}>Not</label>
-                <textarea value={sahaNot} onChange={e=>setSahaNot(e.target.value)} rows={2} placeholder="Kurulum notu..."
-                  style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, resize:"vertical", boxSizing:"border-box" }} />
-              </div>
-            </div>
-            <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:16 }}>
-              <button onClick={()=>setSahaCikisModal(null)} style={{ padding:"9px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700 }}>İptal</button>
-              <button onClick={handleSaha} disabled={saving} style={{ padding:"9px 20px", background:"#15803d", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700 }}>
-                {saving ? "..." : "✅ Sahaya Çık"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* İade Modal */}
-      {iadeModal && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-          <div style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:400, padding:24 }}>
-            <h3 style={{ margin:"0 0 6px", fontSize:17, fontWeight:800, color:"#92400e" }}>↩ Depoya İade</h3>
-            <p style={{ margin:"0 0 16px", fontSize:13, color:"#6b7280" }}><strong>{iadeModal.malzeme_adi}</strong> — {iadeModal.miktar} {iadeModal.birim} depoya geri eklenecek</p>
-            <div>
-              <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4 }}>İade Notu</label>
-              <textarea value={iadeNot} onChange={e=>setIadeNot(e.target.value)} rows={2} placeholder="İsteğe bağlı..."
-                style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, resize:"vertical", boxSizing:"border-box" }} />
-            </div>
-            <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:16 }}>
-              <button onClick={()=>setIadeModal(null)} style={{ padding:"9px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700 }}>İptal</button>
-              <button onClick={handleIade} disabled={saving} style={{ padding:"9px 20px", background:"#92400e", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700 }}>
-                {saving ? "..." : "↩ İade Et"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const _email = (currentUser?.email || "").toLowerCase();
   const isAdmin    = currentUser?.role === "admin";
   const isPM       = _email === "orhan.bedir@simsektel.com";
-  const isDirektor   = _email === "duzgun.simsek@simsektel.com";
-  const isNurcan     = _email === "nurcan.kus@simsektel.com";
-  const isMurat      = _email === "murat.istek@simsektel.com";
-  const isBolgeMudur = !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat &&
-    (["rollout_mudur","bolge_mudur"].includes((currentUser?.role||"").toLowerCase()) ||
-     ["serdar.altinova@simsektel.com"].includes(_email));
-  const canSeeDepo   = isAdmin || isPM || isDirektor || isNurcan || isMurat;
+  const isDirektor = _email === "duzgun.simsek@simsektel.com";
+  const isNurcan   = _email === "nurcan.kus@simsektel.com";
+  const isMurat    = _email === "murat.istek@simsektel.com";
+  const canSeeDepo = isAdmin || isPM || isDirektor || isNurcan || isMurat;
   const canEditFiyat = isAdmin || isPM;
 
-  const _isPersonelOnly = !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat && !isBolgeMudur;
-  const [tab, setTab] = useState(_isPersonelOnly ? "dagitim" : "talepler");
+  const [tab, setTab] = useState("talepler");
   const [talepler, setTalepler] = useState([]);
   const [talepLoading, setTalepLoading] = useState(false);
-  const [talepArama, setTalepArama] = useState("");
-  const [talepDurumFilter, setTalepDurumFilter] = useState("");
-  const [depoArama, setDepoArama] = useState("");
-  const [fiyatArama, setFiyatArama] = useState("");
 
   // Form görünümü: null=liste, "yeni"=yeni form, id=düzenleme
   const [formView, setFormView] = useState(null);
@@ -14851,137 +14073,65 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const [fiyatListe, setFiyatListe] = useState([]);
   const [fiyatForm, setFiyatForm] = useState({ malzeme_adi:"", birim:"Adet", birim_fiyat:"", kategori:"Genel" });
   const [fiyatEditId, setFiyatEditId] = useState(null);
-  // Yeni malzeme ekleme mini-modal (her satır için {rowIdx, adi, birim, birim_fiyat, kategori})
-  const [yeniMalzemePopup, setYeniMalzemePopup] = useState(null);
 
   // Personel listesi
   const [personelListe, setPersonelListe] = useState([]);
-
-  // Malzeme Dağıtım
-  const [dagitim, setDagitim] = useState([]);
-  const [dagitimOzet, setDagitimOzet] = useState([]);
-  const [dagitimModal, setDagitimModal] = useState(false);
-  const [dagitimForm, setDagitimForm] = useState({ malzeme_adi:"", miktar:1, birim:"Adet", alici_tipi:"PERSONEL", alici_personel_id:"", alici_personel_ad:"", alici_personel_email:"", alici_firma:"", site_id:"", bolge:"", notlar:"" });
-  const [sahaCikisModal, setSahaCikisModal] = useState(null);
-  const [sahaCikisForm, setSahaCikisForm] = useState({ saha_site_id:"", saha_kullanim_miktar:"", saha_notlar:"" });
-  const [iadeModal, setIadeModal] = useState(null);
-  const [iadeNot, setIadeNot] = useState("");
-  const [iadeMiktar, setIadeMiktar] = useState("");
-  const [bekleyenIadeler, setBekleyenIadeler] = useState([]);
-  const [dagitimArama, setDagitimArama] = useState("");
-  const [dagitimSiteDropdown, setDagitimSiteDropdown] = useState(false);
-  const [sahaSiteDropdown, setSahaSiteDropdown] = useState(false);
 
   const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
   const MALZEME_LISTESI = [
-    "10M LC-LC SM BREAKOUT OPTİK",
-    "20M LC-LC SM BREAKOUT OPTİK",
-    "30M LC-LC SM BREAKOUT OPTİK",
-    "40M LC-LC SM BREAKOUT OPTİK",
-    "50M LC-LC SM BREAKOUT OPTİK",
-    "60M LC-LC SM BREAKOUT OPTİK",
-    "70M LC-LC SM BREAKOUT OPTİK",
-    "80M LC-LC SM BREAKOUT OPTİK",
-    "90M LC-LC SM BREAKOUT OPTİK",
-    "100M LC-LC SM BREAKOUT OPTİK",
-    "110M LC-LC SM BREAKOUT OPTİK",
-    "120M LC-LC SM BREAKOUT OPTİK",
-    "130M LC-LC SM BREAKOUT OPTİK",
-    "140M LC-LC SM BREAKOUT OPTİK",
-    "150M LC-LC SM BREAKOUT OPTİK",
-    "10M LC-LC MM BREAKOUT OPTİK",
-    "20M LC-LC MM BREAKOUT OPTİK",
-    "30M LC-LC MM BREAKOUT OPTİK",
-    "40M LC-LC MM BREAKOUT OPTİK",
-    "50M LC-LC MM BREAKOUT OPTİK",
-    "60M LC-LC MM BREAKOUT OPTİK",
-    "70M LC-LC MM BREAKOUT OPTİK",
-    "80M LC-LC MM BREAKOUT OPTİK",
-    "90M LC-LC MM BREAKOUT OPTİK",
-    "100M LC-LC MM BREAKOUT OPTİK",
-    "110M LC-LC MM BREAKOUT OPTİK",
-    "120M LC-LC MM BREAKOUT OPTİK",
-    "130M LC-LC MM BREAKOUT OPTİK",
-    "140M LC-LC MM BREAKOUT OPTİK",
-    "150M LC-LC MM BREAKOUT OPTİK",
-    "1MT LC-LC PATCH SM CORT OPTİK",
-    "3MT LC-LC PATCH SM CORT OPTİK",
-    "5MT LC-LC PATCH SM CORT OPTİK",
-    "10MT LC-LC PATCH SM CORT OPTİK",
-    "20MT LC-LC PATCH SM CORT OPTİK",
-    "1MT SC-LC PATCH SM CORT OPTİK",
-    "3MT SC-LC PATCH SM CORT OPTİK",
-    "5MT SC-LC PATCH SM CORT OPTİK",
-    "10MT SC-LC PATCH SM CORT OPTİK",
-    "20MT SC-LC PATCH SM CORT OPTİK",
-    "1MT SC-SC PATCH SM CORT OPTİK",
-    "3MT SC-SC PATCH SM CORT OPTİK",
-    "5MT SC-SC PATCH SM CORT OPTİK",
-    "10MT SC-SC PATCH SM CORT OPTİK",
-    "20MT SC-SC PATCH SM CORT OPTİK",
-    "1MT LC-LC PATCH MM CORT OPTİK",
-    "3MT LC-LC PATCH MM CORT OPTİK",
-    "5MT LC-LC PATCH MM CORT OPTİK",
-    "10MT LC-LC PATCH MM CORT OPTİK",
-    "20MT LC-LC PATCH MM CORT OPTİK",
-    "1MT SC-LC PATCH MM CORT OPTİK",
-    "3MT SC-LC PATCH MM CORT OPTİK",
-    "5MT SC-LC PATCH MM CORT OPTİK",
-    "10MT SC-LC PATCH MM CORT OPTİK",
-    "20MT SC-LC PATCH MM CORT OPTİK",
-    "1MT SC-SC PATCH MM CORT OPTİK",
-    "3MT SC-SC PATCH MM CORT OPTİK",
-    "5MT SC-SC PATCH MM CORT OPTİK",
-    "10MT SC-SC PATCH MM CORT OPTİK",
-    "20MT SC-SC PATCH MM CORT OPTİK",
-    "2MT KALIN-KALIN JUMPER",
-    "3MT KALIN-KALIN JUMPER",
-    "4MT KALIN-KALIN JUMPER",
-    "6MT KALIN-KALIN JUMPER",
-    "8MT KALIN-KALIN JUMPER",
-    "10MT KALIN-KALIN JUMPER",
-    "2MT KALIN-İNCE JUMPER",
-    "3MT KALIN-İNCE JUMPER",
-    "4MT KALIN-İNCE JUMPER",
-    "6MT KALIN-İNCE JUMPER",
-    "8MT KALIN-İNCE JUMPER",
-    "10MT KALIN-İNCE JUMPER",
-    "2MT İNCE-İNCE JUMPER",
-    "3MT İNCE-İNCE JUMPER",
-    "4MT İNCE-İNCE JUMPER",
-    "6MT İNCE-İNCE JUMPER",
-    "8MT İNCE-İNCE JUMPER",
-    "10MT İNCE-İNCE JUMPER",
-    "2x6 DC  TTR ENERJİ KABLOSU ( H05VV-F )",
-    "2x10 DC  TTR ENERJİ KABLOSU ( H05VV-F )",
-    "2x16 DC  TTR ENERJİ KABLOSU ( H05VV-F )",
-    "2x25 DC  TTR ENERJİ KABLOSU ( H05VV-F )",
-    "2x6 DC  TTR ENERJİ KABLOSU ( H07RN-F )",
-    "2x10 DC  TTR ENERJİ KABLOSU ( H07RN-F )",
-    "2x16 DC  TTR ENERJİ KABLOSU ( H07RN-F )",
-    "2x25 DC  TTR ENERJİ KABLOSU ( H07RN-F )",
-    "16mm SİYAH NYAF TOPRAK KABLOSU ( BAKIR )",
-    "16mm MAVİ NYAF TOPRAK KABLOSU ( BAKIR )",
-    "16mm KIRMIZI NYAF TOPRAK KABLOSU ( BAKIR )",
-    "16mm SARI-YEŞİL NYAF TOPRAK KABLOSU ( BAKIR )",
-    "25mm SİYAH NYAF TOPRAK KABLOSU ( BAKIR )",
-    "25mm MAVİ NYAF TOPRAK KABLOSU ( BAKIR )",
-    "25mm KIRMIZI NYAF TOPRAK KABLOSU ( BAKIR )",
-    "25mm SARI-YEŞİL NYAF TOPRAK KABLOSU ( BAKIR )",
-    "25mm SİYAH NYAF TOPRAK KABLOSU ( BAKIR )",
-    "25mm MAVİ NYAF TOPRAK KABLOSU ( BAKIR )",
-    "25mm KIRMIZI NYAF TOPRAK KABLOSU ( BAKIR )",
-    "25mm SARI-YEŞİL NYAF TOPRAK KABLOSU ( BAKIR )",
-    "35mm SİYAH NYAF TOPRAK KABLOSU ( BAKIR )",
-    "35mm MAVİ NYAF TOPRAK KABLOSU ( BAKIR )",
-    "35mm KIRMIZI NYAF TOPRAK KABLOSU ( BAKIR )",
-    "35mm SARI-YEŞİL NYAF TOPRAK KABLOSU ( BAKIR )",
-    "35mm SİYAH NYAF TOPRAK KABLOSU ( ALÜMİNYUM )",
-    "35mm SARI-YEŞİL NYAF TOPRAK KABLOSU ( ALÜMİNYUM )",
-    "50mm SİYAH NYAF TOPRAK KABLOSU ( BAKIR )",
-    "50mm SİYAH NYAF TOPRAK KABLOSU ( ALÜMİNYUM )",
+    "10M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "20M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "30M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "40M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "50M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "60M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "70M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "80M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "90M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "100M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "110M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "120M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "130M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "140M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "150M LC-LC SİNGLE MOD OUTDOOR OPTİK ( SİYAH )( HUAWEİ TİPİ )",
+    "3M LC-LC PATCH CORT OPTİK ( SİNGLE MOD ) ( SARI )",
+    "5M LC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "10M LC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "3M SC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "5M SC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "10M SC-LC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "3M SC-SC PATCH CORT OPTİK( SİNGLE MOD )( SARI )",
+    "5M SC-SC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "10M SC-SC PATCH CORT OPTİK ( SİNGLE MOD )( SARI )",
+    "3M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "4M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "5M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "6M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "8M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "10M 7-16 / 7-16 ( KALIN-KALIN ) JUMPER",
+    "3M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "4M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "5M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "6M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "8M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "10M 4,3-10 / 7-16 ( KALIN-İNCE ) JUMPER",
+    "3M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "4M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "5M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "6M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "8M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "10M 4,3-10 / 4,3-10 ( İNCE-İNCE ) JUMPER",
+    "2x6 DC TTR ENERJİ KABLOSU ( HUAWEİ TİPİ ) ( SİYAH-YUMUŞAK )",
+    "2x10 DC TTR ENERJİ KABLOSU ( HUAWEİ TİPİ )( SİYAH-YUMUŞAK )",
+    "2x16 DC TTR ENERJİ KABLOSU ( HUAWEİ TİPİ )( SİYAH-YUMUŞAK )",
+    "2x25 DC TTR ENERJİ KABLOSU ( HUAWEİ TİPİ )( SİYAH-YUMUŞAK )",
+    "1X50 DC ENERJİ KABLOSU ( ERICSSON TİPİ ) ( SİYAH )( H07RN-F )",
+    "1X35mm NYAF TOPRAK KABLOSU ( BAKIR )",
+    "1X50mm NYAF TOPRAK KABLOSU ( BAKIR )",
+    "1X16MM NYAF MAVİ TOPRAK KABLOSU ( BAKIR )",
+    "1X16MM NYAF SİYAH TOPRAK KABLOSU ( BAKIR )",
     "MKS-03",
     "16mm TOPRAKLAMA PABUCU",
     "25mm TOPRAKLAMA PABUCU",
@@ -14990,22 +14140,16 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     "AVEA TİPİ YUMA ASMA KİLİT",
     "AVEA TİPİ YUMA BAREL",
     "2x1,5 TTR KABLO",
-    "2x2,5 TTR KABLO",
     "3x1,5 TTR KABLO",
     "3x2,5 TTR KABLO",
     "4x1,5 TTR KABLO",
     "4x2,5 TTR KABLO",
     "CAT6 KABLO",
-    "3MT HAZIR ÇAKILI CAT6 KABLO",
-    "5MT HAZIR ÇAKILI CAT6 KABLO",
+    "3M HAZIR ÇAKILI CAT6 KABLO",
+    "5M HAZIR ÇAKILI CAT6 KABLO",
     "4x6 NYY KABLO",
     "4x10 NYY KABLO",
     "4x16 NYY KABLO",
-    "4x25 NYY KABLO",
-    "4x6 YER ALTI ÇELİK ZIRHLI KABLO",
-    "4x10 YER ALTI ÇELİK ZIRHLI KABLO",
-    "4x16 YER ALTI ÇELİK ZIRHLI KABLO",
-    "4x25 YER ALTI ÇELİK ZIRHLI KABLO",
     "4 LÜK YÜKSÜK",
     "6 LIK YÜKSÜK",
     "10 LUK YÜKSÜK",
@@ -15013,25 +14157,14 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     "25 LİK YÜKSÜK",
     "35 LİK YÜKSÜK",
     "50 LİK YÜKSÜK",
-    "TT 2G 900 ETİKET",
-    "TT 2G 1800 ETİKET",
-    "TT 3G 900 ETİKET",
-    "TT 3G 2100 ETİKET",
-    "TT 4G 800 ETİKET",
-    "TT 4G 1800 ETİKET",
-    "TT 4G 2100 ETİKET",
-    "TT 4G 2600 ETİKET",
-    "TT 5G 700 ETİKET",
-    "TT 5G 3500 ETİKET",
-    "VDF 800 ETİKET",
-    "VDF 900 ETİKET",
-    "VDF 1800 ETİKET",
-    "VDF 2100 ETİKET",
-    "VDF 2600 ETİKET",
+    "AVEA TİPİ 2G 900 MARKİNG",
+    "AVEA TİPİ 2G 1800 MARKİNG",
+    "AVEA TİPİ 3G 900 MARKİNG",
+    "AVEA TİPİ 3G 2100 MARKİNG",
+    "AVEA TİPİ LTE 800 MARKİNG",
+    "AVEA TİPİ LTE 1800 MARKİNG",
+    "AVEA TİPİ LTE 2600 MARKİNG",
     "ROXTEK ( 16/18 ) ( 34 LÜK KİT )",
-    "BÜYÜK RF ROXTEC MODÜL",
-    "KÜÇÜK RF ROXTEC MODÜL",
-    "3 LÜ OPTİK ROXTEC MODÜL",
     "1/2 NORMAL FEEDERE GÖRE DÜZ 7,16 ( KALIN ) DİŞİ KONNEKTÖR",
     "1/2 NORMAL FEEDERE GÖRE DÜZ 7,16 ( KALIN ) ERKEK KONNEKTÖR",
     "1/2 FLEXİ FEEDERE GÖRE DÜZ 7,16 ( KALIN ) DİŞİ KONNEKTÖR",
@@ -15042,41 +14175,29 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     "1/2 FLEXİ FEEDERE GÖRE DÜZ 4,3-10 ( İNCE ) ERKEK KONNEKTÖR",
     "1/2 NORMAL FEEDERE GÖRE DÜZ N TYPE DİŞİ KONNEKTÖR",
     "1/2 NORMAL FEEDERE GÖRE DÜZ N TYPE ERKEK KONNEKTÖR",
-    "1/2 NORMAL FEEDERE GÖRE L N TYPE DİŞİ KONNEKTÖR",
-    "1/2 NORMAL FEEDERE GÖRE L N TYPE ERKEK KONNEKTÖR",
     "1/2 FLEXİ FEEDERE GÖRE DÜZ N TYPE DİŞİ KONNEKTÖR",
     "1/2 FLEXİ FEEDERE GÖRE DÜZ N TYPE ERKEK KONNEKTÖR",
-    "1/2 FLEXİ FEEDERE GÖRE L N TYPE DİŞİ KONNEKTÖR",
-    "1/2 FLEXİ FEEDERE GÖRE L N TYPE ERKEK KONNEKTÖR",
     "DIŞ RACK ( TAKIM )",
     "İÇ RACK ( TAKIM )",
     "COLD SHİRİNG",
     "7/8 FEEDER KABLO",
     "1/2 FEEDER KABLO",
-    "1MT 2,5'' GALVANİZ BORU",
-    "2MT 2,5'' GALVANİZ BORU",
-    "2,5MT 2,5'' GALVANİZ BORU",
-    "3MT 2,5'' GALVANİZ BORU",
-    "1MT 2,5'' GALVANİZ BORU",
-    "2MT 2,5'' GALVANİZ BORU",
-    "2,5MT 2,5'' GALVANİZ BORU",
-    "3MT 2,5'' GALVANİZ BORU",
-    "10 LUK AÇMA OFSET ( 2,5''- 2,5'' )",
-    "20 LUK AÇMA OFSET ( 2,5''- 2,5'' )",
-    "30 LUK AÇMA OFSET ( 2,5''- 2,5'' )",
-    "40 LUK AÇMA OFSET ( 2,5''- 2,5'' )",
-    "50 LUK AÇMA OFSET ( 2,5''- 2,5'' )",
-    "10 LUK AÇMA OFSET ( 2,5''- 4'' )",
-    "20 LUK AÇMA OFSET ( 2,5''- 4'' )",
-    "30 LUK AÇMA OFSET ( 2,5''- 4'' )",
-    "40 LUK AÇMA OFSET ( 2,5''- 4'' )",
-    "50 LUK AÇMA OFSET ( 2,5''- 4'' )",
-    "KULE OFSET",
-    "3 KOLLU YILDUZ OFSET",
-    "4 KOLLU YILDIZ OFSET",
+    "10 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "20 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "30 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "40 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "50 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 2 TARAFI DA 2,5 İNÇ BORUYA GÖRE )",
+    "10 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "20 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "30 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "40 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "50 CM LİK BORUDAN BORUYA AÇMA OFSET ( TAKIM )( 1 TARAFI 2,5 İNÇ BORU- DİĞER TARAFI 4 İNÇ BORUYA GÖRE )",
+    "KULE ANTEN ASMA APARATI ( KULE OFSET )( TAKIM )",
+    "ÇİÇEK ( YILDIZ OFSET ) ( 2,5 İNÇ BORUYA GÖRE )( TAKIM )",
+    "ÇİÇEK ( YILDIZ OFSET ) ( 4 İNÇ BORUYA GÖRE )(TAKIM )",
     "PANEL ANTEN",
     "OMNİ ANTEN",
-    "12 CORE  İNDOOR ODF",
+    "12 CORE İNDOOR ODF",
     "24 CORE İNDOOR ODF",
     "36 CORE İNDOOR ODF",
     "48 CORE İNDOOR ODF",
@@ -15084,33 +14205,23 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     "24 CORE OUTDOOR ODF",
     "36 CORE OUTDOOR ODF",
     "48 CORE OUTDOOR ODF",
-    "12 CORE SM FİBER KABLO",
-    "24 CORE SM FİBER KABLO",
-    "36 CORE SM FİBER KABLO",
-    "48 CORE SM FİBER KABLO",
-    "12 CORE MM FİBER KABLO",
-    "24 CORE MM FİBER KABLO",
-    "36 CORE MM FİBER KABLO",
-    "48 CORE MM FİBER KABLO",
-    "2X6-2X10 DC-FO CLAMP",
-    "2X16-2X25 DC-FO CLAMP",
+    "12 CORE FİBER KABLO",
+    "24 CORE FİBER KABLO",
+    "36 CORE FİBER KABLO",
+    "48 CORE FİBER KABLO",
+    "2X6-2X10 DC CLAMP ( HUAWEİ TİPİ )",
+    "2X16-2X25 DC CLAMP ( HUAWEİ TİPİ )",
     "PLASTİK KABLO BAĞI ( KALIN )",
     "PLASTİK KABLO BAĞI ( İNCE )",
     "PLASTİK KABLO BAĞI ( KISA-KIL )",
-    "DYMO KUTUCUK",
-    "DYMO KARTUŞ",
-    "SİYAH MASTİK",
-    "BEYAZ MASTİK",
+    "DYMO KUTUCUK ( PVC )",
+    "DYMO KARTUŞ ( SARI )",
     "SİYAH SİLİKON",
     "BEYAZ SİLİKON",
     "SİYAH İZOLELİ BANT",
-    "RENKLİ İZOLELİ BANT",
-    "3MT RRU-RCU RET KABLOSU",
-    "5MT RRU-RCU RET KABLOSU",
-    "3MT RCU-RCU RET KABLOSU",
-    "5MT RCU-RCU RET KABLOSU",
-    "KREM SAYAÇ PANOSU",
-    "YEŞİL SAYAÇ PANOSU",
+    "5M ERİCSSON RET KABLOSU",
+    "5M HUAWEİ RET KABLOSU",
+    "SAYAÇ PANOSU",
     "UÇAK İKAZ",
     "SİYAH SPREY BOYA",
     "BEYAZ SPREY BOYA",
@@ -15155,49 +14266,103 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     "63A BIÇAKLI SİGORTA ( BOY 0 )",
     "100A BIÇAKLI SİGORTA ( BOY 0 )",
     "125A BIÇAKLI SİGORTA ( BOY 0 )",
-    "16MM ÇELİK SPRAL",
-    "18MM ÇELİK SPRAL",
-    "20MM ÇELİK SPRAL",
-    "26MM ÇELİK SPRAL",
-    "16MM PLASTİK SPRAL",
-    "18MM PLASTİK SPRAL",
-    "20MM PLASTİK SPRAL",
-    "26MM PLASTİK SPRAL",
-    "İSG LEVHALARI ( PVC )",
-    "İSG LEVHALARI ( SAC )",
-    "50X40 ÇELİK TAVA",
-    "100X60 ÇELİK TAVA",
-    "40X40 PLASTİK KANALET",
-    "100X60 PLASTİK KANALET",
-    "İÇ BARA",
-    "DIŞ BARA",
-    "KİMYASAL",
-    "MAKARA İZOLATÖR",
-    "AL-AL KLEMENS",
-    "AL-CU KLEMENS",
-    "TRAVERS",
-    "TOPRAKLAMA KAZIĞI ( 1MT )",
-    "ÖLÜM TEHLİKE LEVHASI",
-    "Q13 MAKARON",
-    "Q18 MAKARON",
-    "8 LİK ROKET DÜBEL",
-    "8 LİK VİDA",
-    "M8 PUL",
-    "M8 SOMUN",
-    "M10 PUL",
-    "M10 SOMUN",
-    "M12 PUL",
-    "M12 SOMUN",
-    "M16 PUL",
-    "M16 SOMUN",
-    "M8 TİJ ( 1MT )",
-    "M12 TİJ ( 1MT )",
-    "M16 TİJ ( 1 MT )"
+    "NYY 3x4mm2 ENERJİ KABLOSU",
+    "NYY 3x6mm2 ENERJİ KABLOSU",
+    "NYY 3x10mm2 ENERJİ KABLOSU",
+    "NYY 3x16mm2 ENERJİ KABLOSU",
+    "NYY 3x35mm2 ENERJİ KABLOSU",
+    "NYY 1x50mm2 ENERJİ KABLOSU",
+    "NYY 1x95mm2 ENERJİ KABLOSU",
+    "NYAF 1x50mm2 ESNEK TOPRAKLAMA İLETKENİ",
+    "NYAF 1x16mm2 ESNEK TOPRAKLAMA İLETKENİ",
+    "NYAF 1x6mm2 ESNEK TOPRAKLAMA İLETKENİ",
+    "NH-FE 180 3x2.5mm2 YANMAZ ENERJİ KABLOSU",
+    "DC 48V GÜÇ KABLOSU 2x35mm2",
+    "BAKIR ÖRGÜLÜ TOPRAKLAMA İLETKENİ 35mm2",
+    "HDPE Ø50/42mm TEK KATLI KABLO KORUMA BORUSU",
+    "HDPE Ø63/53mm TEK KATLI KABLO KORUMA BORUSU",
+    "HDPE Ø110/94mm ÇİFT KATLI KABLO KORUMA BORUSU",
+    "HDPE Ø160/136mm ÇİFT KATLI KABLO KORUMA BORUSU",
+    "HDPE Ø40/34mm MİKROKANAL BORUSU",
+    "PVC BORU Ø32mm ELEKTRİK TESİSAT BORUSU",
+    "PVC BORU Ø50mm ELEKTRİK TESİSAT BORUSU",
+    "PVC BORU Ø75mm ELEKTRİK TESİSAT BORUSU",
+    "GALVANİZLİ ÇELİK BORU 2'",
+    "CORRUGATED BORU Ø32mm ESNEKLİK BORUSU",
+    "3m STANDART ANTEN OFSETİ (GALVANİZLİ ÇELİK)",
+    "6m STANDART ANTEN OFSETİ (GALVANİZLİ ÇELİK)",
+    "1.5m KISA ANTEN OFSETİ (HOT DIP GALVANİZLİ)",
+    "DUVAR TİPİ ANTEN MONTAJ KOL SETİ",
+    "SEKTÖR ANTEN MONTAJ FLANŞI VE BAĞLANTI KİTİ",
+    "ANTEN TAVAN MONTAJ KİTİ (3 NOKTA SABITLEME)",
+    "U-BOLT M16 GALVANİZLİ KULE BAĞLANTI CİVATASI (4'LÜ SET)",
+    "48 FİBER OPTİK KABLO G.652D LOOSE TUBE OUTDOOR",
+    "96 FİBER OPTİK KABLO G.652D LOOSE TUBE OUTDOOR",
+    "24 FİBER OPTİK KABLO G.652D LOOSE TUBE OUTDOOR",
+    "12 FİBER OPTİK KABLO G.657A2 INDOOR/OUTDOOR",
+    "4 FİBER OPTİK KABLO G.652D FİGÜR-8 HAVAI",
+    "2M LC-LC SİNGLE MOD PATCH CORD (INDOOR)",
+    "2M SC-LC SİNGLE MOD PATCH CORD (INDOOR)",
+    "2M SC-SC SİNGLE MOD PATCH CORD (INDOOR)",
+    "LC/UPC PİGTAİL 1.5M SİNGLE MOD G.652D",
+    "SC/UPC PİGTAİL 1.5M SİNGLE MOD G.652D",
+    "SC/APC PİGTAİL 1.5M SİNGLE MOD G.652D",
+    "12 FİBER SC/UPC FANOUT SİNGLE MOD",
+    "24 FİBER SC/UPC FANOUT SİNGLE MOD",
+    "12 PORT LC DUPLEX FIBER OPTİK PATCH PANEL 19'",
+    "24 PORT SC SIMPLEX FIBER OPTİK PATCH PANEL 19'",
+    "48 PORT LC DUPLEX FIBER OPTİK PATCH PANEL 19'",
+    "FIBER OPTİK SPLICE CLOSURE 48 FİBER 4 PORT",
+    "FIBER OPTİK SPLICE CLOSURE 144 FİBER 6 PORT",
+    "FIBER OPTİK SPLICE CLOSURE 288 FİBER 6 PORT",
+    "FIBER OPTİK SONLANDIRMA KUTUSU 12 PORT SC",
+    "FIBER OPTİK SONLANDIRMA KUTUSU 24 PORT SC",
+    "ODF 19'",
+    "FIBER OPTİK SPLICE TRAY (12 FİBER KAPASİTELİ)",
+    "SC/LC ADAPTÖR SİNGLE MOD UPC",
+    "SC/LC ADAPTÖR SİNGLE MOD APC",
+    "BAKIR TOPRAKLAMA ÇUBUĞU 14mm x 1500mm",
+    "BAKIR TOPRAKLAMA ÇUBUĞU 14mm x 2000mm",
+    "BAKIR ŞERİT 30x3mm2 TOPRAKLAMA İLETKENİ",
+    "BAKIR ŞERİT 25x3mm2 TOPRAKLAMA İLETKENİ",
+    "TOPRAKLAMA RAYIÇ KLEMENSİ BUS BAR 100A",
+    "TOPRAKLAMA RAYIÇ KLEMENSİ BUS BAR 200A",
+    "TOPRAKLAMA PABUCİ CU 50mm2 M8",
+    "TOPRAKLAMA PABUCİ CU 95mm2 M10",
+    "GALVANİZLİ TOPRAKLAMA BAĞLANTISI KELEPÇE SETİ",
+    "RF KOAKSIYEL FEEDER KABLO 1/2'",
+    "RF KOAKSIYEL FEEDER KABLO 7/8'",
+    "RF JUMPER KABLO 0.5M N(M)-N(M) SÜPER ESNEK",
+    "RF JUMPER KABLO 1M N(M)-N(M) SÜPER ESNEK",
+    "RF JUMPER KABLO 2M N(M)-N(M) SÜPER ESNEK",
+    "N TİPİ KONNEKTÖR 1/2'",
+    "N TİPİ KONNEKTÖR 7/8'",
+    "7/16 DIN KONNEKTÖR 7/8'",
+    "RF TOPRAKLAMA KİTİ 1/2'",
+    "RF TOPRAKLAMA KİTİ 7/8'",
+    "GALVANİZLİ KABLO KANALÜ 100x50mm (3m PARÇA)",
+    "GALVANİZLİ KABLO KANALÜ 200x100mm (3m PARÇA)",
+    "PVC KABLO KANALÜ 25x16mm (2m PARÇA)",
+    "PVC KABLO KANALÜ 40x25mm (2m PARÇA)",
+    "KABLO ASKISI GALVANİZLİ 50mm",
+    "KABLO ASKISI GALVANİZLİ 75mm",
+    "ÇELİK KABLO BAĞI TIE WRAP 250mm 100 ADET",
+    "PVC SPIRAL KABLO KORUYUCU Ø20mm",
+    "KABLO MERDİVENİ LADDER RACK 300mm",
+    "KABLO MERDİVENİ LADDER RACK 600mm",
+    "J-HOOK KABLO ASKI KANCASI Ø75mm",
+    "OUTDOOR METAL KABIN IP55 600x800x300mm",
+    "OUTDOOR METAL KABIN IP55 1000x800x300mm",
+    "19'",
+    "HAVALANDIRMA FAN KİTİ KABIN 230VAC",
+    "SPD AŞIRI GERİLİM KORUYUCU TİP 2 40kA",
+    "AC KABLO 3x2.5mm2 TESİSAT KABLOSU",
+    "ALÇAK GERİLİM KABİN ANAHTARLAMA PANELI"
   ];
 
   const BOLGELER = ["İzmir","İstanbul","Ankara","Bursa","Antalya","Adana","Samsun","Trabzon","Erzurum","Diyarbakır","Diğer"];
   const PROJELER = ["TT","TC","VF","Diğer"];
-  const SITE_TYPES = ["5G","LTE","DSS","STANDALONE","Diğer"];
+  const SITE_TYPES = ["GF","RT","IB","OUT","Diğer"];
   const FIRMALAR = ["Şimşek","UBS","FEDERAL","2KX","Diğer"];
 
   // ── LOAD ──
@@ -15252,98 +14417,9 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const loadSarf = async (malzeme_adi) => {
     try { const r = await fetch(`${API_BASE}/malzeme/sarf?malzeme_adi=${encodeURIComponent(malzeme_adi)}`, { headers }); setSarfListe(await r.json()); } catch {}
   };
-  const loadDagitim = async () => {
-    try {
-      const [r1, r2] = await Promise.all([
-        fetch(`${API_BASE}/malzeme/dagitim`, { headers }),
-        fetch(`${API_BASE}/malzeme/dagitim/ozet`, { headers }),
-      ]);
-      const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
-      setDagitim(Array.isArray(d1) ? d1 : []);
-      setDagitimOzet(Array.isArray(d2) ? d2 : []);
-    } catch {}
-  };
-  const loadDagitimPersonel = async () => {
-    if (!currentUser?.email) return;
-    try {
-      const r = await fetch(`${API_BASE}/malzeme/dagitim?personel_email=${encodeURIComponent(currentUser.email)}`, { headers });
-      const d = await r.json();
-      setDagitim(Array.isArray(d) ? d : []);
-    } catch {}
-  };
-  const handleDagitimCikis = async () => {
-    if (!dagitimForm.malzeme_adi || !dagitimForm.miktar) { alert("Malzeme ve miktar zorunlu"); return; }
-    if (dagitimForm.alici_tipi==="PERSONEL" && !dagitimForm.alici_personel_ad) { alert("Personel seçin"); return; }
-    if (dagitimForm.alici_tipi==="TASERON" && !dagitimForm.alici_firma) { alert("Firma adı girin"); return; }
-    setSaving(true);
-    try {
-      const r = await fetch(`${API_BASE}/malzeme/dagitim`, { method:"POST", headers, body: JSON.stringify(dagitimForm) });
-      const d = await r.json();
-      if (d.error) { alert(d.error); return; }
-      setDagitimModal(false);
-      setDagitimForm({ malzeme_adi:"", miktar:1, birim:"Adet", alici_tipi:"PERSONEL", alici_personel_id:"", alici_personel_ad:"", alici_personel_email:"", alici_firma:"", site_id:"", bolge:"", notlar:"" });
-      loadDagitim(); loadDepoStok();
-    } catch (e) { alert(e.message); }
-    setSaving(false);
-  };
-  const handleSahaCikis = async () => {
-    if (!sahaCikisForm.saha_site_id) { alert("Site ID girin"); return; }
-    const kullanim = Number(sahaCikisForm.saha_kullanim_miktar);
-    if (!kullanim || kullanim <= 0) { alert("Kullanılan miktarı girin"); return; }
-    if (kullanim > sahaCikisModal.miktar) { alert(`Miktar ${sahaCikisModal.miktar} ${sahaCikisModal.birim}'den fazla olamaz`); return; }
-    setSaving(true);
-    try {
-      const r = await fetch(`${API_BASE}/malzeme/dagitim/${sahaCikisModal.id}/saha-cikis`, { method:"PUT", headers, body: JSON.stringify(sahaCikisForm) });
-      const d = await r.json();
-      if (d.error) { alert(d.error); setSaving(false); return; }
-      setSahaCikisModal(null); setSahaCikisForm({ saha_site_id:"", saha_kullanim_miktar:"", saha_notlar:"" });
-      canSeeDepo ? loadDagitim() : loadDagitimPersonel();
-      loadDepoStok();
-    } catch (e) { alert(e.message); }
-    setSaving(false);
-  };
-  const handleIade = async () => {
-    const miktar = Number(iadeMiktar);
-    if (!miktar || miktar <= 0) { alert("İade miktarı girin"); return; }
-    if (miktar > iadeModal.miktar) { alert(`İade miktarı ${iadeModal.miktar} ${iadeModal.birim}'den fazla olamaz`); return; }
-    setSaving(true);
-    try {
-      const r = await fetch(`${API_BASE}/malzeme/dagitim/${iadeModal.id}/iade`, { method:"PUT", headers, body: JSON.stringify({ notlar: iadeNot, iade_miktar: miktar }) });
-      const d = await r.json();
-      if (d.error) { alert(d.error); setSaving(false); return; }
-      setIadeModal(null); setIadeNot(""); setIadeMiktar("");
-      canSeeDepo ? loadDagitim() : loadDagitimPersonel();
-    } catch (e) { alert(e.message); }
-    setSaving(false);
-  };
-  const handleIadeOnayla = async (id) => {
-    setSaving(true);
-    try {
-      const r = await fetch(`${API_BASE}/malzeme/dagitim/${id}/iade-onayla`, { method:"PUT", headers });
-      const d = await r.json();
-      if (d.error) { alert(d.error); setSaving(false); return; }
-      loadDagitim(); loadDepoStok();
-    } catch (e) { alert(e.message); }
-    setSaving(false);
-  };
-  const handleIadeReddet = async (id) => {
-    const not = window.prompt("Red nedeni (isteğe bağlı):");
-    if (not === null) return; // iptal
-    setSaving(true);
-    try {
-      const r = await fetch(`${API_BASE}/malzeme/dagitim/${id}/iade-reddet`, { method:"PUT", headers, body: JSON.stringify({ notlar: not }) });
-      const d = await r.json();
-      if (d.error) { alert(d.error); setSaving(false); return; }
-      loadDagitim();
-    } catch (e) { alert(e.message); }
-    setSaving(false);
-  };
 
   useEffect(() => { loadTalepler(); loadFiyatListe(); loadPersonel(); }, []);
-  useEffect(() => {
-    if (tab === "depo") loadDepoStok();
-    if (tab === "dagitim") { canSeeDepo ? loadDagitim() : loadDagitimPersonel(); }
-  }, [tab]);
+  useEffect(() => { if (tab === "depo") loadDepoStok(); }, [tab]);
 
   // ── TALEP KAYDET ──
   const saveTalep = async (durum) => {
@@ -15412,322 +14488,56 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   // ── EXCEL EXPORT ──
   const excelIndir = (t, kalemler) => {
     const durumLabel = {
-      TASLAK:"Taslak", NURCAN_ONAY:"Nurcan Onayı Bekliyor", ROLLOUT_BEKLE:"Rollout Müdürü Onayı Bekleniyor", FIYAT_GIRISI:"Fiyat Girişi (Murat)",
+      TASLAK:"Taslak", NURCAN_ONAY:"Nurcan Onayı Bekliyor", FIYAT_GIRISI:"Fiyat Girişi (Murat)",
       PM_ONAY:"PM Onayı (Orhan Bedir)", DUZGUN_ONAY:"Düzgün Onayı Bekliyor",
       ONAYLANDI:"Onaylandı", SATINALINACAK:"Satın Alınacak", DEPODA:"Depoda", REDDEDILDI:"Reddedildi"
     };
     const tarihFmt = (d) => {
       if (!d) return "";
       const dt = new Date(d);
-      if (isNaN(dt)) return String(d).split("T")[0];
+      if (isNaN(dt)) return d;
       return `${String(dt.getDate()).padStart(2,"0")}.${String(dt.getMonth()+1).padStart(2,"0")}.${dt.getFullYear()}`;
     };
     const toplam = kalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0);
-
-    // ── Stil sabitleri ──────────────────────────────────────────────
-    const NAV   = "1e3a5f"; // koyu lacivert
-    const GOLD  = "f59e0b"; // altın sarısı başlık
-    const LBLU  = "dbeafe"; // açık mavi (etiket bg)
-    const FBLK  = "1f2937"; // yazı rengi
-    const GRN   = "15803d"; // yeşil (toplam)
-    const GRLT  = "dcfce7"; // açık yeşil bg
-    const GRAY  = "f3f4f6"; // açık gri satır
-    const border = (color="d1d5db") => ({
-      top:{style:"thin",color:{rgb:color}}, bottom:{style:"thin",color:{rgb:color}},
-      left:{style:"thin",color:{rgb:color}}, right:{style:"thin",color:{rgb:color}}
-    });
-    const cell = (v, opts={}) => ({
-      v, t: typeof v==="number" ? "n" : "s",
-      s: {
-        font:   { name:"Calibri", sz:opts.sz||11, bold:!!opts.bold, color:{rgb:opts.color||FBLK}, italic:!!opts.italic },
-        fill:   opts.bg ? { patternType:"solid", fgColor:{rgb:opts.bg} } : { patternType:"none" },
-        alignment: { horizontal:opts.align||"left", vertical:"center", wrapText:!!opts.wrap },
-        border: border(opts.borderColor||"d1d5db"),
-      }
-    });
-    const empty = () => ({ v:"", t:"s", s:{ border:border("f3f4f6") } });
-
-    // Cols: A(sıra/etiket) B(malzeme-geniş) C(miktar) D(birim) E(birim fiyat) F(toplam) G(not)
-    const COL_W = [{ wch:6 },{ wch:52 },{ wch:10 },{ wch:10 },{ wch:15 },{ wch:15 },{ wch:28 }];
-
-    // ── Satır üreticileri ───────────────────────────────────────────
-    const R = (...cells) => cells;
-
-    // R1: Ana başlık (A:G birleşik)
-    const r1 = R(
-      cell("ERC MÜHENDİSLİK — MALZEME TALEBİ", {bold:true,sz:15,color:"ffffff",bg:NAV,align:"center"}),
-      ...Array(6).fill(cell("",{bg:NAV}))
-    );
-
-    // R2: Talep No / Tarih / Site ID / Site Tipi
-    const INFO_BG = LBLU;
-    const r2 = R(
-      cell("TALEP NO",{bold:true,bg:INFO_BG,align:"center"}),
-      cell(t.talep_no||"",{bold:true,sz:12}),
-      cell("TARİH",{bold:true,bg:INFO_BG,align:"center"}),
-      cell(tarihFmt(t.talep_tarihi||t.created_at),{align:"center"}),
-      cell("SİTE ID",{bold:true,bg:INFO_BG,align:"center"}),
-      cell(t.site_id||"—",{align:"center"}),
-      cell(t.site_type||"—",{align:"center"})
-    );
-
-    // R3: Bölge / Proje / Firma / Personel
-    const r3 = R(
-      cell("BÖLGE",{bold:true,bg:INFO_BG,align:"center"}),
-      cell(t.bolge||"—",{}),
-      cell("PROJE",{bold:true,bg:INFO_BG,align:"center"}),
-      cell(t.proje||"—",{align:"center"}),
-      cell("FİRMA",{bold:true,bg:INFO_BG,align:"center"}),
-      cell(t.talep_edilen_firma||"—",{align:"center"}),
-      cell(t.talep_edilen_personel||"—",{})
-    );
-
-    // R4: Talep Eden / Durum / Açıklama
-    const r4 = R(
-      cell("TALEP EDEN",{bold:true,bg:INFO_BG,align:"center"}),
-      cell(t.talep_eden_ad||"—",{}),
-      cell("DURUM",{bold:true,bg:INFO_BG,align:"center"}),
-      cell(durumLabel[t.durum]||t.durum||"—",{bold:true}),
-      cell("AÇIKLAMA",{bold:true,bg:INFO_BG,align:"center"}),
-      cell(t.notlar||"—",{wrap:true}),
-      empty()
-    );
-
-    // R5: boş ayırıcı
-    const r5 = Array(7).fill(empty());
-
-    // R6: Tablo başlığı
-    const THEAD_BG = NAV;
-    const r6 = R(
-      cell("#",           {bold:true,color:"ffffff",bg:THEAD_BG,align:"center"}),
-      cell("MALZEME ADI", {bold:true,color:"ffffff",bg:THEAD_BG}),
-      cell("MİKTAR",      {bold:true,color:"ffffff",bg:THEAD_BG,align:"center"}),
-      cell("BİRİM",       {bold:true,color:"ffffff",bg:THEAD_BG,align:"center"}),
-      cell("BİRİM FİYAT (₺)",{bold:true,color:"ffffff",bg:THEAD_BG,align:"right"}),
-      cell("TOPLAM (₺)",  {bold:true,color:"ffffff",bg:THEAD_BG,align:"right"}),
-      cell("NOT",         {bold:true,color:"ffffff",bg:THEAD_BG})
-    );
-
-    // R7…: Kalem satırları (zebra)
-    const kalemRows = kalemler.map((k,i) => {
-      const bg = i%2===0 ? "ffffff" : GRAY;
-      return R(
-        cell(i+1,                              {align:"center",bg}),
-        cell(k.malzeme_adi||"",               {bg,wrap:true}),
-        cell(Number(k.miktar||0),              {align:"center",bg}),
-        cell(k.birim||"Adet",                  {align:"center",bg}),
-        cell(Number((k.birim_fiyat||0).toFixed?Number(k.birim_fiyat||0).toFixed(2):k.birim_fiyat||0), {align:"right",bg}),
-        cell(Number(Number(k.toplam_tutar||0).toFixed(2)), {align:"right",bg,bold:Number(k.toplam_tutar||0)>0,color:Number(k.toplam_tutar||0)>0?GRN:FBLK}),
-        cell(k.notlar||"",                    {bg,wrap:true,italic:true,color:"6b7280"})
-      );
-    });
-
-    // Son: Genel Toplam
-    const rToplam = R(
-      empty(), empty(), empty(), empty(),
-      cell("GENEL TOPLAM (₺)", {bold:true,bg:GRLT,align:"right",color:GRN,borderColor:"86efac"}),
-      cell(Number(toplam.toFixed(2)),          {bold:true,sz:12,bg:GRLT,align:"right",color:GRN,borderColor:"86efac"}),
-      empty()
-    );
-
-    // ── Sayfayı oluştur ──────────────────────────────────────────────
-    const data = [r1, r2, r3, r4, r5, r6, ...kalemRows, r5, rToplam];
-    const ws = XLSXStyle.utils.aoa_to_sheet(data);
-    ws["!cols"] = COL_W;
-    ws["!rows"] = [
-      {hpt:28}, // r1 - başlık yüksek
-      {hpt:20}, // r2
-      {hpt:20}, // r3
-      {hpt:20}, // r4
-      {hpt:8 }, // r5 - boşluk
-      {hpt:22}, // r6 - thead
-      ...kalemler.map(()=>({hpt:18})),
-      {hpt:8 },
-      {hpt:22},
+    const rows = [
+      ["ERC MÜHENDİSLİK - MALZEME TALEBİ", "", "", "", "", "", ""],
+      [],
+      ["TALEP NO",        t.talep_no||"",              "", "TARİH",       tarihFmt(t.talep_tarihi), "", ""],
+      ["BÖLGE",           t.bolge||"-",                "", "PROJE",       t.proje||"-",             "SİTE TİPİ", t.site_type||"-"],
+      ["SİTE ID",         t.site_id||"-",              "", "", "", "", ""],
+      ["TALEP EDEN",      t.talep_eden_ad||"-",        "", "FİRMA",       t.talep_edilen_firma||"-","", ""],
+      ["TALEP ED. PERS.", t.talep_edilen_personel||"-","", "DURUM",       durumLabel[t.durum]||t.durum||"-", "", ""],
+      ["AÇIKLAMA",        t.notlar||"-",               "", "", "", "", ""],
+      [],
+      ["#", "MALZEME ADI", "MİKTAR", "BİRİM", "BİRİM FİYAT (₺)", "TOPLAM (₺)", "NOT"],
+      ...kalemler.map((k,i) => [
+        i+1,
+        k.malzeme_adi||"",
+        Number(k.miktar||0),
+        k.birim||"Adet",
+        Number(Number(k.birim_fiyat||0).toFixed(2)),
+        Number(Number(k.toplam_tutar||0).toFixed(2)),
+        k.notlar||""
+      ]),
+      [],
+      ["", "", "", "", "GENEL TOPLAM (₺)", Number(toplam.toFixed(2)), ""],
     ];
-    ws["!merges"] = [
-      { s:{r:0,c:0}, e:{r:0,c:6} },   // Başlık birleşik
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    // Kolon genişlikleri
+    ws["!cols"] = [
+      { wch: 22 }, // A - etiket
+      { wch: 36 }, // B - değer (malzeme adı)
+      { wch: 3  }, // C - boşluk
+      { wch: 18 }, // D - etiket2
+      { wch: 22 }, // E - değer2
+      { wch: 12 }, // F - site tipi etiket
+      { wch: 12 }, // G - site tipi değer
     ];
-    const wb = XLSXStyle.utils.book_new();
-    XLSXStyle.utils.book_append_sheet(wb, ws, "Talep");
-    XLSXStyle.writeFile(wb, `${t.talep_no||"Malzeme_Talebi"}.xlsx`);
-  };
-
-  // ── DEPO STOK EXCEL ──
-  const depoStokExcelIndir = () => {
-    const tarih = new Date().toLocaleDateString("tr-TR");
-    const NAV   = "1e3a5f";
-    const GRN   = "166534";
-    const GRLT  = "f0fdf4";
-    const AMBERLT = "fff7ed";
-    const border = (c="d1d5db") => ({ top:{style:"thin",color:{rgb:c}}, bottom:{style:"thin",color:{rgb:c}}, left:{style:"thin",color:{rgb:c}}, right:{style:"thin",color:{rgb:c}} });
-    const cell = (v, opts={}) => ({
-      v, t: typeof v==="number" ? "n" : "s",
-      s: {
-        font:{ bold:!!opts.bold, sz:opts.sz||11, color:{rgb:opts.color||"222222"}, name:"Calibri", italic:!!opts.italic },
-        fill:{ fgColor:{ rgb:opts.bg||"ffffff" } },
-        alignment:{ horizontal:opts.align||"left", vertical:"center", wrapText:!!opts.wrap },
-        border:border(opts.borderColor||"d1d5db"),
-      }
-    });
-    const empty = () => ({ v:"", t:"s", s:{ fill:{fgColor:{rgb:"ffffff"}}, border:border("ffffff") } });
-    const R = (...cells) => cells;
-    const COLS = 9; // A..I
-    // Sütunlar: Malzeme Adı | Toplam | Birim | Kalan | Personelde | Rezerve | İlk Fiyat | Son Fiyat | Açıklama
-    const COL_W = [{ wch:48 },{ wch:13 },{ wch:9 },{ wch:14 },{ wch:13 },{ wch:10 },{ wch:16 },{ wch:16 },{ wch:30 }];
-    const r1 = R(
-      cell("ERC MÜHENDİSLİK — DEPO STOK RAPORU", {bold:true,sz:14,color:"ffffff",bg:NAV,align:"center"}),
-      ...Array(COLS-1).fill(cell("",{bg:NAV}))
-    );
-    const r2 = R(
-      cell(`Rapor Tarihi: ${tarih}`, {bold:true,sz:10,color:"6b7280",bg:"f8fafc",align:"center"}),
-      ...Array(COLS-1).fill(cell("",{bg:"f8fafc"}))
-    );
-    const rSpace = R(...Array(COLS).fill(empty()));
-    const rHead = R(
-      cell("MALZEME ADI",    {bold:true,color:"ffffff",bg:NAV}),
-      cell("TOPLAM STOK",    {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("BİRİM",          {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("DEPODA KALAN",   {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("PERSONELde",     {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("REZERVE",        {bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("İLK ALIŞ FİYATI",{bold:true,color:"ffffff",bg:"164e63",align:"center"}),
-      cell("SON ALIŞ FİYATI",{bold:true,color:"ffffff",bg:"166534",align:"center"}),
-      cell("AÇIKLAMA",       {bold:true,color:"ffffff",bg:NAV}),
-    );
-    const rows = depoStok.map((s,i) => {
-      const bg = i%2===0 ? "ffffff" : "f8fafc";
-      const kalan = Number(s.depoda_kalan||0);
-      const kalanColor = kalan < 0 ? "dc2626" : kalan === 0 ? "92400e" : GRN;
-      // Fiyat listesinden eşleştir
-      const fiyatRow = fiyatListe.find(f=>(f.malzeme_adi||"").toLowerCase()===(s.malzeme_adi||"").toLowerCase());
-      const ilkFiyat = fiyatRow?.ilk_fiyat ? Number(fiyatRow.ilk_fiyat) : null;
-      const sonFiyat = fiyatRow?.son_fiyat ? Number(fiyatRow.son_fiyat) : (fiyatRow?.birim_fiyat ? Number(fiyatRow.birim_fiyat) : null);
-      return R(
-        cell(s.malzeme_adi||"",                              {bg, bold:true}),
-        cell(Number(s.toplam_miktar||0),                     {bg, align:"center"}),
-        cell(s.birim||"Adet",                                {bg, align:"center"}),
-        cell(kalan,                                          {bg, align:"center", bold:true, color:kalanColor}),
-        cell(Number(s.personelde||0),                        {bg, align:"center", color:"92400e"}),
-        cell(Number(s.rezerve||0),                           {bg, align:"center", color:"7c3aed"}),
-        ilkFiyat ? cell(ilkFiyat,                            {bg, align:"center", color:"0e7490"}) : cell("—",{bg,align:"center",color:"9ca3af"}),
-        sonFiyat ? cell(sonFiyat,                            {bg, align:"center", bold:true, color:GRN}) : cell("—",{bg,align:"center",color:"9ca3af"}),
-        cell(s.aciklama||"",                                 {bg, italic:true, color:"6b7280", wrap:true}),
-      );
-    });
-    const rToplam = R(
-      cell(`Toplam ${depoStok.length} kalem`, {bold:true, bg:GRLT, color:GRN}),
-      cell(depoStok.reduce((a,s)=>a+Number(s.toplam_miktar||0),0), {bold:true, bg:GRLT, align:"center", color:GRN}),
-      empty(),
-      cell(depoStok.reduce((a,s)=>a+Number(s.depoda_kalan||0),0), {bold:true, bg:GRLT, align:"center", color:GRN}),
-      empty(), empty(), empty(), empty(), empty()
-    );
-    const data = [r1, r2, rSpace, rHead, ...rows, rSpace, rToplam];
-    const ws = XLSXStyle.utils.aoa_to_sheet(data);
-    ws["!cols"] = COL_W;
-    ws["!rows"] = [{hpt:28},{hpt:18},{hpt:6},{hpt:22},...depoStok.map(()=>({hpt:18})),{hpt:6},{hpt:22}];
-    ws["!merges"] = [
-      { s:{r:0,c:0}, e:{r:0,c:COLS-1} },
-      { s:{r:1,c:0}, e:{r:1,c:COLS-1} },
-    ];
-    const wb = XLSXStyle.utils.book_new();
-    XLSXStyle.utils.book_append_sheet(wb, ws, "Depo Stok");
-    // JSZip ile XML patch yaparak gridlines kapat (xlsx-js-style'da !sheetViews çalışmıyor)
-    const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
-    import("jszip").then(({ default: JSZip }) => {
-      JSZip.loadAsync(buf).then(zip => {
-        const sheetFile = zip.file("xl/worksheets/sheet1.xml");
-        return sheetFile.async("string").then(xml => {
-          const patched = xml
-            .replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>')
-            .replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
-          zip.file("xl/worksheets/sheet1.xml", patched);
-          return zip.generateAsync({ type:"blob", compression:"STORE" });
-        });
-      }).then(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `ERC_Depo_Stok_${tarih.replace(/\./g,"-")}.xlsx`;
-        document.body.appendChild(a); a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      });
-    });
-  };
-
-  // ── DAĞITIM EXCEL ──
-  const exportDagitimExcel = () => {
-    const tarih = new Date().toLocaleDateString("tr-TR");
-    const NAV = "1e3a5f";
-    const border = (c="d1d5db") => ({ top:{style:"thin",color:{rgb:c}}, bottom:{style:"thin",color:{rgb:c}}, left:{style:"thin",color:{rgb:c}}, right:{style:"thin",color:{rgb:c}} });
-    const cell = (v, opts={}) => ({
-      v, t: typeof v==="number" ? "n" : "s",
-      s: { font:{bold:!!opts.bold,sz:opts.sz||11,color:{rgb:opts.color||"222222"},name:"Calibri"},
-           fill:{fgColor:{rgb:opts.bg||"ffffff"}},
-           alignment:{horizontal:opts.align||"left",vertical:"center",wrapText:!!opts.wrap},
-           border:border(opts.borderColor||"d1d5db") }
-    });
-    const empty = () => ({ v:"", t:"s", s:{ fill:{fgColor:{rgb:"ffffff"}}, border:border("ffffff") } });
-    const R = (...cells) => cells;
-    const COLS = 9;
-    const COL_W = [{wch:28},{wch:14},{wch:48},{wch:10},{wch:10},{wch:16},{wch:16},{wch:16},{wch:30}];
-    const r1 = R(cell("ERC MÜHENDİSLİK — PERSONEL MALZEME STOK DURUMU",{bold:true,sz:14,color:"ffffff",bg:NAV,align:"center"}),...Array(COLS-1).fill(cell("",{bg:NAV})));
-    const r2 = R(cell(`Rapor Tarihi: ${tarih}`,{bold:true,sz:10,color:"6b7280",bg:"f8fafc",align:"center"}),...Array(COLS-1).fill(cell("",{bg:"f8fafc"})));
-    const rSpace = R(...Array(COLS).fill(empty()));
-    const rHead = R(
-      cell("ALICI / FİRMA",{bold:true,color:"ffffff",bg:NAV}),
-      cell("TİP",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("MALZEME ADI",{bold:true,color:"ffffff",bg:NAV}),
-      cell("MİKTAR",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("BİRİM",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("VERİLME TARİHİ",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("DURUM",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("SAHA SİTE",{bold:true,color:"ffffff",bg:NAV,align:"center"}),
-      cell("NOT",{bold:true,color:"ffffff",bg:NAV}),
-    );
-    const sorted = [...dagitim].filter(d=>d.durum!=="DEPOYA_IADE").sort((a,b)=>(a.alici_personel_ad||a.alici_firma||"").localeCompare(b.alici_personel_ad||b.alici_firma||""));
-    const rows = sorted.map((d,i)=>{
-      const bg = i%2===0 ? "ffffff" : "f8fafc";
-      const durumLabel = d.durum==="PERSONELDE" ? "Üzerinde" : d.durum==="SAHADA" ? "Sahada" : "İade";
-      const durumColor = d.durum==="SAHADA" ? "166534" : d.durum==="PERSONELDE" ? "1d4ed8" : "6b7280";
-      return R(
-        cell(d.alici_tipi==="TASERON" ? (d.alici_firma||"") : (d.alici_personel_ad||""),{bg,bold:true}),
-        cell(d.alici_tipi==="TASERON" ? "Taşeron" : "Personel",{bg,align:"center",color:d.alici_tipi==="TASERON"?"7c3aed":"1d4ed8"}),
-        cell(d.malzeme_adi||"",{bg}),
-        cell(Number(d.miktar||0),{bg,align:"center",bold:true}),
-        cell(d.birim||"Adet",{bg,align:"center"}),
-        cell(d.verilme_tarihi ? new Date(d.verilme_tarihi).toLocaleDateString("tr-TR") : "—",{bg,align:"center",color:"6b7280"}),
-        cell(durumLabel,{bg,align:"center",bold:true,color:durumColor}),
-        cell(d.saha_site_id||"—",{bg,align:"center",color:"15803d"}),
-        cell(d.notlar||"",{bg,italic:true,color:"6b7280",wrap:true}),
-      );
-    });
-    const rTotal = R(
-      cell(`Toplam ${sorted.length} kayıt`,{bold:true,bg:"f0fdf4",color:"166534"}),
-      ...Array(COLS-1).fill(empty())
-    );
-    const data = [r1,r2,rSpace,rHead,...rows,rSpace,rTotal];
-    const ws = XLSXStyle.utils.aoa_to_sheet(data);
-    ws["!cols"] = COL_W;
-    ws["!rows"] = [{hpt:28},{hpt:18},{hpt:6},{hpt:22},...sorted.map(()=>({hpt:18})),{hpt:6},{hpt:20}];
-    ws["!merges"] = [{ s:{r:0,c:0},e:{r:0,c:COLS-1} },{ s:{r:1,c:0},e:{r:1,c:COLS-1} }];
-    const wb = XLSXStyle.utils.book_new();
-    XLSXStyle.utils.book_append_sheet(wb, ws, "Personel Stok");
-    const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
-    import("jszip").then(({ default: JSZip }) => {
-      JSZip.loadAsync(buf).then(zip => {
-        return zip.file("xl/worksheets/sheet1.xml").async("string").then(xml => {
-          const patched = xml.replace('<sheetView workbookViewId="0"/>','<sheetView showGridLines="0" workbookViewId="0"/>').replace('<sheetView tabSelected="1" workbookViewId="0"/>','<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
-          zip.file("xl/worksheets/sheet1.xml", patched);
-          return zip.generateAsync({ type:"blob", compression:"STORE" });
-        });
-      }).then(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a"); a.href=url; a.download=`ERC_Personel_Stok_${tarih.replace(/\./g,"-")}.xlsx`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      });
-    });
+    // Başlık birleştir (A1:G1)
+    ws["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:6} }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Talep");
+    XLSX.writeFile(wb, `${t.talep_no||"Malzeme_Talebi"}.xlsx`);
   };
 
   // ── SARF ──
@@ -15765,82 +14575,62 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const durumBadge = (d) => {
     const map = {
       TASLAK:        { label:"Taslak",                   color:"#6b7280", bg:"#f3f4f6" },
-      NURCAN_ONAY:   { label:"Rollout Müdürü Onayı Bekleniyor", color:"#f59e0b", bg:"#fef3c7" },
-      ROLLOUT_BEKLE: { label:"Rollout Müdürü Onayı Bekleniyor", color:"#f59e0b", bg:"#fef3c7" },
-      FIYAT_GIRISI:  { label:"Envanter Onayı Bekleniyor",        color:"#8b5cf6", bg:"#ede9fe" },
-      PM_ONAY:       { label:"PM Onayı Bekleniyor",              color:"#2563eb", bg:"#dbeafe" },
-      DUZGUN_ONAY:   { label:"Proje Direktörü Onayı Bekleniyor", color:"#0284c7", bg:"#e0f2fe" },
-      ONAYLANDI:     { label:"Onaylandı",                        color:"#16a34a", bg:"#dcfce7" },
-      SATINALINACAK: { label:"Tedarik Aşamasında",               color:"#ea580c", bg:"#ffedd5" },
-      DEPODA:        { label:"Tedarik Tamamlandı ✓",             color:"#15803d", bg:"#bbf7d0" },
-      REDDEDILDI:    { label:"Reddedildi ✗",                    color:"#dc2626", bg:"#fee2e2" },
+      NURCAN_ONAY:   { label:"Nurcan Onayı Bekliyor",    color:"#f59e0b", bg:"#fef3c7" },
+      FIYAT_GIRISI:  { label:"Fiyat Girişi (Murat)",     color:"#8b5cf6", bg:"#ede9fe" },
+      PM_ONAY:       { label:"PM Onayı Bekliyor",         color:"#2563eb", bg:"#dbeafe" },
+      DUZGUN_ONAY:   { label:"Düzgün Onayı Bekliyor",    color:"#0284c7", bg:"#e0f2fe" },
+      ONAYLANDI:     { label:"Onaylandı",                 color:"#16a34a", bg:"#dcfce7" },
+      SATINALINACAK: { label:"Satın Alınacak",            color:"#ea580c", bg:"#ffedd5" },
+      DEPODA:        { label:"Depoda",                    color:"#15803d", bg:"#bbf7d0" },
+      REDDEDILDI:    { label:"Reddedildi",                color:"#dc2626", bg:"#fee2e2" },
     };
     const s = map[d] || { label:d, color:"#6b7280", bg:"#f3f4f6" };
     return <span style={{ padding:"3px 10px",borderRadius:12,fontSize:12,fontWeight:700,color:s.color,background:s.bg,whiteSpace:"nowrap" }}>{s.label}</span>;
   };
 
   // ── KALEM SATIRI ──
-  const INP = { height:38, padding:"0 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, boxSizing:"border-box", width:"100%", outline:"none" };
-
-  // DB + statik liste birleşik autocomplete
-  const buildCombinedList = () => {
-    const dbNames = fiyatListe.map(f => f.malzeme_adi).filter(Boolean);
-    const all = [...new Set([...dbNames, ...MALZEME_LISTESI])];
-    return all.sort((a, b) => a.localeCompare(b, "tr"));
-  };
-
   const renderKalemRow = (k, i) => {
+    // Fiyat listesinden DB fiyatı (varsa)
     const fiyatAc = fiyatListe.find(f => f.malzeme_adi.toLowerCase() === k.malzeme_adi.toLowerCase());
-    const q = k.malzeme_adi.toLowerCase().trim();
-    const COMBINED = buildCombinedList();
-    const exactMatch = q.length > 0 && COMBINED.some(n => n.toLowerCase() === q);
+    // Hardcoded MALZEME_LISTESI'nden autocomplete (API'ye bağımlı değil)
+    const q = k.malzeme_adi.toLowerCase();
+    const exactMatch = q.length > 0 && MALZEME_LISTESI.some(n => n.toLowerCase() === q);
     const suggestions = !exactMatch && q.length >= 1
-      ? COMBINED.filter(n => n.toLowerCase().includes(q)).slice(0, 14)
+      ? MALZEME_LISTESI.filter(n => n.toLowerCase().includes(q)).slice(0, 14)
       : [];
     const toplam = (Number(k.miktar)||0) * (Number(k.birim_fiyat)||0);
-    const isInDB = fiyatListe.some(f => f.malzeme_adi.toLowerCase() === q) || MALZEME_LISTESI.some(n => n.toLowerCase() === q);
-
     return (
-      <div key={i} style={{ display:"grid", gridTemplateColumns:"3fr 80px 110px 130px 110px 110px 38px", gap:8, marginBottom:10, alignItems:"start" }}>
-        {/* Malzeme adı + autocomplete + Yeni ekle butonu */}
+      <div key={i} style={{ display:"grid", gridTemplateColumns:"2fr 80px 100px 120px 100px 100px 36px", gap:8, marginBottom:10, alignItems:"start" }}>
+        {/* Malzeme adı + autocomplete */}
         <div style={{ position:"relative" }}>
-          <div style={{ display:"flex", gap:5, alignItems:"center" }}>
-            <input placeholder="Malzeme adı yazın..." value={k.malzeme_adi} autoComplete="off"
-              onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:e.target.value, birim_fiyat:""} : x))}
-              style={{ ...INP, flex:1 }} />
-            {/* Yeni Malzeme Ekle butonu — her zaman görünür */}
-            <button
-              type="button"
-              title="Yeni malzeme ekle / veritabanına kaydet"
-              onClick={() => setYeniMalzemePopup({
-                rowIdx: i,
-                adi: k.malzeme_adi.trim().toUpperCase(),
-                birim: k.birim || "Adet",
-                birim_fiyat: "",
-                kategori: "Genel",
-              })}
-              style={{
-                flexShrink:0, height:38, padding:"0 10px",
-                background: isInDB && q.length>0 ? "#f0fdf4" : "#eff6ff",
-                border: `1px solid ${isInDB && q.length>0 ? "#86efac" : "#bfdbfe"}`,
-                borderRadius:7, cursor:"pointer", fontSize:18, lineHeight:1,
-                display:"flex", alignItems:"center", justifyContent:"center",
-                color: isInDB && q.length>0 ? "#16a34a" : "#2563eb",
-                transition:"all 0.15s",
-              }}
-            >
-              {isInDB && q.length>0 ? "✓" : "+"}
-            </button>
-          </div>
+          <input placeholder="Malzeme adı yazın..." value={k.malzeme_adi}
+            autoComplete="off"
+            onChange={e => {
+              const v = e.target.value;
+              setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:v, birim_fiyat:""} : x));
+            }}
+            style={{ width:"100%",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13,boxSizing:"border-box" }} />
           {suggestions.length > 0 && (
-            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#fff",border:"1px solid #d1d5db",borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:260,overflowY:"auto" }}>
+            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#fff",border:"1px solid #d1d5db",borderRadius:6,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:260,overflowY:"auto" }}>
               {suggestions.map((name, idx) => {
                 const dbItem = fiyatListe.find(f => f.malzeme_adi.toLowerCase() === name.toLowerCase());
                 return (
-                  <div key={idx} style={{ padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6" }}
-                    onMouseDown={e => { e.preventDefault(); setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, malzeme_adi:name, birim:dbItem?.birim||k.birim, birim_fiyat:dbItem?.birim_fiyat||""} : x)); }}>
-                    <div style={{ wordBreak:"break-word", lineHeight:1.5 }}>{name}</div>
-                    {dbItem && Number(dbItem.birim_fiyat)>0 && <div style={{ color:"#9ca3af",fontSize:11,marginTop:2 }}>{dbItem.birim} · ₺{Number(dbItem.birim_fiyat).toLocaleString("tr-TR")}</div>}
+                  <div key={idx} style={{ padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6",background:"#fff" }}
+                    onMouseDown={e => {
+                      e.preventDefault();
+                      setTalepKalemler(prev => prev.map((x,j) => j===i ? {
+                        ...x,
+                        malzeme_adi: name,
+                        birim: dbItem?.birim || k.birim,
+                        birim_fiyat: dbItem?.birim_fiyat || ""
+                      } : x));
+                    }}>
+                    <div style={{ wordBreak:"break-word", lineHeight:"1.5" }}>{name}</div>
+                    {dbItem && Number(dbItem.birim_fiyat)>0 && (
+                      <div style={{ color:"#9ca3af",fontSize:11,marginTop:2 }}>
+                        {dbItem.birim} · ₺{Number(dbItem.birim_fiyat).toLocaleString("tr-TR")}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -15848,39 +14638,37 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           )}
         </div>
         {/* Miktar */}
-        <input type="number" placeholder="0" value={k.miktar} min="0"
+        <input type="number" placeholder="Adet" value={k.miktar} min="0"
           onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, miktar:e.target.value} : x))}
-          style={{ ...INP, textAlign:"center" }} />
+          style={{ padding:"8px 6px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13,textAlign:"center",width:"100%" }} />
         {/* Birim */}
         <select value={k.birim} onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, birim:e.target.value} : x))}
-          style={{ ...INP, paddingLeft:8 }}>
+          style={{ padding:"8px 4px",border:"1px solid #d1d5db",borderRadius:6,fontSize:12,width:"100%" }}>
           {["Adet","Metre","Rulo","Kutu","Kg","Lt","Paket","Set","Takım"].map(u=><option key={u}>{u}</option>)}
         </select>
         {/* Birim Fiyat */}
         <div style={{ position:"relative" }}>
           <input type="number" placeholder="₺ Fiyat" value={k.birim_fiyat}
             onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, birim_fiyat:e.target.value} : x))}
-            style={INP} />
+            style={{ width:"100%",padding:"8px 8px",border:"1px solid #d1d5db",borderRadius:6,fontSize:13,boxSizing:"border-box" }} />
           {fiyatAc && Number(fiyatAc.birim_fiyat)>0 && !k.birim_fiyat && (
-            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:100,background:"#fffbeb",border:"1px solid #fde68a",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer" }}
+            <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:100,background:"#fffbeb",border:"1px solid #fde68a",borderRadius:4,padding:"4px 8px",fontSize:11,cursor:"pointer",whiteSpace:"nowrap" }}
               onMouseDown={e=>{e.preventDefault();setTalepKalemler(prev=>prev.map((x,j)=>j===i?{...x,birim_fiyat:fiyatAc.birim_fiyat}:x));}}>
-              💡 DB: ₺{Number(fiyatAc.birim_fiyat).toLocaleString("tr-TR")} kullan
+              DB: ₺{Number(fiyatAc.birim_fiyat).toLocaleString("tr-TR")} kullan
             </div>
           )}
         </div>
-        {/* Toplam (readonly) */}
-        <div style={{ ...INP, display:"flex",alignItems:"center",justifyContent:"flex-end",fontWeight:700,color:toplam>0?"#15803d":"#d1d5db",background:"#f9fafb",border:"1px solid #e5e7eb",userSelect:"none" }}>
+        {/* Toplam */}
+        <div style={{ padding:"8px 8px",border:"1px solid #e5e7eb",borderRadius:6,fontSize:13,fontWeight:700,color:"#15803d",background:"#f0fdf4",textAlign:"right" }}>
           {toplam > 0 ? `₺${toplam.toLocaleString("tr-TR")}` : "—"}
         </div>
         {/* Not */}
-        <input placeholder="Not / açıklama" value={k.notlar}
+        <input placeholder="Not" value={k.notlar}
           onChange={e => setTalepKalemler(prev => prev.map((x,j) => j===i ? {...x, notlar:e.target.value} : x))}
-          style={INP} />
+          style={{ padding:"8px 8px",border:"1px solid #d1d5db",borderRadius:6,fontSize:12 }} />
         {/* Sil */}
         <button onClick={() => setTalepKalemler(prev => prev.filter((_,j)=>j!==i))}
-          style={{ height:38, width:38, background:"#fee2e2", border:"1px solid #fecaca", borderRadius:7, color:"#dc2626", cursor:"pointer", fontWeight:700, fontSize:15, display:"flex",alignItems:"center",justifyContent:"center" }}>
-          ✕
-        </button>
+          style={{ padding:"8px",background:"#fee2e2",border:"none",borderRadius:6,color:"#dc2626",cursor:"pointer",fontWeight:700,fontSize:14 }}>✕</button>
       </div>
     );
   };
@@ -15889,23 +14677,19 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const renderDetayModal = () => {
     if (!detayModal) return null;
     const d = detayModal;
-    const _detayUserRole = (currentUser?.role || "").toLowerCase();
-    const _isRolloutMudurDetay = _detayUserRole === "rollout_mudur" || _detayUserRole === "bolge_mudur";
-    const canRollout       = _isRolloutMudurDetay && d.durum==="ROLLOUT_BEKLE";
-    const canNurcan        = isNurcan   && (d.durum==="NURCAN_ONAY" || d.durum==="ROLLOUT_BEKLE");
-    const canPM            = isPM       && d.durum==="PM_ONAY";
-    const canMurat         = isMurat    && d.durum==="FIYAT_GIRISI";
-    const canDuzgun        = isDirektor && d.durum==="DUZGUN_ONAY";
-    const canMuratTedarik  = isMurat    && d.durum==="SATINALINACAK";
-    const canOnay          = false;
-    const canDepoda        = canMuratTedarik;
-    const canReddet        = (isNurcan||isPM||isMurat||isDirektor||_isRolloutMudurDetay) && ["ROLLOUT_BEKLE","NURCAN_ONAY","PM_ONAY","FIYAT_GIRISI","DUZGUN_ONAY"].includes(d.durum);
+    const canNurcan   = isNurcan && d.durum==="NURCAN_ONAY";
+    const canMurat    = isMurat  && d.durum==="FIYAT_GIRISI";
+    const canPM       = isPM     && d.durum==="PM_ONAY";
+    const canDuzgun   = isDirektor && d.durum==="DUZGUN_ONAY";
+    const canOnay     = (isPM||isDirektor) && d.durum==="ONAYLANDI";
+    const canDepoda   = (isPM||isDirektor||isNurcan) && d.durum==="SATINALINACAK";
+    const canReddet   = (isNurcan||isPM||isDirektor) && ["NURCAN_ONAY","FIYAT_GIRISI","PM_ONAY","DUZGUN_ONAY"].includes(d.durum);
     const isOwner     = d.talep_eden_email === currentUser?.email;
     const canDuzenle  = isOwner && ["TASLAK","REDDEDILDI"].includes(d.durum);
 
     return (
-      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:24,overflowY:"auto" }}>
-        <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:1100,maxHeight:"94vh",overflowY:"auto",padding:28 }}>
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,overflowY:"auto" }}>
+        <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:760,maxHeight:"92vh",overflowY:"auto",padding:24 }}>
           {/* Başlık */}
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16 }}>
             <div>
@@ -15942,86 +14726,21 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           </div>
           {d.notlar && <div style={{ padding:"8px 14px",background:"#fffbeb",borderRadius:8,fontSize:13,marginBottom:14,color:"#92400e" }}>📝 {d.notlar}</div>}
 
-          {/* ── Onay Zinciri ── */}
-          {(() => {
-            // Talep edenin rolüne göre hangi adımlar atlanıyor?
-            const tEml = (d.talep_eden_email||"").toLowerCase();
-            const talepEdenPM         = tEml === "orhan.bedir@simsektel.com";
-            const talepEdenNurcan     = tEml === "nurcan.kus@simsektel.com";
-            const talepEdenMurat      = tEml === "murat.istek@simsektel.com";
-            const talepEdenDirektor   = tEml === "duzgun.simsek@simsektel.com";
-            const talepEdenBolgeMudur = !talepEdenPM && !talepEdenNurcan && !talepEdenMurat && !talepEdenDirektor &&
-              (["serdar.altinova@simsektel.com"].includes(tEml) || false);
-            // PM talep ederse: Nurcan + PM adımları atlanır → Murat'tan başlar
-            // Nurcan talep ederse: Nurcan adımı atlanır → PM'den başlar
-            // Murat/Direktor talep ederse: sırasıyla kendi adımına kadar atlanır
-            const skipNurcan = talepEdenPM || talepEdenNurcan || talepEdenMurat || talepEdenDirektor || talepEdenBolgeMudur;
-            const skipPM     = talepEdenPM || talepEdenMurat || talepEdenDirektor; // Bölge Müdürü PM'den geçer
-            const ZINCIR = [
-              { key:"talep",    label:"Talep Eden",    kisi: d.talep_eden_ad||"—",      done: true,                                                                             color:"#0ea5e9" },
-              { key:"nurcan",   label:"Rollout Müdürü",kisi:"Nurcan Kuş",               done: !skipNurcan && !["TASLAK","NURCAN_ONAY","ROLLOUT_BEKLE"].includes(d.durum)&&d.durum!=="REDDEDILDI", waiting: !skipNurcan && (d.durum==="NURCAN_ONAY" || d.durum==="ROLLOUT_BEKLE"), skipped: skipNurcan, color:"#8b5cf6" },
-              { key:"pm",       label:"PM Onayı",      kisi:"Orhan Bedir",              done: !skipPM && ["FIYAT_GIRISI","DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: !skipPM && d.durum==="PM_ONAY", skipped: skipPM, color:"#2563eb" },
-              { key:"murat",    label:"Envanter Onayı",kisi:"Murat İstek",              done: ["DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="FIYAT_GIRISI", color:"#f59e0b" },
-              { key:"duzgun",   label:"Proje Dir.",    kisi:"Düzgün Şimşek",            done: ["SATINALINACAK","DEPODA"].includes(d.durum), waiting: d.durum==="DUZGUN_ONAY", color:"#0284c7" },
-              { key:"tedarik",  label:"Tedarik",       kisi:"Murat İstek",              done: d.durum==="DEPODA", waiting: d.durum==="SATINALINACAK", color:"#ea580c" },
-              { key:"depo",     label:"Depoda ✓",      kisi:"Tedarik Tamamlandı",       done: d.durum==="DEPODA", waiting: false, color:"#16a34a" },
-            ].filter(s => !s.skipped); // Atlanacak adımları zincirden çıkar
-            const reddi = d.durum === "REDDEDILDI";
-            return (
-              <div style={{ marginBottom:16, background:"#f8fafc", borderRadius:12, padding:"16px 20px", border:"1px solid #e2e8f0" }}>
-                <div style={{ fontSize:13,fontWeight:700,color:"#374151",marginBottom:14 }}>📊 Onay Zinciri</div>
-                <div style={{ display:"flex", alignItems:"flex-start", gap:0, overflowX:"auto", paddingBottom:4 }}>
-                  {ZINCIR.map((s, idx) => {
-                    const bgColor = reddi ? "#fee2e2" : s.done ? s.color : s.waiting ? "#fef9c3" : "#f1f5f9";
-                    const borderColor = s.done ? s.color : s.waiting ? "#fde047" : "#e2e8f0";
-                    return (
-                      <React.Fragment key={s.key}>
-                        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", minWidth:100, maxWidth:120 }}>
-                          <div style={{ width:36, height:36, borderRadius:"50%", background:bgColor, border:`2px solid ${borderColor}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, marginBottom:6, flexShrink:0 }}>
-                            {reddi && idx > 0 ? "✕" : s.done ? "✓" : s.waiting ? "⏳" : "○"}
-                          </div>
-                          <div style={{ fontSize:10, fontWeight:700, color:"#6b7280", textTransform:"uppercase", letterSpacing:"0.4px", textAlign:"center", lineHeight:1.3 }}>{s.label}</div>
-                          <div style={{ fontSize:11, color:s.done?"#374151":s.waiting?"#92400e":"#9ca3af", textAlign:"center", marginTop:3, lineHeight:1.3 }}>{s.kisi}</div>
-                        </div>
-                        {idx < ZINCIR.length - 1 && (
-                          <div style={{ flex:1, height:2, background: s.done ? s.color : "#e2e8f0", marginTop:17, minWidth:16 }} />
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-                {reddi && d.onay_notu && (
-                  <div style={{ marginTop:10, padding:"8px 12px", background:"#fee2e2", borderRadius:8, fontSize:12, color:"#dc2626" }}>
-                    ❌ Red Gerekçesi: {d.onay_notu}
-                  </div>
-                )}
-                {!reddi && d.onay_notu && (
-                  <div style={{ marginTop:10, padding:"8px 12px", background:"#f0fdf4", borderRadius:8, fontSize:12, color:"#15803d" }}>
-                    💬 {d.onay_notu}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
           {/* Kalemler */}
           <div style={{ overflowX:"auto",marginBottom:16 }}>
             <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
               <thead>
                 <tr style={{ background:"#1e3a5f",color:"#fff" }}>
-                  {["#","Malzeme Adı","Miktar","Birim","Birim Fiyat","Toplam","Temin Türü","Not",...(canMuratTedarik?["İşlem"]:[])].map(h=>(
+                  {["#","Malzeme Adı","Miktar","Birim","Birim Fiyat","Toplam","Temin Türü","Not"].map(h=>(
                     <th key={h} style={{ padding:"8px 10px",textAlign:"left",fontWeight:600,whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {detayKalemler.map((k,i)=>(
-                  <tr key={k.id} style={{ borderBottom:"1px solid #e5e7eb",background:k.dagitim_yapildi?"#f0fdf4":i%2===0?"#fff":"#f9fafb",opacity:k.dagitim_yapildi?0.7:1 }}>
+                  <tr key={k.id} style={{ borderBottom:"1px solid #e5e7eb",background:i%2===0?"#fff":"#f9fafb" }}>
                     <td style={{ padding:"8px 10px",color:"#9ca3af" }}>{i+1}</td>
-                    <td style={{ padding:"8px 10px",fontWeight:600 }}>
-                      {k.malzeme_adi}
-                      {k.dagitim_yapildi && <span style={{ marginLeft:6,fontSize:10,background:"#bbf7d0",color:"#166534",borderRadius:4,padding:"1px 6px",fontWeight:700 }}>✓ Dağıtıldı</span>}
-                    </td>
+                    <td style={{ padding:"8px 10px",fontWeight:600 }}>{k.malzeme_adi}</td>
                     <td style={{ padding:"8px 10px",textAlign:"center" }}>{k.miktar}</td>
                     <td style={{ padding:"8px 10px" }}>{k.birim}</td>
                     <td style={{ padding:"8px 10px" }}>
@@ -16049,70 +14768,6 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                       ) : "—")}
                     </td>
                     <td style={{ padding:"8px 10px",color:"#6b7280",fontSize:12 }}>{k.notlar}</td>
-                    {canMuratTedarik && (
-                      <td style={{ padding:"6px 8px" }}>
-                        {k.dagitim_yapildi ? (
-                          <span style={{ fontSize:11,color:"#16a34a",fontWeight:700 }}>✓ Tamam</span>
-                        ) : k.temin_turu === "Depo Stok" ? (
-                          <button
-                            disabled={saving}
-                            onClick={async ()=>{
-                              setSaving(true);
-                              try {
-                                const tkn = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
-                                const hdrs = {"Content-Type":"application/json",Authorization:`Bearer ${tkn}`};
-                                // Depoya Giriş + Dağıtım kaydı
-                                const r = await fetch(`${API_BASE}/malzeme/dagitim`,{method:"POST",headers:hdrs,body:JSON.stringify({
-                                  malzeme_adi:k.malzeme_adi, miktar:k.miktar, birim:k.birim||"Adet",
-                                  alici_tipi:"PERSONEL",
-                                  alici_personel_ad: d.talep_edilen_personel||d.talep_eden_ad,
-                                  alici_personel_email: d.talep_eden_email,
-                                  site_id: d.site_id||"", bolge: d.bolge||"",
-                                  notlar:`MT Talep: ${d.talep_no} - Depo Stok dağıtımı`,
-                                  talep_kalem_id: k.id
-                                })});
-                                const rd = await r.json();
-                                if (rd.error){ alert(rd.error); setSaving(false); return; }
-                                // Kalem dagitim_yapildi işaretle
-                                await fetch(`${API_BASE}/malzeme/talepler/${d.id}/kalem-dagitildi`,{method:"PUT",headers:hdrs,body:JSON.stringify({kalem_id:k.id})});
-                                setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,dagitim_yapildi:true}:x));
-                                // Eğer tüm kalemler dağıtıldı/tamamlandı ise DEPODA'ya çek
-                                const yeniKalemler = detayKalemler.map((x,j)=>j===i?{...x,dagitim_yapildi:true}:x);
-                                const hepsiTamam = yeniKalemler.every(x=>x.dagitim_yapildi||(x.temin_turu!=="Depo Stok"));
-                                // Not: Yeni Alım kalemler için ayrıca "Satın Alındı" tıklanacak
-                              } catch(e){ alert(e.message); }
-                              setSaving(false);
-                            }}
-                            style={{ padding:"4px 10px",background:"#065f46",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:11,whiteSpace:"nowrap" }}>
-                            📦 Dağıtım Yap
-                          </button>
-                        ) : k.temin_turu === "Yeni Alım" ? (
-                          <button
-                            disabled={saving}
-                            onClick={async ()=>{
-                              if(!window.confirm(`"${k.malzeme_adi}" satın alındı ve depoya girişi yapıldı mı?`)) return;
-                              setSaving(true);
-                              try {
-                                const tkn = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
-                                const hdrs = {"Content-Type":"application/json",Authorization:`Bearer ${tkn}`};
-                                // Depoya Giriş yap
-                                const stokR = await fetch(`${API_BASE}/malzeme/depo-stok-ekle`,{method:"POST",headers:hdrs,body:JSON.stringify({
-                                  malzeme_adi:k.malzeme_adi, birim:k.birim||"Adet", miktar:k.miktar,
-                                  talep_no:d.talep_no, notlar:"Yeni Alım - MT Talep"
-                                })});
-                                const stokD = await stokR.json();
-                                if(stokD.error){ alert(stokD.error); setSaving(false); return; }
-                                await fetch(`${API_BASE}/malzeme/talepler/${d.id}/kalem-dagitildi`,{method:"PUT",headers:hdrs,body:JSON.stringify({kalem_id:k.id})});
-                                setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,dagitim_yapildi:true}:x));
-                              } catch(e){ alert(e.message); }
-                              setSaving(false);
-                            }}
-                            style={{ padding:"4px 10px",background:"#1d4ed8",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:11,whiteSpace:"nowrap" }}>
-                            🛒 Satın Alındı
-                          </button>
-                        ) : <span style={{ fontSize:11,color:"#9ca3af" }}>—</span>}
-                      </td>
-                    )}
                   </tr>
                 ))}
               </tbody>
@@ -16122,74 +14777,14 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   <td style={{ padding:"8px 10px",color:"#15803d",fontSize:15 }}>
                     ₺{detayKalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0).toLocaleString("tr-TR")}
                   </td>
-                  <td colSpan={canMuratTedarik?3:2}></td>
+                  <td colSpan={2}></td>
                 </tr>
               </tfoot>
             </table>
           </div>
 
-          {/* PD Fiyat Karşılaştırma Analizi */}
-          {canDuzgun && detayKalemler.some(k=>Number(k.birim_fiyat||0)>0) && (() => {
-            const kalemleriyle = detayKalemler.filter(k=>Number(k.birim_fiyat||0)>0);
-            const hasUyari = kalemleriyle.some(k=>{
-              const gecmis = fiyatListe.find(f=>f.malzeme_adi?.toLowerCase()===k.malzeme_adi?.toLowerCase());
-              if (!gecmis?.son_fiyat) return false;
-              return (Number(k.birim_fiyat)-Number(gecmis.son_fiyat))/Number(gecmis.son_fiyat)*100 > 15;
-            });
-            return (
-              <div style={{ marginBottom:14, background: hasUyari?"#fff7ed":"#f0fdf4", border:`1.5px solid ${hasUyari?"#fed7aa":"#86efac"}`, borderRadius:10, padding:"12px 16px" }}>
-                <div style={{ fontSize:13,fontWeight:700,color:hasUyari?"#92400e":"#166534",marginBottom:10 }}>
-                  {hasUyari ? "⚠️ Fiyat Artış Analizi — Dikkat!" : "✅ Fiyat Analizi"}
-                </div>
-                <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
-                  <thead>
-                    <tr style={{ borderBottom:"1px solid #e5e7eb" }}>
-                      {["Malzeme","Son Alım Fiyatı","Murat'ın Teklifi","Fark","Artış %"].map(h=>(
-                        <th key={h} style={{ padding:"4px 8px",textAlign:"left",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {kalemleriyle.map((k,i)=>{
-                      const gecmis = fiyatListe.find(f=>f.malzeme_adi?.toLowerCase()===k.malzeme_adi?.toLowerCase());
-                      const sonFiyat = gecmis?.son_fiyat ? Number(gecmis.son_fiyat) : null;
-                      const teklifFiyat = Number(k.birim_fiyat||0);
-                      const fark = sonFiyat ? teklifFiyat - sonFiyat : null;
-                      const artis = sonFiyat && sonFiyat>0 ? (fark/sonFiyat*100) : null;
-                      const alarm = artis !== null && artis > 15;
-                      return (
-                        <tr key={i} style={{ borderBottom:"1px solid #f3f4f6", background: alarm?"#fff7ed":"transparent" }}>
-                          <td style={{ padding:"5px 8px",fontWeight:600,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{k.malzeme_adi}</td>
-                          <td style={{ padding:"5px 8px",color:sonFiyat?"#374151":"#9ca3af" }}>
-                            {sonFiyat ? `₺${sonFiyat.toLocaleString("tr-TR",{minimumFractionDigits:2})}` : "İlk alım"}
-                          </td>
-                          <td style={{ padding:"5px 8px",fontWeight:700,color:"#0284c7" }}>
-                            ₺{teklifFiyat.toLocaleString("tr-TR",{minimumFractionDigits:2})}
-                          </td>
-                          <td style={{ padding:"5px 8px",fontWeight:600,color:fark>0?"#dc2626":fark<0?"#16a34a":"#6b7280" }}>
-                            {fark!==null ? `${fark>0?"+":""}₺${fark.toLocaleString("tr-TR",{minimumFractionDigits:2})}` : "—"}
-                          </td>
-                          <td style={{ padding:"5px 8px" }}>
-                            {artis!==null ? (
-                              <span style={{ padding:"2px 7px",borderRadius:6,fontWeight:700,fontSize:11,
-                                background:alarm?"#fee2e2":artis<0?"#dcfce7":"#fef3c7",
-                                color:alarm?"#dc2626":artis<0?"#15803d":"#92400e" }}>
-                                {artis>0?"▲":"▼"} {Math.abs(artis).toFixed(1)}% {alarm?"🚨":""}
-                              </span>
-                            ) : <span style={{color:"#9ca3af",fontSize:11}}>—</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {hasUyari && <div style={{ marginTop:8,fontSize:11,color:"#92400e",fontStyle:"italic" }}>⚠️ %15'in üzerinde fiyat artışı tespit edildi. Onaylamadan önce sorgulayın.</div>}
-              </div>
-            );
-          })()}
-
           {/* Onay notu */}
-          {(canNurcan||canMurat||canPM||canDuzgun||canMuratTedarik) && (
+          {(canNurcan||canMurat||canPM||canDuzgun) && (
             <div style={{ marginBottom:14 }}>
               <label style={{ fontSize:13,fontWeight:600,display:"block",marginBottom:6 }}>Onay Notu (isteğe bağlı)</label>
               <textarea value={onayNotu} onChange={e=>setOnayNotu(e.target.value)} rows={2}
@@ -16199,12 +14794,12 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
           {/* Aksiyon butonları */}
           <div style={{ display:"flex",gap:10,flexWrap:"wrap" }}>
-            {canRollout       && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
-            {canNurcan        && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
-            {canPM            && <button onClick={()=>updateDurum(d.id,"FIYAT_GIRISI",null,onayNotu)}  disabled={saving} style={{ padding:"10px 18px",background:"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Envanter Onayına Gönder</button>}
-            {canMurat         && <button onClick={()=>updateDurum(d.id,"DUZGUN_ONAY",detayKalemler,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#0284c7",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Proje Direktörü'ne Gönder</button>}
-            {canDuzgun        && <button onClick={()=>updateDurum(d.id,"SATINALINACAK",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#ea580c",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Tedarik Sürecine Al</button>}
-            {canMuratTedarik  && <button onClick={()=>updateDurum(d.id,"DEPODA",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#15803d",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>📦 Tedarik Tamamlandı — Depoya Giriş</button>}
+            {canNurcan   && <button onClick={()=>updateDurum(d.id,"FIYAT_GIRISI",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Fiyat Girişi</button>}
+            {canMurat    && <button onClick={()=>updateDurum(d.id,"PM_ONAY",detayKalemler,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Fiyatları Kaydet → PM'e Gönder</button>}
+            {canPM       && <button onClick={()=>updateDurum(d.id,"DUZGUN_ONAY",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#0284c7",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Düzgün'e Gönder</button>}
+            {canDuzgun   && <button onClick={()=>updateDurum(d.id,"ONAYLANDI",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#16a34a",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla</button>}
+            {canOnay     && <button onClick={()=>updateDurum(d.id,"SATINALINACAK",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#ea580c",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>🛒 Satın Alınacak</button>}
+            {canDepoda   && <button onClick={()=>updateDurum(d.id,"DEPODA",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#15803d",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>📦 Depoya Girdi</button>}
             {canReddet   && <button onClick={()=>{setRedModal(d);setDetayModal(null);setRedNot("");}} style={{ padding:"10px 18px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>❌ Reddet</button>}
           </div>
         </div>
@@ -16217,86 +14812,6 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
     const toplamGenel = talepKalemler.reduce((s,k)=>s+(Number(k.miktar)||0)*(Number(k.birim_fiyat)||0),0);
     return (
       <div style={{ minHeight:"100vh",background:"#f1f5f9",fontFamily:"Inter,sans-serif" }}>
-
-        {/* ── YENİ MALZEME EKLE POPUP ─────────────────────────────── */}
-        {yeniMalzemePopup && (
-          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}
-            onClick={e=>{ if(e.target===e.currentTarget) setYeniMalzemePopup(null); }}>
-            <div style={{ background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:420,boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
-              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-                <div>
-                  <div style={{ fontSize:18,fontWeight:800,color:"#1e3a5f" }}>📦 Yeni Malzeme Ekle</div>
-                  <div style={{ fontSize:12,color:"#9ca3af",marginTop:2 }}>Malzeme kataloğuna eklenecek</div>
-                </div>
-                <button onClick={()=>setYeniMalzemePopup(null)} style={{ background:"#f3f4f6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6b7280" }}>✕</button>
-              </div>
-              {/* Malzeme Adı */}
-              <div style={{ marginBottom:14 }}>
-                <div style={{ fontSize:11,fontWeight:700,color:"#374151",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em" }}>Malzeme Adı *</div>
-                <input
-                  value={yeniMalzemePopup.adi}
-                  onChange={e=>setYeniMalzemePopup(p=>({...p,adi:e.target.value.toUpperCase()}))}
-                  placeholder="Malzeme adını yazın..."
-                  style={{ width:"100%",height:40,padding:"0 12px",border:"2px solid #2563eb",borderRadius:9,fontSize:13,boxSizing:"border-box",outline:"none",fontWeight:600 }}
-                  autoFocus
-                />
-              </div>
-              {/* Birim + Fiyat */}
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14 }}>
-                <div>
-                  <div style={{ fontSize:11,fontWeight:700,color:"#374151",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em" }}>Birim</div>
-                  <select value={yeniMalzemePopup.birim} onChange={e=>setYeniMalzemePopup(p=>({...p,birim:e.target.value}))}
-                    style={{ width:"100%",height:40,padding:"0 10px",border:"1px solid #d1d5db",borderRadius:9,fontSize:13,boxSizing:"border-box" }}>
-                    {["Adet","Metre","Rulo","Kutu","Kg","Lt","Paket","Set","Takım"].map(u=><option key={u}>{u}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize:11,fontWeight:700,color:"#374151",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em" }}>Birim Fiyat (₺)</div>
-                  <input type="number" value={yeniMalzemePopup.birim_fiyat}
-                    onChange={e=>setYeniMalzemePopup(p=>({...p,birim_fiyat:e.target.value}))}
-                    placeholder="0"
-                    style={{ width:"100%",height:40,padding:"0 12px",border:"1px solid #d1d5db",borderRadius:9,fontSize:13,boxSizing:"border-box",outline:"none" }}
-                  />
-                </div>
-              </div>
-              {/* Kategori */}
-              <div style={{ marginBottom:20 }}>
-                <div style={{ fontSize:11,fontWeight:700,color:"#374151",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em" }}>Kategori</div>
-                <select value={yeniMalzemePopup.kategori} onChange={e=>setYeniMalzemePopup(p=>({...p,kategori:e.target.value}))}
-                  style={{ width:"100%",height:40,padding:"0 10px",border:"1px solid #d1d5db",borderRadius:9,fontSize:13,boxSizing:"border-box" }}>
-                  {["Genel","Optik","Kablo","Pasif Ekipman","Aktif Ekipman","Enerji","Güvenlik","Diğer"].map(k=><option key={k}>{k}</option>)}
-                </select>
-              </div>
-              {/* Butonlar */}
-              <div style={{ display:"flex",gap:10 }}>
-                <button onClick={()=>setYeniMalzemePopup(null)}
-                  style={{ flex:1,height:42,background:"#f3f4f6",border:"none",borderRadius:10,fontSize:13,fontWeight:600,color:"#6b7280",cursor:"pointer" }}>
-                  İptal
-                </button>
-                <button onClick={async()=>{
-                  const ad = (yeniMalzemePopup.adi||"").trim().toUpperCase();
-                  if(!ad){ alert("Malzeme adı boş olamaz"); return; }
-                  const token2 = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
-                  const h2 = {"Content-Type":"application/json",Authorization:`Bearer ${token2}`};
-                  const r = await fetch(`${API_BASE}/malzeme/fiyat-listesi`,{
-                    method:"POST",headers:h2,
-                    body:JSON.stringify({malzeme_adi:ad,birim:yeniMalzemePopup.birim||"Adet",birim_fiyat:Number(yeniMalzemePopup.birim_fiyat)||0,kategori:yeniMalzemePopup.kategori||"Genel"})
-                  });
-                  const d2=await r.json();
-                  if(d2.error){ alert(d2.error); return; }
-                  // Talepte o satırın adını da güncelle
-                  setTalepKalemler(prev=>prev.map((x,j)=>j===yeniMalzemePopup.rowIdx?{...x,malzeme_adi:ad,birim:yeniMalzemePopup.birim||x.birim,birim_fiyat:yeniMalzemePopup.birim_fiyat||x.birim_fiyat}:x));
-                  loadFiyatListe();
-                  setYeniMalzemePopup(null);
-                }}
-                  style={{ flex:2,height:42,background:"linear-gradient(135deg,#1d4ed8,#2563eb)",border:"none",borderRadius:10,fontSize:14,fontWeight:700,color:"#fff",cursor:"pointer" }}>
-                  ✓ Kataloğa Ekle
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Header */}
         <div style={{ background:"#1e3a5f",color:"#fff",padding:"16px 20px",display:"flex",alignItems:"center",gap:12 }}>
           <button onClick={()=>{setFormView(null);setEditingId(null);setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);}}
@@ -16307,7 +14822,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
           </div>
         </div>
 
-        <div style={{ maxWidth:1200,margin:"0 auto",padding:20 }}>
+        <div style={{ maxWidth:880,margin:"0 auto",padding:20 }}>
           {/* Talep Bilgileri */}
           <div style={{ background:"#fff",borderRadius:12,padding:20,marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
             <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f",marginBottom:14 }}>📋 Talep Bilgileri</div>
@@ -16412,26 +14927,28 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
           {/* Malzeme Kalemleri */}
           <div style={{ background:"#fff",borderRadius:12,padding:20,marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-            <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f",marginBottom:14 }}>📦 Malzeme Kalemleri</div>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+              <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f" }}>📦 Malzeme Kalemleri</div>
+              <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}])}
+                style={{ padding:"7px 14px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700 }}>
+                + Kalem Ekle
+              </button>
+            </div>
             {/* Başlıklar */}
-            <div style={{ display:"grid",gridTemplateColumns:"3fr 80px 110px 130px 110px 110px 38px",gap:8,marginBottom:6 }}>
-              {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not / Açıklama",""].map(h=>(
+            <div style={{ display:"grid",gridTemplateColumns:"2fr 80px 100px 120px 100px 100px 36px",gap:8,marginBottom:6 }}>
+              {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not",""].map(h=>(
                 <div key={h} style={{ fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.3px",padding:"0 2px" }}>{h}</div>
               ))}
             </div>
             {talepKalemler.map((k,i)=>renderKalemRow(k,i))}
-            {/* Alt: Kalem Ekle + Genel Toplam */}
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12,paddingTop:12,borderTop:"2px solid #e5e7eb" }}>
-              <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}])}
-                style={{ padding:"8px 18px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:700 }}>
-                + Kalem Ekle
-              </button>
-              {toplamGenel > 0 && (
+            {/* Genel Toplam */}
+            {toplamGenel > 0 && (
+              <div style={{ display:"flex",justifyContent:"flex-end",marginTop:12,paddingTop:12,borderTop:"2px solid #e5e7eb" }}>
                 <div style={{ fontSize:16,fontWeight:800,color:"#15803d" }}>
                   Genel Toplam: ₺{toplamGenel.toLocaleString("tr-TR")}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* Açıklama */}
@@ -16455,14 +14972,11 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             <button onClick={()=>{
               // Hiyerarşiye göre ilk onay adımını belirle:
               // Nurcan Kuş → Orhan Bedir - Murat İstek - Düzgün Şimşek - Murat İstek
-              const userRole = (currentUser?.role || "").toLowerCase();
-              const isRolloutMudur = userRole === "rollout_mudur" || userRole === "bolge_mudur";
-              const submitDurum = isDirektor    ? "FIYAT_GIRISI"         // Direktör → Murat fiyat
-                : isMurat       ? "DUZGUN_ONAY"                          // Murat → PD'ye
-                : isPM          ? "FIYAT_GIRISI"                         // PM → Murat'a
-                : isNurcan      ? "PM_ONAY"                              // Nurcan → PM'e
-                : isRolloutMudur? "PM_ONAY"                              // Rollout/Bölge Müd. → PM'e
-                : "ROLLOUT_BEKLE";                                       // Personel → Rollout Müdürüne
+              const submitDurum = isDirektor ? "ONAYLANDI"
+                : isMurat    ? "DUZGUN_ONAY"
+                : isPM       ? "FIYAT_GIRISI"   // Orhan → Nurcan'ı atla, Murat'a git
+                : isNurcan   ? "PM_ONAY"         // Nurcan → kendini atla, Orhan'a git
+                : "NURCAN_ONAY";                 // Diğerleri → Nurcan'dan başla
               saveTalep(submitDurum);
             }} disabled={saving}
               style={{ padding:"12px 28px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:15 }}>
@@ -16488,9 +15002,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
       {/* Tabs */}
       <div style={{ display:"flex",borderBottom:"2px solid #e2e8f0",background:"#fff",padding:"0 16px",gap:4 }}>
-        {[...(!_isPersonelOnly?[["talepler","📋 Talepler"]]:[]),
-          ...(canSeeDepo?[["depo","🏭 Depo Stok"],["fiyat","💰 Fiyat Listesi"]]:[]),
-          ["dagitim",_isPersonelOnly?"📦 Üzerimdeki Malzemeler":"📤 Dağıtım"]
+        {[["talepler","📋 Talepler"],
+          ...(canSeeDepo?[["depo","🏭 Depo Stok"],["fiyat","💰 Fiyat Listesi"]]:[])
         ].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)}
             style={{ padding:"12px 16px",background:"none",border:"none",cursor:"pointer",fontWeight:tab===k?700:400,fontSize:14,
@@ -16500,144 +15013,57 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
         ))}
       </div>
 
-      <div style={{ padding:"16px 20px" }}>
+      <div style={{ padding:16,maxWidth:960,margin:"0 auto" }}>
 
         {/* ── TALEPLER SEKMESİ ── */}
         {tab==="talepler" && (
           <div>
-            {/* Üst bar: başlık + filtreler + yeni talep */}
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:14,flexWrap:"wrap" }}>
-              <div style={{ display:"flex",alignItems:"center",gap:10,flex:1,flexWrap:"wrap" }}>
-                <div style={{ fontSize:16,fontWeight:800,color:"#1e3a5f",whiteSpace:"nowrap" }}>
-                  Malzeme Talepleri
-                  {talepLoading && <span style={{fontSize:12,color:"#9ca3af",fontWeight:400,marginLeft:8}}>yükleniyor…</span>}
-                  <span style={{fontSize:13,color:"#6b7280",fontWeight:500,marginLeft:8}}>({talepler.filter(t=>{
-                    if(talepDurumFilter && t.durum!==talepDurumFilter) return false;
-                    if(talepArama) { const q=talepArama.toLowerCase(); return (t.talep_no||"").toLowerCase().includes(q)||(t.talep_eden_ad||"").toLowerCase().includes(q)||(t.bolge||"").toLowerCase().includes(q)||(t.proje||"").toLowerCase().includes(q)||(t.site_id||"").toLowerCase().includes(q); }
-                    return true;
-                  }).length} kayıt)</span>
-                </div>
-                <input
-                  placeholder="🔍 Ara… (no, kişi, bölge, site)"
-                  value={talepArama} onChange={e=>setTalepArama(e.target.value)}
-                  style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,width:220,outline:"none" }}
-                />
-                <select value={talepDurumFilter} onChange={e=>setTalepDurumFilter(e.target.value)}
-                  style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,color:"#374151",cursor:"pointer" }}>
-                  <option value="">Tüm Durumlar</option>
-                  <option value="TASLAK">Taslak</option>
-                  <option value="NURCAN_ONAY">Rollout Müdürü Onayı Bekleniyor</option>
-                  <option value="ROLLOUT_BEKLE">Rollout Müdürü Onayı Bekleniyor</option>
-                  <option value="PM_ONAY">PM Onayı Bekleniyor</option>
-                  <option value="FIYAT_GIRISI">Envanter Onayı Bekleniyor</option>
-                  <option value="DUZGUN_ONAY">Proje Direktörü Onayı Bekleniyor</option>
-                  <option value="SATINALINACAK">Tedarik Aşamasında</option>
-                  <option value="ONAYLANDI">Onaylandı</option>
-                  <option value="DEPODA">Depoda</option>
-                  <option value="REDDEDILDI">Reddedildi</option>
-                </select>
-                {(talepArama||talepDurumFilter) && (
-                  <button onClick={()=>{setTalepArama("");setTalepDurumFilter("");}}
-                    style={{ padding:"7px 12px",background:"#f3f4f6",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,color:"#6b7280" }}>
-                    ✕ Temizle
-                  </button>
-                )}
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+              <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f" }}>
+                Malzeme Talepleri {talepLoading&&<span style={{fontSize:12,color:"#9ca3af"}}>yükleniyor…</span>}
               </div>
-              <div style={{ display:"flex",gap:8 }}>
-                {canSeeDepo && (
-                  <button onClick={depoStokExcelIndir}
-                    style={{ padding:"10px 18px",background:"#16a34a",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6 }}>
-                    📥 Depo Stok Excel
-                  </button>
-                )}
-                <button onClick={()=>{setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);setEditingId(null);setFormView("form");}}
-                  style={{ padding:"10px 22px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
-                  + Yeni Talep
-                </button>
-              </div>
+              <button onClick={()=>{setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);setEditingId(null);setFormView("form");}}
+                style={{ padding:"10px 20px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14 }}>
+                + Yeni Talep
+              </button>
             </div>
-
-            {/* Tablo */}
-            <div style={{ background:"#fff",borderRadius:14,boxShadow:"0 1px 6px rgba(0,0,0,0.07)",overflow:"hidden" }}>
-              <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
-                <thead>
-                  <tr style={{ background:"#1e3a5f",color:"#fff" }}>
-                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap" }}>Talep No</th>
-                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700 }}>Talep Eden</th>
-                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700 }}>Bölge</th>
-                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700 }}>Proje</th>
-                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap" }}>Site ID</th>
-                    <th style={{ padding:"11px 14px",textAlign:"center",fontWeight:700,whiteSpace:"nowrap" }}>Kalem</th>
-                    <th style={{ padding:"11px 14px",textAlign:"right",fontWeight:700,whiteSpace:"nowrap" }}>Tutar</th>
-                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap" }}>Tarih</th>
-                    <th style={{ padding:"11px 14px",textAlign:"left",fontWeight:700 }}>Durum</th>
-                    <th style={{ padding:"11px 14px",textAlign:"center",fontWeight:700 }}>İşlem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {talepler.filter(t=>{
-                    if(talepDurumFilter && t.durum!==talepDurumFilter) return false;
-                    if(talepArama) { const q=talepArama.toLowerCase(); return (t.talep_no||"").toLowerCase().includes(q)||(t.talep_eden_ad||"").toLowerCase().includes(q)||(t.bolge||"").toLowerCase().includes(q)||(t.proje||"").toLowerCase().includes(q)||(t.site_id||"").toLowerCase().includes(q); }
-                    return true;
-                  }).length===0 && (
-                    <tr><td colSpan={10} style={{padding:40,textAlign:"center",color:"#9ca3af"}}>
-                      {talepLoading ? "Yükleniyor…" : "Kayıt bulunamadı."}
-                    </td></tr>
-                  )}
-                  {talepler.filter(t=>{
-                    if(talepDurumFilter && t.durum!==talepDurumFilter) return false;
-                    if(talepArama) { const q=talepArama.toLowerCase(); return (t.talep_no||"").toLowerCase().includes(q)||(t.talep_eden_ad||"").toLowerCase().includes(q)||(t.bolge||"").toLowerCase().includes(q)||(t.proje||"").toLowerCase().includes(q)||(t.site_id||"").toLowerCase().includes(q); }
-                    return true;
-                  }).map((t,i)=>{
-                    const durumColors = {
-                      TASLAK:"#9ca3af", NURCAN_ONAY:"#d97706", ROLLOUT_BEKLE:"#f59e0b", FIYAT_GIRISI:"#7c3aed",
-                      PM_ONAY:"#2563eb", DUZGUN_ONAY:"#0284c7", ONAYLANDI:"#16a34a",
-                      SATINALINACAK:"#ea580c", DEPODA:"#15803d", REDDEDILDI:"#dc2626",
-                    };
-                    const leftColor = durumColors[t.durum] || "#1e3a5f";
-                    return (
-                      <tr key={t.id} style={{ borderBottom:"1px solid #f1f5f9",background:i%2===0?"#fff":"#fafbfc",
-                        borderLeft:`4px solid ${leftColor}`,cursor:"pointer" }}
-                        onClick={()=>loadDetay(t.id)}
-                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
-                        onMouseLeave={e=>e.currentTarget.style.background=i%2===0?"#fff":"#fafbfc"}
-                      >
-                        <td style={{ padding:"11px 14px",fontWeight:700,color:"#1e3a5f",whiteSpace:"nowrap" }}>{t.talep_no}</td>
-                        <td style={{ padding:"11px 14px",fontWeight:600,color:"#374151" }}>{t.talep_eden_ad}</td>
-                        <td style={{ padding:"11px 14px",color:"#6b7280" }}>{t.bolge||"—"}</td>
-                        <td style={{ padding:"11px 14px",color:"#6b7280" }}>{t.proje||"—"}</td>
-                        <td style={{ padding:"11px 14px",color:"#6b7280",fontFamily:"monospace",fontSize:12 }}>{t.site_id||"—"}</td>
-                        <td style={{ padding:"11px 14px",textAlign:"center",color:"#374151",fontWeight:600 }}>{Number(t.kalem_sayisi)}</td>
-                        <td style={{ padding:"11px 14px",textAlign:"right",fontWeight:700,color:Number(t.toplam_tutar)>0?"#15803d":"#9ca3af" }}>
-                          {Number(t.toplam_tutar)>0 ? `₺${Number(t.toplam_tutar).toLocaleString("tr-TR")}` : "—"}
-                        </td>
-                        <td style={{ padding:"11px 14px",color:"#6b7280",whiteSpace:"nowrap",fontSize:12 }}>
-                          {t.talep_tarihi ? new Date(t.talep_tarihi).toLocaleDateString("tr-TR") : new Date(t.created_at).toLocaleDateString("tr-TR")}
-                        </td>
-                        <td style={{ padding:"11px 14px" }}>{durumBadge(t.durum)}</td>
-                        <td style={{ padding:"8px 10px",textAlign:"center" }} onClick={e=>e.stopPropagation()}>
-                          <div style={{ display:"flex",gap:5,justifyContent:"center" }}>
-                            <button onClick={()=>loadDetay(t.id)}
-                              style={{ padding:"5px 10px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700 }}>
-                              Detay
-                            </button>
-                            {["TASLAK","REDDEDILDI"].includes(t.durum) && t.talep_eden_email===currentUser?.email && (<>
-                              <button onClick={()=>openEdit(t)}
-                                style={{ padding:"5px 8px",background:"#fef3c7",color:"#92400e",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700 }}>
-                                ✏️
-                              </button>
-                              <button onClick={()=>deleteTalep(t.id)}
-                                style={{ padding:"5px 8px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700 }}>
-                                🗑
-                              </button>
-                            </>)}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            {talepler.length===0&&!talepLoading&&<div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>Henüz talep yok.</div>}
+            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+              {talepler.map(t=>(
+                <div key={t.id}
+                  style={{ background:"#fff",borderRadius:12,padding:"14px 18px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",
+                    borderLeft:`4px solid ${t.durum==="TASLAK"?"#9ca3af":t.durum==="REDDEDILDI"?"#dc2626":t.durum==="DEPODA"?"#15803d":"#1e3a5f"}` }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap" }}>
+                    <div style={{ cursor:"pointer",flex:1 }} onClick={()=>loadDetay(t.id)}>
+                      <div style={{ fontWeight:700,fontSize:15,marginBottom:4 }}>{t.talep_no} · {t.talep_eden_ad}</div>
+                      <div style={{ fontSize:12,color:"#6b7280",display:"flex",gap:12,flexWrap:"wrap" }}>
+                        {t.bolge&&<span>📍 {t.bolge}</span>}
+                        {t.proje&&<span>🏗 {t.proje}</span>}
+                        {t.site_type&&<span>📡 {t.site_type}</span>}
+                        {t.site_id&&<span>🔖 {t.site_id}</span>}
+                        {t.talep_edilen_firma&&<span>🏢 {t.talep_edilen_firma}</span>}
+                        <span>📅 {t.talep_tarihi ? new Date(t.talep_tarihi).toLocaleDateString("tr-TR") : new Date(t.created_at).toLocaleDateString("tr-TR")}</span>
+                        <span>{Number(t.kalem_sayisi)} kalem</span>
+                        {Number(t.toplam_tutar)>0&&<span style={{color:"#15803d",fontWeight:700}}>₺{Number(t.toplam_tutar).toLocaleString("tr-TR")}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
+                      {durumBadge(t.durum)}
+                      {["TASLAK","REDDEDILDI"].includes(t.durum) && t.talep_eden_email===currentUser?.email && (<>
+                        <button onClick={()=>openEdit(t)}
+                          style={{ padding:"5px 12px",background:"#dbeafe",color:"#1d4ed8",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:700 }}>
+                          ✏️ Düzenle
+                        </button>
+                        <button onClick={e=>{e.stopPropagation();deleteTalep(t.id);}}
+                          style={{ padding:"5px 12px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:700 }}>
+                          🗑 Sil
+                        </button>
+                      </>)}
+                      <span style={{color:"#9ca3af",fontSize:18,cursor:"pointer"}} onClick={()=>loadDetay(t.id)}>›</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -16645,32 +15071,14 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
         {/* ── DEPO STOK ── */}
         {tab==="depo" && canSeeDepo && (
           <div>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap" }}>
-              <div style={{ display:"flex",alignItems:"center",gap:10,flex:1 }}>
-                <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f",whiteSpace:"nowrap" }}>🏭 Depo Stok Durumu</div>
-                <span style={{ fontSize:13,color:"#6b7280",fontWeight:500 }}>
-                  ({(depoArama ? depoStok.filter(s=>(s.malzeme_adi||"").toLowerCase().includes(depoArama.toLowerCase())) : depoStok).length} kalem)
-                </span>
-              </div>
-              <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                <div style={{ position:"relative" }}>
-                  <input
-                    placeholder="🔍 Malzeme ara…"
-                    value={depoArama} onChange={e=>setDepoArama(e.target.value)}
-                    style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,width:220,outline:"none" }}
-                  />
-                  {depoArama && (
-                    <button onClick={()=>setDepoArama("")}
-                      style={{ position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#9ca3af",fontSize:14,padding:0,lineHeight:1 }}>✕</button>
-                  )}
-                </div>
-                {(isAdmin||isMurat) && (
-                  <button onClick={()=>{setDepoEditModal({id:null});setDepoEditForm({malzeme_adi:"",birim:"Adet",toplam_miktar:"",aciklama:""});}}
-                    style={{ padding:"9px 18px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
-                    + Manuel Stok Güncelle
-                  </button>
-                )}
-              </div>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+              <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f" }}>🏭 Depo Stok Durumu</div>
+              {(isAdmin||isPM||isDirektor) && (
+                <button onClick={()=>{setDepoEditModal({id:null});setDepoEditForm({malzeme_adi:"",birim:"Adet",toplam_miktar:"",aciklama:""});}}
+                  style={{ padding:"9px 18px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14 }}>
+                  + Manuel Stok Girişi
+                </button>
+              )}
             </div>
             <div style={{ overflowX:"auto",background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
               <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
@@ -16682,8 +15090,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {depoStok.filter(s=>!depoArama||(s.malzeme_adi||"").toLowerCase().includes(depoArama.toLowerCase())).length===0&&<tr><td colSpan={8} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>{depoArama?"Eşleşen malzeme bulunamadı.":"Depo kaydı yok."}</td></tr>}
-                  {depoStok.filter(s=>!depoArama||(s.malzeme_adi||"").toLowerCase().includes(depoArama.toLowerCase())).map((s,i)=>(
+                  {depoStok.length===0&&<tr><td colSpan={8} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>Depo kaydı yok.</td></tr>}
+                  {depoStok.map((s,i)=>(
                     <tr key={s.id} style={{ borderBottom:"1px solid #f0f4f8",background:i%2===0?"#fff":"#f8fafc" }}>
                       <td style={{ padding:"10px 12px",fontWeight:600 }}>{s.malzeme_adi}</td>
                       <td style={{ padding:"10px 12px",textAlign:"center" }}>{Number(s.toplam_miktar).toLocaleString("tr-TR")}</td>
@@ -16696,7 +15104,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                         <div style={{ display:"flex",gap:6 }}>
                           <button onClick={()=>{setSarfModal(s);setSarfForm({miktar:"",personel_ad:"",lokasyon:"",islem_turu:"CIKIS",notlar:""});loadSarf(s.malzeme_adi);}}
                             style={{ padding:"5px 10px",background:"#dbeafe",color:"#1d4ed8",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700 }}>📤 Sarf</button>
-                          {(isAdmin||isMurat)&&<button onClick={()=>{setDepoEditModal(s);setDepoEditForm({...s});}}
+                          {(isAdmin||isPM)&&<button onClick={()=>{setDepoEditModal(s);setDepoEditForm({...s});}}
                             style={{ padding:"5px 10px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:6,cursor:"pointer",fontSize:11 }}>✏️</button>}
                         </div>
                       </td>
@@ -16711,25 +15119,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
         {/* ── FİYAT LİSTESİ ── */}
         {tab==="fiyat" && canSeeDepo && (
           <div>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap" }}>
-              <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f" }}>💰 Malzeme Fiyat Listesi</div>
-                <span style={{ fontSize:13,color:"#6b7280",fontWeight:500 }}>
-                  ({(fiyatArama ? fiyatListe.filter(f=>(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())) : fiyatListe).length} kalem)
-                </span>
-              </div>
-              <div style={{ position:"relative" }}>
-                <input
-                  placeholder="🔍 Malzeme veya kategori ara…"
-                  value={fiyatArama} onChange={e=>setFiyatArama(e.target.value)}
-                  style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,width:260,outline:"none" }}
-                />
-                {fiyatArama && (
-                  <button onClick={()=>setFiyatArama("")}
-                    style={{ position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#9ca3af",fontSize:14,padding:0,lineHeight:1 }}>✕</button>
-                )}
-              </div>
-            </div>
+            <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f",marginBottom:16 }}>💰 Malzeme Fiyat Listesi</div>
             {canEditFiyat && (
               <div style={{ background:"#fff",borderRadius:12,padding:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginBottom:16 }}>
                 <div style={{ fontSize:14,fontWeight:700,marginBottom:12 }}>{fiyatEditId?"✏️ Malzeme Düzenle":"➕ Yeni Malzeme Ekle"}</div>
@@ -16771,48 +15161,19 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
                 <thead>
                   <tr style={{ background:"#1e3a5f",color:"#fff" }}>
-                    <th style={{ padding:"10px 14px",textAlign:"left",fontWeight:600 }}>Malzeme Adı</th>
-                    <th style={{ padding:"10px 14px",textAlign:"left",fontWeight:600 }}>Birim</th>
-                    <th style={{ padding:"10px 14px",textAlign:"center",fontWeight:600 }}>İlk Alım Fiyatı</th>
-                    <th style={{ padding:"10px 14px",textAlign:"center",fontWeight:600 }}>Son Alım Fiyatı</th>
-                    <th style={{ padding:"10px 14px",textAlign:"center",fontWeight:600 }}>Fiyat Değişimi</th>
-                    <th style={{ padding:"10px 14px",textAlign:"left",fontWeight:600 }}>Kategori</th>
-                    <th style={{ padding:"10px 14px" }}></th>
+                    {["Malzeme Adı","Birim","Birim Fiyat","Kategori",""].map(h=>(
+                      <th key={h} style={{ padding:"10px 14px",textAlign:"left",fontWeight:600 }}>{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {fiyatListe.filter(f=>!fiyatArama||(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())).length===0&&<tr><td colSpan={7} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>{fiyatArama?"Eşleşen malzeme bulunamadı.":"Fiyat listesi boş."}</td></tr>}
-                  {fiyatListe.filter(f=>!fiyatArama||(f.malzeme_adi||"").toLowerCase().includes(fiyatArama.toLowerCase())||(f.kategori||"").toLowerCase().includes(fiyatArama.toLowerCase())).map((f,i)=>{
-                    const ilk = Number(f.ilk_fiyat||0);
-                    const son = Number(f.son_fiyat||f.birim_fiyat||0);
-                    const degisim = ilk > 0 && son > 0 ? ((son-ilk)/ilk*100) : null;
-                    const degisimRenk = degisim === null ? "#9ca3af" : degisim > 20 ? "#dc2626" : degisim > 0 ? "#ea580c" : degisim < 0 ? "#15803d" : "#6b7280";
-                    return (
+                  {fiyatListe.length===0&&<tr><td colSpan={5} style={{padding:32,textAlign:"center",color:"#9ca3af"}}>Fiyat listesi boş.</td></tr>}
+                  {fiyatListe.map((f,i)=>(
                     <tr key={f.id} style={{ borderBottom:"1px solid #f0f4f8",background:i%2===0?"#fff":"#f8fafc" }}>
                       <td style={{ padding:"9px 14px",fontWeight:600 }}>{f.malzeme_adi}</td>
                       <td style={{ padding:"9px 14px" }}>{f.birim}</td>
-                      <td style={{ padding:"9px 14px",textAlign:"center",color:"#6b7280",fontSize:12 }}>
-                        {ilk > 0 ? (
-                          <div>
-                            <div style={{ fontWeight:600, color:"#374151" }}>₺{ilk.toLocaleString("tr-TR",{minimumFractionDigits:2})}</div>
-                            {f.ilk_fiyat_tarihi && <div style={{ fontSize:10,color:"#9ca3af" }}>{new Date(f.ilk_fiyat_tarihi).toLocaleDateString("tr-TR")}</div>}
-                          </div>
-                        ) : <span style={{color:"#d1d5db"}}>—</span>}
-                      </td>
-                      <td style={{ padding:"9px 14px",textAlign:"center" }}>
-                        {son > 0 ? (
-                          <div>
-                            <div style={{ fontWeight:700,color:"#15803d" }}>₺{son.toLocaleString("tr-TR",{minimumFractionDigits:2})}</div>
-                            {f.son_fiyat_tarihi && <div style={{ fontSize:10,color:"#9ca3af" }}>{new Date(f.son_fiyat_tarihi).toLocaleDateString("tr-TR")}</div>}
-                          </div>
-                        ) : <span style={{color:"#d1d5db"}}>—</span>}
-                      </td>
-                      <td style={{ padding:"9px 14px",textAlign:"center" }}>
-                        {degisim !== null ? (
-                          <span style={{ padding:"3px 8px",borderRadius:8,background:degisim>20?"#fee2e2":degisim>0?"#fff7ed":degisim<0?"#f0fdf4":"#f9fafb", color:degisimRenk,fontWeight:700,fontSize:12 }}>
-                            {degisim > 0 ? "▲" : degisim < 0 ? "▼" : "—"} {Math.abs(degisim).toFixed(1)}%
-                          </span>
-                        ) : <span style={{color:"#d1d5db",fontSize:12}}>Veri yok</span>}
+                      <td style={{ padding:"9px 14px",fontWeight:700,color:Number(f.birim_fiyat)>0?"#15803d":"#9ca3af" }}>
+                        {Number(f.birim_fiyat)>0 ? `₺${Number(f.birim_fiyat).toLocaleString("tr-TR")}` : "—"}
                       </td>
                       <td style={{ padding:"9px 14px" }}><span style={{ padding:"2px 8px",borderRadius:8,background:"#f0f4ff",color:"#3730a3",fontSize:11,fontWeight:600 }}>{f.kategori}</span></td>
                       <td style={{ padding:"9px 10px" }}>
@@ -16824,171 +15185,12 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                         </div>}
                       </td>
                     </tr>
-                  );})}
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
         )}
-        {/* ── BEKLEYENİADELER PANELİ (Murat/Admin görür) ── */}
-        {tab==="dagitim" && canSeeDepo && isMurat && dagitim.filter(d=>d.durum==="IADE_BEKLEMEDE").length > 0 && (
-          <div style={{ background:"#fffbeb",border:"2px solid #fcd34d",borderRadius:12,padding:16,marginBottom:20 }}>
-            <div style={{ fontSize:15,fontWeight:800,color:"#92400e",marginBottom:12 }}>⏳ Onay Bekleyen İadeler ({dagitim.filter(d=>d.durum==="IADE_BEKLEMEDE").length})</div>
-            {dagitim.filter(d=>d.durum==="IADE_BEKLEMEDE").map(d=>(
-              <div key={d.id} style={{ background:"#fff",borderRadius:9,border:"1px solid #fde68a",padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap" }}>
-                <div style={{ flex:1,minWidth:200 }}>
-                  <div style={{ fontWeight:700,fontSize:13,color:"#111827" }}>{d.malzeme_adi}</div>
-                  <div style={{ fontSize:12,color:"#6b7280",marginTop:2 }}>
-                    <span style={{ color:"#1d4ed8",fontWeight:600 }}>{d.alici_personel_ad||d.alici_firma||"?"}</span>
-                    {" · "}<span>İade: <strong>{d.iade_miktar||d.miktar} {d.birim}</strong></span>
-                    {d.saha_notlar && <span style={{ marginLeft:6,color:"#9ca3af" }}>· {d.saha_notlar}</span>}
-                    {d.iade_talep_tarihi && <span style={{ marginLeft:6 }}> · {new Date(d.iade_talep_tarihi).toLocaleDateString("tr-TR")}</span>}
-                  </div>
-                </div>
-                <div style={{ display:"flex",gap:8 }}>
-                  <button onClick={()=>handleIadeReddet(d.id)} disabled={saving}
-                    style={{ padding:"7px 14px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:12 }}>
-                    ✗ Reddet
-                  </button>
-                  <button onClick={()=>handleIadeOnayla(d.id)} disabled={saving}
-                    style={{ padding:"7px 14px",background:"#065f46",color:"#fff",border:"none",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:12 }}>
-                    ✓ Onayla &amp; Depoya Ekle
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ── DAĞITIM ── */}
-        {tab==="dagitim" && (() => {
-          const durumRenk = { PERSONELDE:{ bg:"#dbeafe",c:"#1d4ed8",l:"Üzerinde" }, SAHADA:{ bg:"#dcfce7",c:"#15803d",l:"Sahada" }, IADE_BEKLEMEDE:{ bg:"#fef3c7",c:"#d97706",l:"İade Onayı Bekleniyor" }, DEPOYA_IADE:{ bg:"#f3f4f6",c:"#6b7280",l:"İade Edildi" } };
-          const isPersonel = !canSeeDepo;
-          const liste = isPersonel ? dagitim : dagitim.filter(d=>!dagitimArama || (d.malzeme_adi||"").toLowerCase().includes(dagitimArama.toLowerCase()) || (d.alici_personel_ad||"").toLowerCase().includes(dagitimArama.toLowerCase()) || (d.alici_firma||"").toLowerCase().includes(dagitimArama.toLowerCase()));
-          return (
-            <div>
-              {/* Başlık satırı */}
-              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap" }}>
-                <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                  <div style={{ fontSize:16,fontWeight:700,color:"#1e3a5f" }}>{isPersonel ? "📦 Üzerimdeki Malzemeler" : "📤 Malzeme Dağıtım Takibi"}</div>
-                  <span style={{ fontSize:13,color:"#6b7280" }}>({liste.filter(d=>d.durum!=="DEPOYA_IADE").length} aktif)</span>
-                </div>
-                <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                  {canSeeDepo && (
-                    <div style={{ position:"relative" }}>
-                      <input placeholder="🔍 Malzeme, personel, firma..."
-                        value={dagitimArama} onChange={e=>setDagitimArama(e.target.value)}
-                        style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,width:240,outline:"none" }} />
-                      {dagitimArama && <button onClick={()=>setDagitimArama("")} style={{ position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#9ca3af",fontSize:14 }}>✕</button>}
-                    </div>
-                  )}
-                  {canSeeDepo && (
-                    <button onClick={()=>{ setDagitimModal(true); setDagitimForm({ malzeme_adi:"",miktar:1,birim:"Adet",alici_tipi:"PERSONEL",alici_personel_id:"",alici_personel_ad:"",alici_personel_email:"",alici_firma:"",site_id:"",bolge:"",notlar:"" }); }}
-                      style={{ padding:"9px 18px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
-                      + Malzeme Çıkışı Yap
-                    </button>
-                  )}
-                  {canSeeDepo && (
-                    <button onClick={()=>{ /* Excel */ exportDagitimExcel(); }}
-                      style={{ padding:"9px 16px",background:"#16a34a",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
-                      📥 Excel
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Tablo */}
-              <div style={{ overflowX:"auto",background:"#fff",borderRadius:12,boxShadow:"0 1px 6px rgba(0,0,0,0.07)" }}>
-                <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
-                  <colgroup>
-                    <col style={{ width:"28%" }} />
-                    <col style={{ width:"6%" }} />
-                    <col style={{ width:"6%" }} />
-                    {canSeeDepo && <col style={{ width:"16%" }} />}
-                    <col style={{ width:"10%" }} />
-                    <col style={{ width:"10%" }} />
-                    <col style={{ width:"8%" }} />
-                    <col style={{ width:"10%" }} />
-                    <col style={{ width:"8%" }} />
-                    <col style={{ width:"8%" }} />
-                  </colgroup>
-                  <thead>
-                    <tr style={{ background:"#1e3a5f",color:"#fff" }}>
-                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Malzeme</th>
-                      <th style={{ padding:"10px 12px",textAlign:"center",fontWeight:600 }}>Miktar</th>
-                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Birim</th>
-                      {canSeeDepo && <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Alıcı</th>}
-                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Verilme Tarihi</th>
-                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Site / Bölge</th>
-                      <th style={{ padding:"10px 12px",textAlign:"center",fontWeight:600 }}>Durum</th>
-                      <th style={{ padding:"10px 12px",textAlign:"left",fontWeight:600 }}>Saha Site</th>
-                      <th style={{ padding:"10px 12px",textAlign:"center",fontWeight:600 }}>Tutanak</th>
-                      <th style={{ padding:"10px 12px" }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {liste.length===0 && <tr><td colSpan={10} style={{ padding:32,textAlign:"center",color:"#9ca3af" }}>Kayıt bulunamadı.</td></tr>}
-                    {liste.map((d,i)=>{
-                      const dr = durumRenk[d.durum] || durumRenk.PERSONELDE;
-                      const aktif = d.durum==="PERSONELDE";
-                      return (
-                        <tr key={d.id} style={{ borderBottom:"1px solid #f0f4f8",background:d.durum==="DEPOYA_IADE"?"#fafafa":i%2===0?"#fff":"#f8fafc", opacity:d.durum==="DEPOYA_IADE"?0.6:1 }}>
-                          <td style={{ padding:"9px 12px",fontWeight:600,maxWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }} title={d.malzeme_adi}>{d.malzeme_adi}</td>
-                          <td style={{ padding:"9px 12px",textAlign:"center",fontWeight:700 }}>{d.miktar}</td>
-                          <td style={{ padding:"9px 12px" }}>{d.birim}</td>
-                          {canSeeDepo && <td style={{ padding:"9px 12px" }}>
-                            {d.alici_tipi==="TASERON"
-                              ? <span style={{ color:"#7c3aed",fontWeight:600 }}>🏢 {d.alici_firma}</span>
-                              : <span style={{ color:"#1d4ed8",fontWeight:600 }}>👤 {d.alici_personel_ad}</span>
-                            }
-                          </td>}
-                          <td style={{ padding:"9px 12px",color:"#6b7280",fontSize:12 }}>{d.verilme_tarihi ? new Date(d.verilme_tarihi).toLocaleDateString("tr-TR") : "—"}</td>
-                          <td style={{ padding:"9px 12px",fontSize:12 }}>{d.site_id||d.bolge||"—"}</td>
-                          <td style={{ padding:"9px 12px",textAlign:"center" }}>
-                            <span style={{ padding:"3px 10px",borderRadius:8,background:dr.bg,color:dr.c,fontWeight:700,fontSize:11 }}>{dr.l}</span>
-                          </td>
-                          <td style={{ padding:"9px 12px",fontSize:12,color:"#15803d" }}>{d.saha_site_id||"—"}</td>
-                          <td style={{ padding:"9px 12px",textAlign:"center" }}>
-                            {d.tutanak_url
-                              ? <a href={d.tutanak_url} target="_blank" rel="noreferrer" style={{ color:"#2563eb",fontWeight:700,fontSize:12 }}>📄 Gör</a>
-                              : (aktif ? (
-                                <label style={{ cursor:"pointer",color:"#9ca3af",fontSize:11,padding:"3px 8px",border:"1px dashed #d1d5db",borderRadius:6 }}>
-                                  📎 Yükle
-                                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} onChange={async e=>{
-                                    const file = e.target.files[0]; if(!file) return;
-                                    const fd = new FormData(); fd.append("file", file);
-                                    try {
-                                      const up = await fetch(`${API_BASE}/upload`, { method:"POST", headers:{ Authorization:`Bearer ${token}` }, body:fd });
-                                      const ud = await up.json();
-                                      if (ud.url) {
-                                        await fetch(`${API_BASE}/malzeme/dagitim/${d.id}/tutanak`, { method:"PUT", headers, body:JSON.stringify({ tutanak_url: ud.url }) });
-                                        canSeeDepo ? loadDagitim() : loadDagitimPersonel();
-                                      }
-                                    } catch {}
-                                  }} />
-                                </label>
-                              ) : <span style={{ color:"#d1d5db",fontSize:11 }}>—</span>)
-                            }
-                          </td>
-                          <td style={{ padding:"8px 10px" }}>
-                            {aktif && (
-                              <div style={{ display:"flex",gap:5 }}>
-                                <button onClick={()=>{ setSahaCikisModal(d); setSahaCikisForm({ saha_site_id:"",saha_notlar:"" }); }}
-                                  style={{ padding:"4px 9px",background:"#dcfce7",color:"#15803d",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,whiteSpace:"nowrap" }}>🏗 Sahaya</button>
-                                <button onClick={()=>{ setIadeModal(d); setIadeNot(""); }}
-                                  style={{ padding:"4px 9px",background:"#fef3c7",color:"#92400e",border:"none",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:700,whiteSpace:"nowrap" }}>↩ İade</button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
       {/* DETAY MODAL */}
@@ -17005,233 +15207,6 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               <button onClick={()=>setRedModal(null)} style={{ padding:"10px 20px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>İptal</button>
               <button onClick={()=>{updateDurum(redModal.id,"REDDEDILDI",null,redNot);setRedModal(null);}}
                 style={{ padding:"10px 20px",background:"#dc2626",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>Reddet</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DAĞITIM ÇIKIŞ MODAL */}
-      {dagitimModal && (
-        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2200,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
-          <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:560,padding:28 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
-              <h3 style={{ margin:0,fontSize:18,fontWeight:800,color:"#1e3a5f" }}>📤 Malzeme Çıkışı Yap</h3>
-              <button onClick={()=>setDagitimModal(false)} style={{ background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#6b7280" }}>✕</button>
-            </div>
-            <div style={{ display:"grid",gap:12 }}>
-              {/* Malzeme seç */}
-              <div>
-                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Malzeme Adı <span style={{color:"#dc2626"}}>*</span></label>
-                <select value={dagitimForm.malzeme_adi} onChange={e=>{
-                  const found = depoStok.find(s=>s.malzeme_adi===e.target.value);
-                  setDagitimForm(p=>({...p, malzeme_adi:e.target.value, birim:found?.birim||p.birim }));
-                }} style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }}>
-                  <option value="">Depodan malzeme seçin...</option>
-                  {depoStok.filter(s=>Number(s.depoda_kalan||0)>0).map(s=>(
-                    <option key={s.id} value={s.malzeme_adi}>{s.malzeme_adi} (Kalan: {s.depoda_kalan} {s.birim})</option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-                <div>
-                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Miktar <span style={{color:"#dc2626"}}>*</span></label>
-                  <input type="number" min="0.001" step="0.001" value={dagitimForm.miktar} onChange={e=>setDagitimForm(p=>({...p,miktar:e.target.value}))}
-                    style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
-                </div>
-                <div>
-                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Birim</label>
-                  <input value={dagitimForm.birim} readOnly style={{ width:"100%",padding:"9px 10px",border:"1px solid #e5e7eb",borderRadius:7,fontSize:13,background:"#f9fafb",boxSizing:"border-box" }} />
-                </div>
-              </div>
-              {/* Alıcı tipi */}
-              <div>
-                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:6 }}>Alıcı Tipi</label>
-                <div style={{ display:"flex",gap:8 }}>
-                  {[["PERSONEL","👤 ERC Personeli"],["TASERON","🏢 Taşeron Firma"]].map(([v,l])=>(
-                    <button key={v} onClick={()=>setDagitimForm(p=>({...p,alici_tipi:v}))}
-                      style={{ flex:1,padding:"8px 0",background:dagitimForm.alici_tipi===v?"#1e3a5f":"#f9fafb",color:dagitimForm.alici_tipi===v?"#fff":"#374151",border:`2px solid ${dagitimForm.alici_tipi===v?"#1e3a5f":"#e5e7eb"}`,borderRadius:8,cursor:"pointer",fontWeight:dagitimForm.alici_tipi===v?700:400,fontSize:13 }}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {dagitimForm.alici_tipi==="PERSONEL" ? (
-                <div>
-                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Personel Seç <span style={{color:"#dc2626"}}>*</span></label>
-                  <select value={dagitimForm.alici_personel_email} onChange={e=>{
-                    const p = personelListe.find(p=>p.email===e.target.value);
-                    setDagitimForm(prev=>({...prev, alici_personel_email:e.target.value, alici_personel_ad:p?.ad_soyad||"", alici_personel_id:p?.id||"" }));
-                  }} style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }}>
-                    <option value="">Personel seçin...</option>
-                    {personelListe.filter(p=>p.aktif!==false).map(p=>(
-                      <option key={p.id} value={p.email}>{p.ad_soyad} — {p.unvan||p.bolge||""}{!p.email?" ⚠️":""}</option>
-                    ))}
-                  </select>
-                  {dagitimForm.alici_personel_ad && !dagitimForm.alici_personel_email && (
-                    <div style={{ marginTop:6,padding:"6px 10px",background:"#fef3c7",borderRadius:6,fontSize:11,color:"#92400e" }}>
-                      ⚠️ Bu personelin HR kaydında email yok. Lütfen aşağıya giriş emailini yazın:
-                    </div>
-                  )}
-                  {dagitimForm.alici_personel_ad && !dagitimForm.alici_personel_email && (
-                    <input value={dagitimForm.alici_personel_email} onChange={e=>setDagitimForm(p=>({...p,alici_personel_email:e.target.value}))}
-                      placeholder="personel@simsektel.com"
-                      style={{ marginTop:6,width:"100%",padding:"8px 10px",border:"1px solid #f59e0b",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
-                  )}
-                </div>
-              ) : (
-                <div>
-                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Taşeron Firma Adı <span style={{color:"#dc2626"}}>*</span></label>
-                  <input value={dagitimForm.alici_firma} onChange={e=>setDagitimForm(p=>({...p,alici_firma:e.target.value}))} placeholder="Firma adı"
-                    style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
-                </div>
-              )}
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-                <div style={{ position:"relative" }}>
-                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Site ID / Bölge</label>
-                  <input value={dagitimForm.site_id}
-                    onChange={e=>{ setDagitimForm(p=>({...p,site_id:e.target.value})); searchSiteCode(e.target.value); setDagitimSiteDropdown(true); }}
-                    onBlur={()=>setTimeout(()=>setDagitimSiteDropdown(false),180)}
-                    onFocus={()=>{ if(dagitimForm.site_id?.length>=2) setDagitimSiteDropdown(true); }}
-                    placeholder="Site kodu yazın..."
-                    style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
-                  {dagitimSiteDropdown && siteCodeSuggestions.length>0 && (
-                    <div style={{ position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #d1d5db",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",zIndex:9999,maxHeight:200,overflowY:"auto" }}>
-                      {siteCodeSuggestions.map(s=>(
-                        <div key={s.site_code} onMouseDown={()=>{ setDagitimForm(p=>({...p,site_id:s.site_code,bolge:s.bolge||p.bolge})); setDagitimSiteDropdown(false); setSiteCodeSuggestions([]); }}
-                          style={{ padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f3f4f6",fontSize:13 }}
-                          onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
-                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                          <span style={{ fontWeight:600,color:"#1e3a5f" }}>{s.site_code}</span>
-                          {s.bolge && <span style={{ marginLeft:8,color:"#6b7280",fontSize:11 }}>{s.bolge}</span>}
-                          {s.site_type && <span style={{ marginLeft:6,color:"#9ca3af",fontSize:11 }}>{s.site_type}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Bölge</label>
-                  <select value={dagitimForm.bolge} onChange={e=>setDagitimForm(p=>({...p,bolge:e.target.value}))} style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }}>
-                    <option value="">Seçin</option>
-                    {["Ankara","İzmir","Antalya"].map(b=><option key={b}>{b}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Not</label>
-                <textarea value={dagitimForm.notlar} onChange={e=>setDagitimForm(p=>({...p,notlar:e.target.value}))} rows={2} placeholder="İsteğe bağlı..."
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,resize:"vertical",boxSizing:"border-box" }} />
-              </div>
-            </div>
-            <div style={{ display:"flex",gap:10,justifyContent:"flex-end",marginTop:18 }}>
-              <button onClick={()=>setDagitimModal(false)} style={{ padding:"10px 22px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>İptal</button>
-              <button onClick={handleDagitimCikis} disabled={saving} style={{ padding:"10px 22px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>
-                {saving ? "Kaydediliyor..." : "📤 Çıkışı Onayla"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SAHA ÇIKIŞ MODAL */}
-      {sahaCikisModal && (
-        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2200,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
-          <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:440,padding:28 }}>
-            <h3 style={{ margin:"0 0 6px",fontSize:18,fontWeight:800,color:"#15803d" }}>🏗 Sahaya Çıkış</h3>
-            <p style={{ margin:"0 0 16px",fontSize:13,color:"#6b7280" }}>
-              <strong>{sahaCikisModal.malzeme_adi}</strong>
-              <span style={{ marginLeft:8,background:"#dbeafe",color:"#1d4ed8",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:700 }}>
-                Üzerimde: {sahaCikisModal.miktar} {sahaCikisModal.birim}
-              </span>
-            </p>
-            <div style={{ display:"grid",gap:12 }}>
-              <div>
-                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>
-                  Kullanılan Miktar ({sahaCikisModal.birim}) <span style={{color:"#dc2626"}}>*</span>
-                </label>
-                <input
-                  type="number" min="0.01" step="any" max={sahaCikisModal.miktar}
-                  value={sahaCikisForm.saha_kullanim_miktar}
-                  onChange={e=>setSahaCikisForm(p=>({...p,saha_kullanim_miktar:e.target.value}))}
-                  placeholder={`Maks: ${sahaCikisModal.miktar} ${sahaCikisModal.birim}`}
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
-                {sahaCikisForm.saha_kullanim_miktar && Number(sahaCikisForm.saha_kullanim_miktar) < sahaCikisModal.miktar && (
-                  <p style={{ margin:"4px 0 0",fontSize:11,color:"#059669" }}>
-                    ✓ Kalan {(sahaCikisModal.miktar - Number(sahaCikisForm.saha_kullanim_miktar)).toFixed(2)} {sahaCikisModal.birim} depoya geri eklenecek
-                  </p>
-                )}
-              </div>
-              <div style={{ position:"relative" }}>
-                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Site ID <span style={{color:"#dc2626"}}>*</span></label>
-                <input value={sahaCikisForm.saha_site_id}
-                  onChange={e=>{ setSahaCikisForm(p=>({...p,saha_site_id:e.target.value})); searchSiteCode(e.target.value); setSahaSiteDropdown(true); }}
-                  onBlur={()=>setTimeout(()=>setSahaSiteDropdown(false),180)}
-                  onFocus={()=>{ if(sahaCikisForm.saha_site_id?.length>=2) setSahaSiteDropdown(true); }}
-                  placeholder="Site kodu yazın..."
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
-                {sahaSiteDropdown && siteCodeSuggestions.length>0 && (
-                  <div style={{ position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #d1d5db",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",zIndex:9999,maxHeight:200,overflowY:"auto" }}>
-                    {siteCodeSuggestions.map(s=>(
-                      <div key={s.site_code} onMouseDown={()=>{ setSahaCikisForm(p=>({...p,saha_site_id:s.site_code})); setSahaSiteDropdown(false); setSiteCodeSuggestions([]); }}
-                        style={{ padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f3f4f6",fontSize:13 }}
-                        onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
-                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <span style={{ fontWeight:600,color:"#1e3a5f" }}>{s.site_code}</span>
-                        {s.bolge && <span style={{ marginLeft:8,color:"#6b7280",fontSize:11 }}>{s.bolge}</span>}
-                        {s.site_type && <span style={{ marginLeft:6,color:"#9ca3af",fontSize:11 }}>{s.site_type}</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Not</label>
-                <textarea value={sahaCikisForm.saha_notlar} onChange={e=>setSahaCikisForm(p=>({...p,saha_notlar:e.target.value}))} rows={2} placeholder="Kurulum notu..."
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,resize:"vertical",boxSizing:"border-box" }} />
-              </div>
-            </div>
-            <div style={{ display:"flex",gap:10,justifyContent:"flex-end",marginTop:16 }}>
-              <button onClick={()=>{ setSahaCikisModal(null); setSahaCikisForm({ saha_site_id:"", saha_kullanim_miktar:"", saha_notlar:"" }); }} style={{ padding:"10px 20px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>İptal</button>
-              <button onClick={handleSahaCikis} disabled={saving} style={{ padding:"10px 20px",background:"#15803d",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>
-                {saving ? "..." : "✅ Sahaya Çık"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* İADE MODAL */}
-      {iadeModal && (
-        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:2200,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
-          <div style={{ background:"#fff",borderRadius:16,width:"100%",maxWidth:420,padding:28 }}>
-            <h3 style={{ margin:"0 0 6px",fontSize:18,fontWeight:800,color:"#d97706" }}>↩ Depoya İade Talebi</h3>
-            <p style={{ margin:"0 0 4px",fontSize:13,color:"#6b7280" }}><strong>{iadeModal.malzeme_adi}</strong></p>
-            <p style={{ margin:"0 0 16px",fontSize:12,color:"#92400e",background:"#fef3c7",padding:"6px 10px",borderRadius:6 }}>
-              ⚠️ İade talebiniz Murat İstek'in onayına gönderilecek. Onay sonrası malzeme depoya işlenecektir.
-            </p>
-            <div style={{ display:"grid",gap:12 }}>
-              <div>
-                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>
-                  İade Miktarı ({iadeModal.birim}) <span style={{color:"#dc2626"}}>*</span>
-                </label>
-                <input
-                  type="number" min="0.01" step="any" max={iadeModal.miktar}
-                  value={iadeMiktar}
-                  onChange={e=>setIadeMiktar(e.target.value)}
-                  placeholder={`Maks: ${iadeModal.miktar} ${iadeModal.birim}`}
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }} />
-              </div>
-              <div>
-                <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>İade Notu</label>
-                <textarea value={iadeNot} onChange={e=>setIadeNot(e.target.value)} rows={2} placeholder="İsteğe bağlı..."
-                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,resize:"vertical",boxSizing:"border-box" }} />
-              </div>
-            </div>
-            <div style={{ display:"flex",gap:10,justifyContent:"flex-end",marginTop:16 }}>
-              <button onClick={()=>{ setIadeModal(null); setIadeNot(""); setIadeMiktar(""); }} style={{ padding:"10px 20px",background:"#f3f4f6",color:"#374151",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>İptal</button>
-              <button onClick={handleIade} disabled={saving} style={{ padding:"10px 20px",background:"#d97706",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>
-                {saving ? "..." : "📤 İade Talebini Gönder"}
-              </button>
             </div>
           </div>
         </div>
@@ -17369,36 +15344,14 @@ function App() {
       return null;
     }
   });
-  const isAdmin = user?.role === "admin" || user?.role === "direktor";
-
-  // Ünvan görüntüleme fonksiyonu
-  const getUserTitle = (u) => {
-    if (!u) return '';
-    const email = (u.email || '').toLowerCase().trim();
-    // Subcon kullanıcıları → şirket adını göster
-    if (u.role === 'subcon' || String(u.subcon_name || '').trim()) {
-      const company = String(u.subcon_name || '').trim();
-      return company || 'Alt Yüklenici';
-    }
-    if (email === 'serdar.altinova@simsektel.com') return 'Bölge Müdürü';
-    const map = {
-      admin: '👑 Admin',
-      direktor: 'Direktör',
-      rollout_mudur: 'Rollout Müdürü',
-      pm: 'Proje Müdürü',
-      muhasebe: 'Muhasebe',
-      genel_mudur: 'Genel Müdür',
-      user: 'Personel',
-    };
-    return map[u.role] || u.role;
-  };
+  const isAdmin = user?.role === "admin";
   // Rollout erişimi var ama Puantaj görmeyecek kullanıcılar (rol ne olursa olsun rollout gibi davranır)
   const _userEmail = (user?.email || "").toLowerCase().trim();
   const _PUANTAJ_HARIC = ["hatice.omus@simsektel.com", "murat.istek@simsektel.com"];
   const _ROLLOUT_OVERRIDE = ["hatice.omus@simsektel.com"]; // user rolünde olsa bile rollout gibi davranır
   const _isBolgeMudur = _userEmail === "nurcan.kus@simsektel.com" || _userEmail === "serdar.altinova@simsektel.com" || _userEmail === "murat.istek@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
   const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur || _ROLLOUT_OVERRIDE.includes(_userEmail);
-  const canSeePuantaj = (isRollout || user?.role === "muhasebe") && !_PUANTAJ_HARIC.includes(_userEmail);
+  const canSeePuantaj = isRollout && !_PUANTAJ_HARIC.includes(_userEmail);
   const isPersonel = user?.role === "user" && !_isBolgeMudur && !_ROLLOUT_OVERRIDE.includes(_userEmail);
   const canSeeMalzeme = [
     "nurcan.kus@simsektel.com",
@@ -17469,11 +15422,6 @@ function App() {
   });
   const [pendingAvansCount, setPendingAvansCount] = useState(0);
   const [pendingMasrafCount, setPendingMasrafCount] = useState(0);
-  const [pendingMalzemeCount, setPendingMalzemeCount] = useState(0);
-  const [openSections, setOpenSections] = useState({ anaMeny: true, ik: false, muhasebe: false, depo: false });
-  const toggleSection = (key) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [financeActionTrigger, setFinanceActionTrigger] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -17501,21 +15449,6 @@ function App() {
           else if (email === "muhasebe@simsektel.com") mc = mdata.filter(f => f.durum === "TAMAMLANDI").length;
           setPendingMasrafCount(mc);
         }
-        // Malzeme talebi bekleyenleri say
-        try {
-          const mlr = await fetch(`${API_BASE}/malzeme/talepler`, { headers: { Authorization: `Bearer ${token}` } });
-          const mldata = await mlr.json();
-          if (Array.isArray(mldata)) {
-            const email = user.email;
-            let mlc = 0;
-            if (email === "nurcan.kus@simsektel.com")   mlc = mldata.filter(t => t.durum === "NURCAN_ONAY").length;
-            else if (["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase()))  mlc = mldata.filter(t => t.durum === "ROLLOUT_BEKLE").length;
-            else if (email === "orhan.bedir@simsektel.com") mlc = mldata.filter(t => t.durum === "PM_ONAY").length;
-            else if (email === "murat.istek@simsektel.com") mlc = mldata.filter(t => ["FIYAT_GIRISI","SATINALINACAK"].includes(t.durum)).length;
-            else if (email === "duzgun.simsek@simsektel.com") mlc = mldata.filter(t => t.durum === "DUZGUN_ONAY").length;
-            setPendingMalzemeCount(mlc);
-          }
-        } catch {}
       } catch {}
     };
     fetchPending();
@@ -17807,9 +15740,8 @@ function App() {
       const _rolloutOverrideEmails = ["hatice.omus@simsektel.com"];
       const _luIsBolge = _bolgeMudurEmails.includes(_lue) || ["rollout_mudur","bolge_mudur"].includes((_lu?.role||"").toLowerCase());
       const _luIsRolloutOverride = _rolloutOverrideEmails.includes(_lue);
-      const _luIsSubcon = !!_lu?.subcon_name || (_lu?.role || "").toLowerCase() === "subcon";
       if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("masraf");
-      else if (_luIsBolge || _luIsSubcon) setPage("region");
+      else if (_luIsBolge) setPage("region");
       else setPage("finance");
 
       setFinanceLoginEmail("");
@@ -17948,34 +15880,29 @@ function App() {
   if (isPersonel) {
     return (
       <div style={{ minHeight:"100vh", background:"#f8fafc" }}>
-        {/* Top bar */}
+        {/* Mobile top bar */}
         <div style={{ background:"#1e3a5f", color:"#fff", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 8px rgba(0,0,0,0.2)" }}>
           <span style={{ fontWeight:700, fontSize:"16px" }}>ERC Mühendislik</span>
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"2px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+            <span style={{ fontSize:"12px", opacity:0.8 }}>{user?.name || user?.email}</span>
             <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.3)", color:"#fff", borderRadius:"8px", padding:"6px 12px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Çıkış</button>
-            <span style={{ fontSize:"11px", opacity:0.7 }}>{user?.name || user?.email}</span>
           </div>
         </div>
         {/* Bottom navigation */}
         <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:100, background:"#fff", borderTop:"1px solid #e5e7eb", display:"flex", height:"64px", boxShadow:"0 -2px 10px rgba(0,0,0,0.08)" }}>
-          <button onClick={()=>setPage("is_avans")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color:page==="is_avans"?"#1e3a5f":"#9ca3af", fontWeight:page==="is_avans"?700:400, fontSize:"11px", position:"relative" }}>
+          <button onClick={()=>setPage("is_avans")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color: page==="is_avans"?"#1e3a5f":"#9ca3af", fontWeight: page==="is_avans"?700:400, fontSize:"11px" }}>
             <span style={{ fontSize:"22px" }}>💳</span>İş Avansı
-            {pendingAvansCount>0 && <span style={{ position:"absolute", top:"6px", right:"calc(50% - 18px)", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingAvansCount}</span>}
+            {pendingAvansCount>0 && <span style={{ position:"absolute", top:"8px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingAvansCount}</span>}
           </button>
-          <button onClick={()=>setPage("masraf")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color:page==="masraf"?"#1e3a5f":"#9ca3af", fontWeight:page==="masraf"?700:400, fontSize:"11px", position:"relative" }}>
+          <button onClick={()=>setPage("masraf")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color: page==="masraf"?"#1e3a5f":"#9ca3af", fontWeight: page==="masraf"?700:400, fontSize:"11px" }}>
             <span style={{ fontSize:"22px" }}>🧾</span>Masraf Formu
-            {pendingMasrafCount>0 && <span style={{ position:"absolute", top:"6px", right:"calc(50% - 18px)", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingMasrafCount}</span>}
-          </button>
-          <button onClick={()=>setPage("malzeme")} style={{ flex:1, border:"none", background:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"4px", color:page==="malzeme"?"#0f4c35":"#9ca3af", fontWeight:page==="malzeme"?700:400, fontSize:"11px" }}>
-            <span style={{ fontSize:"22px" }}>📦</span>Malzemelerim
+            {pendingMasrafCount>0 && <span style={{ position:"absolute", top:"8px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"9px", fontWeight:700, minWidth:"16px", height:"16px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{pendingMasrafCount}</span>}
           </button>
         </div>
-        {/* Content area */}
+        {/* Content area — default masraf, is_avans seçilince o gösterilir */}
         <div style={{ padding:"12px 12px 80px" }}>
           {page === "is_avans"
             ? <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />
-            : page === "malzeme"
-            ? <PersonelMalzemePanel currentUser={user} />
             : <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />
           }
         </div>
@@ -17983,433 +15910,503 @@ function App() {
     );
   }
 
-  // Sidebar layout için sayfa başlığı helper
-  const getPageTitle = () => {
-    switch(page) {
-      case "finance": return "Finans Paneli";
-      case "region": return "Bölge Analizi";
-      case "executive": return "Rollout Data";
-      case "entry": return "Günlük İş Girişi";
-      case "puantaj": return "Puantaj";
-      case "is_avans": return "İş Avansı";
-      case "masraf": return "Masraf Formu";
-      case "malzeme": return isPersonel ? "Malzemelerim" : "Malzeme Yönetimi";
-      case "hr": return "İK Paneli";
-      case "araclar": return "Araç Yönetimi";
-      case "ofis": return "Ofis & Depo";
-      case "cashflow": return "Nakit Akışı";
-      case "admin": return "Admin Panel";
-      default: return "ERC Mühendislik";
-    }
-  };
-
   return (
-    <>
-      <style>{`
-        .app-layout { display: flex; height: 100vh; overflow: hidden; background: #f0f2f5; }
-        .sidebar { width: 240px; background: #0f1623; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width 0.22s ease; }
-        .sidebar.collapsed { width: 0; overflow: hidden; }
-        .topbar-toggle { width: 34px; height: 34px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #475569; flex-shrink: 0; transition: background 0.15s; }
-        .topbar-toggle:hover { background: #e2e8f0; color: #0f172a; }
-        .sidebar-logo { padding: 20px 16px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; gap: 10px; }
-        .sidebar-logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
-        .sidebar-section-title { padding: 10px 16px 6px; font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.8px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; transition: color 0.15s; }
-        .sidebar-section-title:hover { color: #cbd5e1; }
-        .sidebar-section-chevron { font-size: 12px; color: #94a3b8; transition: transform 0.2s; line-height: 1; }
-        .sidebar-section-chevron.open { transform: rotate(0deg); }
-        .sidebar-section-chevron.closed { transform: rotate(-90deg); }
-        .sidebar-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 1px 8px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; color: #cbd5e1; transition: all 0.15s; position: relative; }
-        .sidebar-nav-item:hover { background: #1e2a3a; color: #f1f5f9; }
-        .sidebar-nav-item.active { background: #1d4ed8; color: #fff; }
-        .sidebar-badge { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #dc2626; color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
-        .sidebar-user { margin-top: auto; padding: 12px; border-top: 1px solid #1e2a3a; }
-        .sidebar-user-card { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; background: #1e2a3a; }
-        .sidebar-user-avatar { width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0; }
-        .main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-        .topbar { background: #fff; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
-        .main-content { flex: 1; overflow-y: auto; padding: 0; }
-        .notification-bar { padding: 10px 24px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 13px; flex-shrink: 0; }
-      `}</style>
-
-      <div className="app-layout">
-        {/* ── SIDEBAR ── */}
-        <div className={`sidebar${sidebarCollapsed?' collapsed':''}`}>
-          {/* Logo */}
-          <div className="sidebar-logo">
-            <div className="sidebar-logo-icon">🏗</div>
-            <div>
-              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>ERC Mühendislik</div>
-              <div style={{fontSize:11,color:'#64748b'}}>Operasyon & Hakediş</div>
-            </div>
-          </div>
-
-          {/* Navigation */}
-          {isSubconUser ? (
-            <>
-              <div className="sidebar-section-title">Menü</div>
-              <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
-                <span>📍</span> Bölge Analizi
-              </div>
-            </>
-          ) : (
-            <>
-              {/* ── ANA MENÜ ── */}
-              <div className="sidebar-section-title" onClick={()=>toggleSection('anaMeny')}>
-                <span>Ana Menü</span>
-                <span className={`sidebar-section-chevron ${openSections.anaMeny?'open':'closed'}`}>▾</span>
-              </div>
-              {openSections.anaMeny && (
-                <div>
-                  {isAdmin && (
-                    <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
-                      <span>📊</span> Finans Paneli
-                    </div>
-                  )}
-                  <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
-                    <span>🗺</span> Bölge Analizi
-                  </div>
-                  <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
-                    <span>📡</span> Rollout Data
-                  </div>
-                  <div className={`sidebar-nav-item ${page==='entry'?'active':''}`} onClick={()=>setPage('entry')}>
-                    <span>✏️</span> Günlük İş Girişi
-                  </div>
-                  {canSeePuantaj && (
-                    <div className={`sidebar-nav-item ${page==='puantaj'?'active':''}`} onClick={()=>setPage('puantaj')}>
-                      <span>⏱</span> Puantaj
-                    </div>
-                  )}
-                  {isAdmin && (
-                    <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
-                      <span>👑</span> Admin Panel
-                    </div>
-                  )}
-                  {isAdmin && (
-                    <>
-                      <div style={{margin:'4px 8px 2px',height:'1px',background:'#1e2a3a'}}/>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); }}>
-                        <span>📤</span> HW Payment Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura'); }}>
-                        <span>🧾</span> HW Fatura Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); }}>
-                        <span>🔩</span> HW PO Yükle
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* ── İNSAN KAYNAKLARI ── */}
-              <div className="sidebar-section-title" onClick={()=>toggleSection('ik')}>
-                <span>İnsan Kaynakları</span>
-                <span className={`sidebar-section-chevron ${openSections.ik?'open':'closed'}`}>▾</span>
-              </div>
-              {openSections.ik && (
-                <div>
-                  {(isAdmin || user?.role === "muhasebe" || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
-                    <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
-                      <span>👥</span> İK Paneli
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ── MUHASEBE ── */}
-              {(isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
-                <>
-                  <div className="sidebar-section-title" onClick={()=>toggleSection('muhasebe')}>
-                    <span>Muhasebe</span>
-                    <span className={`sidebar-section-chevron ${openSections.muhasebe?'open':'closed'}`}>▾</span>
-                  </div>
-                  {openSections.muhasebe && (
-                    <div>
-                      {isAdmin && (
-                        <>
-                          <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
-                            <span>📊</span> Finans Paneli
-                          </div>
-                          <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); }}>
-                            <span>🧾</span> Fatura Girişi
-                          </div>
-                          <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('taseron_hakedis'); }}>
-                            <span>🏗️</span> Taşeron Hakediş
-                          </div>
-                        </>
-                      )}
-                      <div className={`sidebar-nav-item ${page==='is_avans'?'active':''}`} onClick={()=>setPage('is_avans')}>
-                        <span>💳</span> İş Avansı
-                        {pendingAvansCount > 0 && <span className="sidebar-badge">{pendingAvansCount}</span>}
-                      </div>
-                      <div className={`sidebar-nav-item ${page==='masraf'?'active':''}`} onClick={()=>setPage('masraf')}>
-                        <span>📄</span> Masraf Formu
-                        {pendingMasrafCount > 0 && <span className="sidebar-badge">{pendingMasrafCount}</span>}
-                      </div>
-                      {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
-                        <div className={`sidebar-nav-item ${page==='cashflow'?'active':''}`} onClick={()=>setPage('cashflow')}>
-                          <span>🏦</span> Nakit Akışı
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* ── DEPO & ENVANTER ── */}
-              {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
-                <>
-                  <div className="sidebar-section-title" onClick={()=>toggleSection('depo')}>
-                    <span>Depo & Envanter</span>
-                    <span className={`sidebar-section-chevron ${openSections.depo?'open':'closed'}`}>▾</span>
-                  </div>
-                  {openSections.depo && (
-                    <div>
-                      <div className={`sidebar-nav-item ${page==='malzeme'?'active':''}`} onClick={()=>setPage('malzeme')}>
-                        <span>📦</span> Malzeme Yönetimi
-                        {pendingMalzemeCount > 0 && <span className="sidebar-badge">{pendingMalzemeCount}</span>}
-                      </div>
-                      {isAdmin && (
-                        <>
-                          <div className={`sidebar-nav-item ${page==='araclar'?'active':''}`} onClick={()=>setPage('araclar')}>
-                            <span>🚗</span> Araç Yönetimi
-                          </div>
-                          <div className={`sidebar-nav-item ${page==='ofis'?'active':''}`} onClick={()=>setPage('ofis')}>
-                            <span>🏢</span> Ofis & Depo
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-
-          {/* User info + Logout */}
-          <div className="sidebar-user">
-            <div className="sidebar-user-card">
-              <div className="sidebar-user-avatar">{user?.name?.charAt(0) || '?'}</div>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:13,fontWeight:600,color:'#e2e8f0',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user?.name || user?.email}</div>
-                <div style={{fontSize:11,color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{getUserTitle(user)}</div>
-              </div>
-            </div>
+    <div className="container">
+      <div
+        className="navTabs"
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: "12px",
+          flexWrap: "wrap",
+          marginBottom: "24px",
+          position: "relative",
+          paddingRight: "130px",
+        }}
+      >
+        .
+        {isSubconUser ? (
+          <>
             <button
-              onClick={handleLogout}
-              style={{marginTop:8,width:'100%',padding:'8px',background:'#1e2a3a',border:'1px solid #2d3f55',borderRadius:'8px',color:'#94a3b8',fontSize:12,fontWeight:600,cursor:'pointer'}}
+              className={page === "region" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("region")}
             >
-              Çıkış Yap
+              Bölge Analizi
             </button>
-          </div>
-        </div>
 
-        {/* ── MAIN AREA ── */}
-        <div className="main-area" onClick={()=>{ if(!sidebarCollapsed) setSidebarCollapsed(true); }}>
-          {/* Topbar */}
-          <div className="topbar" onClick={e=>e.stopPropagation()}>
-            <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
+            {(token || financeToken) && (
               <button
-                className="topbar-toggle"
-                onClick={()=>setSidebarCollapsed(v=>!v)}
-                title={sidebarCollapsed?"Menüyü aç":"Menüyü kapat"}
+                type="button"
+                onClick={handleLogout}
+                style={{
+                  position: "absolute",
+                  right: "0",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "#dc3545",
+                  color: "#fff",
+                  border: "none",
+                  padding: "10px 16px",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  fontWeight: "600",
+                }}
               >
-                {sidebarCollapsed ? '☰' : '✕'}
+                Çıkış Yap
               </button>
-              <div style={{fontSize:16,fontWeight:700,color:'#0f172a'}}>{getPageTitle()}</div>
-              <div style={{fontSize:12,color:'#94a3b8'}}>{new Date().toLocaleDateString('tr-TR',{day:'numeric',month:'long',year:'numeric'})}</div>
-            </div>
-            <div style={{fontSize:13,color:'#64748b'}}>{user?.name || user?.email}</div>
-          </div>
-
-          {/* Notification bars */}
-          {pendingAvansCount > 0 && page !== "is_avans" && (
-            <div className="notification-bar" onClick={()=>setPage("is_avans")} style={{background:"#fef2f2",borderBottom:"2px solid #fca5a5"}}>
-              <span style={{fontSize:"18px"}}>🔔</span>
-              <span style={{fontWeight:700,color:"#991b1b"}}>{pendingAvansCount} adet iş avansı talebi onayınızı bekliyor</span>
-              <span style={{color:"#dc2626",marginLeft:"4px"}}>→ git</span>
-            </div>
-          )}
-          {pendingMasrafCount > 0 && page !== "masraf" && (
-            <div className="notification-bar" onClick={()=>setPage("masraf")} style={{background:"#fff7ed",borderBottom:"2px solid #fed7aa"}}>
-              <span style={{fontSize:"18px"}}>🧾</span>
-              <span style={{fontWeight:700,color:"#92400e"}}>{pendingMasrafCount} adet masraf formu onayınızı bekliyor</span>
-              <span style={{color:"#b45309",marginLeft:"4px"}}>→ git</span>
-            </div>
-          )}
-          {pendingMalzemeCount > 0 && page !== "malzeme" && (
-            <div className="notification-bar" onClick={()=>setPage("malzeme")} style={{background:"#f0fdf4",borderBottom:"2px solid #86efac"}}>
-              <span style={{fontSize:"18px"}}>📦</span>
-              <span style={{fontWeight:700,color:"#166534"}}>{pendingMalzemeCount} adet malzeme talebi onayınızı bekliyor</span>
-              <span style={{color:"#15803d",marginLeft:"4px"}}>→ git</span>
-            </div>
-          )}
-
-          {/* Main content */}
-          <div className="main-content" onClick={e=>e.stopPropagation()}>
-            {page === "finance" && isAdmin && (
-              financeToken ? (
-                <div style={{padding:"24px 28px"}}>
-                <FinanceDashboard
-                  user={user}
-                  financeToken={financeToken}
-                  financeUserEmail={financeUserEmail}
-                  onFinanceLogout={handleFinanceLogout}
-                  advanceModalOpen={advanceModalOpen}
-                  setAdvanceModalOpen={setAdvanceModalOpen}
-                  advanceForm={advanceForm}
-                  setAdvanceForm={setAdvanceForm}
-                  handleApplyAdvance={handleApplyAdvance}
-                  supplierAdvances={supplierAdvances}
-                  supplierAdvanceTotal={supplierAdvanceTotal}
-                  onGoToAdmin={() => { setPage("admin"); loadAdminUsers(); }}
-                  onGoToHr={() => setPage("hr")}
-                  onGoToAraclar={() => setPage("araclar")}
-                  onGoToOfis={() => setPage("ofis")}
-                  onGoToMalzeme={() => setPage("malzeme")}
-                  onGoToCashflow={() => setPage("cashflow")}
-                  currentUser={user}
-                  actionTrigger={financeActionTrigger}
-                  onActionHandled={() => setFinanceActionTrigger(null)}
-                />
-                </div>
-              ) : (
-                <div style={{maxWidth:"420px",margin:"40px auto",background:"#fff",borderRadius:"20px",padding:"24px",boxShadow:"0 20px 50px rgba(0,0,0,0.08)"}}>
-                  <h2 style={{marginBottom:"18px",textAlign:"center"}}>🔐 Finance Login</h2>
-                  <form onSubmit={handleFinanceLogin}>
-                    <div style={{display:"grid",gap:"12px"}}>
-                      <input type="email" placeholder="E-posta" value={financeLoginEmail} onChange={e=>setFinanceLoginEmail(e.target.value)} />
-                      <input type="password" placeholder="Şifre" value={financeLoginPassword} onChange={e=>setFinanceLoginPassword(e.target.value)} />
-                      <button type="submit" className="saveButton">{financeLoginLoading?"Giriş yapılıyor...":"Giriş Yap"}</button>
-                      {financeLoginError && <div style={{color:"#b91c1c",fontWeight:600}}>{financeLoginError}</div>}
-                    </div>
-                  </form>
-                </div>
-              )
+            )}
+          </>
+        ) : (
+          <>
+            {isAdmin && (
+              <button
+                className={page === "finance" ? "tab activeTab" : "tab"}
+                onClick={() => setPage("finance")}
+              >
+                Finans Paneli
+              </button>
             )}
 
-            {page === "hr" && <HrDashboard onBack={()=>setPage("finance")} currentUser={user} />}
-            {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
-            {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
-            {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
-            {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
-            {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
-            {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
-            {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
-            {page === "executive" && <RolloutDashboard currentUser={user} />}
-            {page === "region" && (
-              <RegionAnalysis
-                isSubconUser={!isAdmin && !!user?.subcon_name}
-                userSubconName={user?.subcon_name || ""}
-                userPaymentRate={Number(user?.payment_rate || 0.8)}
-              />
+            <button
+              className={page === "region" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("region")}
+            >
+              Bölge Analizi
+            </button>
+
+            <button
+              className={page === "executive" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("executive")}
+            >
+              Rollout Data
+            </button>
+
+            <button
+              className={page === "entry" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("entry")}
+            >
+              Günlük İş Girişi
+            </button>
+
+            {canSeePuantaj && (
+              <button
+                className={page === "puantaj" ? "tab activeTab" : "tab"}
+                onClick={() => setPage("puantaj")}
+              >
+                📋 Puantaj
+              </button>
             )}
-            {page === "entry" && <DailyEntry />}
-            {page === "admin" && isAdmin && (
-              <div style={{maxWidth:"1440px",margin:"24px auto",padding:"0 20px"}}>
-                <div style={{background:"linear-gradient(135deg,#1f2937 0%,#374151 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",gap:"16px",color:"#fff"}}>
-                  <div style={{fontSize:"40px"}}>👑</div>
-                  <div>
-                    <h2 style={{margin:0,fontSize:"24px",fontWeight:700}}>Admin Panel</h2>
-                    <p style={{margin:"4px 0 0",color:"#9ca3af",fontSize:"14px"}}>Kullanıcı yönetimi ve sistem ayarları</p>
-                  </div>
-                  <div style={{marginLeft:"auto",textAlign:"right"}}>
-                    <div style={{fontSize:"28px",fontWeight:700}}>{adminUsers.length}</div>
-                    <div style={{fontSize:"12px",color:"#9ca3af"}}>Toplam Kullanıcı</div>
-                  </div>
-                </div>
 
-                <div style={{display:"grid",gridTemplateColumns:"320px 1fr",gap:"24px",alignItems:"start"}}>
-                  <div style={{background:"#fff",borderRadius:"16px",padding:"24px",boxShadow:"0 4px 20px rgba(0,0,0,0.07)",border:"1px solid #f3f4f6"}}>
-                    <h3 style={{margin:"0 0 20px",fontSize:"16px",fontWeight:700,color:"#1f2937",display:"flex",alignItems:"center",gap:"8px"}}>
-                      <span style={{background:"#f3f4f6",borderRadius:"8px",padding:"6px 8px"}}>➕</span> Yeni Kullanıcı
-                    </h3>
-                    <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-                      <input placeholder="Ad Soyad" value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
-                      <input placeholder="E-posta adresi" value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
-                      <input placeholder="Şifre" type="password" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
-                      <select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",background:"#fff",cursor:"pointer"}}>
-                        <option value="user">👤 Personel</option>
-                        <option value="admin">👑 Admin</option>
-                        <option value="rollout_mudur">🏗 Bölge Müdürü</option>
-                        <option value="pm">📋 Proje Müdürü</option>
-                        <option value="direktor">🎯 Direktör</option>
-                        <option value="muhasebe">💼 Muhasebe</option>
-                      </select>
-                      <button onClick={handleCreateUser} style={{padding:"11px",background:"#1f2937",color:"#fff",border:"none",borderRadius:"10px",fontWeight:"700",fontSize:"14px",cursor:"pointer",marginTop:"4px"}}>
-                        Kullanıcı Ekle
-                      </button>
-                    </div>
-                    {adminError && <div style={{marginTop:"12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:"8px",padding:"10px 14px",color:"#b91c1c",fontSize:"13px",fontWeight:600}}>{adminError}</div>}
-                  </div>
+            <button
+              className={page === "is_avans" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("is_avans")}
+              style={{ position: "relative" }}
+            >
+              İş Avansı
+              {pendingAvansCount > 0 && (
+                <span style={{ position:"absolute", top:"-6px", right:"-6px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"11px", fontWeight:700, minWidth:"18px", height:"18px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", lineHeight:1 }}>
+                  {pendingAvansCount}
+                </span>
+              )}
+            </button>
 
-                  <div style={{background:"#fff",borderRadius:"16px",boxShadow:"0 4px 20px rgba(0,0,0,0.07)",border:"1px solid #f3f4f6",overflow:"hidden"}}>
-                    <div style={{padding:"20px 24px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                      <h3 style={{margin:0,fontSize:"16px",fontWeight:700,color:"#1f2937"}}>Kullanıcılar</h3>
-                      <div style={{display:"flex",gap:"8px"}}>
-                        <span style={{background:"#dcfce7",color:"#166534",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>u.is_active).length} Aktif</span>
-                        <span style={{background:"#fee2e2",color:"#991b1b",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>!u.is_active).length} Pasif</span>
-                      </div>
-                    </div>
-                    {adminLoading ? (
-                      <div style={{padding:"40px",textAlign:"center",color:"#9ca3af"}}>Yükleniyor...</div>
-                    ) : (
-                      <div>
-                        {adminUsers.map((u,i) => (
-                          <div key={u.id} style={{display:"grid",gridTemplateColumns:"48px 1fr 180px auto",alignItems:"center",gap:"20px",padding:"16px 28px",borderBottom:i<adminUsers.length-1?"1px solid #f3f4f6":"none",background:"#fff",transition:"background 0.15s"}}
-                            onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
-                            onMouseLeave={e=>e.currentTarget.style.background="#fff"}
-                          >
-                            {/* Avatar */}
-                            <div style={{width:"48px",height:"48px",borderRadius:"14px",background:u.role==="admin"?"linear-gradient(135deg,#fbbf24,#f59e0b)":"linear-gradient(135deg,#60a5fa,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"20px",fontWeight:700,color:"#fff",flexShrink:0}}>
-                              {u.name.charAt(0)}
-                            </div>
-                            {/* Ad + email */}
-                            <div style={{minWidth:0}}>
-                              <div style={{fontWeight:700,fontSize:"15px",color:"#1f2937",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name}</div>
-                              <div style={{fontSize:"12px",color:"#9ca3af",marginTop:"2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
-                            </div>
-                            {/* Rol + Durum badge */}
-                            <div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
-                              <span style={{background:u.role==="admin"?"#fef3c7":u.role==="rollout_mudur"?"#f0fdf4":u.role==="pm"?"#eff6ff":u.role==="direktor"?"#fdf2f8":u.role==="muhasebe"?"#f0f9ff":"#f3f4f6",color:u.role==="admin"?"#92400e":u.role==="rollout_mudur"?"#166534":u.role==="pm"?"#1e40af":u.role==="direktor"?"#7e22ce":u.role==="muhasebe"?"#0369a1":"#374151",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",textTransform:"uppercase",letterSpacing:"0.05em",display:"inline-block",width:"fit-content"}}>
-                                {u.role==="admin"?"👑 Admin":u.role==="rollout_mudur"?(u.email?.toLowerCase()==="serdar.altinova@simsektel.com"?"📍 Bölge Müdürü":"🏗 Rollout Müdürü"):u.role==="pm"?"📋 Proje Müdürü":u.role==="direktor"?"🎯 Direktör":u.role==="muhasebe"?"💼 Muhasebe":"👤 Personel"}
-                              </span>
-                              <span style={{background:u.is_active?"#dcfce7":"#f3f4f6",color:u.is_active?"#166534":"#6b7280",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",display:"inline-block",width:"fit-content"}}>
-                                {u.is_active?"✓ Aktif":"Pasif"}
-                              </span>
-                            </div>
-                            {/* Aksiyonlar */}
-                            <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"nowrap"}}>
-                              <button onClick={()=>handleToggleActive(u.id)} style={{padding:"7px 14px",background:u.is_active?"#fef3c7":"#f0fdf4",color:u.is_active?"#92400e":"#166534",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
-                                {u.is_active?"Pasife Al":"Aktif Et"}
-                              </button>
-                              <select value={u.role||"user"} onChange={e=>handleAdminRoleChange(u.id,e.target.value)} style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:"#f9fafb",color:"#374151"}}>
-                                <option value="user">👤 Personel</option>
-                                <option value="admin">👑 Admin</option>
-                                <option value="rollout_mudur">🏗 Bölge Müdürü</option>
-                                <option value="pm">📋 Proje Müdürü</option>
-                                <option value="direktor">🎯 Direktör</option>
-                                <option value="muhasebe">💼 Muhasebe</option>
-                              </select>
-                              <button onClick={()=>handleResetPassword(u.id,u.name)} style={{padding:"7px 14px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}} title="Şifre değiştir">
-                                🔑 Şifre
-                              </button>
-                              <button onClick={()=>deleteUser(u.id)} style={{padding:"7px 14px",background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
-                                🗑 Sil
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+            <button
+              className={page === "masraf" ? "tab activeTab" : "tab"}
+              onClick={() => setPage("masraf")}
+              style={{ position: "relative" }}
+            >
+              🧾 Masraf Formu
+              {pendingMasrafCount > 0 && (
+                <span style={{ position:"absolute", top:"-6px", right:"-6px", background:"#dc2626", color:"#fff", borderRadius:"999px", fontSize:"11px", fontWeight:700, minWidth:"18px", height:"18px", display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px", lineHeight:1 }}>
+                  {pendingMasrafCount}
+                </span>
+              )}
+            </button>
+
+            {(canSeeMalzeme || isAdmin) && (
+              <button
+                className={page === "malzeme" ? "tab activeTab" : "tab"}
+                onClick={() => setPage("malzeme")}
+              >
+                📦 Malzeme Yönetimi
+              </button>
+            )}
+
+
+            {canSeeMalzeme && false && (
+              <button
+                className={page === "malzeme" ? "tab activeTab" : "tab"}
+                onClick={() => setPage("malzeme")}
+              >
+                📦 Malzeme
+              </button>
+            )}
+
+            {(token || financeToken) && (
+              <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-50%)", display:"flex", alignItems:"center", gap:"10px" }}>
+                {user?.name && !isAdmin && !localStorage.getItem("financeToken") && (
+                  <span style={{ fontSize:"13px", fontWeight:600, color:"#1e3a5f", background:"#f0f4ff", border:"1px solid #c7d7fc", borderRadius:"8px", padding:"7px 13px", whiteSpace:"nowrap" }}>
+                    👤 {user.name}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  style={{ background:"#dc3545", color:"#fff", border:"none", padding:"10px 16px", borderRadius:"8px", cursor:"pointer", fontWeight:"600", whiteSpace:"nowrap" }}
+                >
+                  Çıkış Yap
+                </button>
               </div>
             )}
+          </>
+        )}
+      </div>
+
+      {pendingAvansCount > 0 && page !== "is_avans" && (
+        <div onClick={() => setPage("is_avans")} style={{ margin:"0 0 0 0", padding:"12px 24px", background:"#fef2f2", borderBottom:"2px solid #fca5a5", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer" }}>
+          <span style={{ fontSize:"20px" }}>🔔</span>
+          <div>
+            <span style={{ fontWeight:700, color:"#991b1b", fontSize:"14px" }}>
+              {pendingAvansCount} adet iş avansı talebi onayınızı bekliyor
+            </span>
+            <span style={{ color:"#dc2626", fontSize:"13px", marginLeft:"8px" }}>→ İş Avansı'na git</span>
           </div>
         </div>
-      </div>
-    </>
+      )}
+
+      {pendingMasrafCount > 0 && page !== "masraf" && (
+        <div onClick={() => setPage("masraf")} style={{ margin:"0 0 0 0", padding:"12px 24px", background:"#fff7ed", borderBottom:"2px solid #fed7aa", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer" }}>
+          <span style={{ fontSize:"20px" }}>🧾</span>
+          <div>
+            <span style={{ fontWeight:700, color:"#92400e", fontSize:"14px" }}>
+              {pendingMasrafCount} adet masraf formu onayınızı bekliyor
+            </span>
+            <span style={{ color:"#b45309", fontSize:"13px", marginLeft:"8px" }}>→ Masraf Formu'na git</span>
+          </div>
+        </div>
+      )}
+
+      {page === "finance" &&
+        isAdmin &&
+        (financeToken ? (
+          <FinanceDashboard
+            user={user}
+            financeToken={financeToken}
+            financeUserEmail={financeUserEmail}
+            onFinanceLogout={handleFinanceLogout}
+            advanceModalOpen={advanceModalOpen}
+            setAdvanceModalOpen={setAdvanceModalOpen}
+            advanceForm={advanceForm}
+            setAdvanceForm={setAdvanceForm}
+            handleApplyAdvance={handleApplyAdvance}
+            supplierAdvances={supplierAdvances}
+            supplierAdvanceTotal={supplierAdvanceTotal}
+            onGoToAdmin={() => { setPage("admin"); loadAdminUsers(); }}
+            onGoToHr={() => setPage("hr")}
+            onGoToAraclar={() => setPage("araclar")}
+            onGoToOfis={() => setPage("ofis")}
+            onGoToMalzeme={() => setPage("malzeme")}
+            onGoToCashflow={() => setPage("cashflow")}
+            currentUser={user}
+          />
+        ) : (
+          <div
+            style={{
+              maxWidth: "420px",
+              margin: "40px auto",
+              background: "#fff",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.08)",
+            }}
+          >
+            <h2 style={{ marginBottom: "18px", textAlign: "center" }}>
+              🔐 Finance Login
+            </h2>
+
+            <form onSubmit={handleFinanceLogin}>
+              <div style={{ display: "grid", gap: "12px" }}>
+                <input
+                  type="email"
+                  placeholder="E-posta"
+                  value={financeLoginEmail}
+                  onChange={(e) => setFinanceLoginEmail(e.target.value)}
+                />
+
+                <input
+                  type="password"
+                  placeholder="Şifre"
+                  value={financeLoginPassword}
+                  onChange={(e) => setFinanceLoginPassword(e.target.value)}
+                />
+
+                <button type="submit" className="saveButton">
+                  {financeLoginLoading ? "Giriş yapılıyor..." : "Giriş Yap"}
+                </button>
+
+                {financeLoginError && (
+                  <div style={{ color: "#b91c1c", fontWeight: 600 }}>
+                    {financeLoginError}
+                  </div>
+                )}
+              </div>
+            </form>
+          </div>
+        ))}
+
+      {page === "hr" && <HrDashboard onBack={() => setPage("finance")} currentUser={user} />}
+      {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
+      {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
+      {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
+      {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
+      {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
+      {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
+      {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
+      {page === "executive" && <RolloutDashboard currentUser={user} />}
+      {page === "region" && (
+        <RegionAnalysis
+          isSubconUser={!isAdmin && !!user?.subcon_name}
+          userSubconName={user?.subcon_name || ""}
+          userPaymentRate={Number(user?.payment_rate || 0.8)}
+        />
+      )}
+      {page === "entry" && <DailyEntry />}
+      {page === "admin" && isAdmin && (
+        <div style={{ maxWidth: "1100px", margin: "24px auto" }}>
+          {/* Header */}
+          <div style={{
+            background: "linear-gradient(135deg, #1f2937 0%, #374151 100%)",
+            borderRadius: "16px",
+            padding: "28px 32px",
+            marginBottom: "24px",
+            display: "flex",
+            alignItems: "center",
+            gap: "16px",
+            color: "#fff",
+          }}>
+            <div style={{ fontSize: "40px" }}>👑</div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: "24px", fontWeight: 700 }}>Admin Panel</h2>
+              <p style={{ margin: "4px 0 0", color: "#9ca3af", fontSize: "14px" }}>
+                Kullanıcı yönetimi ve sistem ayarları
+              </p>
+            </div>
+            <div style={{ marginLeft: "auto", textAlign: "right" }}>
+              <div style={{ fontSize: "28px", fontWeight: 700 }}>{adminUsers.length}</div>
+              <div style={{ fontSize: "12px", color: "#9ca3af" }}>Toplam Kullanıcı</div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: "20px", alignItems: "start" }}>
+            {/* Yeni Kullanıcı Formu */}
+            <div style={{
+              background: "#fff",
+              borderRadius: "16px",
+              padding: "24px",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.07)",
+              border: "1px solid #f3f4f6",
+            }}>
+              <h3 style={{ margin: "0 0 20px", fontSize: "16px", fontWeight: 700, color: "#1f2937", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ background: "#f3f4f6", borderRadius: "8px", padding: "6px 8px" }}>➕</span>
+                Yeni Kullanıcı
+              </h3>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <input
+                  placeholder="Ad Soyad"
+                  value={newUser.name}
+                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", outline: "none" }}
+                />
+                <input
+                  placeholder="E-posta adresi"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", outline: "none" }}
+                />
+                <input
+                  placeholder="Şifre"
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", outline: "none" }}
+                />
+                <select
+                  value={newUser.role}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                  style={{ padding: "10px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff", cursor: "pointer" }}
+                >
+                  <option value="user">👤 User</option>
+                  <option value="admin">👑 Admin</option>
+                  <option value="rollout_mudur">🏗 Rollout Müdürü</option>
+                </select>
+                <button
+                  onClick={handleCreateUser}
+                  style={{
+                    padding: "11px",
+                    background: "#1f2937",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "10px",
+                    fontWeight: "700",
+                    fontSize: "14px",
+                    cursor: "pointer",
+                    marginTop: "4px",
+                  }}
+                >
+                  Kullanıcı Ekle
+                </button>
+              </div>
+
+              {adminError && (
+                <div style={{ marginTop: "12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "10px 14px", color: "#b91c1c", fontSize: "13px", fontWeight: 600 }}>
+                  {adminError}
+                </div>
+              )}
+            </div>
+
+            {/* Kullanıcı Listesi */}
+            <div style={{
+              background: "#fff",
+              borderRadius: "16px",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.07)",
+              border: "1px solid #f3f4f6",
+              overflow: "hidden",
+            }}>
+              <div style={{ padding: "20px 24px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1f2937" }}>
+                  Kullanıcılar
+                </h3>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <span style={{ background: "#dcfce7", color: "#166534", fontSize: "12px", fontWeight: 600, padding: "4px 10px", borderRadius: "20px" }}>
+                    {adminUsers.filter(u => u.is_active).length} Aktif
+                  </span>
+                  <span style={{ background: "#fee2e2", color: "#991b1b", fontSize: "12px", fontWeight: 600, padding: "4px 10px", borderRadius: "20px" }}>
+                    {adminUsers.filter(u => !u.is_active).length} Pasif
+                  </span>
+                </div>
+              </div>
+
+              {adminLoading ? (
+                <div style={{ padding: "40px", textAlign: "center", color: "#9ca3af" }}>Yükleniyor...</div>
+              ) : (
+                <div>
+                  {adminUsers.map((u, i) => (
+                    <div key={u.id} style={{
+                      display: "grid",
+                      gridTemplateColumns: "44px 1fr auto auto",
+                      alignItems: "center",
+                      gap: "16px",
+                      padding: "14px 24px",
+                      borderBottom: i < adminUsers.length - 1 ? "1px solid #f9fafb" : "none",
+                      background: "#fff",
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#f9fafb"}
+                    onMouseLeave={e => e.currentTarget.style.background = "#fff"}
+                    >
+                      {/* Avatar */}
+                      <div style={{
+                        width: "44px", height: "44px",
+                        borderRadius: "12px",
+                        background: u.role === "admin" ? "linear-gradient(135deg,#fbbf24,#f59e0b)" : "linear-gradient(135deg,#60a5fa,#3b82f6)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: "18px", fontWeight: 700, color: "#fff",
+                        flexShrink: 0,
+                      }}>
+                        {u.name.charAt(0)}
+                      </div>
+
+                      {/* Info */}
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: "14px", color: "#1f2937" }}>{u.name}</div>
+                        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>{u.email}</div>
+                      </div>
+
+                      {/* Badges */}
+                      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                        <span style={{
+                          background: u.role === "admin" ? "#fef3c7" : u.role === "rollout_mudur" ? "#f0fdf4" : "#eff6ff",
+                          color: u.role === "admin" ? "#92400e" : u.role === "rollout_mudur" ? "#166534" : "#1e40af",
+                          fontSize: "11px", fontWeight: 700, padding: "3px 10px",
+                          borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.05em",
+                        }}>
+                          {u.role === "admin" ? "👑 Admin" : u.role === "rollout_mudur" ? "🏗 Rollout" : "👤 User"}
+                        </span>
+                        <span style={{
+                          background: u.is_active ? "#dcfce7" : "#f3f4f6",
+                          color: u.is_active ? "#166534" : "#6b7280",
+                          fontSize: "11px", fontWeight: 700, padding: "3px 10px",
+                          borderRadius: "20px",
+                        }}>
+                          {u.is_active ? "Aktif" : "Pasif"}
+                        </span>
+                      </div>
+
+                      {/* Actions */}
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button
+                          onClick={() => handleToggleActive(u.id)}
+                          style={{
+                            padding: "6px 12px",
+                            background: u.is_active ? "#fef3c7" : "#f0fdf4",
+                            color: u.is_active ? "#92400e" : "#166534",
+                            border: "none", borderRadius: "8px",
+                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                          }}
+                        >
+                          {u.is_active ? "Pasife Al" : "Aktif Et"}
+                        </button>
+                        <select
+                          value={u.role || "user"}
+                          onChange={e => handleAdminRoleChange(u.id, e.target.value)}
+                          style={{
+                            padding: "6px 10px",
+                            border: "1px solid #e5e7eb", borderRadius: "8px",
+                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                            background: "#f9fafb", color: "#374151",
+                          }}
+                        >
+                          <option value="user">👤 User</option>
+                          <option value="admin">👑 Admin</option>
+                          <option value="rollout_mudur">🏗 Rollout Müdürü</option>
+                        </select>
+                        <button
+                          onClick={() => handleResetPassword(u.id, u.name)}
+                          style={{
+                            padding: "6px 12px",
+                            background: "#eff6ff",
+                            color: "#1d4ed8",
+                            border: "none", borderRadius: "8px",
+                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                          }}
+                          title="Şifre değiştir"
+                        >
+                          🔑 Şifre
+                        </button>
+                        <button
+                          onClick={() => deleteUser(u.id)}
+                          style={{
+                            padding: "6px 12px",
+                            background: "#fee2e2",
+                            color: "#991b1b",
+                            border: "none", borderRadius: "8px",
+                            fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                          }}
+                        >
+                          🗑 Sil
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

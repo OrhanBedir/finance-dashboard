@@ -16019,11 +16019,31 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   <tr key={k.id} style={{ borderBottom:"1px solid #e5e7eb",background:k.dagitim_yapildi?"#f0fdf4":i%2===0?"#fff":"#f9fafb",opacity:k.dagitim_yapildi?0.7:1 }}>
                     <td style={{ padding:"8px 10px",color:"#9ca3af" }}>{i+1}</td>
                     <td style={{ padding:"8px 10px",fontWeight:600 }}>
-                      {k.malzeme_adi}
-                      {k.dagitim_yapildi && <span style={{ marginLeft:6,fontSize:10,background:"#bbf7d0",color:"#166534",borderRadius:4,padding:"1px 6px",fontWeight:700 }}>✓ Dağıtıldı</span>}
+                      {canMurat && !k.dagitim_yapildi ? (
+                        <input type="text" value={k.malzeme_adi}
+                          onChange={e=>setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,malzeme_adi:e.target.value}:x))}
+                          style={{ width:"100%",minWidth:160,padding:"4px 6px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,fontWeight:600,background:"#faf5ff" }} />
+                      ) : (
+                        <>
+                          {k.malzeme_adi}
+                          {k.dagitim_yapildi && <span style={{ marginLeft:6,fontSize:10,background:"#bbf7d0",color:"#166534",borderRadius:4,padding:"1px 6px",fontWeight:700 }}>✓ Dağıtıldı</span>}
+                        </>
+                      )}
                     </td>
-                    <td style={{ padding:"8px 10px",textAlign:"center" }}>{k.miktar}</td>
-                    <td style={{ padding:"8px 10px" }}>{k.birim}</td>
+                    <td style={{ padding:"8px 10px",textAlign:"center" }}>
+                      {canMurat && !k.dagitim_yapildi ? (
+                        <input type="number" value={k.miktar}
+                          onChange={e=>setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,miktar:e.target.value,toplam_tutar:e.target.value*(x.birim_fiyat||0)}:x))}
+                          style={{ width:70,padding:"4px 6px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,background:"#faf5ff",textAlign:"center" }} />
+                      ) : k.miktar}
+                    </td>
+                    <td style={{ padding:"8px 10px" }}>
+                      {canMurat && !k.dagitim_yapildi ? (
+                        <input type="text" value={k.birim}
+                          onChange={e=>setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,birim:e.target.value}:x))}
+                          style={{ width:60,padding:"4px 6px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,background:"#faf5ff" }} />
+                      ) : k.birim}
+                    </td>
                     <td style={{ padding:"8px 10px" }}>
                       {canMurat ? (
                         <input type="number" value={k.birim_fiyat}
@@ -16048,7 +16068,14 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                           color:k.temin_turu==="Yeni Alım"?"#1d4ed8":"#15803d" }}>{k.temin_turu}</span>
                       ) : "—")}
                     </td>
-                    <td style={{ padding:"8px 10px",color:"#6b7280",fontSize:12 }}>{k.notlar}</td>
+                    <td style={{ padding:"8px 10px" }}>
+                      {canMurat && !k.dagitim_yapildi ? (
+                        <input type="text" value={k.notlar||""}
+                          placeholder="Not ekle..."
+                          onChange={e=>setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,notlar:e.target.value}:x))}
+                          style={{ width:"100%",minWidth:120,padding:"4px 6px",border:"1px solid #d1d5db",borderRadius:4,fontSize:12 }} />
+                      ) : <span style={{ color:"#6b7280",fontSize:12 }}>{k.notlar||"—"}</span>}
+                    </td>
                     {canMuratTedarik && (
                       <td style={{ padding:"6px 8px" }}>
                         {k.dagitim_yapildi ? (
@@ -16188,21 +16215,51 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             );
           })()}
 
-          {/* Onay notu */}
+          {/* Onay / Düzeltme notu */}
           {(canNurcan||canMurat||canPM||canDuzgun||canMuratTedarik) && (
             <div style={{ marginBottom:14 }}>
-              <label style={{ fontSize:13,fontWeight:600,display:"block",marginBottom:6 }}>Onay Notu (isteğe bağlı)</label>
+              <label style={{ fontSize:13,fontWeight:600,display:"block",marginBottom:6 }}>
+                {canMurat ? "📝 Envanter Notu / Düzeltme Açıklaması" : "Onay Notu (isteğe bağlı)"}
+              </label>
               <textarea value={onayNotu} onChange={e=>setOnayNotu(e.target.value)} rows={2}
+                placeholder={canMurat ? "Örn: 3MT 2,5'' Galvaniz Boru yanlış seçilmişti, 2MT olarak düzeltildi." : ""}
                 style={{ width:"100%",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:8,fontSize:13,resize:"vertical",boxSizing:"border-box" }} />
             </div>
           )}
 
           {/* Aksiyon butonları */}
-          <div style={{ display:"flex",gap:10,flexWrap:"wrap" }}>
+          <div style={{ display:"flex",gap:10,flexWrap:"wrap",alignItems:"center" }}>
             {canRollout       && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
             {canNurcan        && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
             {canPM            && <button onClick={()=>updateDurum(d.id,"FIYAT_GIRISI",null,onayNotu)}  disabled={saving} style={{ padding:"10px 18px",background:"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Envanter Onayına Gönder</button>}
-            {canMurat         && <button onClick={()=>updateDurum(d.id,"DUZGUN_ONAY",detayKalemler,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#0284c7",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Proje Direktörü'ne Gönder</button>}
+            {canMurat && (
+              <>
+                <button
+                  disabled={saving}
+                  onClick={async ()=>{
+                    setSaving(true);
+                    try {
+                      const tkn = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
+                      const hdrs = {"Content-Type":"application/json",Authorization:`Bearer ${tkn}`};
+                      await fetch(`${API_BASE}/malzeme/talepler/${d.id}/durum`,{
+                        method:"PUT", headers:hdrs,
+                        body:JSON.stringify({ durum:"FIYAT_GIRISI", kalemler:detayKalemler, onay_notu:onayNotu||undefined }),
+                      });
+                      alert("✅ Düzeltmeler kaydedildi.");
+                      loadTalepler();
+                      // Kalem listesini yeniden yükle
+                      const kr = await fetch(`${API_BASE}/malzeme/talepler/${d.id}`,{headers:hdrs});
+                      const kd = await kr.json();
+                      setDetayKalemler(kd.kalemler||[]);
+                    } catch(e){ alert(e.message); }
+                    setSaving(false);
+                  }}
+                  style={{ padding:"10px 18px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>
+                  💾 Düzelt &amp; Kaydet
+                </button>
+                <button onClick={()=>updateDurum(d.id,"DUZGUN_ONAY",detayKalemler,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#0284c7",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Proje Direktörü'ne Gönder</button>
+              </>
+            )}
             {canDuzgun        && <button onClick={()=>updateDurum(d.id,"SATINALINACAK",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#ea580c",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Tedarik Sürecine Al</button>}
             {canMuratTedarik  && <button onClick={()=>updateDurum(d.id,"DEPODA",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#15803d",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>📦 Tedarik Tamamlandı — Depoya Giriş</button>}
             {canReddet   && <button onClick={()=>{setRedModal(d);setDetayModal(null);setRedNot("");}} style={{ padding:"10px 18px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>❌ Reddet</button>}

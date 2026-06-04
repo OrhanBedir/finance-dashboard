@@ -7723,11 +7723,8 @@ function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
-  const _isMuhasebe = currentUser?.role === "muhasebe";
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
-  // Muhasebe → maaş sekmelerini (personel, maas_avans) gizle, is_avans'tan başla
-  // Nurcan → isg'den başla  / Diğerleri → personel'den başla
-  const [tab, setTab] = useState(_isMuhasebe ? "is_avans" : (_isNurcanHR ? "isg" : "personel"));
+  const [tab, setTab] = useState(_isNurcanHR ? "isg" : "personel");
   const [personelList, setPersonelList] = useState([]);
   const [isgTurleri, setIsgTurleri] = useState([]);
   const [isgUyarilar, setIsgUyarilar] = useState([]);
@@ -8183,9 +8180,7 @@ function HrDashboard({ onBack, currentUser }) {
 
       {/* Sekmeler */}
       <div style={{ display:"flex", gap:"8px", marginBottom:"20px" }}>
-        {[["personel","👤 Personel Maaş"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["puantaj","📋 Puantaj"],["isg","🎓 ISG / Belgeler"]]
-        .filter(([k]) => !_isMuhasebe || !["personel","maas_avans"].includes(k))
-        .map(([k,l]) => (
+        {[["personel","👤 Personel Maaş"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["puantaj","📋 Puantaj"],["isg","🎓 ISG / Belgeler"]].map(([k,l]) => (
           <button key={k} onClick={()=>{
             if (k === "personel" && !personelUnlocked) {
               const pwd = prompt("Personel bilgileri için şifre giriniz:");
@@ -10459,25 +10454,6 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
           </div>
         )}
 
-        {/* Onay not modal — viewForm'un early return'ü nedeniyle buraya eklenmeli */}
-        {notModal && (
-          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}
-            onClick={()=>{setNotModal(null);setNotText("");}}>
-            <div style={{ background:"#fff", borderRadius:"16px", padding:"28px", width:"90%", maxWidth:"420px" }}
-              onClick={e=>e.stopPropagation()}>
-              <h3 style={{ margin:"0 0 16px" }}>✅ Onay Notu (opsiyonel)</h3>
-              <textarea value={notText} onChange={e=>setNotText(e.target.value)} rows={3} placeholder="Not eklemek ister misiniz?"
-                style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box", resize:"vertical" }} />
-              <div style={{ display:"flex", gap:"10px", marginTop:"14px" }}>
-                <button onClick={notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
-                  style={{ flex:1, padding:"12px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Onayla</button>
-                <button onClick={()=>{setNotModal(null);setNotText("");}}
-                  style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Red modal — viewForm'un early return'ü nedeniyle buraya eklenmeli */}
         {redModal && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}
@@ -12585,7 +12561,6 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       aoa.push(titleRow);
 
       aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
-
 
       sortedRows.forEach((row, idx) => {
         const isEven = idx % 2 === 1;
@@ -16412,7 +16387,13 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
           {/* Malzeme Kalemleri */}
           <div style={{ background:"#fff",borderRadius:12,padding:20,marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-            <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f",marginBottom:14 }}>📦 Malzeme Kalemleri</div>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+              <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f" }}>📦 Malzeme Kalemleri</div>
+              <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}])}
+                style={{ padding:"7px 14px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700 }}>
+                + Kalem Ekle
+              </button>
+            </div>
             {/* Başlıklar */}
             <div style={{ display:"grid",gridTemplateColumns:"3fr 80px 110px 130px 110px 110px 38px",gap:8,marginBottom:6 }}>
               {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not / Açıklama",""].map(h=>(
@@ -16420,18 +16401,14 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               ))}
             </div>
             {talepKalemler.map((k,i)=>renderKalemRow(k,i))}
-            {/* Alt: Kalem Ekle + Genel Toplam */}
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12,paddingTop:12,borderTop:"2px solid #e5e7eb" }}>
-              <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}])}
-                style={{ padding:"8px 18px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:700 }}>
-                + Kalem Ekle
-              </button>
-              {toplamGenel > 0 && (
+            {/* Genel Toplam */}
+            {toplamGenel > 0 && (
+              <div style={{ display:"flex",justifyContent:"flex-end",marginTop:12,paddingTop:12,borderTop:"2px solid #e5e7eb" }}>
                 <div style={{ fontSize:16,fontWeight:800,color:"#15803d" }}>
                   Genel Toplam: ₺{toplamGenel.toLocaleString("tr-TR")}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* Açıklama */}
@@ -17398,7 +17375,7 @@ function App() {
   const _ROLLOUT_OVERRIDE = ["hatice.omus@simsektel.com"]; // user rolünde olsa bile rollout gibi davranır
   const _isBolgeMudur = _userEmail === "nurcan.kus@simsektel.com" || _userEmail === "serdar.altinova@simsektel.com" || _userEmail === "murat.istek@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
   const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur || _ROLLOUT_OVERRIDE.includes(_userEmail);
-  const canSeePuantaj = (isRollout || user?.role === "muhasebe") && !_PUANTAJ_HARIC.includes(_userEmail);
+  const canSeePuantaj = isRollout && !_PUANTAJ_HARIC.includes(_userEmail);
   const isPersonel = user?.role === "user" && !_isBolgeMudur && !_ROLLOUT_OVERRIDE.includes(_userEmail);
   const canSeeMalzeme = [
     "nurcan.kus@simsektel.com",
@@ -18108,7 +18085,7 @@ function App() {
               </div>
               {openSections.ik && (
                 <div>
-                  {(isAdmin || user?.role === "muhasebe" || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
+                  {(isAdmin || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
                     <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
                       <span>👥</span> İK Paneli
                     </div>
@@ -18157,7 +18134,7 @@ function App() {
               )}
 
               {/* ── DEPO & ENVANTER ── */}
-              {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
+              {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm"].includes(user?.role)) && (
                 <>
                   <div className="sidebar-section-title" onClick={()=>toggleSection('depo')}>
                     <span>Depo & Envanter</span>
