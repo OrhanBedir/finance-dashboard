@@ -11297,7 +11297,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                     <>
                       <button onClick={()=>handleDirektorDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
-                      <button onClick={()=>setEditAvansModal({ id:t.id, tutar:t.tutar, orijinalTutar:t.tutar })} style={{ padding:"6px 14px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
+                      <button onClick={()=>setEditAvansModal({ id:t.id, tutar:t.tutar, orijinalTutar:t.tutar })} style={{ padding:"6px 14px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>✏️ Düzenle</button>
                     </>
                   )}
                   {isMuhasebe && t.durum==="DIREKTOR_ONAY" && (
@@ -11392,7 +11392,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                         <>
                           <button onClick={() => handleDirektorDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
-                          <button onClick={() => setEditAvansModal({ id: t.id, tutar: t.tutar, orijinalTutar: t.tutar })} style={{ padding: "4px 10px", background: "#fef3c7", color: "#92400e", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Düzenle</button>
+                          <button onClick={() => setEditAvansModal({ id: t.id, tutar: t.tutar, orijinalTutar: t.tutar })} style={{ padding: "4px 10px", background: "#fef3c7", color: "#92400e", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>✏️ Düzenle</button>
                         </>
                       )}
                       {isMuhasebe && t.durum === "DIREKTOR_ONAY" && (
