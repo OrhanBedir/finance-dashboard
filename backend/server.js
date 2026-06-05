@@ -10563,6 +10563,21 @@ app.put("/hr/is-avans/:id/direktor-onayla", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.put("/hr/is-avans/:id/duzenle", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tutar } = req.body;
+    if (!tutar || isNaN(Number(tutar))) return res.status(400).json({ error: "Geçerli tutar giriniz" });
+    const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
+    if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
+    const updated = await pool.query(
+      "UPDATE is_avans_talep SET tutar=$1 WHERE id=$2 RETURNING *",
+      [Number(tutar), id]
+    );
+    res.json(updated.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.put("/hr/is-avans/:id/reddet", async (req, res) => {
   try {
     const { id } = req.params;

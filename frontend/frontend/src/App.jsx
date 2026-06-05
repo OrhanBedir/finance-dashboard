@@ -10977,6 +10977,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [saving, setSaving] = useState(false);
   const [avansBakiye, setAvansBakiye] = useState(null);
   const [notTooltip, setNotTooltip] = useState({ visible: false, x: 0, y: 0, aciklama: "", not_aciklama: "" });
+  const [editAvansModal, setEditAvansModal] = useState(null); // { id, tutar, orijinalTutar }
 
   const _email = (currentUser?.email || "").toLowerCase();
   const isPM = _email === "orhan.bedir@simsektel.com";
@@ -11101,6 +11102,21 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     } catch (err) {
       alert("Reddetme işlemi başarısız: " + err.message);
     }
+  };
+
+  const handleDuzenle = async () => {
+    const t = editAvansModal?.tutar;
+    if (!t || isNaN(Number(t.toString().replace(",", ".")))) { alert("Geçerli bir tutar giriniz!"); return; }
+    try {
+      const r = await fetch(`${API_BASE}/hr/is-avans/${editAvansModal.id}/duzenle`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tutar: Number(t.toString().replace(",", ".")) })
+      });
+      if (!r.ok) { const err = await r.json().catch(() => ({})); throw new Error(err.error || `Sunucu hatası (${r.status})`); }
+      setEditAvansModal(null);
+      load();
+    } catch (err) { alert("Düzenleme başarısız: " + err.message); }
   };
 
   const durumBadge = (durum) => {
@@ -11297,6 +11313,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                     <>
                       <button onClick={()=>handleDirektorDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
+                      <button onClick={()=>setEditAvansModal({ id:t.id, tutar:t.tutar, orijinalTutar:t.tutar })} style={{ padding:"6px 14px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
                     </>
                   )}
                   {isMuhasebe && t.durum==="DIREKTOR_ONAY" && (
@@ -11391,6 +11408,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                         <>
                           <button onClick={() => handleDirektorDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
+                          <button onClick={() => setEditAvansModal({ id: t.id, tutar: t.tutar, orijinalTutar: t.tutar })} style={{ padding: "4px 10px", background: "#fef3c7", color: "#92400e", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Düzenle</button>
                         </>
                       )}
                       {isMuhasebe && t.durum === "DIREKTOR_ONAY" && (
@@ -11515,6 +11533,42 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
               <button onClick={handleReddet}
                 style={{ flex: 1, padding: "11px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer" }}>
                 Reddet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tutar Düzenleme Modal (Direktör) */}
+      {editAvansModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setEditAvansModal(null)}>
+          <div style={{ background: "#fff", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 6px", fontSize: "18px", fontWeight: 700, color: "#92400e" }}>✏️ Tutar Düzenle</h3>
+            <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "18px" }}>
+              Talep edilen tutar: <strong>₺{Number(editAvansModal.orijinalTutar).toLocaleString("tr-TR")}</strong>
+            </div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+              Yeni Tutar (₺) <span style={{ color: "#dc2626" }}>*</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={editAvansModal.tutar}
+                onChange={e => setEditAvansModal(m => ({ ...m, tutar: e.target.value }))}
+                autoFocus
+                style={{ display: "block", width: "100%", padding: "12px 14px", borderRadius: "10px", border: "2px solid #f59e0b", fontSize: "16px", fontWeight: 700, marginTop: "6px", boxSizing: "border-box" }}
+              />
+            </label>
+            <div style={{ display: "flex", gap: "8px", marginTop: "18px" }}>
+              <button onClick={() => setEditAvansModal(null)}
+                style={{ flex: 1, padding: "11px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "10px", fontWeight: 600, cursor: "pointer" }}>
+                İptal
+              </button>
+              <button onClick={handleDuzenle}
+                style={{ flex: 2, padding: "11px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer" }}>
+                Kaydet
               </button>
             </div>
           </div>
