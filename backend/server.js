@@ -8992,8 +8992,11 @@ function parseTurkishInvoice(rawText) {
   // toplam: "Ödenecek Tutar" veya "Vergiler Dahil Toplam Tutar" — TOPLAM\s*TUTAR yok
   // (çünkü "Mal Hizmet Toplam Tutarı" da eşleşir ve yanlış değer verir)
   const toplam_raw  = findAmount(/[ÖO]DENECEK\s*TUTAR|VERGiLER\s*DAHiL\s*TOPLAM|VERGİLER\s*DAHİL\s*TOPLAM|GENEL\s*TOPLAM/i);
-  // kdv: "DEĞER VERGİSİ" veya "KATMA DEĞER VERG" (iki satırda gelirse combined match)
-  const kdv_raw     = findAmount(/KATMA\s*DE[ĞG]ER\s*VERG|DEĞER\s*VERGİSİ|DEGER\s*VERGISI|KDV\s*TUTARI|KDV\s*%\d/i);
+  // kdv: birden fazla format destekleniyor:
+  //  - "Hesaplanan GERÇEK USULDE KATMA DEĞER VERGİSİ(%20)"  [iki satırda]
+  //  - "Hesaplanan KDV(%20.00)"                             [tek satır]
+  //  - "KDV Tutarı", "KDV %20" vb.
+  const kdv_raw     = findAmount(/HESAPLANAN\s*KDV|KATMA\s*DE[ĞG]ER\s*VERG|DEĞER\s*VERGİSİ|DEGER\s*VERGISI|KDV\s*TUTARI|KDV\s*%\d/i);
   // matrah: "Mal Hizmet Toplam Tutarı" + genel TOPLAM\s*TUTAR
   const matrah_raw  = findAmount(/MAL\s*H[İI]ZMET\s*TOPLAM|MATRAH|KDV\s*HAR[İI][ÇC]|ARA\s*TOPLAM|TOPLAM\s*TUTAR/i);
 
