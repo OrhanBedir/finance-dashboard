@@ -3197,7 +3197,7 @@ function FinanceDashboard({
   const [showTaseronOdemeModal, setShowTaseronOdemeModal] = useState(false);
   const [faturaForm, setFaturaForm] = useState({ taseron_adi:"", fatura_no:"", fatura_tarihi:"", toplam_tutar:"", kdv_tutar:"", genel_toplam:"", aciklama:"", kalemler:[] });
   const [odemeForm, setOdemeForm] = useState({ fatura_id:"", tutar:"", odeme_tarihi: new Date().toISOString().slice(0,10), aciklama:"" });
-  const [pdfParsing, setPdfParsing] = useState(false);
+  const [taseronPdfParsing, setTaseronPdfParsing] = useState(false);
   const [taseronFaturaLoading, setTaseronFaturaLoading] = useState(false);
   const [faturaDetailOpen, setFaturaDetailOpen] = useState(null);
   const [savingFatura, setSavingFatura] = useState(false);
@@ -4278,7 +4278,7 @@ function FinanceDashboard({
 
   const handlePdfParseTaseron = async (file) => {
     if (!file) return;
-    setPdfParsing(true);
+    setTaseronPdfParsing(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -4298,7 +4298,7 @@ function FinanceDashboard({
           kalemler: data.kalemler?.length > 0 ? data.kalemler : f.kalemler,
         }));
       }
-    } catch(e) { alert("PDF okunamadı: " + e.message); } finally { setPdfParsing(false); }
+    } catch(e) { alert("PDF okunamadı: " + e.message); } finally { setTaseronPdfParsing(false); }
   };
 
   const handleSaveFatura = async () => {
@@ -7277,8 +7277,8 @@ function FinanceDashboard({
             <div style={{ background:"#f0f7ff", border:"2px dashed #93c5fd", borderRadius:"12px", padding:"16px", marginBottom:"20px", textAlign:"center" }}>
               <div style={{ fontSize:"13px", color:"#1d4ed8", fontWeight:600, marginBottom:"10px" }}>📎 PDF Yükle — Otomatik Doldur</div>
               <label style={{ display:"inline-block", padding:"8px 20px", background:"#1d4ed8", color:"#fff", borderRadius:"8px", cursor:"pointer", fontWeight:600, fontSize:"13px" }}>
-                {pdfParsing ? "⏳ Okunuyor..." : "📂 PDF Seç"}
-                <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} disabled={pdfParsing}
+                {taseronPdfParsing ? "⏳ Okunuyor..." : "📂 PDF Seç"}
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} disabled={taseronPdfParsing}
                   onChange={e => e.target.files[0] && handlePdfParseTaseron(e.target.files[0])} />
               </label>
               <div style={{ fontSize:"11px", color:"#60a5fa", marginTop:"6px" }}>Fatura no, tarih, tutar ve site ID'ler otomatik doldurulacak</div>
