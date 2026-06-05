@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-export const API_BASE = "https://finance-dashboard-staf.vercel.app";
+export const API_BASE = "https://erc-backend-zz5s.onrender.com";
 
 async function getAuthHeaders(json = true) {
   const token = await AsyncStorage.getItem("token");
