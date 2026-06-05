@@ -5454,52 +5454,133 @@ app.post("/rollout/add-site", async (req, res) => {
 app.post("/rollout/update", authMiddleware, async (req, res) => {
   try {
     const data = req.body || {};
-    const autoRegion = getRegionFromSiteCode(data.site_code);
-    const autoSiteType = getSiteTypeFromSiteCode(data.site_code);
-    const autoCity = getCityFromSiteCode(data.site_code);
+    if (!data.site_code) return res.status(400).json({ error: "site_code zorunlu" });
 
-    if (!data.site_code) {
-      return res.status(400).json({ error: "site_code zorunlu" });
-    }
+    const autoRegion   = getRegionFromSiteCode(data.site_code);
+    const autoSiteType = getSiteTypeFromSiteCode(data.site_code);
+    const autoCity     = getCityFromSiteCode(data.site_code);
+
+    // Null-safe yardımcı — boş string ve undefined → null
+    const v  = (k)  => (data[k] === "" || data[k] === undefined ? null : data[k]);
+    // Tarih alanı — "Invalid Date" da null'a çevir
+    const vd = (k)  => {
+      const val = data[k];
+      if (!val || val === "" || val === "__NA__") return null;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    };
 
     const result = await pool.query(
-      `
-      INSERT INTO rollout_progress (
-        site_code, site_type, bolge, il, site_physical_type,
-        enh_site_type, atlas_status, gs_status, rf_not, survey_note,
-        enh_not, qc_closed_date,
-        enh_proje_subcon, enh_proje_hazir, enh_proje_not
+      `INSERT INTO rollout_progress (
+        site_code, site_type, bolge, il, project_code, site_physical_type, malzeme_status,
+        -- RF
+        rf_subcon,
+        plan_start_date, installation_actual_start_date, installation_actual_end_date,
+        onair_date, qc_closed_date, rf_not, atlas_status,
+        -- LOS
+        los_subcon, los_plan_date, los_actual_end_date,
+        -- TSS
+        tss_subcon, tss_plan_start_date, tss_actual_end_date,
+        -- TSSR
+        tssr_subcon, tssr_plan_start_date, tssr_actual_end_date,
+        -- BTK/Survey
+        btk_subcon, btk_plan_start_date, btk_actual_end_date, btk_approved,
+        gs_status, survey_note,
+        -- EMR
+        emr_subcon, emr_plan_start_date, emr_actual_end_date,
+        -- TRS
+        trs_subcon, trs_plan_start_date, trs_actual_end_date, trs_not,
+        -- ENH
+        enh_subcon, enh_site_type, enh_plan_start_date, enh_actual_end_date, enh_not,
+        -- ENH Proje
+        enh_proje_subcon, enh_proje_hazir, enh_proje_not,
+        -- POWER
+        power_subcon, power_plan_start_date, power_actual_end_date,
+        abonelik_actual_end_date, tt_horizon_actual_end_date,
+        pac_actual_end_date, tamamlanma_tarihi
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,
+        $8,$9,$10,$11,$12,$13,$14,$15,
+        $16,$17,$18,
+        $19,$20,$21,
+        $22,$23,$24,
+        $25,$26,$27,$28,$29,$30,
+        $31,$32,$33,
+        $34,$35,$36,$37,
+        $38,$39,$40,$41,$42,
+        $43,$44,$45,
+        $46,$47,$48,$49,$50,$51,$52
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-      ON CONFLICT (site_code)
-      DO UPDATE SET
+      ON CONFLICT (site_code) DO UPDATE SET
         site_type = EXCLUDED.site_type,
         bolge = EXCLUDED.bolge,
         il = EXCLUDED.il,
+        project_code = EXCLUDED.project_code,
         site_physical_type = EXCLUDED.site_physical_type,
-        enh_site_type = EXCLUDED.enh_site_type,
-        atlas_status = EXCLUDED.atlas_status,
-        gs_status = EXCLUDED.gs_status,
-        rf_not = EXCLUDED.rf_not,
-        survey_note = EXCLUDED.survey_note,
-        enh_not = EXCLUDED.enh_not,
+        malzeme_status = EXCLUDED.malzeme_status,
+        rf_subcon = EXCLUDED.rf_subcon,
+        plan_start_date = EXCLUDED.plan_start_date,
+        installation_actual_start_date = EXCLUDED.installation_actual_start_date,
+        installation_actual_end_date = EXCLUDED.installation_actual_end_date,
+        onair_date = EXCLUDED.onair_date,
         qc_closed_date = EXCLUDED.qc_closed_date,
+        rf_not = EXCLUDED.rf_not,
+        atlas_status = EXCLUDED.atlas_status,
+        los_subcon = EXCLUDED.los_subcon,
+        los_plan_date = EXCLUDED.los_plan_date,
+        los_actual_end_date = EXCLUDED.los_actual_end_date,
+        tss_subcon = EXCLUDED.tss_subcon,
+        tss_plan_start_date = EXCLUDED.tss_plan_start_date,
+        tss_actual_end_date = EXCLUDED.tss_actual_end_date,
+        tssr_subcon = EXCLUDED.tssr_subcon,
+        tssr_plan_start_date = EXCLUDED.tssr_plan_start_date,
+        tssr_actual_end_date = EXCLUDED.tssr_actual_end_date,
+        btk_subcon = EXCLUDED.btk_subcon,
+        btk_plan_start_date = EXCLUDED.btk_plan_start_date,
+        btk_actual_end_date = EXCLUDED.btk_actual_end_date,
+        btk_approved = EXCLUDED.btk_approved,
+        gs_status = EXCLUDED.gs_status,
+        survey_note = EXCLUDED.survey_note,
+        emr_subcon = EXCLUDED.emr_subcon,
+        emr_plan_start_date = EXCLUDED.emr_plan_start_date,
+        emr_actual_end_date = EXCLUDED.emr_actual_end_date,
+        trs_subcon = EXCLUDED.trs_subcon,
+        trs_plan_start_date = EXCLUDED.trs_plan_start_date,
+        trs_actual_end_date = EXCLUDED.trs_actual_end_date,
+        trs_not = EXCLUDED.trs_not,
+        enh_subcon = EXCLUDED.enh_subcon,
+        enh_site_type = EXCLUDED.enh_site_type,
+        enh_plan_start_date = EXCLUDED.enh_plan_start_date,
+        enh_actual_end_date = EXCLUDED.enh_actual_end_date,
+        enh_not = EXCLUDED.enh_not,
         enh_proje_subcon = EXCLUDED.enh_proje_subcon,
         enh_proje_hazir = EXCLUDED.enh_proje_hazir,
         enh_proje_not = EXCLUDED.enh_proje_not,
+        power_subcon = EXCLUDED.power_subcon,
+        power_plan_start_date = EXCLUDED.power_plan_start_date,
+        power_actual_end_date = EXCLUDED.power_actual_end_date,
+        abonelik_actual_end_date = EXCLUDED.abonelik_actual_end_date,
+        tt_horizon_actual_end_date = EXCLUDED.tt_horizon_actual_end_date,
+        pac_actual_end_date = EXCLUDED.pac_actual_end_date,
+        tamamlanma_tarihi = EXCLUDED.tamamlanma_tarihi,
         updated_at = NOW()
-      RETURNING *
-      `,
+      RETURNING *`,
       [
-        data.site_code, autoSiteType, autoRegion, autoCity,
-        data.site_physical_type || null, data.enh_site_type || null,
-        data.atlas_status || null, data.gs_status || null,
-        data.rf_not || null, data.survey_note || null,
-        data.enh_not || null, data.qc_closed_date || null,
-        data.enh_proje_subcon || null,
-        data.enh_proje_hazir || null,
-        data.enh_proje_not || null,
-      ],
+        /* 1-7  */ data.site_code, autoSiteType, autoRegion, autoCity, v("project_code"), v("site_physical_type"), v("malzeme_status"),
+        /* 8-15 */ v("rf_subcon"), vd("plan_start_date"), vd("installation_actual_start_date"), vd("installation_actual_end_date"),
+                   vd("onair_date"), vd("qc_closed_date"), v("rf_not"), v("atlas_status"),
+        /* 16-18 */ v("los_subcon"), vd("los_plan_date"), vd("los_actual_end_date"),
+        /* 19-21 */ v("tss_subcon"), vd("tss_plan_start_date"), vd("tss_actual_end_date"),
+        /* 22-24 */ v("tssr_subcon"), vd("tssr_plan_start_date"), vd("tssr_actual_end_date"),
+        /* 25-30 */ v("btk_subcon"), vd("btk_plan_start_date"), vd("btk_actual_end_date"), vd("btk_approved"), v("gs_status"), v("survey_note"),
+        /* 31-33 */ v("emr_subcon"), vd("emr_plan_start_date"), vd("emr_actual_end_date"),
+        /* 34-37 */ v("trs_subcon"), vd("trs_plan_start_date"), vd("trs_actual_end_date"), v("trs_not"),
+        /* 38-42 */ v("enh_subcon"), v("enh_site_type"), vd("enh_plan_start_date"), vd("enh_actual_end_date"), v("enh_not"),
+        /* 43-45 */ v("enh_proje_subcon"), vd("enh_proje_hazir"), v("enh_proje_not"),
+        /* 46-52 */ v("power_subcon"), vd("power_plan_start_date"), vd("power_actual_end_date"),
+                    vd("abonelik_actual_end_date"), vd("tt_horizon_actual_end_date"),
+                    vd("pac_actual_end_date"), vd("tamamlanma_tarihi"),
+      ]
     );
 
     res.json({ ok: true, row: result.rows[0] });
