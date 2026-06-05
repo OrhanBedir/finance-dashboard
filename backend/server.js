@@ -1000,9 +1000,10 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
               ELSE onair_date
             END,
 
+            -- NOK gelince tarih temizlenir: QC "open" ise closed_date olmamalı
             qc_closed_date = CASE
               WHEN $2 = 'OK' THEN COALESCE(qc_closed_date, $4)
-              ELSE qc_closed_date
+              ELSE NULL
             END,
 
             malzeme_status = CASE
@@ -14142,6 +14143,26 @@ app.get("/taseron/qc-kalemler/:taseron_adi", authMiddleware, async (req, res) =>
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 /* ========================= / TAŞERON FATURA YÖNETİMİ ========================= */
+
+// ── Admin: belirli bir saha için QC verisini sıfırla ───────────────────────
+// DELETE /admin/clear-qc/:siteCode — qc_durum + qc_closed_date temizler
+app.delete("/admin/clear-qc/:siteCode", authMiddleware, async (req, res) => {
+  try {
+    const siteCode = String(req.params.siteCode || "").trim().toUpperCase();
+    if (!siteCode) return res.status(400).json({ ok: false, error: "Site kodu gerekli" });
+    const result = await pool.query(
+      `UPDATE rollout_progress
+         SET qc_durum = NULL,
+             qc_closed_date = NULL,
+             updated_at = NOW()
+       WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1
+       RETURNING site_code, qc_durum, qc_closed_date`,
+      [siteCode]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ ok: false, error: "Saha bulunamadı: " + siteCode });
+    res.json({ ok: true, cleared: result.rowCount, rows: result.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server çalışıyor: ${PORT}`);
