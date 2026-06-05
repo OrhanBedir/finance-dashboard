@@ -16,3 +16,8 @@ frontend/backend/
 
 # build output
 frontend/dist/
+
+# Vercel prebuilt artifacts - must NOT be committed (bypasses Vite rebuild)
+.vercel/output/
+frontend/.vercel/output/
+frontend/frontend/.vercel/output/
