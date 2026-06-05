@@ -13886,31 +13886,53 @@ app.delete("/taseron/fatura/:id", authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-function parseTaseronFaturaText(text) {
+function parseTaseronFaturaText(text, filenameHint) {
+  // ── Yapılandırılmış alanlar için sofistike parseri kullan ──────────────────
+  // parseTurkishInvoice e-fatura 2-sütunlu düzenini doğru işler
+  const parsed = parseTurkishInvoice(text);
+
+  const parseNum = s => {
+    if (!s) return 0;
+    s = String(s).replace(/\s|TL|₺/g, "").trim();
+    if (!s) return 0;
+    if (/\d\.\d{3},\d/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+    else if (/\d,\d{3}\.\d/.test(s)) s = s.replace(/,/g, "");
+    else if (/^\d+\.\d{3}$/.test(s)) s = s.replace(".", "");
+    else s = s.replace(/\./g, "").replace(",", ".");
+    return parseFloat(s) || 0;
+  };
+
+  let fatura_no    = parsed.fatura_no    || null;
+  let fatura_tarihi= parsed.fatura_tarihi|| null;
+  let taseron_adi  = parsed.tedarikci    || null;
+  let toplam_tutar = parseNum(parsed.tutar);
+  let kdv_tutar    = parseNum(parsed.kdv);
+  let genel_toplam = parseNum(parsed.toplam_tutar);
+
+  // ── Dosya adından fatura no fallback ─────────────────────────────────────
+  // Örn: "ETS2026000000007.pdf" → fatura_no = "ETS2026000000007"
+  if (!fatura_no && filenameHint) {
+    const fnBase = filenameHint.replace(/\.[^.]+$/, ""); // uzantıyı çıkar
+    // Yıl bazlı format: ETS2026000000007, ERS2026000000115, FAT2025000001 vb.
+    const fnM = fnBase.match(/([A-Z]{2,8}(?:20|19)\d{2}\d{4,})/i);
+    if (fnM) fatura_no = fnM[1].toUpperCase();
+    // Yoksa dosya adının tamamını fatura no olarak al (mantıklı görünüyorsa)
+    else if (/^[A-Z0-9\-\/]{5,40}$/i.test(fnBase)) fatura_no = fnBase.toUpperCase();
+  }
+
+  // ── Tutar dengeleme ────────────────────────────────────────────────────────
+  if (!toplam_tutar && genel_toplam && kdv_tutar) toplam_tutar = Math.round((genel_toplam - kdv_tutar) * 100) / 100;
+  if (!genel_toplam && toplam_tutar && kdv_tutar) genel_toplam = Math.round((toplam_tutar + kdv_tutar) * 100) / 100;
+
+  // ── Site ID / kalem çıkarma ────────────────────────────────────────────────
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  let fatura_no = null, fatura_tarihi = null, toplam_tutar = 0, kdv_tutar = 0, genel_toplam = 0, taseron_adi = null;
-  const noPatterns = [/fatura\s*no[:\s]+([A-Z0-9\-\/]+)/i, /invoice\s*no[:\s]+([A-Z0-9\-\/]+)/i, /^([A-Z]{2,}[0-9]{8,})/im, /fatura\s*numaras[ıi][:\s]+([A-Z0-9\-\/]+)/i];
-  for (const p of noPatterns) { const m = text.match(p); if (m) { fatura_no = m[1].trim(); break; } }
-  const tarihM = text.match(/(\d{2}[./\-]\d{2}[./\-]\d{4})/);
-  if (tarihM) { const parts = tarihM[1].split(/[./\-]/); if (parts.length === 3) fatura_tarihi = parts[2].length === 4 ? `${parts[2]}-${parts[1]}-${parts[0]}` : tarihM[1]; }
-  const parseNum = s => parseFloat(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
-  const kdvM = text.match(/kdv\s*tutar[ıi]?[:\s]+([\d.,]+)/i) || text.match(/%\s*20\s*kdv[:\s]+([\d.,]+)/i) || text.match(/katma\s*de[gğ]er\s*vergisi[:\s]+([\d.,]+)/i);
-  if (kdvM) kdv_tutar = parseNum(kdvM[1]);
-  const toplamPatterns = [/genel\s*toplam[:\s]+([\d.,]+)/i, /[öo]denecek\s*tutar[:\s]+([\d.,]+)/i, /toplam\s*tutar[:\s]+([\d.,]+)/i];
-  for (const p of toplamPatterns) { const m = text.match(p); if (m) { genel_toplam = parseNum(m[1]); break; } }
-  const matrahM = text.match(/matrah[:\s]+([\d.,]+)/i) || text.match(/vergisiz\s*tutar[:\s]+([\d.,]+)/i);
-  if (matrahM) toplam_tutar = parseNum(matrahM[1]);
-  if (!toplam_tutar && genel_toplam && kdv_tutar) toplam_tutar = genel_toplam - kdv_tutar;
-  if (!genel_toplam && toplam_tutar && kdv_tutar) genel_toplam = toplam_tutar + kdv_tutar;
-  const firmLines = lines.filter(l => l.length > 3 && l.length < 60 && /^[A-ZÇĞİÖŞÜa-zçğışöü]/.test(l) && !/fatura|tarih|no:|seri|s[ıi]ra|toplam|kdv|matrah/i.test(l));
-  if (firmLines.length > 0) taseron_adi = firmLines[0];
   const siteMap = new Map();
   const sitePattern = /\b([A-Z]{2,5}[-_]?[0-9]{3,8})\b/g;
   for (const line of lines) {
     sitePattern.lastIndex = 0;
     const siteMatch = sitePattern.exec(line);
     if (siteMatch) {
-      const sid = siteMatch[0].toUpperCase().replace(/\s+/g, '');
+      const sid = siteMatch[0].toUpperCase().replace(/\s+/g, "");
       const amounts = [...line.matchAll(/([\d]{1,3}(?:\.[\d]{3})*,[\d]{2})/g)].map(m => parseNum(m[1]));
       if (amounts.length > 0) {
         const amt = amounts[amounts.length - 1];
@@ -13918,7 +13940,9 @@ function parseTaseronFaturaText(text) {
       }
     }
   }
-  const kalemler = Array.from(siteMap.entries()).map(([site_id, tutar]) => ({ site_id, saha_adi: '', kalem_aciklama: '', tutar }));
+  const kalemler = Array.from(siteMap.entries()).map(([site_id, tutar]) => ({ site_id, saha_adi: "", kalem_aciklama: "", tutar }));
+
+  console.log("[parseTaseronFaturaText]", { fatura_no, fatura_tarihi, taseron_adi, toplam_tutar, kdv_tutar, genel_toplam, kalemCount: kalemler.length });
   return { fatura_no, fatura_tarihi, toplam_tutar, kdv_tutar, genel_toplam, taseron_adi, kalemler };
 }
 
@@ -13928,8 +13952,9 @@ app.post("/taseron/fatura/pdf-parse", authMiddleware, uploadTaseronFaturaParse.s
   const isPDF = req.file.originalname.toLowerCase().endsWith(".pdf") || req.file.mimetype === "application/pdf";
   try {
     const rawText = await extractPdfText(req.file.buffer, isPDF);
-    const result = parseTaseronFaturaText(rawText);
-    res.json({ ok: true, ...result, raw_snippet: rawText.slice(0, 400) });
+    // Dosya adını fatura no fallback olarak gönder (ETS2026000000007.pdf gibi)
+    const result = parseTaseronFaturaText(rawText, req.file.originalname);
+    res.json({ ok: true, ...result, raw_snippet: rawText.slice(0, 500) });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 

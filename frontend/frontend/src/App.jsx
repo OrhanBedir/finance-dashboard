@@ -4287,6 +4287,13 @@ function FinanceDashboard({
       });
       const data = await r.json();
       if (data.ok) {
+        const filled = [];
+        if (data.fatura_no)    filled.push("Fatura No");
+        if (data.fatura_tarihi) filled.push("Tarih");
+        if (data.taseron_adi)  filled.push("Taşeron");
+        if (data.toplam_tutar) filled.push("Matrah");
+        if (data.kdv_tutar)    filled.push("KDV");
+        if (data.genel_toplam) filled.push("Toplam");
         setFaturaForm(f => ({
           ...f,
           fatura_no: data.fatura_no || f.fatura_no,
@@ -4297,6 +4304,11 @@ function FinanceDashboard({
           taseron_adi: data.taseron_adi || f.taseron_adi,
           kalemler: data.kalemler?.length > 0 ? data.kalemler : f.kalemler,
         }));
+        if (filled.length > 0) {
+          alert(`✅ PDF okundu — ${filled.length} alan dolduruldu: ${filled.join(", ")}\n\nLütfen kontrol edin.`);
+        } else {
+          alert("⚠️ PDF okundu ancak hiçbir alan çıkarılamadı.\nLütfen alanları manuel olarak doldurun.");
+        }
       }
     } catch(e) { alert("PDF okunamadı: " + e.message); } finally { setTaseronPdfParsing(false); }
   };
