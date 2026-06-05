@@ -18880,12 +18880,12 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
     }
 
     if (dateField === "installation_actual_end_date") {
+      // onair_date fallback KALDIRILDI: installation_end_date boşsa "bitmedi" sayılır
       return (
         row.installation_actual_end_date ||
         row.inst_actual_end_date ||
         row.install_end_date ||
-        row.onair_date ||
-        (qcOk ? "SMART_OK" : "")
+        ""
       );
     }
 
@@ -19491,8 +19491,8 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   const [pacBelgeFile, setPacBelgeFile] = useState(null);
   const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
-  // Subcon HW mi? (HW, Huawei, huawei vb.)
-  const isHw = (v) => /^h(uawei|w)$/i.test(String(v || "").trim());
+  // Subcon HW mi? Huawei, HW, veya "Huawei Turkey" gibi varyantlar dahil
+  const isHw = (v) => /huawei|^hw$/i.test(String(v || "").trim());
 
   // HW subcon → ilgili alanları N/A işaretle
   const HW_NA_MAP = {

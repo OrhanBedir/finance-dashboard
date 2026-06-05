@@ -5657,247 +5657,181 @@ app.get("/export/excel", async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Rollout Data");
 
-    worksheet.columns = [
-      { header: "Bölge", key: "bolge", width: 16 },
-      { header: "Site Type", key: "site_type", width: 14 },
-      { header: "Site Fiziksel Tip", key: "site_physical_type", width: 20 },
-      { header: "Project Code", key: "project_code", width: 18 },
-      { header: "Site Code", key: "site_code", width: 24 },
-      { header: "Malzeme Status", key: "malzeme_status", width: 18 },
-      { header: "İl", key: "il", width: 16 },
-      { header: "RF Subcon", key: "rf_subcon", width: 22 },
-      { header: "Plan Start Date", key: "plan_start_date", width: 18 },
-      {
-        header: "Installation Start Date",
-        key: "installation_actual_start_date",
-        width: 24,
-      },
-      {
-        header: "Installation End Date",
-        key: "installation_actual_end_date",
-        width: 24,
-      },
-      { header: "OnAir Date", key: "onair_date", width: 18 },
-      { header: "QC Closed Date", key: "qc_closed_date", width: 18 },
-      { header: "RF Not", key: "rf_not", width: 35 },
-      { header: "LOS Subcon", key: "los_subcon", width: 22 },
-      { header: "LOS Plan Date", key: "los_plan_date", width: 18 },
-      { header: "LOS Actual End Date", key: "los_actual_end_date", width: 22 },
-      { header: "TSS Subcon", key: "tss_subcon", width: 22 },
-      { header: "TSS Plan Start Date", key: "tss_plan_start_date", width: 22 },
-      { header: "TSS Actual End Date", key: "tss_actual_end_date", width: 22 },
-      { header: "TSSR Subcon", key: "tssr_subcon", width: 22 },
-      {
-        header: "TSSR Plan Start Date",
-        key: "tssr_plan_start_date",
-        width: 22,
-      },
-      {
-        header: "TSSR Actual End Date",
-        key: "tssr_actual_end_date",
-        width: 22,
-      },
-      { header: "BTK Subcon", key: "btk_subcon", width: 22 },
-      { header: "BTK Plan Start Date", key: "btk_plan_start_date", width: 22 },
-      { header: "BTK Actual End Date", key: "btk_actual_end_date", width: 22 },
-      { header: "BTK Approved by BTK", key: "btk_approved", width: 22 },
-      { header: "GS Status", key: "gs_status", width: 18 },
-      { header: "Survey Note", key: "survey_note", width: 35 },
-      { header: "ENH Subcon", key: "enh_subcon", width: 22 },
-      { header: "ENH Site Type", key: "enh_site_type", width: 18 },
-      { header: "ENH Plan Start Date", key: "enh_plan_start_date", width: 22 },
-      { header: "ENH Actual End Date", key: "enh_actual_end_date", width: 22 },
-      { header: "ENH Not", key: "enh_not", width: 35 },
-      { header: "Power Subcon", key: "power_subcon", width: 22 },
-      {
-        header: "Power Plan Start Date",
-        key: "power_plan_start_date",
-        width: 24,
-      },
-      {
-        header: "Power Actual End Date",
-        key: "power_actual_end_date",
-        width: 24,
-      },
-      {
-        header: "Abonelik Actual End Date",
-        key: "abonelik_end_date",
-        width: 24,
-      },
-      {
-        header: "Horizon Actual End Date",
-        key: "tt_horizon_end_date",
-        width: 24,
-      },
-      { header: "PAC Actual End Date", key: "pac_end_date", width: 24 },
+    // Sütun tanımları — section bilgisi ile genişletildi
+    // section: veri satırlarında ilgili grup rengini vermek için kullanılır
+    const COL_DEFS = [
+      { header: "Bölge",           key: "bolge",                          width: 16,  section: "info" },
+      { header: "Site Type",       key: "site_type",                      width: 14,  section: "info" },
+      { header: "Site Fiziksel",   key: "site_physical_type",             width: 18,  section: "info" },
+      { header: "Project Code",    key: "project_code",                   width: 18,  section: "info" },
+      { header: "Site Code",       key: "site_code",                      width: 24,  section: "info" },
+      { header: "Malzeme Status",  key: "malzeme_status",                 width: 16,  section: "info" },
+      { header: "İl",              key: "il",                             width: 14,  section: "info" },
+      // RF
+      { header: "RF Subcon",                key: "rf_subcon",                       width: 20, section: "rf" },
+      { header: "Plan Start Date",          key: "plan_start_date",                 width: 18, section: "rf" },
+      { header: "Install Start Date",       key: "installation_actual_start_date",  width: 20, section: "rf" },
+      { header: "Install End Date",         key: "installation_actual_end_date",    width: 20, section: "rf" },
+      { header: "OnAir Date",               key: "onair_date",                      width: 18, section: "rf" },
+      { header: "QC Closed Date",           key: "qc_closed_date",                  width: 18, section: "rf" },
+      { header: "RF Not",                   key: "rf_not",                          width: 32, section: "rf" },
+      // LOS
+      { header: "LOS Subcon",       key: "los_subcon",          width: 20, section: "los" },
+      { header: "LOS Plan Date",    key: "los_plan_date",        width: 18, section: "los" },
+      { header: "LOS Actual End",   key: "los_actual_end_date",  width: 18, section: "los" },
+      // TSS
+      { header: "TSS Subcon",       key: "tss_subcon",           width: 20, section: "tss" },
+      { header: "TSS Plan Start",   key: "tss_plan_start_date",  width: 18, section: "tss" },
+      { header: "TSS Actual End",   key: "tss_actual_end_date",  width: 18, section: "tss" },
+      // TSSR
+      { header: "TSSR Subcon",      key: "tssr_subcon",          width: 20, section: "tssr" },
+      { header: "TSSR Plan Start",  key: "tssr_plan_start_date", width: 18, section: "tssr" },
+      { header: "TSSR Actual End",  key: "tssr_actual_end_date", width: 18, section: "tssr" },
+      // BTK
+      { header: "BTK Subcon",         key: "btk_subcon",          width: 20, section: "btk" },
+      { header: "BTK Plan Start",     key: "btk_plan_start_date", width: 18, section: "btk" },
+      { header: "BTK Actual End",     key: "btk_actual_end_date", width: 18, section: "btk" },
+      { header: "BTK Approved",       key: "btk_approved",        width: 18, section: "btk" },
+      { header: "GS Status",          key: "gs_status",           width: 14, section: "btk" },
+      { header: "Survey Note",        key: "survey_note",         width: 32, section: "btk" },
+      // ENH
+      { header: "ENH Subcon",        key: "enh_subcon",          width: 20, section: "enh" },
+      { header: "ENH Site Type",     key: "enh_site_type",        width: 16, section: "enh" },
+      { header: "ENH Plan Start",    key: "enh_plan_start_date",  width: 18, section: "enh" },
+      { header: "ENH Actual End",    key: "enh_actual_end_date",  width: 18, section: "enh" },
+      { header: "ENH QC Closed",     key: "enh_qc_closed_date",  width: 18, section: "enh" },
+      { header: "ENH Not",           key: "enh_not",              width: 32, section: "enh" },
+      // POWER
+      { header: "Power Subcon",      key: "power_subcon",          width: 20, section: "power" },
+      { header: "Power Plan Start",  key: "power_plan_start_date", width: 18, section: "power" },
+      { header: "Power Actual End",  key: "power_actual_end_date", width: 18, section: "power" },
+      { header: "Abonelik End Date", key: "abonelik_end_date",      width: 22, section: "power" },
+      { header: "Horizon End Date",  key: "tt_horizon_end_date",   width: 20, section: "power" },
+      { header: "PAC Actual End",    key: "pac_end_date",           width: 18, section: "power" },
     ];
+
+    // Section başlık renkleri (koyu) ve veri satır renkleri (açık)
+    const SECTION_COLORS = {
+      info:  { header: "FF1F4E78", row: "FFDBE5F0" },
+      rf:    { header: "FF0F5132", row: "FFD1FAE5" },
+      los:   { header: "FF92400E", row: "FFFEF3C7" },
+      tss:   { header: "FF581C87", row: "FFEDE9FE" },
+      tssr:  { header: "FF155E75", row: "FFE0F2FE" },
+      btk:   { header: "FF9D174D", row: "FFFCE7F3" },
+      enh:   { header: "FF78350F", row: "FFFEF9C3" },
+      power: { header: "FF1E3A5F", row: "FFE8EDF5" },
+    };
+
+    worksheet.columns = COL_DEFS.map(c => ({ header: c.header, key: c.key, width: c.width }));
 
     worksheet.spliceRows(1, 0, []);
 
     const lastCol = worksheet.getColumn(worksheet.columns.length).letter;
 
+    // Satır 1: Başlık
     worksheet.mergeCells(`A1:${lastCol}1`);
     const titleCell = worksheet.getCell("A1");
+    titleCell.value = `ROLLOUT DATA RAPORU — ${region && region !== "ALL" ? region : "Tüm Bölgeler"} (${new Date().toLocaleDateString("tr-TR")})`;
+    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3864" } };
+    worksheet.getRow(1).height = 30;
 
-    titleCell.value = `ROLLOUT DATA RAPORU - ${
-      region && region !== "ALL" ? region : "Tüm Bölgeler"
-    } (${new Date().toLocaleDateString("tr-TR")})`;
-
-    titleCell.font = {
-      bold: true,
-      size: 16,
-      color: { argb: "FFFFFFFF" },
-    };
-
-    titleCell.alignment = {
-      horizontal: "center",
-      vertical: "middle",
-    };
-
-    titleCell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "1F4E78" },
-    };
-
-    worksheet.getRow(1).height = 28;
-
+    // Satır 2: Sütun başlıkları — her bölümün rengiyle
     const headerRow = worksheet.getRow(2);
-
-    worksheet.columns.forEach((col, index) => {
+    COL_DEFS.forEach((col, index) => {
       const cell = headerRow.getCell(index + 1);
       cell.value = col.header;
-
-      cell.font = {
-        bold: true,
-        color: { argb: "FFFFFFFF" },
-      };
-
-      cell.alignment = {
-        horizontal: "center",
-        vertical: "middle",
-        wrapText: true,
-      };
-
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "2F5D8A" },
-      };
-
+      cell.font = { bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: SECTION_COLORS[col.section].header } };
       cell.border = {
-        top: { style: "thin", color: { argb: "D9D9D9" } },
-        left: { style: "thin", color: { argb: "D9D9D9" } },
-        bottom: { style: "thin", color: { argb: "D9D9D9" } },
-        right: { style: "thin", color: { argb: "D9D9D9" } },
+        top:    { style: "thin", color: { argb: "FFB7C9E2" } },
+        left:   { style: "thin", color: { argb: "FFB7C9E2" } },
+        bottom: { style: "medium", color: { argb: "FFB7C9E2" } },
+        right:  { style: "thin", color: { argb: "FFB7C9E2" } },
       };
     });
+    headerRow.height = 36;
 
-    headerRow.height = 24;
-
-    result.rows.forEach((row) => {
-      worksheet.addRow({
-        ...row,
-        site_type: getSiteTypeFromSiteCode(row.site_code),
-      });
-    });
-
-    worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber < 3) return;
-
-      row.eachCell((cell) => {
-        const headerCell = worksheet.getRow(2).getCell(cell.col).value;
-        const header =
-          typeof headerCell === "object"
-            ? headerCell?.richText?.[0]?.text || headerCell?.text
-            : headerCell;
-
-        if (header === "Site Type") {
-          const value = String(cell.value || "").toUpperCase();
-
-          if (value === "DSS") {
-            cell.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFFDE9D9" },
-            };
-            cell.font = { bold: true };
-          }
-
-          if (value === "LTE") {
-            cell.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFDDEBF7" },
-            };
-            cell.font = { bold: true };
-          }
-
-          if (value === "5G") {
-            cell.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFE2EFDA" },
-            };
-            cell.font = { bold: true };
-          }
-        }
-      });
-    });
-
-    worksheet.views = [
-      {
-        state: "frozen",
-        ySplit: 2,
-        showGridLines: false,
-      },
-    ];
-
-    worksheet.autoFilter = {
-      from: "A2",
-      to: `${lastCol}2`,
+    // Veri satırlarını ekle — tarihleri JS Date nesnesi olarak ver (Excel native date)
+    const DATE_KEYS = new Set([
+      "plan_start_date","installation_actual_start_date","installation_actual_end_date",
+      "onair_date","qc_closed_date","los_plan_date","los_actual_end_date",
+      "tss_plan_start_date","tss_actual_end_date","tssr_plan_start_date","tssr_actual_end_date",
+      "btk_plan_start_date","btk_actual_end_date","btk_approved",
+      "enh_plan_start_date","enh_actual_end_date","enh_qc_closed_date",
+      "power_plan_start_date","power_actual_end_date","abonelik_end_date",
+      "tt_horizon_end_date","pac_end_date",
+    ]);
+    const toDate = (v) => {
+      if (!v) return "";
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? String(v) : d;
     };
 
-    const safeRegion =
-      region && region !== "ALL" && region !== "Tüm Bölgeler" ? region : "ALL";
+    result.rows.forEach((row) => {
+      const rowObj = { ...row, site_type: getSiteTypeFromSiteCode(row.site_code) };
+      DATE_KEYS.forEach(k => { if (k in rowObj) rowObj[k] = toDate(rowObj[k]); });
+      const excelRow = worksheet.addRow(rowObj);
+      // Tarih hücrelerine format uygula
+      COL_DEFS.forEach((col, idx) => {
+        if (DATE_KEYS.has(col.key)) {
+          const cell = excelRow.getCell(idx + 1);
+          if (cell.value instanceof Date) cell.numFmt = "dd.mm.yyyy";
+        }
+      });
+    });
 
-    const fileName = `rollout_${safeRegion}_${new Date()
-      .toISOString()
-      .slice(0, 10)}.xlsx`;
+    // Veri satırları: section renklerini uygula (sütun gruplarına göre)
+    worksheet.eachRow((exRow, rowNumber) => {
+      if (rowNumber < 3) return;
+      const isOdd = rowNumber % 2 !== 0;
+      COL_DEFS.forEach((col, idx) => {
+        const cell = exRow.getCell(idx + 1);
+        const sectionColor = SECTION_COLORS[col.section];
+        const hasValue = cell.value !== null && cell.value !== undefined && cell.value !== "";
 
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    );
+        // Boş hücreler: bölüm renginin çok açık tonu; dolu hücreler: çift satırlarda biraz koyu
+        if (!hasValue) {
+          cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: isOdd ? "FFF9FAFB" : "FFF3F4F6" } };
+        } else {
+          cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: isOdd ? "FFFFFFFF" : sectionColor.row } };
+        }
+        cell.border = {
+          top:    { style:"hair", color:{ argb:"FFD1D5DB" } },
+          left:   { style:"hair", color:{ argb:"FFD1D5DB" } },
+          bottom: { style:"hair", color:{ argb:"FFD1D5DB" } },
+          right:  { style:"hair", color:{ argb:"FFD1D5DB" } },
+        };
+        cell.alignment = { vertical:"middle", wrapText:false };
+        // Status sütunları için renk kodlama
+        if (col.key === "malzeme_status" || col.key === "qc_closed_date" || col.key === "enh_qc_closed_date") {
+          const val = String(cell.value || "").toUpperCase();
+          if (val === "OK" || (cell.value instanceof Date)) {
+            cell.font = { bold:true, color:{ argb:"FF15803D" } };
+          }
+        }
+        if (col.key === "site_type") {
+          const val = String(cell.value || "").toUpperCase();
+          const typeColors = { "DSS":"FFFDE9D9", "LTE":"FFDDEBF7", "5G":"FFE2EFDA", "STANDALONE":"FFFEF9C3" };
+          if (typeColors[val]) {
+            cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: typeColors[val] } };
+            cell.font = { bold:true };
+          }
+        }
+      });
+    });
 
+    worksheet.views = [{ state:"frozen", ySplit:2, showGridLines:false }];
+    worksheet.autoFilter = { from:"A2", to:`${lastCol}2` };
+
+    const safeRegion = region && region !== "ALL" && region !== "Tüm Bölgeler" ? region : "ALL";
+    const fileName = `rollout_${safeRegion}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
-    // 🔥 Tüm Excel alanını tablo gibi çiz
-    for (let i = 1; i <= worksheet.rowCount; i++) {
-      const row = worksheet.getRow(i);
-
-      for (let j = 1; j <= worksheet.columnCount; j++) {
-        const cell = row.getCell(j);
-
-        if (cell.value === null || cell.value === undefined) {
-          cell.value = "";
-        }
-
-        cell.border = {
-          top: { style: "thin", color: { argb: "FFD9D9D9" } },
-          left: { style: "thin", color: { argb: "FFD9D9D9" } },
-          bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
-          right: { style: "thin", color: { argb: "FFD9D9D9" } },
-        };
-      }
-    }
-    applyPremiumExcelStyle(worksheet, {
-      headerRowNumber: 2,
-      freezeRow: 2,
-      filterFrom: "A2",
-      filterTo: "P2",
-      statusColumn: "B",
-    });
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
@@ -5927,13 +5861,11 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
       const installStart =
         r.installation_actual_start_date || r.plan_start_date || null;
 
-      const installEnd = qcOk
-        ? r.installation_actual_end_date || r.onair_date || qcClosedDate || null
-        : r.installation_actual_end_date || null;
+      // Installation End Date: SADECE gerçek tarih varsa göster
+      // (onair_date fallback kaldırıldı — iki ayrı kavram; biri bitmişken diğeri boş olabilir)
+      const installEnd = r.installation_actual_end_date || null;
 
-      const onairDate = qcOk
-        ? r.onair_date || r.installation_actual_end_date || qcClosedDate || null
-        : r.onair_date || null;
+      const onairDate = r.onair_date || null;
 
       const malzemeStatus =
         qcOk || onairDate || installEnd || installStart
