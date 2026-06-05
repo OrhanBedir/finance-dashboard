@@ -5159,257 +5159,239 @@ function FinanceDashboard({
               </div>
             </div>
 
-            {/* FORM PANEL */}
-            {showInvoiceFormPanel && (
-              <div
+          </div>
+        </div>
+      )}
+
+      {/* ── Fatura Giriş / Düzenle Modal (top-level) ───────────── */}
+      {showInvoiceFormPanel && (
+        <div
+          onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 11000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: "#f8fafc", borderRadius: "20px", width: "100%", maxWidth: "960px", maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", overflow: "hidden" }}
+          >
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #e5e7eb", flexShrink: 0 }}>
+              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
+                {editingInvoiceId ? "🧾 Fatura Düzenle" : "🧾 Yeni Fatura Girişi"}
+              </h3>
+              <button
+                type="button"
                 onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
-                style={{
-                  position: "fixed",
-                  inset: 0,
-                  background: "rgba(0,0,0,0.45)",
-                  zIndex: 10000,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "20px",
-                }}
-              >
-                <div
-                  onClick={e => e.stopPropagation()}
-                  style={{
-                    background: "#f8fafc",
-                    borderRadius: "20px",
-                    width: "100%",
-                    maxWidth: "920px",
-                    maxHeight: "92vh",
-                    display: "flex",
-                    flexDirection: "column",
-                    boxShadow: "0 24px 80px rgba(0,0,0,0.22)",
-                    overflow: "hidden",
-                  }}
-                >
-                  {/* Modal Header */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #e5e7eb", flexShrink: 0, borderRadius: "20px 20px 0 0" }}>
-                    <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
-                      {editingInvoiceId ? "🧾 Fatura Düzenle" : "🧾 Yeni Fatura Girişi"}
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
-                      style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", fontSize: "18px", cursor: "pointer", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
-                    >✕</button>
+                style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", fontSize: "18px", cursor: "pointer", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
+              >✕</button>
+            </div>
+
+            {/* Scrollable form content */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 24px 24px" }}>
+              <form onSubmit={handleSaveManualInvoice}>
+
+                {/* BÖLÜM 0: PDF Otomatik Doldurma */}
+                <div style={{ background: pdfFilled ? "#f0fdf4" : "#eff6ff", borderRadius:"14px", padding:"16px 20px", marginBottom:"16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", border: pdfFilled ? "1.5px solid #86efac" : "1.5px dashed #93c5fd" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: pdfFilled ? 10 : 0 }}>
+                    <span style={{ fontSize:22 }}>{pdfParsing ? "⚙️" : pdfFilled ? "✅" : "📄"}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:700, fontSize:13, color: pdfFilled ? "#166534" : "#1d4ed8" }}>
+                        {pdfParsing ? "Fatura okunuyor..." : pdfFilled ? `${pdfFilled.count} alan otomatik dolduruldu — kontrol edin` : "PDF Yükle → Otomatik Doldur"}
+                      </div>
+                      {!pdfFilled && !pdfParsing && <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>Fatura PDF'ini yükleyin, alanlar otomatik dolsun</div>}
+                      {pdfFilled && <div style={{ fontSize:11, color:"#166534", marginTop:2 }}>📎 {pdfFileName} · Doldurulan: {pdfFilled.fields.join(", ")}</div>}
+                    </div>
+                    {!pdfParsing && (
+                      <label style={{ cursor:"pointer", padding:"8px 16px", background: pdfFilled ? "#16a34a" : "#2563eb", color:"#fff", borderRadius:8, fontSize:12, fontWeight:700, flexShrink:0 }}>
+                        {pdfFilled ? "🔄 Değiştir" : "📎 PDF Seç"}
+                        <input ref={invoicePdfRef} type="file" accept=".pdf,image/*" style={{ display:"none" }}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            setPdfFileName(file.name);
+                            setPdfParsing(true);
+                            setPdfFilled(null);
+                            try {
+                              const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+                              const fd = new FormData();
+                              fd.append("file", file);
+                              const r = await fetch(`${API_BASE}/invoice-parse`, {
+                                method:"POST",
+                                headers: { Authorization:`Bearer ${tkn}` },
+                                body: fd,
+                              });
+                              const data = await r.json();
+                              if (!data.ok) { alert("OCR hatası: " + (data.error||"bilinmeyen")); return; }
+                              const p = data.parsed || {};
+                              setPdfTempKey(data.temp_key || "");
+                              const filled = [];
+                              setInvoiceForm(prev => {
+                                const next = { ...prev };
+                                if (p.fatura_no)    { next.fatura_no = p.fatura_no;         filled.push("Fatura No"); }
+                                if (p.fatura_tarihi){ next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
+                                if (p.tedarikci)    { next.tedarikci = p.tedarikci;         filled.push("Tedarikçi"); }
+                                if (p.tutar)        { next.tutar = p.tutar;                 filled.push("Tutar"); }
+                                if (p.kdv)          { next.kdv = p.kdv;                     filled.push("KDV"); }
+                                if (p.toplam_tutar) { next.toplam_tutar = p.toplam_tutar;   filled.push("Toplam"); }
+                                return next;
+                              });
+                              setPdfFilled({ count: filled.length || 0, fields: filled.length ? filled : ["Belge yüklendi"] });
+                            } catch (err) {
+                              alert("PDF işleme hatası: " + err.message);
+                            } finally {
+                              setPdfParsing(false);
+                              if (invoicePdfRef.current) invoicePdfRef.current.value = "";
+                            }
+                          }}
+                        />
+                      </label>
+                    )}
+                    {pdfParsing && <div style={{ width:24, height:24, border:"3px solid #93c5fd", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />}
+                  </div>
+                </div>
+
+                {/* Fatura Türü */}
+                {!editingInvoiceId && (
+                <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                  <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Fatura Türü:</span>
+                  {[["GELEN","📥 Gelen Fatura (Alış)","#166534","#f0fdf4","#86efac"],["IADE","↩️ İade Fatura (Kesilen)","#c2410c","#fff7ed","#fed7aa"]].map(([val,lbl,col,bg,brd])=>(
+                    <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:invoiceForm.fatura_turu===val?bg:"#f9fafb", border:`1.5px solid ${invoiceForm.fatura_turu===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:invoiceForm.fatura_turu===val?col:"#6b7280" }}>
+                      <input type="radio" name="fatura_turu" value={val} checked={invoiceForm.fatura_turu===val} onChange={()=>setInvoiceForm(p=>({...p,fatura_turu:val}))} style={{ display:"none" }} />{lbl}
+                    </label>
+                  ))}
+                  {invoiceForm.fatura_turu==='IADE' && (
+                    <select value={invoiceForm.bagli_fatura_id||""} onChange={e=>setInvoiceForm(p=>({...p,bagli_fatura_id:e.target.value}))}
+                      style={{ flex:1, minWidth:200, padding:"7px 12px", border:"1.5px solid #fed7aa", borderRadius:8, fontSize:13 }}>
+                      <option value="">— Bağlı Fatura Seç (opsiyonel)</option>
+                      {manualInvoiceRows.filter(r=>r.fatura_turu!=='IADE').map(r=>(
+                        <option key={r.id} value={r.id}>{r.fatura_no} — {r.tedarikci} — {formatTRY(r.toplam_tutar)}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                )}
+
+                {/* BÖLÜM 1: Proje Bilgileri */}
+                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />
+                    Proje Bilgileri
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                    {[
+                      { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara" },
+                      { label: "Proje", name: "proje", placeholder: "TT / TC" },
+                      { label: "Proje Kodu", name: "proje_kodu", placeholder: "56A0QEF" },
+                    ].map(f => (
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
+                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* BÖLÜM 2: Fatura Bilgileri */}
+                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#8b5cf6", display: "inline-block" }} />
+                    Fatura Bilgileri
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                    {[
+                      { label: "Fatura No *", name: "fatura_no", placeholder: "ABC2025/001" },
+                      { label: "Tedarikçi *", name: "tedarikci", placeholder: "Firma adı" },
+                      { label: "RF Montaj Firma", name: "rf_montaj_firma", placeholder: "Subcon firma adı" },
+                      { label: "Fatura Kalemi", name: "fatura_kalemi", placeholder: "Malzeme / Hizmet" },
+                      { label: "İş Kalemi", name: "is_kalemi", placeholder: "KONAKLAMA / PROJE" },
+                      { label: "PO No", name: "po_no", placeholder: "PO numarası" },
+                      { label: "Site ID", name: "site_id", placeholder: "BU8944" },
+                    ].map(f => (
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
+                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                    <div>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>Fatura Tarihi</label>
+                      <input type="date" name="fatura_tarihi" value={invoiceForm.fatura_tarihi} onChange={handleInvoiceFormChange}
+                        style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#7e22ce", marginBottom: "6px" }}>💸 Ödeme Tarihi</label>
+                      <input type="date" name="odeme_tarihi" value={invoiceForm.odeme_tarihi} onChange={handleInvoiceFormChange}
+                        style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #d8b4fe", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box", background:"#fdf4ff" }} />
+                      <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Nakit Akış'ta taşeron satırı olarak görünür</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* BÖLÜM 3: Finansal Bilgiler */}
+                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
+                    Finansal Bilgiler
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "14px" }}>
+                    {[
+                      { label: "Tutar (₺)", name: "tutar" },
+                      { label: "KDV (₺)", name: "kdv" },
+                      { label: "Toplam Tutar (₺) *", name: "toplam_tutar" },
+                      { label: "Ödenen Tutar (₺)", name: "odenen_tutar" },
+                      { label: "Kalan Borç (₺)", name: "kalan_borc" },
+                    ].map(f => (
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <input type="number" step="0.01" name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder="0"
+                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* BÖLÜM 4: Not + Fatura Fotoğrafı */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                  <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
+                      Not / Açıklama
+                    </div>
+                    <textarea name="note" value={invoiceForm.note} onChange={handleInvoiceFormChange} placeholder="Ödeme planı, açıklama, notlar..." rows={5}
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", resize: "vertical", boxSizing: "border-box" }} />
                   </div>
 
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 24px 24px" }}>
-                  <form onSubmit={handleSaveManualInvoice}>
-
-                    {/* BÖLÜM 0: PDF Otomatik Doldurma */}
-                    <div style={{ background: pdfFilled ? "#f0fdf4" : "#eff6ff", borderRadius:"14px", padding:"16px 20px", marginBottom:"16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", border: pdfFilled ? "1.5px solid #86efac" : "1.5px dashed #93c5fd" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: pdfFilled ? 10 : 0 }}>
-                        <span style={{ fontSize:22 }}>{pdfParsing ? "⚙️" : pdfFilled ? "✅" : "📄"}</span>
+                  <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
+                      Fatura Belgesi (PDF / Fotoğraf)
+                    </div>
+                    {pdfTempKey && !editingInvoiceId ? (
+                      <div style={{ border:"1.5px solid #86efac", borderRadius:10, padding:"14px 16px", background:"#f0fdf4", display:"flex", alignItems:"center", gap:10 }}>
+                        <span style={{ fontSize:28 }}>📄</span>
                         <div style={{ flex:1 }}>
-                          <div style={{ fontWeight:700, fontSize:13, color: pdfFilled ? "#166534" : "#1d4ed8" }}>
-                            {pdfParsing ? "Fatura okunuyor..." : pdfFilled ? `${pdfFilled.count} alan otomatik dolduruldu — kontrol edin` : "PDF Yükle → Otomatik Doldur"}
-                          </div>
-                          {!pdfFilled && !pdfParsing && <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>Fatura PDF'ini yükleyin, alanlar otomatik dolsun</div>}
-                          {pdfFilled && <div style={{ fontSize:11, color:"#166534", marginTop:2 }}>📎 {pdfFileName} · Doldurulan: {pdfFilled.fields.join(", ")}</div>}
+                          <div style={{ fontWeight:600, fontSize:13, color:"#166534" }}>Belge Hazır</div>
+                          <div style={{ fontSize:11, color:"#9ca3af" }}>{pdfFileName}</div>
                         </div>
-                        {!pdfParsing && (
-                          <label style={{ cursor:"pointer", padding:"8px 16px", background: pdfFilled ? "#16a34a" : "#2563eb", color:"#fff", borderRadius:8, fontSize:12, fontWeight:700, flexShrink:0 }}>
-                            {pdfFilled ? "🔄 Değiştir" : "📎 PDF Seç"}
-                            <input ref={invoicePdfRef} type="file" accept=".pdf,image/*" style={{ display:"none" }}
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                setPdfFileName(file.name);
-                                setPdfParsing(true);
-                                setPdfFilled(null);
-                                try {
-                                  const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
-                                  const fd = new FormData();
-                                  fd.append("file", file);
-                                  const r = await fetch(`${API_BASE}/invoice-parse`, {
-                                    method:"POST",
-                                    headers: { Authorization:`Bearer ${tkn}` },
-                                    body: fd,
-                                  });
-                                  const data = await r.json();
-                                  if (!data.ok) { alert("OCR hatası: " + (data.error||"bilinmeyen")); return; }
-                                  const p = data.parsed || {};
-                                  setPdfTempKey(data.temp_key || "");
-                                  // PDF'den gelen tüm değerleri yaz (mevcut değerlerin üzerine yazar)
-                                  const filled = [];
-                                  setInvoiceForm(prev => {
-                                    const next = { ...prev };
-                                    if (p.fatura_no)    { next.fatura_no = p.fatura_no;         filled.push("Fatura No"); }
-                                    if (p.fatura_tarihi){ next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
-                                    if (p.tedarikci)    { next.tedarikci = p.tedarikci;         filled.push("Tedarikçi"); }
-                                    if (p.tutar)        { next.tutar = p.tutar;                 filled.push("Tutar"); }
-                                    if (p.kdv)          { next.kdv = p.kdv;                     filled.push("KDV"); }
-                                    if (p.toplam_tutar) { next.toplam_tutar = p.toplam_tutar;   filled.push("Toplam"); }
-                                    return next;
-                                  });
-                                  setPdfFilled({ count: filled.length || 0, fields: filled.length ? filled : ["Belge yüklendi"] });
-                                } catch (err) {
-                                  alert("PDF işleme hatası: " + err.message);
-                                } finally {
-                                  setPdfParsing(false);
-                                  if (invoicePdfRef.current) invoicePdfRef.current.value = "";
-                                }
-                              }}
-                            />
-                          </label>
-                        )}
-                        {pdfParsing && <div style={{ width:24, height:24, border:"3px solid #93c5fd", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />}
+                        <button type="button" onClick={()=>{setPdfTempKey("");setPdfFilled(null);setPdfFileName("");}} style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Kaldır</button>
                       </div>
-                    </div>
-
-                    {/* Fatura Türü */}
-                    {!editingInvoiceId && (
-                    <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
-                      <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Fatura Türü:</span>
-                      {[["GELEN","📥 Gelen Fatura (Alış)","#166534","#f0fdf4","#86efac"],["IADE","↩️ İade Fatura (Kesilen)","#c2410c","#fff7ed","#fed7aa"]].map(([val,lbl,col,bg,brd])=>(
-                        <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:invoiceForm.fatura_turu===val?bg:"#f9fafb", border:`1.5px solid ${invoiceForm.fatura_turu===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:invoiceForm.fatura_turu===val?col:"#6b7280" }}>
-                          <input type="radio" name="fatura_turu" value={val} checked={invoiceForm.fatura_turu===val} onChange={()=>setInvoiceForm(p=>({...p,fatura_turu:val}))} style={{ display:"none" }} />{lbl}
-                        </label>
-                      ))}
-                      {invoiceForm.fatura_turu==='IADE' && (
-                        <select value={invoiceForm.bagli_fatura_id||""} onChange={e=>setInvoiceForm(p=>({...p,bagli_fatura_id:e.target.value}))}
-                          style={{ flex:1, minWidth:200, padding:"7px 12px", border:"1.5px solid #fed7aa", borderRadius:8, fontSize:13 }}>
-                          <option value="">— Bağlı Fatura Seç (opsiyonel)</option>
-                          {manualInvoiceRows.filter(r=>r.fatura_turu!=='IADE').map(r=>(
-                            <option key={r.id} value={r.id}>{r.fatura_no} — {r.tedarikci} — {formatTRY(r.toplam_tutar)}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
+                    ) : (
+                      <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
                     )}
-
-                    {/* BÖLÜM 1: Proje Bilgileri */}
-                    <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />
-                        Proje Bilgileri
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
-                        {[
-                          { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara" },
-                          { label: "Proje", name: "proje", placeholder: "TT / TC" },
-                          { label: "Proje Kodu", name: "proje_kodu", placeholder: "56A0QEF" },
-                        ].map(f => (
-                          <div key={f.name}>
-                            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                            <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
-                              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* BÖLÜM 2: Fatura Bilgileri */}
-                    <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#8b5cf6", display: "inline-block" }} />
-                        Fatura Bilgileri
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
-                        {[
-                          { label: "Fatura No *", name: "fatura_no", placeholder: "ABC2025/001" },
-                          { label: "Tedarikçi *", name: "tedarikci", placeholder: "Firma adı" },
-                          { label: "RF Montaj Firma", name: "rf_montaj_firma", placeholder: "Subcon firma adı" },
-                          { label: "Fatura Kalemi", name: "fatura_kalemi", placeholder: "Malzeme / Hizmet" },
-                          { label: "İş Kalemi", name: "is_kalemi", placeholder: "KONAKLAMA / PROJE" },
-                          { label: "PO No", name: "po_no", placeholder: "PO numarası" },
-                          { label: "Site ID", name: "site_id", placeholder: "BU8944" },
-                        ].map(f => (
-                          <div key={f.name}>
-                            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                            <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
-                              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                          </div>
-                        ))}
-                        <div>
-                          <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>Fatura Tarihi</label>
-                          <input type="date" name="fatura_tarihi" value={invoiceForm.fatura_tarihi} onChange={handleInvoiceFormChange}
-                            style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                        </div>
-                        <div>
-                          <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#7e22ce", marginBottom: "6px" }}>💸 Ödeme Tarihi</label>
-                          <input type="date" name="odeme_tarihi" value={invoiceForm.odeme_tarihi} onChange={handleInvoiceFormChange}
-                            style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #d8b4fe", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box", background:"#fdf4ff" }} />
-                          <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Nakit Akış'ta taşeron satırı olarak görünür</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* BÖLÜM 3: Finansal Bilgiler */}
-                    <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
-                        Finansal Bilgiler
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "14px" }}>
-                        {[
-                          { label: "Tutar (₺)", name: "tutar" },
-                          { label: "KDV (₺)", name: "kdv" },
-                          { label: "Toplam Tutar (₺) *", name: "toplam_tutar" },
-                          { label: "Ödenen Tutar (₺)", name: "odenen_tutar" },
-                          { label: "Kalan Borç (₺)", name: "kalan_borc" },
-                        ].map(f => (
-                          <div key={f.name}>
-                            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                            <input type="number" step="0.01" name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder="0"
-                              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* BÖLÜM 4: Not + Fatura Fotoğrafı */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-                      <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
-                          Not / Açıklama
-                        </div>
-                        <textarea name="note" value={invoiceForm.note} onChange={handleInvoiceFormChange} placeholder="Ödeme planı, açıklama, notlar..." rows={5}
-                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", resize: "vertical", boxSizing: "border-box" }} />
-                      </div>
-
-                      <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
-                          Fatura Belgesi (PDF / Fotoğraf)
-                        </div>
-                        {pdfTempKey && !editingInvoiceId ? (
-                          <div style={{ border:"1.5px solid #86efac", borderRadius:10, padding:"14px 16px", background:"#f0fdf4", display:"flex", alignItems:"center", gap:10 }}>
-                            <span style={{ fontSize:28 }}>📄</span>
-                            <div style={{ flex:1 }}>
-                              <div style={{ fontWeight:600, fontSize:13, color:"#166534" }}>Belge Hazır</div>
-                              <div style={{ fontSize:11, color:"#9ca3af" }}>{pdfFileName}</div>
-                            </div>
-                            <button type="button" onClick={()=>{setPdfTempKey("");setPdfFilled(null);setPdfFileName("");}} style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Kaldır</button>
-                          </div>
-                        ) : (
-                          <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
-                        )}
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                      <button type="button" className="tab"
-                        onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}>
-                        Vazgeç
-                      </button>
-                      <button type="submit" className="saveButton">
-                        {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
-                      </button>
-                    </div>
-                  </form>
+                  </div>
                 </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                  <button type="button" className="tab"
+                    onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}>
+                    Vazgeç
+                  </button>
+                  <button type="submit" className="saveButton">
+                    {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
+                  </button>
                 </div>
-              </div>
-            )}
+              </form>
+            </div>
           </div>
         </div>
       )}
