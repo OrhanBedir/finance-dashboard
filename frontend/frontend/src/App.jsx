@@ -5162,44 +5162,45 @@ function FinanceDashboard({
             {/* FORM PANEL */}
             {showInvoiceFormPanel && (
               <div
+                onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
                 style={{
-                  position: "absolute",
+                  position: "fixed",
                   inset: 0,
-                  background: "rgba(255,255,255,0.96)",
-                  zIndex: 20,
+                  background: "rgba(0,0,0,0.45)",
+                  zIndex: 10000,
                   display: "flex",
-                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "20px",
                 }}
               >
                 <div
+                  onClick={e => e.stopPropagation()}
                   style={{
+                    background: "#f8fafc",
+                    borderRadius: "20px",
+                    width: "100%",
+                    maxWidth: "920px",
+                    maxHeight: "92vh",
                     display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "20px 24px",
-                    borderBottom: "1px solid #e5e7eb",
-                    flexShrink: 0,
+                    flexDirection: "column",
+                    boxShadow: "0 24px 80px rgba(0,0,0,0.22)",
+                    overflow: "hidden",
                   }}
                 >
-                  <h3 className="listTitle" style={{ margin: 0 }}>
-                    {editingInvoiceId
-                      ? "🧾 Fatura Düzenle"
-                      : "🧾 Yeni Fatura Girişi"}
-                  </h3>
+                  {/* Modal Header */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #e5e7eb", flexShrink: 0, borderRadius: "20px 20px 0 0" }}>
+                    <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
+                      {editingInvoiceId ? "🧾 Fatura Düzenle" : "🧾 Yeni Fatura Girişi"}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
+                      style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", fontSize: "18px", cursor: "pointer", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
+                    >✕</button>
+                  </div>
 
-                  <button
-                    type="button"
-                    className="tab"
-                    onClick={() => {
-                      setShowInvoiceFormPanel(false);
-                      setEditingInvoiceId(null);
-                    }}
-                  >
-                    Geri Dön
-                  </button>
-                </div>
-
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px", background: "#f8fafc" }}>
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 24px 24px" }}>
                   <form onSubmit={handleSaveManualInvoice}>
 
                     {/* BÖLÜM 0: PDF Otomatik Doldurma */}
@@ -5405,6 +5406,7 @@ function FinanceDashboard({
                       </button>
                     </div>
                   </form>
+                </div>
                 </div>
               </div>
             )}
