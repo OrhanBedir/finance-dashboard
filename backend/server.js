@@ -969,84 +969,96 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       const firstSubmitDateOnly = toDateOnly(firstSubmitRaw);
       const qcClosedDateOnly = toDateOnly(qcCloseTimeRaw);
 
-      if (!siteCode || !qcDurum) {
+      if (!siteCode || !qcDurum || !templateName) {
         continue;
       }
 
-      /* 🔥 Rollout Data QC otomatik güncelleme */
-      /* 🔥 Rollout Data QC otomatik güncelleme */
-      await pool.query(
-        `
-        UPDATE rollout_progress
-        SET
-          qc_durum = $2,
+      const templateNorm = normalizeText(templateName);
+      const siteType = getSiteTypeFromCode(siteCode);
 
-          plan_start_date = COALESCE(plan_start_date, $3),
-          installation_actual_start_date = COALESCE(installation_actual_start_date, $3),
-
-          installation_actual_end_date = CASE
-            WHEN $2 = 'OK' THEN COALESCE(installation_actual_end_date, $4)
-            ELSE installation_actual_end_date
-          END,
-
-          onair_date = CASE
-            WHEN $2 = 'OK' THEN COALESCE(onair_date, $4)
-            ELSE onair_date
-          END,
-
-          qc_closed_date = CASE
-            WHEN $2 = 'OK' THEN COALESCE(qc_closed_date, $4)
-            ELSE qc_closed_date
-          END,
-
-          malzeme_status = CASE
-            WHEN $2 = 'OK' AND COALESCE(malzeme_status, '') = ''
-            THEN 'OK'
-            ELSE malzeme_status
-          END,
-
-          updated_at = NOW()
-        WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1
-        `,
-        [siteCode, qcDurum, firstSubmitDateOnly, qcClosedDateOnly],
-      );
-
-      /* Eski master_works kuralı aynen devam */
-      if (!templateName) {
-        continue;
-      }
-
+      // ── RF QC Kuralı: doğru template eşleşince rollout_progress + master_works güncelle ──
       const rule = getRuleByTemplate(siteCode, templateName);
 
-      if (!rule) {
-        continue;
-      }
-      if (rule.type === "ONLY_8818274546") {
-        const result = await pool.query(
+      if (rule) {
+        /* 🔥 Rollout Data RF QC — SADECE doğru template eşleşince güncellenir */
+        await pool.query(
           `
-            UPDATE master_works
-            SET qc_durum = $1
-            WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
-              AND TRIM(COALESCE(item_code, '')) = '8818274546'
-            `,
-          [qcDurum, siteCode],
+          UPDATE rollout_progress
+          SET
+            qc_durum = $2,
+
+            plan_start_date = COALESCE(plan_start_date, $3),
+            installation_actual_start_date = COALESCE(installation_actual_start_date, $3),
+
+            installation_actual_end_date = CASE
+              WHEN $2 = 'OK' THEN COALESCE(installation_actual_end_date, $4)
+              ELSE installation_actual_end_date
+            END,
+
+            onair_date = CASE
+              WHEN $2 = 'OK' THEN COALESCE(onair_date, $4)
+              ELSE onair_date
+            END,
+
+            qc_closed_date = CASE
+              WHEN $2 = 'OK' THEN COALESCE(qc_closed_date, $4)
+              ELSE qc_closed_date
+            END,
+
+            malzeme_status = CASE
+              WHEN $2 = 'OK' AND COALESCE(malzeme_status, '') = ''
+              THEN 'OK'
+              ELSE malzeme_status
+            END,
+
+            updated_at = NOW()
+          WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1
+          `,
+          [siteCode, qcDurum, firstSubmitDateOnly, qcClosedDateOnly],
         );
 
-        updatedCount += result.rowCount || 0;
+        if (rule.type === "ONLY_8818274546") {
+          const result = await pool.query(
+            `
+              UPDATE master_works
+              SET qc_durum = $1
+              WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
+                AND TRIM(COALESCE(item_code, '')) = '8818274546'
+              `,
+            [qcDurum, siteCode],
+          );
+          updatedCount += result.rowCount || 0;
+        }
+
+        if (rule.type === "ALL_EXCEPT_SPECIAL") {
+          const result = await pool.query(
+            `
+              UPDATE master_works
+              SET qc_durum = $1
+              WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
+                AND TRIM(COALESCE(item_code, '')) <> ALL($3::text[])
+              `,
+            [qcDurum, siteCode, EXCLUDED_ITEMS],
+          );
+          updatedCount += result.rowCount || 0;
+        }
       }
 
-      if (rule.type === "ALL_EXCEPT_SPECIAL") {
-        const result = await pool.query(
-          `
-            UPDATE master_works
-            SET qc_durum = $1
-            WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
-              AND TRIM(COALESCE(item_code, '')) <> ALL($3::text[])
-            `,
-          [qcDurum, siteCode, EXCLUDED_ITEMS],
-        );
-
-        updatedCount += result.rowCount || 0;
+      // ── ENH / Enerji QC Kuralı ────────────────────────────────────────────────
+      // Standalone (NS) + "AG OG Enerji Template" → enh_qc_closed_date
+      if (
+        siteType === "STANDALONE" &&
+        templateNorm.includes("AG OG ENERJI")
+      ) {
+        if (qcDurum === "OK") {
+          await pool.query(
+            `UPDATE rollout_progress
+               SET enh_qc_closed_date = COALESCE(enh_qc_closed_date, $2),
+                   updated_at = NOW()
+             WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1`,
+            [siteCode, qcClosedDateOnly || firstSubmitDateOnly],
+          );
+        }
       }
     }
 
@@ -2232,6 +2244,7 @@ app.get("/migrate", async (req, res) => {
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_hazir DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_not TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_qc_closed_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_subcon TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_plan_start_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_actual_end_date DATE",
@@ -2379,6 +2392,7 @@ app.get("/setup-db", async (req, res) => {
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_plan_start_date DATE",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_actual_end_date DATE",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_not TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_qc_closed_date DATE",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_subcon TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_plan_start_date DATE",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_actual_end_date DATE",
@@ -6039,6 +6053,7 @@ app.get("/rollout/summary", async (req, res) => {
         COUNT(*) FILTER (WHERE power_actual_end_date IS NOT NULL)::int AS power_actual_end,
         COUNT(*) FILTER (WHERE enh_plan_start_date IS NOT NULL)::int AS enh_plan_start,
         COUNT(*) FILTER (WHERE enh_actual_end_date IS NOT NULL)::int AS enh_actual_end,
+        COUNT(*) FILTER (WHERE enh_qc_closed_date IS NOT NULL)::int AS enh_qc_closed,
         COUNT(*) FILTER (
           WHERE abonelik_actual_end_date IS NOT NULL
              OR abonelik_end_date IS NOT NULL
@@ -12960,6 +12975,7 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_hazir DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_not TEXT",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_belge_url TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_qc_closed_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_subcon TEXT",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_plan_start_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_actual_end_date DATE",

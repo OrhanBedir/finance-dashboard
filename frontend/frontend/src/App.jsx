@@ -18935,6 +18935,10 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       return row.enh_actual_end_date || "";
     }
 
+    if (dateField === "enh_qc_closed_date") {
+      return row.enh_qc_closed_date || "";
+    }
+
     if (dateField === "abonelik_actual_end_date") {
       return row.abonelik_actual_end_date || row.abonelik_end_date || "";
     }
@@ -19354,6 +19358,11 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
             label: "Abonelik Belgesi Actual End Date",
             key: "abonelik_end",
             dateField: "abonelik_actual_end_date",
+          },
+          {
+            label: "QC(Closed)",
+            key: "enh_qc_closed",
+            dateField: "enh_qc_closed_date",
           },
         ], { hideTypeRow: true })}
       </div>
