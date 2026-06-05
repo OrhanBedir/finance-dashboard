@@ -8891,19 +8891,26 @@ function parseTurkishInvoice(rawText) {
   }
 
   // ── FATURA NO ──────────────────────────────────────────────────────────────
-  // Önce e-fatura konum tabanlı sonuç, yoksa genel arama
+  // Önce e-fatura konum tabanlı sonuç (EF_LABEL_ORDER), yoksa genel arama
   let fatura_no = efFaturaNo;
   if (!fatura_no) fatura_no = findAfterLabel(
     /^fatura\s*no\s*:?\s*$/i,
-    /^([A-Z0-9]{5,40})$/i
+    // Fatura no mutlaka rakam içermeli: TICARIFATURA, SATIS gibi salt-harf değerleri dışla
+    /^(?=.*\d)([A-Z0-9][A-Z0-9\/\-]{4,39})$/i
   );
+  // findFlat fallback: yıl bazlı fatura no formatı (ERS2026xxx, ETS2026xxx vb.)
   if (!fatura_no) fatura_no = findFlat([
-    /FATURA\s*NO\s*[:\|]?\s*([A-Z0-9][A-Z0-9\-\/\.]{4,39})/i,
-    /\bFATURA\s*NO\b[^A-Z0-9]*([A-Z0-9]{5,40})/i,
+    /FATURA\s*NO\s*[:\|]?\s*([A-Z]{1,8}(?:20|19)\d{2}\d{4,})/i,
   ]);
-  // ETTN UUID'ini veya bilinen Senaryo değerlerini fatura no olarak alma
+  // Son çare: metinde herhangi bir yıl bazlı fatura no ara
+  if (!fatura_no) {
+    const m = flat.match(/\b([A-Z]{2,8}(?:20|19)\d{2}\d{4,})\b/);
+    if (m) fatura_no = m[1];
+  }
+  // ETTN UUID'ini veya bilinen Senaryo/sözcük değerlerini fatura no olarak alma
   if (/^[0-9a-f\-]{30,}$/i.test(fatura_no)) fatura_no = "";
-  if (/^(TICARIFATURA|EARSIVFATURA|SATIS|ALIS)$/i.test(fatura_no)) fatura_no = "";
+  if (/^(TICARIFATURA|EARSIVFATURA|SATIS|ALIS|TR\d\.\d)$/i.test(fatura_no)) fatura_no = "";
+  if (fatura_no && !/\d/.test(fatura_no)) fatura_no = ""; // salt harfse temizle
 
   // ── FATURA TARİHİ ──────────────────────────────────────────────────────────
   // Önce e-fatura konum tabanlı sonuç, yoksa genel arama
@@ -9024,9 +9031,15 @@ async function extractPdfText(pdfBuffer, isPDF) {
       const text = await new Promise((resolve, reject) => {
         execFile("python3", [
           "-c",
-          `import sys; from pdfminer.high_level import extract_text; print(extract_text(sys.argv[1]))`,
+          // sys.stdout.reconfigure: UTF-8 zorla (Render gibi ortamlarda LANG=C olabilir)
+          `import sys; sys.stdout.reconfigure(encoding='utf-8'); from pdfminer.high_level import extract_text; print(extract_text(sys.argv[1]))`,
           tmpFile,
-        ], { timeout: 15000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+        ], {
+          timeout: 15000,
+          maxBuffer: 5 * 1024 * 1024,
+          encoding: "utf8",
+          env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
+        }, (err, stdout, stderr) => {
           try { require("fs").unlinkSync(tmpFile); } catch (_) {}
           if (err) return reject(err);
           resolve(stdout);
