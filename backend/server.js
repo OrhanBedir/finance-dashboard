@@ -2603,6 +2603,50 @@ app.get("/setup-db", async (req, res) => {
      );
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS taseron_fatura (
+        id SERIAL PRIMARY KEY,
+        taseron_adi TEXT NOT NULL,
+        fatura_no TEXT,
+        fatura_tarihi DATE,
+        toplam_tutar NUMERIC DEFAULT 0,
+        kdv_tutar NUMERIC DEFAULT 0,
+        genel_toplam NUMERIC DEFAULT 0,
+        odenen_tutar NUMERIC DEFAULT 0,
+        kalan_tutar NUMERIC DEFAULT 0,
+        pdf_url TEXT,
+        aciklama TEXT,
+        durum TEXT DEFAULT 'bekliyor',
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS taseron_fatura_kalem (
+        id SERIAL PRIMARY KEY,
+        fatura_id INTEGER REFERENCES taseron_fatura(id) ON DELETE CASCADE,
+        site_id TEXT,
+        saha_adi TEXT,
+        kalem_aciklama TEXT,
+        tutar NUMERIC DEFAULT 0,
+        odenen NUMERIC DEFAULT 0,
+        kalan NUMERIC DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS taseron_odeme (
+        id SERIAL PRIMARY KEY,
+        taseron_adi TEXT NOT NULL,
+        fatura_id INTEGER REFERENCES taseron_fatura(id) ON DELETE SET NULL,
+        tutar NUMERIC NOT NULL DEFAULT 0,
+        odeme_tarihi DATE DEFAULT CURRENT_DATE,
+        aciklama TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     res.json({ ok: true, message: "Tüm DB hazır ✅" });
   } catch (err) {
     console.error("SETUP DB ERROR FULL:", err);
@@ -13744,6 +13788,319 @@ app.post("/subcons", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+/* ========================= TAŞERON FATURA YÖNETİMİ ========================= */
+
+app.get("/taseron/fatura/list", authMiddleware, async (req, res) => {
+  try {
+    const { taseron, durum } = req.query;
+    let sql = `SELECT tf.*, (SELECT COUNT(*) FROM taseron_fatura_kalem k WHERE k.fatura_id = tf.id) AS kalem_count FROM taseron_fatura tf WHERE 1=1`;
+    const params = [];
+    if (taseron) { params.push(`%${taseron}%`); sql += ` AND LOWER(tf.taseron_adi) LIKE LOWER($${params.length})`; }
+    if (durum) { params.push(durum); sql += ` AND tf.durum = $${params.length}`; }
+    sql += ` ORDER BY tf.created_at DESC`;
+    const result = await pool.query(sql, params);
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get("/taseron/fatura/:id", authMiddleware, async (req, res) => {
+  try {
+    const fatura = await pool.query(`SELECT * FROM taseron_fatura WHERE id=$1`, [req.params.id]);
+    if (!fatura.rows[0]) return res.status(404).json({ ok: false, error: "Fatura bulunamadı" });
+    const kalemler = await pool.query(`SELECT * FROM taseron_fatura_kalem WHERE fatura_id=$1 ORDER BY id`, [req.params.id]);
+    res.json({ ok: true, fatura: fatura.rows[0], kalemler: kalemler.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/taseron/fatura/add", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { taseron_adi, fatura_no, fatura_tarihi, toplam_tutar, kdv_tutar, genel_toplam, aciklama, kalemler } = req.body;
+    const gt = Number(genel_toplam || 0) || (Number(toplam_tutar || 0) + Number(kdv_tutar || 0));
+    const faturaRes = await client.query(
+      `INSERT INTO taseron_fatura (taseron_adi, fatura_no, fatura_tarihi, toplam_tutar, kdv_tutar, genel_toplam, kalan_tutar, aciklama, durum)
+       VALUES ($1,$2,$3,$4,$5,$6,$6,$7,'bekliyor') RETURNING *`,
+      [taseron_adi, fatura_no || null, fatura_tarihi || null, Number(toplam_tutar || 0), Number(kdv_tutar || 0), gt, aciklama || null]
+    );
+    const faturaId = faturaRes.rows[0].id;
+    if (Array.isArray(kalemler) && kalemler.length > 0) {
+      for (const k of kalemler) {
+        const t = Number(k.tutar || 0);
+        await client.query(
+          `INSERT INTO taseron_fatura_kalem (fatura_id, site_id, saha_adi, kalem_aciklama, tutar, odenen, kalan) VALUES ($1,$2,$3,$4,$5,0,$5)`,
+          [faturaId, k.site_id || null, k.saha_adi || null, k.kalem_aciklama || null, t]
+        );
+      }
+    }
+    await client.query("COMMIT");
+    const full = await pool.query(`SELECT * FROM taseron_fatura WHERE id=$1`, [faturaId]);
+    const fullK = await pool.query(`SELECT * FROM taseron_fatura_kalem WHERE fatura_id=$1 ORDER BY id`, [faturaId]);
+    res.json({ ok: true, fatura: full.rows[0], kalemler: fullK.rows });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ ok: false, error: err.message });
+  } finally { client.release(); }
+});
+
+app.put("/taseron/fatura/:id", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { id } = req.params;
+    const { taseron_adi, fatura_no, fatura_tarihi, toplam_tutar, kdv_tutar, genel_toplam, aciklama, kalemler } = req.body;
+    const gt = Number(genel_toplam || 0) || (Number(toplam_tutar || 0) + Number(kdv_tutar || 0));
+    let totalOdenen = 0;
+    if (Array.isArray(kalemler)) totalOdenen = kalemler.reduce((s, k) => s + Number(k.odenen || 0), 0);
+    const durum = totalOdenen >= gt ? 'odendi' : totalOdenen > 0 ? 'kismi' : 'bekliyor';
+    await client.query(
+      `UPDATE taseron_fatura SET taseron_adi=$1, fatura_no=$2, fatura_tarihi=$3, toplam_tutar=$4, kdv_tutar=$5, genel_toplam=$6, odenen_tutar=$7, kalan_tutar=$8, aciklama=$9, durum=$10 WHERE id=$11`,
+      [taseron_adi, fatura_no || null, fatura_tarihi || null, Number(toplam_tutar || 0), Number(kdv_tutar || 0), gt, totalOdenen, Math.max(gt - totalOdenen, 0), aciklama || null, durum, id]
+    );
+    if (Array.isArray(kalemler)) {
+      await client.query(`DELETE FROM taseron_fatura_kalem WHERE fatura_id=$1`, [id]);
+      for (const k of kalemler) {
+        const t = Number(k.tutar || 0);
+        const o = Number(k.odenen || 0);
+        await client.query(
+          `INSERT INTO taseron_fatura_kalem (fatura_id, site_id, saha_adi, kalem_aciklama, tutar, odenen, kalan) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [id, k.site_id || null, k.saha_adi || null, k.kalem_aciklama || null, t, o, Math.max(t - o, 0)]
+        );
+      }
+    }
+    await client.query("COMMIT");
+    const full = await pool.query(`SELECT * FROM taseron_fatura WHERE id=$1`, [id]);
+    const fullK = await pool.query(`SELECT * FROM taseron_fatura_kalem WHERE fatura_id=$1 ORDER BY id`, [id]);
+    res.json({ ok: true, fatura: full.rows[0], kalemler: fullK.rows });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ ok: false, error: err.message });
+  } finally { client.release(); }
+});
+
+app.delete("/taseron/fatura/:id", authMiddleware, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM taseron_fatura WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+function parseTaseronFaturaText(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  let fatura_no = null, fatura_tarihi = null, toplam_tutar = 0, kdv_tutar = 0, genel_toplam = 0, taseron_adi = null;
+  const noPatterns = [/fatura\s*no[:\s]+([A-Z0-9\-\/]+)/i, /invoice\s*no[:\s]+([A-Z0-9\-\/]+)/i, /^([A-Z]{2,}[0-9]{8,})/im, /fatura\s*numaras[ıi][:\s]+([A-Z0-9\-\/]+)/i];
+  for (const p of noPatterns) { const m = text.match(p); if (m) { fatura_no = m[1].trim(); break; } }
+  const tarihM = text.match(/(\d{2}[./\-]\d{2}[./\-]\d{4})/);
+  if (tarihM) { const parts = tarihM[1].split(/[./\-]/); if (parts.length === 3) fatura_tarihi = parts[2].length === 4 ? `${parts[2]}-${parts[1]}-${parts[0]}` : tarihM[1]; }
+  const parseNum = s => parseFloat(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
+  const kdvM = text.match(/kdv\s*tutar[ıi]?[:\s]+([\d.,]+)/i) || text.match(/%\s*20\s*kdv[:\s]+([\d.,]+)/i) || text.match(/katma\s*de[gğ]er\s*vergisi[:\s]+([\d.,]+)/i);
+  if (kdvM) kdv_tutar = parseNum(kdvM[1]);
+  const toplamPatterns = [/genel\s*toplam[:\s]+([\d.,]+)/i, /[öo]denecek\s*tutar[:\s]+([\d.,]+)/i, /toplam\s*tutar[:\s]+([\d.,]+)/i];
+  for (const p of toplamPatterns) { const m = text.match(p); if (m) { genel_toplam = parseNum(m[1]); break; } }
+  const matrahM = text.match(/matrah[:\s]+([\d.,]+)/i) || text.match(/vergisiz\s*tutar[:\s]+([\d.,]+)/i);
+  if (matrahM) toplam_tutar = parseNum(matrahM[1]);
+  if (!toplam_tutar && genel_toplam && kdv_tutar) toplam_tutar = genel_toplam - kdv_tutar;
+  if (!genel_toplam && toplam_tutar && kdv_tutar) genel_toplam = toplam_tutar + kdv_tutar;
+  const firmLines = lines.filter(l => l.length > 3 && l.length < 60 && /^[A-ZÇĞİÖŞÜa-zçğışöü]/.test(l) && !/fatura|tarih|no:|seri|s[ıi]ra|toplam|kdv|matrah/i.test(l));
+  if (firmLines.length > 0) taseron_adi = firmLines[0];
+  const siteMap = new Map();
+  const sitePattern = /\b([A-Z]{2,5}[-_]?[0-9]{3,8})\b/g;
+  for (const line of lines) {
+    sitePattern.lastIndex = 0;
+    const siteMatch = sitePattern.exec(line);
+    if (siteMatch) {
+      const sid = siteMatch[0].toUpperCase().replace(/\s+/g, '');
+      const amounts = [...line.matchAll(/([\d]{1,3}(?:\.[\d]{3})*,[\d]{2})/g)].map(m => parseNum(m[1]));
+      if (amounts.length > 0) {
+        const amt = amounts[amounts.length - 1];
+        if (amt > 0) siteMap.set(sid, (siteMap.get(sid) || 0) + amt);
+      }
+    }
+  }
+  const kalemler = Array.from(siteMap.entries()).map(([site_id, tutar]) => ({ site_id, saha_adi: '', kalem_aciklama: '', tutar }));
+  return { fatura_no, fatura_tarihi, toplam_tutar, kdv_tutar, genel_toplam, taseron_adi, kalemler };
+}
+
+const uploadTaseronFaturaParse = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+app.post("/taseron/fatura/pdf-parse", authMiddleware, uploadTaseronFaturaParse.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ ok: false, error: "Dosya gelmedi" });
+  const isPDF = req.file.originalname.toLowerCase().endsWith(".pdf") || req.file.mimetype === "application/pdf";
+  try {
+    const rawText = await extractPdfText(req.file.buffer, isPDF);
+    const result = parseTaseronFaturaText(rawText);
+    res.json({ ok: true, ...result, raw_snippet: rawText.slice(0, 400) });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/taseron/odeme/add", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { taseron_adi, fatura_id, tutar, odeme_tarihi, aciklama } = req.body;
+    if (!tutar || Number(tutar) <= 0) throw new Error("Geçerli tutar giriniz");
+    const odemeRes = await client.query(
+      `INSERT INTO taseron_odeme (taseron_adi, fatura_id, tutar, odeme_tarihi, aciklama) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [taseron_adi, fatura_id || null, Number(tutar), odeme_tarihi || null, aciklama || null]
+    );
+    if (fatura_id) {
+      const kalemler = await client.query(`SELECT * FROM taseron_fatura_kalem WHERE fatura_id=$1 AND kalan > 0 ORDER BY id`, [fatura_id]);
+      let remaining = Number(tutar);
+      for (const k of kalemler.rows) {
+        if (remaining <= 0) break;
+        const kalan = Number(k.kalan || 0);
+        const pay = Math.min(remaining, kalan);
+        await client.query(`UPDATE taseron_fatura_kalem SET odenen=$1, kalan=$2 WHERE id=$3`, [Number(k.odenen || 0) + pay, Math.max(kalan - pay, 0), k.id]);
+        remaining -= pay;
+      }
+      const totals = await client.query(`SELECT SUM(odenen) as total_odenen, SUM(kalan) as total_kalan FROM taseron_fatura_kalem WHERE fatura_id=$1`, [fatura_id]);
+      const totalOdenen = Number(totals.rows[0]?.total_odenen || 0);
+      const totalKalan = Number(totals.rows[0]?.total_kalan || 0);
+      const durum = totalKalan <= 0 ? 'odendi' : totalOdenen > 0 ? 'kismi' : 'bekliyor';
+      await client.query(`UPDATE taseron_fatura SET odenen_tutar=$1, kalan_tutar=$2, durum=$3 WHERE id=$4`, [totalOdenen, totalKalan, durum, fatura_id]);
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true, odeme: odemeRes.rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ ok: false, error: err.message });
+  } finally { client.release(); }
+});
+
+app.get("/taseron/odeme/list", authMiddleware, async (req, res) => {
+  try {
+    const { taseron, fatura_id } = req.query;
+    let sql = `SELECT o.*, tf.fatura_no FROM taseron_odeme o LEFT JOIN taseron_fatura tf ON tf.id = o.fatura_id WHERE 1=1`;
+    const params = [];
+    if (taseron) { params.push(`%${taseron}%`); sql += ` AND LOWER(o.taseron_adi) LIKE LOWER($${params.length})`; }
+    if (fatura_id) { params.push(fatura_id); sql += ` AND o.fatura_id=$${params.length}`; }
+    sql += ` ORDER BY o.created_at DESC`;
+    const result = await pool.query(sql, params);
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.delete("/taseron/odeme/:id", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const odeme = await client.query(`SELECT * FROM taseron_odeme WHERE id=$1`, [req.params.id]);
+    if (!odeme.rows[0]) throw new Error("Ödeme bulunamadı");
+    const { tutar, fatura_id } = odeme.rows[0];
+    await client.query(`DELETE FROM taseron_odeme WHERE id=$1`, [req.params.id]);
+    if (fatura_id) {
+      const kalemler = await client.query(`SELECT * FROM taseron_fatura_kalem WHERE fatura_id=$1 ORDER BY id DESC`, [fatura_id]);
+      let toReturn = Number(tutar);
+      for (const k of kalemler.rows) {
+        if (toReturn <= 0) break;
+        const odenen = Number(k.odenen || 0);
+        const ret = Math.min(toReturn, odenen);
+        await client.query(`UPDATE taseron_fatura_kalem SET odenen=$1, kalan=$2 WHERE id=$3`, [odenen - ret, Number(k.kalan || 0) + ret, k.id]);
+        toReturn -= ret;
+      }
+      const totals = await client.query(`SELECT SUM(odenen) as total_odenen, SUM(kalan) as total_kalan FROM taseron_fatura_kalem WHERE fatura_id=$1`, [fatura_id]);
+      const totalOdenen = Number(totals.rows[0]?.total_odenen || 0);
+      const totalKalan = Number(totals.rows[0]?.total_kalan || 0);
+      const durum = totalKalan <= 0 ? 'odendi' : totalOdenen > 0 ? 'kismi' : 'bekliyor';
+      await client.query(`UPDATE taseron_fatura SET odenen_tutar=$1, kalan_tutar=$2, durum=$3 WHERE id=$4`, [totalOdenen, totalKalan, durum, fatura_id]);
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ ok: false, error: err.message });
+  } finally { client.release(); }
+});
+
+app.get("/taseron/hakedis-ozet/:taseron_adi", authMiddleware, async (req, res) => {
+  try {
+    const taseron = req.params.taseron_adi;
+    const faturalar = await pool.query(
+      `SELECT tf.*, COALESCE(json_agg(k ORDER BY k.id) FILTER (WHERE k.id IS NOT NULL), '[]') AS kalemler
+       FROM taseron_fatura tf LEFT JOIN taseron_fatura_kalem k ON k.fatura_id = tf.id
+       WHERE LOWER(TRIM(tf.taseron_adi)) = LOWER(TRIM($1))
+       GROUP BY tf.id ORDER BY tf.fatura_tarihi DESC NULLS LAST`, [taseron]
+    );
+    const odemeler = await pool.query(
+      `SELECT * FROM taseron_odeme WHERE LOWER(TRIM(taseron_adi)) = LOWER(TRIM($1)) ORDER BY odeme_tarihi DESC NULLS LAST`, [taseron]
+    );
+    const totFatura = faturalar.rows.reduce((s, r) => s + Number(r.genel_toplam || 0), 0);
+    const totOdeme = odemeler.rows.reduce((s, r) => s + Number(r.tutar || 0), 0);
+    res.json({ ok: true, taseron_adi: taseron, total_fatura: totFatura, total_odeme: totOdeme, kalan_borc: Math.max(totFatura - totOdeme, 0), fazla_odeme: Math.max(totOdeme - totFatura, 0), faturalar: faturalar.rows, odemeler: odemeler.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get("/taseron/hakedis-excel/:taseron_adi", authMiddleware, async (req, res) => {
+  try {
+    const taseron = req.params.taseron_adi;
+    const faturalar = await pool.query(
+      `SELECT tf.*, COALESCE(json_agg(k ORDER BY k.id) FILTER (WHERE k.id IS NOT NULL), '[]') AS kalemler
+       FROM taseron_fatura tf LEFT JOIN taseron_fatura_kalem k ON k.fatura_id = tf.id
+       WHERE LOWER(TRIM(tf.taseron_adi)) = LOWER(TRIM($1))
+       GROUP BY tf.id ORDER BY tf.fatura_tarihi NULLS LAST`, [taseron]
+    );
+    const odemeler = await pool.query(`SELECT * FROM taseron_odeme WHERE LOWER(TRIM(taseron_adi)) = LOWER(TRIM($1)) ORDER BY odeme_tarihi NULLS LAST`, [taseron]);
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet("Taşeron Hakediş");
+    ws.addRow([`${taseron} — Taşeron Hakediş Raporu`]);
+    ws.getRow(1).font = { bold: true, size: 14 };
+    ws.addRow([]);
+    ws.addRow(["FATURALAR"]);
+    ws.getRow(3).font = { bold: true };
+    const hdr = ws.addRow(["Fatura No", "Tarih", "Matrah (TL)", "KDV (TL)", "Genel Toplam (TL)", "Ödenen (TL)", "Kalan (TL)", "Durum"]);
+    hdr.font = { bold: true };
+    hdr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2E8F0" } };
+    for (const f of faturalar.rows) {
+      ws.addRow([f.fatura_no || "-", f.fatura_tarihi ? String(f.fatura_tarihi).slice(0, 10) : "-", Number(f.toplam_tutar || 0), Number(f.kdv_tutar || 0), Number(f.genel_toplam || 0), Number(f.odened_tutar || 0), Number(f.kalan_tutar || 0), f.durum === 'odendi' ? 'Ödendi' : f.durum === 'kismi' ? 'Kısmi' : 'Bekliyor']);
+      if (Array.isArray(f.kalemler) && f.kalemler.length > 0) {
+        const kHdr = ws.addRow(["", "Site ID", "Saha Adı", "Kalem", "Tutar (TL)", "Ödenen (TL)", "Kalan (TL)"]);
+        kHdr.font = { italic: true, color: { argb: "FF6B7280" } };
+        for (const k of f.kalemler) {
+          if (!k) continue;
+          ws.addRow(["", k.site_id || "-", k.saha_adi || "-", k.kalem_aciklama || "-", Number(k.tutar || 0), Number(k.odenen || 0), Number(k.kalan || 0)]);
+        }
+      }
+    }
+    ws.addRow([]);
+    ws.addRow(["ÖDEMELER"]);
+    ws.getLastRow().font = { bold: true };
+    const oHdr = ws.addRow(["Tarih", "Fatura No", "Tutar (TL)", "Açıklama"]);
+    oHdr.font = { bold: true };
+    oHdr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } };
+    for (const o of odemeler.rows) ws.addRow([o.odeme_tarihi ? String(o.odeme_tarihi).slice(0, 10) : "-", o.fatura_no || "-", Number(o.tutar || 0), o.aciklama || "-"]);
+    const totFatura = faturalar.rows.reduce((s, r) => s + Number(r.genel_toplam || 0), 0);
+    const totOdeme = odemeler.rows.reduce((s, r) => s + Number(r.tutar || 0), 0);
+    ws.addRow([]);
+    ws.addRow(["ÖZET"]);
+    ws.getLastRow().font = { bold: true };
+    ws.addRow(["Toplam Fatura (TL)", totFatura]);
+    ws.addRow(["Toplam Ödeme (TL)", totOdeme]);
+    const kalanRow = ws.addRow(["Kalan Borç (TL)", Math.max(totFatura - totOdeme, 0)]);
+    kalanRow.font = { bold: true, color: { argb: Math.max(totFatura - totOdeme, 0) > 0 ? "FFDC2626" : "FF16A34A" } };
+    ws.columns.forEach(col => { col.width = 20; });
+    const safeFileName = taseron.replace(/[^a-zA-Z0-9_-]/g, "_");
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFileName}_hakedis.xlsx"; filename*=UTF-8''${encodeURIComponent(taseron + "_hakedis.xlsx")}`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get("/taseron/qc-kalemler/:taseron_adi", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT mw.site_code, mw.bolge, mw.project_code, mw.item_code, mw.item_description,
+        COALESCE(mw.done_qty, 0) AS done_qty, mw.subcon_name, mw.qc_durum,
+        COALESCE(pr.unit_price, 0) AS unit_price, COALESCE(pr.currency, 'TRY') AS currency,
+        COALESCE(mw.done_qty, 0) * COALESCE(pr.unit_price, 0) AS tutar
+      FROM master_works mw
+      LEFT JOIN po_rows pr ON pr.project_code = mw.project_code AND pr.site_code = mw.site_code AND pr.item_code = mw.item_code
+      WHERE LOWER(TRIM(mw.subcon_name)) = LOWER(TRIM($1)) AND mw.qc_durum = 'OK' AND COALESCE(mw.done_qty, 0) > 0
+      ORDER BY mw.bolge, mw.site_code`, [req.params.taseron_adi]);
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+/* ========================= / TAŞERON FATURA YÖNETİMİ ========================= */
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server çalışıyor: ${PORT}`);

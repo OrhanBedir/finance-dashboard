@@ -3186,6 +3186,22 @@ function FinanceDashboard({
   const [showInvoiceFormPanel, setShowInvoiceFormPanel] = useState(false);
   const [showInvoiceEntryModal, setShowInvoiceEntryModal] = useState(false);
   const [showSalaryModal, setShowSalaryModal] = useState(false);
+
+  // ── Taşeron Fatura Yönetimi ──────────────────────────────────────────────
+  const [showTaseronFaturaPanel, setShowTaseronFaturaPanel] = useState(false);
+  const [taseronFaturaAdi, setTaseronFaturaAdi] = useState("");
+  const [taseronFaturaList, setTaseronFaturaList] = useState([]);
+  const [taseronOdemeList, setTaseronOdemeList] = useState([]);
+  const [taseronHakedisOzet, setTaseronHakedisOzet] = useState(null);
+  const [showYeniFaturaModal, setShowYeniFaturaModal] = useState(false);
+  const [showTaseronOdemeModal, setShowTaseronOdemeModal] = useState(false);
+  const [faturaForm, setFaturaForm] = useState({ taseron_adi:"", fatura_no:"", fatura_tarihi:"", toplam_tutar:"", kdv_tutar:"", genel_toplam:"", aciklama:"", kalemler:[] });
+  const [odemeForm, setOdemeForm] = useState({ fatura_id:"", tutar:"", odeme_tarihi: new Date().toISOString().slice(0,10), aciklama:"" });
+  const [pdfParsing, setPdfParsing] = useState(false);
+  const [taseronFaturaLoading, setTaseronFaturaLoading] = useState(false);
+  const [faturaDetailOpen, setFaturaDetailOpen] = useState(null);
+  const [savingFatura, setSavingFatura] = useState(false);
+  const [savingOdeme, setSavingOdeme] = useState(false);
   const [showFinanceIslemlerMenu, setShowFinanceIslemlerMenu] = useState(false);
   const [showFinanceHwPoUpload, setShowFinanceHwPoUpload] = useState(false);
 
@@ -4239,6 +4255,103 @@ function FinanceDashboard({
       console.error("SALARY LIST ERROR:", err);
       setSalaryRows([]);
     }
+  };
+
+  const loadTaseronHakedis = async (taseron) => {
+    if (!taseron) return;
+    setTaseronFaturaLoading(true);
+    try {
+      const r = await fetchJson(`${API_BASE}/taseron/hakedis-ozet/${encodeURIComponent(taseron)}`, { withAuth: true });
+      if (r.ok) {
+        setTaseronHakedisOzet(r);
+        setTaseronFaturaList(r.faturalar || []);
+        setTaseronOdemeList(r.odemeler || []);
+      }
+    } catch(e) { console.error(e); } finally { setTaseronFaturaLoading(false); }
+  };
+
+  const openTaseronFaturaPanel = (taseron_adi) => {
+    setTaseronFaturaAdi(taseron_adi);
+    setShowTaseronFaturaPanel(true);
+    loadTaseronHakedis(taseron_adi);
+  };
+
+  const handlePdfParseTaseron = async (file) => {
+    if (!file) return;
+    setPdfParsing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch(`${API_BASE}/taseron/fatura/pdf-parse`, {
+        method: "POST", headers: { Authorization: `Bearer ${financeToken}` }, body: fd,
+      });
+      const data = await r.json();
+      if (data.ok) {
+        setFaturaForm(f => ({
+          ...f,
+          fatura_no: data.fatura_no || f.fatura_no,
+          fatura_tarihi: data.fatura_tarihi || f.fatura_tarihi,
+          toplam_tutar: data.toplam_tutar ? String(data.toplam_tutar) : f.toplam_tutar,
+          kdv_tutar: data.kdv_tutar ? String(data.kdv_tutar) : f.kdv_tutar,
+          genel_toplam: data.genel_toplam ? String(data.genel_toplam) : f.genel_toplam,
+          taseron_adi: data.taseron_adi || f.taseron_adi,
+          kalemler: data.kalemler?.length > 0 ? data.kalemler : f.kalemler,
+        }));
+      }
+    } catch(e) { alert("PDF okunamadı: " + e.message); } finally { setPdfParsing(false); }
+  };
+
+  const handleSaveFatura = async () => {
+    if (!faturaForm.taseron_adi.trim()) { alert("Taşeron adı zorunludur"); return; }
+    if (!faturaForm.genel_toplam || Number(faturaForm.genel_toplam) <= 0) { alert("Genel toplam giriniz"); return; }
+    setSavingFatura(true);
+    try {
+      const r = await fetch(`${API_BASE}/taseron/fatura/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${financeToken}` },
+        body: JSON.stringify({
+          ...faturaForm,
+          toplam_tutar: Number(faturaForm.toplam_tutar || 0),
+          kdv_tutar: Number(faturaForm.kdv_tutar || 0),
+          genel_toplam: Number(faturaForm.genel_toplam || 0),
+          kalemler: faturaForm.kalemler.map(k => ({ ...k, tutar: Number(k.tutar || 0) }))
+        }),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || "Kayıt hatası");
+      setShowYeniFaturaModal(false);
+      setFaturaForm({ taseron_adi: taseronFaturaAdi, fatura_no:"", fatura_tarihi:"", toplam_tutar:"", kdv_tutar:"", genel_toplam:"", aciklama:"", kalemler:[] });
+      loadTaseronHakedis(taseronFaturaAdi);
+    } catch(e) { alert("Hata: " + e.message); } finally { setSavingFatura(false); }
+  };
+
+  const handleSaveOdeme = async () => {
+    if (!odemeForm.tutar || Number(odemeForm.tutar) <= 0) { alert("Tutar giriniz"); return; }
+    setSavingOdeme(true);
+    try {
+      const r = await fetch(`${API_BASE}/taseron/odeme/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${financeToken}` },
+        body: JSON.stringify({ ...odemeForm, taseron_adi: taseronFaturaAdi, tutar: Number(odemeForm.tutar), fatura_id: odemeForm.fatura_id || null }),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || "Ödeme kaydedilemedi");
+      setShowTaseronOdemeModal(false);
+      setOdemeForm({ fatura_id:"", tutar:"", odeme_tarihi: new Date().toISOString().slice(0,10), aciklama:"" });
+      loadTaseronHakedis(taseronFaturaAdi);
+    } catch(e) { alert("Hata: " + e.message); } finally { setSavingOdeme(false); }
+  };
+
+  const handleDeleteFatura = async (id) => {
+    if (!window.confirm("Bu fatura silinecek. Emin misiniz?")) return;
+    await fetch(`${API_BASE}/taseron/fatura/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${financeToken}` } });
+    loadTaseronHakedis(taseronFaturaAdi);
+  };
+
+  const handleDeleteOdeme = async (id) => {
+    if (!window.confirm("Bu ödeme silinecek. Emin misiniz?")) return;
+    await fetch(`${API_BASE}/taseron/odeme/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${financeToken}` } });
+    loadTaseronHakedis(taseronFaturaAdi);
   };
 
   const loadFinance = useCallback(async () => {
@@ -6862,6 +6975,7 @@ function FinanceDashboard({
                     <th>Ödenen</th>
                     <th>Kalan Borç</th>
                     <th>Fazla Ödeme</th>
+                    <th>İşlem</th>
                   </tr>
                 </thead>
 
@@ -6925,6 +7039,14 @@ function FinanceDashboard({
                           >
                             {formatMoneyByCurrency(row.fazla_odeme || 0, "TRY")}
                           </td>
+                          <td onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => openTaseronFaturaPanel(row.subcon_name)}
+                              style={{ padding:"5px 10px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
+                            >
+                              🧾 Fatura Yönetimi
+                            </button>
+                          </td>
                         </tr>
                       ))}
 
@@ -6956,6 +7078,350 @@ function FinanceDashboard({
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          TAŞERON FATURA YÖNETİMİ PANEL
+      ═══════════════════════════════════════════════════════════════ */}
+      {showTaseronFaturaPanel && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:10500, display:"flex", alignItems:"flex-start", justifyContent:"center", overflowY:"auto", padding:"20px" }}
+          onClick={() => setShowTaseronFaturaPanel(false)}>
+          <div style={{ background:"#fff", width:"100%", maxWidth:"1100px", borderRadius:"20px", padding:"28px", boxShadow:"0 24px 60px rgba(0,0,0,0.18)", marginTop:"10px" }}
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"20px" }}>
+              <div>
+                <h2 style={{ margin:0, fontSize:"20px", fontWeight:800, color:"#1e3a5f" }}>🧾 Taşeron Fatura Yönetimi</h2>
+                <div style={{ fontSize:"15px", color:"#4f46e5", fontWeight:700, marginTop:"2px" }}>{taseronFaturaAdi}</div>
+              </div>
+              <div style={{ display:"flex", gap:"10px" }}>
+                <button onClick={() => { setFaturaForm({ taseron_adi: taseronFaturaAdi, fatura_no:"", fatura_tarihi:"", toplam_tutar:"", kdv_tutar:"", genel_toplam:"", aciklama:"", kalemler:[] }); setShowYeniFaturaModal(true); }}
+                  style={{ padding:"9px 18px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+                  ➕ Yeni Fatura
+                </button>
+                <button onClick={() => { setOdemeForm({ fatura_id:"", tutar:"", odeme_tarihi: new Date().toISOString().slice(0,10), aciklama:"" }); setShowTaseronOdemeModal(true); }}
+                  style={{ padding:"9px 18px", background:"linear-gradient(135deg,#059669,#10b981)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+                  💳 Ödeme Gir
+                </button>
+                <a href={`${API_BASE}/taseron/hakedis-excel/${encodeURIComponent(taseronFaturaAdi)}`}
+                  style={{ padding:"9px 16px", background:"#f0fdf4", color:"#166534", border:"1px solid #86efac", borderRadius:"10px", fontWeight:600, cursor:"pointer", fontSize:"13px", textDecoration:"none", display:"inline-flex", alignItems:"center", gap:"5px" }}>
+                  📥 Excel İndir
+                </a>
+                <button onClick={() => setShowTaseronFaturaPanel(false)}
+                  style={{ padding:"9px 16px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
+                  ✕ Kapat
+                </button>
+              </div>
+            </div>
+
+            {/* Özet Kartlar */}
+            {taseronHakedisOzet && (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"12px", marginBottom:"24px" }}>
+                {[
+                  { label:"Toplam Fatura", val: taseronHakedisOzet.total_fatura, color:"#1d4ed8", bg:"#eff6ff" },
+                  { label:"Toplam Ödeme", val: taseronHakedisOzet.total_odeme, color:"#059669", bg:"#f0fdf4" },
+                  { label:"Kalan Borç", val: taseronHakedisOzet.kalan_borc, color:"#dc2626", bg:"#fef2f2" },
+                  { label:"Fazla Ödeme", val: taseronHakedisOzet.fazla_odeme, color:"#f59e0b", bg:"#fffbeb" },
+                ].map(c => (
+                  <div key={c.label} style={{ background:c.bg, border:`1.5px solid ${c.color}30`, borderRadius:"12px", padding:"14px 18px" }}>
+                    <div style={{ fontSize:"12px", color:"#6b7280", fontWeight:600, marginBottom:"4px" }}>{c.label}</div>
+                    <div style={{ fontSize:"18px", fontWeight:800, color:c.color }}>{Number(c.val||0).toLocaleString("tr-TR",{style:"currency",currency:"TRY",maximumFractionDigits:2})}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {taseronFaturaLoading ? (
+              <div style={{ textAlign:"center", padding:"40px", color:"#6b7280" }}>Yükleniyor...</div>
+            ) : (
+              <>
+                {/* FATURALAR LİSTESİ */}
+                <h3 style={{ fontSize:"15px", fontWeight:700, color:"#1e3a5f", margin:"0 0 12px" }}>📋 Faturalar</h3>
+                {taseronFaturaList.length === 0 ? (
+                  <div style={{ textAlign:"center", padding:"20px", color:"#9ca3af", background:"#f9fafb", borderRadius:"10px", marginBottom:"20px" }}>Henüz fatura girilmemiş</div>
+                ) : (
+                  <div style={{ marginBottom:"24px", overflowX:"auto" }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+                      <thead>
+                        <tr style={{ background:"#f1f5f9" }}>
+                          <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Fatura No</th>
+                          <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Tarih</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Matrah</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>KDV</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Genel Toplam</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Ödenen</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Kalan</th>
+                          <th style={{ padding:"10px 12px", textAlign:"center", fontWeight:700, color:"#374151" }}>Durum</th>
+                          <th style={{ padding:"10px 12px", textAlign:"center", fontWeight:700, color:"#374151" }}>İşlem</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {taseronFaturaList.map(f => (
+                          <>
+                            <tr key={f.id} style={{ borderBottom:"1px solid #e5e7eb", cursor:"pointer" }}
+                              onClick={() => setFaturaDetailOpen(faturaDetailOpen === f.id ? null : f.id)}>
+                              <td style={{ padding:"10px 12px", fontWeight:600, color:"#1d4ed8" }}>{f.fatura_no || "-"}</td>
+                              <td style={{ padding:"10px 12px", color:"#374151" }}>{f.fatura_tarihi ? String(f.fatura_tarihi).slice(0,10) : "-"}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right" }}>{Number(f.toplam_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right" }}>{Number(f.kdv_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right", fontWeight:700 }}>{Number(f.genel_toplam||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right", color:"#059669", fontWeight:600 }}>{Number(f.odenen_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right", color: Number(f.kalan_tutar||0) > 0 ? "#dc2626" : "#059669", fontWeight:700 }}>{Number(f.kalan_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"center" }}>
+                                <span style={{ padding:"3px 10px", borderRadius:"20px", fontSize:"11px", fontWeight:700,
+                                  background: f.durum==="odendi" ? "#dcfce7" : f.durum==="kismi" ? "#fef3c7" : "#fee2e2",
+                                  color: f.durum==="odendi" ? "#166534" : f.durum==="kismi" ? "#92400e" : "#991b1b" }}>
+                                  {f.durum==="odendi" ? "✅ Ödendi" : f.durum==="kismi" ? "⏳ Kısmi" : "❌ Bekliyor"}
+                                </span>
+                              </td>
+                              <td style={{ padding:"10px 12px", textAlign:"center" }} onClick={e => e.stopPropagation()}>
+                                <button onClick={() => { setOdemeForm({ fatura_id: f.id, tutar:"", odeme_tarihi: new Date().toISOString().slice(0,10), aciklama:"" }); setShowTaseronOdemeModal(true); }}
+                                  style={{ marginRight:"6px", padding:"4px 8px", background:"#d1fae5", color:"#065f46", border:"none", borderRadius:"6px", fontSize:"11px", cursor:"pointer", fontWeight:600 }}>💳 Öde</button>
+                                <button onClick={() => handleDeleteFatura(f.id)}
+                                  style={{ padding:"4px 8px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", fontSize:"11px", cursor:"pointer", fontWeight:600 }}>🗑️ Sil</button>
+                              </td>
+                            </tr>
+                            {faturaDetailOpen === f.id && f.kalemler && f.kalemler.length > 0 && (
+                              <tr key={`detail-${f.id}`}>
+                                <td colSpan={9} style={{ padding:"0 12px 12px 32px", background:"#f8fafc" }}>
+                                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px", marginTop:"8px" }}>
+                                    <thead>
+                                      <tr style={{ background:"#e2e8f0" }}>
+                                        <th style={{ padding:"6px 10px", textAlign:"left" }}>Site ID</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"left" }}>Saha</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"left" }}>Kalem</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"right" }}>Tutar</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"right" }}>Ödenen</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"right" }}>Kalan</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"center" }}>Durum</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {f.kalemler.map((k, ki) => k && (
+                                        <tr key={ki} style={{ borderBottom:"1px solid #e2e8f0" }}>
+                                          <td style={{ padding:"6px 10px", fontWeight:600, color:"#4f46e5" }}>{k.site_id||"-"}</td>
+                                          <td style={{ padding:"6px 10px" }}>{k.saha_adi||"-"}</td>
+                                          <td style={{ padding:"6px 10px" }}>{k.kalem_aciklama||"-"}</td>
+                                          <td style={{ padding:"6px 10px", textAlign:"right", fontWeight:600 }}>{Number(k.tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                                          <td style={{ padding:"6px 10px", textAlign:"right", color:"#059669" }}>{Number(k.odenen||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                                          <td style={{ padding:"6px 10px", textAlign:"right", color: Number(k.kalan||0) > 0 ? "#dc2626" : "#059669", fontWeight:600 }}>{Number(k.kalan||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                                          <td style={{ padding:"6px 10px", textAlign:"center" }}>
+                                            {Number(k.kalan||0) <= 0 ? "✅" : Number(k.odenen||0) > 0 ? "⏳" : "❌"}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* ÖDEMELER LİSTESİ */}
+                <h3 style={{ fontSize:"15px", fontWeight:700, color:"#1e3a5f", margin:"0 0 12px" }}>💳 Ödemeler</h3>
+                {taseronOdemeList.length === 0 ? (
+                  <div style={{ textAlign:"center", padding:"20px", color:"#9ca3af", background:"#f9fafb", borderRadius:"10px" }}>Henüz ödeme girilmemiş</div>
+                ) : (
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+                    <thead>
+                      <tr style={{ background:"#f0fdf4" }}>
+                        <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Tarih</th>
+                        <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Fatura No</th>
+                        <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Tutar</th>
+                        <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Açıklama</th>
+                        <th style={{ padding:"10px 12px", textAlign:"center", fontWeight:700, color:"#374151" }}>İşlem</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {taseronOdemeList.map(o => (
+                        <tr key={o.id} style={{ borderBottom:"1px solid #e5e7eb" }}>
+                          <td style={{ padding:"10px 12px" }}>{o.odeme_tarihi ? String(o.odeme_tarihi).slice(0,10) : "-"}</td>
+                          <td style={{ padding:"10px 12px", color:"#4f46e5", fontWeight:600 }}>{o.fatura_no || "—"}</td>
+                          <td style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#059669" }}>{Number(o.tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})} ₺</td>
+                          <td style={{ padding:"10px 12px", color:"#6b7280" }}>{o.aciklama||"—"}</td>
+                          <td style={{ padding:"10px 12px", textAlign:"center" }}>
+                            <button onClick={() => handleDeleteOdeme(o.id)}
+                              style={{ padding:"4px 8px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", fontSize:"11px", cursor:"pointer", fontWeight:600 }}>🗑️ Sil</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          YENİ TAŞERON FATURA MODAL
+      ═══════════════════════════════════════════════════════════════ */}
+      {showYeniFaturaModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:11000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}
+          onClick={() => setShowYeniFaturaModal(false)}>
+          <div style={{ background:"#fff", width:"100%", maxWidth:"680px", maxHeight:"90vh", overflowY:"auto", borderRadius:"20px", padding:"28px", boxShadow:"0 24px 60px rgba(0,0,0,0.2)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin:"0 0 20px", fontSize:"18px", fontWeight:800, color:"#1e3a5f" }}>➕ Yeni Taşeron Faturası</h3>
+
+            {/* PDF Yükle */}
+            <div style={{ background:"#f0f7ff", border:"2px dashed #93c5fd", borderRadius:"12px", padding:"16px", marginBottom:"20px", textAlign:"center" }}>
+              <div style={{ fontSize:"13px", color:"#1d4ed8", fontWeight:600, marginBottom:"10px" }}>📎 PDF Yükle — Otomatik Doldur</div>
+              <label style={{ display:"inline-block", padding:"8px 20px", background:"#1d4ed8", color:"#fff", borderRadius:"8px", cursor:"pointer", fontWeight:600, fontSize:"13px" }}>
+                {pdfParsing ? "⏳ Okunuyor..." : "📂 PDF Seç"}
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} disabled={pdfParsing}
+                  onChange={e => e.target.files[0] && handlePdfParseTaseron(e.target.files[0])} />
+              </label>
+              <div style={{ fontSize:"11px", color:"#60a5fa", marginTop:"6px" }}>Fatura no, tarih, tutar ve site ID'ler otomatik doldurulacak</div>
+            </div>
+
+            {/* Form Alanları */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"14px", marginBottom:"16px" }}>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Taşeron Adı *</label>
+                <input value={faturaForm.taseron_adi} onChange={e => setFaturaForm(f => ({...f, taseron_adi: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="ETAS, Federal vb." />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Fatura No</label>
+                <input value={faturaForm.fatura_no} onChange={e => setFaturaForm(f => ({...f, fatura_no: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="ETS2026000000007" />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Fatura Tarihi</label>
+                <input type="date" value={faturaForm.fatura_tarihi} onChange={e => setFaturaForm(f => ({...f, fatura_tarihi: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Matrah (TL)</label>
+                <input type="number" value={faturaForm.toplam_tutar} onChange={e => setFaturaForm(f => ({...f, toplam_tutar: e.target.value, genel_toplam: String((Number(e.target.value)||0) + (Number(f.kdv_tutar)||0)) }))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="0.00" />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>KDV Tutarı (TL)</label>
+                <input type="number" value={faturaForm.kdv_tutar} onChange={e => setFaturaForm(f => ({...f, kdv_tutar: e.target.value, genel_toplam: String((Number(f.toplam_tutar)||0) + (Number(e.target.value)||0)) }))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="0.00" />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:700, color:"#1d4ed8", display:"block", marginBottom:"4px" }}>Genel Toplam (TL) *</label>
+                <input type="number" value={faturaForm.genel_toplam} onChange={e => setFaturaForm(f => ({...f, genel_toplam: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"2px solid #3b82f6", borderRadius:"8px", fontSize:"15px", fontWeight:700, boxSizing:"border-box" }} placeholder="0.00" />
+              </div>
+            </div>
+            <div style={{ marginBottom:"16px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Açıklama</label>
+              <input value={faturaForm.aciklama} onChange={e => setFaturaForm(f => ({...f, aciklama: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="İsteğe bağlı not" />
+            </div>
+
+            {/* Kalem Dağılımı */}
+            <div style={{ marginBottom:"20px" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"10px" }}>
+                <label style={{ fontSize:"13px", fontWeight:700, color:"#374151" }}>📍 Site Bazında Kalem Dağılımı ({faturaForm.kalemler.length} kalem)</label>
+                <button type="button" onClick={() => setFaturaForm(f => ({ ...f, kalemler: [...f.kalemler, { site_id:"", saha_adi:"", kalem_aciklama:"", tutar:"" }] }))}
+                  style={{ padding:"5px 12px", background:"#eff6ff", color:"#1d4ed8", border:"1px solid #bfdbfe", borderRadius:"7px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>
+                  ➕ Kalem Ekle
+                </button>
+              </div>
+              {faturaForm.kalemler.map((k, i) => (
+                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 1fr 2fr 1.2fr auto", gap:"8px", marginBottom:"8px", alignItems:"center" }}>
+                  <input value={k.site_id} onChange={e => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.map((x,j) => j===i ? {...x,site_id:e.target.value} : x) }))}
+                    style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px" }} placeholder="Site ID" />
+                  <input value={k.saha_adi} onChange={e => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.map((x,j) => j===i ? {...x,saha_adi:e.target.value} : x) }))}
+                    style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px" }} placeholder="Saha adı" />
+                  <input value={k.kalem_aciklama} onChange={e => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.map((x,j) => j===i ? {...x,kalem_aciklama:e.target.value} : x) }))}
+                    style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px" }} placeholder="Kalem açıklama" />
+                  <input type="number" value={k.tutar} onChange={e => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.map((x,j) => j===i ? {...x,tutar:e.target.value} : x) }))}
+                    style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px", textAlign:"right" }} placeholder="Tutar" />
+                  <button type="button" onClick={() => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.filter((_,j) => j!==i) }))}
+                    style={{ padding:"8px 10px", background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"7px", cursor:"pointer", fontSize:"13px" }}>✕</button>
+                </div>
+              ))}
+              {faturaForm.kalemler.length > 0 && (
+                <div style={{ textAlign:"right", fontSize:"13px", color:"#374151", fontWeight:600, marginTop:"6px" }}>
+                  Kalem Toplamı: {faturaForm.kalemler.reduce((s,k) => s + (Number(k.tutar)||0), 0).toLocaleString("tr-TR",{minimumFractionDigits:2})} TL
+                  {Math.abs(faturaForm.kalemler.reduce((s,k) => s + (Number(k.tutar)||0), 0) - Number(faturaForm.genel_toplam||0)) > 0.01 && (
+                    <span style={{ color:"#dc2626", marginLeft:"10px" }}>⚠️ Genel toplam ile uyuşmuyor!</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
+              <button onClick={() => setShowYeniFaturaModal(false)}
+                style={{ padding:"11px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>İptal</button>
+              <button onClick={handleSaveFatura} disabled={savingFatura}
+                style={{ padding:"11px 28px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+                {savingFatura ? "Kaydediliyor..." : "💾 Kaydet"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          ÖDEME GİRİŞ MODAL
+      ═══════════════════════════════════════════════════════════════ */}
+      {showTaseronOdemeModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:11000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}
+          onClick={() => setShowTaseronOdemeModal(false)}>
+          <div style={{ background:"#fff", width:"100%", maxWidth:"440px", borderRadius:"18px", padding:"28px", boxShadow:"0 24px 60px rgba(0,0,0,0.2)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin:"0 0 20px", fontSize:"18px", fontWeight:800, color:"#065f46" }}>💳 Ödeme Girişi</h3>
+            <div style={{ fontSize:"14px", color:"#374151", fontWeight:600, marginBottom:"18px", padding:"10px 14px", background:"#f0fdf4", borderRadius:"8px" }}>
+              Taşeron: <strong style={{ color:"#059669" }}>{taseronFaturaAdi}</strong>
+            </div>
+
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"5px" }}>Fatura Seç (isteğe bağlı)</label>
+              <select value={odemeForm.fatura_id} onChange={e => setOdemeForm(f => ({...f, fatura_id: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}>
+                <option value="">— Genel ödeme (fatura seçilmeden) —</option>
+                {taseronFaturaList.filter(f => f.durum !== "odendi").map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.fatura_no || `#${f.id}`} — Kalan: {Number(f.kalan_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})} TL
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"5px" }}>Ödeme Tutarı (TL) *</label>
+              <input type="number" value={odemeForm.tutar} onChange={e => setOdemeForm(f => ({...f, tutar: e.target.value}))}
+                style={{ width:"100%", padding:"11px 14px", border:"2px solid #10b981", borderRadius:"8px", fontSize:"16px", fontWeight:700, boxSizing:"border-box" }} placeholder="0.00" autoFocus />
+            </div>
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"5px" }}>Ödeme Tarihi</label>
+              <input type="date" value={odemeForm.odeme_tarihi} onChange={e => setOdemeForm(f => ({...f, odeme_tarihi: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+            </div>
+            <div style={{ marginBottom:"20px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"5px" }}>Açıklama</label>
+              <input value={odemeForm.aciklama} onChange={e => setOdemeForm(f => ({...f, aciklama: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="İsteğe bağlı not" />
+            </div>
+
+            {odemeForm.fatura_id && (
+              <div style={{ marginBottom:"16px", padding:"12px", background:"#f0fdf4", borderRadius:"8px", fontSize:"13px", color:"#065f46" }}>
+                💡 Bu ödeme seçili faturanın kalemlerine <strong>yukarıdan aşağıya</strong> otomatik dağıtılacak.
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:"10px" }}>
+              <button onClick={() => setShowTaseronOdemeModal(false)}
+                style={{ flex:1, padding:"11px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>İptal</button>
+              <button onClick={handleSaveOdeme} disabled={savingOdeme}
+                style={{ flex:2, padding:"11px", background:"linear-gradient(135deg,#059669,#10b981)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+                {savingOdeme ? "Kaydediliyor..." : "💾 Ödemeyi Kaydet"}
+              </button>
             </div>
           </div>
         </div>
