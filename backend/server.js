@@ -1953,6 +1953,33 @@ function getRegion(siteCode, projectCode = "") {
   return "DİĞER";
 }
 
+async function ensureHwAcceptanceTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hw_acceptance_rows (
+      id SERIAL PRIMARY KEY,
+      acceptance_no TEXT,
+      po_no TEXT,
+      po_line_no TEXT,
+      shipment_no TEXT,
+      status TEXT,
+      current_handler TEXT,
+      site_code TEXT,
+      approval_progress TEXT,
+      unit_price NUMERIC DEFAULT 0,
+      requested_qty NUMERIC DEFAULT 0,
+      acceptance_qty NUMERIC DEFAULT 0,
+      site_name TEXT,
+      project_name TEXT,
+      engineering_code TEXT,
+      milestone_type TEXT,
+      acceptance_milestone TEXT,
+      payment_pct TEXT,
+      upload_batch TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+}
+
 async function ensureHwInvoiceTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS hw_invoice_rows (
@@ -2501,6 +2528,7 @@ app.get("/setup-db", async (req, res) => {
     `);
 
     await ensureHwInvoiceTable();
+    await ensureHwAcceptanceTable();
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS finance_expenses (
@@ -10399,6 +10427,7 @@ pool.query(`
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS proje TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS reddeden_email TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS red_aciklama TEXT;
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS rollout_mudur_onay_tarihi DATE;
 `).catch(e => console.error("is_avans_talep tablo hatası:", e.message));
 
 // GET iş avansı bakiye for a personel by email
@@ -10518,12 +10547,10 @@ app.post("/hr/is-avans", async (req, res) => {
     if (!talep_eden_email)  return res.status(400).json({ error: "talep_eden_email zorunlu" });
     if (!tutar)             return res.status(400).json({ error: "tutar zorunlu" });
 
-    // PM'in kendi talebi → PM adımını atla, doğrudan Direktör onayına gönder
-    const PM_EMAIL = "orhan.bedir@simsektel.com";
+    // Herkes Rollout Manager'dan başlar
     const today = new Date().toISOString().split("T")[0];
-    const isPMSubmitter = talep_eden_email.toLowerCase() === PM_EMAIL.toLowerCase();
-    const durumFinal = isPMSubmitter ? "PM_ONAY" : "TALEP";
-    const pmOnayTarihi = isPMSubmitter ? today : null;
+    const durumFinal = "TALEP";
+    const pmOnayTarihi = null;
 
     // banka_adi / iban kolonları yoksa ekle (ilk çalışmada oluşturulur)
     await pool.query(`
@@ -10591,9 +10618,15 @@ app.put("/hr/is-avans/:id/onayla", async (req, res) => {
     let updateSql, updateParams;
 
     if (talep.durum === "TALEP") {
+      // Rollout Manager onaylıyor
+      updateSql = "UPDATE is_avans_talep SET durum='ROLLOUT_MUDUR_ONAY', rollout_mudur_onay_tarihi=$1 WHERE id=$2 RETURNING *";
+      updateParams = [today, id];
+    } else if (talep.durum === "ROLLOUT_MUDUR_ONAY") {
+      // PM onaylıyor
       updateSql = "UPDATE is_avans_talep SET durum='PM_ONAY', pm_onay_tarihi=$1 WHERE id=$2 RETURNING *";
       updateParams = [today, id];
     } else if (talep.durum === "PM_ONAY") {
+      // Direktör onaylıyor
       updateSql = "UPDATE is_avans_talep SET durum='DIREKTOR_ONAY', direktor_onay_tarihi=$1 WHERE id=$2 RETURNING *";
       updateParams = [today, id];
     } else if (talep.durum === "DIREKTOR_ONAY") {
@@ -10618,6 +10651,25 @@ app.put("/hr/is-avans/:id/onayla", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PM — TALEP veya ROLLOUT_MUDUR_ONAY'ı doğrudan PM_ONAY'a taşır
+app.put("/hr/is-avans/:id/pm-onayla", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
+    if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
+    const talep = row.rows[0];
+    if (!["TALEP","ROLLOUT_MUDUR_ONAY"].includes(talep.durum)) {
+      return res.status(400).json({ error: "Bu durumda PM onayı yapılamaz" });
+    }
+    const today = new Date().toISOString().split("T")[0];
+    const updated = await pool.query(
+      "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1 WHERE id=$2 RETURNING *",
+      [today, id]
+    );
+    res.json(updated.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Direktör — TALEP veya PM_ONAY'ı doğrudan DIREKTOR_ONAY'a taşır (PM adımını atlar)
 app.put("/hr/is-avans/:id/direktor-onayla", async (req, res) => {
   try {
@@ -10625,7 +10677,7 @@ app.put("/hr/is-avans/:id/direktor-onayla", async (req, res) => {
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
-    if (!["TALEP","PM_ONAY"].includes(talep.durum)) {
+    if (!["TALEP","ROLLOUT_MUDUR_ONAY","PM_ONAY"].includes(talep.durum)) {
       return res.status(400).json({ error: "Bu durumda direktör onayı yapılamaz" });
     }
     const today = new Date().toISOString().split("T")[0];
@@ -10730,8 +10782,12 @@ app.get("/hr/is-avans/excel", async (req, res) => {
     headerRow.height = 22;
 
     const durumLabels = {
-      TALEP: "Talep Edildi", PM_ONAY: "PM Onayında", DIREKTOR_ONAY: "Direktör Onayında",
-      TAMAMLANDI: "Tamamlandı ✓", REDDEDILDI: "Reddedildi ✗"
+      TALEP: "Talep Edildi",
+      ROLLOUT_MUDUR_ONAY: "Rollout Müdür Onayında",
+      PM_ONAY: "PM Onayında",
+      DIREKTOR_ONAY: "Direktör Onayında",
+      TAMAMLANDI: "Tamamlandı ✓",
+      REDDEDILDI: "Reddedildi ✗"
     };
 
     const fmtDate = v => v ? (v.toISOString?.().split("T")[0] || String(v).split("T")[0]) : "";
@@ -14179,10 +14235,176 @@ app.delete("/admin/clear-qc/:siteCode", authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+/* ================== HW ACCEPTANCE UPLOAD ================== */
+app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
+  try {
+    await ensureHwAcceptanceTable();
+    if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
+
+    const workbook = XLSX.read(req.file.buffer);
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) return res.status(400).json({ ok: false, error: "Excel içinde sheet bulunamadı" });
+
+    const sheet = workbook.Sheets[firstSheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+    if (!rows.length) return res.status(400).json({ ok: false, error: "Excel içinde veri bulunamadı" });
+
+    await pool.query(`DELETE FROM hw_acceptance_rows`);
+
+    const batchName = new Date().toISOString();
+    let inserted = 0;
+
+    for (const r of rows) {
+      const poNo           = String(r["PONo."]  || r["PONo"]  || "").trim();
+      const poLineNo       = String(r["POLineNo."] || r["POLineNo"] || "").trim();
+      const shipmentNo     = String(r["ShipmentNO."] || r["ShipmentNO"] || "").trim();
+      const acceptanceNo   = String(r["AcceptanceNO."] || r["AcceptanceNO"] || "").trim();
+      const status         = String(r["Status"] || "").trim();
+      const currentHandler = String(r["CurrentHandler"] || "").trim();
+      const siteCode       = String(r["SiteCode"] || "").trim().toUpperCase();
+      const approvalProgress = String(r["ApprovalProgress"] || "").trim();
+      const unitPrice      = parseFloat(r["UnitPrice"] || 0) || 0;
+      const requestedQty   = parseFloat(r["RequestedQty"] || 0) || 0;
+      const acceptanceQty  = parseFloat(r["AcceptanceQty"] || 0) || 0;
+      const siteName       = String(r["SiteName"] || "").trim();
+      const projectName    = String(r["ProjectName"] || "").trim();
+      const engineeringCode = String(r["EngineeringCode"] || "").trim();
+      const milestoneType  = String(r["MilestoneType"] || "").trim();
+      const acceptanceMilestone = String(r["AcceptanceMilestone"] || "").trim();
+      const paymentPct     = String(r["Payment Percentage"] || "").trim();
+
+      if (!poNo && !acceptanceNo) continue;
+
+      await pool.query(`
+        INSERT INTO hw_acceptance_rows (
+          acceptance_no, po_no, po_line_no, shipment_no,
+          status, current_handler, site_code, approval_progress,
+          unit_price, requested_qty, acceptance_qty,
+          site_name, project_name, engineering_code,
+          milestone_type, acceptance_milestone, payment_pct, upload_batch
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      `, [
+        acceptanceNo || null, poNo || null, poLineNo || null, shipmentNo || null,
+        status || null, currentHandler || null, siteCode || null, approvalProgress || null,
+        unitPrice, requestedQty, acceptanceQty,
+        siteName || null, projectName || null, engineeringCode || null,
+        milestoneType || null, acceptanceMilestone || null, paymentPct || null, batchName
+      ]);
+      inserted++;
+    }
+
+    res.json({ ok: true, message: "HW Acceptance listesi yüklendi", inserted });
+  } catch (err) {
+    console.error("HW ACCEPTANCE UPLOAD ERROR:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/* ================== HW ACCEPTANCE SUMMARY ================== */
+app.get("/hw-acceptance/summary", async (req, res) => {
+  try {
+    await ensureHwAcceptanceTable();
+    // Acceptance satırlarını po_rows ile join ederek currency al
+    // po_no: "3621HG3454795-40" → exact match önce, sonra prefix (son -XX kısmı kesilince) denenir
+    const result = await pool.query(`
+      SELECT
+        a.acceptance_no,
+        a.po_no,
+        a.po_line_no,
+        a.shipment_no,
+        a.current_handler,
+        a.approval_progress,
+        a.site_code,
+        a.site_name,
+        a.acceptance_milestone,
+        a.milestone_type,
+        a.unit_price,
+        a.acceptance_qty,
+        a.status,
+        COALESCE(
+          (SELECT currency FROM po_rows WHERE po_no = a.po_no LIMIT 1),
+          (SELECT currency FROM po_rows
+             WHERE po_no = REGEXP_REPLACE(a.po_no, '-[^-]+$', '') LIMIT 1),
+          'TRY'
+        ) AS currency
+      FROM hw_acceptance_rows a
+      WHERE a.status ILIKE '%pending%'
+      ORDER BY a.current_handler, a.po_no
+    `);
+
+    if (!result.rows.length) {
+      return res.json({ total_usd: 0, total_try: 0, total_count: 0, by_handler: [], last_upload: null });
+    }
+
+    // Son yükleme tarihi
+    const batchRes = await pool.query(`SELECT MAX(upload_batch) AS last_upload FROM hw_acceptance_rows`);
+    const lastUpload = batchRes.rows[0]?.last_upload || null;
+
+    let total_usd = 0;
+    let total_try = 0;
+    const handlerMap = {};
+
+    for (const row of result.rows) {
+      const qty       = parseFloat(row.acceptance_qty) || 1;
+      const price     = parseFloat(row.unit_price) || 0;
+      const lineTotal = price * qty;
+      const currency  = row.currency || 'USD';
+      const isTry     = currency === 'TRY' || currency === 'TL';
+
+      if (isTry) total_try += lineTotal;
+      else        total_usd += lineTotal;
+
+      // Handler adını sayısal suffix'ten arındır ("Tolgahan Unal 84294958" → "Tolgahan Unal")
+      const handlerRaw = row.current_handler || 'Bilinmiyor';
+      const handlerName = handlerRaw.replace(/\s+\d{6,}$/, '').trim();
+
+      if (!handlerMap[handlerName]) {
+        handlerMap[handlerName] = {
+          handler: handlerName,
+          progress: row.approval_progress || '0/0',
+          count: 0,
+          total_usd: 0,
+          total_try: 0,
+          items: []
+        };
+      }
+
+      handlerMap[handlerName].count++;
+      if (isTry) handlerMap[handlerName].total_try += lineTotal;
+      else        handlerMap[handlerName].total_usd += lineTotal;
+
+      handlerMap[handlerName].items.push({
+        acceptance_no: row.acceptance_no,
+        po_no: row.po_no,
+        site_code: row.site_code,
+        site_name: row.site_name,
+        milestone: row.acceptance_milestone || row.milestone_type || '',
+        line_total: lineTotal,
+        currency,
+        progress: row.approval_progress
+      });
+    }
+
+    const by_handler = Object.values(handlerMap)
+      .sort((a, b) => (b.total_usd + b.total_try) - (a.total_usd + a.total_try));
+
+    res.json({
+      total_usd:   Math.round(total_usd   * 100) / 100,
+      total_try:   Math.round(total_try   * 100) / 100,
+      total_count: result.rows.length,
+      by_handler,
+      last_upload: lastUpload
+    });
+  } catch (err) {
+    console.error("HW ACCEPTANCE SUMMARY ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server çalışıyor: ${PORT}`);
 });
 
 module.exports = app;
-// deploy trigger Tue May 26 08:49:41 +03 2026
+// deploy trigger Mon Jun  8 13:27:48 +03 2026
 
