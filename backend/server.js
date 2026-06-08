@@ -8377,6 +8377,45 @@ app.get("/finance/hw-payment/last-upload", async (req, res) => {
   }
 });
 
+/* ================== FINANCE DEBUG PAYMENTS (TEMP) ================== */
+app.get("/finance/debug-payments", async (req, res) => {
+  try {
+    const stats = await pool.query(`
+      SELECT
+        COUNT(*) AS total_rows,
+        COUNT(due_date) AS rows_with_due_date,
+        COUNT(CASE WHEN COALESCE(remaining_amount,0) != 0 THEN 1 END) AS rows_nonzero_remaining,
+        COUNT(CASE WHEN due_date > CURRENT_DATE THEN 1 END) AS future_due_rows,
+        COUNT(CASE WHEN due_date > CURRENT_DATE AND COALESCE(remaining_amount,0) != 0 THEN 1 END) AS future_nonzero,
+        MAX(due_date) AS max_due_date,
+        MIN(due_date) AS min_due_date,
+        SUM(CASE WHEN due_date > CURRENT_DATE THEN COALESCE(remaining_amount,0) ELSE 0 END) AS future_remaining_sum
+      FROM hw_payment_rows
+    `);
+    const sample = await pool.query(`
+      SELECT invoice_no, invoice_amount, payment_amount, remaining_amount, payment_date, due_date, currency
+      FROM hw_payment_rows
+      WHERE due_date >= CURRENT_DATE
+      ORDER BY due_date ASC
+      LIMIT 10
+    `);
+    const overdueSample = await pool.query(`
+      SELECT COUNT(*) AS cnt, SUM(COALESCE(remaining_amount,0)) AS total
+      FROM hw_payment_rows
+      WHERE due_date < CURRENT_DATE AND COALESCE(remaining_amount,0) != 0
+    `);
+    res.json({
+      ok: true,
+      stats: stats.rows[0],
+      future_sample: sample.rows,
+      overdue_summary: overdueSample.rows[0],
+      server_time: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /* ================== FINANCE PAYMENTS LIST ================== */
 app.get("/finance/payments/list", requireFinanceAuth, async (req, res) => {
   try {
@@ -8677,7 +8716,7 @@ app.get("/finance/upcoming-payments", async (req, res) => {
       SELECT COALESCE(SUM(COALESCE(payment_amount, 0)), 0) AS today_received_total
       FROM hw_payment_rows
       WHERE payment_date IS NOT NULL
-        AND payment_date::date = CURRENT_DATE
+        AND payment_date::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Istanbul')::date
     `);
 
     res.json({
