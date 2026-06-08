@@ -2246,6 +2246,7 @@ app.get("/migrate", async (req, res) => {
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_not TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_qc_closed_date DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS suzme_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_subcon TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_plan_start_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_actual_end_date DATE",
@@ -2394,6 +2395,7 @@ app.get("/setup-db", async (req, res) => {
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_actual_end_date DATE",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_not TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_qc_closed_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS suzme_date DATE",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_subcon TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_plan_start_date DATE",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_actual_end_date DATE",
@@ -5497,7 +5499,8 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         -- POWER
         power_subcon, power_plan_start_date, power_actual_end_date,
         abonelik_actual_end_date, tt_horizon_actual_end_date,
-        pac_actual_end_date, tamamlanma_tarihi
+        pac_actual_end_date, tamamlanma_tarihi,
+        suzme_date
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,
         $8,$9,$10,$11,$12,$13,$14,$15,
@@ -5509,7 +5512,7 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         $34,$35,$36,$37,
         $38,$39,$40,$41,$42,
         $43,$44,$45,
-        $46,$47,$48,$49,$50,$51,$52
+        $46,$47,$48,$49,$50,$51,$52,$53
       )
       ON CONFLICT (site_code) DO UPDATE SET
         site_type = EXCLUDED.site_type,
@@ -5563,6 +5566,7 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         tt_horizon_actual_end_date = EXCLUDED.tt_horizon_actual_end_date,
         pac_actual_end_date = EXCLUDED.pac_actual_end_date,
         tamamlanma_tarihi = EXCLUDED.tamamlanma_tarihi,
+        suzme_date = EXCLUDED.suzme_date,
         updated_at = NOW()
       RETURNING *`,
       [
@@ -5577,9 +5581,9 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         /* 34-37 */ v("trs_subcon"), vd("trs_plan_start_date"), vd("trs_actual_end_date"), v("trs_not"),
         /* 38-42 */ v("enh_subcon"), v("enh_site_type"), vd("enh_plan_start_date"), vd("enh_actual_end_date"), v("enh_not"),
         /* 43-45 */ v("enh_proje_subcon"), vd("enh_proje_hazir"), v("enh_proje_not"),
-        /* 46-52 */ v("power_subcon"), vd("power_plan_start_date"), vd("power_actual_end_date"),
+        /* 46-53 */ v("power_subcon"), vd("power_plan_start_date"), vd("power_actual_end_date"),
                     vd("abonelik_actual_end_date"), vd("tt_horizon_actual_end_date"),
-                    vd("pac_actual_end_date"), vd("tamamlanma_tarihi"),
+                    vd("pac_actual_end_date"), vd("tamamlanma_tarihi"), vd("suzme_date"),
       ]
     );
 
@@ -5776,64 +5780,58 @@ app.get("/export/excel", async (req, res) => {
       { header: "GS Status",          key: "gs_status",           width: 14, section: "btk" },
       { header: "Survey Note",        key: "survey_note",         width: 32, section: "btk" },
       // ENH
-      { header: "ENH Subcon",        key: "enh_subcon",          width: 20, section: "enh" },
-      { header: "ENH Site Type",     key: "enh_site_type",        width: 16, section: "enh" },
-      { header: "ENH Plan Start",    key: "enh_plan_start_date",  width: 18, section: "enh" },
-      { header: "ENH Actual End",    key: "enh_actual_end_date",  width: 18, section: "enh" },
-      { header: "ENH QC Closed",     key: "enh_qc_closed_date",  width: 18, section: "enh" },
-      { header: "ENH Not",           key: "enh_not",              width: 32, section: "enh" },
+      { header: "ENH Subcon",        key: "enh_subcon",           width: 20 },
+      { header: "ENH Site Type",     key: "enh_site_type",         width: 16 },
+      { header: "ENH Plan Start",    key: "enh_plan_start_date",   width: 18 },
+      { header: "ENH Actual End",    key: "enh_actual_end_date",   width: 18 },
+      { header: "ENH QC Closed",     key: "enh_qc_closed_date",    width: 18 },
+      { header: "ENH Not",           key: "enh_not",               width: 32 },
       // POWER
-      { header: "Power Subcon",      key: "power_subcon",          width: 20, section: "power" },
-      { header: "Power Plan Start",  key: "power_plan_start_date", width: 18, section: "power" },
-      { header: "Power Actual End",  key: "power_actual_end_date", width: 18, section: "power" },
-      { header: "Abonelik End Date", key: "abonelik_end_date",      width: 22, section: "power" },
-      { header: "Horizon End Date",  key: "tt_horizon_end_date",   width: 20, section: "power" },
-      { header: "PAC Actual End",    key: "pac_end_date",           width: 18, section: "power" },
+      { header: "Power Subcon",      key: "power_subcon",          width: 20 },
+      { header: "Power Plan Start",  key: "power_plan_start_date", width: 18 },
+      { header: "Power Actual End",  key: "power_actual_end_date", width: 18 },
+      { header: "Süzme Tarihi",      key: "suzme_date",            width: 18 },
+      { header: "Abonelik End Date", key: "abonelik_end_date",      width: 22 },
+      { header: "Horizon End Date",  key: "tt_horizon_end_date",   width: 20 },
+      { header: "PAC Actual End",    key: "pac_end_date",           width: 18 },
     ];
 
-    // Section başlık renkleri (koyu) ve veri satır renkleri (açık)
-    const SECTION_COLORS = {
-      info:  { header: "FF1F4E78", row: "FFDBE5F0" },
-      rf:    { header: "FF0F5132", row: "FFD1FAE5" },
-      los:   { header: "FF92400E", row: "FFFEF3C7" },
-      tss:   { header: "FF581C87", row: "FFEDE9FE" },
-      tssr:  { header: "FF155E75", row: "FFE0F2FE" },
-      btk:   { header: "FF9D174D", row: "FFFCE7F3" },
-      enh:   { header: "FF78350F", row: "FFFEF9C3" },
-      power: { header: "FF1E3A5F", row: "FFE8EDF5" },
-    };
+    // Sütun genişliklerini doğrudan ata (header auto-row oluşturmaması için columns.header kullanma)
+    COL_DEFS.forEach((col, idx) => {
+      const wsCol = worksheet.getColumn(idx + 1);
+      wsCol.key   = col.key;
+      wsCol.width = col.width;
+    });
 
-    worksheet.columns = COL_DEFS.map(c => ({ header: c.header, key: c.key, width: c.width }));
+    const lastColNum = COL_DEFS.length;
+    const lastColLetter = worksheet.getColumn(lastColNum).letter;
 
-    worksheet.spliceRows(1, 0, []);
-
-    const lastCol = worksheet.getColumn(worksheet.columns.length).letter;
-
-    // Satır 1: Başlık
-    worksheet.mergeCells(`A1:${lastCol}1`);
-    const titleCell = worksheet.getCell("A1");
+    // Satır 1: Başlık (merged, koyu lacivert)
+    const titleRow = worksheet.getRow(1);
+    titleRow.height = 28;
+    const titleCell = titleRow.getCell(1);
     titleCell.value = `ROLLOUT DATA RAPORU — ${region && region !== "ALL" ? region : "Tüm Bölgeler"} (${new Date().toLocaleDateString("tr-TR")})`;
-    titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    titleCell.font  = { bold: true, size: 13, color: { argb: "FFFFFFFF" } };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
-    titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3864" } };
-    worksheet.getRow(1).height = 30;
+    titleCell.fill  = { type: "pattern", pattern: "solid", fgColor: { argb: "FF203864" } };
+    worksheet.mergeCells(1, 1, 1, lastColNum);
 
-    // Satır 2: Sütun başlıkları — her bölümün rengiyle
+    // Satır 2: Sütun başlıkları — tek tip koyu lacivert (qc_ready formatı)
     const headerRow = worksheet.getRow(2);
+    headerRow.height = 24;
     COL_DEFS.forEach((col, index) => {
       const cell = headerRow.getCell(index + 1);
       cell.value = col.header;
-      cell.font = { bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+      cell.font  = { bold: true, size: 10, color: { argb: "FFFFFFFF" } };
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: SECTION_COLORS[col.section].header } };
+      cell.fill  = { type: "pattern", pattern: "solid", fgColor: { argb: "FF203864" } };
       cell.border = {
-        top:    { style: "thin", color: { argb: "FFB7C9E2" } },
-        left:   { style: "thin", color: { argb: "FFB7C9E2" } },
+        top:    { style: "thin",   color: { argb: "FFB7C9E2" } },
+        left:   { style: "thin",   color: { argb: "FFB7C9E2" } },
         bottom: { style: "medium", color: { argb: "FFB7C9E2" } },
-        right:  { style: "thin", color: { argb: "FFB7C9E2" } },
+        right:  { style: "thin",   color: { argb: "FFB7C9E2" } },
       };
     });
-    headerRow.height = 36;
 
     // Veri satırlarını ekle — tarihleri JS Date nesnesi olarak ver (Excel native date)
     const DATE_KEYS = new Set([
@@ -5842,8 +5840,8 @@ app.get("/export/excel", async (req, res) => {
       "tss_plan_start_date","tss_actual_end_date","tssr_plan_start_date","tssr_actual_end_date",
       "btk_plan_start_date","btk_actual_end_date","btk_approved",
       "enh_plan_start_date","enh_actual_end_date","enh_qc_closed_date",
-      "power_plan_start_date","power_actual_end_date","abonelik_end_date",
-      "tt_horizon_end_date","pac_end_date",
+      "power_plan_start_date","power_actual_end_date","suzme_date",
+      "abonelik_end_date","tt_horizon_end_date","pac_end_date",
     ]);
     const toDate = (v) => {
       if (!v) return "";
@@ -5864,21 +5862,17 @@ app.get("/export/excel", async (req, res) => {
       });
     });
 
-    // Veri satırları: section renklerini uygula (sütun gruplarına göre)
+    // Veri satırları: tek tip alternatif renk (qc_ready formatı — #F8FAFC / beyaz)
     worksheet.eachRow((exRow, rowNumber) => {
       if (rowNumber < 3) return;
-      const isOdd = rowNumber % 2 !== 0;
+      const isOdd = (rowNumber - 2) % 2 !== 0; // veri satırı 1,3,5... = açık; 2,4,6... = beyaz
       COL_DEFS.forEach((col, idx) => {
         const cell = exRow.getCell(idx + 1);
-        const sectionColor = SECTION_COLORS[col.section];
-        const hasValue = cell.value !== null && cell.value !== undefined && cell.value !== "";
 
-        // Boş hücreler: bölüm renginin çok açık tonu; dolu hücreler: çift satırlarda biraz koyu
-        if (!hasValue) {
-          cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: isOdd ? "FFF9FAFB" : "FFF3F4F6" } };
-        } else {
-          cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: isOdd ? "FFFFFFFF" : sectionColor.row } };
-        }
+        cell.fill = {
+          type: "pattern", pattern: "solid",
+          fgColor: { argb: isOdd ? "FFF8FAFC" : "FFFFFFFF" },
+        };
         cell.border = {
           top:    { style:"hair", color:{ argb:"FFD1D5DB" } },
           left:   { style:"hair", color:{ argb:"FFD1D5DB" } },
@@ -5886,13 +5880,19 @@ app.get("/export/excel", async (req, res) => {
           right:  { style:"hair", color:{ argb:"FFD1D5DB" } },
         };
         cell.alignment = { vertical:"middle", wrapText:false };
-        // Status sütunları için renk kodlama
-        if (col.key === "malzeme_status" || col.key === "qc_closed_date" || col.key === "enh_qc_closed_date") {
-          const val = String(cell.value || "").toUpperCase();
-          if (val === "OK" || (cell.value instanceof Date)) {
+
+        // QC Closed / ENH QC Closed / Süzme — tarihi varsa yeşil bold
+        if (col.key === "qc_closed_date" || col.key === "enh_qc_closed_date" || col.key === "suzme_date") {
+          if (cell.value instanceof Date) {
             cell.font = { bold:true, color:{ argb:"FF15803D" } };
           }
         }
+        // Malzeme Status OK → yeşil
+        if (col.key === "malzeme_status") {
+          const val = String(cell.value || "").toUpperCase();
+          if (val === "OK") cell.font = { bold:true, color:{ argb:"FF15803D" } };
+        }
+        // Site type: arka plan rengi
         if (col.key === "site_type") {
           const val = String(cell.value || "").toUpperCase();
           const typeColors = { "DSS":"FFFDE9D9", "LTE":"FFDDEBF7", "5G":"FFE2EFDA", "STANDALONE":"FFFEF9C3" };
@@ -5905,7 +5905,7 @@ app.get("/export/excel", async (req, res) => {
     });
 
     worksheet.views = [{ state:"frozen", ySplit:2, showGridLines:false }];
-    worksheet.autoFilter = { from:"A2", to:`${lastCol}2` };
+    worksheet.autoFilter = { from:"A2", to:`${lastColLetter}2` };
 
     const safeRegion = region && region !== "ALL" && region !== "Tüm Bölgeler" ? region : "ALL";
     const fileName = `rollout_${safeRegion}_${new Date().toISOString().slice(0, 10)}.xlsx`;
@@ -6068,6 +6068,7 @@ app.get("/rollout/summary", async (req, res) => {
         COUNT(*) FILTER (WHERE enh_plan_start_date IS NOT NULL)::int AS enh_plan_start,
         COUNT(*) FILTER (WHERE enh_actual_end_date IS NOT NULL)::int AS enh_actual_end,
         COUNT(*) FILTER (WHERE enh_qc_closed_date IS NOT NULL)::int AS enh_qc_closed,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(enh_site_type,''))) LIKE '%süzme%')::int AS suzme,
         COUNT(*) FILTER (
           WHERE abonelik_actual_end_date IS NOT NULL
              OR abonelik_end_date IS NOT NULL
@@ -12990,6 +12991,7 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_not TEXT",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_proje_belge_url TEXT",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_qc_closed_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS suzme_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_subcon TEXT",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_plan_start_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS power_actual_end_date DATE",

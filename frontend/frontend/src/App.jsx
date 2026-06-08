@@ -3342,6 +3342,7 @@ function FinanceDashboard({
   const [showUpload, setShowUpload] = useState(false);
   const [hwAcceptanceSummary, setHwAcceptanceSummary] = useState(null);
   const [showHwAcceptanceModal, setShowHwAcceptanceModal] = useState(false);
+  const [hwCardExpanded, setHwCardExpanded] = useState(false);
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [paymentRows, setPaymentRows] = useState([]);
@@ -4798,27 +4799,34 @@ function FinanceDashboard({
           const totalUsd = acc?.total_usd || 0;
           const totalTry = acc?.total_try || 0;
           const count    = acc?.total_count || 0;
-          const handlers = acc?.by_handler || [];
+          // Sırala: en çok aşama tamamlayan (progress oranı yüksek) üstte
+          const rawHandlers = acc?.by_handler || [];
+          const parseP = (p) => { const [d,t] = (p||"0/0").split("/").map(Number); return t>0?d/t:0; };
+          const handlers = [...rawHandlers].sort((a,b) => parseP(b.progress) - parseP(a.progress));
+
           const fmtAmt = (usd, tryAmt) => {
+            // TL öncelikli göster; yoksa USD
+            if (tryAmt > 0) return tryAmt >= 1000000 ? `₺${(tryAmt/1000000).toFixed(1)}M` : tryAmt >= 1000 ? `₺${Math.round(tryAmt/1000)}K` : `₺${Math.round(tryAmt)}`;
             if (usd > 0) return usd >= 1000000 ? `$${(usd/1000000).toFixed(1)}M` : usd >= 1000 ? `$${Math.round(usd/1000)}K` : `$${Math.round(usd)}`;
-            if (tryAmt > 0) return tryAmt >= 1000000 ? `₺${(tryAmt/1000000).toFixed(1)}M` : `₺${Math.round(tryAmt/1000)}K`;
-            return "$0";
+            return "₺0";
           };
           const progColor = (prog) => {
-            const [d, t] = (prog || "0/0").split("/").map(Number);
-            const p = t > 0 ? d/t : 0;
+            const p = parseP(prog);
             return p === 0 ? "#ef4444" : p < 0.75 ? "#f59e0b" : "#22c55e";
           };
-          const topHandlers = handlers.slice(0, 3);
-          const moreCount = handlers.length - topHandlers.length;
+
+          const SHOW_N = 4;
+          const visibleHandlers = hwCardExpanded ? handlers : handlers.slice(0, SHOW_N);
+          const hasMore = handlers.length > SHOW_N;
+
           return (
-            <div style={{ background:"#fff", borderRadius:"12px", padding:"16px 20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden", cursor: count > 0 ? "pointer" : "default" }}
-              onClick={() => count > 0 && setShowHwAcceptanceModal(true)}>
+            <div style={{ background:"#fff", borderRadius:"12px", padding:"16px 20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
               <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#f59e0b,#fbbf24)" }}/>
               {/* Header */}
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
                 <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>HW Fatura Onay Bekler</div>
-                <div style={{ width:"30px", height:"30px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px" }}>📋</div>
+                <div style={{ width:"30px", height:"30px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", cursor: count>0?"pointer":"default" }}
+                  onClick={() => count > 0 && setShowHwAcceptanceModal(true)} title="Detay">📋</div>
               </div>
               {count === 0 ? (
                 <div style={{ fontSize:"12px", color:"#9ca3af" }}>Veri yok · Acceptance yükleyin</div>
@@ -4829,9 +4837,9 @@ function FinanceDashboard({
                     <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>{fmtAmt(totalUsd, totalTry)}</div>
                     <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
                   </div>
-                  {/* Handler kırılımı */}
+                  {/* Handler kırılımı — en çok ilerleyen üstte */}
                   <div style={{ borderTop:"1px solid #f1f5f9", paddingTop:"8px", display:"flex", flexDirection:"column", gap:"5px" }}>
-                    {topHandlers.map((h, i) => {
+                    {visibleHandlers.map((h, i) => {
                       const clr = progColor(h.progress);
                       return (
                         <div key={i} style={{ display:"flex", alignItems:"center", gap:"6px" }}>
@@ -4846,8 +4854,14 @@ function FinanceDashboard({
                         </div>
                       );
                     })}
-                    {moreCount > 0 && (
-                      <div style={{ fontSize:"10px", color:"#6b7280", textAlign:"right" }}>+{moreCount} kişi daha · detay için tıkla</div>
+                    {hasMore && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setHwCardExpanded(v => !v); }}
+                        style={{ marginTop:"4px", fontSize:"10px", color:"#3b82f6", background:"none", border:"none", cursor:"pointer", textAlign:"left", padding:0, fontWeight:600, display:"flex", alignItems:"center", gap:"3px" }}>
+                        {hwCardExpanded
+                          ? "▲ Daha az göster"
+                          : `▼ +${handlers.length - SHOW_N} kişi daha göster`}
+                      </button>
                     )}
                   </div>
                 </>
