@@ -742,6 +742,59 @@ function HWPoUploadInline({ onClose, onUploaded }) {
   );
 }
 
+function HWAcceptanceUploadInline({ onClose, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleUpload = async () => {
+    if (!file) { setMessage("❌ Lütfen bir Excel dosyası seç"); return; }
+    try {
+      setUploading(true);
+      setMessage("");
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(`${API_BASE}/hw-acceptance/upload`, { method: "POST", body: formData });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.error || "HW Acceptance upload sırasında hata oluştu");
+      setMessage(`✅ HW Acceptance listesi yüklendi. Eklenen kayıt: ${data.inserted || 0}`);
+      setFile(null);
+      const input = document.getElementById("hw-acceptance-upload-input");
+      if (input) input.value = "";
+      if (onUploaded) await onUploaded();
+    } catch (err) {
+      console.error("HW ACCEPTANCE UPLOAD ERROR:", err);
+      setMessage(`❌ ${err.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="entryPanel" style={{ marginBottom: "18px" }}>
+      <div className="entryForm">
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px", gap:"12px", flexWrap:"wrap" }}>
+          <h3 className="listTitle" style={{ margin: 0 }}>📋 HW Acceptance Yükle</h3>
+          <button type="button" className="tab" onClick={onClose} style={{ padding:"10px 14px" }}>Kapat</button>
+        </div>
+        <div className="formGrid">
+          <div className="formGroup formGroupWide">
+            <label>Huawei Acceptance Excel Dosyası</label>
+            <input id="hw-acceptance-upload-input" type="file" accept=".xlsx,.xls"
+              onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          </div>
+        </div>
+        <div className="entryActions">
+          <button type="button" className="saveButton" onClick={handleUpload} disabled={uploading}>
+            {uploading ? "Yükleniyor..." : "Acceptance Yükle"}
+          </button>
+        </div>
+        {message && <div className="entryMessage">{message}</div>}
+      </div>
+    </div>
+  );
+}
+
 function RolloutUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -885,15 +938,24 @@ function RolloutDashboard({ currentUser }) {
   const [selectedRolloutSite, setSelectedRolloutSite] = useState("");
 
   const handleExportExcel = async () => {
-    const XLSX = await import("xlsx");
     const today = new Date().toISOString().split("T")[0];
     const regionLabel = regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter;
 
+    // Tarih formatlayıcı
     const fd = (v) => {
-      if (!v) return "";
+      if (!v || v === "N/A") return "";
       const d = new Date(v);
       if (isNaN(d)) return String(v);
       return `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+    };
+
+    // Subcon Huawei mi?
+    const isHwSubcon = (v) => /huawei|^hw$/i.test(String(v || "").trim());
+
+    // Huawei subcon'a bağlı tarih → N/A
+    const fdHw = (dateVal, subconVal) => {
+      if (isHwSubcon(subconVal)) return "N/A";
+      return fd(dateVal);
     };
 
     // Ortak kimlik alanları
@@ -905,90 +967,114 @@ function RolloutDashboard({ currentUser }) {
       "İl":            r.il || "",
     });
 
-    let data, sheetName, fileSuffix;
+    let cols, rows2export, sheetName, fileSuffix;
 
     if (typeFilter === "POWER") {
-      // ⚡ POWER / Enerji kolonları
       fileSuffix = "Power_Enerji";
       sheetName  = "Power";
-      data = filteredRows.map(r => ({
+      cols = ["Bölge","Site Type","Project Code","Site Code","İl",
+        "ENH Site Type","ENH Proje Subcon","ENH Proje Hazır Tarihi","ENH Proje Not",
+        "ENH Subcon","ENH Plan Start Date","ENH Actual End Date","ENH Not",
+        "Power Subcon","Power Plan Start Date","Power Actual End Date",
+        "Süzme Tarihi","Abonelik Actual End Date","Horizon Actual End Date","PAC Actual End Date"];
+      rows2export = filteredRows.map(r => ({
         ...base(r),
         "ENH Site Type":            r.enh_site_type || "",
         "ENH Proje Subcon":         r.enh_proje_subcon || "",
         "ENH Proje Hazır Tarihi":   fd(r.enh_proje_hazir),
         "ENH Proje Not":            r.enh_proje_not || "",
         "ENH Subcon":               r.enh_subcon || "",
-        "ENH Plan Start Date":      fd(r.enh_plan_start_date),
-        "ENH Actual End Date":      fd(r.enh_actual_end_date),
+        "ENH Plan Start Date":      fdHw(r.enh_plan_start_date, r.enh_subcon),
+        "ENH Actual End Date":      fdHw(r.enh_actual_end_date, r.enh_subcon),
         "ENH Not":                  r.enh_not || "",
         "Power Subcon":             r.power_subcon || "",
-        "Power Plan Start Date":    fd(r.power_plan_start_date),
-        "Power Actual End Date":    fd(r.power_actual_end_date),
+        "Power Plan Start Date":    fdHw(r.power_plan_start_date, r.power_subcon),
+        "Power Actual End Date":    fdHw(r.power_actual_end_date, r.power_subcon),
+        "Süzme Tarihi":             fd(r.suzme_date),
         "Abonelik Actual End Date": fd(r.abonelik_actual_end_date),
         "Horizon Actual End Date":  fd(r.tt_horizon_actual_end_date),
         "PAC Actual End Date":      fd(r.pac_actual_end_date),
       }));
 
     } else if (typeFilter === "SURVEY_BTK") {
-      // 📋 Survey & BTK kolonları
       fileSuffix = "Survey_BTK";
       sheetName  = "Survey&BTK";
-      data = filteredRows.map(r => ({
+      cols = ["Bölge","Site Type","Project Code","Site Code","İl",
+        "Malzeme Status","LOS Subcon","LOS Plan Date","LOS Actual End Date",
+        "TSS Subcon","TSS Plan Start Date","TSS Actual End Date",
+        "TSSR Subcon","TSSR Plan Start Date","TSSR Actual End Date",
+        "BTK Subcon","BTK Plan Start Date","BTK Actual End Date","BTK Approval Status",
+        "GS Status","Atlas Status","Survey Note",
+        "EMR Plan Start Date","EMR Actual End Date"];
+      rows2export = filteredRows.map(r => ({
         ...base(r),
         "Malzeme Status":           r.malzeme_status || "",
         "LOS Subcon":               r.los_subcon || "",
-        "LOS Plan Date":            fd(r.los_plan_date),
-        "LOS Actual End Date":      fd(r.los_actual_end_date),
+        "LOS Plan Date":            fdHw(r.los_plan_date, r.los_subcon),
+        "LOS Actual End Date":      fdHw(r.los_actual_end_date, r.los_subcon),
         "TSS Subcon":               r.tss_subcon || "",
-        "TSS Plan Start Date":      fd(r.tss_plan_start_date),
-        "TSS Actual End Date":      fd(r.tss_actual_end_date),
+        "TSS Plan Start Date":      fdHw(r.tss_plan_start_date, r.tss_subcon),
+        "TSS Actual End Date":      fdHw(r.tss_actual_end_date, r.tss_subcon),
         "TSSR Subcon":              r.tssr_subcon || "",
-        "TSSR Plan Start Date":     fd(r.tssr_plan_start_date),
-        "TSSR Actual End Date":     fd(r.tssr_actual_end_date),
+        "TSSR Plan Start Date":     fdHw(r.tssr_plan_start_date, r.tssr_subcon),
+        "TSSR Actual End Date":     fdHw(r.tssr_actual_end_date, r.tssr_subcon),
         "BTK Subcon":               r.btk_subcon || "",
-        "BTK Plan Start Date":      fd(r.btk_plan_start_date),
-        "BTK Actual End Date":      fd(r.btk_actual_end_date),
+        "BTK Plan Start Date":      fdHw(r.btk_plan_start_date, r.btk_subcon),
+        "BTK Actual End Date":      fdHw(r.btk_actual_end_date, r.btk_subcon),
         "BTK Approval Status":      r.btk_approved || "",
         "GS Status":                r.gs_status || "",
         "Atlas Status":             r.atlas_status || "",
         "Survey Note":              r.survey_note || "",
-        "EMR Plan Start Date":      fd(r.emr_plan_start_date),
-        "EMR Actual End Date":      fd(r.emr_actual_end_date),
+        "EMR Plan Start Date":      fdHw(r.emr_plan_start_date, r.emr_subcon),
+        "EMR Actual End Date":      fdHw(r.emr_actual_end_date, r.emr_subcon),
       }));
 
     } else {
-      // Tüm kolonlar (ALL, 5G, DSS, LTE, STANDALONE)
       fileSuffix = typeFilter === "ALL" ? "Tum" : typeFilter;
       sheetName  = "Rollout Data";
-      data = filteredRows.map(r => ({
+      cols = ["Bölge","Site Type","Project Code","Site Code","İl",
+        "Site Fiziksel Tip","Malzeme Status",
+        "RF Subcon","Plan Start Date","Installation Start Date","Installation End Date","OnAir Date","QC Closed Date","RF Not",
+        "LOS Subcon","LOS Plan Date","LOS Actual End Date",
+        "TSS Subcon","TSS Plan Start Date","TSS Actual End Date",
+        "TSSR Subcon","TSSR Plan Start Date","TSSR Actual End Date",
+        "BTK Subcon","BTK Plan Start Date","BTK Actual End Date","BTK Approval Status",
+        "GS Status","Atlas Status","Survey Note",
+        "EMR Plan Start Date","EMR Actual End Date",
+        "TRS Subcon","TRS Plan Start Date","TRS Actual End Date","TRS Not",
+        "ENH Site Type","ENH Proje Subcon","ENH Proje Hazır Tarihi","ENH Proje Not",
+        "ENH Subcon","ENH Plan Start Date","ENH Actual End Date","ENH Not",
+        "Power Subcon","Power Plan Start Date","Power Actual End Date",
+        "Süzme Tarihi","Abonelik Actual End Date","Horizon Actual End Date","PAC Actual End Date"];
+      rows2export = filteredRows.map(r => ({
         ...base(r),
         "Site Fiziksel Tip":        r.site_physical_type || "",
         "Malzeme Status":           r.malzeme_status || "",
         "RF Subcon":                r.rf_subcon || "",
-        "Plan Start Date":          fd(r.plan_start_date),
-        "Installation Start Date":  fd(r.installation_actual_start_date),
-        "Installation End Date":    fd(r.installation_actual_end_date),
-        "OnAir Date":               fd(r.onair_date),
+        "Plan Start Date":          fdHw(r.plan_start_date, r.rf_subcon),
+        "Installation Start Date":  fdHw(r.installation_actual_start_date, r.rf_subcon),
+        "Installation End Date":    fdHw(r.installation_actual_end_date, r.rf_subcon),
+        "OnAir Date":               fdHw(r.onair_date, r.rf_subcon),
         "QC Closed Date":           fd(r.qc_closed_date),
         "RF Not":                   r.rf_not || "",
         "LOS Subcon":               r.los_subcon || "",
-        "LOS Plan Date":            fd(r.los_plan_date),
-        "LOS Actual End Date":      fd(r.los_actual_end_date),
+        "LOS Plan Date":            fdHw(r.los_plan_date, r.los_subcon),
+        "LOS Actual End Date":      fdHw(r.los_actual_end_date, r.los_subcon),
         "TSS Subcon":               r.tss_subcon || "",
-        "TSS Plan Start Date":      fd(r.tss_plan_start_date),
-        "TSS Actual End Date":      fd(r.tss_actual_end_date),
+        "TSS Plan Start Date":      fdHw(r.tss_plan_start_date, r.tss_subcon),
+        "TSS Actual End Date":      fdHw(r.tss_actual_end_date, r.tss_subcon),
         "TSSR Subcon":              r.tssr_subcon || "",
-        "TSSR Plan Start Date":     fd(r.tssr_plan_start_date),
-        "TSSR Actual End Date":     fd(r.tssr_actual_end_date),
+        "TSSR Plan Start Date":     fdHw(r.tssr_plan_start_date, r.tssr_subcon),
+        "TSSR Actual End Date":     fdHw(r.tssr_actual_end_date, r.tssr_subcon),
         "BTK Subcon":               r.btk_subcon || "",
-        "BTK Plan Start Date":      fd(r.btk_plan_start_date),
-        "BTK Actual End Date":      fd(r.btk_actual_end_date),
+        "BTK Plan Start Date":      fdHw(r.btk_plan_start_date, r.btk_subcon),
+        "BTK Actual End Date":      fdHw(r.btk_actual_end_date, r.btk_subcon),
         "BTK Approval Status":      r.btk_approved || "",
         "GS Status":                r.gs_status || "",
         "Atlas Status":             r.atlas_status || "",
         "Survey Note":              r.survey_note || "",
-        "EMR Plan Start Date":      fd(r.emr_plan_start_date),
-        "EMR Actual End Date":      fd(r.emr_actual_end_date),
+        "EMR Plan Start Date":      fdHw(r.emr_plan_start_date, r.emr_subcon),
+        "EMR Actual End Date":      fdHw(r.emr_actual_end_date, r.emr_subcon),
         "TRS Subcon":               r.trs_subcon || "",
         "TRS Plan Start Date":      fd(r.trs_plan_start_date),
         "TRS Actual End Date":      fd(r.trs_actual_end_date),
@@ -998,24 +1084,110 @@ function RolloutDashboard({ currentUser }) {
         "ENH Proje Hazır Tarihi":   fd(r.enh_proje_hazir),
         "ENH Proje Not":            r.enh_proje_not || "",
         "ENH Subcon":               r.enh_subcon || "",
-        "ENH Plan Start Date":      fd(r.enh_plan_start_date),
-        "ENH Actual End Date":      fd(r.enh_actual_end_date),
+        "ENH Plan Start Date":      fdHw(r.enh_plan_start_date, r.enh_subcon),
+        "ENH Actual End Date":      fdHw(r.enh_actual_end_date, r.enh_subcon),
         "ENH Not":                  r.enh_not || "",
         "Power Subcon":             r.power_subcon || "",
-        "Power Plan Start Date":    fd(r.power_plan_start_date),
-        "Power Actual End Date":    fd(r.power_actual_end_date),
+        "Power Plan Start Date":    fdHw(r.power_plan_start_date, r.power_subcon),
+        "Power Actual End Date":    fdHw(r.power_actual_end_date, r.power_subcon),
+        "Süzme Tarihi":             fd(r.suzme_date),
         "Abonelik Actual End Date": fd(r.abonelik_actual_end_date),
         "Horizon Actual End Date":  fd(r.tt_horizon_actual_end_date),
         "PAC Actual End Date":      fd(r.pac_actual_end_date),
       }));
     }
 
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    // ── XLSXStyle ile stillendirilmiş Excel ──────────────────────────────
+    // NOT: xlsx-js-style renk 6 karakter RGB (FF prefix'siz), patternType gerekli
 
-    const fileName = `rollout_${regionLabel}_${fileSuffix}_${today}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+    const mkFill  = (hex6) => ({ patternType: "solid", fgColor: { rgb: hex6 } });
+    const mkBorder = (style) => ({ top:{style,color:{rgb:"D1D5DB"}}, left:{style,color:{rgb:"D1D5DB"}}, bottom:{style,color:{rgb:"D1D5DB"}}, right:{style,color:{rgb:"D1D5DB"}} });
+
+    const headerStyle = {
+      font:      { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
+      fill:      mkFill("203864"),
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border:    { top:{style:"thin",color:{rgb:"B7C9E2"}}, left:{style:"thin",color:{rgb:"B7C9E2"}}, bottom:{style:"medium",color:{rgb:"B7C9E2"}}, right:{style:"thin",color:{rgb:"B7C9E2"}} },
+    };
+
+    const getCellStyle = (rowIdx, colName, val) => {
+      const isNa  = val === "N/A";
+      const isOdd = rowIdx % 2 === 0;
+      const bg    = isOdd ? "F8FAFC" : "FFFFFF";
+      const isQcDate = ["QC Closed Date","ENH QC Closed","Süzme Tarihi"].includes(colName) && val && !isNa;
+      const border = mkBorder("hair");
+
+      if (isNa) {
+        return { fill: mkFill("F3F4F6"), font: { sz:10, color:{ rgb:"9CA3AF" }, italic:true, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+      }
+      if (isQcDate) {
+        return { fill: mkFill(bg), font: { bold:true, sz:10, color:{ rgb:"15803D" }, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+      }
+      if (colName === "Malzeme Status" && String(val).toUpperCase() === "OK") {
+        return { fill: mkFill(bg), font: { bold:true, sz:10, color:{ rgb:"15803D" }, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+      }
+      if (colName === "Site Type") {
+        const typeColors = { DSS:"FDE9D9", LTE:"DDEBF7", "5G":"E2EFDA", STANDALONE:"FEF9C3" };
+        const tc = typeColors[String(val).toUpperCase()];
+        if (tc) return { fill: mkFill(tc), font: { bold:true, sz:10, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+      }
+      return { fill: mkFill(bg), font: { sz:10, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+    };
+
+    // Şemayı oluştur: önce saf değerler, sonra stiller uygula
+    const aoa = [
+      cols.map(h => h),                      // row 0: header labels
+      ...rows2export.map(rowObj => cols.map(col => rowObj[col] ?? "")), // data rows
+    ];
+    const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
+
+    // Stilleri sonradan uygula (xlsx-js-style'ın standart yöntemi)
+    cols.forEach((col, ci) => {
+      // Header row (r=0)
+      const hAddr = XLSXStyle.utils.encode_cell({ r: 0, c: ci });
+      if (ws[hAddr]) ws[hAddr].s = headerStyle;
+
+      // Data rows
+      rows2export.forEach((rowObj, ri) => {
+        const addr = XLSXStyle.utils.encode_cell({ r: ri + 1, c: ci });
+        if (ws[addr]) ws[addr].s = getCellStyle(ri, col, ws[addr].v ?? "");
+      });
+    });
+
+    // Sütun genişlikleri
+    const COL_WIDTHS = {
+      "Bölge": 14, "Site Type": 12, "Project Code": 16, "Site Code": 22, "İl": 12,
+      "Site Fiziksel Tip": 16, "Malzeme Status": 14,
+      "RF Subcon": 18, "Plan Start Date": 16, "Installation Start Date": 20,
+      "Installation End Date": 18, "OnAir Date": 16, "QC Closed Date": 16, "RF Not": 28,
+      "LOS Subcon": 18, "LOS Plan Date": 16, "LOS Actual End Date": 18,
+      "TSS Subcon": 18, "TSS Plan Start Date": 18, "TSS Actual End Date": 18,
+      "TSSR Subcon": 18, "TSSR Plan Start Date": 18, "TSSR Actual End Date": 18,
+      "BTK Subcon": 18, "BTK Plan Start Date": 16, "BTK Actual End Date": 16, "BTK Approval Status": 16,
+      "GS Status": 12, "Atlas Status": 12, "Survey Note": 28,
+      "EMR Plan Start Date": 18, "EMR Actual End Date": 18,
+      "TRS Subcon": 18, "TRS Plan Start Date": 16, "TRS Actual End Date": 16, "TRS Not": 24,
+      "ENH Site Type": 14, "ENH Proje Subcon": 18, "ENH Proje Hazır Tarihi": 18, "ENH Proje Not": 24,
+      "ENH Subcon": 18, "ENH Plan Start Date": 18, "ENH Actual End Date": 18, "ENH Not": 24,
+      "Power Subcon": 18, "Power Plan Start Date": 18, "Power Actual End Date": 18,
+      "Süzme Tarihi": 16,
+      "Abonelik Actual End Date": 20, "Horizon Actual End Date": 20, "PAC Actual End Date": 16,
+    };
+    ws["!cols"]  = cols.map(c => ({ wch: COL_WIDTHS[c] || 16 }));
+    ws["!rows"]  = [{ hpt: 22 }];
+    ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws, sheetName);
+
+    const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rollout_${regionLabel}_${fileSuffix}_${today}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const loadData = useCallback(async () => {
@@ -3168,6 +3340,8 @@ function FinanceDashboard({
   const [summary, setSummary] = useState(null);
   const [hwLastUpload, setHwLastUpload] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
+  const [hwAcceptanceSummary, setHwAcceptanceSummary] = useState(null);
+  const [showHwAcceptanceModal, setShowHwAcceptanceModal] = useState(false);
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [paymentRows, setPaymentRows] = useState([]);
@@ -3204,6 +3378,7 @@ function FinanceDashboard({
   const [savingOdeme, setSavingOdeme] = useState(false);
   const [showFinanceIslemlerMenu, setShowFinanceIslemlerMenu] = useState(false);
   const [showFinanceHwPoUpload, setShowFinanceHwPoUpload] = useState(false);
+  const [showFinanceHwAcceptanceUpload, setShowFinanceHwAcceptanceUpload] = useState(false);
 
   const [salaryFilterMonth, setSalaryFilterMonth] = useState(
     String(new Date().getMonth() + 1).padStart(2, "0"),
@@ -3740,11 +3915,13 @@ function FinanceDashboard({
     } else if (actionTrigger === 'taseron_hakedis') {
       handleShowSubconSummary();
     } else if (actionTrigger === 'hw_payment') {
-      setShowUpload(true); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false);
+      setShowUpload(true); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false); setShowFinanceHwAcceptanceUpload(false);
     } else if (actionTrigger === 'hw_fatura') {
-      setShowInvoiceUpload(true); setShowUpload(false); setShowFinanceHwPoUpload(false);
+      setShowInvoiceUpload(true); setShowUpload(false); setShowFinanceHwPoUpload(false); setShowFinanceHwAcceptanceUpload(false);
     } else if (actionTrigger === 'hw_po') {
-      setShowFinanceHwPoUpload(true); setShowUpload(false); setShowInvoiceUpload(false);
+      setShowFinanceHwPoUpload(true); setShowUpload(false); setShowInvoiceUpload(false); setShowFinanceHwAcceptanceUpload(false);
+    } else if (actionTrigger === 'hw_acceptance') {
+      setShowFinanceHwAcceptanceUpload(true); setShowUpload(false); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false);
     }
     onActionHandled?.();
   }, [actionTrigger]);
@@ -4384,6 +4561,7 @@ function FinanceDashboard({
         manualInvoiceData,
         salaryData,
         lastUploadData,
+        acceptanceSummaryData,
       ] = await Promise.all([
         fetchJson(`${API_BASE}/finance/summary`, { withAuth: true }),
         fetchJson(paymentsUrl, { withAuth: true }),
@@ -4391,6 +4569,7 @@ function FinanceDashboard({
         fetchJson(`${API_BASE}/finance/invoice-entry/list`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/salary/list`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/hw-payment/last-upload`).catch(() => ({ ok: true, last_upload: null })),
+        fetchJson(`${API_BASE}/hw-acceptance/summary`).catch(() => ({ total_usd: 0, total_try: 0, total_count: 0, by_handler: [] })),
       ]);
 
       console.log("MANUAL INVOICE DATA:", manualInvoiceData.rows);
@@ -4398,6 +4577,7 @@ function FinanceDashboard({
       setManualInvoiceRows(manualInvoiceData.rows || []);
       setSummary(summaryData.summary || null);
       setHwLastUpload(lastUploadData.last_upload || null);
+      setHwAcceptanceSummary(acceptanceSummaryData || null);
       setPaymentRows(paymentsData.rows || []);
       setUpcomingRows(upcomingData.rows || []);
       setOverdueRows(upcomingData.overdue_rows || []);
@@ -4569,6 +4749,12 @@ function FinanceDashboard({
           onUploaded={loadFinance}
         />
       )}
+      {showFinanceHwAcceptanceUpload && (
+        <HWAcceptanceUploadInline
+          onClose={() => setShowFinanceHwAcceptanceUpload(false)}
+          onUploaded={loadFinance}
+        />
+      )}
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"16px", marginBottom:"24px" }}>
         {/* Toplam Tahsilat */}
@@ -4606,16 +4792,69 @@ function FinanceDashboard({
           <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(thisMonthInvoiced || 0, "TRY")}</div>
           <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay faturalanan</div>
         </div>
-        {/* Gider Kayıt */}
-        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden", cursor:"pointer" }} onClick={handleShowSubconModal}>
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#ef4444,#f87171)" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Gider Kayıt</div>
-            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#fef2f2", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📉</div>
-          </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalRemaining || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Tıkla: taşeron hakediş</div>
-        </div>
+        {/* HW Fatura Onay Bekler */}
+        {(() => {
+          const acc = hwAcceptanceSummary;
+          const totalUsd = acc?.total_usd || 0;
+          const totalTry = acc?.total_try || 0;
+          const count    = acc?.total_count || 0;
+          const handlers = acc?.by_handler || [];
+          const fmtAmt = (usd, tryAmt) => {
+            if (usd > 0) return usd >= 1000000 ? `$${(usd/1000000).toFixed(1)}M` : usd >= 1000 ? `$${Math.round(usd/1000)}K` : `$${Math.round(usd)}`;
+            if (tryAmt > 0) return tryAmt >= 1000000 ? `₺${(tryAmt/1000000).toFixed(1)}M` : `₺${Math.round(tryAmt/1000)}K`;
+            return "$0";
+          };
+          const progColor = (prog) => {
+            const [d, t] = (prog || "0/0").split("/").map(Number);
+            const p = t > 0 ? d/t : 0;
+            return p === 0 ? "#ef4444" : p < 0.75 ? "#f59e0b" : "#22c55e";
+          };
+          const topHandlers = handlers.slice(0, 3);
+          const moreCount = handlers.length - topHandlers.length;
+          return (
+            <div style={{ background:"#fff", borderRadius:"12px", padding:"16px 20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden", cursor: count > 0 ? "pointer" : "default" }}
+              onClick={() => count > 0 && setShowHwAcceptanceModal(true)}>
+              <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#f59e0b,#fbbf24)" }}/>
+              {/* Header */}
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
+                <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>HW Fatura Onay Bekler</div>
+                <div style={{ width:"30px", height:"30px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px" }}>📋</div>
+              </div>
+              {count === 0 ? (
+                <div style={{ fontSize:"12px", color:"#9ca3af" }}>Veri yok · Acceptance yükleyin</div>
+              ) : (
+                <>
+                  {/* Toplam */}
+                  <div style={{ display:"flex", alignItems:"baseline", gap:"6px", marginBottom:"8px" }}>
+                    <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>{fmtAmt(totalUsd, totalTry)}</div>
+                    <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
+                  </div>
+                  {/* Handler kırılımı */}
+                  <div style={{ borderTop:"1px solid #f1f5f9", paddingTop:"8px", display:"flex", flexDirection:"column", gap:"5px" }}>
+                    {topHandlers.map((h, i) => {
+                      const clr = progColor(h.progress);
+                      return (
+                        <div key={i} style={{ display:"flex", alignItems:"center", gap:"6px" }}>
+                          <div style={{ width:"22px", height:"22px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", fontSize:"9px", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                            {(h.handler||"?")[0].toUpperCase()}
+                          </div>
+                          <div style={{ flex:1, overflow:"hidden" }}>
+                            <div style={{ fontSize:"11px", fontWeight:600, color:"#1e293b", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{h.handler}</div>
+                          </div>
+                          <span style={{ fontSize:"10px", fontWeight:700, color:clr, flexShrink:0 }}>{h.progress}</span>
+                          <span style={{ fontSize:"11px", fontWeight:700, color:"#0f172a", flexShrink:0 }}>{fmtAmt(h.total_usd, h.total_try)}</span>
+                        </div>
+                      );
+                    })}
+                    {moreCount > 0 && (
+                      <div style={{ fontSize:"10px", color:"#6b7280", textAlign:"right" }}>+{moreCount} kişi daha · detay için tıkla</div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div style={{ background:"#fff", borderRadius:"12px", border:"1px solid #e2e8f0", marginBottom:"24px", overflow:"hidden" }}>
@@ -4886,6 +5125,80 @@ function FinanceDashboard({
           </tbody>
         </table>
       </div>
+
+      {/* HW Acceptance Detay Modal */}
+      {showHwAcceptanceModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}
+          onClick={() => setShowHwAcceptanceModal(false)}>
+          <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"720px", maxHeight:"85vh", overflow:"hidden", display:"flex", flexDirection:"column" }}
+            onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ padding:"20px 24px 16px", borderBottom:"1px solid #e5e7eb", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div>
+                <div style={{ fontSize:"17px", fontWeight:800, color:"#0f172a" }}>📋 HW Fatura Onay Bekler</div>
+                <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"2px" }}>
+                  {hwAcceptanceSummary?.total_count || 0} acceptance • Toplam:&nbsp;
+                  {hwAcceptanceSummary?.total_usd > 0 && <strong>${Number(hwAcceptanceSummary.total_usd).toLocaleString("en-US", {maximumFractionDigits:0})}</strong>}
+                  {hwAcceptanceSummary?.total_try > 0 && <strong> + ₺{Number(hwAcceptanceSummary.total_try).toLocaleString("tr-TR", {maximumFractionDigits:0})}</strong>}
+                </div>
+              </div>
+              <button onClick={() => setShowHwAcceptanceModal(false)}
+                style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#6b7280", padding:"4px 8px" }}>✕</button>
+            </div>
+            {/* Body */}
+            <div style={{ overflowY:"auto", padding:"16px 24px 24px" }}>
+              {(!hwAcceptanceSummary?.by_handler?.length) ? (
+                <div style={{ textAlign:"center", color:"#9ca3af", padding:"40px 0" }}>
+                  Henüz veri yok. Sidebar'dan "HW Acceptance Yükle" ile Excel yükleyin.
+                </div>
+              ) : hwAcceptanceSummary.by_handler.map((h, hi) => {
+                const [done, total] = (h.progress || "0/0").split("/").map(Number);
+                const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                const progColor = pct === 0 ? "#ef4444" : pct < 75 ? "#f59e0b" : "#22c55e";
+                const handlerAmt = h.total_usd > 0 ? `$${Number(h.total_usd).toLocaleString("en-US",{maximumFractionDigits:0})}` : `₺${Number(h.total_try).toLocaleString("tr-TR",{maximumFractionDigits:0})}`;
+                return (
+                  <div key={hi} style={{ border:"1px solid #e5e7eb", borderRadius:"12px", marginBottom:"12px", overflow:"hidden" }}>
+                    {/* Handler satırı */}
+                    <div style={{ background:"#f8fafc", padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px" }}>
+                      <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", fontWeight:700, flexShrink:0 }}>
+                        {(h.handler||"?")[0].toUpperCase()}
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:"14px", fontWeight:700, color:"#0f172a" }}>{h.handler}</div>
+                        <div style={{ display:"flex", alignItems:"center", gap:"8px", marginTop:"4px" }}>
+                          {/* Progress bar */}
+                          <div style={{ flex:1, height:"6px", background:"#e5e7eb", borderRadius:"999px", maxWidth:"120px" }}>
+                            <div style={{ height:"100%", width:`${pct}%`, background:progColor, borderRadius:"999px", transition:"width .3s" }}/>
+                          </div>
+                          <span style={{ fontSize:"12px", fontWeight:700, color:progColor }}>{h.progress}</span>
+                          <span style={{ fontSize:"11px", color:"#6b7280" }}>{h.count} kalem</span>
+                        </div>
+                      </div>
+                      <div style={{ fontSize:"17px", fontWeight:800, color:"#0f172a", flexShrink:0 }}>{handlerAmt}</div>
+                    </div>
+                    {/* Kırılım satırları */}
+                    <div style={{ padding:"0 0 4px" }}>
+                      {h.items.map((item, ii) => (
+                        <div key={ii} style={{ display:"flex", alignItems:"center", gap:"8px", padding:"7px 16px", borderTop: ii===0?"none":"1px solid #f3f4f6", fontSize:"12px" }}>
+                          <span style={{ background:"#f1f5f9", color:"#374151", padding:"2px 8px", borderRadius:"6px", fontWeight:600, flexShrink:0 }}>{item.site_code}</span>
+                          <span style={{ color:"#6b7280", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.milestone || item.acceptance_no}</span>
+                          <span style={{ background:"#eff6ff", color:"#1d4ed8", padding:"2px 7px", borderRadius:"6px", fontWeight:600, flexShrink:0 }}>{item.progress}</span>
+                          <span style={{ fontWeight:700, color:"#0f172a", flexShrink:0 }}>
+                            {item.currency === "TRY" || item.currency === "TL"
+                              ? `₺${Number(item.line_total).toLocaleString("tr-TR",{maximumFractionDigits:0})}`
+                              : `$${Number(item.line_total).toLocaleString("en-US",{maximumFractionDigits:0})}`
+                            }
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showOverdueModal && (
         <div
@@ -11442,13 +11755,16 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [editAvansModal, setEditAvansModal] = useState(null); // { id, tutar, orijinalTutar }
 
   const _email = (currentUser?.email || "").toLowerCase();
-  const isPM = _email === "orhan.bedir@simsektel.com";
-  const isDirektor = _email === "duzgun.simsek@simsektel.com";
-  const isMuhasebe = _email === "muhasebe@simsektel.com";
+  const _role  = (currentUser?.role  || "").toLowerCase();
+  const isPM           = _email === "orhan.bedir@simsektel.com";
+  const isDirektor     = _email === "duzgun.simsek@simsektel.com";
+  const isMuhasebe     = _email === "muhasebe@simsektel.com";
   // Nurcan: herkesi görebilir, herkes için talep edebilir (yönetici yetkisi)
-  const isNurcan = _email === "nurcan.kus@simsektel.com";
-  // isRequester: sadece kendi avanslarını görür — Serdar ve diğer normal kullanıcılar
-  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isNurcan;
+  const isNurcan       = _email === "nurcan.kus@simsektel.com";
+  // Rollout Manager: rollout_mudur veya bolge_mudur rolüne sahip kullanıcılar
+  const isRolloutMudur = _role === "rollout_mudur" || _role === "bolge_mudur";
+  // isRequester: sadece kendi avanslarını görür
+  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const loadBakiye = async () => {
@@ -11540,6 +11856,12 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     load(); loadBakiye();
   };
 
+  // PM, TALEP veya ROLLOUT_MUDUR_ONAY durumundaki talepleri doğrudan PM_ONAY'a taşır
+  const handlePmDogrudan = async (id) => {
+    await fetch(`${API_BASE}/hr/is-avans/${id}/pm-onayla`, { method: "PUT" });
+    load(); loadBakiye();
+  };
+
   // Direktör, TALEP veya PM_ONAY durumundaki talepleri doğrudan onaylar (PM adımını atlar)
   const handleDirektorDogrudan = async (id) => {
     await fetch(`${API_BASE}/hr/is-avans/${id}/direktor-onayla`, { method: "PUT" });
@@ -11583,12 +11905,13 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const durumBadge = (durum) => {
     const map = {
-      TALEP: { bg: "#e5e7eb", color: "#374151", label: "Talep Edildi" },
-      PM_ONAY: { bg: "#fed7aa", color: "#92400e", label: "Direktör Onayında" },
-      DIREKTOR_ONAY: { bg: "#dcfce7", color: "#166534", label: "Onaylandı · Ödeme Bekler" },
-      MUHASEBE_ONAY: { bg: "#fef9c3", color: "#713f12", label: "Muhasebe Onayında" },
-      TAMAMLANDI: { bg: "#dcfce7", color: "#166534", label: "Tamamlandı" },
-      REDDEDILDI: { bg: "#fee2e2", color: "#991b1b", label: "Reddedildi" },
+      TALEP:               { bg: "#e5e7eb", color: "#374151", label: "Talep Edildi" },
+      ROLLOUT_MUDUR_ONAY:  { bg: "#dbeafe", color: "#1e40af", label: "Rollout Müdür Onayında" },
+      PM_ONAY:             { bg: "#fed7aa", color: "#92400e", label: "PM Onayında" },
+      DIREKTOR_ONAY:       { bg: "#dcfce7", color: "#166534", label: "Onaylandı · Ödeme Bekler" },
+      MUHASEBE_ONAY:       { bg: "#fef9c3", color: "#713f12", label: "Muhasebe Onayında" },
+      TAMAMLANDI:          { bg: "#dcfce7", color: "#166534", label: "Tamamlandı" },
+      REDDEDILDI:          { bg: "#fee2e2", color: "#991b1b", label: "Reddedildi" },
     };
     const s = map[durum] || { bg: "#f3f4f6", color: "#6b7280", label: durum };
     return <span style={{ background: s.bg, color: s.color, borderRadius: "20px", padding: "3px 12px", fontSize: 12, fontWeight: 600 }}>{s.label}</span>;
@@ -11597,10 +11920,11 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const cardSt = { background: "#fff", borderRadius: "16px", boxShadow: "0 4px 20px rgba(0,0,0,0.07)", border: "1px solid #f3f4f6", padding: "24px" };
 
   const myPendingCount =
-    isPM ? list.filter(t => t.durum === "TALEP").length :
-    isDirektor ? list.filter(t => t.durum === "PM_ONAY").length :
-    isMuhasebe ? list.filter(t => t.durum === "DIREKTOR_ONAY").length :
-    isNurcan ? list.filter(t => t.durum === "TALEP").length : 0;
+    isRolloutMudur ? list.filter(t => t.durum === "TALEP").length :
+    isPM           ? list.filter(t => t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY").length :
+    isDirektor     ? list.filter(t => t.durum === "PM_ONAY").length :
+    isMuhasebe     ? list.filter(t => t.durum === "DIREKTOR_ONAY").length :
+    isNurcan       ? list.filter(t => t.durum === "TALEP").length : 0;
 
   const NotTooltipEl = notTooltip.visible ? (() => {
     const TW = 300;
@@ -11707,7 +12031,8 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
           style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff" }}>
           <option value="">Tüm Durumlar</option>
           <option value="TALEP">Talep Edildi</option>
-          <option value="PM_ONAY">Direktör Onayında</option>
+          <option value="ROLLOUT_MUDUR_ONAY">Rollout Müdür Onayında</option>
+          <option value="PM_ONAY">PM Onayında</option>
           <option value="DIREKTOR_ONAY">Onaylandı · Ödeme Bekler</option>
           <option value="TAMAMLANDI">Tamamlandı</option>
           <option value="REDDEDILDI">Reddedildi</option>
@@ -11725,8 +12050,12 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
           {visibleList.length === 0 && <div style={{ textAlign:"center", color:"#9ca3af", padding:"32px" }}>Kayıt bulunamadı</div>}
           {visibleList.map(t => {
-            const needsMyAction = (isPM && t.durum==="TALEP") || (isDirektor && t.durum==="PM_ONAY") || (isMuhasebe && t.durum==="DIREKTOR_ONAY");
-            const myPendingRequest = t.talep_eden_email===currentUser?.email && ["TALEP","PM_ONAY","DIREKTOR_ONAY"].includes(t.durum);
+            const needsMyAction =
+              (isRolloutMudur && t.durum==="TALEP") ||
+              (isPM && (t.durum==="TALEP" || t.durum==="ROLLOUT_MUDUR_ONAY")) ||
+              (isDirektor && t.durum==="PM_ONAY") ||
+              (isMuhasebe && t.durum==="DIREKTOR_ONAY");
+            const myPendingRequest = t.talep_eden_email===currentUser?.email && ["TALEP","ROLLOUT_MUDUR_ONAY","PM_ONAY","DIREKTOR_ONAY"].includes(t.durum);
             const cardBorder = needsMyAction ? "3px solid #f59e0b" : myPendingRequest ? "3px solid #f87171" : "3px solid #e5e7eb";
             const cardBg = needsMyAction ? "#fffbeb" : myPendingRequest ? "#fef2f2" : "#fff";
             return (
@@ -11765,13 +12094,22 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   {isPM && t.durum!=="DIREKTOR_ONAY" && t.durum!=="TAMAMLANDI" && (
                     <button onClick={()=>handleDelete(t.id)} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Sil</button>
                   )}
-                  {isPM && t.durum==="TALEP" && (
+                  {/* Rollout Manager: TALEP → ROLLOUT_MUDUR_ONAY */}
+                  {isRolloutMudur && t.durum==="TALEP" && (
                     <>
                       <button onClick={()=>handleOnayla(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                     </>
                   )}
-                  {isDirektor && (t.durum==="PM_ONAY" || t.durum==="TALEP") && (
+                  {/* PM: TALEP veya ROLLOUT_MUDUR_ONAY → PM_ONAY (doğrudan) */}
+                  {isPM && (t.durum==="TALEP" || t.durum==="ROLLOUT_MUDUR_ONAY") && (
+                    <>
+                      <button onClick={()=>handlePmDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
+                      <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
+                    </>
+                  )}
+                  {/* Direktör: PM_ONAY veya önceki aşamalardan doğrudan onay */}
+                  {isDirektor && (t.durum==="PM_ONAY" || t.durum==="ROLLOUT_MUDUR_ONAY" || t.durum==="TALEP") && (
                     <>
                       <button onClick={()=>handleDirektorDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
@@ -11806,12 +12144,13 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
               )}
               {visibleList.map((t, i) => {
                 const needsMyAction =
-                  (isPM && t.durum === "TALEP") ||
+                  (isRolloutMudur && t.durum === "TALEP") ||
+                  (isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY")) ||
                   (isDirektor && t.durum === "PM_ONAY") ||
                   (isMuhasebe && t.durum === "DIREKTOR_ONAY");
                 const myPendingRequest =
                   t.talep_eden_email === currentUser?.email &&
-                  (t.durum === "TALEP" || t.durum === "PM_ONAY" || t.durum === "DIREKTOR_ONAY");
+                  ["TALEP","ROLLOUT_MUDUR_ONAY","PM_ONAY","DIREKTOR_ONAY"].includes(t.durum);
                 const rowBg = needsMyAction ? "#fffbeb" : myPendingRequest ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#fafafa";
                 const rowBorder = needsMyAction ? "4px solid #f59e0b" : myPendingRequest ? "4px solid #f87171" : "4px solid transparent";
                 return (
@@ -11845,7 +12184,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                     {needsMyAction && <div style={{ fontSize:"10px", fontWeight:700, color:"#92400e", marginTop:"4px" }}>⏳ Onayınızı bekliyor</div>}
                     {myPendingRequest && !needsMyAction && (
                       <div style={{ fontSize:"10px", fontWeight:700, color:"#b91c1c", marginTop:"4px" }}>
-                        🕐 {t.durum === "TALEP" ? "PM onayı bekleniyor" : t.durum === "PM_ONAY" ? "Direktör onayı bekleniyor" : "Ödeme bekleniyor"}
+                        🕐 {t.durum === "TALEP" ? "Rollout Müdür onayı bekleniyor" : t.durum === "ROLLOUT_MUDUR_ONAY" ? "PM onayı bekleniyor" : t.durum === "PM_ONAY" ? "Direktör onayı bekleniyor" : "Ödeme bekleniyor"}
                       </div>
                     )}
                   </td>
@@ -11860,13 +12199,21 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                       {isPM && t.durum !== "DIREKTOR_ONAY" && t.durum !== "TAMAMLANDI" && (
                         <button onClick={() => handleDelete(t.id)} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Sil</button>
                       )}
-                      {isPM && t.durum === "TALEP" && (
+                      {/* Rollout Manager: TALEP → ROLLOUT_MUDUR_ONAY */}
+                      {isRolloutMudur && t.durum === "TALEP" && (
                         <>
                           <button onClick={() => handleOnayla(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                         </>
                       )}
-                      {isDirektor && (t.durum === "PM_ONAY" || t.durum === "TALEP") && (
+                      {/* PM: TALEP veya ROLLOUT_MUDUR_ONAY → PM_ONAY (doğrudan) */}
+                      {isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY") && (
+                        <>
+                          <button onClick={() => handlePmDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
+                          <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
+                        </>
+                      )}
+                      {isDirektor && (t.durum === "PM_ONAY" || t.durum === "ROLLOUT_MUDUR_ONAY" || t.durum === "TALEP") && (
                         <>
                           <button onClick={() => handleDirektorDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
@@ -17811,11 +18158,18 @@ function App() {
         const r = await fetch(`${API_BASE}/hr/is-avans`);
         const data = await r.json();
         if (Array.isArray(data)) {
-          const email = user.email;
+          const email = (user.email || "").toLowerCase();
+          const role  = (user.role  || "").toLowerCase();
+          const isRM  = role === "rollout_mudur" || role === "bolge_mudur";
           let count = 0;
-          if (email === "orhan.bedir@simsektel.com") count = data.filter(t => t.durum === "TALEP").length;
-          else if (email === "duzgun.simsek@simsektel.com") count = data.filter(t => t.durum === "PM_ONAY").length;
-          else if (email === "muhasebe@simsektel.com") count = data.filter(t => t.durum === "DIREKTOR_ONAY").length;
+          if (email === "orhan.bedir@simsektel.com")
+            count = data.filter(t => t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY").length;
+          else if (email === "duzgun.simsek@simsektel.com")
+            count = data.filter(t => t.durum === "PM_ONAY").length;
+          else if (email === "muhasebe@simsektel.com")
+            count = data.filter(t => t.durum === "DIREKTOR_ONAY").length;
+          else if (isRM)
+            count = data.filter(t => t.durum === "TALEP").length;
           setPendingAvansCount(count);
         }
         // Masraf formu bekleyenleri say
@@ -18424,6 +18778,9 @@ function App() {
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); }}>
                         <span>🔩</span> HW PO Yükle
                       </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); }}>
+                        <span>📋</span> HW Acceptance Yükle
+                      </div>
                     </>
                   )}
                 </div>
@@ -18939,6 +19296,10 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       return row.enh_qc_closed_date || "";
     }
 
+    if (dateField === "suzme_date") {
+      return row.suzme_date || "";
+    }
+
     if (dateField === "abonelik_actual_end_date") {
       return row.abonelik_actual_end_date || row.abonelik_end_date || "";
     }
@@ -18963,6 +19324,14 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
     if (item.key === "po_closed") {
       return backendValue;
     }
+
+    // Süzme: bölge filtreli frontend listesinden say (getRowsByType artık süzme sahalarını da içeriyor)
+    if (item.key === "suzme") {
+      return getRowsByType("STANDALONE_ABONE").filter(
+        (r) => String(r.enh_site_type || "").trim().toLowerCase() === "süzme"
+      ).length;
+    }
+
     if (
       ["5G", "DSS", "LTE", "STANDALONE", "STANDALONE_ABONE"].includes(type) &&
       item.key === "target"
@@ -19060,8 +19429,10 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       }
 
       if (type === "STANDALONE_ABONE") {
+        // Hem "Abone" hem "Süzme" (ve "Abone + Süzme") tipindeki STANDALONE sahalar
+        const enhT = String(r.enh_site_type || "").trim().toLowerCase();
         return rowType === "STANDALONE" &&
-          String(r.enh_site_type || "").trim().toLowerCase() === "abone";
+          (enhT === "abone" || enhT === "süzme" || enhT === "abone + süzme");
       }
 
       return rowType === type;
@@ -19345,11 +19716,6 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
             dateField: "enh_actual_end_date",
           },
           {
-            label: "POWER Project Plan Start Date",
-            key: "power_plan_start",
-            dateField: "power_plan_start_date",
-          },
-          {
             label: "POWER Project Actual End Date",
             key: "power_actual_end",
             dateField: "power_actual_end_date",
@@ -19358,6 +19724,11 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
             label: "Abonelik Belgesi Actual End Date",
             key: "abonelik_end",
             dateField: "abonelik_actual_end_date",
+          },
+          {
+            label: "Süzme",
+            key: "suzme",
+            dateField: "suzme_date",
           },
           {
             label: "QC(Closed)",
@@ -19389,7 +19760,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
       "enh_plan_start_date","enh_actual_end_date","enh_proje_hazir",
       "power_plan_start_date","power_actual_end_date",
       "abonelik_actual_end_date","tt_horizon_actual_end_date",
-      "pac_actual_end_date","tamamlanma_tarihi",
+      "pac_actual_end_date","tamamlanma_tarihi","suzme_date",
     ];
     const norm = { ...raw };
     for (const f of DATE_FIELDS) {
@@ -19463,6 +19834,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     tt_horizon_actual_end_date: existingRow.tt_horizon_actual_end_date || "",
     pac_actual_end_date: existingRow.pac_actual_end_date || "",
     tamamlanma_tarihi: existingRow.tamamlanma_tarihi || "",
+    suzme_date: existingRow.suzme_date || "",
 
     // ENH Proje: Abone değilse Subcon + Hazır Tarihi kilitli
     enh_proje_subcon: (() => {
@@ -19874,6 +20246,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             {input("Abonelik Actual End Date", "abonelik_actual_end_date", "date")}
             {input("Horizon Actual End Date", "tt_horizon_actual_end_date", "date")}
             {input("PAC Actual End Date", "pac_actual_end_date", "date")}
+            {input("Süzme Tarihi", "suzme_date", "date")}
           </div>
           <div style={{ marginTop:"10px" }}>
             <div style={{ fontSize:"12px", fontWeight:600, color:"#1e40af", marginBottom:"4px" }}>📎 PAC Belgesi</div>

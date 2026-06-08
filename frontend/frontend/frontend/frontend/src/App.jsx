@@ -742,6 +742,59 @@ function HWPoUploadInline({ onClose, onUploaded }) {
   );
 }
 
+function HWAcceptanceUploadInline({ onClose, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleUpload = async () => {
+    if (!file) { setMessage("❌ Lütfen bir Excel dosyası seç"); return; }
+    try {
+      setUploading(true);
+      setMessage("");
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(`${API_BASE}/hw-acceptance/upload`, { method: "POST", body: formData });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.error || "HW Acceptance upload sırasında hata oluştu");
+      setMessage(`✅ HW Acceptance listesi yüklendi. Eklenen kayıt: ${data.inserted || 0}`);
+      setFile(null);
+      const input = document.getElementById("hw-acceptance-upload-input");
+      if (input) input.value = "";
+      if (onUploaded) await onUploaded();
+    } catch (err) {
+      console.error("HW ACCEPTANCE UPLOAD ERROR:", err);
+      setMessage(`❌ ${err.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="entryPanel" style={{ marginBottom: "18px" }}>
+      <div className="entryForm">
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px", gap:"12px", flexWrap:"wrap" }}>
+          <h3 className="listTitle" style={{ margin: 0 }}>📋 HW Acceptance Yükle</h3>
+          <button type="button" className="tab" onClick={onClose} style={{ padding:"10px 14px" }}>Kapat</button>
+        </div>
+        <div className="formGrid">
+          <div className="formGroup formGroupWide">
+            <label>Huawei Acceptance Excel Dosyası</label>
+            <input id="hw-acceptance-upload-input" type="file" accept=".xlsx,.xls"
+              onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          </div>
+        </div>
+        <div className="entryActions">
+          <button type="button" className="saveButton" onClick={handleUpload} disabled={uploading}>
+            {uploading ? "Yükleniyor..." : "Acceptance Yükle"}
+          </button>
+        </div>
+        {message && <div className="entryMessage">{message}</div>}
+      </div>
+    </div>
+  );
+}
+
 function RolloutUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -885,15 +938,24 @@ function RolloutDashboard({ currentUser }) {
   const [selectedRolloutSite, setSelectedRolloutSite] = useState("");
 
   const handleExportExcel = async () => {
-    const XLSX = await import("xlsx");
     const today = new Date().toISOString().split("T")[0];
     const regionLabel = regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter;
 
+    // Tarih formatlayıcı
     const fd = (v) => {
-      if (!v) return "";
+      if (!v || v === "N/A") return "";
       const d = new Date(v);
       if (isNaN(d)) return String(v);
       return `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+    };
+
+    // Subcon Huawei mi?
+    const isHwSubcon = (v) => /huawei|^hw$/i.test(String(v || "").trim());
+
+    // Huawei subcon'a bağlı tarih → N/A
+    const fdHw = (dateVal, subconVal) => {
+      if (isHwSubcon(subconVal)) return "N/A";
+      return fd(dateVal);
     };
 
     // Ortak kimlik alanları
@@ -905,90 +967,114 @@ function RolloutDashboard({ currentUser }) {
       "İl":            r.il || "",
     });
 
-    let data, sheetName, fileSuffix;
+    let cols, rows2export, sheetName, fileSuffix;
 
     if (typeFilter === "POWER") {
-      // ⚡ POWER / Enerji kolonları
       fileSuffix = "Power_Enerji";
       sheetName  = "Power";
-      data = filteredRows.map(r => ({
+      cols = ["Bölge","Site Type","Project Code","Site Code","İl",
+        "ENH Site Type","ENH Proje Subcon","ENH Proje Hazır Tarihi","ENH Proje Not",
+        "ENH Subcon","ENH Plan Start Date","ENH Actual End Date","ENH Not",
+        "Power Subcon","Power Plan Start Date","Power Actual End Date",
+        "Süzme Tarihi","Abonelik Actual End Date","Horizon Actual End Date","PAC Actual End Date"];
+      rows2export = filteredRows.map(r => ({
         ...base(r),
         "ENH Site Type":            r.enh_site_type || "",
         "ENH Proje Subcon":         r.enh_proje_subcon || "",
         "ENH Proje Hazır Tarihi":   fd(r.enh_proje_hazir),
         "ENH Proje Not":            r.enh_proje_not || "",
         "ENH Subcon":               r.enh_subcon || "",
-        "ENH Plan Start Date":      fd(r.enh_plan_start_date),
-        "ENH Actual End Date":      fd(r.enh_actual_end_date),
+        "ENH Plan Start Date":      fdHw(r.enh_plan_start_date, r.enh_subcon),
+        "ENH Actual End Date":      fdHw(r.enh_actual_end_date, r.enh_subcon),
         "ENH Not":                  r.enh_not || "",
         "Power Subcon":             r.power_subcon || "",
-        "Power Plan Start Date":    fd(r.power_plan_start_date),
-        "Power Actual End Date":    fd(r.power_actual_end_date),
+        "Power Plan Start Date":    fdHw(r.power_plan_start_date, r.power_subcon),
+        "Power Actual End Date":    fdHw(r.power_actual_end_date, r.power_subcon),
+        "Süzme Tarihi":             fd(r.suzme_date),
         "Abonelik Actual End Date": fd(r.abonelik_actual_end_date),
         "Horizon Actual End Date":  fd(r.tt_horizon_actual_end_date),
         "PAC Actual End Date":      fd(r.pac_actual_end_date),
       }));
 
     } else if (typeFilter === "SURVEY_BTK") {
-      // 📋 Survey & BTK kolonları
       fileSuffix = "Survey_BTK";
       sheetName  = "Survey&BTK";
-      data = filteredRows.map(r => ({
+      cols = ["Bölge","Site Type","Project Code","Site Code","İl",
+        "Malzeme Status","LOS Subcon","LOS Plan Date","LOS Actual End Date",
+        "TSS Subcon","TSS Plan Start Date","TSS Actual End Date",
+        "TSSR Subcon","TSSR Plan Start Date","TSSR Actual End Date",
+        "BTK Subcon","BTK Plan Start Date","BTK Actual End Date","BTK Approval Status",
+        "GS Status","Atlas Status","Survey Note",
+        "EMR Plan Start Date","EMR Actual End Date"];
+      rows2export = filteredRows.map(r => ({
         ...base(r),
         "Malzeme Status":           r.malzeme_status || "",
         "LOS Subcon":               r.los_subcon || "",
-        "LOS Plan Date":            fd(r.los_plan_date),
-        "LOS Actual End Date":      fd(r.los_actual_end_date),
+        "LOS Plan Date":            fdHw(r.los_plan_date, r.los_subcon),
+        "LOS Actual End Date":      fdHw(r.los_actual_end_date, r.los_subcon),
         "TSS Subcon":               r.tss_subcon || "",
-        "TSS Plan Start Date":      fd(r.tss_plan_start_date),
-        "TSS Actual End Date":      fd(r.tss_actual_end_date),
+        "TSS Plan Start Date":      fdHw(r.tss_plan_start_date, r.tss_subcon),
+        "TSS Actual End Date":      fdHw(r.tss_actual_end_date, r.tss_subcon),
         "TSSR Subcon":              r.tssr_subcon || "",
-        "TSSR Plan Start Date":     fd(r.tssr_plan_start_date),
-        "TSSR Actual End Date":     fd(r.tssr_actual_end_date),
+        "TSSR Plan Start Date":     fdHw(r.tssr_plan_start_date, r.tssr_subcon),
+        "TSSR Actual End Date":     fdHw(r.tssr_actual_end_date, r.tssr_subcon),
         "BTK Subcon":               r.btk_subcon || "",
-        "BTK Plan Start Date":      fd(r.btk_plan_start_date),
-        "BTK Actual End Date":      fd(r.btk_actual_end_date),
+        "BTK Plan Start Date":      fdHw(r.btk_plan_start_date, r.btk_subcon),
+        "BTK Actual End Date":      fdHw(r.btk_actual_end_date, r.btk_subcon),
         "BTK Approval Status":      r.btk_approved || "",
         "GS Status":                r.gs_status || "",
         "Atlas Status":             r.atlas_status || "",
         "Survey Note":              r.survey_note || "",
-        "EMR Plan Start Date":      fd(r.emr_plan_start_date),
-        "EMR Actual End Date":      fd(r.emr_actual_end_date),
+        "EMR Plan Start Date":      fdHw(r.emr_plan_start_date, r.emr_subcon),
+        "EMR Actual End Date":      fdHw(r.emr_actual_end_date, r.emr_subcon),
       }));
 
     } else {
-      // Tüm kolonlar (ALL, 5G, DSS, LTE, STANDALONE)
       fileSuffix = typeFilter === "ALL" ? "Tum" : typeFilter;
       sheetName  = "Rollout Data";
-      data = filteredRows.map(r => ({
+      cols = ["Bölge","Site Type","Project Code","Site Code","İl",
+        "Site Fiziksel Tip","Malzeme Status",
+        "RF Subcon","Plan Start Date","Installation Start Date","Installation End Date","OnAir Date","QC Closed Date","RF Not",
+        "LOS Subcon","LOS Plan Date","LOS Actual End Date",
+        "TSS Subcon","TSS Plan Start Date","TSS Actual End Date",
+        "TSSR Subcon","TSSR Plan Start Date","TSSR Actual End Date",
+        "BTK Subcon","BTK Plan Start Date","BTK Actual End Date","BTK Approval Status",
+        "GS Status","Atlas Status","Survey Note",
+        "EMR Plan Start Date","EMR Actual End Date",
+        "TRS Subcon","TRS Plan Start Date","TRS Actual End Date","TRS Not",
+        "ENH Site Type","ENH Proje Subcon","ENH Proje Hazır Tarihi","ENH Proje Not",
+        "ENH Subcon","ENH Plan Start Date","ENH Actual End Date","ENH Not",
+        "Power Subcon","Power Plan Start Date","Power Actual End Date",
+        "Süzme Tarihi","Abonelik Actual End Date","Horizon Actual End Date","PAC Actual End Date"];
+      rows2export = filteredRows.map(r => ({
         ...base(r),
         "Site Fiziksel Tip":        r.site_physical_type || "",
         "Malzeme Status":           r.malzeme_status || "",
         "RF Subcon":                r.rf_subcon || "",
-        "Plan Start Date":          fd(r.plan_start_date),
-        "Installation Start Date":  fd(r.installation_actual_start_date),
-        "Installation End Date":    fd(r.installation_actual_end_date),
-        "OnAir Date":               fd(r.onair_date),
+        "Plan Start Date":          fdHw(r.plan_start_date, r.rf_subcon),
+        "Installation Start Date":  fdHw(r.installation_actual_start_date, r.rf_subcon),
+        "Installation End Date":    fdHw(r.installation_actual_end_date, r.rf_subcon),
+        "OnAir Date":               fdHw(r.onair_date, r.rf_subcon),
         "QC Closed Date":           fd(r.qc_closed_date),
         "RF Not":                   r.rf_not || "",
         "LOS Subcon":               r.los_subcon || "",
-        "LOS Plan Date":            fd(r.los_plan_date),
-        "LOS Actual End Date":      fd(r.los_actual_end_date),
+        "LOS Plan Date":            fdHw(r.los_plan_date, r.los_subcon),
+        "LOS Actual End Date":      fdHw(r.los_actual_end_date, r.los_subcon),
         "TSS Subcon":               r.tss_subcon || "",
-        "TSS Plan Start Date":      fd(r.tss_plan_start_date),
-        "TSS Actual End Date":      fd(r.tss_actual_end_date),
+        "TSS Plan Start Date":      fdHw(r.tss_plan_start_date, r.tss_subcon),
+        "TSS Actual End Date":      fdHw(r.tss_actual_end_date, r.tss_subcon),
         "TSSR Subcon":              r.tssr_subcon || "",
-        "TSSR Plan Start Date":     fd(r.tssr_plan_start_date),
-        "TSSR Actual End Date":     fd(r.tssr_actual_end_date),
+        "TSSR Plan Start Date":     fdHw(r.tssr_plan_start_date, r.tssr_subcon),
+        "TSSR Actual End Date":     fdHw(r.tssr_actual_end_date, r.tssr_subcon),
         "BTK Subcon":               r.btk_subcon || "",
-        "BTK Plan Start Date":      fd(r.btk_plan_start_date),
-        "BTK Actual End Date":      fd(r.btk_actual_end_date),
+        "BTK Plan Start Date":      fdHw(r.btk_plan_start_date, r.btk_subcon),
+        "BTK Actual End Date":      fdHw(r.btk_actual_end_date, r.btk_subcon),
         "BTK Approval Status":      r.btk_approved || "",
         "GS Status":                r.gs_status || "",
         "Atlas Status":             r.atlas_status || "",
         "Survey Note":              r.survey_note || "",
-        "EMR Plan Start Date":      fd(r.emr_plan_start_date),
-        "EMR Actual End Date":      fd(r.emr_actual_end_date),
+        "EMR Plan Start Date":      fdHw(r.emr_plan_start_date, r.emr_subcon),
+        "EMR Actual End Date":      fdHw(r.emr_actual_end_date, r.emr_subcon),
         "TRS Subcon":               r.trs_subcon || "",
         "TRS Plan Start Date":      fd(r.trs_plan_start_date),
         "TRS Actual End Date":      fd(r.trs_actual_end_date),
@@ -998,24 +1084,110 @@ function RolloutDashboard({ currentUser }) {
         "ENH Proje Hazır Tarihi":   fd(r.enh_proje_hazir),
         "ENH Proje Not":            r.enh_proje_not || "",
         "ENH Subcon":               r.enh_subcon || "",
-        "ENH Plan Start Date":      fd(r.enh_plan_start_date),
-        "ENH Actual End Date":      fd(r.enh_actual_end_date),
+        "ENH Plan Start Date":      fdHw(r.enh_plan_start_date, r.enh_subcon),
+        "ENH Actual End Date":      fdHw(r.enh_actual_end_date, r.enh_subcon),
         "ENH Not":                  r.enh_not || "",
         "Power Subcon":             r.power_subcon || "",
-        "Power Plan Start Date":    fd(r.power_plan_start_date),
-        "Power Actual End Date":    fd(r.power_actual_end_date),
+        "Power Plan Start Date":    fdHw(r.power_plan_start_date, r.power_subcon),
+        "Power Actual End Date":    fdHw(r.power_actual_end_date, r.power_subcon),
+        "Süzme Tarihi":             fd(r.suzme_date),
         "Abonelik Actual End Date": fd(r.abonelik_actual_end_date),
         "Horizon Actual End Date":  fd(r.tt_horizon_actual_end_date),
         "PAC Actual End Date":      fd(r.pac_actual_end_date),
       }));
     }
 
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    // ── XLSXStyle ile stillendirilmiş Excel ──────────────────────────────
+    // NOT: xlsx-js-style renk 6 karakter RGB (FF prefix'siz), patternType gerekli
 
-    const fileName = `rollout_${regionLabel}_${fileSuffix}_${today}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+    const mkFill  = (hex6) => ({ patternType: "solid", fgColor: { rgb: hex6 } });
+    const mkBorder = (style) => ({ top:{style,color:{rgb:"D1D5DB"}}, left:{style,color:{rgb:"D1D5DB"}}, bottom:{style,color:{rgb:"D1D5DB"}}, right:{style,color:{rgb:"D1D5DB"}} });
+
+    const headerStyle = {
+      font:      { bold: true, sz: 10, color: { rgb: "FFFFFF" }, name: "Calibri" },
+      fill:      mkFill("203864"),
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border:    { top:{style:"thin",color:{rgb:"B7C9E2"}}, left:{style:"thin",color:{rgb:"B7C9E2"}}, bottom:{style:"medium",color:{rgb:"B7C9E2"}}, right:{style:"thin",color:{rgb:"B7C9E2"}} },
+    };
+
+    const getCellStyle = (rowIdx, colName, val) => {
+      const isNa  = val === "N/A";
+      const isOdd = rowIdx % 2 === 0;
+      const bg    = isOdd ? "F8FAFC" : "FFFFFF";
+      const isQcDate = ["QC Closed Date","ENH QC Closed","Süzme Tarihi"].includes(colName) && val && !isNa;
+      const border = mkBorder("hair");
+
+      if (isNa) {
+        return { fill: mkFill("F3F4F6"), font: { sz:10, color:{ rgb:"9CA3AF" }, italic:true, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+      }
+      if (isQcDate) {
+        return { fill: mkFill(bg), font: { bold:true, sz:10, color:{ rgb:"15803D" }, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+      }
+      if (colName === "Malzeme Status" && String(val).toUpperCase() === "OK") {
+        return { fill: mkFill(bg), font: { bold:true, sz:10, color:{ rgb:"15803D" }, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+      }
+      if (colName === "Site Type") {
+        const typeColors = { DSS:"FDE9D9", LTE:"DDEBF7", "5G":"E2EFDA", STANDALONE:"FEF9C3" };
+        const tc = typeColors[String(val).toUpperCase()];
+        if (tc) return { fill: mkFill(tc), font: { bold:true, sz:10, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+      }
+      return { fill: mkFill(bg), font: { sz:10, name:"Calibri" }, alignment:{ vertical:"center" }, border };
+    };
+
+    // Şemayı oluştur: önce saf değerler, sonra stiller uygula
+    const aoa = [
+      cols.map(h => h),                      // row 0: header labels
+      ...rows2export.map(rowObj => cols.map(col => rowObj[col] ?? "")), // data rows
+    ];
+    const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
+
+    // Stilleri sonradan uygula (xlsx-js-style'ın standart yöntemi)
+    cols.forEach((col, ci) => {
+      // Header row (r=0)
+      const hAddr = XLSXStyle.utils.encode_cell({ r: 0, c: ci });
+      if (ws[hAddr]) ws[hAddr].s = headerStyle;
+
+      // Data rows
+      rows2export.forEach((rowObj, ri) => {
+        const addr = XLSXStyle.utils.encode_cell({ r: ri + 1, c: ci });
+        if (ws[addr]) ws[addr].s = getCellStyle(ri, col, ws[addr].v ?? "");
+      });
+    });
+
+    // Sütun genişlikleri
+    const COL_WIDTHS = {
+      "Bölge": 14, "Site Type": 12, "Project Code": 16, "Site Code": 22, "İl": 12,
+      "Site Fiziksel Tip": 16, "Malzeme Status": 14,
+      "RF Subcon": 18, "Plan Start Date": 16, "Installation Start Date": 20,
+      "Installation End Date": 18, "OnAir Date": 16, "QC Closed Date": 16, "RF Not": 28,
+      "LOS Subcon": 18, "LOS Plan Date": 16, "LOS Actual End Date": 18,
+      "TSS Subcon": 18, "TSS Plan Start Date": 18, "TSS Actual End Date": 18,
+      "TSSR Subcon": 18, "TSSR Plan Start Date": 18, "TSSR Actual End Date": 18,
+      "BTK Subcon": 18, "BTK Plan Start Date": 16, "BTK Actual End Date": 16, "BTK Approval Status": 16,
+      "GS Status": 12, "Atlas Status": 12, "Survey Note": 28,
+      "EMR Plan Start Date": 18, "EMR Actual End Date": 18,
+      "TRS Subcon": 18, "TRS Plan Start Date": 16, "TRS Actual End Date": 16, "TRS Not": 24,
+      "ENH Site Type": 14, "ENH Proje Subcon": 18, "ENH Proje Hazır Tarihi": 18, "ENH Proje Not": 24,
+      "ENH Subcon": 18, "ENH Plan Start Date": 18, "ENH Actual End Date": 18, "ENH Not": 24,
+      "Power Subcon": 18, "Power Plan Start Date": 18, "Power Actual End Date": 18,
+      "Süzme Tarihi": 16,
+      "Abonelik Actual End Date": 20, "Horizon Actual End Date": 20, "PAC Actual End Date": 16,
+    };
+    ws["!cols"]  = cols.map(c => ({ wch: COL_WIDTHS[c] || 16 }));
+    ws["!rows"]  = [{ hpt: 22 }];
+    ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws, sheetName);
+
+    const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rollout_${regionLabel}_${fileSuffix}_${today}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const loadData = useCallback(async () => {
@@ -1586,6 +1758,8 @@ function DailyEntry() {
   const [form, setForm] = useState(initialForm);
   const [rows, setRows] = useState([]);
   const [siteEntries, setSiteEntries] = useState([]);
+  const [showSubconDrop, setShowSubconDrop] = useState(false);
+  const [subconList, setSubconList] = useState([]);
 
   const [projectCodes, setProjectCodes] = useState([]);
   const [itemOptions, setItemOptions] = useState([]);
@@ -1754,6 +1928,15 @@ function DailyEntry() {
     }
   };
 
+  const loadSubcons = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE}/subcons`);
+      setSubconList(data.subcons || []);
+    } catch (err) {
+      console.error("LOAD SUBCONS ERROR:", err);
+    }
+  };
+
   const loadSitePoRows = async (projectCode, siteCode) => {
     if (!siteCode) {
       setPoRows([]);
@@ -1842,6 +2025,7 @@ function DailyEntry() {
     loadRows();
     loadProjectCodes();
     loadItems();
+    loadSubcons();
   }, []);
 
   useEffect(() => {
@@ -2020,7 +2204,12 @@ function DailyEntry() {
     setMessage("");
     setItemCodeSearch("");
     setItemDescriptionSearch("");
-    setForm(initialForm);
+    // Preserve site_code so the useEffect doesn't clear the tables
+    setForm({
+      ...initialForm,
+      site_code: siteSearchCode,
+      site_type: detectSiteTypeFromSiteCode(siteSearchCode),
+    });
     setShowItemCodeList(false);
     setShowItemDescriptionList(false);
     setShowEntryModal(false);
@@ -2064,6 +2253,9 @@ function DailyEntry() {
     setShowItemDescriptionList(false);
 
     try {
+      // Normalize subcon name to UPPERCASE
+      const normalizedSubcon = (form.subcon_name || "").trim().toUpperCase();
+
       const payload = {
         site_type: detectSiteTypeFromSiteCode(form.site_code),
         project_code: form.project_code,
@@ -2071,13 +2263,25 @@ function DailyEntry() {
         item_code: form.item_code,
         item_description: form.item_description,
         done_qty: Number(form.done_qty || 0),
-        subcon_name: form.subcon_name,
+        subcon_name: normalizedSubcon,
         onair_date: form.onair_date || null,
         note: form.note,
         qc_durum: form.qc_durum,
         kabul_durum: form.kabul_durum,
         kabul_not: form.kabul_not,
       };
+
+      // Save new subcon to master list if not already there
+      if (normalizedSubcon && !subconList.includes(normalizedSubcon)) {
+        try {
+          await fetch(`${API_BASE}/subcons`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subcon_name: normalizedSubcon }),
+          });
+          setSubconList(prev => [...prev, normalizedSubcon].sort((a, b) => a.localeCompare(b, "tr")));
+        } catch (_) { /* non-critical */ }
+      }
 
       if (editingId) {
         await fetchJson(`${API_BASE}/master/${editingId}`, {
@@ -2203,348 +2407,129 @@ function DailyEntry() {
     }
   };
 
+  // shared th style for sticky headers
+  const thSt = (bg = "#1e293b") => ({ position:"sticky", top:0, background:bg, zIndex:2, color:"#fff", fontWeight:700, fontSize:12, padding:"10px 12px", textAlign:"left", whiteSpace:"nowrap", letterSpacing:"0.03em" });
+  const thStLight = () => ({ position:"sticky", top:0, background:"#1e293b", zIndex:2, color:"#94a3b8", fontWeight:600, fontSize:11, padding:"9px 12px", textAlign:"left", whiteSpace:"nowrap", letterSpacing:"0.04em", textTransform:"uppercase" });
+  const statBadge = (val, label, color) => (
+    <div style={{ background:`${color}22`, border:`1px solid ${color}55`, borderRadius:8, padding:"5px 12px", display:"flex", flexDirection:"column", alignItems:"center", minWidth:90 }}>
+      <div style={{ fontSize:11, color:`${color}cc`, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em" }}>{label}</div>
+      <div style={{ fontSize:14, fontWeight:800, color }}>{val}</div>
+    </div>
+  );
+
   return (
     <>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: "12px",
-          flexWrap: "wrap",
-          marginBottom: "8px",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "28px", lineHeight: 1.1 }}>
-          📋 Günlük İş Girişi
-        </h1>
-
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ position: "relative", display: "inline-block" }}>
-            <button
-              type="button"
-              className={showDailyIslemlerMenu ? "tab uploadTab activeTab" : "tab uploadTab"}
+      {/* ═══ PAGE HEADER BANNER ═══ */}
+      <div style={{ background:"linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1d4ed8 100%)", borderRadius:16, padding:"18px 24px", marginBottom:18, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+          <div style={{ width:48, height:48, borderRadius:14, background:"rgba(255,255,255,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, flexShrink:0 }}>📡</div>
+          <div>
+            <div style={{ color:"#fff", fontWeight:800, fontSize:20, letterSpacing:"-0.3px" }}>Günlük İş Girişi</div>
+            <div style={{ color:"rgba(255,255,255,0.55)", fontSize:12, marginTop:2 }}>Rollout · Saha Veri Yönetimi</div>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+          {/* İşlemler dropdown */}
+          <div style={{ position:"relative" }}>
+            <button type="button"
               onClick={() => setShowDailyIslemlerMenu((prev) => !prev)}
-              style={{ display: "flex", alignItems: "center", gap: "6px" }}
-            >
+              style={{ height:38, padding:"0 16px", background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.25)", borderRadius:9, color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
               ⚡ İşlemler {showDailyIslemlerMenu ? "▲" : "▼"}
             </button>
-
             {showDailyIslemlerMenu && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 6px)",
-                  right: 0,
-                  background: "#fff",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "10px",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                  zIndex: 999,
-                  minWidth: "200px",
-                  overflow: "hidden",
-                }}
-              >
+              <div style={{ position:"absolute", top:"calc(100% + 6px)", right:0, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.15)", zIndex:999, minWidth:210, overflow:"hidden" }}>
                 {[
-                  {
-                    label: "📊 QC Yükle",
-                    action: () => {
-                      setShowQcUpload((prev) => !prev);
-                      setShowBoqUpload(false);
-                      setShowHwPoUpload(false);
-                      setShowCompletedImport(false);
-                      setShowDailyIslemlerMenu(false);
-                    },
-                  },
-                  {
-                    label: "📋 BoQ Yükle",
-                    action: () => {
-                      setShowBoqUpload((prev) => !prev);
-                      setShowQcUpload(false);
-                      setShowHwPoUpload(false);
-                      setShowCompletedImport(false);
-                      setShowDailyIslemlerMenu(false);
-                    },
-                  },
-                  {
-                    label: "🚀 Rollout Yükle",
-                    action: () => {
-                      setShowRolloutUpload(true);
-                      setShowDailyIslemlerMenu(false);
-                    },
-                  },
-                  {
-                    label: "✅ Tamamlanan Import",
-                    action: () => {
-                      setShowCompletedImport((prev) => !prev);
-                      setShowBoqUpload(false);
-                      setShowQcUpload(false);
-                      setShowHwPoUpload(false);
-                      setShowDailyIslemlerMenu(false);
-                    },
-                  },
-                ].map((item, i, arr) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={item.action}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "11px 16px",
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: i < arr.length - 1 ? "1px solid #f3f4f6" : "none",
-                      fontSize: "14px",
-                      color: "#1f2937",
-                      cursor: "pointer",
-                      fontWeight: "500",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f9fafb")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                  >
+                  { label:"📊 QC Yükle", action:() => { setShowQcUpload((p)=>!p); setShowBoqUpload(false); setShowHwPoUpload(false); setShowCompletedImport(false); setShowDailyIslemlerMenu(false); } },
+                  { label:"📋 BoQ Yükle", action:() => { setShowBoqUpload((p)=>!p); setShowQcUpload(false); setShowHwPoUpload(false); setShowCompletedImport(false); setShowDailyIslemlerMenu(false); } },
+                  { label:"🚀 Rollout Yükle", action:() => { setShowRolloutUpload(true); setShowDailyIslemlerMenu(false); } },
+                  { label:"✅ Tamamlanan Import", action:() => { setShowCompletedImport((p)=>!p); setShowBoqUpload(false); setShowQcUpload(false); setShowHwPoUpload(false); setShowDailyIslemlerMenu(false); } },
+                ].map((item,i,arr) => (
+                  <button key={i} type="button" onClick={item.action}
+                    style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 16px", background:"transparent", border:"none", borderBottom:i<arr.length-1?"1px solid #f3f4f6":"none", fontSize:14, color:"#1f2937", cursor:"pointer", fontWeight:500 }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                     {item.label}
                   </button>
                 ))}
               </div>
             )}
           </div>
-
-          <button
-            type="button"
-            className="excelBtn"
-            onClick={handleExportAllEntriesExcel}
-          >
-            Tüm İşleri Excel İndir
+          {/* Tüm İşleri Excel */}
+          <button type="button" onClick={handleExportAllEntriesExcel}
+            style={{ height:38, padding:"0 18px", background:"rgba(255,255,255,0.92)", border:"none", borderRadius:9, color:"#1d4ed8", fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+            📥 Tüm İşleri Excel
           </button>
         </div>
       </div>
 
-      {showBoqUpload && (
-        <BoQUploadInline
-          onClose={() => setShowBoqUpload(false)}
-          onUploaded={refreshAll}
-        />
-      )}
+      {/* Upload panels */}
+      {showBoqUpload && <BoQUploadInline onClose={() => setShowBoqUpload(false)} onUploaded={refreshAll} />}
+      {showHwPoUpload && <HWPoUploadInline onClose={() => setShowHwPoUpload(false)} onUploaded={refreshAll} />}
+      {showRolloutUpload && <RolloutUploadInline onClose={() => setShowRolloutUpload(false)} onUploaded={refreshAll} />}
+      {showCompletedImport && <CompletedWorksImportInline onClose={() => setShowCompletedImport(false)} onImported={refreshAll} />}
+      {showQcUpload && <QCUploadInline onClose={() => setShowQcUpload(false)} onUploaded={refreshAll} />}
 
-      {showHwPoUpload && (
-        <HWPoUploadInline
-          onClose={() => setShowHwPoUpload(false)}
-          onUploaded={refreshAll}
-        />
-      )}
-      {showRolloutUpload && (
-        <RolloutUploadInline
-          onClose={() => setShowRolloutUpload(false)}
-          onUploaded={refreshAll}
-        />
-      )}
-
-      {showCompletedImport && (
-        <CompletedWorksImportInline
-          onClose={() => setShowCompletedImport(false)}
-          onImported={refreshAll}
-        />
-      )}
-
-      {showQcUpload && (
-        <QCUploadInline
-          onClose={() => setShowQcUpload(false)}
-          onUploaded={refreshAll}
-        />
-      )}
-
-      <div className="entryPanel">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "end",
-            gap: "16px",
-            flexWrap: "wrap",
-          }}
-        >
-          <div
-            style={{ display: "flex", justifyContent: "center", width: "100%" }}
-          >
-            <div style={{ width: "420px" }}>
-              <label
-                style={{
-                  display: "block",
-                  fontWeight: "700",
-                  marginBottom: "8px",
-                  color: "#374151",
-                  textAlign: "center",
-                }}
-              >
-                Site Code
-              </label>
-
-              <div style={{ display: "flex", gap: "10px" }}>
-                <input
-                  value={siteSearchCode}
-                  onChange={handleSiteSearchChange}
-                  placeholder="Site ID giriniz"
-                  style={{
-                    flex: 1,
-                    padding: "12px 14px",
-                    border: "1px solid #d1d5db",
-                    borderRadius: "10px",
-                    fontSize: "14px",
-                    outline: "none",
-                  }}
-                />
-
-                <button
-                  type="button"
-                  className="saveButton"
-                  onClick={handleOpenEntryModal}
-                  disabled={!siteSearchCode}
-                  style={{
-                    padding: "12px 18px",
-                    borderRadius: "10px",
-                  }}
-                >
-                  Veri Gir
-                </button>
-              </div>
-            </div>
+      {/* ═══ SITE CODE SEARCH CARD ═══ */}
+      <div style={{ background:"#fff", borderRadius:14, padding:"22px 28px", marginBottom:18, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", border:"1.5px solid #e2e8f0" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:12, flexWrap:"wrap" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:"#64748b", letterSpacing:"0.05em", textTransform:"uppercase" }}>🔎 Saha Kodu ile Ara</div>
+          <div style={{ display:"flex", gap:10, width:"100%", maxWidth:520 }}>
+            <input
+              value={siteSearchCode}
+              onChange={handleSiteSearchChange}
+              placeholder="Site ID giriniz — örn: AT8227_NS_WM"
+              style={{ flex:1, height:48, padding:"0 16px", border:"2px solid #e2e8f0", borderRadius:12, fontSize:15, outline:"none", transition:"border 0.15s", fontWeight:500 }}
+              onFocus={e=>e.currentTarget.style.border="2px solid #3b82f6"}
+              onBlur={e=>e.currentTarget.style.border="2px solid #e2e8f0"}
+            />
+            <button type="button" onClick={handleOpenEntryModal} disabled={!siteSearchCode}
+              style={{ height:48, padding:"0 26px", background:siteSearchCode?"linear-gradient(135deg,#1d4ed8,#4f46e5)":"#cbd5e1", border:"none", borderRadius:12, color:"#fff", fontSize:14, fontWeight:700, cursor:siteSearchCode?"pointer":"not-allowed", boxShadow:siteSearchCode?"0 4px 12px rgba(79,70,229,0.35)":"none", display:"flex", alignItems:"center", gap:7, whiteSpace:"nowrap" }}>
+              📡 Veri Gir
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="tableWrap">
-        <h3 className="listTitle">Bu Saha İçin Açılmış PO Kalemleri</h3>
-        <div style={{ marginBottom: "10px", fontSize: "14px" }}>
-          <strong>Toplam Adet:</strong> {poSummary.totalQty} &nbsp; | &nbsp;
-          <strong>Toplam Tutar:</strong> {formatTRY(poSummary.totalAmount)}
+      {/* ═══ PO KALEMLERİ CARD ═══ */}
+      <div style={{ background:"#fff", borderRadius:14, marginBottom:16, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", overflow:"hidden", border:"1.5px solid #e2e8f0" }}>
+        {/* Card header */}
+        <div style={{ background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)", padding:"13px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div style={{ color:"#fff", fontWeight:700, fontSize:14, display:"flex", alignItems:"center", gap:8 }}>
+            <span>📦</span> Bu Saha İçin Açılmış PO Kalemleri
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            {statBadge(poSummary.totalQty, "Toplam Adet", "#60a5fa")}
+            {statBadge(formatTRY(poSummary.totalAmount), "Toplam Tutar", "#34d399")}
+          </div>
         </div>
-
-        <div
-          style={{
-            maxHeight: "38vh",
-            overflowY: "auto",
-            overflowX: "auto",
-          }}
-        >
-          <table>
+        {/* Table */}
+        <div style={{ maxHeight:"35vh", overflowY:"auto", overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
               <tr>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  PO No
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Project Code
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Site Code
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Item Code
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Item Description
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Requested Qty
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Due Qty
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Currency
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Unit Price
-                </th>
+                {["PO No","Project Code","Site Code","Item Code","Item Description","Req. Qty","Due Qty","Currency","Unit Price"].map(h => (
+                  <th key={h} style={thStLight()}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {poRows.length === 0 ? (
-                <EmptyRow
-                  colSpan={9}
-                  text="Bu saha için PO kalemi bulunamadı"
-                />
+                <EmptyRow colSpan={9} text="Bu saha için PO kalemi bulunamadı" />
               ) : (
                 poRows.map((row, index) => (
-                  <tr key={`${row.po_no || "no-po"}-${row.item_code}-${index}`}>
-                    <td>{row.po_no || "-"}</td>
-                    <td>{row.project_code || "-"}</td>
-                    <td>{row.site_code || "-"}</td>
-                    <td>{row.item_code || "-"}</td>
-                    <td>{row.item_description || "-"}</td>
-                    <td>{row.requested_qty ?? "-"}</td>
-                    <td>{row.due_qty ?? "-"}</td>
-                    <td>{row.currency || "-"}</td>
-                    <td>
-                      {Number(row.unit_price || 0) === 0
-                        ? "-"
-                        : formatMoneyByCurrency(row.unit_price, row.currency)}
-                    </td>
+                  <tr key={`${row.po_no||"no-po"}-${row.item_code}-${index}`}
+                    style={{ borderBottom:"1px solid #f1f5f9" }}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <td style={{ padding:"9px 12px", fontSize:13 }}>{row.po_no || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13 }}>{row.project_code || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13, fontWeight:600 }}>{row.site_code || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:12, fontFamily:"monospace" }}>{row.item_code || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:12, maxWidth:280 }}>{row.item_description || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13, textAlign:"center", fontWeight:600 }}>{row.requested_qty ?? "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13, textAlign:"center", fontWeight:600, color: Number(row.due_qty||0) > 0 ? "#dc2626" : "#16a34a" }}>{row.due_qty ?? "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:12 }}>{row.currency || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13, fontWeight:600 }}>{Number(row.unit_price||0)===0 ? "-" : formatMoneyByCurrency(row.unit_price, row.currency)}</td>
                   </tr>
                 ))
               )}
@@ -2553,222 +2538,32 @@ function DailyEntry() {
         </div>
       </div>
 
-      <div className="tableWrap">
-        <div className="tableWrap">
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr auto 1fr auto",
-              alignItems: "center",
-              gap: "12px",
-              marginBottom: "14px",
-            }}
-          >
-            <div style={{ fontSize: "14px", textAlign: "left" }}>
-              <strong>Toplam Adet:</strong> {entrySummary.totalQty} {" | "}
-              <strong>Toplam Tutar:</strong>{" "}
-              {formatTRY(entrySummary.totalAmount)}
-            </div>
-
-            <h3
-              className="listTitle"
-              style={{ margin: 0, textAlign: "center" }}
-            >
-              Bu Saha İçin Girilmiş İşler
-            </h3>
-
-            <div style={{ fontSize: "14px", textAlign: "right" }}>
-              <strong>Fark Adet:</strong> {farkQty} {" | "}
-              <strong>Fark Tutar:</strong> {formatTRY(farkTutar)}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              style={{
-                padding: "10px 16px",
-                background: "#e5e7eb",
-                border: "none",
-                borderRadius: "8px",
-                fontWeight: "600",
-                cursor: "pointer",
-              }}
-            >
-              Excel İndir
+      {/* ═══ GİRİLMİŞ İŞLER CARD ═══ */}
+      <div style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", overflow:"hidden", border:"1.5px solid #e2e8f0" }}>
+        {/* Card header */}
+        <div style={{ background:"linear-gradient(135deg,#0f4c2a,#15803d)", padding:"13px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
+          <div style={{ color:"#fff", fontWeight:700, fontSize:14, display:"flex", alignItems:"center", gap:8 }}>
+            <span>✅</span> Bu Saha İçin Girilmiş İşler
+          </div>
+          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+            {statBadge(entrySummary.totalQty, "Toplam Adet", "#86efac")}
+            {statBadge(formatTRY(entrySummary.totalAmount), "Toplam Tutar", "#86efac")}
+            {statBadge(farkQty, "Fark Adet", farkQty > 0 ? "#fca5a5" : "#86efac")}
+            {statBadge(formatTRY(farkTutar), "Fark Tutar", farkTutar > 0 ? "#fca5a5" : "#86efac")}
+            <button type="button" onClick={handleExportExcel}
+              style={{ height:36, padding:"0 16px", background:"rgba(255,255,255,0.9)", border:"none", borderRadius:8, color:"#15803d", fontSize:12, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
+              📥 Excel
             </button>
           </div>
         </div>
-
-        <div
-          style={{
-            maxHeight: "38vh",
-            overflowY: "auto",
-            overflowX: "auto",
-          }}
-        >
-          <table>
+        {/* Table */}
+        <div style={{ maxHeight:"40vh", overflowY:"auto", overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
               <tr>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Saha Türü
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Project
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Site
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Item Code
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Item Description
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Done Qty
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Requested Qty
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Fark
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Analiz
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Taşeron
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  OnAir
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  RF Not
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  İşlem
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  QC Durum
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Kabul Durum
-                </th>
-                <th
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f3f4f6",
-                    zIndex: 2,
-                  }}
-                >
-                  Kabul Not
-                </th>
+                {["Saha Türü","Project","Site","Item Code","Item Description","Done Qty","Req. Qty","Fark","Analiz","Taşeron","OnAir","RF Not","İşlem","QC","Kabul","Kabul Not"].map(h => (
+                  <th key={h} style={thStLight()}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -2776,79 +2571,53 @@ function DailyEntry() {
                 <EmptyRow colSpan={16} text="Bu saha için giriş yapılmamış" />
               ) : (
                 siteEntries.map((row, index) => {
-                  const analysis = getQtyAnalysis(
-                    row.done_qty,
-                    row.requested_qty,
-                  );
-
+                  const analysis = getQtyAnalysis(row.done_qty, row.requested_qty);
+                  const tdSt = { padding:"8px 12px", fontSize:12, borderBottom:"1px solid #f1f5f9", verticalAlign:"middle" };
                   return (
-                    <tr key={`${row.id}-${index}`}>
-                      <td>{row.site_type}</td>
-                      <td>{row.project_code}</td>
-                      <td>{row.site_code}</td>
-                      <td>{row.item_code}</td>
-                      <td title={row.item_description}>
+                    <tr key={`${row.id}-${index}`}
+                      onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <td style={tdSt}>
+                        <span style={{ background:"#dbeafe", color:"#1d4ed8", borderRadius:5, padding:"2px 7px", fontSize:11, fontWeight:700 }}>{row.site_type}</span>
+                      </td>
+                      <td style={{ ...tdSt, fontFamily:"monospace", fontSize:11 }}>{row.project_code}</td>
+                      <td style={{ ...tdSt, fontWeight:700, color:"#1e3a5f" }}>{row.site_code}</td>
+                      <td style={{ ...tdSt, fontFamily:"monospace", fontSize:11 }}>{row.item_code}</td>
+                      <td style={{ ...tdSt, maxWidth:220 }} title={row.item_description}>
                         <div className="desc-cell">{row.item_description}</div>
                       </td>
-                      <td>{row.done_qty}</td>
-                      <td>{row.requested_qty ?? "-"}</td>
-                      <td>{analysis.diff}</td>
-                      <td>
-                        <span className={`analysisBadge ${analysis.className}`}>
-                          {analysis.label}
-                        </span>
+                      <td style={{ ...tdSt, fontWeight:800, fontSize:14, textAlign:"center", color:"#1d4ed8" }}>{row.done_qty}</td>
+                      <td style={{ ...tdSt, textAlign:"center" }}>{row.requested_qty ?? "-"}</td>
+                      <td style={{ ...tdSt, textAlign:"center", fontWeight:700, color: analysis.diff > 0 ? "#dc2626" : "#16a34a" }}>{analysis.diff}</td>
+                      <td style={tdSt}>
+                        <span className={`analysisBadge ${analysis.className}`}>{analysis.label}</span>
                       </td>
-                      <td>{row.subcon_name}</td>
-                      <td>{formatDateTR(row.onair_date)}</td>
-                      <td>{row.note}</td>
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "8px",
-                            flexWrap: "nowrap",
-                            justifyContent: "center",
-                            alignItems: "center",
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="tab"
-                            style={{
-                              padding: "8px 14px",
-                              minWidth: "86px",
-                              borderRadius: "10px",
-                              fontWeight: "600",
-                              whiteSpace: "nowrap",
-                            }}
-                            onClick={() => handleEdit(row)}
-                            title="Kaydı düzenle"
-                          >
-                            Düzenle
+                      <td style={{ ...tdSt, fontSize:11 }}>{row.subcon_name}</td>
+                      <td style={{ ...tdSt, whiteSpace:"nowrap" }}>{formatDateTR(row.onair_date)}</td>
+                      <td style={{ ...tdSt, maxWidth:120, fontSize:11, color:"#6b7280" }}>{row.note}</td>
+                      <td style={tdSt}>
+                        <div style={{ display:"flex", gap:6, justifyContent:"center" }}>
+                          <button type="button" onClick={() => handleEdit(row)}
+                            style={{ padding:"5px 12px", background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:7, fontSize:12, fontWeight:700, color:"#1d4ed8", cursor:"pointer", whiteSpace:"nowrap" }}>
+                            ✏️ Düzenle
                           </button>
-
-                          <button
-                            type="button"
-                            className="tab"
-                            style={{
-                              padding: "8px 14px",
-                              minWidth: "70px",
-                              borderRadius: "10px",
-                              fontWeight: "600",
-                              whiteSpace: "nowrap",
-                              background: "#fee2e2",
-                              color: "#991b1b",
-                            }}
-                            onClick={() => handleDelete(row)}
-                            title="Kaydı sil"
-                          >
-                            Sil
+                          <button type="button" onClick={() => handleDelete(row)}
+                            style={{ padding:"5px 10px", background:"#fff1f2", border:"1px solid #fecaca", borderRadius:7, fontSize:12, fontWeight:700, color:"#dc2626", cursor:"pointer" }}>
+                            🗑
                           </button>
                         </div>
                       </td>
-                      <td>{row.qc_durum || "-"}</td>
-                      <td>{row.kabul_durum || "-"}</td>
-                      <td>{row.kabul_not || "-"}</td>
+                      <td style={tdSt}>
+                        <span style={{ background:row.qc_durum==="OK"?"#f0fdf4":"#fff1f2", color:row.qc_durum==="OK"?"#15803d":"#dc2626", border:`1px solid ${row.qc_durum==="OK"?"#bbf7d0":"#fecaca"}`, borderRadius:5, padding:"2px 8px", fontSize:11, fontWeight:700 }}>
+                          {row.qc_durum==="OK"?"✓ OK":"✗ NOK"}
+                        </span>
+                      </td>
+                      <td style={tdSt}>
+                        <span style={{ background:row.kabul_durum==="OK"?"#f0fdf4":"#fff1f2", color:row.kabul_durum==="OK"?"#15803d":"#dc2626", border:`1px solid ${row.kabul_durum==="OK"?"#bbf7d0":"#fecaca"}`, borderRadius:5, padding:"2px 8px", fontSize:11, fontWeight:700 }}>
+                          {row.kabul_durum==="OK"?"✓ OK":"✗ NOK"}
+                        </span>
+                      </td>
+                      <td style={{ ...tdSt, maxWidth:140, fontSize:11, color:"#6b7280" }}>{row.kabul_not || "-"}</td>
                     </tr>
                   );
                 })
@@ -2874,323 +2643,259 @@ function DailyEntry() {
         >
           <div
             style={{
-              background: "#fff",
+              background: "#f1f5f9",
               width: "100%",
-              maxWidth: "1100px",
-              maxHeight: "90vh",
-              overflow: "auto",
+              maxWidth: "960px",
+              maxHeight: "92vh",
+              display: "flex",
+              flexDirection: "column",
               borderRadius: "20px",
-              padding: "24px",
-              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+              overflow: "hidden",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "12px",
-                flexWrap: "wrap",
-                marginBottom: "18px",
-              }}
-            >
-              <h3 style={{ margin: 0 }}>
-                {editingId ? "Kaydı Düzenle" : "Yeni Veri Girişi"}
-              </h3>
-
-              <button type="button" className="tab" onClick={handleCancelEdit}>
-                Kapat
+            {/* ── HEADER ── */}
+            <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1d4ed8 100%)", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
+                  📡
+                </div>
+                <div>
+                  <div style={{ color: "#fff", fontWeight: 800, fontSize: 17, letterSpacing: "-0.3px" }}>
+                    {editingId ? "Kaydı Düzenle" : "Yeni Veri Girişi"}
+                  </div>
+                  <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, marginTop: 2 }}>
+                    Günlük İş Girişi · Rollout Takip
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelEdit}
+                style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.12)", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
+              >
+                ×
               </button>
             </div>
 
-            <form className="entryForm" onSubmit={handleSave}>
-              <div className="formGrid">
-                <div className="formGroup">
-                  <label>Saha Türü</label>
-                  <select
-                    name="site_type"
-                    value={form.site_type}
-                    onChange={handleChange}
-                  >
-                    <option value="5G">5G</option>
-                    <option value="DSS">DSS</option>
-                    <option value="LTE">LTE</option>
-                    <option value="STANDALONE">STANDALONE</option>
-                    <option value="Diğer">Diğer</option>
-                  </select>
-                </div>
+            {/* ── SCROLLABLE FORM ── */}
+            <form onSubmit={handleSave} style={{ overflowY: "auto", flex: 1, padding: "20px 24px 24px" }}>
 
-                <div className="formGroup">
-                  <label>Project Code</label>
-                  <select
-                    name="project_code"
-                    value={form.project_code}
-                    onChange={handleChange}
-                    required
-                  >
-                    <option value="">Seçiniz</option>
-                    <option value="56A0SJC">56A0SJC</option>
-                    <option value="56A0QEF">56A0QEF</option>
-                    <option value="56A0NCD">56A0NCD</option>
-                    <option value="56A0TCT">56A0TCT</option>
-                    {projectCodes
-                      .filter(
-                        (p) =>
-                          ![
-                            "56A0SJC",
-                            "56A0QEF",
-                            "56A0NCD",
-                            "56A0TCT",
-                          ].includes(p.project_code),
-                      )
-                      .map((p, i) => (
-                        <option
-                          key={`${p.project_code}-${i}`}
-                          value={p.project_code}
-                        >
-                          {p.project_code}
-                        </option>
+              {/* SECTION 1 – Saha Bilgileri */}
+              <div style={{ background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderLeft: "4px solid #3b82f6" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>🏗️</span> Saha Bilgileri
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Saha Türü</label>
+                    <select name="site_type" value={form.site_type} onChange={handleChange}
+                      style={{ width: "100%", height: 40, padding: "0 10px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fafafa", outline: "none" }}>
+                      <option value="5G">5G</option>
+                      <option value="DSS">DSS</option>
+                      <option value="LTE">LTE</option>
+                      <option value="STANDALONE">STANDALONE</option>
+                      <option value="Diğer">Diğer</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Project Code <span style={{ color: "#dc2626" }}>*</span></label>
+                    <select name="project_code" value={form.project_code} onChange={handleChange} required
+                      style={{ width: "100%", height: 40, padding: "0 10px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fafafa", outline: "none" }}>
+                      <option value="">Seçiniz</option>
+                      <option value="56A0SJC">56A0SJC</option>
+                      <option value="56A0QEF">56A0QEF</option>
+                      <option value="56A0NCD">56A0NCD</option>
+                      <option value="56A0TCT">56A0TCT</option>
+                      {projectCodes.filter((p) => !["56A0SJC","56A0QEF","56A0NCD","56A0TCT"].includes(p.project_code)).map((p, i) => (
+                        <option key={`${p.project_code}-${i}`} value={p.project_code}>{p.project_code}</option>
                       ))}
-                  </select>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Site Code <span style={{ color: "#dc2626" }}>*</span></label>
+                    <input name="site_code" value={form.site_code} onChange={handleChange} placeholder="Örn: AT8227_NS_WM" required
+                      style={{ width: "100%", height: 40, padding: "0 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fafafa", outline: "none" }} />
+                  </div>
                 </div>
+              </div>
 
-                <div className="formGroup">
-                  <label>Site Code</label>
-                  <input
-                    name="site_code"
-                    value={form.site_code}
-                    onChange={handleChange}
-                    placeholder="Örn: AT8227_NS_WM"
-                    required
-                  />
+              {/* SECTION 2 – İş Kalemi */}
+              <div style={{ background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderLeft: "4px solid #8b5cf6" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>📋</span> İş Kalemi
                 </div>
-
-                <div className="formGroup">
-                  <label>Done Qty</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="done_qty"
-                    value={form.done_qty}
-                    onChange={handleChange}
-                    placeholder="Örn: 2"
-                    required
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>Subcon Name</label>
-                  <input
-                    name="subcon_name"
-                    value={form.subcon_name}
-                    onChange={handleChange}
-                    placeholder="Taşeron adı"
-                  />
-                </div>
-
-                <div className="formGroup">
-                  <label>OnAir Date</label>
-                  <DatePicker
-                    selected={parseTRDateToDate(form.onair_date)}
-                    onChange={(date) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        onair_date: formatDateToTR(date),
-                      }))
-                    }
-                    dateFormat="dd.MM.yyyy"
-                    placeholderText="GG.AA.YYYY"
-                    className="datePickerInput"
-                    isClearable
-                    showPopperArrow={false}
-                  />
-                </div>
-
-                <div
-                  className="formGroup"
-                  style={{ position: "relative" }}
-                  ref={itemCodeBoxRef}
-                >
-                  <label>Item Code</label>
-
+                {/* Item Description – full width search bar */}
+                <div style={{ position: "relative", marginBottom: 12 }} ref={itemDescriptionBoxRef}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>🔎 Item Description <span style={{ color: "#dc2626" }}>*</span></label>
                   <input
                     type="text"
-                    value={itemCodeSearch}
-                    onChange={(e) => {
-                      setItemCodeSearch(e.target.value);
-                      setShowItemCodeList(true);
-                    }}
-                    onFocus={() => setShowItemCodeList(true)}
-                    placeholder="Item code filtrele..."
+                    value={itemDescriptionSearch}
+                    onChange={(e) => { setItemDescriptionSearch(e.target.value); setShowItemDescriptionList(true); }}
+                    onFocus={() => setShowItemDescriptionList(true)}
+                    placeholder={itemOptions.length === 0 ? "Kayıt bulunamadı" : "İş kalemini yazarak arayın..."}
                     disabled={itemOptions.length === 0}
+                    style={{ width: "100%", height: 44, padding: "0 14px 0 40px", border: `2px solid ${form.item_description ? "#8b5cf6" : "#e2e8f0"}`, borderRadius: 9, fontSize: 13, boxSizing: "border-box", background: form.item_description ? "#faf5ff" : "#fafafa", outline: "none", fontWeight: form.item_description ? 600 : 400 }}
                   />
-
-                  {showItemCodeList && filteredItemCodes.length > 0 && (
+                  <span style={{ position: "absolute", left: 13, top: "calc(50% + 10px)", transform: "translateY(-50%)", fontSize: 16, pointerEvents: "none" }}>🔍</span>
+                  {/* hidden input for HTML5 required validation */}
+                  <input type="text" value={form.item_description} required readOnly style={{ position: "absolute", opacity: 0, width: 1, height: 1, pointerEvents: "none" }} tabIndex={-1} />
+                  {showItemDescriptionList && filteredItemDescriptions.length > 0 && (
                     <div className="filterDropdown">
-                      {filteredItemCodes.map((item, idx) => (
-                        <div
-                          key={`${item.item_code}-${idx}`}
-                          className="filterDropdownItem"
-                          onMouseDown={() => handleItemCodePick(item)}
-                        >
-                          {item.item_code}
+                      {filteredItemDescriptions.map((item, idx) => (
+                        <div key={`${item.item_code}-${idx}`} className="filterDropdownItem" onMouseDown={() => handleItemDescriptionPick(item)}>
+                          {item.item_description}
                         </div>
                       ))}
                     </div>
                   )}
-
-                  <select
-                    name="item_code"
-                    value={form.item_code}
-                    onChange={handleChange}
-                    required
-                    disabled={itemOptions.length === 0}
-                    style={{ marginTop: "8px" }}
-                  >
-                    <option value="">
-                      {itemOptions.length === 0
-                        ? "Kayıt bulunamadı"
-                        : "Seçiniz"}
-                    </option>
-                    {itemOptions.map((item, idx) => (
-                      <option
-                        key={`${item.item_code}-${idx}`}
-                        value={item.item_code}
-                      >
-                        {item.item_code}
-                      </option>
-                    ))}
-                  </select>
                 </div>
-
-                <div
-                  className="formGroup formGroupWide"
-                  style={{ position: "relative" }}
-                  ref={itemDescriptionBoxRef}
-                >
-                  <label className="itemDescLabel">
-                    🔎 Item Description (Buradan arayın)
-                  </label>
-
-                  <input
-                    className="itemDescHighlight"
-                    type="text"
-                    value={itemDescriptionSearch}
-                    onChange={(e) => {
-                      setItemDescriptionSearch(e.target.value);
-                      setShowItemDescriptionList(true);
-                    }}
-                    onFocus={() => setShowItemDescriptionList(true)}
-                    placeholder="🔎 Aramak için item description yazın..."
-                    disabled={itemOptions.length === 0}
-                  />
-
-                  {showItemDescriptionList &&
-                    filteredItemDescriptions.length > 0 && (
+                {/* Item Code + Done Qty – 2 column */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 180px", gap: 12 }}>
+                  <div style={{ position: "relative" }} ref={itemCodeBoxRef}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Item Code <span style={{ color: "#dc2626" }}>*</span></label>
+                    <input type="text" value={itemCodeSearch}
+                      onChange={(e) => { setItemCodeSearch(e.target.value); setShowItemCodeList(true); }}
+                      onFocus={() => setShowItemCodeList(true)}
+                      placeholder={itemOptions.length === 0 ? "Kayıt bulunamadı" : "Kod filtrele veya seçin..."}
+                      disabled={itemOptions.length === 0}
+                      style={{ width: "100%", height: 40, padding: "0 12px", border: `1.5px solid ${form.item_code ? "#10b981" : "#e2e8f0"}`, borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: form.item_code ? "#f0fdf4" : "#fafafa", outline: "none", fontWeight: form.item_code ? 700 : 400 }} />
+                    {/* hidden input for HTML5 required validation */}
+                    <input type="text" name="item_code_hidden" value={form.item_code} required readOnly style={{ position: "absolute", opacity: 0, width: 1, height: 1, pointerEvents: "none" }} tabIndex={-1} />
+                    {showItemCodeList && filteredItemCodes.length > 0 && (
                       <div className="filterDropdown">
-                        {filteredItemDescriptions.map((item, idx) => (
-                          <div
-                            key={`${item.item_code}-${idx}`}
-                            className="filterDropdownItem"
-                            onMouseDown={() => handleItemDescriptionPick(item)}
-                          >
-                            {item.item_description}
+                        {filteredItemCodes.map((item, idx) => (
+                          <div key={`${item.item_code}-${idx}`} className="filterDropdownItem" onMouseDown={() => handleItemCodePick(item)}>
+                            {item.item_code}
                           </div>
                         ))}
                       </div>
                     )}
-
-                  <select
-                    name="item_description"
-                    value={form.item_description}
-                    onChange={handleDescriptionChange}
-                    required
-                    disabled={itemOptions.length === 0}
-                    style={{ marginTop: "8px" }}
-                  >
-                    <option value="">
-                      {itemOptions.length === 0
-                        ? "Kayıt bulunamadı"
-                        : "Seçiniz"}
-                    </option>
-                    {itemOptions.map((item, idx) => (
-                      <option
-                        key={`${item.item_code}-${idx}`}
-                        value={item.item_description}
-                      >
-                        {item.item_description}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="formGroup">
-                  <label>QC Durum</label>
-                  <select
-                    name="qc_durum"
-                    value={form.qc_durum}
-                    onChange={handleChange}
-                  >
-                    <option value="OK">OK</option>
-                    <option value="NOK">NOK</option>
-                  </select>
-                </div>
-
-                <div className="formGroup">
-                  <label>Kabul Durum</label>
-                  <select
-                    name="kabul_durum"
-                    value={form.kabul_durum}
-                    onChange={handleChange}
-                  >
-                    <option value="OK">OK</option>
-                    <option value="NOK">NOK</option>
-                  </select>
-                </div>
-
-                <div className="formGroup formGroupWide">
-                  <label>Kabul Not</label>
-                  <textarea
-                    name="kabul_not"
-                    value={form.kabul_not}
-                    onChange={handleChange}
-                    placeholder="Kabul ile ilgili not"
-                    rows={3}
-                  />
-                </div>
-
-                <div className="formGroup formGroupWide">
-                  <label>RF Not</label>
-                  <textarea
-                    name="note"
-                    value={form.note}
-                    onChange={handleChange}
-                    placeholder="RF ile ilgili not giriniz"
-                    rows={3}
-                  />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Done Qty <span style={{ color: "#dc2626" }}>*</span></label>
+                    <input type="number" step="1" min="0" name="done_qty" value={form.done_qty} onChange={handleChange} placeholder="0" required
+                      style={{ width: "100%", height: 40, padding: "0 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 15, fontWeight: 700, boxSizing: "border-box", background: "#fafafa", outline: "none", textAlign: "center", marginTop: 0 }} />
+                  </div>
                 </div>
               </div>
 
-              <div className="entryActions" style={{ gap: "10px" }}>
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={handleCancelEdit}
-                >
+              {/* SECTION 3 – Taşeron & Tarih */}
+              <div style={{ background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderLeft: "4px solid #10b981" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>👷</span> Taşeron & Tarih
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div style={{ position: "relative" }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Subcon Name</label>
+                    <input
+                      name="subcon_name"
+                      value={form.subcon_name}
+                      onChange={e => setForm(prev => ({ ...prev, subcon_name: e.target.value.toUpperCase() }))}
+                      onFocus={() => setShowSubconDrop(true)}
+                      onBlur={() => setTimeout(() => setShowSubconDrop(false), 150)}
+                      placeholder="TAŞERON ADI YAZIN..."
+                      autoComplete="off"
+                      style={{ width: "100%", height: 40, padding: "0 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", background: "#fafafa", outline: "none", textTransform: "uppercase", letterSpacing: "0.02em" }}
+                    />
+                    {showSubconDrop && (() => {
+                      const q = (form.subcon_name || "").trim().toUpperCase();
+                      const sugg = subconList.filter(n => !q || n.includes(q));
+                      return sugg.length > 0 ? (
+                        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 300, background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", maxHeight: 220, overflowY: "auto" }}>
+                          {sugg.map((name, i) => (
+                            <div key={i}
+                              onMouseDown={e => { e.preventDefault(); setForm(prev => ({ ...prev, subcon_name: name })); setShowSubconDrop(false); }}
+                              style={{ padding: "9px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 8 }}
+                              onMouseEnter={e => e.currentTarget.style.background = "#f0fdf4"}
+                              onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                              <span style={{ fontSize: 15 }}>👷</span>
+                              <span style={{ fontWeight: 600 }}>{name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>OnAir Date</label>
+                    <DatePicker
+                      selected={parseTRDateToDate(form.onair_date)}
+                      onChange={(date) => setForm((prev) => ({ ...prev, onair_date: formatDateToTR(date) }))}
+                      dateFormat="dd.MM.yyyy"
+                      placeholderText="GG.AA.YYYY"
+                      className="datePickerInput"
+                      isClearable
+                      showPopperArrow={false}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 4 – Durum & Notlar */}
+              <div style={{ background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderLeft: "4px solid #f59e0b" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>✅</span> Durum & Notlar
+                </div>
+                {/* QC + Kabul Durum */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>QC Durum</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {["OK","NOK"].map(v => (
+                        <button key={v} type="button"
+                          onClick={() => setForm(prev => ({ ...prev, qc_durum: v }))}
+                          style={{ flex: 1, height: 40, border: "2px solid", borderColor: form.qc_durum === v ? (v === "OK" ? "#16a34a" : "#dc2626") : "#e2e8f0", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", background: form.qc_durum === v ? (v === "OK" ? "#f0fdf4" : "#fff1f2") : "#fafafa", color: form.qc_durum === v ? (v === "OK" ? "#16a34a" : "#dc2626") : "#9ca3af", transition: "all 0.15s" }}>
+                          {v === "OK" ? "✓ OK" : "✗ NOK"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Kabul Durum</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {["OK","NOK"].map(v => (
+                        <button key={v} type="button"
+                          onClick={() => setForm(prev => ({ ...prev, kabul_durum: v }))}
+                          style={{ flex: 1, height: 40, border: "2px solid", borderColor: form.kabul_durum === v ? (v === "OK" ? "#16a34a" : "#dc2626") : "#e2e8f0", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", background: form.kabul_durum === v ? (v === "OK" ? "#f0fdf4" : "#fff1f2") : "#fafafa", color: form.kabul_durum === v ? (v === "OK" ? "#16a34a" : "#dc2626") : "#9ca3af", transition: "all 0.15s" }}>
+                          {v === "OK" ? "✓ OK" : "✗ NOK"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {/* RF Not + Kabul Not */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>RF Not</label>
+                    <textarea name="note" value={form.note} onChange={handleChange} placeholder="RF ile ilgili not giriniz..." rows={3}
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", resize: "vertical", outline: "none", fontFamily: "inherit", background: "#fafafa" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Kabul Not</label>
+                    <textarea name="kabul_not" value={form.kabul_not} onChange={handleChange} placeholder="Kabul ile ilgili not..." rows={3}
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", resize: "vertical", outline: "none", fontFamily: "inherit", background: "#fafafa" }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* FOOTER ACTIONS */}
+              {message && (
+                <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#166534", fontWeight: 600 }}>
+                  ✓ {message}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button type="button" onClick={handleCancelEdit}
+                  style={{ padding: "0 24px", height: 44, borderRadius: 10, border: "1.5px solid #e2e8f0", background: "#fff", fontSize: 14, fontWeight: 600, color: "#6b7280", cursor: "pointer" }}>
                   Kapat
                 </button>
-
-                <button type="submit" className="saveButton" disabled={saving}>
-                  {saving
-                    ? "Kaydediliyor..."
-                    : editingId
-                      ? "Güncelle"
-                      : "Kaydet"}
+                <button type="submit" disabled={saving}
+                  style={{ padding: "0 32px", height: 44, borderRadius: 10, border: "none", background: saving ? "#94a3b8" : "linear-gradient(135deg,#1d4ed8,#4f46e5)", fontSize: 14, fontWeight: 700, color: "#fff", cursor: saving ? "not-allowed" : "pointer", boxShadow: saving ? "none" : "0 4px 12px rgba(79,70,229,0.35)" }}>
+                  {saving ? "⏳ Kaydediliyor..." : editingId ? "✓ Güncelle" : "✓ Kaydet"}
                 </button>
               </div>
-
-              {message && <div className="entryMessage">{message}</div>}
             </form>
           </div>
         </div>
@@ -3635,6 +3340,8 @@ function FinanceDashboard({
   const [summary, setSummary] = useState(null);
   const [hwLastUpload, setHwLastUpload] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
+  const [hwAcceptanceSummary, setHwAcceptanceSummary] = useState(null);
+  const [showHwAcceptanceModal, setShowHwAcceptanceModal] = useState(false);
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [paymentRows, setPaymentRows] = useState([]);
@@ -3653,8 +3360,25 @@ function FinanceDashboard({
   const [showInvoiceFormPanel, setShowInvoiceFormPanel] = useState(false);
   const [showInvoiceEntryModal, setShowInvoiceEntryModal] = useState(false);
   const [showSalaryModal, setShowSalaryModal] = useState(false);
+
+  // ── Taşeron Fatura Yönetimi ──────────────────────────────────────────────
+  const [showTaseronFaturaPanel, setShowTaseronFaturaPanel] = useState(false);
+  const [taseronFaturaAdi, setTaseronFaturaAdi] = useState("");
+  const [taseronFaturaList, setTaseronFaturaList] = useState([]);
+  const [taseronOdemeList, setTaseronOdemeList] = useState([]);
+  const [taseronHakedisOzet, setTaseronHakedisOzet] = useState(null);
+  const [showYeniFaturaModal, setShowYeniFaturaModal] = useState(false);
+  const [showTaseronOdemeModal, setShowTaseronOdemeModal] = useState(false);
+  const [faturaForm, setFaturaForm] = useState({ taseron_adi:"", fatura_no:"", fatura_tarihi:"", toplam_tutar:"", kdv_tutar:"", genel_toplam:"", aciklama:"", kalemler:[] });
+  const [odemeForm, setOdemeForm] = useState({ fatura_id:"", tutar:"", odeme_tarihi: new Date().toISOString().slice(0,10), aciklama:"" });
+  const [taseronPdfParsing, setTaseronPdfParsing] = useState(false);
+  const [taseronFaturaLoading, setTaseronFaturaLoading] = useState(false);
+  const [faturaDetailOpen, setFaturaDetailOpen] = useState(null);
+  const [savingFatura, setSavingFatura] = useState(false);
+  const [savingOdeme, setSavingOdeme] = useState(false);
   const [showFinanceIslemlerMenu, setShowFinanceIslemlerMenu] = useState(false);
   const [showFinanceHwPoUpload, setShowFinanceHwPoUpload] = useState(false);
+  const [showFinanceHwAcceptanceUpload, setShowFinanceHwAcceptanceUpload] = useState(false);
 
   const [salaryFilterMonth, setSalaryFilterMonth] = useState(
     String(new Date().getMonth() + 1).padStart(2, "0"),
@@ -3934,8 +3658,20 @@ function FinanceDashboard({
     odenen_tutar: "",
     kalan_borc: "",
     note: "",
+    fatura_turu: "GELEN",
+    bagli_fatura_id: "",
     belge_path: "",
   });
+
+  // Fatura PDF otomatik doldurma
+  const [pdfParsing, setPdfParsing] = useState(false);
+  const [hakedisData, setHakedisData] = useState(null);
+  const [hakedisModal, setHakedisModal] = useState(false);
+  const [hakedisLoading, setHakedisLoading] = useState(false);
+  const [pdfTempKey, setPdfTempKey] = useState("");
+  const [pdfFilled, setPdfFilled] = useState(null); // { count, fields[] }
+  const [pdfFileName, setPdfFileName] = useState("");
+  const invoicePdfRef = useRef(null);
 
   const [salaryForm, setSalaryForm] = useState({
     ad_soyad: "",
@@ -4175,15 +3911,17 @@ function FinanceDashboard({
       setShowInvoiceUpload(false);
       setShowUpload(false);
       setEditingInvoiceId(null);
-      setInvoiceForm({ bolge:"", proje:"", proje_kodu:"", fatura_no:"", fatura_tarihi:"", odeme_tarihi:"", tedarikci:"", rf_montaj_firma:"", fatura_kalemi:"", is_kalemi:"", po_no:"", site_id:"", tutar:"", kdv:"", toplam_tutar:"", odenen_tutar:"", kalan_borc:"", note:"" });
+      setInvoiceForm({ bolge:"", proje:"", proje_kodu:"", fatura_no:"", fatura_tarihi:"", odeme_tarihi:"", tedarikci:"", rf_montaj_firma:"", fatura_kalemi:"", is_kalemi:"", po_no:"", site_id:"", tutar:"", kdv:"", toplam_tutar:"", odenen_tutar:"", kalan_borc:"", note:"", fatura_turu:"GELEN", bagli_fatura_id:"" });
     } else if (actionTrigger === 'taseron_hakedis') {
       handleShowSubconSummary();
     } else if (actionTrigger === 'hw_payment') {
-      setShowUpload(true); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false);
+      setShowUpload(true); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false); setShowFinanceHwAcceptanceUpload(false);
     } else if (actionTrigger === 'hw_fatura') {
-      setShowInvoiceUpload(true); setShowUpload(false); setShowFinanceHwPoUpload(false);
+      setShowInvoiceUpload(true); setShowUpload(false); setShowFinanceHwPoUpload(false); setShowFinanceHwAcceptanceUpload(false);
     } else if (actionTrigger === 'hw_po') {
-      setShowFinanceHwPoUpload(true); setShowUpload(false); setShowInvoiceUpload(false);
+      setShowFinanceHwPoUpload(true); setShowUpload(false); setShowInvoiceUpload(false); setShowFinanceHwAcceptanceUpload(false);
+    } else if (actionTrigger === 'hw_acceptance') {
+      setShowFinanceHwAcceptanceUpload(true); setShowUpload(false); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false);
     }
     onActionHandled?.();
   }, [actionTrigger]);
@@ -4445,6 +4183,8 @@ function FinanceDashboard({
       odenen_tutar: row.odenen_tutar ?? "",
       kalan_borc: row.kalan_borc ?? "",
       note: row.note || "",
+      fatura_turu: row.fatura_turu || "GELEN",
+      bagli_fatura_id: row.bagli_fatura_id || "",
     });
 
     setShowUpload(false);
@@ -4493,7 +4233,10 @@ function FinanceDashboard({
         toplam_tutar: Number(invoiceForm.toplam_tutar || 0),
         odenen_tutar: Number(invoiceForm.odenen_tutar || 0),
         kalan_borc: Number(invoiceForm.kalan_borc || 0),
+        fatura_turu: invoiceForm.fatura_turu || "GELEN",
+        bagli_fatura_id: invoiceForm.bagli_fatura_id ? Number(invoiceForm.bagli_fatura_id) : null,
         note: invoiceForm.note,
+        ...(pdfTempKey && !editingInvoiceId ? { temp_belge_key: pdfTempKey } : {}),
       };
       console.log("MANUAL INVOICE PAYLOAD:", payload);
 
@@ -4519,6 +4262,7 @@ function FinanceDashboard({
           body: JSON.stringify(payload),
         });
       }
+      setPdfTempKey(""); setPdfFilled(null); setPdfFileName("");
 
       setInvoiceForm({
         bolge: "",
@@ -4539,6 +4283,8 @@ function FinanceDashboard({
         odenen_tutar: "",
         kalan_borc: "",
         note: "",
+        fatura_turu: "GELEN",
+        bagli_fatura_id: "",
       });
       setEditingInvoiceId(null);
       setShowInvoiceFormPanel(false);
@@ -4688,6 +4434,115 @@ function FinanceDashboard({
     }
   };
 
+  const loadTaseronHakedis = async (taseron) => {
+    if (!taseron) return;
+    setTaseronFaturaLoading(true);
+    try {
+      const r = await fetchJson(`${API_BASE}/taseron/hakedis-ozet/${encodeURIComponent(taseron)}`, { withAuth: true });
+      if (r.ok) {
+        setTaseronHakedisOzet(r);
+        setTaseronFaturaList(r.faturalar || []);
+        setTaseronOdemeList(r.odemeler || []);
+      }
+    } catch(e) { console.error(e); } finally { setTaseronFaturaLoading(false); }
+  };
+
+  const openTaseronFaturaPanel = (taseron_adi) => {
+    setTaseronFaturaAdi(taseron_adi);
+    setShowTaseronFaturaPanel(true);
+    loadTaseronHakedis(taseron_adi);
+  };
+
+  const handlePdfParseTaseron = async (file) => {
+    if (!file) return;
+    setTaseronPdfParsing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch(`${API_BASE}/taseron/fatura/pdf-parse`, {
+        method: "POST", headers: { Authorization: `Bearer ${financeToken}` }, body: fd,
+      });
+      const data = await r.json();
+      if (data.ok) {
+        const filled = [];
+        if (data.fatura_no)    filled.push("Fatura No");
+        if (data.fatura_tarihi) filled.push("Tarih");
+        if (data.taseron_adi)  filled.push("Taşeron");
+        if (data.toplam_tutar) filled.push("Matrah");
+        if (data.kdv_tutar)    filled.push("KDV");
+        if (data.genel_toplam) filled.push("Toplam");
+        setFaturaForm(f => ({
+          ...f,
+          fatura_no: data.fatura_no || f.fatura_no,
+          fatura_tarihi: data.fatura_tarihi || f.fatura_tarihi,
+          toplam_tutar: data.toplam_tutar ? String(data.toplam_tutar) : f.toplam_tutar,
+          kdv_tutar: data.kdv_tutar ? String(data.kdv_tutar) : f.kdv_tutar,
+          genel_toplam: data.genel_toplam ? String(data.genel_toplam) : f.genel_toplam,
+          taseron_adi: data.taseron_adi || f.taseron_adi,
+          kalemler: data.kalemler?.length > 0 ? data.kalemler : f.kalemler,
+        }));
+        if (filled.length > 0) {
+          alert(`✅ PDF okundu — ${filled.length} alan dolduruldu: ${filled.join(", ")}\n\nLütfen kontrol edin.`);
+        } else {
+          alert("⚠️ PDF okundu ancak hiçbir alan çıkarılamadı.\nLütfen alanları manuel olarak doldurun.");
+        }
+      }
+    } catch(e) { alert("PDF okunamadı: " + e.message); } finally { setTaseronPdfParsing(false); }
+  };
+
+  const handleSaveFatura = async () => {
+    if (!faturaForm.taseron_adi.trim()) { alert("Taşeron adı zorunludur"); return; }
+    if (!faturaForm.genel_toplam || Number(faturaForm.genel_toplam) <= 0) { alert("Genel toplam giriniz"); return; }
+    setSavingFatura(true);
+    try {
+      const r = await fetch(`${API_BASE}/taseron/fatura/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${financeToken}` },
+        body: JSON.stringify({
+          ...faturaForm,
+          toplam_tutar: Number(faturaForm.toplam_tutar || 0),
+          kdv_tutar: Number(faturaForm.kdv_tutar || 0),
+          genel_toplam: Number(faturaForm.genel_toplam || 0),
+          kalemler: faturaForm.kalemler.map(k => ({ ...k, tutar: Number(k.tutar || 0) }))
+        }),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || "Kayıt hatası");
+      setShowYeniFaturaModal(false);
+      setFaturaForm({ taseron_adi: taseronFaturaAdi, fatura_no:"", fatura_tarihi:"", toplam_tutar:"", kdv_tutar:"", genel_toplam:"", aciklama:"", kalemler:[] });
+      loadTaseronHakedis(taseronFaturaAdi);
+    } catch(e) { alert("Hata: " + e.message); } finally { setSavingFatura(false); }
+  };
+
+  const handleSaveOdeme = async () => {
+    if (!odemeForm.tutar || Number(odemeForm.tutar) <= 0) { alert("Tutar giriniz"); return; }
+    setSavingOdeme(true);
+    try {
+      const r = await fetch(`${API_BASE}/taseron/odeme/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${financeToken}` },
+        body: JSON.stringify({ ...odemeForm, taseron_adi: taseronFaturaAdi, tutar: Number(odemeForm.tutar), fatura_id: odemeForm.fatura_id || null }),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || "Ödeme kaydedilemedi");
+      setShowTaseronOdemeModal(false);
+      setOdemeForm({ fatura_id:"", tutar:"", odeme_tarihi: new Date().toISOString().slice(0,10), aciklama:"" });
+      loadTaseronHakedis(taseronFaturaAdi);
+    } catch(e) { alert("Hata: " + e.message); } finally { setSavingOdeme(false); }
+  };
+
+  const handleDeleteFatura = async (id) => {
+    if (!window.confirm("Bu fatura silinecek. Emin misiniz?")) return;
+    await fetch(`${API_BASE}/taseron/fatura/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${financeToken}` } });
+    loadTaseronHakedis(taseronFaturaAdi);
+  };
+
+  const handleDeleteOdeme = async (id) => {
+    if (!window.confirm("Bu ödeme silinecek. Emin misiniz?")) return;
+    await fetch(`${API_BASE}/taseron/odeme/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${financeToken}` } });
+    loadTaseronHakedis(taseronFaturaAdi);
+  };
+
   const loadFinance = useCallback(async () => {
     try {
       setLoading(true);
@@ -4706,6 +4561,7 @@ function FinanceDashboard({
         manualInvoiceData,
         salaryData,
         lastUploadData,
+        acceptanceSummaryData,
       ] = await Promise.all([
         fetchJson(`${API_BASE}/finance/summary`, { withAuth: true }),
         fetchJson(paymentsUrl, { withAuth: true }),
@@ -4713,6 +4569,7 @@ function FinanceDashboard({
         fetchJson(`${API_BASE}/finance/invoice-entry/list`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/salary/list`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/hw-payment/last-upload`).catch(() => ({ ok: true, last_upload: null })),
+        fetchJson(`${API_BASE}/hw-acceptance/summary`).catch(() => ({ total_usd: 0, total_try: 0, total_count: 0, by_handler: [] })),
       ]);
 
       console.log("MANUAL INVOICE DATA:", manualInvoiceData.rows);
@@ -4720,6 +4577,7 @@ function FinanceDashboard({
       setManualInvoiceRows(manualInvoiceData.rows || []);
       setSummary(summaryData.summary || null);
       setHwLastUpload(lastUploadData.last_upload || null);
+      setHwAcceptanceSummary(acceptanceSummaryData || null);
       setPaymentRows(paymentsData.rows || []);
       setUpcomingRows(upcomingData.rows || []);
       setOverdueRows(upcomingData.overdue_rows || []);
@@ -4813,27 +4671,41 @@ function FinanceDashboard({
     return filteredManualInvoiceRows.reduce(
       (acc, row) => {
         const total = Number(row.toplam_tutar || 0);
-        const paid = Number(row.odenen_tutar || 0);
+        const paid = Number(row.odened_tutar || row.odenen_tutar || 0);
         const remaining = Number(row.kalan_borc || 0);
-
-        acc.totalAmount += total;
-        acc.totalPaid += paid;
-        acc.totalRemaining += remaining;
-
-        if (remaining > 0) acc.waitingCount += 1;
-        if (paid > 0) acc.paidCount += 1;
-
+        const turu = row.fatura_turu || 'GELEN';
+        if (turu === 'IADE') {
+          acc.totalIade += total;
+        } else {
+          acc.totalGelen += total;
+          acc.totalPaid += paid;
+          acc.totalRemaining += remaining;
+          if (remaining > 0) acc.waitingCount += 1;
+          if (paid > 0) acc.paidCount += 1;
+        }
+        acc.totalAmount += (turu === 'IADE' ? -total : total);
         return acc;
       },
-      {
-        totalAmount: 0,
-        totalPaid: 0,
-        totalRemaining: 0,
-        waitingCount: 0,
-        paidCount: 0,
-      },
+      { totalGelen: 0, totalIade: 0, totalPaid: 0, totalRemaining: 0, totalAmount: 0, waitingCount: 0, paidCount: 0 },
     );
   }, [filteredManualInvoiceRows]);
+
+  // Tedarikçi aramasına göre hakediş yükle
+  useEffect(() => {
+    const q = manualInvoiceSearch.trim();
+    if (!q || q.length < 2) { setHakedisData(null); return; }
+    const t = setTimeout(async () => {
+      setHakedisLoading(true);
+      try {
+        const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+        const r = await fetch(`${API_BASE}/finance/subcon-hakedis-detail?subcon=${encodeURIComponent(q)}`, { headers:{ Authorization:`Bearer ${tkn}` } });
+        const d = await r.json();
+        if (d.ok && d.total_hakedis > 0) setHakedisData(d); else setHakedisData(null);
+      } catch { setHakedisData(null); }
+      setHakedisLoading(false);
+    }, 700);
+    return () => clearTimeout(t);
+  }, [manualInvoiceSearch]);
 
   if (loading) return <div className="loading">Yükleniyor...</div>;
 
@@ -4877,6 +4749,12 @@ function FinanceDashboard({
           onUploaded={loadFinance}
         />
       )}
+      {showFinanceHwAcceptanceUpload && (
+        <HWAcceptanceUploadInline
+          onClose={() => setShowFinanceHwAcceptanceUpload(false)}
+          onUploaded={loadFinance}
+        />
+      )}
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"16px", marginBottom:"24px" }}>
         {/* Toplam Tahsilat */}
@@ -4914,16 +4792,69 @@ function FinanceDashboard({
           <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(thisMonthInvoiced || 0, "TRY")}</div>
           <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay faturalanan</div>
         </div>
-        {/* Gider Kayıt */}
-        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden", cursor:"pointer" }} onClick={handleShowSubconModal}>
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#ef4444,#f87171)" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Gider Kayıt</div>
-            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#fef2f2", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📉</div>
-          </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalRemaining || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Tıkla: taşeron hakediş</div>
-        </div>
+        {/* HW Fatura Onay Bekler */}
+        {(() => {
+          const acc = hwAcceptanceSummary;
+          const totalUsd = acc?.total_usd || 0;
+          const totalTry = acc?.total_try || 0;
+          const count    = acc?.total_count || 0;
+          const handlers = acc?.by_handler || [];
+          const fmtAmt = (usd, tryAmt) => {
+            if (usd > 0) return usd >= 1000000 ? `$${(usd/1000000).toFixed(1)}M` : usd >= 1000 ? `$${Math.round(usd/1000)}K` : `$${Math.round(usd)}`;
+            if (tryAmt > 0) return tryAmt >= 1000000 ? `₺${(tryAmt/1000000).toFixed(1)}M` : `₺${Math.round(tryAmt/1000)}K`;
+            return "$0";
+          };
+          const progColor = (prog) => {
+            const [d, t] = (prog || "0/0").split("/").map(Number);
+            const p = t > 0 ? d/t : 0;
+            return p === 0 ? "#ef4444" : p < 0.75 ? "#f59e0b" : "#22c55e";
+          };
+          const topHandlers = handlers.slice(0, 3);
+          const moreCount = handlers.length - topHandlers.length;
+          return (
+            <div style={{ background:"#fff", borderRadius:"12px", padding:"16px 20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden", cursor: count > 0 ? "pointer" : "default" }}
+              onClick={() => count > 0 && setShowHwAcceptanceModal(true)}>
+              <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#f59e0b,#fbbf24)" }}/>
+              {/* Header */}
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
+                <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>HW Fatura Onay Bekler</div>
+                <div style={{ width:"30px", height:"30px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px" }}>📋</div>
+              </div>
+              {count === 0 ? (
+                <div style={{ fontSize:"12px", color:"#9ca3af" }}>Veri yok · Acceptance yükleyin</div>
+              ) : (
+                <>
+                  {/* Toplam */}
+                  <div style={{ display:"flex", alignItems:"baseline", gap:"6px", marginBottom:"8px" }}>
+                    <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>{fmtAmt(totalUsd, totalTry)}</div>
+                    <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
+                  </div>
+                  {/* Handler kırılımı */}
+                  <div style={{ borderTop:"1px solid #f1f5f9", paddingTop:"8px", display:"flex", flexDirection:"column", gap:"5px" }}>
+                    {topHandlers.map((h, i) => {
+                      const clr = progColor(h.progress);
+                      return (
+                        <div key={i} style={{ display:"flex", alignItems:"center", gap:"6px" }}>
+                          <div style={{ width:"22px", height:"22px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", fontSize:"9px", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                            {(h.handler||"?")[0].toUpperCase()}
+                          </div>
+                          <div style={{ flex:1, overflow:"hidden" }}>
+                            <div style={{ fontSize:"11px", fontWeight:600, color:"#1e293b", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{h.handler}</div>
+                          </div>
+                          <span style={{ fontSize:"10px", fontWeight:700, color:clr, flexShrink:0 }}>{h.progress}</span>
+                          <span style={{ fontSize:"11px", fontWeight:700, color:"#0f172a", flexShrink:0 }}>{fmtAmt(h.total_usd, h.total_try)}</span>
+                        </div>
+                      );
+                    })}
+                    {moreCount > 0 && (
+                      <div style={{ fontSize:"10px", color:"#6b7280", textAlign:"right" }}>+{moreCount} kişi daha · detay için tıkla</div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div style={{ background:"#fff", borderRadius:"12px", border:"1px solid #e2e8f0", marginBottom:"24px", overflow:"hidden" }}>
@@ -5195,6 +5126,80 @@ function FinanceDashboard({
         </table>
       </div>
 
+      {/* HW Acceptance Detay Modal */}
+      {showHwAcceptanceModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}
+          onClick={() => setShowHwAcceptanceModal(false)}>
+          <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"720px", maxHeight:"85vh", overflow:"hidden", display:"flex", flexDirection:"column" }}
+            onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ padding:"20px 24px 16px", borderBottom:"1px solid #e5e7eb", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div>
+                <div style={{ fontSize:"17px", fontWeight:800, color:"#0f172a" }}>📋 HW Fatura Onay Bekler</div>
+                <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"2px" }}>
+                  {hwAcceptanceSummary?.total_count || 0} acceptance • Toplam:&nbsp;
+                  {hwAcceptanceSummary?.total_usd > 0 && <strong>${Number(hwAcceptanceSummary.total_usd).toLocaleString("en-US", {maximumFractionDigits:0})}</strong>}
+                  {hwAcceptanceSummary?.total_try > 0 && <strong> + ₺{Number(hwAcceptanceSummary.total_try).toLocaleString("tr-TR", {maximumFractionDigits:0})}</strong>}
+                </div>
+              </div>
+              <button onClick={() => setShowHwAcceptanceModal(false)}
+                style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#6b7280", padding:"4px 8px" }}>✕</button>
+            </div>
+            {/* Body */}
+            <div style={{ overflowY:"auto", padding:"16px 24px 24px" }}>
+              {(!hwAcceptanceSummary?.by_handler?.length) ? (
+                <div style={{ textAlign:"center", color:"#9ca3af", padding:"40px 0" }}>
+                  Henüz veri yok. Sidebar'dan "HW Acceptance Yükle" ile Excel yükleyin.
+                </div>
+              ) : hwAcceptanceSummary.by_handler.map((h, hi) => {
+                const [done, total] = (h.progress || "0/0").split("/").map(Number);
+                const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                const progColor = pct === 0 ? "#ef4444" : pct < 75 ? "#f59e0b" : "#22c55e";
+                const handlerAmt = h.total_usd > 0 ? `$${Number(h.total_usd).toLocaleString("en-US",{maximumFractionDigits:0})}` : `₺${Number(h.total_try).toLocaleString("tr-TR",{maximumFractionDigits:0})}`;
+                return (
+                  <div key={hi} style={{ border:"1px solid #e5e7eb", borderRadius:"12px", marginBottom:"12px", overflow:"hidden" }}>
+                    {/* Handler satırı */}
+                    <div style={{ background:"#f8fafc", padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px" }}>
+                      <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", fontWeight:700, flexShrink:0 }}>
+                        {(h.handler||"?")[0].toUpperCase()}
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:"14px", fontWeight:700, color:"#0f172a" }}>{h.handler}</div>
+                        <div style={{ display:"flex", alignItems:"center", gap:"8px", marginTop:"4px" }}>
+                          {/* Progress bar */}
+                          <div style={{ flex:1, height:"6px", background:"#e5e7eb", borderRadius:"999px", maxWidth:"120px" }}>
+                            <div style={{ height:"100%", width:`${pct}%`, background:progColor, borderRadius:"999px", transition:"width .3s" }}/>
+                          </div>
+                          <span style={{ fontSize:"12px", fontWeight:700, color:progColor }}>{h.progress}</span>
+                          <span style={{ fontSize:"11px", color:"#6b7280" }}>{h.count} kalem</span>
+                        </div>
+                      </div>
+                      <div style={{ fontSize:"17px", fontWeight:800, color:"#0f172a", flexShrink:0 }}>{handlerAmt}</div>
+                    </div>
+                    {/* Kırılım satırları */}
+                    <div style={{ padding:"0 0 4px" }}>
+                      {h.items.map((item, ii) => (
+                        <div key={ii} style={{ display:"flex", alignItems:"center", gap:"8px", padding:"7px 16px", borderTop: ii===0?"none":"1px solid #f3f4f6", fontSize:"12px" }}>
+                          <span style={{ background:"#f1f5f9", color:"#374151", padding:"2px 8px", borderRadius:"6px", fontWeight:600, flexShrink:0 }}>{item.site_code}</span>
+                          <span style={{ color:"#6b7280", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.milestone || item.acceptance_no}</span>
+                          <span style={{ background:"#eff6ff", color:"#1d4ed8", padding:"2px 7px", borderRadius:"6px", fontWeight:600, flexShrink:0 }}>{item.progress}</span>
+                          <span style={{ fontWeight:700, color:"#0f172a", flexShrink:0 }}>
+                            {item.currency === "TRY" || item.currency === "TL"
+                              ? `₺${Number(item.line_total).toLocaleString("tr-TR",{maximumFractionDigits:0})}`
+                              : `$${Number(item.line_total).toLocaleString("en-US",{maximumFractionDigits:0})}`
+                            }
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showOverdueModal && (
         <div
           style={{
@@ -5275,6 +5280,44 @@ function FinanceDashboard({
                     </tr>
                   ))
                 )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {hakedisModal && hakedisData && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:10001,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}
+          onClick={()=>setHakedisModal(false)}>
+          <div style={{ background:"#fff",borderRadius:16,padding:24,width:"100%",maxWidth:820,maxHeight:"80vh",overflow:"auto",boxShadow:"0 20px 40px rgba(0,0,0,0.25)" }}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+              <h3 style={{ margin:0,fontSize:17,fontWeight:800,color:"#1e3a5f" }}>🏗️ {hakedisData.subcon} — Hakediş Detayı</h3>
+              <button onClick={()=>setHakedisModal(false)} style={{ background:"#f3f4f6",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontWeight:700 }}>✕ Kapat</button>
+            </div>
+            <div style={{ background:"#faf5ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"10px 16px",marginBottom:14,fontWeight:700,color:"#6d28d9",fontSize:15 }}>
+              Toplam Hakediş: {formatMoneyByCurrency(hakedisData.total_hakedis,"TRY")}
+            </div>
+            <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
+              <thead>
+                <tr style={{ background:"#1e3a5f",color:"#fff" }}>
+                  {["Bölge","Site","Proje","Malzeme / Hizmet","Miktar","Birim Fiyat","Tutar (₺)"].map(h=>(
+                    <th key={h} style={{ padding:"7px 10px",textAlign:"left",fontWeight:600,whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {hakedisData.rows.map((r,i)=>(
+                  <tr key={i} style={{ borderBottom:"1px solid #e5e7eb",background:i%2===0?"#fff":"#f9fafb" }}>
+                    <td style={{ padding:"6px 10px" }}>{r.bolge||"-"}</td>
+                    <td style={{ padding:"6px 10px",fontWeight:600 }}>{r.site_code||"-"}</td>
+                    <td style={{ padding:"6px 10px" }}>{r.project_code||"-"}</td>
+                    <td style={{ padding:"6px 10px",maxWidth:200,wordBreak:"break-word" }}>{r.item_description||"-"}</td>
+                    <td style={{ padding:"6px 10px",textAlign:"center" }}>{r.done_qty}</td>
+                    <td style={{ padding:"6px 10px",textAlign:"right" }}>{r.currency==="USD"?`$${r.unit_price}`:formatTRY(r.unit_price)}</td>
+                    <td style={{ padding:"6px 10px",textAlign:"right",fontWeight:700,color:"#7c3aed" }}>{formatTRY(r.done_amount_tl)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -5409,6 +5452,8 @@ function FinanceDashboard({
                     odened_tutar: "",
                     kalan_borc: "",
                     note: "",
+                    fatura_turu: "GELEN",
+                    bagli_fatura_id: "",
                   });
                   setShowInvoiceFormPanel(true);
                 }}
@@ -5425,50 +5470,33 @@ function FinanceDashboard({
             </div>
 
             {/* SUMMARY */}
-            <div
-              style={{
-                padding: "16px 24px",
-                display: "flex",
-                gap: "12px",
-                flexWrap: "wrap",
-                borderBottom: "1px solid #e5e7eb",
-                flexShrink: 0,
-              }}
-            >
-              <div className="card ok statCard" style={{ minWidth: "220px" }}>
-                <div className="statLabel">Toplam Tutar</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalAmount || 0,
-                    "TRY",
-                  )}
-                </div>
+            <div style={{ padding:"12px 24px", display:"flex", gap:"10px", flexWrap:"wrap", borderBottom:"1px solid #e5e7eb", flexShrink:0, background:"#f8fafc" }}>
+              <div style={{ flex:"1 1 140px", background:"#f0fdf4", border:"1.5px solid #86efac", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#166534", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>📥 Toplam Gelen</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#15803d" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalGelen||0,"TRY")}</div>
               </div>
-
-              <div
-                className="card bekler statCard"
-                style={{ minWidth: "220px" }}
-              >
-                <div className="statLabel">Toplam Ödenen</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalPaid || 0,
-                    "TRY",
-                  )}
-                </div>
+              <div style={{ flex:"1 1 140px", background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#9a3412", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>↩️ Toplam İade</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#ea580c" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalIade||0,"TRY")}</div>
               </div>
-
-              <div
-                className="card cancel statCard"
-                style={{ minWidth: "220px" }}
-              >
-                <div className="statLabel">Kalan Borç</div>
-                <div className="statValue">
-                  {formatMoneyByCurrency(
-                    manualInvoiceSummary.totalRemaining || 0,
-                    "TRY",
-                  )}
-                </div>
+              <div style={{ flex:"1 1 140px", background:"#fff1f2", border:"1.5px solid #fecdd3", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#9f1239", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>⚖️ Net Borç</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#be123c" }}>{formatMoneyByCurrency((manualInvoiceSummary.totalGelen||0)-(manualInvoiceSummary.totalIade||0),"TRY")}</div>
+              </div>
+              <div style={{ flex:"1 1 140px", background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#1e40af", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>💳 Toplam Ödenen</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#1d4ed8" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalPaid||0,"TRY")}</div>
+              </div>
+              <div style={{ flex:"1 1 140px", background:"#fef2f2", border:"1.5px solid #fecaca", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#991b1b", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>🔴 Kalan Borç</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#dc2626" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalRemaining||0,"TRY")}</div>
+              </div>
+              <div onClick={()=>{ if(hakedisData) setHakedisModal(true); }}
+                style={{ flex:"1 1 140px", background:hakedisData?"#faf5ff":"#f9fafb", border:`1.5px solid ${hakedisData?"#c4b5fd":"#e5e7eb"}`, borderRadius:12, padding:"10px 14px", cursor:hakedisData?"pointer":"default" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:hakedisData?"#6d28d9":"#6b7280", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>🏗️ Hakediş{hakedisData?" ↗":""}</div>
+                {hakedisLoading ? <div style={{ fontSize:12,color:"#9ca3af" }}>Yükleniyor...</div>
+                  : hakedisData ? <div style={{ fontSize:16,fontWeight:800,color:"#7c3aed" }}>{formatMoneyByCurrency(hakedisData.total_hakedis||0,"TRY")}</div>
+                  : <div style={{ fontSize:12,color:"#9ca3af" }}>Tedarikçi ara →</div>}
               </div>
             </div>
 
@@ -5485,6 +5513,7 @@ function FinanceDashboard({
                 <table>
                   <thead>
                     <tr>
+                      <th>Tür</th>
                       <th>Bölge</th>
                       <th>Proje</th>
                       <th>Proje Kodu</th>
@@ -5501,10 +5530,11 @@ function FinanceDashboard({
                   </thead>
                   <tbody>
                     {filteredManualInvoiceRows.length === 0 ? (
-                      <EmptyRow colSpan={12} text="Kayıt bulunamadı" />
+                      <EmptyRow colSpan={13} text="Kayıt bulunamadı" />
                     ) : (
                       filteredManualInvoiceRows.map((row, index) => (
                         <tr key={row.id ?? index}>
+                          <td><span style={{ padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:700, background:row.fatura_turu==='IADE'?"#fff7ed":"#f0fdf4", color:row.fatura_turu==='IADE'?"#c2410c":"#166534", border:`1px solid ${row.fatura_turu==='IADE'?"#fed7aa":"#86efac"}` }}>{row.fatura_turu==='IADE'?'↩ İade':'↓ Gelen'}</span></td>
                           <td>{row.bolge || "-"}</td>
                           <td>{row.proje || "-"}</td>
                           <td>{row.proje_kodu || "-"}</td>
@@ -5567,162 +5597,239 @@ function FinanceDashboard({
               </div>
             </div>
 
-            {/* FORM PANEL */}
-            {showInvoiceFormPanel && (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  background: "rgba(255,255,255,0.96)",
-                  zIndex: 20,
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "20px 24px",
-                    borderBottom: "1px solid #e5e7eb",
-                    flexShrink: 0,
-                  }}
-                >
-                  <h3 className="listTitle" style={{ margin: 0 }}>
-                    {editingInvoiceId
-                      ? "🧾 Fatura Düzenle"
-                      : "🧾 Yeni Fatura Girişi"}
-                  </h3>
+          </div>
+        </div>
+      )}
 
-                  <button
-                    type="button"
-                    className="tab"
-                    onClick={() => {
-                      setShowInvoiceFormPanel(false);
-                      setEditingInvoiceId(null);
-                    }}
-                  >
-                    Geri Dön
+      {/* ── Fatura Giriş / Düzenle Modal (top-level) ───────────── */}
+      {showInvoiceFormPanel && (
+        <div
+          onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 11000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: "#f8fafc", borderRadius: "20px", width: "100%", maxWidth: "960px", maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", overflow: "hidden" }}
+          >
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #e5e7eb", flexShrink: 0 }}>
+              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
+                {editingInvoiceId ? "🧾 Fatura Düzenle" : "🧾 Yeni Fatura Girişi"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
+                style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", fontSize: "18px", cursor: "pointer", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
+              >✕</button>
+            </div>
+
+            {/* Scrollable form content */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 24px 24px" }}>
+              <form onSubmit={handleSaveManualInvoice}>
+
+                {/* BÖLÜM 0: PDF Otomatik Doldurma */}
+                <div style={{ background: pdfFilled ? "#f0fdf4" : "#eff6ff", borderRadius:"14px", padding:"16px 20px", marginBottom:"16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", border: pdfFilled ? "1.5px solid #86efac" : "1.5px dashed #93c5fd" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: pdfFilled ? 10 : 0 }}>
+                    <span style={{ fontSize:22 }}>{pdfParsing ? "⚙️" : pdfFilled ? "✅" : "📄"}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:700, fontSize:13, color: pdfFilled ? "#166534" : "#1d4ed8" }}>
+                        {pdfParsing ? "Fatura okunuyor..." : pdfFilled ? `${pdfFilled.count} alan otomatik dolduruldu — kontrol edin` : "PDF Yükle → Otomatik Doldur"}
+                      </div>
+                      {!pdfFilled && !pdfParsing && <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>Fatura PDF'ini yükleyin, alanlar otomatik dolsun</div>}
+                      {pdfFilled && <div style={{ fontSize:11, color:"#166534", marginTop:2 }}>📎 {pdfFileName} · Doldurulan: {pdfFilled.fields.join(", ")}</div>}
+                    </div>
+                    {!pdfParsing && (
+                      <label style={{ cursor:"pointer", padding:"8px 16px", background: pdfFilled ? "#16a34a" : "#2563eb", color:"#fff", borderRadius:8, fontSize:12, fontWeight:700, flexShrink:0 }}>
+                        {pdfFilled ? "🔄 Değiştir" : "📎 PDF Seç"}
+                        <input ref={invoicePdfRef} type="file" accept=".pdf,image/*" style={{ display:"none" }}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            setPdfFileName(file.name);
+                            setPdfParsing(true);
+                            setPdfFilled(null);
+                            try {
+                              const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+                              const fd = new FormData();
+                              fd.append("file", file);
+                              const r = await fetch(`${API_BASE}/invoice-parse`, {
+                                method:"POST",
+                                headers: { Authorization:`Bearer ${tkn}` },
+                                body: fd,
+                              });
+                              const data = await r.json();
+                              if (!data.ok) { alert("OCR hatası: " + (data.error||"bilinmeyen")); return; }
+                              const p = data.parsed || {};
+                              setPdfTempKey(data.temp_key || "");
+                              const filled = [];
+                              setInvoiceForm(prev => {
+                                const next = { ...prev };
+                                if (p.fatura_no)    { next.fatura_no = p.fatura_no;         filled.push("Fatura No"); }
+                                if (p.fatura_tarihi){ next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
+                                if (p.tedarikci)    { next.tedarikci = p.tedarikci;         filled.push("Tedarikçi"); }
+                                if (p.tutar)        { next.tutar = p.tutar;                 filled.push("Tutar"); }
+                                if (p.kdv)          { next.kdv = p.kdv;                     filled.push("KDV"); }
+                                if (p.toplam_tutar) { next.toplam_tutar = p.toplam_tutar;   filled.push("Toplam"); }
+                                return next;
+                              });
+                              setPdfFilled({ count: filled.length || 0, fields: filled.length ? filled : ["Belge yüklendi"] });
+                            } catch (err) {
+                              alert("PDF işleme hatası: " + err.message);
+                            } finally {
+                              setPdfParsing(false);
+                              if (invoicePdfRef.current) invoicePdfRef.current.value = "";
+                            }
+                          }}
+                        />
+                      </label>
+                    )}
+                    {pdfParsing && <div style={{ width:24, height:24, border:"3px solid #93c5fd", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />}
+                  </div>
+                </div>
+
+                {/* Fatura Türü */}
+                {!editingInvoiceId && (
+                <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                  <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Fatura Türü:</span>
+                  {[["GELEN","📥 Gelen Fatura (Alış)","#166534","#f0fdf4","#86efac"],["IADE","↩️ İade Fatura (Kesilen)","#c2410c","#fff7ed","#fed7aa"]].map(([val,lbl,col,bg,brd])=>(
+                    <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:invoiceForm.fatura_turu===val?bg:"#f9fafb", border:`1.5px solid ${invoiceForm.fatura_turu===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:invoiceForm.fatura_turu===val?col:"#6b7280" }}>
+                      <input type="radio" name="fatura_turu" value={val} checked={invoiceForm.fatura_turu===val} onChange={()=>setInvoiceForm(p=>({...p,fatura_turu:val}))} style={{ display:"none" }} />{lbl}
+                    </label>
+                  ))}
+                  {invoiceForm.fatura_turu==='IADE' && (
+                    <select value={invoiceForm.bagli_fatura_id||""} onChange={e=>setInvoiceForm(p=>({...p,bagli_fatura_id:e.target.value}))}
+                      style={{ flex:1, minWidth:200, padding:"7px 12px", border:"1.5px solid #fed7aa", borderRadius:8, fontSize:13 }}>
+                      <option value="">— Bağlı Fatura Seç (opsiyonel)</option>
+                      {manualInvoiceRows.filter(r=>r.fatura_turu!=='IADE').map(r=>(
+                        <option key={r.id} value={r.id}>{r.fatura_no} — {r.tedarikci} — {formatTRY(r.toplam_tutar)}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                )}
+
+                {/* BÖLÜM 1: Proje Bilgileri */}
+                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />
+                    Proje Bilgileri
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                    {[
+                      { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara" },
+                      { label: "Proje", name: "proje", placeholder: "TT / TC" },
+                      { label: "Proje Kodu", name: "proje_kodu", placeholder: "56A0QEF" },
+                    ].map(f => (
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
+                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* BÖLÜM 2: Fatura Bilgileri */}
+                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#8b5cf6", display: "inline-block" }} />
+                    Fatura Bilgileri
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                    {[
+                      { label: "Fatura No *", name: "fatura_no", placeholder: "ABC2025/001" },
+                      { label: "Tedarikçi *", name: "tedarikci", placeholder: "Firma adı" },
+                      { label: "RF Montaj Firma", name: "rf_montaj_firma", placeholder: "Subcon firma adı" },
+                      { label: "Fatura Kalemi", name: "fatura_kalemi", placeholder: "Malzeme / Hizmet" },
+                      { label: "İş Kalemi", name: "is_kalemi", placeholder: "KONAKLAMA / PROJE" },
+                      { label: "PO No", name: "po_no", placeholder: "PO numarası" },
+                      { label: "Site ID", name: "site_id", placeholder: "BU8944" },
+                    ].map(f => (
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
+                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                    <div>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>Fatura Tarihi</label>
+                      <input type="date" name="fatura_tarihi" value={invoiceForm.fatura_tarihi} onChange={handleInvoiceFormChange}
+                        style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#7e22ce", marginBottom: "6px" }}>💸 Ödeme Tarihi</label>
+                      <input type="date" name="odeme_tarihi" value={invoiceForm.odeme_tarihi} onChange={handleInvoiceFormChange}
+                        style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #d8b4fe", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box", background:"#fdf4ff" }} />
+                      <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Nakit Akış'ta taşeron satırı olarak görünür</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* BÖLÜM 3: Finansal Bilgiler */}
+                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
+                    Finansal Bilgiler
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "14px" }}>
+                    {[
+                      { label: "Tutar (₺)", name: "tutar" },
+                      { label: "KDV (₺)", name: "kdv" },
+                      { label: "Toplam Tutar (₺) *", name: "toplam_tutar" },
+                      { label: "Ödenen Tutar (₺)", name: "odenen_tutar" },
+                      { label: "Kalan Borç (₺)", name: "kalan_borc" },
+                    ].map(f => (
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <input type="number" step="0.01" name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder="0"
+                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* BÖLÜM 4: Not + Fatura Fotoğrafı */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                  <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
+                      Not / Açıklama
+                    </div>
+                    <textarea name="note" value={invoiceForm.note} onChange={handleInvoiceFormChange} placeholder="Ödeme planı, açıklama, notlar..." rows={5}
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", resize: "vertical", boxSizing: "border-box" }} />
+                  </div>
+
+                  <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
+                      Fatura Belgesi (PDF / Fotoğraf)
+                    </div>
+                    {pdfTempKey && !editingInvoiceId ? (
+                      <div style={{ border:"1.5px solid #86efac", borderRadius:10, padding:"14px 16px", background:"#f0fdf4", display:"flex", alignItems:"center", gap:10 }}>
+                        <span style={{ fontSize:28 }}>📄</span>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontWeight:600, fontSize:13, color:"#166534" }}>Belge Hazır</div>
+                          <div style={{ fontSize:11, color:"#9ca3af" }}>{pdfFileName}</div>
+                        </div>
+                        <button type="button" onClick={()=>{setPdfTempKey("");setPdfFilled(null);setPdfFileName("");}} style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Kaldır</button>
+                      </div>
+                    ) : (
+                      <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                  <button type="button" className="tab"
+                    onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}>
+                    Vazgeç
+                  </button>
+                  <button type="submit" className="saveButton">
+                    {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
                   </button>
                 </div>
-
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px", background: "#f8fafc" }}>
-                  <form onSubmit={handleSaveManualInvoice}>
-
-                    {/* BÖLÜM 1: Proje Bilgileri */}
-                    <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />
-                        Proje Bilgileri
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
-                        {[
-                          { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara" },
-                          { label: "Proje", name: "proje", placeholder: "TT / TC" },
-                          { label: "Proje Kodu", name: "proje_kodu", placeholder: "56A0QEF" },
-                        ].map(f => (
-                          <div key={f.name}>
-                            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                            <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
-                              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* BÖLÜM 2: Fatura Bilgileri */}
-                    <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#8b5cf6", display: "inline-block" }} />
-                        Fatura Bilgileri
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
-                        {[
-                          { label: "Fatura No *", name: "fatura_no", placeholder: "ABC2025/001" },
-                          { label: "Tedarikçi *", name: "tedarikci", placeholder: "Firma adı" },
-                          { label: "RF Montaj Firma", name: "rf_montaj_firma", placeholder: "Subcon firma adı" },
-                          { label: "Fatura Kalemi", name: "fatura_kalemi", placeholder: "Malzeme / Hizmet" },
-                          { label: "İş Kalemi", name: "is_kalemi", placeholder: "KONAKLAMA / PROJE" },
-                          { label: "PO No", name: "po_no", placeholder: "PO numarası" },
-                          { label: "Site ID", name: "site_id", placeholder: "BU8944" },
-                        ].map(f => (
-                          <div key={f.name}>
-                            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                            <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
-                              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                          </div>
-                        ))}
-                        <div>
-                          <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>Fatura Tarihi</label>
-                          <input type="date" name="fatura_tarihi" value={invoiceForm.fatura_tarihi} onChange={handleInvoiceFormChange}
-                            style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                        </div>
-                        <div>
-                          <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#7e22ce", marginBottom: "6px" }}>💸 Ödeme Tarihi</label>
-                          <input type="date" name="odeme_tarihi" value={invoiceForm.odeme_tarihi} onChange={handleInvoiceFormChange}
-                            style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #d8b4fe", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box", background:"#fdf4ff" }} />
-                          <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Nakit Akış'ta taşeron satırı olarak görünür</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* BÖLÜM 3: Finansal Bilgiler */}
-                    <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
-                        Finansal Bilgiler
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "14px" }}>
-                        {[
-                          { label: "Tutar (₺)", name: "tutar" },
-                          { label: "KDV (₺)", name: "kdv" },
-                          { label: "Toplam Tutar (₺) *", name: "toplam_tutar" },
-                          { label: "Ödenen Tutar (₺)", name: "odenen_tutar" },
-                          { label: "Kalan Borç (₺)", name: "kalan_borc" },
-                        ].map(f => (
-                          <div key={f.name}>
-                            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                            <input type="number" step="0.01" name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder="0"
-                              style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* BÖLÜM 4: Not + Fatura Fotoğrafı */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-                      <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
-                          Not / Açıklama
-                        </div>
-                        <textarea name="note" value={invoiceForm.note} onChange={handleInvoiceFormChange} placeholder="Ödeme planı, açıklama, notlar..." rows={5}
-                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", resize: "vertical", boxSizing: "border-box" }} />
-                      </div>
-
-                      <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
-                          Fatura Belgesi (PDF / Fotoğraf)
-                        </div>
-                        <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                      <button type="button" className="tab"
-                        onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}>
-                        Vazgeç
-                      </button>
-                      <button type="submit" className="saveButton">
-                        {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            )}
+              </form>
+            </div>
           </div>
         </div>
       )}
@@ -7193,6 +7300,7 @@ function FinanceDashboard({
                     <th>Ödenen</th>
                     <th>Kalan Borç</th>
                     <th>Fazla Ödeme</th>
+                    <th>İşlem</th>
                   </tr>
                 </thead>
 
@@ -7256,6 +7364,14 @@ function FinanceDashboard({
                           >
                             {formatMoneyByCurrency(row.fazla_odeme || 0, "TRY")}
                           </td>
+                          <td onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => openTaseronFaturaPanel(row.subcon_name)}
+                              style={{ padding:"5px 10px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
+                            >
+                              🧾 Fatura Yönetimi
+                            </button>
+                          </td>
                         </tr>
                       ))}
 
@@ -7287,6 +7403,350 @@ function FinanceDashboard({
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          TAŞERON FATURA YÖNETİMİ PANEL
+      ═══════════════════════════════════════════════════════════════ */}
+      {showTaseronFaturaPanel && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:10500, display:"flex", alignItems:"flex-start", justifyContent:"center", overflowY:"auto", padding:"20px" }}
+          onClick={() => setShowTaseronFaturaPanel(false)}>
+          <div style={{ background:"#fff", width:"100%", maxWidth:"1100px", borderRadius:"20px", padding:"28px", boxShadow:"0 24px 60px rgba(0,0,0,0.18)", marginTop:"10px" }}
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"20px" }}>
+              <div>
+                <h2 style={{ margin:0, fontSize:"20px", fontWeight:800, color:"#1e3a5f" }}>🧾 Taşeron Fatura Yönetimi</h2>
+                <div style={{ fontSize:"15px", color:"#4f46e5", fontWeight:700, marginTop:"2px" }}>{taseronFaturaAdi}</div>
+              </div>
+              <div style={{ display:"flex", gap:"10px" }}>
+                <button onClick={() => { setFaturaForm({ taseron_adi: taseronFaturaAdi, fatura_no:"", fatura_tarihi:"", toplam_tutar:"", kdv_tutar:"", genel_toplam:"", aciklama:"", kalemler:[] }); setShowYeniFaturaModal(true); }}
+                  style={{ padding:"9px 18px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+                  ➕ Yeni Fatura
+                </button>
+                <button onClick={() => { setOdemeForm({ fatura_id:"", tutar:"", odeme_tarihi: new Date().toISOString().slice(0,10), aciklama:"" }); setShowTaseronOdemeModal(true); }}
+                  style={{ padding:"9px 18px", background:"linear-gradient(135deg,#059669,#10b981)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+                  💳 Ödeme Gir
+                </button>
+                <a href={`${API_BASE}/taseron/hakedis-excel/${encodeURIComponent(taseronFaturaAdi)}`}
+                  style={{ padding:"9px 16px", background:"#f0fdf4", color:"#166534", border:"1px solid #86efac", borderRadius:"10px", fontWeight:600, cursor:"pointer", fontSize:"13px", textDecoration:"none", display:"inline-flex", alignItems:"center", gap:"5px" }}>
+                  📥 Excel İndir
+                </a>
+                <button onClick={() => setShowTaseronFaturaPanel(false)}
+                  style={{ padding:"9px 16px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
+                  ✕ Kapat
+                </button>
+              </div>
+            </div>
+
+            {/* Özet Kartlar */}
+            {taseronHakedisOzet && (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"12px", marginBottom:"24px" }}>
+                {[
+                  { label:"Toplam Fatura", val: taseronHakedisOzet.total_fatura, color:"#1d4ed8", bg:"#eff6ff" },
+                  { label:"Toplam Ödeme", val: taseronHakedisOzet.total_odeme, color:"#059669", bg:"#f0fdf4" },
+                  { label:"Kalan Borç", val: taseronHakedisOzet.kalan_borc, color:"#dc2626", bg:"#fef2f2" },
+                  { label:"Fazla Ödeme", val: taseronHakedisOzet.fazla_odeme, color:"#f59e0b", bg:"#fffbeb" },
+                ].map(c => (
+                  <div key={c.label} style={{ background:c.bg, border:`1.5px solid ${c.color}30`, borderRadius:"12px", padding:"14px 18px" }}>
+                    <div style={{ fontSize:"12px", color:"#6b7280", fontWeight:600, marginBottom:"4px" }}>{c.label}</div>
+                    <div style={{ fontSize:"18px", fontWeight:800, color:c.color }}>{Number(c.val||0).toLocaleString("tr-TR",{style:"currency",currency:"TRY",maximumFractionDigits:2})}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {taseronFaturaLoading ? (
+              <div style={{ textAlign:"center", padding:"40px", color:"#6b7280" }}>Yükleniyor...</div>
+            ) : (
+              <>
+                {/* FATURALAR LİSTESİ */}
+                <h3 style={{ fontSize:"15px", fontWeight:700, color:"#1e3a5f", margin:"0 0 12px" }}>📋 Faturalar</h3>
+                {taseronFaturaList.length === 0 ? (
+                  <div style={{ textAlign:"center", padding:"20px", color:"#9ca3af", background:"#f9fafb", borderRadius:"10px", marginBottom:"20px" }}>Henüz fatura girilmemiş</div>
+                ) : (
+                  <div style={{ marginBottom:"24px", overflowX:"auto" }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+                      <thead>
+                        <tr style={{ background:"#f1f5f9" }}>
+                          <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Fatura No</th>
+                          <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Tarih</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Matrah</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>KDV</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Genel Toplam</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Ödenen</th>
+                          <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Kalan</th>
+                          <th style={{ padding:"10px 12px", textAlign:"center", fontWeight:700, color:"#374151" }}>Durum</th>
+                          <th style={{ padding:"10px 12px", textAlign:"center", fontWeight:700, color:"#374151" }}>İşlem</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {taseronFaturaList.map(f => (
+                          <>
+                            <tr key={f.id} style={{ borderBottom:"1px solid #e5e7eb", cursor:"pointer" }}
+                              onClick={() => setFaturaDetailOpen(faturaDetailOpen === f.id ? null : f.id)}>
+                              <td style={{ padding:"10px 12px", fontWeight:600, color:"#1d4ed8" }}>{f.fatura_no || "-"}</td>
+                              <td style={{ padding:"10px 12px", color:"#374151" }}>{f.fatura_tarihi ? String(f.fatura_tarihi).slice(0,10) : "-"}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right" }}>{Number(f.toplam_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right" }}>{Number(f.kdv_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right", fontWeight:700 }}>{Number(f.genel_toplam||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right", color:"#059669", fontWeight:600 }}>{Number(f.odenen_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"right", color: Number(f.kalan_tutar||0) > 0 ? "#dc2626" : "#059669", fontWeight:700 }}>{Number(f.kalan_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                              <td style={{ padding:"10px 12px", textAlign:"center" }}>
+                                <span style={{ padding:"3px 10px", borderRadius:"20px", fontSize:"11px", fontWeight:700,
+                                  background: f.durum==="odendi" ? "#dcfce7" : f.durum==="kismi" ? "#fef3c7" : "#fee2e2",
+                                  color: f.durum==="odendi" ? "#166534" : f.durum==="kismi" ? "#92400e" : "#991b1b" }}>
+                                  {f.durum==="odendi" ? "✅ Ödendi" : f.durum==="kismi" ? "⏳ Kısmi" : "❌ Bekliyor"}
+                                </span>
+                              </td>
+                              <td style={{ padding:"10px 12px", textAlign:"center" }} onClick={e => e.stopPropagation()}>
+                                <button onClick={() => { setOdemeForm({ fatura_id: f.id, tutar:"", odeme_tarihi: new Date().toISOString().slice(0,10), aciklama:"" }); setShowTaseronOdemeModal(true); }}
+                                  style={{ marginRight:"6px", padding:"4px 8px", background:"#d1fae5", color:"#065f46", border:"none", borderRadius:"6px", fontSize:"11px", cursor:"pointer", fontWeight:600 }}>💳 Öde</button>
+                                <button onClick={() => handleDeleteFatura(f.id)}
+                                  style={{ padding:"4px 8px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", fontSize:"11px", cursor:"pointer", fontWeight:600 }}>🗑️ Sil</button>
+                              </td>
+                            </tr>
+                            {faturaDetailOpen === f.id && f.kalemler && f.kalemler.length > 0 && (
+                              <tr key={`detail-${f.id}`}>
+                                <td colSpan={9} style={{ padding:"0 12px 12px 32px", background:"#f8fafc" }}>
+                                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px", marginTop:"8px" }}>
+                                    <thead>
+                                      <tr style={{ background:"#e2e8f0" }}>
+                                        <th style={{ padding:"6px 10px", textAlign:"left" }}>Site ID</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"left" }}>Saha</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"left" }}>Kalem</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"right" }}>Tutar</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"right" }}>Ödenen</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"right" }}>Kalan</th>
+                                        <th style={{ padding:"6px 10px", textAlign:"center" }}>Durum</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {f.kalemler.map((k, ki) => k && (
+                                        <tr key={ki} style={{ borderBottom:"1px solid #e2e8f0" }}>
+                                          <td style={{ padding:"6px 10px", fontWeight:600, color:"#4f46e5" }}>{k.site_id||"-"}</td>
+                                          <td style={{ padding:"6px 10px" }}>{k.saha_adi||"-"}</td>
+                                          <td style={{ padding:"6px 10px" }}>{k.kalem_aciklama||"-"}</td>
+                                          <td style={{ padding:"6px 10px", textAlign:"right", fontWeight:600 }}>{Number(k.tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                                          <td style={{ padding:"6px 10px", textAlign:"right", color:"#059669" }}>{Number(k.odenen||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                                          <td style={{ padding:"6px 10px", textAlign:"right", color: Number(k.kalan||0) > 0 ? "#dc2626" : "#059669", fontWeight:600 }}>{Number(k.kalan||0).toLocaleString("tr-TR",{minimumFractionDigits:2})}</td>
+                                          <td style={{ padding:"6px 10px", textAlign:"center" }}>
+                                            {Number(k.kalan||0) <= 0 ? "✅" : Number(k.odenen||0) > 0 ? "⏳" : "❌"}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* ÖDEMELER LİSTESİ */}
+                <h3 style={{ fontSize:"15px", fontWeight:700, color:"#1e3a5f", margin:"0 0 12px" }}>💳 Ödemeler</h3>
+                {taseronOdemeList.length === 0 ? (
+                  <div style={{ textAlign:"center", padding:"20px", color:"#9ca3af", background:"#f9fafb", borderRadius:"10px" }}>Henüz ödeme girilmemiş</div>
+                ) : (
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+                    <thead>
+                      <tr style={{ background:"#f0fdf4" }}>
+                        <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Tarih</th>
+                        <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Fatura No</th>
+                        <th style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#374151" }}>Tutar</th>
+                        <th style={{ padding:"10px 12px", textAlign:"left", fontWeight:700, color:"#374151" }}>Açıklama</th>
+                        <th style={{ padding:"10px 12px", textAlign:"center", fontWeight:700, color:"#374151" }}>İşlem</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {taseronOdemeList.map(o => (
+                        <tr key={o.id} style={{ borderBottom:"1px solid #e5e7eb" }}>
+                          <td style={{ padding:"10px 12px" }}>{o.odeme_tarihi ? String(o.odeme_tarihi).slice(0,10) : "-"}</td>
+                          <td style={{ padding:"10px 12px", color:"#4f46e5", fontWeight:600 }}>{o.fatura_no || "—"}</td>
+                          <td style={{ padding:"10px 12px", textAlign:"right", fontWeight:700, color:"#059669" }}>{Number(o.tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})} ₺</td>
+                          <td style={{ padding:"10px 12px", color:"#6b7280" }}>{o.aciklama||"—"}</td>
+                          <td style={{ padding:"10px 12px", textAlign:"center" }}>
+                            <button onClick={() => handleDeleteOdeme(o.id)}
+                              style={{ padding:"4px 8px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", fontSize:"11px", cursor:"pointer", fontWeight:600 }}>🗑️ Sil</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          YENİ TAŞERON FATURA MODAL
+      ═══════════════════════════════════════════════════════════════ */}
+      {showYeniFaturaModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:11000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}
+          onClick={() => setShowYeniFaturaModal(false)}>
+          <div style={{ background:"#fff", width:"100%", maxWidth:"680px", maxHeight:"90vh", overflowY:"auto", borderRadius:"20px", padding:"28px", boxShadow:"0 24px 60px rgba(0,0,0,0.2)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin:"0 0 20px", fontSize:"18px", fontWeight:800, color:"#1e3a5f" }}>➕ Yeni Taşeron Faturası</h3>
+
+            {/* PDF Yükle */}
+            <div style={{ background:"#f0f7ff", border:"2px dashed #93c5fd", borderRadius:"12px", padding:"16px", marginBottom:"20px", textAlign:"center" }}>
+              <div style={{ fontSize:"13px", color:"#1d4ed8", fontWeight:600, marginBottom:"10px" }}>📎 PDF Yükle — Otomatik Doldur</div>
+              <label style={{ display:"inline-block", padding:"8px 20px", background:"#1d4ed8", color:"#fff", borderRadius:"8px", cursor:"pointer", fontWeight:600, fontSize:"13px" }}>
+                {taseronPdfParsing ? "⏳ Okunuyor..." : "📂 PDF Seç"}
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} disabled={taseronPdfParsing}
+                  onChange={e => e.target.files[0] && handlePdfParseTaseron(e.target.files[0])} />
+              </label>
+              <div style={{ fontSize:"11px", color:"#60a5fa", marginTop:"6px" }}>Fatura no, tarih, tutar ve site ID'ler otomatik doldurulacak</div>
+            </div>
+
+            {/* Form Alanları */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"14px", marginBottom:"16px" }}>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Taşeron Adı *</label>
+                <input value={faturaForm.taseron_adi} onChange={e => setFaturaForm(f => ({...f, taseron_adi: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="ETAS, Federal vb." />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Fatura No</label>
+                <input value={faturaForm.fatura_no} onChange={e => setFaturaForm(f => ({...f, fatura_no: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="ETS2026000000007" />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Fatura Tarihi</label>
+                <input type="date" value={faturaForm.fatura_tarihi} onChange={e => setFaturaForm(f => ({...f, fatura_tarihi: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Matrah (TL)</label>
+                <input type="number" value={faturaForm.toplam_tutar} onChange={e => setFaturaForm(f => ({...f, toplam_tutar: e.target.value, genel_toplam: String((Number(e.target.value)||0) + (Number(f.kdv_tutar)||0)) }))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="0.00" />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>KDV Tutarı (TL)</label>
+                <input type="number" value={faturaForm.kdv_tutar} onChange={e => setFaturaForm(f => ({...f, kdv_tutar: e.target.value, genel_toplam: String((Number(f.toplam_tutar)||0) + (Number(e.target.value)||0)) }))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="0.00" />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:700, color:"#1d4ed8", display:"block", marginBottom:"4px" }}>Genel Toplam (TL) *</label>
+                <input type="number" value={faturaForm.genel_toplam} onChange={e => setFaturaForm(f => ({...f, genel_toplam: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"2px solid #3b82f6", borderRadius:"8px", fontSize:"15px", fontWeight:700, boxSizing:"border-box" }} placeholder="0.00" />
+              </div>
+            </div>
+            <div style={{ marginBottom:"16px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"4px" }}>Açıklama</label>
+              <input value={faturaForm.aciklama} onChange={e => setFaturaForm(f => ({...f, aciklama: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="İsteğe bağlı not" />
+            </div>
+
+            {/* Kalem Dağılımı */}
+            <div style={{ marginBottom:"20px" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"10px" }}>
+                <label style={{ fontSize:"13px", fontWeight:700, color:"#374151" }}>📍 Site Bazında Kalem Dağılımı ({faturaForm.kalemler.length} kalem)</label>
+                <button type="button" onClick={() => setFaturaForm(f => ({ ...f, kalemler: [...f.kalemler, { site_id:"", saha_adi:"", kalem_aciklama:"", tutar:"" }] }))}
+                  style={{ padding:"5px 12px", background:"#eff6ff", color:"#1d4ed8", border:"1px solid #bfdbfe", borderRadius:"7px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>
+                  ➕ Kalem Ekle
+                </button>
+              </div>
+              {faturaForm.kalemler.map((k, i) => (
+                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 1fr 2fr 1.2fr auto", gap:"8px", marginBottom:"8px", alignItems:"center" }}>
+                  <input value={k.site_id} onChange={e => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.map((x,j) => j===i ? {...x,site_id:e.target.value} : x) }))}
+                    style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px" }} placeholder="Site ID" />
+                  <input value={k.saha_adi} onChange={e => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.map((x,j) => j===i ? {...x,saha_adi:e.target.value} : x) }))}
+                    style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px" }} placeholder="Saha adı" />
+                  <input value={k.kalem_aciklama} onChange={e => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.map((x,j) => j===i ? {...x,kalem_aciklama:e.target.value} : x) }))}
+                    style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px" }} placeholder="Kalem açıklama" />
+                  <input type="number" value={k.tutar} onChange={e => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.map((x,j) => j===i ? {...x,tutar:e.target.value} : x) }))}
+                    style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px", textAlign:"right" }} placeholder="Tutar" />
+                  <button type="button" onClick={() => setFaturaForm(f => ({ ...f, kalemler: f.kalemler.filter((_,j) => j!==i) }))}
+                    style={{ padding:"8px 10px", background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"7px", cursor:"pointer", fontSize:"13px" }}>✕</button>
+                </div>
+              ))}
+              {faturaForm.kalemler.length > 0 && (
+                <div style={{ textAlign:"right", fontSize:"13px", color:"#374151", fontWeight:600, marginTop:"6px" }}>
+                  Kalem Toplamı: {faturaForm.kalemler.reduce((s,k) => s + (Number(k.tutar)||0), 0).toLocaleString("tr-TR",{minimumFractionDigits:2})} TL
+                  {Math.abs(faturaForm.kalemler.reduce((s,k) => s + (Number(k.tutar)||0), 0) - Number(faturaForm.genel_toplam||0)) > 0.01 && (
+                    <span style={{ color:"#dc2626", marginLeft:"10px" }}>⚠️ Genel toplam ile uyuşmuyor!</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
+              <button onClick={() => setShowYeniFaturaModal(false)}
+                style={{ padding:"11px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>İptal</button>
+              <button onClick={handleSaveFatura} disabled={savingFatura}
+                style={{ padding:"11px 28px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+                {savingFatura ? "Kaydediliyor..." : "💾 Kaydet"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          ÖDEME GİRİŞ MODAL
+      ═══════════════════════════════════════════════════════════════ */}
+      {showTaseronOdemeModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:11000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}
+          onClick={() => setShowTaseronOdemeModal(false)}>
+          <div style={{ background:"#fff", width:"100%", maxWidth:"440px", borderRadius:"18px", padding:"28px", boxShadow:"0 24px 60px rgba(0,0,0,0.2)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin:"0 0 20px", fontSize:"18px", fontWeight:800, color:"#065f46" }}>💳 Ödeme Girişi</h3>
+            <div style={{ fontSize:"14px", color:"#374151", fontWeight:600, marginBottom:"18px", padding:"10px 14px", background:"#f0fdf4", borderRadius:"8px" }}>
+              Taşeron: <strong style={{ color:"#059669" }}>{taseronFaturaAdi}</strong>
+            </div>
+
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"5px" }}>Fatura Seç (isteğe bağlı)</label>
+              <select value={odemeForm.fatura_id} onChange={e => setOdemeForm(f => ({...f, fatura_id: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}>
+                <option value="">— Genel ödeme (fatura seçilmeden) —</option>
+                {taseronFaturaList.filter(f => f.durum !== "odendi").map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.fatura_no || `#${f.id}`} — Kalan: {Number(f.kalan_tutar||0).toLocaleString("tr-TR",{minimumFractionDigits:2})} TL
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"5px" }}>Ödeme Tutarı (TL) *</label>
+              <input type="number" value={odemeForm.tutar} onChange={e => setOdemeForm(f => ({...f, tutar: e.target.value}))}
+                style={{ width:"100%", padding:"11px 14px", border:"2px solid #10b981", borderRadius:"8px", fontSize:"16px", fontWeight:700, boxSizing:"border-box" }} placeholder="0.00" autoFocus />
+            </div>
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"5px" }}>Ödeme Tarihi</label>
+              <input type="date" value={odemeForm.odeme_tarihi} onChange={e => setOdemeForm(f => ({...f, odeme_tarihi: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+            </div>
+            <div style={{ marginBottom:"20px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#374151", display:"block", marginBottom:"5px" }}>Açıklama</label>
+              <input value={odemeForm.aciklama} onChange={e => setOdemeForm(f => ({...f, aciklama: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} placeholder="İsteğe bağlı not" />
+            </div>
+
+            {odemeForm.fatura_id && (
+              <div style={{ marginBottom:"16px", padding:"12px", background:"#f0fdf4", borderRadius:"8px", fontSize:"13px", color:"#065f46" }}>
+                💡 Bu ödeme seçili faturanın kalemlerine <strong>yukarıdan aşağıya</strong> otomatik dağıtılacak.
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:"10px" }}>
+              <button onClick={() => setShowTaseronOdemeModal(false)}
+                style={{ flex:1, padding:"11px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>İptal</button>
+              <button onClick={handleSaveOdeme} disabled={savingOdeme}
+                style={{ flex:2, padding:"11px", background:"linear-gradient(135deg,#059669,#10b981)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
+                {savingOdeme ? "Kaydediliyor..." : "💾 Ödemeyi Kaydet"}
+              </button>
             </div>
           </div>
         </div>
@@ -7723,8 +8183,11 @@ function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
+  const _isMuhasebe = currentUser?.role === "muhasebe";
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
-  const [tab, setTab] = useState(_isNurcanHR ? "isg" : "personel");
+  // Muhasebe → maaş sekmelerini (personel, maas_avans) gizle, is_avans'tan başla
+  // Nurcan → isg'den başla  / Diğerleri → personel'den başla
+  const [tab, setTab] = useState(_isMuhasebe ? "is_avans" : (_isNurcanHR ? "isg" : "personel"));
   const [personelList, setPersonelList] = useState([]);
   const [isgTurleri, setIsgTurleri] = useState([]);
   const [isgUyarilar, setIsgUyarilar] = useState([]);
@@ -8180,7 +8643,9 @@ function HrDashboard({ onBack, currentUser }) {
 
       {/* Sekmeler */}
       <div style={{ display:"flex", gap:"8px", marginBottom:"20px" }}>
-        {[["personel","👤 Personel Maaş"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["puantaj","📋 Puantaj"],["isg","🎓 ISG / Belgeler"]].map(([k,l]) => (
+        {[["personel","👤 Personel Maaş"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["puantaj","📋 Puantaj"],["isg","🎓 ISG / Belgeler"]]
+        .filter(([k]) => !_isMuhasebe || !["personel","maas_avans"].includes(k))
+        .map(([k,l]) => (
           <button key={k} onClick={()=>{
             if (k === "personel" && !personelUnlocked) {
               const pwd = prompt("Personel bilgileri için şifre giriniz:");
@@ -10454,6 +10919,25 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
           </div>
         )}
 
+        {/* Onay not modal — viewForm'un early return'ü nedeniyle buraya eklenmeli */}
+        {notModal && (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}
+            onClick={()=>{setNotModal(null);setNotText("");}}>
+            <div style={{ background:"#fff", borderRadius:"16px", padding:"28px", width:"90%", maxWidth:"420px" }}
+              onClick={e=>e.stopPropagation()}>
+              <h3 style={{ margin:"0 0 16px" }}>✅ Onay Notu (opsiyonel)</h3>
+              <textarea value={notText} onChange={e=>setNotText(e.target.value)} rows={3} placeholder="Not eklemek ister misiniz?"
+                style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box", resize:"vertical" }} />
+              <div style={{ display:"flex", gap:"10px", marginTop:"14px" }}>
+                <button onClick={notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
+                  style={{ flex:1, padding:"12px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Onayla</button>
+                <button onClick={()=>{setNotModal(null);setNotText("");}}
+                  style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Red modal — viewForm'un early return'ü nedeniyle buraya eklenmeli */}
         {redModal && (
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}
@@ -11268,15 +11752,19 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [saving, setSaving] = useState(false);
   const [avansBakiye, setAvansBakiye] = useState(null);
   const [notTooltip, setNotTooltip] = useState({ visible: false, x: 0, y: 0, aciklama: "", not_aciklama: "" });
+  const [editAvansModal, setEditAvansModal] = useState(null); // { id, tutar, orijinalTutar }
 
   const _email = (currentUser?.email || "").toLowerCase();
-  const isPM = _email === "orhan.bedir@simsektel.com";
-  const isDirektor = _email === "duzgun.simsek@simsektel.com";
-  const isMuhasebe = _email === "muhasebe@simsektel.com";
+  const _role  = (currentUser?.role  || "").toLowerCase();
+  const isPM           = _email === "orhan.bedir@simsektel.com";
+  const isDirektor     = _email === "duzgun.simsek@simsektel.com";
+  const isMuhasebe     = _email === "muhasebe@simsektel.com";
   // Nurcan: herkesi görebilir, herkes için talep edebilir (yönetici yetkisi)
-  const isNurcan = _email === "nurcan.kus@simsektel.com";
-  // isRequester: sadece kendi avanslarını görür — Serdar ve diğer normal kullanıcılar
-  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isNurcan;
+  const isNurcan       = _email === "nurcan.kus@simsektel.com";
+  // Rollout Manager: rollout_mudur veya bolge_mudur rolüne sahip kullanıcılar
+  const isRolloutMudur = _role === "rollout_mudur" || _role === "bolge_mudur";
+  // isRequester: sadece kendi avanslarını görür
+  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const loadBakiye = async () => {
@@ -11368,6 +11856,12 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     load(); loadBakiye();
   };
 
+  // PM, TALEP veya ROLLOUT_MUDUR_ONAY durumundaki talepleri doğrudan PM_ONAY'a taşır
+  const handlePmDogrudan = async (id) => {
+    await fetch(`${API_BASE}/hr/is-avans/${id}/pm-onayla`, { method: "PUT" });
+    load(); loadBakiye();
+  };
+
   // Direktör, TALEP veya PM_ONAY durumundaki talepleri doğrudan onaylar (PM adımını atlar)
   const handleDirektorDogrudan = async (id) => {
     await fetch(`${API_BASE}/hr/is-avans/${id}/direktor-onayla`, { method: "PUT" });
@@ -11394,14 +11888,30 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     }
   };
 
+  const handleDuzenle = async () => {
+    const t = editAvansModal?.tutar;
+    if (!t || isNaN(Number(t.toString().replace(",", ".")))) { alert("Geçerli bir tutar giriniz!"); return; }
+    try {
+      const r = await fetch(`${API_BASE}/hr/is-avans/${editAvansModal.id}/duzenle`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tutar: Number(t.toString().replace(",", ".")) })
+      });
+      if (!r.ok) { const err = await r.json().catch(() => ({})); throw new Error(err.error || `Sunucu hatası (${r.status})`); }
+      setEditAvansModal(null);
+      load();
+    } catch (err) { alert("Düzenleme başarısız: " + err.message); }
+  };
+
   const durumBadge = (durum) => {
     const map = {
-      TALEP: { bg: "#e5e7eb", color: "#374151", label: "Talep Edildi" },
-      PM_ONAY: { bg: "#fed7aa", color: "#92400e", label: "Direktör Onayında" },
-      DIREKTOR_ONAY: { bg: "#dcfce7", color: "#166534", label: "Onaylandı · Ödeme Bekler" },
-      MUHASEBE_ONAY: { bg: "#fef9c3", color: "#713f12", label: "Muhasebe Onayında" },
-      TAMAMLANDI: { bg: "#dcfce7", color: "#166534", label: "Tamamlandı" },
-      REDDEDILDI: { bg: "#fee2e2", color: "#991b1b", label: "Reddedildi" },
+      TALEP:               { bg: "#e5e7eb", color: "#374151", label: "Talep Edildi" },
+      ROLLOUT_MUDUR_ONAY:  { bg: "#dbeafe", color: "#1e40af", label: "Rollout Müdür Onayında" },
+      PM_ONAY:             { bg: "#fed7aa", color: "#92400e", label: "PM Onayında" },
+      DIREKTOR_ONAY:       { bg: "#dcfce7", color: "#166534", label: "Onaylandı · Ödeme Bekler" },
+      MUHASEBE_ONAY:       { bg: "#fef9c3", color: "#713f12", label: "Muhasebe Onayında" },
+      TAMAMLANDI:          { bg: "#dcfce7", color: "#166534", label: "Tamamlandı" },
+      REDDEDILDI:          { bg: "#fee2e2", color: "#991b1b", label: "Reddedildi" },
     };
     const s = map[durum] || { bg: "#f3f4f6", color: "#6b7280", label: durum };
     return <span style={{ background: s.bg, color: s.color, borderRadius: "20px", padding: "3px 12px", fontSize: 12, fontWeight: 600 }}>{s.label}</span>;
@@ -11410,10 +11920,11 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const cardSt = { background: "#fff", borderRadius: "16px", boxShadow: "0 4px 20px rgba(0,0,0,0.07)", border: "1px solid #f3f4f6", padding: "24px" };
 
   const myPendingCount =
-    isPM ? list.filter(t => t.durum === "TALEP").length :
-    isDirektor ? list.filter(t => t.durum === "PM_ONAY").length :
-    isMuhasebe ? list.filter(t => t.durum === "DIREKTOR_ONAY").length :
-    isNurcan ? list.filter(t => t.durum === "TALEP").length : 0;
+    isRolloutMudur ? list.filter(t => t.durum === "TALEP").length :
+    isPM           ? list.filter(t => t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY").length :
+    isDirektor     ? list.filter(t => t.durum === "PM_ONAY").length :
+    isMuhasebe     ? list.filter(t => t.durum === "DIREKTOR_ONAY").length :
+    isNurcan       ? list.filter(t => t.durum === "TALEP").length : 0;
 
   const NotTooltipEl = notTooltip.visible ? (() => {
     const TW = 300;
@@ -11520,7 +12031,8 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
           style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", background: "#fff" }}>
           <option value="">Tüm Durumlar</option>
           <option value="TALEP">Talep Edildi</option>
-          <option value="PM_ONAY">Direktör Onayında</option>
+          <option value="ROLLOUT_MUDUR_ONAY">Rollout Müdür Onayında</option>
+          <option value="PM_ONAY">PM Onayında</option>
           <option value="DIREKTOR_ONAY">Onaylandı · Ödeme Bekler</option>
           <option value="TAMAMLANDI">Tamamlandı</option>
           <option value="REDDEDILDI">Reddedildi</option>
@@ -11538,8 +12050,12 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
           {visibleList.length === 0 && <div style={{ textAlign:"center", color:"#9ca3af", padding:"32px" }}>Kayıt bulunamadı</div>}
           {visibleList.map(t => {
-            const needsMyAction = (isPM && t.durum==="TALEP") || (isDirektor && t.durum==="PM_ONAY") || (isMuhasebe && t.durum==="DIREKTOR_ONAY");
-            const myPendingRequest = t.talep_eden_email===currentUser?.email && ["TALEP","PM_ONAY","DIREKTOR_ONAY"].includes(t.durum);
+            const needsMyAction =
+              (isRolloutMudur && t.durum==="TALEP") ||
+              (isPM && (t.durum==="TALEP" || t.durum==="ROLLOUT_MUDUR_ONAY")) ||
+              (isDirektor && t.durum==="PM_ONAY") ||
+              (isMuhasebe && t.durum==="DIREKTOR_ONAY");
+            const myPendingRequest = t.talep_eden_email===currentUser?.email && ["TALEP","ROLLOUT_MUDUR_ONAY","PM_ONAY","DIREKTOR_ONAY"].includes(t.durum);
             const cardBorder = needsMyAction ? "3px solid #f59e0b" : myPendingRequest ? "3px solid #f87171" : "3px solid #e5e7eb";
             const cardBg = needsMyAction ? "#fffbeb" : myPendingRequest ? "#fef2f2" : "#fff";
             return (
@@ -11578,16 +12094,26 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   {isPM && t.durum!=="DIREKTOR_ONAY" && t.durum!=="TAMAMLANDI" && (
                     <button onClick={()=>handleDelete(t.id)} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Sil</button>
                   )}
-                  {isPM && t.durum==="TALEP" && (
+                  {/* Rollout Manager: TALEP → ROLLOUT_MUDUR_ONAY */}
+                  {isRolloutMudur && t.durum==="TALEP" && (
                     <>
                       <button onClick={()=>handleOnayla(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                     </>
                   )}
-                  {isDirektor && (t.durum==="PM_ONAY" || t.durum==="TALEP") && (
+                  {/* PM: TALEP veya ROLLOUT_MUDUR_ONAY → PM_ONAY (doğrudan) */}
+                  {isPM && (t.durum==="TALEP" || t.durum==="ROLLOUT_MUDUR_ONAY") && (
+                    <>
+                      <button onClick={()=>handlePmDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
+                      <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
+                    </>
+                  )}
+                  {/* Direktör: PM_ONAY veya önceki aşamalardan doğrudan onay */}
+                  {isDirektor && (t.durum==="PM_ONAY" || t.durum==="ROLLOUT_MUDUR_ONAY" || t.durum==="TALEP") && (
                     <>
                       <button onClick={()=>handleDirektorDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
+                      <button onClick={()=>setEditAvansModal({ id:t.id, tutar:t.tutar, orijinalTutar:t.tutar })} style={{ padding:"6px 14px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>✏️ Düzenle</button>
                     </>
                   )}
                   {isMuhasebe && t.durum==="DIREKTOR_ONAY" && (
@@ -11618,12 +12144,13 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
               )}
               {visibleList.map((t, i) => {
                 const needsMyAction =
-                  (isPM && t.durum === "TALEP") ||
+                  (isRolloutMudur && t.durum === "TALEP") ||
+                  (isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY")) ||
                   (isDirektor && t.durum === "PM_ONAY") ||
                   (isMuhasebe && t.durum === "DIREKTOR_ONAY");
                 const myPendingRequest =
                   t.talep_eden_email === currentUser?.email &&
-                  (t.durum === "TALEP" || t.durum === "PM_ONAY" || t.durum === "DIREKTOR_ONAY");
+                  ["TALEP","ROLLOUT_MUDUR_ONAY","PM_ONAY","DIREKTOR_ONAY"].includes(t.durum);
                 const rowBg = needsMyAction ? "#fffbeb" : myPendingRequest ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#fafafa";
                 const rowBorder = needsMyAction ? "4px solid #f59e0b" : myPendingRequest ? "4px solid #f87171" : "4px solid transparent";
                 return (
@@ -11657,7 +12184,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                     {needsMyAction && <div style={{ fontSize:"10px", fontWeight:700, color:"#92400e", marginTop:"4px" }}>⏳ Onayınızı bekliyor</div>}
                     {myPendingRequest && !needsMyAction && (
                       <div style={{ fontSize:"10px", fontWeight:700, color:"#b91c1c", marginTop:"4px" }}>
-                        🕐 {t.durum === "TALEP" ? "PM onayı bekleniyor" : t.durum === "PM_ONAY" ? "Direktör onayı bekleniyor" : "Ödeme bekleniyor"}
+                        🕐 {t.durum === "TALEP" ? "Rollout Müdür onayı bekleniyor" : t.durum === "ROLLOUT_MUDUR_ONAY" ? "PM onayı bekleniyor" : t.durum === "PM_ONAY" ? "Direktör onayı bekleniyor" : "Ödeme bekleniyor"}
                       </div>
                     )}
                   </td>
@@ -11672,16 +12199,25 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                       {isPM && t.durum !== "DIREKTOR_ONAY" && t.durum !== "TAMAMLANDI" && (
                         <button onClick={() => handleDelete(t.id)} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Sil</button>
                       )}
-                      {isPM && t.durum === "TALEP" && (
+                      {/* Rollout Manager: TALEP → ROLLOUT_MUDUR_ONAY */}
+                      {isRolloutMudur && t.durum === "TALEP" && (
                         <>
                           <button onClick={() => handleOnayla(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                         </>
                       )}
-                      {isDirektor && (t.durum === "PM_ONAY" || t.durum === "TALEP") && (
+                      {/* PM: TALEP veya ROLLOUT_MUDUR_ONAY → PM_ONAY (doğrudan) */}
+                      {isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY") && (
+                        <>
+                          <button onClick={() => handlePmDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
+                          <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
+                        </>
+                      )}
+                      {isDirektor && (t.durum === "PM_ONAY" || t.durum === "ROLLOUT_MUDUR_ONAY" || t.durum === "TALEP") && (
                         <>
                           <button onClick={() => handleDirektorDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
+                          <button onClick={() => setEditAvansModal({ id: t.id, tutar: t.tutar, orijinalTutar: t.tutar })} style={{ padding: "4px 10px", background: "#fef3c7", color: "#92400e", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>✏️ Düzenle</button>
                         </>
                       )}
                       {isMuhasebe && t.durum === "DIREKTOR_ONAY" && (
@@ -11806,6 +12342,42 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
               <button onClick={handleReddet}
                 style={{ flex: 1, padding: "11px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer" }}>
                 Reddet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tutar Düzenleme Modal (Direktör) */}
+      {editAvansModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setEditAvansModal(null)}>
+          <div style={{ background: "#fff", borderRadius: "16px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 6px", fontSize: "18px", fontWeight: 700, color: "#92400e" }}>✏️ Tutar Düzenle</h3>
+            <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "18px" }}>
+              Talep edilen tutar: <strong>₺{Number(editAvansModal.orijinalTutar).toLocaleString("tr-TR")}</strong>
+            </div>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+              Yeni Tutar (₺) <span style={{ color: "#dc2626" }}>*</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={editAvansModal.tutar}
+                onChange={e => setEditAvansModal(m => ({ ...m, tutar: e.target.value }))}
+                autoFocus
+                style={{ display: "block", width: "100%", padding: "12px 14px", borderRadius: "10px", border: "2px solid #f59e0b", fontSize: "16px", fontWeight: 700, marginTop: "6px", boxSizing: "border-box" }}
+              />
+            </label>
+            <div style={{ display: "flex", gap: "8px", marginTop: "18px" }}>
+              <button onClick={() => setEditAvansModal(null)}
+                style={{ flex: 1, padding: "11px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "10px", fontWeight: 600, cursor: "pointer" }}>
+                İptal
+              </button>
+              <button onClick={handleDuzenle}
+                style={{ flex: 2, padding: "11px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer" }}>
+                Kaydet
               </button>
             </div>
           </div>
@@ -12319,53 +12891,61 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         return;
       }
 
-      const savedToken =
-        localStorage.getItem("financeToken") || localStorage.getItem("token");
+      // detailRows'u doğrudan kullan — backend filter hatalarından bağımsız,
+      // kullanıcının gördüğü ile birebir aynı satırlar
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
 
-      // Başlık "Bölge - Tip" formatındaysa bölgeyi al, değilse boş bırak
-      const regionName = String(detailTitle || "").includes(" - ")
-        ? String(detailTitle || "").split(" - ")[0].trim()
-        : "";
-      const exportType = detailTitle.includes("Faturalanmamış")
-        ? "NOT_INVOICED"
-        : detailTitle.includes("İptal")
-        ? "PO_IPTAL"
-        : "PO_BEKLER";
+      const headers = [
+        "Bölge", "Status", "QC Durum", "Kabul Durum", "Kabul Not",
+        "Project Code", "Site Code", "Item Code", "Item Description",
+        "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
+        "Birim Fiyat", "Para Birimi", "Toplam Tutar", "Taşeron", "OnAir Date", "RF Not"
+      ];
 
-      const params = new URLSearchParams({
-        region: regionName,
-        type: exportType,
-        subcon: isSubconUser ? userSubconName : "",
+      const data = detailRows.map(row => {
+        const unitPrice = Number(row.unit_price || 0);
+        const doneQty   = Number(row.done_qty   || 0);
+        const currency  = normalizeCurrency(row.currency);
+        return [
+          getRegion(row.site_code, row.project_code) || "",
+          row.status || "",
+          row.qc_durum || "NOK",
+          row.kabul_durum || "NOK",
+          row.kabul_not || "",
+          row.project_code || "",
+          row.site_code || "",
+          row.item_code || "",
+          row.item_description || "",
+          doneQty,
+          Number(row.requested_qty || 0),
+          Number(row.billed_qty    || 0),
+          Number(row.due_qty       || 0),
+          unitPrice,
+          currency,
+          Math.round(doneQty * unitPrice * 100) / 100,
+          row.subcon_name || "",
+          row.onair_date  || "",
+          row.note        || "",
+        ];
       });
 
-      const response = await fetch(
-        `${API_BASE}/export/detail-excel?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: savedToken ? `Bearer ${savedToken}` : "",
-          },
-        },
-      );
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("DETAIL EXCEL EXPORT ERROR:", errorText);
-        alert(`Excel indirilemedi:\n${errorText}`);
-        return;
-      }
+      // Kolon genişlikleri
+      ws["!cols"] = [
+        {wch:10},{wch:12},{wch:10},{wch:12},{wch:24},
+        {wch:14},{wch:22},{wch:18},{wch:45},
+        {wch:10},{wch:13},{wch:10},{wch:10},
+        {wch:12},{wch:10},{wch:14},{wch:20},{wch:12},{wch:24}
+      ];
 
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${regionName}_${exportType}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(url);
+      XLSX.utils.book_append_sheet(wb, ws, "Detay");
+      const regionName = String(detailTitle || "").includes(" - ")
+        ? String(detailTitle || "").split(" - ")[0].trim()
+        : "Tüm";
+      const safeTitle = detailTitle.replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ _-]/g, "").slice(0, 40);
+      XLSX.writeFile(wb, `${safeTitle}_${new Date().toISOString().slice(0,10)}.xlsx`);
     } catch (err) {
       console.error("DETAIL EXCEL EXPORT ERROR:", err);
       alert(`Excel indirilemedi:\n${err.message}`);
@@ -12561,6 +13141,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       aoa.push(titleRow);
 
       aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
+
 
       sortedRows.forEach((row, idx) => {
         const isEven = idx % 2 === 1;
@@ -14810,6 +15391,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   // Detay modal
   const [detayModal, setDetayModal] = useState(null);
   const [detayKalemler, setDetayKalemler] = useState([]);
+  const [detayAcIdx, setDetayAcIdx] = useState(null); // autocomplete için hangi satır açık
   const [onayNotu, setOnayNotu] = useState("");
   const [redModal, setRedModal] = useState(null);
   const [redNot, setRedNot] = useState("");
@@ -15984,8 +16566,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             <table style={{ width:"100%",borderCollapse:"collapse",fontSize:13 }}>
               <thead>
                 <tr style={{ background:"#1e3a5f",color:"#fff" }}>
-                  {["#","Malzeme Adı","Miktar","Birim","Birim Fiyat","Toplam","Temin Türü","Not",...(canMuratTedarik?["İşlem"]:[])].map(h=>(
-                    <th key={h} style={{ padding:"8px 10px",textAlign:"left",fontWeight:600,whiteSpace:"nowrap" }}>{h}</th>
+                  {["#","Malzeme Adı","Miktar","Birim","Birim Fiyat","Toplam","Temin Türü","Not",...(canMuratTedarik?["İşlem"]:[]),...(canMurat?[""]:[])].map((h,hi)=>(
+                    <th key={hi} style={{ padding:"8px 10px",textAlign:"left",fontWeight:600,whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -15994,11 +16576,65 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   <tr key={k.id} style={{ borderBottom:"1px solid #e5e7eb",background:k.dagitim_yapildi?"#f0fdf4":i%2===0?"#fff":"#f9fafb",opacity:k.dagitim_yapildi?0.7:1 }}>
                     <td style={{ padding:"8px 10px",color:"#9ca3af" }}>{i+1}</td>
                     <td style={{ padding:"8px 10px",fontWeight:600 }}>
-                      {k.malzeme_adi}
-                      {k.dagitim_yapildi && <span style={{ marginLeft:6,fontSize:10,background:"#bbf7d0",color:"#166534",borderRadius:4,padding:"1px 6px",fontWeight:700 }}>✓ Dağıtıldı</span>}
+                      {canMurat && !k.dagitim_yapildi ? (
+                        <div style={{ position:"relative" }}>
+                          <input type="text" value={k.malzeme_adi} autoComplete="off"
+                            onChange={e=>{
+                              setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,malzeme_adi:e.target.value}:x));
+                              setDetayAcIdx(i);
+                            }}
+                            onFocus={()=>setDetayAcIdx(i)}
+                            onBlur={()=>setTimeout(()=>setDetayAcIdx(null),150)}
+                            style={{ width:"100%",minWidth:160,padding:"4px 8px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,fontWeight:600,background:"#faf5ff",textAlign:"center" }} />
+                          {detayAcIdx===i && (()=>{
+                            const q=(k.malzeme_adi||"").toLowerCase().trim();
+                            const COMBINED=[...new Set([...fiyatListe.map(f=>f.malzeme_adi).filter(Boolean),...(typeof MALZEME_LISTESI!=="undefined"?MALZEME_LISTESI:[])].sort((a,b)=>a.localeCompare(b,"tr")))];
+                            const exact=q.length>0&&COMBINED.some(n=>n.toLowerCase()===q);
+                            const sugg=!exact&&q.length>=1?COMBINED.filter(n=>n.toLowerCase().includes(q)).slice(0,14):[];
+                            return sugg.length>0?(
+                              <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:300,background:"#fff",border:"1px solid #a78bfa",borderRadius:6,boxShadow:"0 4px 16px rgba(124,58,237,0.15)",maxHeight:240,overflowY:"auto" }}>
+                                {sugg.map((name,idx)=>{
+                                  const dbItem=fiyatListe.find(f=>f.malzeme_adi.toLowerCase()===name.toLowerCase());
+                                  return(
+                                    <div key={idx}
+                                      onMouseDown={e=>{
+                                        e.preventDefault();
+                                        setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,malzeme_adi:name,birim:dbItem?.birim||x.birim}:x));
+                                        setDetayAcIdx(null);
+                                      }}
+                                      style={{ padding:"7px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6",background:"#fff" }}
+                                      onMouseEnter={e=>e.currentTarget.style.background="#f5f3ff"}
+                                      onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                                      <div style={{ wordBreak:"break-word",lineHeight:1.5,fontWeight:600 }}>{name}</div>
+                                      {dbItem&&Number(dbItem.birim_fiyat)>0&&<div style={{ color:"#9ca3af",fontSize:11,marginTop:2 }}>{dbItem.birim} · ₺{Number(dbItem.birim_fiyat).toLocaleString("tr-TR")}</div>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ):null;
+                          })()}
+                        </div>
+                      ) : (
+                        <>
+                          {k.malzeme_adi}
+                          {k.dagitim_yapildi && <span style={{ marginLeft:6,fontSize:10,background:"#bbf7d0",color:"#166534",borderRadius:4,padding:"1px 6px",fontWeight:700 }}>✓ Dağıtıldı</span>}
+                        </>
+                      )}
                     </td>
-                    <td style={{ padding:"8px 10px",textAlign:"center" }}>{k.miktar}</td>
-                    <td style={{ padding:"8px 10px" }}>{k.birim}</td>
+                    <td style={{ padding:"8px 10px",textAlign:"center" }}>
+                      {canMurat && !k.dagitim_yapildi ? (
+                        <input type="number" value={k.miktar}
+                          onChange={e=>setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,miktar:e.target.value,toplam_tutar:e.target.value*(x.birim_fiyat||0)}:x))}
+                          style={{ width:70,padding:"4px 6px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,background:"#faf5ff",textAlign:"center" }} />
+                      ) : k.miktar}
+                    </td>
+                    <td style={{ padding:"8px 10px" }}>
+                      {canMurat && !k.dagitim_yapildi ? (
+                        <input type="text" value={k.birim}
+                          onChange={e=>setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,birim:e.target.value}:x))}
+                          style={{ width:60,padding:"4px 6px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,background:"#faf5ff" }} />
+                      ) : k.birim}
+                    </td>
                     <td style={{ padding:"8px 10px" }}>
                       {canMurat ? (
                         <input type="number" value={k.birim_fiyat}
@@ -16023,7 +16659,14 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                           color:k.temin_turu==="Yeni Alım"?"#1d4ed8":"#15803d" }}>{k.temin_turu}</span>
                       ) : "—")}
                     </td>
-                    <td style={{ padding:"8px 10px",color:"#6b7280",fontSize:12 }}>{k.notlar}</td>
+                    <td style={{ padding:"8px 10px" }}>
+                      {canMurat && !k.dagitim_yapildi ? (
+                        <input type="text" value={k.notlar||""}
+                          placeholder="Not ekle..."
+                          onChange={e=>setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,notlar:e.target.value}:x))}
+                          style={{ width:"100%",minWidth:120,padding:"4px 6px",border:"1px solid #d1d5db",borderRadius:4,fontSize:12 }} />
+                      ) : <span style={{ color:"#6b7280",fontSize:12 }}>{k.notlar||"—"}</span>}
+                    </td>
                     {canMuratTedarik && (
                       <td style={{ padding:"6px 8px" }}>
                         {k.dagitim_yapildi ? (
@@ -16088,8 +16731,35 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                         ) : <span style={{ fontSize:11,color:"#9ca3af" }}>—</span>}
                       </td>
                     )}
+                    {canMurat && (
+                      <td style={{ padding:"4px 6px",textAlign:"center" }}>
+                        {!k.dagitim_yapildi && (
+                          <button
+                            title="Bu kalemi sil"
+                            onClick={()=>{
+                              if(detayKalemler.length<=1){alert("En az bir kalem olmalı");return;}
+                              if(!window.confirm("Bu kalemi listeden silmek istiyor musunuz?"))return;
+                              setDetayKalemler(prev=>prev.filter((_,j)=>j!==i));
+                            }}
+                            style={{ width:26,height:26,padding:0,background:"#fee2e2",color:"#dc2626",border:"1px solid #fca5a5",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:14,lineHeight:1 }}>
+                            ×
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
+                {canMurat && (
+                  <tr>
+                    <td colSpan={10} style={{ padding:"6px 10px" }}>
+                      <button
+                        onClick={()=>setDetayKalemler(prev=>[...prev,{id:`new_${Date.now()}`,malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:0,toplam_tutar:0,temin_turu:"",notlar:""}])}
+                        style={{ padding:"6px 16px",background:"#16a34a",color:"#fff",border:"none",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:12 }}>
+                        + Kalem Ekle
+                      </button>
+                    </td>
+                  </tr>
+                )}
               </tbody>
               <tfoot>
                 <tr style={{ background:"#f0f9ff",fontWeight:700 }}>
@@ -16097,7 +16767,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                   <td style={{ padding:"8px 10px",color:"#15803d",fontSize:15 }}>
                     ₺{detayKalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0).toLocaleString("tr-TR")}
                   </td>
-                  <td colSpan={canMuratTedarik?3:2}></td>
+                  <td colSpan={canMuratTedarik?4:canMurat?3:2}></td>
                 </tr>
               </tfoot>
             </table>
@@ -16163,21 +16833,51 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             );
           })()}
 
-          {/* Onay notu */}
+          {/* Onay / Düzeltme notu */}
           {(canNurcan||canMurat||canPM||canDuzgun||canMuratTedarik) && (
             <div style={{ marginBottom:14 }}>
-              <label style={{ fontSize:13,fontWeight:600,display:"block",marginBottom:6 }}>Onay Notu (isteğe bağlı)</label>
+              <label style={{ fontSize:13,fontWeight:600,display:"block",marginBottom:6 }}>
+                {canMurat ? "📝 Envanter Notu / Düzeltme Açıklaması" : "Onay Notu (isteğe bağlı)"}
+              </label>
               <textarea value={onayNotu} onChange={e=>setOnayNotu(e.target.value)} rows={2}
+                placeholder={canMurat ? "Örn: 3MT 2,5'' Galvaniz Boru yanlış seçilmişti, 2MT olarak düzeltildi." : ""}
                 style={{ width:"100%",padding:"8px 10px",border:"1px solid #d1d5db",borderRadius:8,fontSize:13,resize:"vertical",boxSizing:"border-box" }} />
             </div>
           )}
 
           {/* Aksiyon butonları */}
-          <div style={{ display:"flex",gap:10,flexWrap:"wrap" }}>
+          <div style={{ display:"flex",gap:10,flexWrap:"wrap",alignItems:"center" }}>
             {canRollout       && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
             {canNurcan        && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
             {canPM            && <button onClick={()=>updateDurum(d.id,"FIYAT_GIRISI",null,onayNotu)}  disabled={saving} style={{ padding:"10px 18px",background:"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Envanter Onayına Gönder</button>}
-            {canMurat         && <button onClick={()=>updateDurum(d.id,"DUZGUN_ONAY",detayKalemler,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#0284c7",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Proje Direktörü'ne Gönder</button>}
+            {canMurat && (
+              <>
+                <button
+                  disabled={saving}
+                  onClick={async ()=>{
+                    setSaving(true);
+                    try {
+                      const tkn = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
+                      const hdrs = {"Content-Type":"application/json",Authorization:`Bearer ${tkn}`};
+                      await fetch(`${API_BASE}/malzeme/talepler/${d.id}/durum`,{
+                        method:"PUT", headers:hdrs,
+                        body:JSON.stringify({ durum:"FIYAT_GIRISI", kalemler:detayKalemler, onay_notu:onayNotu||undefined }),
+                      });
+                      alert("✅ Düzeltmeler kaydedildi.");
+                      loadTalepler();
+                      // Kalem listesini yeniden yükle
+                      const kr = await fetch(`${API_BASE}/malzeme/talepler/${d.id}`,{headers:hdrs});
+                      const kd = await kr.json();
+                      setDetayKalemler(kd.kalemler||[]);
+                    } catch(e){ alert(e.message); }
+                    setSaving(false);
+                  }}
+                  style={{ padding:"10px 18px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>
+                  💾 Düzelt &amp; Kaydet
+                </button>
+                <button onClick={()=>updateDurum(d.id,"DUZGUN_ONAY",detayKalemler,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#0284c7",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Proje Direktörü'ne Gönder</button>
+              </>
+            )}
             {canDuzgun        && <button onClick={()=>updateDurum(d.id,"SATINALINACAK",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#ea580c",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Tedarik Sürecine Al</button>}
             {canMuratTedarik  && <button onClick={()=>updateDurum(d.id,"DEPODA",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#15803d",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>📦 Tedarik Tamamlandı — Depoya Giriş</button>}
             {canReddet   && <button onClick={()=>{setRedModal(d);setDetayModal(null);setRedNot("");}} style={{ padding:"10px 18px",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>❌ Reddet</button>}
@@ -16387,13 +17087,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
 
           {/* Malzeme Kalemleri */}
           <div style={{ background:"#fff",borderRadius:12,padding:20,marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-              <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f" }}>📦 Malzeme Kalemleri</div>
-              <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}])}
-                style={{ padding:"7px 14px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700 }}>
-                + Kalem Ekle
-              </button>
-            </div>
+            <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f",marginBottom:14 }}>📦 Malzeme Kalemleri</div>
             {/* Başlıklar */}
             <div style={{ display:"grid",gridTemplateColumns:"3fr 80px 110px 130px 110px 110px 38px",gap:8,marginBottom:6 }}>
               {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not / Açıklama",""].map(h=>(
@@ -16401,14 +17095,18 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               ))}
             </div>
             {talepKalemler.map((k,i)=>renderKalemRow(k,i))}
-            {/* Genel Toplam */}
-            {toplamGenel > 0 && (
-              <div style={{ display:"flex",justifyContent:"flex-end",marginTop:12,paddingTop:12,borderTop:"2px solid #e5e7eb" }}>
+            {/* Alt: Kalem Ekle + Genel Toplam */}
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12,paddingTop:12,borderTop:"2px solid #e5e7eb" }}>
+              <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}])}
+                style={{ padding:"8px 18px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:700 }}>
+                + Kalem Ekle
+              </button>
+              {toplamGenel > 0 && (
                 <div style={{ fontSize:16,fontWeight:800,color:"#15803d" }}>
                   Genel Toplam: ₺{toplamGenel.toLocaleString("tr-TR")}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Açıklama */}
@@ -17375,7 +18073,7 @@ function App() {
   const _ROLLOUT_OVERRIDE = ["hatice.omus@simsektel.com"]; // user rolünde olsa bile rollout gibi davranır
   const _isBolgeMudur = _userEmail === "nurcan.kus@simsektel.com" || _userEmail === "serdar.altinova@simsektel.com" || _userEmail === "murat.istek@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
   const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur || _ROLLOUT_OVERRIDE.includes(_userEmail);
-  const canSeePuantaj = isRollout && !_PUANTAJ_HARIC.includes(_userEmail);
+  const canSeePuantaj = (isRollout || user?.role === "muhasebe") && !_PUANTAJ_HARIC.includes(_userEmail);
   const isPersonel = user?.role === "user" && !_isBolgeMudur && !_ROLLOUT_OVERRIDE.includes(_userEmail);
   const canSeeMalzeme = [
     "nurcan.kus@simsektel.com",
@@ -17460,11 +18158,18 @@ function App() {
         const r = await fetch(`${API_BASE}/hr/is-avans`);
         const data = await r.json();
         if (Array.isArray(data)) {
-          const email = user.email;
+          const email = (user.email || "").toLowerCase();
+          const role  = (user.role  || "").toLowerCase();
+          const isRM  = role === "rollout_mudur" || role === "bolge_mudur";
           let count = 0;
-          if (email === "orhan.bedir@simsektel.com") count = data.filter(t => t.durum === "TALEP").length;
-          else if (email === "duzgun.simsek@simsektel.com") count = data.filter(t => t.durum === "PM_ONAY").length;
-          else if (email === "muhasebe@simsektel.com") count = data.filter(t => t.durum === "DIREKTOR_ONAY").length;
+          if (email === "orhan.bedir@simsektel.com")
+            count = data.filter(t => t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY").length;
+          else if (email === "duzgun.simsek@simsektel.com")
+            count = data.filter(t => t.durum === "PM_ONAY").length;
+          else if (email === "muhasebe@simsektel.com")
+            count = data.filter(t => t.durum === "DIREKTOR_ONAY").length;
+          else if (isRM)
+            count = data.filter(t => t.durum === "TALEP").length;
           setPendingAvansCount(count);
         }
         // Masraf formu bekleyenleri say
@@ -18073,6 +18778,9 @@ function App() {
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); }}>
                         <span>🔩</span> HW PO Yükle
                       </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); }}>
+                        <span>📋</span> HW Acceptance Yükle
+                      </div>
                     </>
                   )}
                 </div>
@@ -18085,7 +18793,7 @@ function App() {
               </div>
               {openSections.ik && (
                 <div>
-                  {(isAdmin || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
+                  {(isAdmin || user?.role === "muhasebe" || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
                     <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
                       <span>👥</span> İK Paneli
                     </div>
@@ -18134,7 +18842,7 @@ function App() {
               )}
 
               {/* ── DEPO & ENVANTER ── */}
-              {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm"].includes(user?.role)) && (
+              {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
                 <>
                   <div className="sidebar-section-title" onClick={()=>toggleSection('depo')}>
                     <span>Depo & Envanter</span>
@@ -18529,12 +19237,12 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
     }
 
     if (dateField === "installation_actual_end_date") {
+      // onair_date fallback KALDIRILDI: installation_end_date boşsa "bitmedi" sayılır
       return (
         row.installation_actual_end_date ||
         row.inst_actual_end_date ||
         row.install_end_date ||
-        row.onair_date ||
-        (qcOk ? "SMART_OK" : "")
+        ""
       );
     }
 
@@ -18584,6 +19292,14 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       return row.enh_actual_end_date || "";
     }
 
+    if (dateField === "enh_qc_closed_date") {
+      return row.enh_qc_closed_date || "";
+    }
+
+    if (dateField === "suzme_date") {
+      return row.suzme_date || "";
+    }
+
     if (dateField === "abonelik_actual_end_date") {
       return row.abonelik_actual_end_date || row.abonelik_end_date || "";
     }
@@ -18608,6 +19324,14 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
     if (item.key === "po_closed") {
       return backendValue;
     }
+
+    // Süzme: bölge filtreli frontend listesinden say (getRowsByType artık süzme sahalarını da içeriyor)
+    if (item.key === "suzme") {
+      return getRowsByType("STANDALONE_ABONE").filter(
+        (r) => String(r.enh_site_type || "").trim().toLowerCase() === "süzme"
+      ).length;
+    }
+
     if (
       ["5G", "DSS", "LTE", "STANDALONE", "STANDALONE_ABONE"].includes(type) &&
       item.key === "target"
@@ -18705,8 +19429,10 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
       }
 
       if (type === "STANDALONE_ABONE") {
+        // Hem "Abone" hem "Süzme" (ve "Abone + Süzme") tipindeki STANDALONE sahalar
+        const enhT = String(r.enh_site_type || "").trim().toLowerCase();
         return rowType === "STANDALONE" &&
-          String(r.enh_site_type || "").trim().toLowerCase() === "abone";
+          (enhT === "abone" || enhT === "süzme" || enhT === "abone + süzme");
       }
 
       return rowType === type;
@@ -18990,11 +19716,6 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
             dateField: "enh_actual_end_date",
           },
           {
-            label: "POWER Project Plan Start Date",
-            key: "power_plan_start",
-            dateField: "power_plan_start_date",
-          },
-          {
             label: "POWER Project Actual End Date",
             key: "power_actual_end",
             dateField: "power_actual_end_date",
@@ -19003,6 +19724,16 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
             label: "Abonelik Belgesi Actual End Date",
             key: "abonelik_end",
             dateField: "abonelik_actual_end_date",
+          },
+          {
+            label: "Süzme",
+            key: "suzme",
+            dateField: "suzme_date",
+          },
+          {
+            label: "QC(Closed)",
+            key: "enh_qc_closed",
+            dateField: "enh_qc_closed_date",
           },
         ], { hideTypeRow: true })}
       </div>
@@ -19029,7 +19760,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
       "enh_plan_start_date","enh_actual_end_date","enh_proje_hazir",
       "power_plan_start_date","power_actual_end_date",
       "abonelik_actual_end_date","tt_horizon_actual_end_date",
-      "pac_actual_end_date","tamamlanma_tarihi",
+      "pac_actual_end_date","tamamlanma_tarihi","suzme_date",
     ];
     const norm = { ...raw };
     for (const f of DATE_FIELDS) {
@@ -19103,6 +19834,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     tt_horizon_actual_end_date: existingRow.tt_horizon_actual_end_date || "",
     pac_actual_end_date: existingRow.pac_actual_end_date || "",
     tamamlanma_tarihi: existingRow.tamamlanma_tarihi || "",
+    suzme_date: existingRow.suzme_date || "",
 
     // ENH Proje: Abone değilse Subcon + Hazır Tarihi kilitli
     enh_proje_subcon: (() => {
@@ -19131,8 +19863,8 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   const [pacBelgeFile, setPacBelgeFile] = useState(null);
   const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
-  // Subcon HW mi? (HW, Huawei, huawei vb.)
-  const isHw = (v) => /^h(uawei|w)$/i.test(String(v || "").trim());
+  // Subcon HW mi? Huawei, HW, veya "Huawei Turkey" gibi varyantlar dahil
+  const isHw = (v) => /huawei|^hw$/i.test(String(v || "").trim());
 
   // HW subcon → ilgili alanları N/A işaretle
   const HW_NA_MAP = {
@@ -19514,6 +20246,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             {input("Abonelik Actual End Date", "abonelik_actual_end_date", "date")}
             {input("Horizon Actual End Date", "tt_horizon_actual_end_date", "date")}
             {input("PAC Actual End Date", "pac_actual_end_date", "date")}
+            {input("Süzme Tarihi", "suzme_date", "date")}
           </div>
           <div style={{ marginTop:"10px" }}>
             <div style={{ fontSize:"12px", fontWeight:600, color:"#1e40af", marginBottom:"4px" }}>📎 PAC Belgesi</div>
