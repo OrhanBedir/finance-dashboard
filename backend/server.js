@@ -11051,7 +11051,8 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
 
     // 9. Kullanıcının rolüne göre onay bekleyen iş avansları
     //    PM  → durum='TALEP' olanlar
-    //    Direktör → durum='PM_ONAY' olanlar
+    //    Direktör → TALEP + ROLLOUT_MUDUR_ONAY + PM_ONAY olanlar (direktor-onayla hepsini kabul eder)
+    //    PM      → TALEP + ROLLOUT_MUDUR_ONAY olanlar (pm-onayla hepsini kabul eder)
     const PM_EMAIL_CONST       = 'orhan.bedir@simsektel.com';
     const DIREKTOR_EMAIL_CONST = 'duzgun.simsek@simsektel.com';
     const userEmailLower = (queryEmail || '').toLowerCase().trim();
@@ -11060,15 +11061,17 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
 
     let onayBekleyenAvanslar = [];
     if (isPM || isDirektor) {
-      const bekleyenDurum = isDirektor ? 'PM_ONAY' : 'TALEP';
+      const bekleyenDurumlar = isDirektor
+        ? ['TALEP', 'ROLLOUT_MUDUR_ONAY', 'PM_ONAY']
+        : ['TALEP', 'ROLLOUT_MUDUR_ONAY'];
       const onayRes = await pool.query(
         `SELECT id, tutar, aciklama, gider_turu, bolge, proje, durum, tarih, created_at,
                 talep_eden_ad, talep_eden_email
          FROM is_avans_talep
-         WHERE durum=$1
+         WHERE durum = ANY($1)
          ORDER BY created_at ASC
          LIMIT 20`,
-        [bekleyenDurum]
+        [bekleyenDurumlar]
       );
       onayBekleyenAvanslar = onayRes.rows;
     }
