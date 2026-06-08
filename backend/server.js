@@ -1416,10 +1416,11 @@ function getEndOfMonth(date) {
 
 async function buildUpcomingCollectionsData() {
   // H01 iade faturaları (negatif remaining_amount) dahil — net ödeme hesabı için
+  // TO_CHAR ile due_date her zaman "YYYY-MM-DD" string olarak döner (pg Date object sorununu önler)
   const result = await pool.query(`
     SELECT
       p.invoice_no,
-      p.due_date,
+      TO_CHAR(p.due_date, 'YYYY-MM-DD') AS due_date,
       COALESCE(p.remaining_amount, 0) AS remaining_amount,
       COALESCE(p.currency, 'TRY') AS currency
     FROM hw_payment_rows p
