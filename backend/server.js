@@ -1428,14 +1428,16 @@ async function buildUpcomingCollectionsData() {
     ORDER BY p.due_date ASC
   `);
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Türkiye saati (UTC+3) baz alınarak "bugün" hesaplanır
+  const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
+  const nowTR = new Date(Date.now() + TR_OFFSET_MS);
+  const today = new Date(Date.UTC(nowTR.getUTCFullYear(), nowTR.getUTCMonth(), nowTR.getUTCDate()));
 
   const endOfWeek = new Date(today);
-  const day = endOfWeek.getDay();
+  const day = endOfWeek.getUTCDay();
   const diffToSunday = day === 0 ? 0 : 7 - day;
-  endOfWeek.setDate(endOfWeek.getDate() + diffToSunday);
-  endOfWeek.setHours(23, 59, 59, 999);
+  endOfWeek.setUTCDate(endOfWeek.getUTCDate() + diffToSunday);
+  endOfWeek.setUTCHours(23, 59, 59, 999);
 
   const monthlyUpcoming = {};
   for (let i = 1; i <= 12; i += 1) {
@@ -1452,8 +1454,8 @@ async function buildUpcomingCollectionsData() {
     const amount = Number(row.remaining_amount || 0);
     if (amount === 0) continue;  // Sadece sıfırı atla; H01 negatifleri dahil et
 
-    const dueDate = new Date(row.due_date);
-    dueDate.setHours(0, 0, 0, 0);
+    // due_date UTC gece yarısı olarak parse et (timezone kaymasını önle)
+    const dueDate = new Date(row.due_date + 'T00:00:00Z');
 
     if (Number.isNaN(dueDate.getTime())) continue;
 
@@ -2751,9 +2753,11 @@ app.get("/force-reset-boq", async (req, res) => {
 /* ================== FINANCE SUMMARY ================== */
 app.get("/finance/summary", async (req, res) => {
   try {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
+    // Türkiye saati (UTC+3) baz alınarak yıl/ay belirlenir
+    const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
+    const nowTR = new Date(Date.now() + TR_OFFSET_MS);
+    const year  = nowTR.getUTCFullYear();
+    const month = nowTR.getUTCMonth() + 1;
 
     const monthly_received = {};
     const monthly_invoiced = {};
