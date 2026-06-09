@@ -2962,7 +2962,7 @@ function InvoiceBelgeUploader({ invoiceId, currentBelge }) {
     try {
       const r = await fetch(`${API_BASE}/invoice-entries/${invoiceId}/belge`, { method: "POST", body: fd });
       const d = await r.json();
-      if (d.ok) setBelge(d.filename);
+      if (d.ok) setBelge(d.url || d.filename);
       else alert("Yükleme hatası: " + d.error);
     } catch (err) {
       alert("Hata: " + err.message);
@@ -2998,7 +2998,7 @@ function InvoiceBelgeUploader({ invoiceId, currentBelge }) {
             </div>
           </div>
           <div style={{ display: "flex", gap: "8px" }}>
-            <a href={`${API_BASE.replace("/api", "")}/fatura-belgeler/${belge}`} target="_blank" rel="noreferrer"
+            <a href={belge && belge.startsWith("http") ? belge : `${API_BASE.replace(/\/api$/,"")}/fatura-belgeler/${belge}`} target="_blank" rel="noreferrer"
               style={{ padding: "6px 12px", background: "#166534", color: "#fff", borderRadius: "8px", fontSize: "12px", fontWeight: 600, textDecoration: "none" }}>
               Görüntüle
             </a>
@@ -5698,7 +5698,7 @@ function FinanceDashboard({
                             <div style={{ display: "flex", gap: "8px" }}>
                               {row.belge_path && (
                                 <a
-                                  href={`http://localhost:5001/fatura-belgeler/${row.belge_path}`}
+                                  href={row.belge_path.startsWith("http") ? row.belge_path : `${API_BASE.replace(/\/api$/,"")}/fatura-belgeler/${row.belge_path}`}
                                   target="_blank"
                                   rel="noreferrer"
                                   style={{
