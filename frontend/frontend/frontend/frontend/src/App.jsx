@@ -15283,6 +15283,18 @@ function PersonelMalzemePanel({ currentUser }) {
   const [siteCodeSuggestions2, setSiteCodeSuggestions2] = React.useState([]);
   const [showSiteDrop2, setShowSiteDrop2] = React.useState(false);
 
+  // ── TALEP STATE ──
+  const [mainTab, setMainTab] = React.useState("malzemelerim");
+  const [talepler, setTalepler] = React.useState([]);
+  const [talepLoading, setTalepLoading] = React.useState(false);
+  const [showTalepForm, setShowTalepForm] = React.useState(false);
+  const [editingTalepId, setEditingTalepId] = React.useState(null);
+  const [talepKalemler, setTalepKalemler] = React.useState([{malzeme_adi:"",miktar:1,birim:"Adet",notlar:""}]);
+  const [savingTalep, setSavingTalep] = React.useState(false);
+  const [talepSiteSugg, setTalepSiteSugg] = React.useState([]);
+  const [showTalepSiteDrop, setShowTalepSiteDrop] = React.useState(false);
+  const [talepForm, setTalepForm] = React.useState({ bolge:"", proje:"", site_type:"", site_id:"", talep_eden_ad:currentUser?.name||currentUser?.email||"", talep_eden_email:currentUser?.email||"", talep_tarihi:new Date().toISOString().split("T")[0], notlar:"" });
+
   const API_BASE2 = import.meta.env.VITE_API_BASE || "http://localhost:5001";
 
   const load = async () => {
@@ -15302,7 +15314,7 @@ function PersonelMalzemePanel({ currentUser }) {
     setLoading(false);
   };
 
-  React.useEffect(() => { load(); }, []);
+  React.useEffect(() => { load(); loadTalepler(); }, []);
 
   const searchSite2 = async (q) => {
     if (!q || q.length < 2) { setSiteCodeSuggestions2([]); return; }
@@ -15332,6 +15344,49 @@ function PersonelMalzemePanel({ currentUser }) {
     setSaving(false);
   };
 
+  // ── TALEP FONKSİYONLARI ──
+  const loadTalepler = async () => {
+    setTalepLoading(true);
+    try {
+      const r = await fetch(`${API_BASE2}/malzeme/talepler`, { headers });
+      const d = await r.json();
+      setTalepler(Array.isArray(d) ? d.filter(t => (t.talep_eden_email||"").toLowerCase() === _email) : []);
+    } catch {} finally { setTalepLoading(false); }
+  };
+  const searchTalepSite = async (q) => {
+    if (!q || q.length < 2) { setTalepSiteSugg([]); return; }
+    try { const r = await fetch(`${API_BASE2}/malzeme/site-codes?q=${encodeURIComponent(q)}`, { headers }); const d = await r.json(); setTalepSiteSugg(Array.isArray(d) ? d : []); } catch { setTalepSiteSugg([]); }
+  };
+  const resetTalepForm = () => {
+    setTalepForm({ bolge:"", proje:"", site_type:"", site_id:"", talep_eden_ad:currentUser?.name||currentUser?.email||"", talep_eden_email:currentUser?.email||"", talep_tarihi:new Date().toISOString().split("T")[0], notlar:"" });
+    setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",notlar:""}]);
+    setEditingTalepId(null); setShowTalepForm(false);
+  };
+  const saveTalepFn = async (durum) => {
+    const kalemlerDolu = talepKalemler.filter(k => k.malzeme_adi.trim());
+    if (!kalemlerDolu.length) { alert("En az bir malzeme kalemi girin"); return; }
+    setSavingTalep(true);
+    try {
+      const body = { ...talepForm, durum, kalemler: kalemlerDolu.map(k => ({...k, birim_fiyat:k.birim_fiyat||0, toplam_tutar:(Number(k.miktar)||0)*(Number(k.birim_fiyat)||0)})) };
+      if (editingTalepId) { await fetch(`${API_BASE2}/malzeme/talepler/${editingTalepId}`, { method:"PUT", headers, body:JSON.stringify(body) }); }
+      else { await fetch(`${API_BASE2}/malzeme/talepler`, { method:"POST", headers, body:JSON.stringify(body) }); }
+      resetTalepForm(); loadTalepler();
+    } catch (e) { alert(e.message); }
+    setSavingTalep(false);
+  };
+  const deleteTalepM = async (id) => {
+    if (!window.confirm("Bu talebi silmek istediğinize emin misiniz?")) return;
+    try { await fetch(`${API_BASE2}/malzeme/talepler/${id}`, { method:"DELETE", headers }); loadTalepler(); } catch (e) { alert(e.message); }
+  };
+  const openEditTalepM = async (t) => {
+    try {
+      const r = await fetch(`${API_BASE2}/malzeme/talepler/${t.id}`, { headers }); const d = await r.json();
+      setTalepForm({ bolge:d.bolge||"", proje:d.proje||"", site_type:d.site_type||"", site_id:d.site_id||"", talep_eden_ad:d.talep_eden_ad||"", talep_eden_email:d.talep_eden_email||"", talep_tarihi:d.talep_tarihi?d.talep_tarihi.split("T")[0]:new Date().toISOString().split("T")[0], notlar:d.notlar||"" });
+      setTalepKalemler(d.kalemler?.length ? d.kalemler : [{malzeme_adi:"",miktar:1,birim:"Adet",notlar:""}]);
+      setEditingTalepId(t.id); setShowTalepForm(true);
+    } catch { alert("Yüklenemedi"); }
+  };
+
   const tabs = [
     { key:"PERSONELDE",     label:"📦 Üzerimdeki", color:"#1d4ed8" },
     { key:"SAHADA",         label:"🏗 Sahada",     color:"#15803d" },
@@ -15340,6 +15395,20 @@ function PersonelMalzemePanel({ currentUser }) {
   ];
 
   const durumRenk = { PERSONELDE:{bg:"#dbeafe",c:"#1d4ed8",l:"Üzerimde"}, SAHADA:{bg:"#dcfce7",c:"#15803d",l:"Sahada ✓"}, IADE_BEKLEMEDE:{bg:"#fef3c7",c:"#d97706",l:"İade Onayı Bekleniyor"}, DEPOYA_IADE:{bg:"#f3f4f6",c:"#6b7280",l:"İade Edildi"} };
+  const TALEP_DURUM_MAP = {
+    TASLAK:        { label:"Taslak",                    color:"#6b7280", bg:"#f3f4f6" },
+    ROLLOUT_BEKLE: { label:"Rollout Onayı Bekleniyor",   color:"#f59e0b", bg:"#fef3c7" },
+    FIYAT_GIRISI:  { label:"Envanter Onayı Bekleniyor",  color:"#8b5cf6", bg:"#ede9fe" },
+    PM_ONAY:       { label:"PM Onayında",                color:"#2563eb", bg:"#dbeafe" },
+    DUZGUN_ONAY:   { label:"Direktör Onayında",          color:"#0284c7", bg:"#e0f2fe" },
+    ONAYLANDI:     { label:"Onaylandı ✓",               color:"#16a34a", bg:"#dcfce7" },
+    SATINALINACAK: { label:"Tedarik Aşamasında",         color:"#ea580c", bg:"#ffedd5" },
+    DEPODA:        { label:"Tedarik Tamamlandı ✓",       color:"#15803d", bg:"#bbf7d0" },
+    REDDEDILDI:    { label:"Reddedildi ✗",              color:"#dc2626", bg:"#fee2e2" },
+  };
+  const BOLGELER_M = ["İzmir","İstanbul","Ankara","Bursa","Antalya","Adana","Samsun","Trabzon","Erzurum","Diyarbakır","Diğer"];
+  const PROJELER_M = ["TT","TC","VF","Diğer"];
+  const BIRIMLER_M = ["Adet","Metre","Rulo","Kutu","Paket","Kg","Lt","Takım","Diğer"];
 
   const filtered = liste.filter(d => d.durum === aktifTab);
   const counts = { PERSONELDE: liste.filter(d=>d.durum==="PERSONELDE").length, SAHADA: liste.filter(d=>d.durum==="SAHADA").length, IADE_BEKLEMEDE: liste.filter(d=>d.durum==="IADE_BEKLEMEDE").length, DEPOYA_IADE: liste.filter(d=>d.durum==="DEPOYA_IADE").length };
@@ -15348,83 +15417,299 @@ function PersonelMalzemePanel({ currentUser }) {
 
   return (
     <div style={{ maxWidth:800, margin:"0 auto" }}>
-      {/* Özet kartlar */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
-        {tabs.map(t => (
-          <div key={t.key} onClick={()=>setAktifTab(t.key)}
-            style={{ background:"#fff", borderRadius:12, padding:"14px 10px", textAlign:"center", cursor:"pointer", border:`2px solid ${aktifTab===t.key?t.color:"#e5e7eb"}`, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-            <div style={{ fontSize:26, fontWeight:800, color:t.color }}>{counts[t.key]}</div>
-            <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>{t.label}</div>
-          </div>
-        ))}
+
+      {/* ── ANA SEKME SEÇİCİ ── */}
+      <div style={{ display:"flex", gap:0, marginBottom:16, background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 6px rgba(0,0,0,0.08)" }}>
+        <button onClick={()=>setMainTab("malzemelerim")}
+          style={{ flex:1, padding:"13px 0", border:"none", background:mainTab==="malzemelerim"?"#1e3a5f":"transparent", color:mainTab==="malzemelerim"?"#fff":"#6b7280", fontWeight:700, fontSize:14, cursor:"pointer", transition:"all 0.15s" }}>
+          📦 Malzemelerim {liste.filter(d=>d.durum==="PERSONELDE").length > 0 ? `(${liste.filter(d=>d.durum==="PERSONELDE").length})` : ""}
+        </button>
+        <button onClick={()=>{ setMainTab("taleplerim"); }}
+          style={{ flex:1, padding:"13px 0", border:"none", background:mainTab==="taleplerim"?"#1e3a5f":"transparent", color:mainTab==="taleplerim"?"#fff":"#6b7280", fontWeight:700, fontSize:14, cursor:"pointer", transition:"all 0.15s" }}>
+          📋 Taleplerim {talepler.length > 0 ? `(${talepler.length})` : ""}
+        </button>
       </div>
 
-      {/* Tab seçici */}
-      <div style={{ display:"flex", borderBottom:"2px solid #e2e8f0", background:"#fff", borderRadius:"10px 10px 0 0", overflow:"hidden", marginBottom:0 }}>
-        {tabs.map(t => (
-          <button key={t.key} onClick={()=>setAktifTab(t.key)}
-            style={{ flex:1, padding:"11px 0", border:"none", background:"none", cursor:"pointer", fontWeight:aktifTab===t.key?700:400, fontSize:13, color:aktifTab===t.key?t.color:"#6b7280", borderBottom:aktifTab===t.key?`3px solid ${t.color}`:"3px solid transparent", marginBottom:-2 }}>
-            {t.label} {counts[t.key]>0?`(${counts[t.key]})`:""}</button>
-        ))}
-      </div>
-
-      {/* Liste */}
-      <div style={{ background:"#fff", borderRadius:"0 0 12px 12px", boxShadow:"0 1px 6px rgba(0,0,0,0.07)", overflow:"hidden" }}>
-        {filtered.length === 0 ? (
-          <div style={{ textAlign:"center", padding:40, color:"#9ca3af" }}>
-            <div style={{ fontSize:40, marginBottom:10 }}>📭</div>
-            <div>Bu kategoride malzeme yok</div>
-            <button onClick={load} style={{ marginTop:12, padding:"6px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:12 }}>Yenile</button>
+      {/* ── MALZEMELERIM SEKMESİ ── */}
+      {mainTab === "malzemelerim" && (
+        <div>
+          {/* Özet kartlar */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
+            {tabs.map(t => (
+              <div key={t.key} onClick={()=>setAktifTab(t.key)}
+                style={{ background:"#fff", borderRadius:12, padding:"14px 10px", textAlign:"center", cursor:"pointer", border:`2px solid ${aktifTab===t.key?t.color:"#e5e7eb"}`, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                <div style={{ fontSize:26, fontWeight:800, color:t.color }}>{counts[t.key]}</div>
+                <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>{t.label}</div>
+              </div>
+            ))}
           </div>
-        ) : filtered.map((d, i) => {
-          const dr = durumRenk[d.durum] || durumRenk.PERSONELDE;
-          const aktif = d.durum === "PERSONELDE";
-          return (
-            <div key={d.id} style={{ padding:"14px 16px", borderBottom:i<filtered.length-1?"1px solid #f0f4f8":"none" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
-                <div style={{ fontWeight:700, color:"#1e3a5f", fontSize:14, flex:1, marginRight:10 }}>{d.malzeme_adi}</div>
-                <span style={{ padding:"3px 10px", borderRadius:8, background:dr.bg, color:dr.c, fontWeight:700, fontSize:11, whiteSpace:"nowrap" }}>{dr.l}</span>
+          {/* Tab seçici */}
+          <div style={{ display:"flex", borderBottom:"2px solid #e2e8f0", background:"#fff", borderRadius:"10px 10px 0 0", overflow:"hidden", marginBottom:0 }}>
+            {tabs.map(t => (
+              <button key={t.key} onClick={()=>setAktifTab(t.key)}
+                style={{ flex:1, padding:"11px 0", border:"none", background:"none", cursor:"pointer", fontWeight:aktifTab===t.key?700:400, fontSize:13, color:aktifTab===t.key?t.color:"#6b7280", borderBottom:aktifTab===t.key?`3px solid ${t.color}`:"3px solid transparent", marginBottom:-2 }}>
+                {t.label} {counts[t.key]>0?`(${counts[t.key]})`:""}</button>
+            ))}
+          </div>
+          {/* Liste */}
+          <div style={{ background:"#fff", borderRadius:"0 0 12px 12px", boxShadow:"0 1px 6px rgba(0,0,0,0.07)", overflow:"hidden" }}>
+            {filtered.length === 0 ? (
+              <div style={{ textAlign:"center", padding:40, color:"#9ca3af" }}>
+                <div style={{ fontSize:40, marginBottom:10 }}>📭</div>
+                <div>Bu kategoride malzeme yok</div>
+                <button onClick={load} style={{ marginTop:12, padding:"6px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:12 }}>Yenile</button>
               </div>
-              <div style={{ display:"flex", gap:16, fontSize:12, color:"#6b7280", marginBottom:8, flexWrap:"wrap" }}>
-                <span>📏 {d.miktar} {d.birim}</span>
-                {(d.site_id||d.bolge) && <span>📍 {d.site_id||d.bolge}</span>}
-                {d.saha_site_id && <span>🏗 Saha: {d.saha_site_id}</span>}
-                {d.verilme_tarihi && <span>📅 {new Date(d.verilme_tarihi).toLocaleDateString("tr-TR")}</span>}
-              </div>
-              {d.tutanak_url && (
-                <a href={d.tutanak_url} target="_blank" rel="noreferrer"
-                  style={{ display:"inline-block", marginBottom:8, fontSize:12, color:"#2563eb", fontWeight:600 }}>📄 Tutanağı Gör</a>
-              )}
-              {aktif && (
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                  <button onClick={()=>{ setSahaCikisModal(d); setSahaSiteId(""); setSahaNot(""); }}
-                    style={{ padding:"6px 14px", background:"#dcfce7", color:"#15803d", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                    🏗 Sahaya Çıkış
-                  </button>
-                  <button onClick={()=>{ setIadeModal(d); setIadeNot(""); }}
-                    style={{ padding:"6px 14px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                    ↩ Depoya İade
-                  </button>
-                  {!d.tutanak_url && (
-                    <label style={{ padding:"6px 14px", background:"#f0f4ff", color:"#2563eb", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                      📎 Tutanak Yükle
-                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} onChange={async e=>{
-                        const file = e.target.files[0]; if(!file) return;
-                        const fd = new FormData(); fd.append("file", file);
-                        try {
-                          const up = await fetch(`${API_BASE2}/upload`, { method:"POST", headers:{ Authorization:`Bearer ${token}` }, body:fd });
-                          const ud = await up.json();
-                          if (ud.url) { await fetch(`${API_BASE2}/malzeme/dagitim/${d.id}/tutanak`, { method:"PUT", headers, body:JSON.stringify({ tutanak_url: ud.url }) }); load(); }
-                        } catch {}
-                      }} />
-                    </label>
+            ) : filtered.map((d, i) => {
+              const dr = durumRenk[d.durum] || durumRenk.PERSONELDE;
+              const aktif = d.durum === "PERSONELDE";
+              return (
+                <div key={d.id} style={{ padding:"14px 16px", borderBottom:i<filtered.length-1?"1px solid #f0f4f8":"none" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                    <div style={{ fontWeight:700, color:"#1e3a5f", fontSize:14, flex:1, marginRight:10 }}>{d.malzeme_adi}</div>
+                    <span style={{ padding:"3px 10px", borderRadius:8, background:dr.bg, color:dr.c, fontWeight:700, fontSize:11, whiteSpace:"nowrap" }}>{dr.l}</span>
+                  </div>
+                  <div style={{ display:"flex", gap:16, fontSize:12, color:"#6b7280", marginBottom:8, flexWrap:"wrap" }}>
+                    <span>📏 {d.miktar} {d.birim}</span>
+                    {(d.site_id||d.bolge) && <span>📍 {d.site_id||d.bolge}</span>}
+                    {d.saha_site_id && <span>🏗 Saha: {d.saha_site_id}</span>}
+                    {d.verilme_tarihi && <span>📅 {new Date(d.verilme_tarihi).toLocaleDateString("tr-TR")}</span>}
+                  </div>
+                  {d.tutanak_url && (
+                    <a href={d.tutanak_url} target="_blank" rel="noreferrer"
+                      style={{ display:"inline-block", marginBottom:8, fontSize:12, color:"#2563eb", fontWeight:600 }}>📄 Tutanağı Gör</a>
                   )}
+                  {aktif && (
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                      <button onClick={()=>{ setSahaCikisModal(d); setSahaSiteId(""); setSahaNot(""); }}
+                        style={{ padding:"6px 14px", background:"#dcfce7", color:"#15803d", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                        🏗 Sahaya Çıkış
+                      </button>
+                      <button onClick={()=>{ setIadeModal(d); setIadeNot(""); }}
+                        style={{ padding:"6px 14px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                        ↩ Depoya İade
+                      </button>
+                      {!d.tutanak_url && (
+                        <label style={{ padding:"6px 14px", background:"#f0f4ff", color:"#2563eb", border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                          📎 Tutanak Yükle
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} onChange={async e=>{
+                            const file = e.target.files[0]; if(!file) return;
+                            const fd = new FormData(); fd.append("file", file);
+                            try {
+                              const up = await fetch(`${API_BASE2}/upload`, { method:"POST", headers:{ Authorization:`Bearer ${token}` }, body:fd });
+                              const ud = await up.json();
+                              if (ud.url) { await fetch(`${API_BASE2}/malzeme/dagitim/${d.id}/tutanak`, { method:"PUT", headers, body:JSON.stringify({ tutanak_url: ud.url }) }); load(); }
+                            } catch {}
+                          }} />
+                        </label>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── TALEPLERİM SEKMESİ ── */}
+      {mainTab === "taleplerim" && (
+        <div>
+          {/* Üst bar */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+            <div style={{ fontSize:15, fontWeight:700, color:"#1e3a5f" }}>
+              Malzeme Taleplerim
+              {talepLoading && <span style={{ fontSize:12, color:"#9ca3af", fontWeight:400, marginLeft:8 }}>yükleniyor…</span>}
+            </div>
+            <button onClick={()=>{ resetTalepForm(); setShowTalepForm(true); }}
+              style={{ padding:"10px 18px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:10, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+              + Yeni Talep
+            </button>
+          </div>
+
+          {/* Talep listesi */}
+          {talepler.length === 0 && !talepLoading ? (
+            <div style={{ textAlign:"center", padding:50, background:"#fff", borderRadius:12, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+              <div style={{ fontSize:44, marginBottom:10 }}>📋</div>
+              <div style={{ color:"#6b7280", fontSize:14, marginBottom:4 }}>Henüz malzeme talebiniz yok</div>
+              <div style={{ color:"#9ca3af", fontSize:12 }}>Yukarıdaki "+ Yeni Talep" butonuna basarak talep oluşturabilirsiniz</div>
+            </div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {talepler.map(t => {
+                const ds = TALEP_DURUM_MAP[t.durum] || { label:t.durum, color:"#6b7280", bg:"#f3f4f6" };
+                const canEdit = t.durum === "TASLAK";
+                const canDelete = t.durum === "TASLAK";
+                return (
+                  <div key={t.id} style={{ background:"#fff", borderRadius:12, padding:"14px 16px", boxShadow:"0 1px 4px rgba(0,0,0,0.07)", borderLeft:`4px solid ${ds.color}` }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:13, color:"#1e3a5f" }}>{t.talep_no || `#${t.id}`}</div>
+                        <div style={{ fontSize:12, color:"#6b7280", marginTop:2 }}>
+                          {[t.proje, t.bolge, t.site_id].filter(Boolean).join(" · ")}
+                        </div>
+                      </div>
+                      <span style={{ padding:"4px 10px", borderRadius:8, background:ds.bg, color:ds.color, fontWeight:700, fontSize:11, whiteSpace:"nowrap", flexShrink:0 }}>{ds.label}</span>
+                    </div>
+                    <div style={{ fontSize:12, color:"#374151", marginBottom:8 }}>
+                      {(t.kalemler||[]).slice(0,3).map((k,i) => (
+                        <div key={i} style={{ display:"flex", gap:6 }}>
+                          <span>• {k.malzeme_adi}</span>
+                          <span style={{ color:"#6b7280" }}>{k.miktar} {k.birim}</span>
+                        </div>
+                      ))}
+                      {(t.kalemler||[]).length > 3 && <div style={{ color:"#9ca3af" }}>+{t.kalemler.length - 3} kalem daha…</div>}
+                    </div>
+                    <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                      <span style={{ fontSize:11, color:"#9ca3af", flex:1 }}>
+                        {t.talep_tarihi ? new Date(t.talep_tarihi).toLocaleDateString("tr-TR") : ""}
+                        {t.toplam_tutar > 0 && ` · ₺${Number(t.toplam_tutar).toLocaleString("tr-TR")}`}
+                      </span>
+                      {canEdit && (
+                        <button onClick={()=>openEditTalepM(t)}
+                          style={{ padding:"5px 12px", background:"#eff6ff", color:"#2563eb", border:"none", borderRadius:7, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                          ✏️ Düzenle
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button onClick={()=>deleteTalepM(t.id)}
+                          style={{ padding:"5px 12px", background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:7, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                          🗑
+                        </button>
+                      )}
+                    </div>
+                    {t.durum === "REDDEDILDI" && t.red_notu && (
+                      <div style={{ marginTop:8, padding:"8px 10px", background:"#fee2e2", borderRadius:7, fontSize:12, color:"#991b1b" }}>
+                        ❌ Red Notu: {t.red_notu}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── YENİ / DÜZENLEME TALEP FORMU (bottom sheet) ── */}
+      {showTalepForm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:4000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+          onClick={e=>{ if(e.target===e.currentTarget) resetTalepForm(); }}>
+          <div style={{ background:"#fff", borderRadius:"20px 20px 0 0", width:"100%", maxWidth:600, maxHeight:"92vh", overflowY:"auto", padding:"20px 16px 40px" }}>
+            <div style={{ width:40, height:4, background:"#d1d5db", borderRadius:2, margin:"0 auto 16px" }} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+              <h3 style={{ margin:0, fontSize:17, fontWeight:800, color:"#1e3a5f" }}>
+                📋 {editingTalepId ? "Talebi Düzenle" : "Yeni Malzeme Talebi"}
+              </h3>
+              <button onClick={resetTalepForm} style={{ background:"none", border:"none", fontSize:22, color:"#6b7280", cursor:"pointer" }}>✕</button>
+            </div>
+
+            {/* Bölge & Proje */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+              <div>
+                <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4, color:"#374151" }}>Bölge</label>
+                <select value={talepForm.bolge} onChange={e=>setTalepForm(p=>({...p,bolge:e.target.value}))}
+                  style={{ width:"100%", padding:"10px 10px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, boxSizing:"border-box" }}>
+                  <option value="">Seçin…</option>
+                  {BOLGELER_M.map(b=><option key={b}>{b}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4, color:"#374151" }}>Proje</label>
+                <select value={talepForm.proje} onChange={e=>setTalepForm(p=>({...p,proje:e.target.value}))}
+                  style={{ width:"100%", padding:"10px 10px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, boxSizing:"border-box" }}>
+                  <option value="">Seçin…</option>
+                  {PROJELER_M.map(b=><option key={b}>{b}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Site ID */}
+            <div style={{ marginBottom:12, position:"relative" }}>
+              <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4, color:"#374151" }}>Site ID</label>
+              <input value={talepForm.site_id}
+                onChange={e=>{ setTalepForm(p=>({...p,site_id:e.target.value})); searchTalepSite(e.target.value); setShowTalepSiteDrop(true); }}
+                onBlur={()=>setTimeout(()=>setShowTalepSiteDrop(false),180)}
+                placeholder="Site kodu yazın…"
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, boxSizing:"border-box" }} />
+              {showTalepSiteDrop && talepSiteSugg.length > 0 && (
+                <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:"1px solid #d1d5db", borderRadius:8, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:9999, maxHeight:180, overflowY:"auto" }}>
+                  {talepSiteSugg.map(s=>(
+                    <div key={s.site_code} onMouseDown={()=>{ setTalepForm(p=>({...p,site_id:s.site_code})); setShowTalepSiteDrop(false); setTalepSiteSugg([]); }}
+                      style={{ padding:"9px 12px", cursor:"pointer", fontSize:13, borderBottom:"1px solid #f3f4f6" }}>
+                      <span style={{ fontWeight:600, color:"#1e3a5f" }}>{s.site_code}</span>
+                      {s.bolge && <span style={{ marginLeft:8, color:"#6b7280", fontSize:11 }}>{s.bolge}</span>}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
-          );
-        })}
-      </div>
+
+            {/* Malzeme Kalemleri */}
+            <div style={{ marginBottom:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <label style={{ fontSize:13, fontWeight:700, color:"#1e3a5f" }}>📦 Malzeme Kalemleri</label>
+                <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",notlar:""}])}
+                  style={{ padding:"5px 12px", background:"#f0fdf4", color:"#15803d", border:"1px solid #bbf7d0", borderRadius:7, cursor:"pointer", fontSize:12, fontWeight:700 }}>
+                  + Kalem Ekle
+                </button>
+              </div>
+              {talepKalemler.map((k,i) => (
+                <div key={i} style={{ background:"#f8fafc", borderRadius:10, padding:"12px", marginBottom:8, border:"1px solid #e5e7eb" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                    <span style={{ fontSize:12, fontWeight:600, color:"#6b7280" }}>Kalem {i+1}</span>
+                    {talepKalemler.length > 1 && (
+                      <button onClick={()=>setTalepKalemler(prev=>prev.filter((_,idx)=>idx!==i))}
+                        style={{ background:"none", border:"none", color:"#dc2626", fontSize:18, cursor:"pointer", padding:0 }}>✕</button>
+                    )}
+                  </div>
+                  <input placeholder="Malzeme adı *" value={k.malzeme_adi}
+                    onChange={e=>setTalepKalemler(prev=>prev.map((x,idx)=>idx===i?{...x,malzeme_adi:e.target.value}:x))}
+                    style={{ width:"100%", padding:"9px 10px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, marginBottom:8, boxSizing:"border-box" }} />
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                    <div>
+                      <label style={{ fontSize:11, fontWeight:600, color:"#6b7280", display:"block", marginBottom:3 }}>Miktar</label>
+                      <input type="number" min="1" value={k.miktar}
+                        onChange={e=>setTalepKalemler(prev=>prev.map((x,idx)=>idx===i?{...x,miktar:Number(e.target.value)||1}:x))}
+                        style={{ width:"100%", padding:"9px 10px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, boxSizing:"border-box" }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize:11, fontWeight:600, color:"#6b7280", display:"block", marginBottom:3 }}>Birim</label>
+                      <select value={k.birim}
+                        onChange={e=>setTalepKalemler(prev=>prev.map((x,idx)=>idx===i?{...x,birim:e.target.value}:x))}
+                        style={{ width:"100%", padding:"9px 10px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, boxSizing:"border-box" }}>
+                        {BIRIMLER_M.map(b=><option key={b}>{b}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <input placeholder="Not (isteğe bağlı)" value={k.notlar||""}
+                    onChange={e=>setTalepKalemler(prev=>prev.map((x,idx)=>idx===i?{...x,notlar:e.target.value}:x))}
+                    style={{ width:"100%", padding:"9px 10px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:13, boxSizing:"border-box" }} />
+                </div>
+              ))}
+            </div>
+
+            {/* Genel Not */}
+            <div style={{ marginBottom:20 }}>
+              <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4, color:"#374151" }}>💬 Açıklama / Not</label>
+              <textarea value={talepForm.notlar} onChange={e=>setTalepForm(p=>({...p,notlar:e.target.value}))} rows={3}
+                placeholder="Talep ile ilgili açıklama…"
+                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, resize:"none", boxSizing:"border-box" }} />
+            </div>
+
+            {/* Butonlar */}
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              <button onClick={()=>saveTalepFn("ROLLOUT_BEKLE")} disabled={savingTalep}
+                style={{ padding:"14px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:10, cursor:"pointer", fontWeight:700, fontSize:15 }}>
+                {savingTalep ? "Gönderiliyor…" : "📤 Onaya Gönder"}
+              </button>
+              <button onClick={()=>saveTalepFn("TASLAK")} disabled={savingTalep}
+                style={{ padding:"14px", background:"#f3f4f6", color:"#374151", border:"1.5px solid #d1d5db", borderRadius:10, cursor:"pointer", fontWeight:700, fontSize:14 }}>
+                {savingTalep ? "…" : "💾 Taslak Olarak Kaydet"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Saha Çıkış Modal */}
       {sahaCikisModal && (
