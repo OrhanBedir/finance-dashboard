@@ -19901,19 +19901,49 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
     onDeleted();
   };
 
-  const handleExcel = () => {
-    const rows = [["Site Code","Site Type","Ziyaret Tarihi","Eksik Bildirim Tarihi","Tamamlama Tarihi","Eksik Kalemleri","Notlar","Tamamlandı"]];
-    cleanupRows.forEach(r => {
+  const handleExcel = async () => {
+    const XS = await import("xlsx-js-style");
+    const wb = XS.utils.book_new();
+
+    const navy = "1E3A5F"; const green = "166534"; const red = "991B1B"; const amber = "92400E";
+    const hdrS = (bg) => ({ fill:{patternType:"solid",fgColor:{rgb:bg}}, font:{bold:true,color:{rgb:"FFFFFF"},sz:11,name:"Calibri"}, alignment:{horizontal:"center",vertical:"center",wrapText:true}, border:{top:{style:"thin",color:{rgb:"FFFFFF"}},bottom:{style:"thin",color:{rgb:"FFFFFF"}},left:{style:"thin",color:{rgb:"334D6E"}},right:{style:"thin",color:{rgb:"334D6E"}}} });
+    const cellS = (bg,tc="111827",bold=false) => ({ fill:{patternType:"solid",fgColor:{rgb:bg}}, font:{sz:11,name:"Calibri",bold,color:{rgb:tc}}, alignment:{horizontal:"left",vertical:"center",wrapText:true}, border:{top:{style:"thin",color:{rgb:"E5E7EB"}},bottom:{style:"thin",color:{rgb:"E5E7EB"}},left:{style:"thin",color:{rgb:"E5E7EB"}},right:{style:"thin",color:{rgb:"E5E7EB"}}} });
+
+    const HEADERS = ["Site Code","Site Type","Bölge","Ziyaret Tarihi","Eksik Bildirim Tarihi","Tamamlama Tarihi","Eksik Kalemleri","Tamamlanan","Toplam Kalem","Durum","Notlar"];
+    const wsData = [HEADERS.map((h,i) => ({ v:h, s:hdrS(i===0?navy:"2D5A8E") }))];
+
+    cleanupRows.forEach((r, ri) => {
       const rr = getRolloutRow(r.site_code);
-      const items = (r.items||[]);
-      const itemStr = items.map(i=>i.kalem).join("; ");
-      const tamamlandi = items.length > 0 && items.every(i=>i.tamamlandi) ? "Evet" : items.some(i=>i.tamamlandi) ? "Kısmi" : "Hayır";
-      rows.push([r.site_code, rr.site_type||"", fmtDate(r.visit_date), fmtDate(r.notification_date), fmtDate(r.completion_date), itemStr, r.notlar||"", tamamlandi]);
+      const items = r.items||[];
+      const doneCount = items.filter(i=>i.tamamlandi).length;
+      const allDone = items.length>0 && doneCount===items.length;
+      const durum = allDone?"Tamamlandı":doneCount>0?`${doneCount}/${items.length} Yapıldı`:items.length===0?"Kalem Yok":"Bekliyor";
+      const durumColor = allDone?green:doneCount>0?amber:items.length===0?"475569":red;
+      const bg = ri%2===0?"F8FAFC":"FFFFFF";
+      const itemStr = items.map(i=>(i.tamamlandi?"✓ ":"• ")+i.kalem).join("\n");
+      wsData.push([
+        {v:r.site_code, s:cellS(bg,navy,true)},
+        {v:rr.site_type||"", s:cellS(bg)},
+        {v:rr.bolge||"", s:cellS(bg)},
+        {v:fmtDate(r.visit_date), s:cellS(bg)},
+        {v:fmtDate(r.notification_date), s:cellS(bg)},
+        {v:fmtDate(r.completion_date), s:cellS(bg)},
+        {v:itemStr, s:cellS(bg)},
+        {v:doneCount, s:cellS(bg,"166534",true)},
+        {v:items.length, s:cellS(bg)},
+        {v:durum, s:cellS(bg,durumColor,true)},
+        {v:r.notlar||"", s:cellS(bg)},
+      ]);
     });
-    const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
-    const blob = new Blob(["﻿"+csv], {type:"text/csv;charset=utf-8;"});
+
+    const ws = XS.utils.aoa_to_sheet(wsData);
+    ws["!cols"] = [22,10,10,14,16,14,40,12,12,14,30].map(w=>({wch:w}));
+    ws["!rows"] = [{ hpt:22 }, ...cleanupRows.map(()=>({ hpt:36 }))];
+    XS.utils.book_append_sheet(wb, ws, "Clean Up");
+    const buf = XS.write(wb, { bookType:"xlsx", type:"array" });
+    const blob = new Blob([buf], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     const a = document.createElement("a"); a.href=URL.createObjectURL(blob);
-    a.download=`cleanup_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    a.download=`CleanUp_${new Date().toISOString().slice(0,10)}.xlsx`; a.click();
     URL.revokeObjectURL(a.href);
   };
 
