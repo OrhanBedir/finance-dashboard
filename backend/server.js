@@ -1447,9 +1447,10 @@ async function buildUpcomingCollectionsData() {
 
   let todayTotal = 0;
   let weekTotal = 0;
-  let overdueTotal = 0;
+  let overduePaymentTotal = 0;
 
   const groupedMap = new Map();
+  const overdueGroupedMap = new Map();
 
   for (const row of result.rows) {
     const amount = Number(row.remaining_amount || 0);
@@ -1461,7 +1462,18 @@ async function buildUpcomingCollectionsData() {
     if (Number.isNaN(dueDate.getTime())) continue;
 
     if (dueDate < today) {
-      overdueTotal += amount;
+      overduePaymentTotal += amount;
+      // Geciken satırları da grupla
+      const key = row.due_date;
+      const dayName = dueDate.toLocaleDateString("tr-TR", { weekday: "long" });
+      const day_name = dayName.charAt(0).toLocaleUpperCase("tr-TR") + dayName.slice(1);
+      if (!overdueGroupedMap.has(key)) {
+        overdueGroupedMap.set(key, { due_date: key, day_name, amount: 0, gross_amount: 0, deduction_amount: 0, currency: row.currency || "TRY" });
+      }
+      const ov = overdueGroupedMap.get(key);
+      ov.amount += amount;
+      if (amount > 0) ov.gross_amount += amount;
+      else ov.deduction_amount += amount;
       continue;
     }
 
@@ -1512,12 +1524,18 @@ async function buildUpcomingCollectionsData() {
     (a, b) => new Date(a.due_date) - new Date(b.due_date),
   );
 
+  // Geciken ödemeler — en yakın tarih önce
+  const overduePaymentRows = [...overdueGroupedMap.values()].sort(
+    (a, b) => new Date(b.due_date) - new Date(a.due_date),
+  );
+
   return {
     rows,
+    overdue_payment_rows: overduePaymentRows,
     summary: {
       today_total: todayTotal,
       week_total: weekTotal,
-      overdue_total: overdueTotal,
+      overdue_payment_total: overduePaymentTotal,
     },
     monthlyUpcoming,
   };
@@ -8723,9 +8741,12 @@ app.get("/finance/upcoming-payments", async (req, res) => {
     res.json({
       ok: true,
       rows: upcomingData.rows,
-      overdue_rows: overdueData.rows,
+      overdue_payment_rows: upcomingData.overdue_payment_rows,  // hw_payment_rows geciken
+      overdue_rows: overdueData.rows,                           // hw_invoice_rows geciken
       summary: {
-        ...upcomingData.summary,
+        today_total: upcomingData.summary.today_total,
+        week_total: upcomingData.summary.week_total,
+        overdue_payment_total: upcomingData.summary.overdue_payment_total,
         today_received_total: Number(
           todayReceivedResult.rows[0]?.today_received_total || 0,
         ),
