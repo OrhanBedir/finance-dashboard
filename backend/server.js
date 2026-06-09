@@ -8733,14 +8733,31 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
       ORDER BY gun
     `, [monthStr, todayStr]);
 
-    // 3) Kesintiler — due_date bu ayda, remaining_amount < 0
+    // 3) Kesintiler — iki kaynak:
+    //   a) Mahsup edilmiş: payment_amount < 0 VE remaining = 0 → payment_date bazlı
+    //   b) Bekleyen: remaining_amount < 0 → due_date bazlı
+    //   İki set birbirini dışladığı için toplama güvenlidir.
     const deductions = await pool.query(`
-      SELECT
-        EXTRACT(DAY FROM due_date)::int AS gun,
-        SUM(COALESCE(remaining_amount, 0)) AS tutar
-      FROM hw_payment_rows
-      WHERE to_char(due_date, 'YYYY-MM') = $1
-        AND COALESCE(remaining_amount, 0) < 0
+      SELECT gun, SUM(tutar)::numeric AS tutar FROM (
+        SELECT
+          EXTRACT(DAY FROM payment_date)::int AS gun,
+          SUM(COALESCE(payment_amount, 0)) AS tutar
+        FROM hw_payment_rows
+        WHERE to_char(payment_date, 'YYYY-MM') = $1
+          AND COALESCE(payment_amount, 0) < 0
+          AND COALESCE(remaining_amount, 0) = 0
+        GROUP BY gun
+
+        UNION ALL
+
+        SELECT
+          EXTRACT(DAY FROM due_date)::int AS gun,
+          SUM(COALESCE(remaining_amount, 0)) AS tutar
+        FROM hw_payment_rows
+        WHERE to_char(due_date, 'YYYY-MM') = $1
+          AND COALESCE(remaining_amount, 0) < 0
+        GROUP BY gun
+      ) t
       GROUP BY gun
       ORDER BY gun
     `, [monthStr]);
