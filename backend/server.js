@@ -8703,7 +8703,11 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
       ORDER BY gun
     `, [monthStr]);
 
-    // 2) Bekleyen tahsilat — due_date bu ayda, remaining_amount > 0
+    // Türkiye saati ile bugünün tarihi
+    const todayTR = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
+    const todayStr = `${todayTR.getFullYear()}-${String(todayTR.getMonth()+1).padStart(2,'0')}-${String(todayTR.getDate()).padStart(2,'0')}`;
+
+    // 2a) Gelecek bekleyen tahsilat — due_date bu ayda, DUE_DATE > BUGÜN, remaining_amount > 0
     const pending = await pool.query(`
       SELECT
         EXTRACT(DAY FROM due_date)::int AS gun,
@@ -8711,11 +8715,25 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
       FROM hw_payment_rows
       WHERE to_char(due_date, 'YYYY-MM') = $1
         AND COALESCE(remaining_amount, 0) > 0
+        AND due_date > $2::date
       GROUP BY gun
       ORDER BY gun
-    `, [monthStr]);
+    `, [monthStr, todayStr]);
 
-    // 3) H01 kesintiler — due_date bu ayda, remaining_amount < 0
+    // 2b) Geciken/bugün vadeli ödenmemiş — due_date bu ayda, DUE_DATE <= BUGÜN, remaining_amount > 0
+    const overdueHw = await pool.query(`
+      SELECT
+        EXTRACT(DAY FROM due_date)::int AS gun,
+        SUM(COALESCE(remaining_amount, 0)) AS tutar
+      FROM hw_payment_rows
+      WHERE to_char(due_date, 'YYYY-MM') = $1
+        AND COALESCE(remaining_amount, 0) > 0
+        AND due_date <= $2::date
+      GROUP BY gun
+      ORDER BY gun
+    `, [monthStr, todayStr]);
+
+    // 3) Kesintiler — due_date bu ayda, remaining_amount < 0
     const deductions = await pool.query(`
       SELECT
         EXTRACT(DAY FROM due_date)::int AS gun,
@@ -8723,16 +8741,16 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
       FROM hw_payment_rows
       WHERE to_char(due_date, 'YYYY-MM') = $1
         AND COALESCE(remaining_amount, 0) < 0
-        AND LOWER(COALESCE(invoice_no,'')) LIKE 'h01%'
       GROUP BY gun
       ORDER BY gun
     `, [monthStr]);
 
     res.json({
       ok: true,
-      received:   received.rows,    // payment_date bazlı alınan
-      pending:    pending.rows,     // due_date bazlı bekleyen
-      deductions: deductions.rows,  // H01 kesintiler
+      received:     received.rows,    // payment_date bazlı alınan
+      pending:      pending.rows,     // due_date > bugün
+      overdue_hw:   overdueHw.rows,   // due_date <= bugün, henüz tahsil edilmemiş
+      deductions:   deductions.rows,  // negatif remaining (iade/kesinti)
     });
   } catch(e) {
     console.error("CASHFLOW MONTHLY ERROR:", e.message);

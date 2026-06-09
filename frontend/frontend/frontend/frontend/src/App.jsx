@@ -14710,8 +14710,9 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [yil, setYil] = useState(String(now.getFullYear()));
   const [ay, setAy]   = useState(String(now.getMonth() + 1).padStart(2, "0"));
   const [hwReceived,  setHwReceived]  = useState({});  // gun→tutar (alınan)
-  const [hwPending,   setHwPending]   = useState({});  // gun→tutar (bekleyen)
-  const [hwDeduct,    setHwDeduct]    = useState({});  // gun→tutar (H01 kesinti)
+  const [hwPending,   setHwPending]   = useState({});  // gun→tutar (gelecek bekleyen)
+  const [hwOverdue,   setHwOverdue]   = useState({});  // gun→tutar (vadesi geçmiş/bugün, henüz alınmamış)
+  const [hwDeduct,    setHwDeduct]    = useState({});  // gun→tutar (kesinti)
   const [personelList,setPersonelList]= useState([]);
   const [araclar,     setAraclar]     = useState([]);
   const [ofisList,    setOfisList]    = useState([]);
@@ -14754,6 +14755,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       const toMap = (rows) => (rows||[]).reduce((m,r) => { m[r.gun]=(m[r.gun]||0)+Number(r.tutar||0); return m; }, {});
       setHwReceived(toMap(cfData.received));
       setHwPending(toMap(cfData.pending));
+      setHwOverdue(toMap(cfData.overdue_hw));
       setHwDeduct(toMap(cfData.deductions));
       setPersonelList(Array.isArray(perData) ? perData.filter(p => p.aktif) : []);
       setAraclar(Array.isArray(aracData) ? aracData.filter(a => a.durum === "AKTİF") : []);
@@ -14817,16 +14819,18 @@ function CashFlowPanel({ currentUser, onBack }) {
 
   // ── Spillover (önceki aydan sarkan) ─────────────────────────────
   const totalSarkan  = sarkanlar.reduce((s,r) => s + Number(r.sarkan||0), 0);
-  const hwDaysAll    = [...Object.keys(hwReceived), ...Object.keys(hwPending)]
+  const hwDaysAll    = [...Object.keys(hwReceived), ...Object.keys(hwPending), ...Object.keys(hwOverdue)]
                          .map(Number).filter(n => !isNaN(n) && n > 0);
   const firstHWDay   = hwDaysAll.length > 0 ? Math.min(...hwDaysAll) : null;
 
   // Kategoriler
   const hwDeductAbs = Object.fromEntries(Object.entries(hwDeduct).map(([k,v])=>[k,Math.abs(v)]));
+  const hwOverdueTotal = Object.values(hwOverdue).reduce((s,v)=>s+v,0);
   const KATEGORILER = [
     { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",               type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived },
     { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",              type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending  },
-    { key:"hw_deduct",   label:"↩️ İade Kesinti (H01)",                  type:"expense", color:"#fee2e2", textColor:"#991b1b", byDay: hwDeductAbs },
+    ...(hwOverdueTotal > 0 ? [{ key:"hw_overdue", label:"⚠️ HW Geciken Tahsilat",  type:"income",  color:"#fee2e2", textColor:"#991b1b", byDay: hwOverdue, overdue: true }] : []),
+    { key:"hw_deduct",   label:"↩️ İade / Kesinti",                      type:"expense", color:"#fff1f2", textColor:"#9f1239", byDay: hwDeductAbs },
     { key:"maas",        label:`👥 ${prevAyAdi} Maaşları`,               type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: totalMaas>0   ? {15: totalMaas}   : {}, note: `${prevAyAdi} ayı hakedilen · Ödeme: 15. gün`, overdue: maasOverdue },
     { key:"arac",        label:`🚗 ${prevAyAdi} Araç Kiraları`,           type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: totalArac>0   ? {10: totalArac}   : {}, note: `${prevAyAdi} kirası · Ödeme: 10. gün`,          overdue: totalArac>0 && paymentOverdue(10) },
     { key:"ticket",      label:"🎫 Ticket'lar",                           type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: totalTicket>0 ? {5:  totalTicket} : {}, note: `${personelList.length} kişi × ₺10.000 · 5. gün`, overdue: totalTicket>0 && paymentOverdue(5) },
@@ -14897,7 +14901,8 @@ function CashFlowPanel({ currentUser, onBack }) {
     // Kategori satırları
     const ROW_COLORS = {
       hw_received:["BBFCD0","14532D"], hw_pending:["DCFCE7","166534"],
-      hw_deduct:  ["FEE2E2","991B1B"], maas:["FECACA","7F1D1D"],
+      hw_overdue: ["FEE2E2","991B1B"],
+      hw_deduct:  ["FFF1F2","9F1239"], maas:["FECACA","7F1D1D"],
       arac:       ["FEF3C7","92400E"], ticket:["F3E8FF","6B21A8"],
       ofis:       ["FFF7ED","9A3412"], spillover:["FECACA","DC2626"],
       taseron:    ["FDF4FF","7E22CE"], diger:["F1F5F9","475569"],
