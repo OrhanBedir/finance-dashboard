@@ -20145,12 +20145,12 @@ function CleanupModal({ record, rolloutRows, onClose, onSaved }) {
             <textarea style={{...inSt,minHeight:"80px",resize:"vertical"}} value={form.notlar} onChange={e=>setForm(p=>({...p,notlar:e.target.value}))} placeholder="Notlarınızı buraya yazın..." />
           </div>
 
-          {/* Screenshot */}
+          {/* TEMU Screenshot */}
           <div>
-            <label style={lblSt}>📸 Ekran Görüntüsü</label>
-            {screenshotPreview && <img src={screenshotPreview} alt="preview" style={{ width:"100%",maxHeight:"150px",objectFit:"cover",borderRadius:"8px",marginBottom:"8px",border:"1px solid #e2e8f0" }} />}
+            <label style={lblSt}>📱 TEMU Ekran Görüntüsü</label>
+            {screenshotPreview && <img src={screenshotPreview} alt="TEMU önizleme" style={{ width:"100%",maxHeight:"150px",objectFit:"cover",borderRadius:"8px",marginBottom:"8px",border:"1px solid #e2e8f0" }} />}
             <label style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",background:"#eff6ff",border:"2px dashed #93c5fd",borderRadius:"10px",padding:"14px",cursor:"pointer",fontSize:"13px",color:"#2563eb",fontWeight:600 }}>
-              📎 Görüntü Seç (JPG, PNG)
+              📎 TEMU Görüntüsü Seç (JPG, PNG)
               <input type="file" accept="image/*" style={{ display:"none" }} onChange={handleScreenshot} />
             </label>
           </div>
