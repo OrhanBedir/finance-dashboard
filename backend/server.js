@@ -13713,7 +13713,11 @@ pool.query(`
   );
 `).catch(e => console.error("taseron_odeme_log tablo hatası:", e.message));
 
-// Firmalar listesi (filtreleme için)
+// dekont_url kolonu ekle
+pool.query(`ALTER TABLE taseron_odeme_log ADD COLUMN IF NOT EXISTS dekont_url TEXT;`)
+  .catch(e => console.error("dekont_url kolonu:", e.message));
+
+// Firmalar listesi (kalan borcu olanlar — Ödeme Gir dropdown)
 app.get("/finance/taseron-firmalar", requireFinanceAuth, async (req, res) => {
   try {
     const r = await pool.query(`
@@ -13730,6 +13734,35 @@ app.get("/finance/taseron-firmalar", requireFinanceAuth, async (req, res) => {
       ORDER BY firma ASC
     `);
     res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Tüm firmalar listesi (arama/datalist için — kalan borç 0 olanlar dahil)
+app.get("/finance/taseron-firmalar-all", requireFinanceAuth, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT
+        TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
+        COALESCE(SUM(kalan_borc),0) AS toplam_kalan
+      FROM invoice_entries
+      WHERE COALESCE(TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')), '') <> ''
+      GROUP BY TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, ''))
+      ORDER BY toplam_kalan DESC, firma ASC
+    `);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ödeme dekontu yükle
+app.post("/finance/odeme-dekont/:id", requireFinanceAuth, upload.single("file"), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.status(400).json({ error: "Dosya yok" });
+    const ext = (req.file.originalname || "").split(".").pop() || "pdf";
+    const filename = `odeme-dekont/${id}_${Date.now()}.${ext}`;
+    const { url } = await uploadToStorage("odeme-dekontlar", filename, req.file.buffer, req.file.mimetype);
+    await pool.query(`UPDATE taseron_odeme_log SET dekont_url=$1 WHERE id=$2`, [url, id]);
+    res.json({ ok: true, dekont_url: url });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -13759,7 +13792,7 @@ app.get("/finance/taseron-odeme-gecmisi", requireFinanceAuth, async (req, res) =
     const { firma } = req.query;
     if (!firma) return res.status(400).json({ error: "firma zorunlu" });
     const r = await pool.query(`
-      SELECT id, firma, tutar, tarih, aciklama, dagilim, created_at
+      SELECT id, firma, tutar, tarih, aciklama, dagilim, dekont_url, created_at
       FROM taseron_odeme_log
       WHERE firma = $1
       ORDER BY tarih DESC, created_at DESC

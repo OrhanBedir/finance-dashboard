@@ -2564,7 +2564,7 @@ function DailyEntry() {
                     <td style={{ padding:"9px 12px", fontSize:13 }}>{row.project_code || "-"}</td>
                     <td style={{ padding:"9px 12px", fontSize:13, fontWeight:600 }}>{row.site_code || "-"}</td>
                     <td style={{ padding:"9px 12px", fontSize:12, fontFamily:"monospace" }}>{row.item_code || "-"}</td>
-                    <td style={{ padding:"9px 12px", fontSize:12, maxWidth:280 }}>{row.item_description || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:12, maxWidth:280 }} title={row.item_description||""}><div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:260 }}>{row.item_description || "-"}</div></td>
                     <td style={{ padding:"9px 12px", fontSize:13, textAlign:"center", fontWeight:600 }}>{row.requested_qty ?? "-"}</td>
                     <td style={{ padding:"9px 12px", fontSize:13, textAlign:"center", fontWeight:600, color: Number(row.due_qty||0) > 0 ? "#dc2626" : "#16a34a" }}>{row.due_qty ?? "-"}</td>
                     <td style={{ padding:"9px 12px", fontSize:12 }}>{row.currency || "-"}</td>
@@ -2623,7 +2623,7 @@ function DailyEntry() {
                       <td style={{ ...tdSt, fontWeight:700, color:"#1e3a5f" }}>{row.site_code}</td>
                       <td style={{ ...tdSt, fontFamily:"monospace", fontSize:11 }}>{row.item_code}</td>
                       <td style={{ ...tdSt, maxWidth:220 }} title={row.item_description}>
-                        <div className="desc-cell">{row.item_description}</div>
+                        <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:200 }}>{row.item_description}</div>
                       </td>
                       <td style={{ ...tdSt, fontWeight:800, fontSize:14, textAlign:"center", color:"#1d4ed8" }}>{row.done_qty}</td>
                       <td style={{ ...tdSt, textAlign:"center" }}>{row.requested_qty ?? "-"}</td>
@@ -3363,10 +3363,13 @@ function FinanceDashboard({
   const [odemeModalTarih,   setOdemeModalTarih]   = useState(() => new Date().toISOString().slice(0,10));
   const [odemeModalAciklama,setOdemeModalAciklama]= useState("");
   const [odemeModalFirmalar,setOdemeModalFirmalar]= useState([]); // [{firma, toplam_kalan}]
+  const [odemeModalTumFirmalar,setOdemeModalTumFirmalar]= useState([]); // tüm firmalar (datalist için)
   const [odemeModalCari,    setOdemeModalCari]    = useState(null); // {faturalar, toplamKalan}
   const [odemeModalLog,     setOdemeModalLog]     = useState([]);
   const [odemeModalLoading, setOdemeModalLoading] = useState(false);
   const [odemeModalSonuc,   setOdemeModalSonuc]   = useState(null);
+  const [dekontUploading,   setDekontUploading]   = useState(null); // log id being uploaded
+  const dekontRef = React.useRef(null);
   const [bankaInfo,         setBankaInfo]         = useState(null);  // seçili firma banka bilgisi
   const [showBankaCard,     setShowBankaCard]     = useState(false); // banka kartı açık mı
   const [bankaEditMode,     setBankaEditMode]     = useState(false); // düzenleme modu
@@ -4085,9 +4088,13 @@ function FinanceDashboard({
   // ── Taşeron Ödeme Modal handlers ─────────────────────────────
   const loadOdemeModalFirmalar = async () => {
     try {
-      const data = await fetchJson(`${API_BASE}/finance/taseron-firmalar`, { withAuth: true });
+      const [data, allData] = await Promise.all([
+        fetchJson(`${API_BASE}/finance/taseron-firmalar`, { withAuth: true }),
+        fetchJson(`${API_BASE}/finance/taseron-firmalar-all`, { withAuth: true }),
+      ]);
       setOdemeModalFirmalar(Array.isArray(data) ? data : []);
-    } catch { setOdemeModalFirmalar([]); }
+      setOdemeModalTumFirmalar(Array.isArray(allData) ? allData : []);
+    } catch { setOdemeModalFirmalar([]); setOdemeModalTumFirmalar([]); }
   };
 
   const loadOdemeModalCari = async (firma) => {
@@ -6020,14 +6027,24 @@ function FinanceDashboard({
               {/* SOL — Firma seç + Cari */}
               <div style={{ width:"340px", flexShrink:0, borderRight:"1px solid #e5e7eb", padding:"20px", overflowY:"auto", background:"#fdf4ff" }}>
                 <div style={{ marginBottom:"16px" }}>
-                  <label style={{ display:"block", fontSize:"12px", fontWeight:700, color:"#6b21a8", marginBottom:"6px" }}>Taşeron Firmayı Seç</label>
-                  <select value={odemeModalFirma} onChange={e=>handleOdemeModalFirmaChange(e.target.value)}
-                    style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #d8b4fe", borderRadius:"10px", fontSize:"14px", background:"#fff" }}>
-                    <option value="">-- Firma Seçin --</option>
-                    {odemeModalFirmalar.map(f => (
-                      <option key={f.firma} value={f.firma}>{f.firma} — ₺{Number(f.toplam_kalan).toLocaleString("tr-TR",{maximumFractionDigits:0})} kalan</option>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:700, color:"#6b21a8", marginBottom:"6px" }}>Taşeron / Tedarikçi Ara</label>
+                  <input
+                    list="odeme-firmalar-list"
+                    value={odemeModalFirma}
+                    onChange={e => handleOdemeModalFirmaChange(e.target.value)}
+                    placeholder="Firma adı yazın..."
+                    style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #d8b4fe", borderRadius:"10px", fontSize:"14px", background:"#fff", boxSizing:"border-box" }}
+                  />
+                  <datalist id="odeme-firmalar-list">
+                    {odemeModalTumFirmalar.map(f => (
+                      <option key={f.firma} value={f.firma}>
+                        {Number(f.toplam_kalan) > 0 ? `₺${Number(f.toplam_kalan).toLocaleString("tr-TR",{maximumFractionDigits:0})} kalan` : "✓ Kapatıldı"}
+                      </option>
                     ))}
-                  </select>
+                  </datalist>
+                  {odemeModalFirma && !odemeModalFirmalar.find(f=>f.firma===odemeModalFirma) && odemeModalTumFirmalar.find(f=>f.firma===odemeModalFirma) && (
+                    <div style={{ fontSize:11, color:"#16a34a", marginTop:4 }}>✅ Kapatılmış firma — yeni ödeme eklenebilir</div>
+                  )}
                 </div>
 
                 {odemeModalCari && (
@@ -6218,23 +6235,71 @@ function FinanceDashboard({
                 {/* Ödeme Geçmişi */}
                 {odemeModalLog.length > 0 && (
                   <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:"14px", padding:"16px 20px" }}>
-                    <div style={{ fontWeight:800, fontSize:"14px", color:"#374151", marginBottom:"12px" }}>📋 Ödeme Geçmişi</div>
-                    <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+                    <div style={{ fontWeight:800, fontSize:"14px", color:"#374151", marginBottom:"12px" }}>📋 Ödeme Geçmişi & Dekontlar</div>
+                    {/* Gizli dekont file input */}
+                    <input ref={dekontRef} type="file" accept="image/*,application/pdf" style={{ display:"none" }}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        const logId = dekontRef.current?._logId;
+                        if (!file || !logId) return;
+                        setDekontUploading(logId);
+                        try {
+                          const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+                          const fd = new FormData();
+                          fd.append("file", file);
+                          const r = await fetch(`${API_BASE}/finance/odeme-dekont/${logId}`, {
+                            method:"POST", headers:{ Authorization:`Bearer ${tkn}` }, body:fd
+                          });
+                          const data = await r.json();
+                          if (data.ok) {
+                            setOdemeModalLog(prev => prev.map(l => l.id === logId ? { ...l, dekont_url: data.dekont_url } : l));
+                          } else { alert(data.error || "Yükleme başarısız"); }
+                        } catch(err) { alert(err.message); }
+                        setDekontUploading(null);
+                        if (dekontRef.current) { dekontRef.current.value = ""; dekontRef.current._logId = null; }
+                      }}
+                    />
+                    <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
                       {odemeModalLog.map(log => (
-                        <div key={log.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", padding:"10px 12px", background:"#f9fafb", borderRadius:"8px", border:"1px solid #f3f4f6" }}>
-                          <div>
-                            <div style={{ fontWeight:700, fontSize:"13px", color:"#1e3a5f" }}>
-                              ₺{Number(log.tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}
-                            </div>
-                            {log.aciklama && <div style={{ fontSize:"11px", color:"#6b7280" }}>{log.aciklama}</div>}
-                            {log.dagilim && Array.isArray(log.dagilim) && (
-                              <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>
-                                {log.dagilim.map((d,i)=><span key={i} style={{ marginRight:"6px" }}>{d.fatura_no}: ₺{Number(d.odeme).toLocaleString("tr-TR",{maximumFractionDigits:0})}</span>)}
+                        <div key={log.id} style={{ background:"#f9fafb", borderRadius:"10px", border:"1px solid #f3f4f6", padding:"12px 14px" }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
+                            <div>
+                              <div style={{ fontWeight:700, fontSize:"14px", color:"#1e3a5f" }}>
+                                ₺{Number(log.tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}
                               </div>
-                            )}
+                              {log.aciklama && <div style={{ fontSize:"11px", color:"#6b7280", marginTop:"2px" }}>{log.aciklama}</div>}
+                              {log.dagilim && Array.isArray(log.dagilim) && (
+                                <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"4px" }}>
+                                  {log.dagilim.map((d,i)=><span key={i} style={{ marginRight:"6px" }}>{d.fatura_no}: ₺{Number(d.odeme).toLocaleString("tr-TR",{maximumFractionDigits:0})}</span>)}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ textAlign:"right", flexShrink:0, marginLeft:"10px" }}>
+                              <div style={{ fontSize:"12px", fontWeight:600, color:"#374151" }}>{log.tarih ? String(log.tarih).slice(0,10) : "—"}</div>
+                            </div>
                           </div>
-                          <div style={{ textAlign:"right", flexShrink:0, marginLeft:"10px" }}>
-                            <div style={{ fontSize:"12px", fontWeight:600, color:"#374151" }}>{log.tarih ? String(log.tarih).slice(0,10) : "—"}</div>
+                          {/* Dekont satırı */}
+                          <div style={{ display:"flex", alignItems:"center", gap:"8px", paddingTop:"8px", borderTop:"1px solid #e5e7eb" }}>
+                            {log.dekont_url ? (
+                              <>
+                                <a href={log.dekont_url} target="_blank" rel="noreferrer"
+                                  style={{ display:"flex", alignItems:"center", gap:"5px", padding:"5px 12px", background:"#f0fdf4", border:"1.5px solid #86efac", borderRadius:"7px", fontSize:"12px", fontWeight:700, color:"#166534", textDecoration:"none" }}>
+                                  📄 Dekont Görüntüle
+                                </a>
+                                <button
+                                  onClick={() => { dekontRef.current._logId = log.id; dekontRef.current.click(); }}
+                                  style={{ padding:"5px 10px", background:"#f3f4f6", border:"1px solid #d1d5db", borderRadius:"7px", fontSize:"11px", color:"#6b7280", cursor:"pointer" }}>
+                                  🔄 Değiştir
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => { if (dekontUploading) return; dekontRef.current._logId = log.id; dekontRef.current.click(); }}
+                                disabled={dekontUploading === log.id}
+                                style={{ display:"flex", alignItems:"center", gap:"6px", padding:"6px 14px", background: dekontUploading===log.id ? "#f3f4f6" : "#fdf4ff", border:`1.5px solid ${dekontUploading===log.id?"#d1d5db":"#d8b4fe"}`, borderRadius:"8px", fontSize:"12px", fontWeight:700, color: dekontUploading===log.id?"#9ca3af":"#7e22ce", cursor: dekontUploading===log.id?"not-allowed":"pointer" }}>
+                                {dekontUploading===log.id ? "⏳ Yükleniyor..." : "📎 Ödeme Dekontu Ekle"}
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
