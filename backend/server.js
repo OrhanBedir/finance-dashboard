@@ -2486,6 +2486,24 @@ app.get("/setup-db", async (req, res) => {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS rollout_cleanup (
+        id SERIAL PRIMARY KEY,
+        site_code TEXT NOT NULL UNIQUE,
+        visit_date DATE,
+        notification_date DATE,
+        completion_date DATE,
+        items JSONB DEFAULT '[]',
+        notlar TEXT,
+        screenshot_url TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS rollout_cleanup_site_code_idx ON rollout_cleanup (site_code);
+    `).catch(() => {});
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS po_rows (
         id SERIAL PRIMARY KEY,
         project_code TEXT,
@@ -6054,6 +6072,69 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
     });
   }
 });
+
+// ── Clean Up endpoints ────────────────────────────────────────────────────────
+
+// GET /rollout/cleanup - list all
+app.get("/rollout/cleanup", authMiddleware, async (req, res) => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS rollout_cleanup (
+      id SERIAL PRIMARY KEY, site_code TEXT NOT NULL UNIQUE,
+      visit_date DATE, notification_date DATE, completion_date DATE,
+      items JSONB DEFAULT '[]', notlar TEXT, screenshot_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    const r = await pool.query("SELECT * FROM rollout_cleanup ORDER BY updated_at DESC");
+    res.json({ ok: true, rows: r.rows });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /rollout/cleanup - upsert
+app.post("/rollout/cleanup", authMiddleware, async (req, res) => {
+  try {
+    const { site_code, visit_date, notification_date, completion_date, items, notlar, screenshot_url } = req.body;
+    if (!site_code) return res.status(400).json({ ok: false, error: "site_code zorunlu" });
+    await pool.query(`CREATE TABLE IF NOT EXISTS rollout_cleanup (
+      id SERIAL PRIMARY KEY, site_code TEXT NOT NULL UNIQUE,
+      visit_date DATE, notification_date DATE, completion_date DATE,
+      items JSONB DEFAULT '[]', notlar TEXT, screenshot_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    const r = await pool.query(`
+      INSERT INTO rollout_cleanup (site_code, visit_date, notification_date, completion_date, items, notlar, screenshot_url)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (site_code) DO UPDATE SET
+        visit_date=EXCLUDED.visit_date, notification_date=EXCLUDED.notification_date,
+        completion_date=EXCLUDED.completion_date, items=EXCLUDED.items,
+        notlar=EXCLUDED.notlar, screenshot_url=COALESCE(EXCLUDED.screenshot_url, rollout_cleanup.screenshot_url),
+        updated_at=NOW()
+      RETURNING *
+    `, [site_code, visit_date||null, notification_date||null, completion_date||null,
+        JSON.stringify(items||[]), notlar||null, screenshot_url||null]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// DELETE /rollout/cleanup/:id
+app.delete("/rollout/cleanup/:id", authMiddleware, async (req, res) => {
+  try {
+    await pool.query("DELETE FROM rollout_cleanup WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /rollout/cleanup/:id/screenshot - upload screenshot
+app.post("/rollout/cleanup/:id/screenshot", authMiddleware, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
+    const fileName = `cleanup_${req.params.id}_${Date.now()}.${req.file.originalname.split('.').pop()}`;
+    const { url } = await uploadToStorage("cleanup-screenshots", fileName, req.file.buffer, req.file.mimetype);
+    await pool.query("UPDATE rollout_cleanup SET screenshot_url=$1, updated_at=NOW() WHERE id=$2", [url, req.params.id]);
+    res.json({ ok: true, url });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 app.get("/rollout/summary", async (req, res) => {
   try {

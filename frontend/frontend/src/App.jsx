@@ -936,6 +936,9 @@ function RolloutDashboard({ currentUser }) {
   const [errorMessage, setErrorMessage] = useState("");
   const [showRolloutEntryModal, setShowRolloutEntryModal] = useState(false);
   const [selectedRolloutSite, setSelectedRolloutSite] = useState("");
+  const [cleanupRows, setCleanupRows] = useState([]);
+  const [showCleanupModal, setShowCleanupModal] = useState(false);
+  const [editingCleanup, setEditingCleanup] = useState(null);
 
   const handleExportExcel = async () => {
     const today = new Date().toISOString().split("T")[0];
@@ -1205,6 +1208,10 @@ function RolloutDashboard({ currentUser }) {
         { withAuth: true },
       );
       setSummaryRows(summaryData.rows || []);
+      try {
+        const cleanupData = await fetchJson(`${API_BASE}/rollout/cleanup`, { withAuth: true });
+        setCleanupRows(cleanupData.rows || []);
+      } catch(e) { /* ignore cleanup fetch errors */ }
     } catch (err) {
       console.error("ROLLOUT LOAD ERROR:", err);
       setRows([]);
@@ -1651,6 +1658,21 @@ function RolloutDashboard({ currentUser }) {
           </tbody>
         </table>
       </div>
+      <RolloutCleanupSection
+        cleanupRows={cleanupRows}
+        rolloutRows={rows}
+        onAdd={() => { setEditingCleanup(null); setShowCleanupModal(true); }}
+        onEdit={(r) => { setEditingCleanup(r); setShowCleanupModal(true); }}
+        onDeleted={() => loadData()}
+      />
+      {showCleanupModal && (
+        <CleanupModal
+          record={editingCleanup}
+          rolloutRows={rows}
+          onClose={() => setShowCleanupModal(false)}
+          onSaved={() => { setShowCleanupModal(false); loadData(); }}
+        />
+      )}
       {showRolloutEntryModal && (
         <RolloutEntryModal
           siteCode={selectedRolloutSite}
@@ -19864,6 +19886,287 @@ function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
     </div>
   );
 }
+function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDeleted }) {
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString("tr-TR") : "—";
+
+  const getRolloutRow = (site_code) => rolloutRows.find(r => r.site_code === site_code) || {};
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Bu kayıt silinsin mi?")) return;
+    const token = localStorage.getItem("token") || "";
+    await fetch(`${API_BASE}/rollout/cleanup/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    onDeleted();
+  };
+
+  const handleExcel = () => {
+    const rows = [["Site Code","Site Type","Ziyaret Tarihi","Eksik Bildirim Tarihi","Tamamlama Tarihi","Eksik Kalemleri","Notlar","Tamamlandı"]];
+    cleanupRows.forEach(r => {
+      const rr = getRolloutRow(r.site_code);
+      const items = (r.items||[]);
+      const itemStr = items.map(i=>i.kalem).join("; ");
+      const tamamlandi = items.length > 0 && items.every(i=>i.tamamlandi) ? "Evet" : items.some(i=>i.tamamlandi) ? "Kısmi" : "Hayır";
+      rows.push([r.site_code, rr.site_type||"", fmtDate(r.visit_date), fmtDate(r.notification_date), fmtDate(r.completion_date), itemStr, r.notlar||"", tamamlandi]);
+    });
+    const csv = rows.map(r=>r.map(v=>`"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob(["﻿"+csv], {type:"text/csv;charset=utf-8;"});
+    const a = document.createElement("a"); a.href=URL.createObjectURL(blob);
+    a.download=`cleanup_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <div style={{ marginTop:"32px", padding:"0 0 40px" }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"16px", flexWrap:"wrap", gap:"10px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+          <h2 style={{ margin:0, fontSize:"20px", fontWeight:800, color:"#1e3a5f", display:"flex", alignItems:"center", gap:"8px" }}>
+            🧹 Clean Up Kayıtları
+          </h2>
+          <span style={{ background:"#e0f2fe", color:"#0369a1", borderRadius:"20px", padding:"2px 12px", fontSize:"13px", fontWeight:700 }}>
+            {cleanupRows.length} saha
+          </span>
+        </div>
+        <div style={{ display:"flex", gap:"8px" }}>
+          <button onClick={handleExcel} style={{ background:"#15803d", color:"#fff", border:"none", borderRadius:"8px", padding:"8px 16px", fontWeight:700, fontSize:"13px", cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}>
+            ⬇ Excel İndir
+          </button>
+          <button onClick={onAdd} style={{ background:"#2563eb", color:"#fff", border:"none", borderRadius:"8px", padding:"8px 16px", fontWeight:700, fontSize:"13px", cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}>
+            ➕ Yeni Kayıt
+          </button>
+        </div>
+      </div>
+
+      {cleanupRows.length === 0 ? (
+        <div style={{ textAlign:"center", padding:"48px", background:"#f8fafc", borderRadius:"16px", border:"2px dashed #cbd5e1" }}>
+          <div style={{ fontSize:"48px", marginBottom:"12px" }}>🧹</div>
+          <div style={{ fontSize:"16px", fontWeight:700, color:"#475569" }}>Henüz Clean Up kaydı yok</div>
+          <div style={{ fontSize:"13px", color:"#94a3b8", marginTop:"6px" }}>Yeni kayıt eklemek için butona tıklayın</div>
+        </div>
+      ) : (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(340px, 1fr))", gap:"16px" }}>
+          {cleanupRows.map(r => {
+            const rr = getRolloutRow(r.site_code);
+            const items = r.items || [];
+            const doneCount = items.filter(i=>i.tamamlandi).length;
+            const allDone = items.length > 0 && doneCount === items.length;
+            const statusColor = allDone ? "#16a34a" : doneCount > 0 ? "#d97706" : "#dc2626";
+            const statusBg   = allDone ? "#dcfce7" : doneCount > 0 ? "#fef3c7" : "#fee2e2";
+            const statusLabel= allDone ? "Tamamlandı" : doneCount > 0 ? `${doneCount}/${items.length} Yapıldı` : items.length===0 ? "Kalem Yok" : "Bekliyor";
+            return (
+              <div key={r.id} style={{ background:"#fff", borderRadius:"16px", border:"1.5px solid #e2e8f0", boxShadow:"0 2px 12px rgba(0,0,0,0.06)", overflow:"hidden", display:"flex", flexDirection:"column" }}>
+                {/* Card header */}
+                <div style={{ background:"linear-gradient(135deg,#1e3a5f,#2563eb)", padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
+                    <span style={{ fontSize:"15px", fontWeight:800, color:"#fff", letterSpacing:"0.03em" }}>{r.site_code}</span>
+                    <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
+                      {rr.site_type && <span style={{ background:"rgba(255,255,255,0.2)", color:"#fff", borderRadius:"20px", padding:"1px 10px", fontSize:"11px", fontWeight:700 }}>{rr.site_type}</span>}
+                      {rr.bolge && <span style={{ background:"rgba(255,255,255,0.15)", color:"#bfdbfe", borderRadius:"20px", padding:"1px 10px", fontSize:"11px" }}>{rr.bolge}</span>}
+                    </div>
+                  </div>
+                  <span style={{ background:statusBg, color:statusColor, borderRadius:"20px", padding:"3px 12px", fontSize:"11px", fontWeight:800 }}>{statusLabel}</span>
+                </div>
+
+                {/* Dates */}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"1px", background:"#f1f5f9" }}>
+                  {[["🔍 Ziyaret",r.visit_date],["📋 Bildirim",r.notification_date],["✅ Tamamlama",r.completion_date]].map(([lbl,val])=>(
+                    <div key={lbl} style={{ background:"#fff", padding:"10px 12px", textAlign:"center" }}>
+                      <div style={{ fontSize:"10px", color:"#94a3b8", fontWeight:600, marginBottom:"3px" }}>{lbl}</div>
+                      <div style={{ fontSize:"12px", fontWeight:700, color: val?"#1e3a5f":"#cbd5e1" }}>{fmtDate(val)}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Items */}
+                {items.length > 0 && (
+                  <div style={{ padding:"12px 16px", borderTop:"1px solid #f1f5f9" }}>
+                    <div style={{ fontSize:"11px", fontWeight:700, color:"#475569", marginBottom:"6px", textTransform:"uppercase", letterSpacing:"0.05em" }}>Eksik Kalemleri</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
+                      {items.map((item,idx)=>(
+                        <div key={idx} style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:"12px" }}>
+                          <span style={{ fontSize:"14px" }}>{item.tamamlandi ? "✅" : "⭕"}</span>
+                          <span style={{ color: item.tamamlandi?"#9ca3af":"#374151", textDecoration: item.tamamlandi?"line-through":"none", fontWeight: item.tamamlandi?400:500 }}>{item.kalem}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Notes */}
+                {r.notlar && (
+                  <div style={{ padding:"8px 16px", background:"#fefce8", borderTop:"1px solid #fef08a", fontSize:"12px", color:"#713f12" }}>
+                    <span style={{ fontWeight:700 }}>📝 Not: </span>{r.notlar}
+                  </div>
+                )}
+
+                {/* Screenshot */}
+                {r.screenshot_url && (
+                  <div style={{ padding:"8px 16px", borderTop:"1px solid #f1f5f9" }}>
+                    <a href={r.screenshot_url} target="_blank" rel="noreferrer">
+                      <img src={r.screenshot_url} alt="Ekran görüntüsü" style={{ width:"100%", maxHeight:"120px", objectFit:"cover", borderRadius:"8px", border:"1px solid #e2e8f0", cursor:"pointer" }} />
+                    </a>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div style={{ padding:"10px 16px", borderTop:"1px solid #f1f5f9", display:"flex", gap:"8px", justifyContent:"flex-end", marginTop:"auto" }}>
+                  <button onClick={()=>onEdit(r)} style={{ background:"#eff6ff", color:"#2563eb", border:"1px solid #bfdbfe", borderRadius:"6px", padding:"5px 14px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle</button>
+                  <button onClick={()=>handleDelete(r.id)} style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"6px", padding:"5px 14px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>🗑️ Sil</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CleanupModal({ record, rolloutRows, onClose, onSaved }) {
+  const isEdit = !!record;
+  const token = localStorage.getItem("token") || "";
+  const headers = { Authorization: `Bearer ${token}` };
+
+  const [form, setForm] = useState({
+    site_code: record?.site_code || "",
+    visit_date: record?.visit_date ? String(record.visit_date).slice(0,10) : "",
+    notification_date: record?.notification_date ? String(record.notification_date).slice(0,10) : "",
+    completion_date: record?.completion_date ? String(record.completion_date).slice(0,10) : "",
+    items: record?.items || [],
+    notlar: record?.notlar || "",
+    screenshot_url: record?.screenshot_url || "",
+  });
+  const [newKalem, setNewKalem] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [screenshotFile, setScreenshotFile] = useState(null);
+  const [screenshotPreview, setScreenshotPreview] = useState(record?.screenshot_url || "");
+
+  const addItem = () => {
+    const k = newKalem.trim();
+    if (!k) return;
+    setForm(p => ({ ...p, items: [...p.items, { id: Date.now(), kalem: k, tamamlandi: false }] }));
+    setNewKalem("");
+  };
+
+  const toggleItem = (idx) => {
+    setForm(p => {
+      const items = p.items.map((it,i) => i===idx ? {...it, tamamlandi: !it.tamamlandi} : it);
+      return { ...p, items };
+    });
+  };
+
+  const removeItem = (idx) => {
+    setForm(p => ({ ...p, items: p.items.filter((_,i)=>i!==idx) }));
+  };
+
+  const handleScreenshot = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setScreenshotFile(file);
+    setScreenshotPreview(URL.createObjectURL(file));
+  };
+
+  const save = async () => {
+    if (!form.site_code.trim()) { alert("Site Code zorunlu"); return; }
+    setSaving(true);
+    try {
+      const r = await fetch(`${API_BASE}/rollout/cleanup`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error);
+
+      // Upload screenshot if new file selected
+      if (screenshotFile && data.row?.id) {
+        const fd = new FormData();
+        fd.append("file", screenshotFile);
+        await fetch(`${API_BASE}/rollout/cleanup/${data.row.id}/screenshot`, {
+          method: "POST",
+          headers,
+          body: fd,
+        });
+      }
+      onSaved();
+    } catch(e) { alert("Hata: "+e.message); } finally { setSaving(false); }
+  };
+
+  const inSt = { padding:"8px 12px", border:"1.5px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" };
+  const lblSt = { fontSize:"12px", fontWeight:700, color:"#374151", marginBottom:"4px", display:"block" };
+
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px" }} onClick={onClose}>
+      <div style={{ background:"#fff",borderRadius:"20px",padding:"24px",width:"100%",maxWidth:"560px",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)" }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"20px" }}>
+          <h2 style={{ margin:0,fontSize:"18px",fontWeight:800,color:"#1e3a5f" }}>🧹 {isEdit?"Clean Up Düzenle":"Yeni Clean Up Kaydı"}</h2>
+          <button onClick={onClose} style={{ background:"#f1f5f9",border:"none",borderRadius:"8px",padding:"6px 12px",cursor:"pointer",fontSize:"16px" }}>✕</button>
+        </div>
+
+        <div style={{ display:"grid",gridTemplateColumns:"1fr",gap:"14px" }}>
+          {/* Site Code */}
+          <div>
+            <label style={lblSt}>Site Code *</label>
+            <input style={inSt} value={form.site_code} onChange={e=>setForm(p=>({...p,site_code:e.target.value}))} placeholder="Örn: MALIK_5GEXP_ANK" disabled={isEdit} />
+          </div>
+
+          {/* Dates */}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"10px" }}>
+            <div><label style={lblSt}>🔍 Ziyaret Tarihi</label><input type="date" style={inSt} value={form.visit_date} onChange={e=>setForm(p=>({...p,visit_date:e.target.value}))} /></div>
+            <div><label style={lblSt}>📋 Bildirim Tarihi</label><input type="date" style={inSt} value={form.notification_date} onChange={e=>setForm(p=>({...p,notification_date:e.target.value}))} /></div>
+            <div><label style={lblSt}>✅ Tamamlama Tarihi</label><input type="date" style={inSt} value={form.completion_date} onChange={e=>setForm(p=>({...p,completion_date:e.target.value}))} /></div>
+          </div>
+
+          {/* Items */}
+          <div>
+            <label style={lblSt}>Eksik Kalemleri</label>
+            <div style={{ display:"flex",gap:"8px",marginBottom:"10px" }}>
+              <input style={{...inSt,flex:1}} value={newKalem} onChange={e=>setNewKalem(e.target.value)} placeholder="Eksik kalem ekle (örn: Etiket eksik)" onKeyDown={e=>e.key==="Enter"&&addItem()} />
+              <button onClick={addItem} style={{ background:"#2563eb",color:"#fff",border:"none",borderRadius:"8px",padding:"8px 16px",fontWeight:700,cursor:"pointer",whiteSpace:"nowrap" }}>+ Ekle</button>
+            </div>
+            {form.items.length > 0 && (
+              <div style={{ display:"flex",flexDirection:"column",gap:"6px",background:"#f8fafc",borderRadius:"10px",padding:"10px" }}>
+                {form.items.map((item,idx)=>(
+                  <div key={idx} style={{ display:"flex",alignItems:"center",gap:"8px" }}>
+                    <input type="checkbox" checked={item.tamamlandi} onChange={()=>toggleItem(idx)} style={{ width:"16px",height:"16px",cursor:"pointer" }} />
+                    <span style={{ flex:1,fontSize:"13px",color:item.tamamlandi?"#9ca3af":"#1e293b",textDecoration:item.tamamlandi?"line-through":"none" }}>{item.kalem}</span>
+                    <button onClick={()=>removeItem(idx)} style={{ background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:"6px",padding:"2px 8px",cursor:"pointer",fontSize:"12px" }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Notlar */}
+          <div>
+            <label style={lblSt}>📝 Clean Up Not</label>
+            <textarea style={{...inSt,minHeight:"80px",resize:"vertical"}} value={form.notlar} onChange={e=>setForm(p=>({...p,notlar:e.target.value}))} placeholder="Notlarınızı buraya yazın..." />
+          </div>
+
+          {/* Screenshot */}
+          <div>
+            <label style={lblSt}>📸 Ekran Görüntüsü</label>
+            {screenshotPreview && <img src={screenshotPreview} alt="preview" style={{ width:"100%",maxHeight:"150px",objectFit:"cover",borderRadius:"8px",marginBottom:"8px",border:"1px solid #e2e8f0" }} />}
+            <label style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",background:"#eff6ff",border:"2px dashed #93c5fd",borderRadius:"10px",padding:"14px",cursor:"pointer",fontSize:"13px",color:"#2563eb",fontWeight:600 }}>
+              📎 Görüntü Seç (JPG, PNG)
+              <input type="file" accept="image/*" style={{ display:"none" }} onChange={handleScreenshot} />
+            </label>
+          </div>
+        </div>
+
+        <div style={{ display:"flex",gap:"10px",justifyContent:"flex-end",marginTop:"20px",paddingTop:"16px",borderTop:"1px solid #f1f5f9" }}>
+          <button onClick={onClose} style={{ background:"#f1f5f9",color:"#374151",border:"none",borderRadius:"8px",padding:"10px 20px",fontWeight:700,cursor:"pointer" }}>İptal</button>
+          <button onClick={save} disabled={saving} style={{ background:"#2563eb",color:"#fff",border:"none",borderRadius:"8px",padding:"10px 24px",fontWeight:700,cursor:"pointer",opacity:saving?0.7:1 }}>
+            {saving?"Kaydediliyor...":"💾 Kaydet"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   const existingRow = (() => {
     const raw = rows.find(
