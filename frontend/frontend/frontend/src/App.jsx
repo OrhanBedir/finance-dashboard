@@ -1381,6 +1381,23 @@ function RolloutDashboard({ currentUser }) {
                 return;
               }
 
+              // Tam eşleşme ara (case-insensitive)
+              const exactMatch = rows.find(
+                r => String(r.site_code || "").toUpperCase() === site.toUpperCase()
+              );
+              if (exactMatch) {
+                setSelectedRolloutSite(exactMatch.site_code);
+                setShowRolloutEntryModal(true);
+                return;
+              }
+              // Filtrelenmiş listede tek sonuç varsa onu kullan (kısmi arama → tam site_code)
+              if (filteredRows.length === 1) {
+                setSelectedRolloutSite(filteredRows[0].site_code);
+                setShowRolloutEntryModal(true);
+                return;
+              }
+
+              // Yeni site veya belirsiz → girilen değerle aç
               setSelectedRolloutSite(site);
               setShowRolloutEntryModal(true);
             }}
