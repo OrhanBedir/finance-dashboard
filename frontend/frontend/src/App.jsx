@@ -3352,9 +3352,11 @@ function FinanceDashboard({
   const [errorMessage, setErrorMessage] = useState("");
   const [paymentDateFilter, setPaymentDateFilter] = useState("");
   const [upcomingRows, setUpcomingRows] = useState([]);
+  const [overduePaymentRows, setOverduePaymentRows] = useState([]);
   const [upcomingSummary, setUpcomingSummary] = useState({
     today_total: 0,
     week_total: 0,
+    overdue_payment_total: 0,
     overdue_total: 0,
   });
 
@@ -4581,11 +4583,13 @@ function FinanceDashboard({
       setHwAcceptanceSummary(acceptanceSummaryData || null);
       setPaymentRows(paymentsData.rows || []);
       setUpcomingRows(upcomingData.rows || []);
+      setOverduePaymentRows(upcomingData.overdue_payment_rows || []);
       setOverdueRows(upcomingData.overdue_rows || []);
       setUpcomingSummary(
         upcomingData.summary || {
           today_total: 0,
           week_total: 0,
+          overdue_payment_total: 0,
           overdue_total: 0,
         },
       );
@@ -4594,9 +4598,11 @@ function FinanceDashboard({
       setSummary(null);
       setPaymentRows([]);
       setUpcomingRows([]);
+      setOverduePaymentRows([]);
       setUpcomingSummary({
         today_total: 0,
         week_total: 0,
+        overdue_payment_total: 0,
         overdue_total: 0,
       });
       setErrorMessage(err.message || "Finance verisi alınamadı");
@@ -4815,9 +4821,39 @@ function FinanceDashboard({
             return p === 0 ? "#ef4444" : p < 0.75 ? "#f59e0b" : "#22c55e";
           };
 
-          const SHOW_N = 4;
+          const SHOW_N = 3;
           const visibleHandlers = hwCardExpanded ? handlers : handlers.slice(0, SHOW_N);
           const hasMore = handlers.length > SHOW_N;
+
+          // Excel indirme — fiyatsız, sadece adet bilgisi
+          const downloadHwAcceptanceExcel = () => {
+            const rows = [];
+            // Başlık satırı
+            rows.push(["Handler", "Acceptance No", "PO No", "Site Kodu", "Site Adı", "Milestone", "Aşama"]);
+            handlers.forEach(h => {
+              (h.items || []).forEach(item => {
+                rows.push([
+                  h.handler || "",
+                  item.acceptance_no || "",
+                  item.po_no || "",
+                  item.site_code || "",
+                  item.site_name || "",
+                  item.milestone || "",
+                  item.progress || "",
+                ]);
+              });
+            });
+            // CSV oluştur
+            const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+            const bom = "﻿"; // Excel UTF-8 BOM
+            const blob = new Blob([bom + csv], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `hw_acceptance_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          };
 
           return (
             <div style={{ background:"#fff", borderRadius:"12px", padding:"16px 20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
@@ -4825,8 +4861,18 @@ function FinanceDashboard({
               {/* Header */}
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
                 <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>HW Fatura Onay Bekler</div>
-                <div style={{ width:"30px", height:"30px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", cursor: count>0?"pointer":"default" }}
-                  onClick={() => count > 0 && setShowHwAcceptanceModal(true)} title="Detay">📋</div>
+                <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
+                  {count > 0 && (
+                    <button
+                      onClick={downloadHwAcceptanceExcel}
+                      title="Excel olarak indir (fiyatsız)"
+                      style={{ padding:"3px 7px", fontSize:"10px", fontWeight:600, background:"#f0fdf4", color:"#166534", border:"1px solid #bbf7d0", borderRadius:"6px", cursor:"pointer", display:"flex", alignItems:"center", gap:"3px" }}>
+                      ⬇ Excel
+                    </button>
+                  )}
+                  <div style={{ width:"30px", height:"30px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", cursor: count>0?"pointer":"default" }}
+                    onClick={() => count > 0 && setShowHwAcceptanceModal(true)} title="Detay">📋</div>
+                </div>
               </div>
               {count === 0 ? (
                 <div style={{ fontSize:"12px", color:"#9ca3af" }}>Veri yok · Acceptance yükleyin</div>
@@ -4841,6 +4887,7 @@ function FinanceDashboard({
                   <div style={{ borderTop:"1px solid #f1f5f9", paddingTop:"8px", display:"flex", flexDirection:"column", gap:"5px" }}>
                     {visibleHandlers.map((h, i) => {
                       const clr = progColor(h.progress);
+                      const itemCount = h.items ? h.items.length : (h.count || 0);
                       return (
                         <div key={i} style={{ display:"flex", alignItems:"center", gap:"6px" }}>
                           <div style={{ width:"22px", height:"22px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", fontSize:"9px", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
@@ -4849,6 +4896,7 @@ function FinanceDashboard({
                           <div style={{ flex:1, overflow:"hidden" }}>
                             <div style={{ fontSize:"11px", fontWeight:600, color:"#1e293b", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{h.handler}</div>
                           </div>
+                          <span style={{ fontSize:"9px", fontWeight:600, color:"#6b7280", background:"#f1f5f9", borderRadius:"9px", padding:"1px 5px", flexShrink:0 }}>{itemCount} kalem</span>
                           <span style={{ fontSize:"10px", fontWeight:700, color:clr, flexShrink:0 }}>{h.progress}</span>
                           <span style={{ fontSize:"11px", fontWeight:700, color:"#0f172a", flexShrink:0 }}>{fmtAmt(h.total_usd, h.total_try)}</span>
                         </div>
@@ -4951,44 +4999,84 @@ function FinanceDashboard({
             <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"4px", fontWeight:500 }}>📅 Bu Hafta Gelecek</div>
             <div style={{ fontSize:"20px", fontWeight:800, color:"#3b82f6" }}>{formatMoneyByCurrency(upcomingSummary.week_total||0,"TRY")}</div>
           </div>
-          <div onClick={handleShowOverdues} style={{ padding:"16px 20px", textAlign:"center", cursor:"pointer", background:upcomingSummary.overdue_total>0?"#fef2f2":undefined }}>
-            <div style={{ fontSize:"11px", color:upcomingSummary.overdue_total>0?"#991b1b":"#64748b", marginBottom:"4px", fontWeight:500 }}>⚠️ Geciken Ödeme</div>
-            <div style={{ fontSize:"20px", fontWeight:800, color:upcomingSummary.overdue_total>0?"#dc2626":"#0f172a" }}>{formatMoneyByCurrency(upcomingSummary.overdue_total||0,"TRY")}</div>
+          <div onClick={handleShowOverdues} style={{ padding:"16px 20px", textAlign:"center", cursor:"pointer", background:(upcomingSummary.overdue_payment_total||0)>0?"#fef2f2":undefined }}>
+            <div style={{ fontSize:"11px", color:(upcomingSummary.overdue_payment_total||0)>0?"#991b1b":"#64748b", marginBottom:"4px", fontWeight:500 }}>⚠️ Geciken Ödeme</div>
+            <div style={{ fontSize:"20px", fontWeight:800, color:(upcomingSummary.overdue_payment_total||0)>0?"#dc2626":"#0f172a" }}>{formatMoneyByCurrency(upcomingSummary.overdue_payment_total||0,"TRY")}</div>
           </div>
         </div>
-        {/* Upcoming rows */}
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <thead>
-            <tr style={{ background:"#f8fafc" }}>
-              <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gün</th>
-              <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Tarih</th>
-              <th style={{ padding:"10px 16px", textAlign:"right", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gelecek Tutar</th>
-            </tr>
-          </thead>
-          <tbody>
-            {upcomingRows.length === 0 ? (
-              <tr><td colSpan={3} style={{ textAlign:"center", padding:"28px", color:"#94a3b8", fontSize:"13px" }}>Gelecek tahsilat bulunamadı</td></tr>
-            ) : (
-              upcomingRows.map((row, index) => (
-                <tr key={index} style={{ borderBottom:"1px solid #f1f5f9", background:row.amount<0?"#fff5f5":undefined }}>
-                  <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{row.day_name || "-"}</td>
-                  <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{formatDateOnly(row.due_date)}</td>
-                  <td style={{ padding:"12px 16px", textAlign:"right" }}>
-                    <div style={{ fontWeight:700, color:row.amount<0?"#dc2626":"#10b981", fontSize:"14px" }}>
-                      {formatMoneyByCurrency(row.amount || 0, row.currency || "TRY")}
-                    </div>
-                    {row.deduction_amount < 0 && (
-                      <div style={{ fontSize:11, color:"#dc2626", marginTop:2 }}>
-                        Brüt: {formatMoneyByCurrency(row.gross_amount||0, row.currency||"TRY")}
-                        &nbsp;|&nbsp;Kesinti: {formatMoneyByCurrency(row.deduction_amount||0, row.currency||"TRY")}
-                      </div>
-                    )}
-                  </td>
+        {/* Geciken ödeme satırları */}
+        {overduePaymentRows.length > 0 && (
+          <>
+            <div style={{ padding:"8px 16px", background:"#fef2f2", borderTop:"1px solid #fecaca", borderBottom:"1px solid #fecaca", display:"flex", alignItems:"center", gap:"6px" }}>
+              <span style={{ fontSize:"12px", fontWeight:700, color:"#991b1b" }}>⚠️ Geciken Ödemeler</span>
+              <span style={{ fontSize:"11px", color:"#ef4444", background:"#fee2e2", padding:"1px 7px", borderRadius:"9px", fontWeight:600 }}>{overduePaymentRows.length} gün</span>
+            </div>
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:"#fff5f5" }}>
+                  <th style={{ padding:"8px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#991b1b", borderBottom:"1px solid #fecaca", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gün</th>
+                  <th style={{ padding:"8px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#991b1b", borderBottom:"1px solid #fecaca", textTransform:"uppercase", letterSpacing:"0.5px" }}>Tarih</th>
+                  <th style={{ padding:"8px 16px", textAlign:"right", fontSize:"11px", fontWeight:600, color:"#991b1b", borderBottom:"1px solid #fecaca", textTransform:"uppercase", letterSpacing:"0.5px" }}>Geciken Tutar</th>
                 </tr>
-              ))
+              </thead>
+              <tbody>
+                {overduePaymentRows.map((row, index) => (
+                  <tr key={index} style={{ borderBottom:"1px solid #fee2e2", background: index%2===0?"#fff5f5":"#fff8f8" }}>
+                    <td style={{ padding:"10px 16px", fontSize:"13px", color:"#7f1d1d" }}>{row.day_name || "-"}</td>
+                    <td style={{ padding:"10px 16px", fontSize:"13px", color:"#7f1d1d" }}>{formatDateOnly(row.due_date)}</td>
+                    <td style={{ padding:"10px 16px", textAlign:"right" }}>
+                      <div style={{ fontWeight:700, color:"#dc2626", fontSize:"14px" }}>
+                        {formatMoneyByCurrency(row.gross_amount || row.amount || 0, row.currency || "TRY")}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+        {/* Gelecek ödeme satırları */}
+        {(upcomingRows.length > 0 || overduePaymentRows.length === 0) && (
+          <>
+            {overduePaymentRows.length > 0 && (
+              <div style={{ padding:"8px 16px", background:"#f0fdf4", borderTop:"1px solid #bbf7d0", borderBottom:"1px solid #bbf7d0", display:"flex", alignItems:"center", gap:"6px" }}>
+                <span style={{ fontSize:"12px", fontWeight:700, color:"#166534" }}>📅 Gelecek Ödemeler</span>
+              </div>
             )}
-          </tbody>
-        </table>
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:"#f8fafc" }}>
+                  <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gün</th>
+                  <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Tarih</th>
+                  <th style={{ padding:"10px 16px", textAlign:"right", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gelecek Tutar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {upcomingRows.length === 0 ? (
+                  <tr><td colSpan={3} style={{ textAlign:"center", padding:"28px", color:"#94a3b8", fontSize:"13px" }}>Gelecek tahsilat bulunamadı</td></tr>
+                ) : (
+                  upcomingRows.map((row, index) => (
+                    <tr key={index} style={{ borderBottom:"1px solid #f1f5f9", background:row.amount<0?"#fff5f5":undefined }}>
+                      <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{row.day_name || "-"}</td>
+                      <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{formatDateOnly(row.due_date)}</td>
+                      <td style={{ padding:"12px 16px", textAlign:"right" }}>
+                        <div style={{ fontWeight:700, color:row.amount<0?"#dc2626":"#10b981", fontSize:"14px" }}>
+                          {formatMoneyByCurrency(row.amount || 0, row.currency || "TRY")}
+                        </div>
+                        {row.deduction_amount < 0 && (
+                          <div style={{ fontSize:11, color:"#dc2626", marginTop:2 }}>
+                            Brüt: {formatMoneyByCurrency(row.gross_amount||0, row.currency||"TRY")}
+                            &nbsp;|&nbsp;Kesinti: {formatMoneyByCurrency(row.deduction_amount||0, row.currency||"TRY")}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </>
+        )}
       </div>
 
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:"12px", marginTop:"24px", marginBottom:"10px" }}>
@@ -14622,8 +14710,9 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [yil, setYil] = useState(String(now.getFullYear()));
   const [ay, setAy]   = useState(String(now.getMonth() + 1).padStart(2, "0"));
   const [hwReceived,  setHwReceived]  = useState({});  // gun→tutar (alınan)
-  const [hwPending,   setHwPending]   = useState({});  // gun→tutar (bekleyen)
-  const [hwDeduct,    setHwDeduct]    = useState({});  // gun→tutar (H01 kesinti)
+  const [hwPending,   setHwPending]   = useState({});  // gun→tutar (gelecek bekleyen)
+  const [hwOverdue,   setHwOverdue]   = useState({});  // gun→tutar (vadesi geçmiş/bugün, henüz alınmamış)
+  const [hwDeduct,    setHwDeduct]    = useState({});  // gun→tutar (kesinti)
   const [personelList,setPersonelList]= useState([]);
   const [araclar,     setAraclar]     = useState([]);
   const [ofisList,    setOfisList]    = useState([]);
@@ -14666,6 +14755,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       const toMap = (rows) => (rows||[]).reduce((m,r) => { m[r.gun]=(m[r.gun]||0)+Number(r.tutar||0); return m; }, {});
       setHwReceived(toMap(cfData.received));
       setHwPending(toMap(cfData.pending));
+      setHwOverdue(toMap(cfData.overdue_hw));
       setHwDeduct(toMap(cfData.deductions));
       setPersonelList(Array.isArray(perData) ? perData.filter(p => p.aktif) : []);
       setAraclar(Array.isArray(aracData) ? aracData.filter(a => a.durum === "AKTİF") : []);
@@ -14729,16 +14819,18 @@ function CashFlowPanel({ currentUser, onBack }) {
 
   // ── Spillover (önceki aydan sarkan) ─────────────────────────────
   const totalSarkan  = sarkanlar.reduce((s,r) => s + Number(r.sarkan||0), 0);
-  const hwDaysAll    = [...Object.keys(hwReceived), ...Object.keys(hwPending)]
+  const hwDaysAll    = [...Object.keys(hwReceived), ...Object.keys(hwPending), ...Object.keys(hwOverdue)]
                          .map(Number).filter(n => !isNaN(n) && n > 0);
   const firstHWDay   = hwDaysAll.length > 0 ? Math.min(...hwDaysAll) : null;
 
   // Kategoriler
   const hwDeductAbs = Object.fromEntries(Object.entries(hwDeduct).map(([k,v])=>[k,Math.abs(v)]));
+  const hwOverdueTotal = Object.values(hwOverdue).reduce((s,v)=>s+v,0);
   const KATEGORILER = [
     { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",               type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived },
     { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",              type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending  },
-    { key:"hw_deduct",   label:"↩️ İade Kesinti (H01)",                  type:"expense", color:"#fee2e2", textColor:"#991b1b", byDay: hwDeductAbs },
+    ...(hwOverdueTotal > 0 ? [{ key:"hw_overdue", label:"⚠️ HW Geciken Tahsilat",  type:"income",  color:"#fee2e2", textColor:"#991b1b", byDay: hwOverdue, overdue: true }] : []),
+    { key:"hw_deduct",   label:"↩️ İade / Kesinti",                      type:"expense", color:"#fff1f2", textColor:"#9f1239", byDay: hwDeductAbs },
     { key:"maas",        label:`👥 ${prevAyAdi} Maaşları`,               type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: totalMaas>0   ? {15: totalMaas}   : {}, note: `${prevAyAdi} ayı hakedilen · Ödeme: 15. gün`, overdue: maasOverdue },
     { key:"arac",        label:`🚗 ${prevAyAdi} Araç Kiraları`,           type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: totalArac>0   ? {10: totalArac}   : {}, note: `${prevAyAdi} kirası · Ödeme: 10. gün`,          overdue: totalArac>0 && paymentOverdue(10) },
     { key:"ticket",      label:"🎫 Ticket'lar",                           type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: totalTicket>0 ? {5:  totalTicket} : {}, note: `${personelList.length} kişi × ₺10.000 · 5. gün`, overdue: totalTicket>0 && paymentOverdue(5) },
@@ -14809,7 +14901,8 @@ function CashFlowPanel({ currentUser, onBack }) {
     // Kategori satırları
     const ROW_COLORS = {
       hw_received:["BBFCD0","14532D"], hw_pending:["DCFCE7","166534"],
-      hw_deduct:  ["FEE2E2","991B1B"], maas:["FECACA","7F1D1D"],
+      hw_overdue: ["FEE2E2","991B1B"],
+      hw_deduct:  ["FFF1F2","9F1239"], maas:["FECACA","7F1D1D"],
       arac:       ["FEF3C7","92400E"], ticket:["F3E8FF","6B21A8"],
       ofis:       ["FFF7ED","9A3412"], spillover:["FECACA","DC2626"],
       taseron:    ["FDF4FF","7E22CE"], diger:["F1F5F9","475569"],
