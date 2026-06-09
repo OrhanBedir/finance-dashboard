@@ -4821,9 +4821,39 @@ function FinanceDashboard({
             return p === 0 ? "#ef4444" : p < 0.75 ? "#f59e0b" : "#22c55e";
           };
 
-          const SHOW_N = 4;
+          const SHOW_N = 3;
           const visibleHandlers = hwCardExpanded ? handlers : handlers.slice(0, SHOW_N);
           const hasMore = handlers.length > SHOW_N;
+
+          // Excel indirme — fiyatsız, sadece adet bilgisi
+          const downloadHwAcceptanceExcel = () => {
+            const rows = [];
+            // Başlık satırı
+            rows.push(["Handler", "Acceptance No", "PO No", "Site Kodu", "Site Adı", "Milestone", "Aşama"]);
+            handlers.forEach(h => {
+              (h.items || []).forEach(item => {
+                rows.push([
+                  h.handler || "",
+                  item.acceptance_no || "",
+                  item.po_no || "",
+                  item.site_code || "",
+                  item.site_name || "",
+                  item.milestone || "",
+                  item.progress || "",
+                ]);
+              });
+            });
+            // CSV oluştur
+            const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+            const bom = "﻿"; // Excel UTF-8 BOM
+            const blob = new Blob([bom + csv], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `hw_acceptance_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          };
 
           return (
             <div style={{ background:"#fff", borderRadius:"12px", padding:"16px 20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
@@ -4831,8 +4861,18 @@ function FinanceDashboard({
               {/* Header */}
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
                 <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>HW Fatura Onay Bekler</div>
-                <div style={{ width:"30px", height:"30px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", cursor: count>0?"pointer":"default" }}
-                  onClick={() => count > 0 && setShowHwAcceptanceModal(true)} title="Detay">📋</div>
+                <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
+                  {count > 0 && (
+                    <button
+                      onClick={downloadHwAcceptanceExcel}
+                      title="Excel olarak indir (fiyatsız)"
+                      style={{ padding:"3px 7px", fontSize:"10px", fontWeight:600, background:"#f0fdf4", color:"#166534", border:"1px solid #bbf7d0", borderRadius:"6px", cursor:"pointer", display:"flex", alignItems:"center", gap:"3px" }}>
+                      ⬇ Excel
+                    </button>
+                  )}
+                  <div style={{ width:"30px", height:"30px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", cursor: count>0?"pointer":"default" }}
+                    onClick={() => count > 0 && setShowHwAcceptanceModal(true)} title="Detay">📋</div>
+                </div>
               </div>
               {count === 0 ? (
                 <div style={{ fontSize:"12px", color:"#9ca3af" }}>Veri yok · Acceptance yükleyin</div>
@@ -4847,6 +4887,7 @@ function FinanceDashboard({
                   <div style={{ borderTop:"1px solid #f1f5f9", paddingTop:"8px", display:"flex", flexDirection:"column", gap:"5px" }}>
                     {visibleHandlers.map((h, i) => {
                       const clr = progColor(h.progress);
+                      const itemCount = h.items ? h.items.length : (h.count || 0);
                       return (
                         <div key={i} style={{ display:"flex", alignItems:"center", gap:"6px" }}>
                           <div style={{ width:"22px", height:"22px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", fontSize:"9px", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
@@ -4855,6 +4896,7 @@ function FinanceDashboard({
                           <div style={{ flex:1, overflow:"hidden" }}>
                             <div style={{ fontSize:"11px", fontWeight:600, color:"#1e293b", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{h.handler}</div>
                           </div>
+                          <span style={{ fontSize:"9px", fontWeight:600, color:"#6b7280", background:"#f1f5f9", borderRadius:"9px", padding:"1px 5px", flexShrink:0 }}>{itemCount} kalem</span>
                           <span style={{ fontSize:"10px", fontWeight:700, color:clr, flexShrink:0 }}>{h.progress}</span>
                           <span style={{ fontSize:"11px", fontWeight:700, color:"#0f172a", flexShrink:0 }}>{fmtAmt(h.total_usd, h.total_try)}</span>
                         </div>
