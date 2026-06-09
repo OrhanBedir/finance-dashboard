@@ -3352,9 +3352,11 @@ function FinanceDashboard({
   const [errorMessage, setErrorMessage] = useState("");
   const [paymentDateFilter, setPaymentDateFilter] = useState("");
   const [upcomingRows, setUpcomingRows] = useState([]);
+  const [overduePaymentRows, setOverduePaymentRows] = useState([]);
   const [upcomingSummary, setUpcomingSummary] = useState({
     today_total: 0,
     week_total: 0,
+    overdue_payment_total: 0,
     overdue_total: 0,
   });
 
@@ -4581,11 +4583,13 @@ function FinanceDashboard({
       setHwAcceptanceSummary(acceptanceSummaryData || null);
       setPaymentRows(paymentsData.rows || []);
       setUpcomingRows(upcomingData.rows || []);
+      setOverduePaymentRows(upcomingData.overdue_payment_rows || []);
       setOverdueRows(upcomingData.overdue_rows || []);
       setUpcomingSummary(
         upcomingData.summary || {
           today_total: 0,
           week_total: 0,
+          overdue_payment_total: 0,
           overdue_total: 0,
         },
       );
@@ -4594,9 +4598,11 @@ function FinanceDashboard({
       setSummary(null);
       setPaymentRows([]);
       setUpcomingRows([]);
+      setOverduePaymentRows([]);
       setUpcomingSummary({
         today_total: 0,
         week_total: 0,
+        overdue_payment_total: 0,
         overdue_total: 0,
       });
       setErrorMessage(err.message || "Finance verisi alınamadı");
@@ -4951,44 +4957,84 @@ function FinanceDashboard({
             <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"4px", fontWeight:500 }}>📅 Bu Hafta Gelecek</div>
             <div style={{ fontSize:"20px", fontWeight:800, color:"#3b82f6" }}>{formatMoneyByCurrency(upcomingSummary.week_total||0,"TRY")}</div>
           </div>
-          <div onClick={handleShowOverdues} style={{ padding:"16px 20px", textAlign:"center", cursor:"pointer", background:upcomingSummary.overdue_total>0?"#fef2f2":undefined }}>
-            <div style={{ fontSize:"11px", color:upcomingSummary.overdue_total>0?"#991b1b":"#64748b", marginBottom:"4px", fontWeight:500 }}>⚠️ Geciken Ödeme</div>
-            <div style={{ fontSize:"20px", fontWeight:800, color:upcomingSummary.overdue_total>0?"#dc2626":"#0f172a" }}>{formatMoneyByCurrency(upcomingSummary.overdue_total||0,"TRY")}</div>
+          <div onClick={handleShowOverdues} style={{ padding:"16px 20px", textAlign:"center", cursor:"pointer", background:(upcomingSummary.overdue_payment_total||0)>0?"#fef2f2":undefined }}>
+            <div style={{ fontSize:"11px", color:(upcomingSummary.overdue_payment_total||0)>0?"#991b1b":"#64748b", marginBottom:"4px", fontWeight:500 }}>⚠️ Geciken Ödeme</div>
+            <div style={{ fontSize:"20px", fontWeight:800, color:(upcomingSummary.overdue_payment_total||0)>0?"#dc2626":"#0f172a" }}>{formatMoneyByCurrency(upcomingSummary.overdue_payment_total||0,"TRY")}</div>
           </div>
         </div>
-        {/* Upcoming rows */}
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <thead>
-            <tr style={{ background:"#f8fafc" }}>
-              <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gün</th>
-              <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Tarih</th>
-              <th style={{ padding:"10px 16px", textAlign:"right", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gelecek Tutar</th>
-            </tr>
-          </thead>
-          <tbody>
-            {upcomingRows.length === 0 ? (
-              <tr><td colSpan={3} style={{ textAlign:"center", padding:"28px", color:"#94a3b8", fontSize:"13px" }}>Gelecek tahsilat bulunamadı</td></tr>
-            ) : (
-              upcomingRows.map((row, index) => (
-                <tr key={index} style={{ borderBottom:"1px solid #f1f5f9", background:row.amount<0?"#fff5f5":undefined }}>
-                  <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{row.day_name || "-"}</td>
-                  <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{formatDateOnly(row.due_date)}</td>
-                  <td style={{ padding:"12px 16px", textAlign:"right" }}>
-                    <div style={{ fontWeight:700, color:row.amount<0?"#dc2626":"#10b981", fontSize:"14px" }}>
-                      {formatMoneyByCurrency(row.amount || 0, row.currency || "TRY")}
-                    </div>
-                    {row.deduction_amount < 0 && (
-                      <div style={{ fontSize:11, color:"#dc2626", marginTop:2 }}>
-                        Brüt: {formatMoneyByCurrency(row.gross_amount||0, row.currency||"TRY")}
-                        &nbsp;|&nbsp;Kesinti: {formatMoneyByCurrency(row.deduction_amount||0, row.currency||"TRY")}
-                      </div>
-                    )}
-                  </td>
+        {/* Geciken ödeme satırları */}
+        {overduePaymentRows.length > 0 && (
+          <>
+            <div style={{ padding:"8px 16px", background:"#fef2f2", borderTop:"1px solid #fecaca", borderBottom:"1px solid #fecaca", display:"flex", alignItems:"center", gap:"6px" }}>
+              <span style={{ fontSize:"12px", fontWeight:700, color:"#991b1b" }}>⚠️ Geciken Ödemeler</span>
+              <span style={{ fontSize:"11px", color:"#ef4444", background:"#fee2e2", padding:"1px 7px", borderRadius:"9px", fontWeight:600 }}>{overduePaymentRows.length} gün</span>
+            </div>
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:"#fff5f5" }}>
+                  <th style={{ padding:"8px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#991b1b", borderBottom:"1px solid #fecaca", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gün</th>
+                  <th style={{ padding:"8px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#991b1b", borderBottom:"1px solid #fecaca", textTransform:"uppercase", letterSpacing:"0.5px" }}>Tarih</th>
+                  <th style={{ padding:"8px 16px", textAlign:"right", fontSize:"11px", fontWeight:600, color:"#991b1b", borderBottom:"1px solid #fecaca", textTransform:"uppercase", letterSpacing:"0.5px" }}>Geciken Tutar</th>
                 </tr>
-              ))
+              </thead>
+              <tbody>
+                {overduePaymentRows.map((row, index) => (
+                  <tr key={index} style={{ borderBottom:"1px solid #fee2e2", background: index%2===0?"#fff5f5":"#fff8f8" }}>
+                    <td style={{ padding:"10px 16px", fontSize:"13px", color:"#7f1d1d" }}>{row.day_name || "-"}</td>
+                    <td style={{ padding:"10px 16px", fontSize:"13px", color:"#7f1d1d" }}>{formatDateOnly(row.due_date)}</td>
+                    <td style={{ padding:"10px 16px", textAlign:"right" }}>
+                      <div style={{ fontWeight:700, color:"#dc2626", fontSize:"14px" }}>
+                        {formatMoneyByCurrency(row.gross_amount || row.amount || 0, row.currency || "TRY")}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+        {/* Gelecek ödeme satırları */}
+        {(upcomingRows.length > 0 || overduePaymentRows.length === 0) && (
+          <>
+            {overduePaymentRows.length > 0 && (
+              <div style={{ padding:"8px 16px", background:"#f0fdf4", borderTop:"1px solid #bbf7d0", borderBottom:"1px solid #bbf7d0", display:"flex", alignItems:"center", gap:"6px" }}>
+                <span style={{ fontSize:"12px", fontWeight:700, color:"#166534" }}>📅 Gelecek Ödemeler</span>
+              </div>
             )}
-          </tbody>
-        </table>
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:"#f8fafc" }}>
+                  <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gün</th>
+                  <th style={{ padding:"10px 16px", textAlign:"left", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Tarih</th>
+                  <th style={{ padding:"10px 16px", textAlign:"right", fontSize:"11px", fontWeight:600, color:"#64748b", borderBottom:"1px solid #e2e8f0", borderTop:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gelecek Tutar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {upcomingRows.length === 0 ? (
+                  <tr><td colSpan={3} style={{ textAlign:"center", padding:"28px", color:"#94a3b8", fontSize:"13px" }}>Gelecek tahsilat bulunamadı</td></tr>
+                ) : (
+                  upcomingRows.map((row, index) => (
+                    <tr key={index} style={{ borderBottom:"1px solid #f1f5f9", background:row.amount<0?"#fff5f5":undefined }}>
+                      <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{row.day_name || "-"}</td>
+                      <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{formatDateOnly(row.due_date)}</td>
+                      <td style={{ padding:"12px 16px", textAlign:"right" }}>
+                        <div style={{ fontWeight:700, color:row.amount<0?"#dc2626":"#10b981", fontSize:"14px" }}>
+                          {formatMoneyByCurrency(row.amount || 0, row.currency || "TRY")}
+                        </div>
+                        {row.deduction_amount < 0 && (
+                          <div style={{ fontSize:11, color:"#dc2626", marginTop:2 }}>
+                            Brüt: {formatMoneyByCurrency(row.gross_amount||0, row.currency||"TRY")}
+                            &nbsp;|&nbsp;Kesinti: {formatMoneyByCurrency(row.deduction_amount||0, row.currency||"TRY")}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </>
+        )}
       </div>
 
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:"12px", marginTop:"24px", marginBottom:"10px" }}>
