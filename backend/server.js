@@ -5569,7 +5569,7 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         power_subcon, power_plan_start_date, power_actual_end_date,
         abonelik_actual_end_date, tt_horizon_actual_end_date,
         pac_actual_end_date, tamamlanma_tarihi,
-        suzme_date
+        suzme_date, pac_subcon, pac_plan_date
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,
         $8,$9,$10,$11,$12,$13,$14,$15,
@@ -5581,7 +5581,7 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         $34,$35,$36,$37,
         $38,$39,$40,$41,$42,
         $43,$44,$45,
-        $46,$47,$48,$49,$50,$51,$52,$53
+        $46,$47,$48,$49,$50,$51,$52,$53,$54,$55
       )
       ON CONFLICT (site_code) DO UPDATE SET
         site_type = EXCLUDED.site_type,
@@ -5636,6 +5636,8 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         pac_actual_end_date = EXCLUDED.pac_actual_end_date,
         tamamlanma_tarihi = EXCLUDED.tamamlanma_tarihi,
         suzme_date = EXCLUDED.suzme_date,
+        pac_subcon = EXCLUDED.pac_subcon,
+        pac_plan_date = EXCLUDED.pac_plan_date,
         updated_at = NOW()
       RETURNING *`,
       [
@@ -5650,9 +5652,10 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         /* 34-37 */ v("trs_subcon"), vd("trs_plan_start_date"), vd("trs_actual_end_date"), v("trs_not"),
         /* 38-42 */ v("enh_subcon"), v("enh_site_type"), vd("enh_plan_start_date"), vd("enh_actual_end_date"), v("enh_not"),
         /* 43-45 */ v("enh_proje_subcon"), vd("enh_proje_hazir"), v("enh_proje_not"),
-        /* 46-53 */ v("power_subcon"), vd("power_plan_start_date"), vd("power_actual_end_date"),
+        /* 46-55 */ v("power_subcon"), vd("power_plan_start_date"), vd("power_actual_end_date"),
                     vd("abonelik_actual_end_date"), vd("tt_horizon_actual_end_date"),
                     vd("pac_actual_end_date"), vd("tamamlanma_tarihi"), vd("suzme_date"),
+                    v("pac_subcon"), vd("pac_plan_date"),
       ]
     );
 
@@ -13253,6 +13256,8 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS abonelik_actual_end_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS abonelik_end_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tt_horizon_actual_end_date DATE",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_subcon TEXT",
+  "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_plan_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_actual_end_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tamamlanma_tarihi DATE",

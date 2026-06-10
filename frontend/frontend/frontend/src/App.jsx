@@ -20639,6 +20639,8 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
 
     abonelik_actual_end_date: existingRow.abonelik_actual_end_date || "",
     tt_horizon_actual_end_date: existingRow.tt_horizon_actual_end_date || "",
+    pac_subcon: existingRow.pac_subcon || "",
+    pac_plan_date: existingRow.pac_plan_date || "",
     pac_actual_end_date: existingRow.pac_actual_end_date || "",
     tamamlanma_tarihi: existingRow.tamamlanma_tarihi || "",
     suzme_date: existingRow.suzme_date || "",
@@ -21052,11 +21054,20 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             {input("Power Actual End Date", "power_actual_end_date", "date")}
             {input("Abonelik Actual End Date", "abonelik_actual_end_date", "date")}
             {input("Horizon Actual End Date", "tt_horizon_actual_end_date", "date")}
-            {input("PAC Actual End Date", "pac_actual_end_date", "date")}
             {input("Süzme Tarihi", "suzme_date", "date")}
           </div>
+        </div>
+
+        {/* ===== PAC ===== */}
+        <div style={{ margin:"16px 0 0", padding:"16px", background:"#fdf4ff", borderRadius:"12px", border:"1.5px solid #e9d5ff" }}>
+          <div style={{ fontWeight:700, fontSize:"14px", color:"#7e22ce", marginBottom:"12px" }}>✅ PAC</div>
+          <div className="modalGrid">
+            {input("PAC Subcon", "pac_subcon")}
+            {input("PAC Plan Date", "pac_plan_date", "date")}
+            {input("PAC Actual End Date", "pac_actual_end_date", "date")}
+          </div>
           <div style={{ marginTop:"10px" }}>
-            <div style={{ fontSize:"12px", fontWeight:600, color:"#1e40af", marginBottom:"4px" }}>📎 PAC Belgesi</div>
+            <div style={{ fontSize:"12px", fontWeight:600, color:"#7e22ce", marginBottom:"4px" }}>📎 PAC Belgesi</div>
             {belgeWidget("pac_belge_url", pacBelgeFile, setPacBelgeFile)}
           </div>
         </div>
