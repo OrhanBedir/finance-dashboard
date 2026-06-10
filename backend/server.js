@@ -2136,7 +2136,9 @@ function buildMasterJoinedQuery(
       CASE
         WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.unit_price, 0)
         ELSE COALESCE(item_po.unit_price, 0)
-      END AS total_done_amount
+      END AS total_done_amount,
+
+      (rp.pac_actual_end_date IS NOT NULL) AS pac_from_rollout
 
     FROM master_works m
     LEFT JOIN best_site_po site_po
@@ -2149,6 +2151,9 @@ function buildMasterJoinedQuery(
 
     LEFT JOIN best_boq
       ON TRIM(COALESCE(best_boq.s_bom_code, '')) = TRIM(COALESCE(m.item_code, ''))
+
+    LEFT JOIN rollout_progress rp
+      ON UPPER(TRIM(COALESCE(rp.site_code, ''))) = UPPER(TRIM(COALESCE(m.site_code, '')))
 
     ${extraWhere}
     ${extraOrder}
