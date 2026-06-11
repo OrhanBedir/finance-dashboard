@@ -609,9 +609,13 @@ app.post("/auth/login", async (req, res) => {
       userRole === "admin" ||
       userRole === "genel_mudur";
 
+    // Finans erişimi olan kullanıcılar: admin, FINANCE_ALLOWED_USERS listesi,
+    // finance/muhasebe rolleri, veya hardcoded finans yetkilileri
+    const FINANCE_HARDCODED = ["nurcan.kus@simsektel.com", "orhan@simsektel.com"];
     const scope =
       isAdminUser ||
       financeAllowedUsers.includes(userEmail) ||
+      FINANCE_HARDCODED.includes(userEmail) ||
       userRole === "finance" ||
       userRole === "muhasebe"
         ? "finance"
