@@ -2187,7 +2187,7 @@ function buildMasterJoinedQuery(
 }
 
 app.get("/", (req, res) => {
-  res.send("Finance backend çalışıyor");
+  res.send("Finance backend çalışıyor v32dce14");
 });
 
 app.get("/health", (req, res) => {
