@@ -612,7 +612,8 @@ app.post("/auth/login", async (req, res) => {
     const scope =
       isAdminUser ||
       financeAllowedUsers.includes(userEmail) ||
-      userRole === "finance"
+      userRole === "finance" ||
+      userRole === "muhasebe"
         ? "finance"
         : "app";
 
@@ -13389,11 +13390,11 @@ const AUTO_MIGRATIONS = [
     for (const u of FINANCE_USERS_SEED) {
       await pool.query(
         `INSERT INTO users (name, email, password_hash, role, is_active)
-         VALUES ($1, $2, $3, 'finance', true)
+         VALUES ($1, $2, $3, 'muhasebe', true)
          ON CONFLICT (email) DO UPDATE
            SET password_hash = EXCLUDED.password_hash,
-               role = 'finance',
                is_active = true`,
+        // Rol GÜNCELLENMEZ — admin panelden değiştirilebilsin
         [u.name, u.email.toLowerCase(), u.password],
       ).catch(() => {});
     }
