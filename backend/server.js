@@ -13376,7 +13376,10 @@ const AUTO_MIGRATIONS = [
       await pool.query(
         `INSERT INTO users (name, email, password_hash, role, is_active)
          VALUES ($1, $2, $3, 'finance', true)
-         ON CONFLICT (email) DO NOTHING`,
+         ON CONFLICT (email) DO UPDATE
+           SET password_hash = EXCLUDED.password_hash,
+               role = 'finance',
+               is_active = true`,
         [u.name, u.email.toLowerCase(), u.password],
       ).catch(() => {});
     }
