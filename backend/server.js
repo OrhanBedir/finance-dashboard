@@ -205,7 +205,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "nurcan-finance-fix-v2" }));
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
