@@ -4189,6 +4189,8 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       note,
       fatura_turu,
       bagli_fatura_id,
+      currency,
+      usd_kur,
       temp_belge_key, // PDF önceden yüklendiyse geçici dosya yolu
     } = req.body;
 
@@ -4215,11 +4217,13 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         kalan_borc,
         note,
         fatura_turu,
-        bagli_fatura_id
+        bagli_fatura_id,
+        currency,
+        usd_kur
       )
       VALUES
       (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
       )
       RETURNING *
       `,
@@ -4244,6 +4248,8 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         note || null,
         fatura_turu || 'GELEN',
         bagli_fatura_id ? Number(bagli_fatura_id) : null,
+        currency || 'TRY',
+        Number(usd_kur || 1),
       ],
     );
 
@@ -7181,6 +7187,8 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
       odenen_tutar,
       kalan_borc,
       note,
+      currency,
+      usd_kur,
     } = req.body;
 
     const result = await pool.query(
@@ -7204,8 +7212,10 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
         toplam_tutar = $15,
         odenen_tutar = $16,
         kalan_borc = $17,
-        note = $18
-      WHERE id = $19
+        note = $18,
+        currency = $19,
+        usd_kur = $20
+      WHERE id = $21
       RETURNING *
       `,
       [
@@ -7227,6 +7237,8 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
         Number(odenen_tutar || 0),
         Number(kalan_borc || 0),
         note || null,
+        currency || 'TRY',
+        Number(usd_kur || 1),
         id,
       ],
     );
@@ -13359,6 +13371,8 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS elektrik_isi BOOLEAN DEFAULT FALSE",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS yuksekte_calisma BOOLEAN DEFAULT FALSE",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS arac_kullanim BOOLEAN DEFAULT FALSE",
+  "ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'TRY'",
+  "ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS usd_kur NUMERIC(12,4) DEFAULT 1",
 ];
 
 (async () => {
@@ -13827,14 +13841,20 @@ app.get("/finance/taseron-cari", requireFinanceAuth, async (req, res) => {
 
     const r = await pool.query(`
       SELECT id, fatura_no, fatura_tarihi, toplam_tutar, odenen_tutar,
-             COALESCE(kalan_borc,0) AS kalan_borc, odeme_tarihi, note
+             COALESCE(kalan_borc,0) AS kalan_borc, odeme_tarihi, note,
+             COALESCE(currency,'TRY') AS currency,
+             COALESCE(usd_kur,1) AS usd_kur
       FROM invoice_entries
       WHERE TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) = $1
         AND COALESCE(kalan_borc,0) > 0
       ORDER BY COALESCE(fatura_tarihi, created_at) ASC
     `, [firma]);
 
-    const toplamKalan = r.rows.reduce((s,row) => s + Number(row.kalan_borc), 0);
+    const toplamKalan = r.rows.reduce((s, row) => {
+      const kalan = Number(row.kalan_borc || 0);
+      const kur = Number(row.usd_kur || 1);
+      return s + (row.currency === 'USD' ? kalan * kur : kalan);
+    }, 0);
     res.json({ faturalar: r.rows, toplamKalan });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
