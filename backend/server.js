@@ -205,7 +205,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "nurcan-finance-fix-v2" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-flow-fix-v3" }));
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
@@ -10929,14 +10929,14 @@ app.put("/hr/is-avans/:id/pm-onayla", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Direktör — TALEP veya PM_ONAY'ı doğrudan DIREKTOR_ONAY'a taşır (PM adımını atlar)
+// Direktör — yalnızca PM_ONAY aşamasındaki talebi DIREKTOR_ONAY'a taşır
 app.put("/hr/is-avans/:id/direktor-onayla", async (req, res) => {
   try {
     const { id } = req.params;
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
-    if (!["TALEP","ROLLOUT_MUDUR_ONAY","PM_ONAY"].includes(talep.durum)) {
+    if (talep.durum !== "PM_ONAY") {
       return res.status(400).json({ error: "Bu durumda direktör onayı yapılamaz" });
     }
     const today = new Date().toISOString().split("T")[0];

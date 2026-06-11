@@ -12151,12 +12151,12 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const durumBadge = (durum) => {
     const map = {
-      TALEP:               { bg: "#e5e7eb", color: "#374151", label: "Talep Edildi" },
-      ROLLOUT_MUDUR_ONAY:  { bg: "#dbeafe", color: "#1e40af", label: "Rollout Müdür Onayında" },
-      PM_ONAY:             { bg: "#fed7aa", color: "#92400e", label: "PM Onayında" },
-      DIREKTOR_ONAY:       { bg: "#dcfce7", color: "#166534", label: "Onaylandı · Ödeme Bekler" },
-      MUHASEBE_ONAY:       { bg: "#fef9c3", color: "#713f12", label: "Muhasebe Onayında" },
-      TAMAMLANDI:          { bg: "#dcfce7", color: "#166534", label: "Tamamlandı" },
+      TALEP:               { bg: "#e5e7eb", color: "#374151",  label: "Rollout Onayı Bekleniyor" },
+      ROLLOUT_MUDUR_ONAY:  { bg: "#dbeafe", color: "#1e40af", label: "PM Onayı Bekleniyor" },
+      PM_ONAY:             { bg: "#fed7aa", color: "#92400e", label: "PD Onayı Bekleniyor" },
+      DIREKTOR_ONAY:       { bg: "#fef9c3", color: "#713f12", label: "Muhasebe Onayı Bekleniyor" },
+      MUHASEBE_ONAY:       { bg: "#d1fae5", color: "#065f46", label: "Muhasebe Onayında" },
+      TAMAMLANDI:          { bg: "#dcfce7", color: "#166534", label: "Tamamlandı ✓" },
       REDDEDILDI:          { bg: "#fee2e2", color: "#991b1b", label: "Reddedildi" },
     };
     const s = map[durum] || { bg: "#f3f4f6", color: "#6b7280", label: durum };
@@ -12459,7 +12459,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                         </>
                       )}
-                      {isDirektor && (t.durum === "PM_ONAY" || t.durum === "ROLLOUT_MUDUR_ONAY" || t.durum === "TALEP") && (
+                      {isDirektor && t.durum === "PM_ONAY" && (
                         <>
                           <button onClick={() => handleDirektorDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
