@@ -13374,6 +13374,7 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS arac_kullanim BOOLEAN DEFAULT FALSE",
   "ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'TRY'",
   "ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS usd_kur NUMERIC(12,4) DEFAULT 1",
+  "UPDATE users SET role='rollout_mudur' WHERE LOWER(email)='nurcan.kus@simsektel.com' AND role='muhasebe'",
 ];
 
 (async () => {
@@ -13390,7 +13391,7 @@ const AUTO_MIGRATIONS = [
     for (const u of FINANCE_USERS_SEED) {
       await pool.query(
         `INSERT INTO users (name, email, password_hash, role, is_active)
-         VALUES ($1, $2, $3, 'muhasebe', true)
+         VALUES ($1, $2, $3, 'rollout_mudur', true)
          ON CONFLICT (email) DO UPDATE
            SET password_hash = EXCLUDED.password_hash,
                is_active = true`,

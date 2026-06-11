@@ -8429,7 +8429,7 @@ function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
-  const _isMuhasebe = currentUser?.role === "muhasebe" || currentUser?.email === "nurcan.kus@simsektel.com";
+  const _isMuhasebe = currentUser?.role === "muhasebe";
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
   // Muhasebe → maaş sekmelerini (personel, maas_avans) gizle, is_avans'tan başla
   // Nurcan → isg'den başla  / Diğerleri → personel'den başla
@@ -10603,7 +10603,7 @@ const MASRAF_KATEGORILER = [
 function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const isPM       = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
-  const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com" || currentUser?.email === "nurcan.kus@simsektel.com" || currentUser?.role === "muhasebe";
+  const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com" || currentUser?.role === "muhasebe";
   const isApprover = isPM || isDirektor || isMuhasebe;
   const isMobile   = typeof window !== "undefined" && window.innerWidth < 768;
 
@@ -12004,7 +12004,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const _role  = (currentUser?.role  || "").toLowerCase();
   const isPM           = _email === "orhan.bedir@simsektel.com";
   const isDirektor     = _email === "duzgun.simsek@simsektel.com";
-  const isMuhasebe     = _email === "muhasebe@simsektel.com" || _email === "nurcan.kus@simsektel.com" || _role === "muhasebe";
+  const isMuhasebe     = _email === "muhasebe@simsektel.com" || _role === "muhasebe";
   // Nurcan: herkesi görebilir, herkes için talep edebilir (yönetici yetkisi)
   const isNurcan       = _email === "nurcan.kus@simsektel.com";
   // Rollout Manager: rollout_mudur veya bolge_mudur rolüne sahip kullanıcılar
@@ -18587,7 +18587,7 @@ function App() {
     }
   });
   const isAdmin = user?.role === "admin" || user?.role === "direktor";
-  const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role);
+  const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role) || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com";
 
   // Ünvan görüntüleme fonksiyonu
   const getUserTitle = (u) => {
@@ -18709,7 +18709,7 @@ function App() {
             count = data.filter(t => t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY").length;
           else if (email === "duzgun.simsek@simsektel.com")
             count = data.filter(t => t.durum === "PM_ONAY").length;
-          else if (email === "muhasebe@simsektel.com" || email === "nurcan.kus@simsektel.com" || role === "muhasebe")
+          else if (email === "muhasebe@simsektel.com" || role === "muhasebe")
             count = data.filter(t => t.durum === "DIREKTOR_ONAY").length;
           else if (isRM)
             count = data.filter(t => t.durum === "TALEP").length;
@@ -18723,7 +18723,7 @@ function App() {
           let mc = 0;
           if (email === "orhan.bedir@simsektel.com") mc = mdata.filter(f => f.durum === "PM_BEKLE").length;
           else if (email === "duzgun.simsek@simsektel.com") mc = mdata.filter(f => f.durum === "DIREKTOR_BEKLE").length;
-          else if (email === "muhasebe@simsektel.com" || email === "nurcan.kus@simsektel.com" || (user?.role || "") === "muhasebe") mc = mdata.filter(f => f.durum === "TAMAMLANDI").length;
+          else if (email === "muhasebe@simsektel.com" || (user?.role || "") === "muhasebe") mc = mdata.filter(f => f.durum === "TAMAMLANDI").length;
           setPendingMasrafCount(mc);
         }
         // Malzeme talebi bekleyenleri say
@@ -19034,7 +19034,7 @@ function App() {
       const _luIsBolge = _bolgeMudurEmails.includes(_lue) || ["rollout_mudur","bolge_mudur"].includes(_luRole);
       const _luIsRolloutOverride = _rolloutOverrideEmails.includes(_lue);
       const _luIsSubcon = !!_lu?.subcon_name || _luRole === "subcon";
-      const _luIsFinance = ["finance","admin","genel_mudur","muhasebe"].includes(_luRole) || _lue === "orhan@simsektel.com";
+      const _luIsFinance = ["finance","admin","genel_mudur","muhasebe"].includes(_luRole) || _lue === "orhan@simsektel.com" || _lue === "nurcan.kus@simsektel.com";
       if (_luIsFinance && !_luIsSubcon) setPage("finance");
       else if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("masraf");
       else if (_luIsBolge || _luIsSubcon) setPage("region");
