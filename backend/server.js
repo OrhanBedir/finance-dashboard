@@ -610,7 +610,9 @@ app.post("/auth/login", async (req, res) => {
       userRole === "genel_mudur";
 
     const scope =
-      isAdminUser || financeAllowedUsers.includes(userEmail)
+      isAdminUser ||
+      financeAllowedUsers.includes(userEmail) ||
+      userRole === "finance"
         ? "finance"
         : "app";
 
