@@ -3706,6 +3706,8 @@ function FinanceDashboard({
     fatura_turu: "GELEN",
     bagli_fatura_id: "",
     belge_path: "",
+    currency: "TRY",
+    usd_kur: "",
   });
 
   // Fatura PDF otomatik doldurma
@@ -3956,7 +3958,7 @@ function FinanceDashboard({
       setShowInvoiceUpload(false);
       setShowUpload(false);
       setEditingInvoiceId(null);
-      setInvoiceForm({ bolge:"", proje:"", proje_kodu:"", fatura_no:"", fatura_tarihi:"", odeme_tarihi:"", tedarikci:"", rf_montaj_firma:"", fatura_kalemi:"", is_kalemi:"", po_no:"", site_id:"", tutar:"", kdv:"", toplam_tutar:"", odenen_tutar:"", kalan_borc:"", note:"", fatura_turu:"GELEN", bagli_fatura_id:"" });
+      setInvoiceForm({ bolge:"", proje:"", proje_kodu:"", fatura_no:"", fatura_tarihi:"", odeme_tarihi:"", tedarikci:"", rf_montaj_firma:"", fatura_kalemi:"", is_kalemi:"", po_no:"", site_id:"", tutar:"", kdv:"", toplam_tutar:"", odenen_tutar:"", kalan_borc:"", note:"", fatura_turu:"GELEN", bagli_fatura_id:"", currency: "TRY", usd_kur: "" });
     } else if (actionTrigger === 'taseron_hakedis') {
       handleShowSubconSummary();
     } else if (actionTrigger === 'hw_payment') {
@@ -4234,6 +4236,8 @@ function FinanceDashboard({
       note: row.note || "",
       fatura_turu: row.fatura_turu || "GELEN",
       bagli_fatura_id: row.bagli_fatura_id || "",
+      currency: row.currency || "TRY",
+      usd_kur: row.usd_kur ?? "",
     });
 
     setShowUpload(false);
@@ -4284,6 +4288,8 @@ function FinanceDashboard({
         kalan_borc: Number(invoiceForm.kalan_borc || 0),
         fatura_turu: invoiceForm.fatura_turu || "GELEN",
         bagli_fatura_id: invoiceForm.bagli_fatura_id ? Number(invoiceForm.bagli_fatura_id) : null,
+        currency: invoiceForm.currency || "TRY",
+        usd_kur: Number(invoiceForm.usd_kur || 1),
         note: invoiceForm.note,
         ...(pdfTempKey && !editingInvoiceId ? { temp_belge_key: pdfTempKey } : {}),
       };
@@ -5915,6 +5921,30 @@ function FinanceDashboard({
 
                 {/* BÖLÜM 3: Finansal Bilgiler */}
                 <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  {/* Para Birimi Seçimi */}
+                  <div style={{ marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
+                    <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>Para Birimi:</span>
+                    {["TRY","USD"].map(c => (
+                      <button key={c} type="button"
+                        onClick={() => setInvoiceForm(p => ({ ...p, currency: c, usd_kur: c === "USD" ? String(usdTryRate) : "" }))}
+                        style={{ padding:"6px 18px", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer",
+                          background: invoiceForm.currency === c ? (c === "USD" ? "#1d4ed8" : "#166534") : "#f3f4f6",
+                          color: invoiceForm.currency === c ? "#fff" : "#6b7280",
+                          border: `2px solid ${invoiceForm.currency === c ? (c === "USD" ? "#1d4ed8" : "#166534") : "#e5e7eb"}` }}>
+                        {c === "TRY" ? "₺ TRY" : "$ USD"}
+                      </button>
+                    ))}
+                    {invoiceForm.currency === "USD" && (
+                      <div style={{ display:"flex", alignItems:"center", gap:"6px", marginLeft:"8px" }}>
+                        <span style={{ fontSize:"12px", color:"#6b7280" }}>Kur:</span>
+                        <input type="number" step="0.01" value={invoiceForm.usd_kur}
+                          onChange={e => setInvoiceForm(p => ({ ...p, usd_kur: e.target.value }))}
+                          style={{ width:"80px", padding:"5px 8px", border:"1.5px solid #bfdbfe", borderRadius:"7px", fontSize:"13px", fontWeight:600 }}
+                          placeholder={String(usdTryRate)} />
+                        <span style={{ fontSize:"11px", color:"#9ca3af" }}>₺/$ (güncel: {usdTryRate?.toFixed(2)})</span>
+                      </div>
+                    )}
+                  </div>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
                     <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
                     Finansal Bilgiler
@@ -6144,14 +6174,24 @@ function FinanceDashboard({
                           <span style={{ fontSize:"10px", color:"#9ca3af" }}>{f.fatura_tarihi ? String(f.fatura_tarihi).slice(0,10) : "—"}</span>
                         </div>
                         <div style={{ display:"flex", gap:"8px", fontSize:"11px" }}>
-                          <span style={{ color:"#6b7280" }}>Toplam: <b>₺{Number(f.toplam_tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}</b></span>
-                          <span style={{ color:"#16a34a" }}>Ödenen: <b>₺{Number(f.odenen_tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}</b></span>
+                          {f.currency === "USD" ? (
+                            <span style={{ color:"#6b7280" }}>Toplam: <b>${Number(f.toplam_tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})} <span style={{fontSize:"10px",color:"#9ca3af"}}>(≈₺{(Number(f.toplam_tutar)*Number(f.usd_kur||1)).toLocaleString("tr-TR",{maximumFractionDigits:0})})</span></b></span>
+                          ) : (
+                            <span style={{ color:"#6b7280" }}>Toplam: <b>₺{Number(f.toplam_tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}</b></span>
+                          )}
+                          <span style={{ color:"#16a34a" }}>Ödendi: <b>₺{Number(f.odenen_tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})} 🔒</b></span>
                         </div>
                         <div style={{ marginTop:"4px", display:"flex", alignItems:"center", gap:"6px" }}>
                           <div style={{ flex:1, height:"5px", background:"#f3e8ff", borderRadius:"99px", overflow:"hidden" }}>
                             <div style={{ height:"100%", background:"#7e22ce", borderRadius:"99px", width:`${f.toplam_tutar>0?Math.min(100,Math.round((Number(f.odenen_tutar)/Number(f.toplam_tutar))*100)):0}%` }} />
                           </div>
-                          <span style={{ fontSize:"10px", color:"#dc2626", fontWeight:700 }}>Kalan: ₺{Number(f.kalan_borc).toLocaleString("tr-TR",{maximumFractionDigits:0})}</span>
+                          {f.currency === "USD" ? (
+                            <span style={{ fontSize:"10px", color:"#dc2626", fontWeight:700 }}>
+                              Kalan: ${Number(f.kalan_borc).toLocaleString("tr-TR",{maximumFractionDigits:2})} (≈₺{(Number(f.kalan_borc)*Number(f.usd_kur||1)).toLocaleString("tr-TR",{maximumFractionDigits:0})})
+                            </span>
+                          ) : (
+                            <span style={{ fontSize:"10px", color:"#dc2626", fontWeight:700 }}>Kalan: ₺{Number(f.kalan_borc).toLocaleString("tr-TR",{maximumFractionDigits:0})}</span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -8389,7 +8429,7 @@ function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
-  const _isMuhasebe = currentUser?.role === "muhasebe";
+  const _isMuhasebe = currentUser?.role === "muhasebe" || currentUser?.email === "nurcan.kus@simsektel.com";
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
   // Muhasebe → maaş sekmelerini (personel, maas_avans) gizle, is_avans'tan başla
   // Nurcan → isg'den başla  / Diğerleri → personel'den başla
@@ -10563,7 +10603,7 @@ const MASRAF_KATEGORILER = [
 function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const isPM       = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
-  const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
+  const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com" || currentUser?.email === "nurcan.kus@simsektel.com" || currentUser?.role === "muhasebe";
   const isApprover = isPM || isDirektor || isMuhasebe;
   const isMobile   = typeof window !== "undefined" && window.innerWidth < 768;
 
@@ -11964,7 +12004,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const _role  = (currentUser?.role  || "").toLowerCase();
   const isPM           = _email === "orhan.bedir@simsektel.com";
   const isDirektor     = _email === "duzgun.simsek@simsektel.com";
-  const isMuhasebe     = _email === "muhasebe@simsektel.com";
+  const isMuhasebe     = _email === "muhasebe@simsektel.com" || _email === "nurcan.kus@simsektel.com" || _role === "muhasebe";
   // Nurcan: herkesi görebilir, herkes için talep edebilir (yönetici yetkisi)
   const isNurcan       = _email === "nurcan.kus@simsektel.com";
   // Rollout Manager: rollout_mudur veya bolge_mudur rolüne sahip kullanıcılar
@@ -12657,19 +12697,22 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         getRegion(row.site_code, row.project_code) || "",
       ).toLowerCase();
 
-      const statusOk = String(row.status || "").toUpperCase() === "OK";
-      const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
+      if (rowRegion !== String(regionName).toLowerCase()) return false;
 
+      // PAC OK: rollout_progress'te pac_actual_end_date girilmiş sahalar
+      // → done_qty > 0 olan tüm kalemler göster (PO şartı aranmaz)
+      if (!!row.pac_from_rollout) {
+        return Number(row.done_qty || 0) > 0;
+      }
+
+      // Kabul OK: klasik PO mantığı
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
       const reqQty = Number(row.requested_qty || 0);
       const dueQty = Number(row.due_qty || 0);
       const progressedQty = reqQty - dueQty;
+      const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
 
-      return (
-        rowRegion === String(regionName).toLowerCase() &&
-        statusOk &&
-        progressedQty > 0 &&
-        kabulOk
-      );
+      return statusOk && progressedQty > 0 && kabulOk;
     });
   };
 
@@ -12680,26 +12723,29 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         getRegion(row.site_code, row.project_code) || "",
       ).toLowerCase();
 
-      const statusOk = String(row.status || "").toUpperCase() === "OK";
-      const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
+      if (rowRegion !== String(regionName).toLowerCase()) return false;
 
+      // PAC OK sahaları NOK'a dahil etme
+      if (!!row.pac_from_rollout) return false;
+
+      const statusOk = String(row.status || "").toUpperCase() === "OK";
       const reqQty = Number(row.requested_qty || 0);
       const dueQty = Number(row.due_qty || 0);
       const progressedQty = reqQty - dueQty;
+      const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
 
-      return (
-        rowRegion === String(regionName).toLowerCase() &&
-        statusOk &&
-        progressedQty > 0 &&
-        !kabulOk
-      );
+      return statusOk && progressedQty > 0 && !kabulOk;
     });
   };
 
   const getFacOk20TotalByRegion = (regionName) => {
     return getFacOk20RowsByRegion(regionName).reduce((sum, row) => {
-      const base = Number(row.due_qty || 0) * Number(row.unit_price || 0);
-
+      // PAC satırları: done_qty × unit_price (tamamlanan iş değeri)
+      // Kabul satırları: due_qty × unit_price (faturalanmamış kalan)
+      const qty = !!row.pac_from_rollout
+        ? Number(row.done_qty || 0)
+        : Number(row.due_qty || 0);
+      const base = qty * Number(row.unit_price || 0);
       const total =
         normalizeCurrency(row.currency) === "USD" ? base * usdRate : base;
 
@@ -18541,6 +18587,7 @@ function App() {
     }
   });
   const isAdmin = user?.role === "admin" || user?.role === "direktor";
+  const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role);
 
   // Ünvan görüntüleme fonksiyonu
   const getUserTitle = (u) => {
@@ -18662,7 +18709,7 @@ function App() {
             count = data.filter(t => t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY").length;
           else if (email === "duzgun.simsek@simsektel.com")
             count = data.filter(t => t.durum === "PM_ONAY").length;
-          else if (email === "muhasebe@simsektel.com")
+          else if (email === "muhasebe@simsektel.com" || email === "nurcan.kus@simsektel.com" || role === "muhasebe")
             count = data.filter(t => t.durum === "DIREKTOR_ONAY").length;
           else if (isRM)
             count = data.filter(t => t.durum === "TALEP").length;
@@ -18676,7 +18723,7 @@ function App() {
           let mc = 0;
           if (email === "orhan.bedir@simsektel.com") mc = mdata.filter(f => f.durum === "PM_BEKLE").length;
           else if (email === "duzgun.simsek@simsektel.com") mc = mdata.filter(f => f.durum === "DIREKTOR_BEKLE").length;
-          else if (email === "muhasebe@simsektel.com") mc = mdata.filter(f => f.durum === "TAMAMLANDI").length;
+          else if (email === "muhasebe@simsektel.com" || email === "nurcan.kus@simsektel.com" || (user?.role || "") === "muhasebe") mc = mdata.filter(f => f.durum === "TAMAMLANDI").length;
           setPendingMasrafCount(mc);
         }
         // Malzeme talebi bekleyenleri say
@@ -18983,10 +19030,13 @@ function App() {
       const _lue = (_lu?.email||"").toLowerCase().trim();
       const _bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com"];
       const _rolloutOverrideEmails = ["hatice.omus@simsektel.com"];
-      const _luIsBolge = _bolgeMudurEmails.includes(_lue) || ["rollout_mudur","bolge_mudur"].includes((_lu?.role||"").toLowerCase());
+      const _luRole = (_lu?.role||"").toLowerCase();
+      const _luIsBolge = _bolgeMudurEmails.includes(_lue) || ["rollout_mudur","bolge_mudur"].includes(_luRole);
       const _luIsRolloutOverride = _rolloutOverrideEmails.includes(_lue);
-      const _luIsSubcon = !!_lu?.subcon_name || (_lu?.role || "").toLowerCase() === "subcon";
-      if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("masraf");
+      const _luIsSubcon = !!_lu?.subcon_name || _luRole === "subcon";
+      const _luIsFinance = ["finance","admin","genel_mudur","muhasebe"].includes(_luRole) || _lue === "orhan@simsektel.com";
+      if (_luIsFinance && !_luIsSubcon) setPage("finance");
+      else if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("masraf");
       else if (_luIsBolge || _luIsSubcon) setPage("region");
       else setPage("finance");
 
@@ -19238,7 +19288,7 @@ function App() {
               </div>
               {openSections.anaMeny && (
                 <div>
-                  {isAdmin && (
+                  {isFinanceUser && (
                     <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
                       <span>📊</span> Finans Paneli
                     </div>
@@ -19306,7 +19356,7 @@ function App() {
                   </div>
                   {openSections.muhasebe && (
                     <div>
-                      {isAdmin && (
+                      {isFinanceUser && (
                         <>
                           <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
                             <span>📊</span> Finans Paneli
@@ -19428,7 +19478,7 @@ function App() {
 
           {/* Main content */}
           <div className="main-content" onClick={e=>e.stopPropagation()}>
-            {page === "finance" && isAdmin && (
+            {page === "finance" && isFinanceUser && (
               financeToken ? (
                 <div style={{padding:"24px 28px"}}>
                 <FinanceDashboard
