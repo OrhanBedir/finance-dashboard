@@ -1291,7 +1291,19 @@ function requireFinanceAuth(req, res, next) {
       process.env.JWT_SECRET || "finance_secret",
     );
 
-    if (decoded.scope !== "finance") {
+    // Finans yetkisi: scope=finance VEYA hardcoded finans e-postaları
+    const FINANCE_EMAILS_HARDCODED = [
+      "nurcan.kus@simsektel.com",
+      "orhan@simsektel.com",
+      "orhan.bedir@simsektel.com",
+      "duzgun.simsek@simsektel.com",
+    ];
+    const decodedEmail = String(decoded.email || "").toLowerCase();
+    const hasFinanceAccess =
+      decoded.scope === "finance" ||
+      FINANCE_EMAILS_HARDCODED.includes(decodedEmail);
+
+    if (!hasFinanceAccess) {
       return res.status(403).json({
         ok: false,
         error: "Finance yetkisi yok",
