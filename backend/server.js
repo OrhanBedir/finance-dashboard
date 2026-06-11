@@ -1082,9 +1082,6 @@ app.post("/finance-auth/login", async (req, res) => {
     const password = String(req.body.password || "").trim();
 
     const allowedUsers = getAllowedFinanceUsers();
-    const validPassword = String(
-      process.env.FINANCE_TEMP_PASSWORD || "",
-    ).trim();
 
     if (!email || !password) {
       return res.status(400).json({
@@ -1100,7 +1097,34 @@ app.post("/finance-auth/login", async (req, res) => {
       });
     }
 
-    if (password !== validPassword) {
+    // Per-user password: users tablosunda kayıtlı bcrypt hash'i kontrol et
+    const userResult = await pool.query(
+      `SELECT id, password_hash, subcon_name, payment_rate
+       FROM users
+       WHERE LOWER(TRIM(email)) = $1 AND is_active = true
+       LIMIT 1`,
+      [email],
+    );
+
+    let authenticated = false;
+    let userMeta = { subcon_name: null, payment_rate: 0.8 };
+
+    if (userResult.rows.length > 0 && userResult.rows[0].password_hash) {
+      const u = userResult.rows[0];
+      authenticated = await bcrypt.compare(password, u.password_hash);
+      userMeta = {
+        subcon_name: u.subcon_name || null,
+        payment_rate: Number(u.payment_rate || 0.8),
+      };
+    } else {
+      // Fallback: ortak geçici şifre (eski kullanıcılar için)
+      const validPassword = String(
+        process.env.FINANCE_TEMP_PASSWORD || "",
+      ).trim();
+      authenticated = password === validPassword;
+    }
+
+    if (!authenticated) {
       return res.status(401).json({
         ok: false,
         error: "Şifre hatalı",
@@ -1114,8 +1138,8 @@ app.post("/finance-auth/login", async (req, res) => {
       token,
       user: {
         email,
-        subcon_name: user.subcon_name,
-        payment_rate: Number(user.payment_rate || 0.8),
+        subcon_name: userMeta.subcon_name,
+        payment_rate: userMeta.payment_rate,
       },
     });
   } catch (err) {
@@ -13341,6 +13365,20 @@ const AUTO_MIGRATIONS = [
       await pool.query(sql).catch(() => {});
     }
     console.log("✅ Auto-migrations tamamlandı");
+
+    // Finans paneli kullanıcıları — bireysel şifre ile
+    const FINANCE_USERS_SEED = [
+      { name: "Nurcan Kuş", email: "nurcan.kus@simsektel.com", password: "$2b$10$90Grc3rIvK0U6a2GCybeS.15rjIYq9NK47ozNYuZE5kTgrsRJInCe" },
+    ];
+    for (const u of FINANCE_USERS_SEED) {
+      await pool.query(
+        `INSERT INTO users (name, email, password_hash, role, is_active)
+         VALUES ($1, $2, $3, 'finance', true)
+         ON CONFLICT (email) DO NOTHING`,
+        [u.name, u.email.toLowerCase(), u.password],
+      ).catch(() => {});
+    }
+    console.log("✅ Finance kullanıcıları hazır");
   } catch (e) {
     console.error("Migration hatası:", e.message);
   }
