@@ -4865,10 +4865,14 @@ function FinanceDashboard({
           const handlers = [...rawHandlers].sort((a,b) => parseP(b.progress) - parseP(a.progress));
 
           const fmtAmt = (usd, tryAmt) => {
-            // TL öncelikli göster; yoksa USD
-            if (tryAmt > 0) return tryAmt >= 1000000 ? `₺${(tryAmt/1000000).toFixed(1)}M` : tryAmt >= 1000 ? `₺${Math.round(tryAmt/1000)}K` : `₺${Math.round(tryAmt)}`;
-            if (usd > 0) return usd >= 1000000 ? `$${(usd/1000000).toFixed(1)}M` : usd >= 1000 ? `$${Math.round(usd/1000)}K` : `$${Math.round(usd)}`;
-            return "₺0";
+            // USD kura çevir, TRY ile topla → tek TL rakamı
+            const combined = (tryAmt || 0) + (usd || 0) * usdTryLiveRate;
+            if (combined <= 0) return "₺0";
+            return combined >= 1000000
+              ? `₺${(combined/1000000).toFixed(1)}M`
+              : combined >= 1000
+              ? `₺${Math.round(combined/1000)}K`
+              : `₺${Math.round(combined)}`;
           };
           const progColor = (prog) => {
             const p = parseP(prog);
