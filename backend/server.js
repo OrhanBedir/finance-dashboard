@@ -205,7 +205,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-3key-join-v9" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-taslak-resume-v10" }));
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
@@ -11437,7 +11437,7 @@ app.get("/hr/masraf-form/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST create form
+// POST create form (veya mevcut TASLAK'ı döndür)
 app.post("/hr/masraf-form", async (req, res) => {
   try {
     const {
@@ -11452,6 +11452,27 @@ app.post("/hr/masraf-form", async (req, res) => {
     const now = new Date();
     const formDonem = donem || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
     const formDurum = durum || "TASLAK";
+
+    // Mevcut TASLAK formu varsa onu döndür (yeni oluşturma)
+    if (talep_eden_email && formDurum === "TASLAK") {
+      const existingDraft = await pool.query(
+        `SELECT mf.* FROM masraf_form mf
+         WHERE LOWER(mf.talep_eden_email) = LOWER($1) AND mf.durum = 'TASLAK'
+         ORDER BY mf.created_at DESC LIMIT 1`,
+        [talep_eden_email]
+      );
+      if (existingDraft.rows.length > 0) {
+        const draft = existingDraft.rows[0];
+        const kalemlerRes = await pool.query(
+          `SELECT mk.*, COALESCE(json_agg(mb.*) FILTER (WHERE mb.id IS NOT NULL), '[]') as belgeler
+           FROM masraf_kalem mk
+           LEFT JOIN masraf_belge mb ON mb.kalem_id = mk.id
+           WHERE mk.form_id=$1 GROUP BY mk.id ORDER BY mk.tarih, mk.id`,
+          [draft.id]
+        );
+        return res.json({ ...draft, kalemler: kalemlerRes.rows });
+      }
+    }
 
     const noRes = await pool.query(`SELECT COALESCE(MAX(form_no), 0) + 1 AS next_no FROM masraf_form`);
     const nextNo = noRes.rows[0].next_no;

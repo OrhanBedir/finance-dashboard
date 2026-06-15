@@ -605,14 +605,19 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           masraflar.slice(0, 5).map((m, idx) => {
             try {
               const b = getBadge(m.durum);
-              // Dönem formatla: "2026-05" → "Mayıs 2026"
               const AYLAR_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
               const donemLabel = m.donem
                 ? (() => { const [yil, ay] = String(m.donem).split("-"); return (AYLAR_TR[parseInt(ay)-1] || ay) + " " + yil; })()
                 : "Masraf Formu";
               const formNo = m.form_no ? `MF.${String(m.form_no).padStart(3,"0")}` : (m.id ? `#${m.id}` : "");
+              const isDraft = m.durum === "TASLAK";
               return (
-                <View key={m.id || idx} style={styles.card}>
+                <TouchableOpacity
+                  key={m.id || idx}
+                  style={[styles.card, isDraft && { borderLeftWidth: 3, borderLeftColor: "#F59E0B" }]}
+                  activeOpacity={isDraft ? 0.7 : 1}
+                  onPress={() => isDraft && navigation.navigate("MasrafForm", { formId: m.id })}
+                >
                   <View style={styles.cardRow}>
                     <View style={{ flex: 1, marginRight: 8 }}>
                       <Text style={styles.cardTitle} numberOfLines={1}>{donemLabel}</Text>
@@ -624,9 +629,12 @@ export default function HomeScreen({ user, onLogout, navigation }) {
                   </View>
                   <View style={styles.cardRow}>
                     <Text style={styles.cardAmt}>{fmtTLDecimal(m.toplam_tutar || m.tutar)}</Text>
-                    <Text style={styles.cardDate}>{fmtDate(m.created_at)}</Text>
+                    {isDraft
+                      ? <Text style={{ fontSize: 12, color: "#D97706", fontWeight: "700" }}>▶ Devam Et</Text>
+                      : <Text style={styles.cardDate}>{fmtDate(m.created_at)}</Text>
+                    }
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             } catch (_) { return null; }
           })

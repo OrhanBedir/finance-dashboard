@@ -111,7 +111,7 @@ function PickerModal({ visible, title, options, value, onSelect, onClose, getLab
 }
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
-export default function MasrafFormScreen({ navigation, user }) {
+export default function MasrafFormScreen({ navigation, user, route }) {
   const [activeForm, setActiveForm]       = useState(null);
   const [kalemler, setKalemler]           = useState([]);
   const [openKats, setOpenKats]           = useState(new Set());
@@ -135,16 +135,19 @@ export default function MasrafFormScreen({ navigation, user }) {
 
   const setKF = (key, val) => setKalemForm((f) => ({ ...f, [key]: val }));
 
-  // ── Initialization: create form + load personel ──────────────────────────
+  // ── Initialization: load or create form + load personel ─────────────────
   useEffect(() => {
     (async () => {
       try {
+        const formId = route?.params?.formId;
         const [formRes, personelRes] = await Promise.all([
-          apiPost("/hr/masraf-form", {
-            talep_eden_email: user?.email || "",
-            talep_eden_ad:    user?.name  || "",
-            donem: new Date().toISOString().slice(0, 7),
-          }, true),
+          formId
+            ? apiGet(`/hr/masraf-form/${formId}`)   // taslaktan devam: belirli formu yükle
+            : apiPost("/hr/masraf-form", {           // yeni / mevcut taslak
+                talep_eden_email: user?.email || "",
+                talep_eden_ad:    user?.name  || "",
+                donem: new Date().toISOString().slice(0, 7),
+              }, true),
           apiGet("/hr/personel"),
         ]);
         if (formRes?.id) {
@@ -153,7 +156,7 @@ export default function MasrafFormScreen({ navigation, user }) {
         }
         if (Array.isArray(personelRes)) setPersonelList(personelRes.filter(p => p.aktif));
       } catch (e) {
-        Alert.alert("Hata", "Form oluşturulamadı. İnternet bağlantınızı kontrol edin.");
+        Alert.alert("Hata", "Form yüklenemedi. İnternet bağlantınızı kontrol edin.");
       } finally {
         setInitializing(false);
       }
@@ -364,7 +367,10 @@ export default function MasrafFormScreen({ navigation, user }) {
         {/* Form info bar */}
         <View style={st.infoBar}>
           <Text style={st.infoText}>
-            {user?.name || user?.email} · {new Date().toLocaleDateString("tr-TR", { month: "long", year: "numeric" })}
+            {user?.name || user?.email} · {activeForm?.donem
+              ? (() => { const [y,m] = String(activeForm.donem).split("-"); return (MONTHS[parseInt(m)-1] || m) + " " + y; })()
+              : new Date().toLocaleDateString("tr-TR", { month: "long", year: "numeric" })
+            }
           </Text>
           <Text style={[st.infoText, { fontWeight: "800", color: "#1e3a5f" }]}>
             ₺{formatTL(totalKalem)}
