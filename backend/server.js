@@ -205,7 +205,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-boq-currency-v5" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-boq-debug-v6" }));
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
@@ -14634,6 +14634,35 @@ app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
     console.error("HW ACCEPTANCE UPLOAD ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+/* ================== HW ACCEPTANCE DEBUG ================== */
+app.get("/hw-acceptance/debug-codes", async (req, res) => {
+  try {
+    await ensureHwAcceptanceTable();
+    const engCodes = await pool.query(`
+      SELECT DISTINCT engineering_code, po_no
+      FROM hw_acceptance_rows
+      WHERE status ILIKE '%pending%'
+      ORDER BY engineering_code NULLS LAST
+      LIMIT 30
+    `);
+    const bomCodes = await pool.query(`
+      SELECT DISTINCT s_bom_code, currency FROM boq_items ORDER BY s_bom_code LIMIT 30
+    `);
+    const poMatch = await pool.query(`
+      SELECT DISTINCT a.po_no, p.item_code, p.currency
+      FROM hw_acceptance_rows a
+      LEFT JOIN po_rows p ON p.po_no = a.po_no
+      WHERE a.status ILIKE '%pending%'
+      LIMIT 20
+    `);
+    res.json({
+      hw_engineering_codes: engCodes.rows,
+      boq_s_bom_codes: bomCodes.rows,
+      po_join_sample: poMatch.rows,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 /* ================== HW ACCEPTANCE SUMMARY ================== */
