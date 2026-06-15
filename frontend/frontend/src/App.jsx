@@ -3425,6 +3425,8 @@ function FinanceDashboard({
   const [showFinanceHwPoUpload, setShowFinanceHwPoUpload] = useState(false);
   const [showFinanceHwAcceptanceUpload, setShowFinanceHwAcceptanceUpload] = useState(false);
 
+  const usdTryLiveRate = useUsdRate(); // canlı USD/TRY kuru
+
   const [salaryFilterMonth, setSalaryFilterMonth] = useState(
     String(new Date().getMonth() + 1).padStart(2, "0"),
   );
@@ -4930,23 +4932,24 @@ function FinanceDashboard({
                 <div style={{ fontSize:"12px", color:"#9ca3af" }}>Veri yok · Acceptance yükleyin</div>
               ) : (
                 <>
-                  {/* Toplam */}
-                  <div style={{ display:"flex", alignItems:"baseline", gap:"6px", marginBottom:"8px", flexWrap:"wrap" }}>
-                    {totalTry > 0 && (
-                      <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>
-                        {totalTry >= 1000000 ? `₺${(totalTry/1000000).toFixed(1)}M` : `₺${Math.round(totalTry/1000)}K`}
+                  {/* Toplam — USD kuru ile TL'ye çevrilip tek rakam */}
+                  {(() => {
+                    const combinedTry = totalTry + totalUsd * usdTryLiveRate;
+                    const fmt = (v) => v >= 1000000 ? `₺${(v/1000000).toFixed(1)}M` : `₺${Math.round(v/1000)}K`;
+                    return (
+                      <div style={{ marginBottom:"8px" }}>
+                        <div style={{ display:"flex", alignItems:"baseline", gap:"6px" }}>
+                          <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>{fmt(combinedTry)}</div>
+                          <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
+                        </div>
+                        {totalUsd > 0 && (
+                          <div style={{ fontSize:"10px", color:"#94a3b8", marginTop:"2px" }}>
+                            ${Math.round(totalUsd/1000)}K USD dahil · kur: {usdTryLiveRate.toFixed(2)} ₺/$
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {totalTry > 0 && totalUsd > 0 && (
-                      <div style={{ fontSize:"13px", fontWeight:700, color:"#64748b" }}>+</div>
-                    )}
-                    {totalUsd > 0 && (
-                      <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>
-                        {totalUsd >= 1000000 ? `$${(totalUsd/1000000).toFixed(1)}M` : `$${Math.round(totalUsd/1000)}K`}
-                      </div>
-                    )}
-                    <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
-                  </div>
+                    );
+                  })()}
                   {/* Handler kırılımı — en çok ilerleyen üstte */}
                   <div style={{ borderTop:"1px solid #f1f5f9", paddingTop:"8px", display:"flex", flexDirection:"column", gap:"5px" }}>
                     {visibleHandlers.map((h, i) => {
