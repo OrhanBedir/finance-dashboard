@@ -205,7 +205,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-item-code-v7" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-3key-join-v8" }));
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
@@ -2570,10 +2570,14 @@ app.get("/setup-db", async (req, res) => {
         billed_qty NUMERIC,
         due_qty NUMERIC,
         po_no TEXT,
+        po_line_no TEXT,
+        shipment_no TEXT,
         upload_batch TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await pool.query(`ALTER TABLE po_rows ADD COLUMN IF NOT EXISTS po_line_no TEXT`);
+    await pool.query(`ALTER TABLE po_rows ADD COLUMN IF NOT EXISTS shipment_no TEXT`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS boq_items (
@@ -4875,7 +4879,9 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
         currency,
         parseNumber(unitPrice),
       );
-      const poNo = getCell(r, ["PO No", "PO", "Purchase Order", "PO Number"]);
+      const poNo      = getCell(r, ["PO NO.", "PO No.", "PO No", "PO", "Purchase Order", "PO Number"]);
+      const poLineNo  = getCell(r, ["PO Line NO.", "PO Line No.", "PO Line No", "POLineNo.", "POLineNo", "Line No"]);
+      const shipmentNo = getCell(r, ["Shipment NO.", "Shipment No.", "Shipment No", "ShipmentNO.", "ShipmentNO", "Shipment"]);
 
       if (!projectCode && !siteCode && !itemCode && !itemDescription) continue;
 
@@ -4902,9 +4908,11 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
           billed_qty,
           due_qty,
           po_no,
+          po_line_no,
+          shipment_no,
           upload_batch
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         `,
         [
           projectCode ? String(projectCode).trim() : null,
@@ -4917,6 +4925,8 @@ app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
           parseNumber(billedQty),
           parseNumber(dueQty),
           poNo ? String(poNo).trim() : null,
+          poLineNo ? String(poLineNo).trim() : null,
+          shipmentNo ? String(shipmentNo).trim() : null,
           req.file.filename,
         ],
       );
@@ -14655,9 +14665,17 @@ app.get("/hw-acceptance/debug-codes", async (req, res) => {
       SELECT DISTINCT s_bom_code, currency FROM boq_items ORDER BY s_bom_code LIMIT 30
     `);
     const poMatch = await pool.query(`
-      SELECT DISTINCT a.po_no, p.item_code, p.currency
+      SELECT DISTINCT
+        a.po_no, a.po_line_no, a.shipment_no,
+        p.item_code, p.po_line_no AS p_line, p.shipment_no AS p_ship,
+        p.currency AS po_currency,
+        b.currency AS boq_currency
       FROM hw_acceptance_rows a
-      LEFT JOIN po_rows p ON p.po_no = a.po_no
+      LEFT JOIN po_rows p
+        ON TRIM(p.po_no) = TRIM(a.po_no)
+        AND TRIM(p.po_line_no) = TRIM(a.po_line_no)
+        AND TRIM(p.shipment_no) = TRIM(a.shipment_no)
+      LEFT JOIN boq_items b ON TRIM(b.s_bom_code) = TRIM(p.item_code)
       WHERE a.status ILIKE '%pending%'
       LIMIT 20
     `);
@@ -14692,19 +14710,24 @@ app.get("/hw-acceptance/summary", async (req, res) => {
         a.status,
         a.engineering_code,
         COALESCE(
-          -- 1. Öncelik: item_code → BOQ s_bom_code eşleşmesi
-          (SELECT currency FROM boq_items
-             WHERE TRIM(s_bom_code) = TRIM(a.item_code)
-             AND TRIM(COALESCE(s_bom_code,'')) <> '' LIMIT 1),
-          -- 2. engineering_code → BOQ s_bom_code eşleşmesi (fallback)
-          (SELECT currency FROM boq_items
-             WHERE TRIM(s_bom_code) = TRIM(a.engineering_code)
-             AND TRIM(COALESCE(s_bom_code,'')) <> '' LIMIT 1),
-          -- 3. PO tablosundan tam po_no eşleşmesi
-          (SELECT currency FROM po_rows WHERE po_no = a.po_no LIMIT 1),
-          -- 4. PO tablosundan prefix eşleşmesi (son -XX kısmı kırpılarak)
-          (SELECT currency FROM po_rows
-             WHERE po_no = REGEXP_REPLACE(a.po_no, '-[^-]+$', '') LIMIT 1)
+          -- 1. Öncelik: HW PO tablosundan 3'lü anahtar ile item_code bul → BOQ'dan currency al
+          (SELECT b.currency FROM po_rows p
+             JOIN boq_items b ON TRIM(b.s_bom_code) = TRIM(p.item_code)
+             WHERE TRIM(p.po_no)       = TRIM(a.po_no)
+               AND TRIM(p.po_line_no)  = TRIM(a.po_line_no)
+               AND TRIM(p.shipment_no) = TRIM(a.shipment_no)
+             LIMIT 1),
+          -- 2. po_no + po_line_no ile eşleşme (shipment_no NULL olabilir)
+          (SELECT b.currency FROM po_rows p
+             JOIN boq_items b ON TRIM(b.s_bom_code) = TRIM(p.item_code)
+             WHERE TRIM(p.po_no)      = TRIM(a.po_no)
+               AND TRIM(p.po_line_no) = TRIM(a.po_line_no)
+             LIMIT 1),
+          -- 3. Sadece po_no ile eşleşme (son fallback)
+          (SELECT b.currency FROM po_rows p
+             JOIN boq_items b ON TRIM(b.s_bom_code) = TRIM(p.item_code)
+             WHERE TRIM(p.po_no) = TRIM(a.po_no)
+             LIMIT 1)
         ) AS currency
       FROM hw_acceptance_rows a
       WHERE a.status ILIKE '%pending%'
