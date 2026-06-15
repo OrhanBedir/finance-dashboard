@@ -205,7 +205,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-currency-fix-v4" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-boq-currency-v5" }));
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
@@ -2043,14 +2043,14 @@ async function ensureHwAcceptanceTable() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
-  // Mevcut tabloya currency sütunu yoksa ekle (mevcut verileri USD kabul et)
+  // Mevcut tabloya currency sütunu yoksa ekle (NULL: BOQ'dan çekilecek)
   await pool.query(`
     ALTER TABLE hw_acceptance_rows
-    ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD'
+    ADD COLUMN IF NOT EXISTS currency TEXT
   `);
-  // Mevcut NULL/boş currency değerlerini USD'ye set et
+  // currency alanı artık BOQ'dan çekiliyor; daha önce 'USD' yazılmış satırları temizle
   await pool.query(`
-    UPDATE hw_acceptance_rows SET currency = 'USD' WHERE currency IS NULL OR currency = ''
+    UPDATE hw_acceptance_rows SET currency = NULL WHERE currency = 'USD'
   `);
 }
 
@@ -14605,9 +14605,9 @@ app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
       const milestoneType  = String(r["MilestoneType"] || "").trim();
       const acceptanceMilestone = String(r["AcceptanceMilestone"] || "").trim();
       const paymentPct     = String(r["Payment Percentage"] || "").trim();
-      // Currency: Excel'den oku, yoksa USD varsayılan (HW acceptance kalemleri genelde USD)
+      // Currency: Excel'de varsa oku, yoksa NULL bırak (BOQ'dan çekilecek)
       const currencyRaw    = String(r["Currency"] || r["PriceCurrency"] || r["Para Birimi"] || "").trim().toUpperCase();
-      const currency       = (currencyRaw === "TRY" || currencyRaw === "TL") ? "TRY" : (currencyRaw || "USD");
+      const currency       = currencyRaw ? ((currencyRaw === "TRY" || currencyRaw === "TL") ? "TRY" : "USD") : null;
 
       if (!poNo && !acceptanceNo) continue;
 
@@ -14657,12 +14657,18 @@ app.get("/hw-acceptance/summary", async (req, res) => {
         a.unit_price,
         a.acceptance_qty,
         a.status,
+        a.engineering_code,
         COALESCE(
-          NULLIF(a.currency, ''),
+          -- 1. Öncelik: BOQ'daki engineering_code = s_bom_code eşleşmesi
+          (SELECT currency FROM boq_items
+             WHERE TRIM(s_bom_code) = TRIM(a.engineering_code) LIMIT 1),
+          -- 2. PO tablosundan tam po_no eşleşmesi
           (SELECT currency FROM po_rows WHERE po_no = a.po_no LIMIT 1),
+          -- 3. PO tablosundan prefix eşleşmesi (son -XX kısmı kırpılarak)
           (SELECT currency FROM po_rows
              WHERE po_no = REGEXP_REPLACE(a.po_no, '-[^-]+$', '') LIMIT 1),
-          'USD'
+          -- 4. Excel'den okunan explicit currency (genelde NULL)
+          NULLIF(a.currency, '')
         ) AS currency
       FROM hw_acceptance_rows a
       WHERE a.status ILIKE '%pending%'
