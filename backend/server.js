@@ -205,7 +205,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-3key-join-v8" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-3key-join-v9" }));
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
@@ -13407,6 +13407,8 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'TRY'",
   "ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS usd_kur NUMERIC(12,4) DEFAULT 1",
   "UPDATE users SET role='rollout_mudur' WHERE LOWER(email)='nurcan.kus@simsektel.com' AND role='muhasebe'",
+  "ALTER TABLE po_rows ADD COLUMN IF NOT EXISTS po_line_no TEXT",
+  "ALTER TABLE po_rows ADD COLUMN IF NOT EXISTS shipment_no TEXT",
 ];
 
 (async () => {
