@@ -4931,8 +4931,20 @@ function FinanceDashboard({
               ) : (
                 <>
                   {/* Toplam */}
-                  <div style={{ display:"flex", alignItems:"baseline", gap:"6px", marginBottom:"8px" }}>
-                    <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>{fmtAmt(totalUsd, totalTry)}</div>
+                  <div style={{ display:"flex", alignItems:"baseline", gap:"6px", marginBottom:"8px", flexWrap:"wrap" }}>
+                    {totalTry > 0 && (
+                      <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>
+                        {totalTry >= 1000000 ? `₺${(totalTry/1000000).toFixed(1)}M` : `₺${Math.round(totalTry/1000)}K`}
+                      </div>
+                    )}
+                    {totalTry > 0 && totalUsd > 0 && (
+                      <div style={{ fontSize:"13px", fontWeight:700, color:"#64748b" }}>+</div>
+                    )}
+                    {totalUsd > 0 && (
+                      <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>
+                        {totalUsd >= 1000000 ? `$${(totalUsd/1000000).toFixed(1)}M` : `$${Math.round(totalUsd/1000)}K`}
+                      </div>
+                    )}
                     <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
                   </div>
                   {/* Handler kırılımı — en çok ilerleyen üstte */}
