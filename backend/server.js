@@ -205,7 +205,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-boq-debug-v6" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-item-code-v7" }));
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
@@ -2035,23 +2035,19 @@ async function ensureHwAcceptanceTable() {
       site_name TEXT,
       project_name TEXT,
       engineering_code TEXT,
+      item_code TEXT,
       milestone_type TEXT,
       acceptance_milestone TEXT,
       payment_pct TEXT,
-      currency TEXT DEFAULT 'USD',
+      currency TEXT,
       upload_batch TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
-  // Mevcut tabloya currency sütunu yoksa ekle (NULL: BOQ'dan çekilecek)
-  await pool.query(`
-    ALTER TABLE hw_acceptance_rows
-    ADD COLUMN IF NOT EXISTS currency TEXT
-  `);
-  // currency alanı artık BOQ'dan çekiliyor; daha önce 'USD' yazılmış satırları temizle
-  await pool.query(`
-    UPDATE hw_acceptance_rows SET currency = NULL WHERE currency = 'USD'
-  `);
+  await pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS currency TEXT`);
+  await pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS item_code TEXT`);
+  // currency alanı BOQ'dan çekiliyor; eski default 'USD' değerlerini temizle
+  await pool.query(`UPDATE hw_acceptance_rows SET currency = NULL WHERE currency = 'USD'`);
 }
 
 async function ensureHwInvoiceTable() {
@@ -14582,6 +14578,10 @@ app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
     const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
     if (!rows.length) return res.status(400).json({ ok: false, error: "Excel içinde veri bulunamadı" });
 
+    // İlk satırın kolon adlarını logla (debug)
+    const detectedColumns = rows[0] ? Object.keys(rows[0]) : [];
+    console.log("HW ACCEPTANCE EXCEL KOLONLARI:", detectedColumns);
+
     await pool.query(`DELETE FROM hw_acceptance_rows`);
 
     const batchName = new Date().toISOString();
@@ -14602,12 +14602,16 @@ app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
       const siteName       = String(r["SiteName"] || "").trim();
       const projectName    = String(r["ProjectName"] || "").trim();
       const engineeringCode = String(r["EngineeringCode"] || "").trim();
+      // BOQ ile eşleşecek item code — olası kolon adları deneniyor
+      const itemCode       = String(
+        r["ItemCode"] || r["Item Code"] || r["Item No"] || r["ItemNo"] ||
+        r["Item No."] || r["MaterialCode"] || r["Material Code"] ||
+        r["MaterialNo"] || r["Material No."] || r["BOQItemCode"] ||
+        r["BOQ Item Code"] || r["S-BOM Code"] || r["SBOMCode"] || ""
+      ).trim();
       const milestoneType  = String(r["MilestoneType"] || "").trim();
       const acceptanceMilestone = String(r["AcceptanceMilestone"] || "").trim();
       const paymentPct     = String(r["Payment Percentage"] || "").trim();
-      // Currency: Excel'de varsa oku, yoksa NULL bırak (BOQ'dan çekilecek)
-      const currencyRaw    = String(r["Currency"] || r["PriceCurrency"] || r["Para Birimi"] || "").trim().toUpperCase();
-      const currency       = currencyRaw ? ((currencyRaw === "TRY" || currencyRaw === "TL") ? "TRY" : "USD") : null;
 
       if (!poNo && !acceptanceNo) continue;
 
@@ -14616,20 +14620,20 @@ app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
           acceptance_no, po_no, po_line_no, shipment_no,
           status, current_handler, site_code, approval_progress,
           unit_price, requested_qty, acceptance_qty,
-          site_name, project_name, engineering_code,
-          milestone_type, acceptance_milestone, payment_pct, currency, upload_batch
+          site_name, project_name, engineering_code, item_code,
+          milestone_type, acceptance_milestone, payment_pct, upload_batch
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
       `, [
         acceptanceNo || null, poNo || null, poLineNo || null, shipmentNo || null,
         status || null, currentHandler || null, siteCode || null, approvalProgress || null,
         unitPrice, requestedQty, acceptanceQty,
-        siteName || null, projectName || null, engineeringCode || null,
-        milestoneType || null, acceptanceMilestone || null, paymentPct || null, currency, batchName
+        siteName || null, projectName || null, engineeringCode || null, itemCode || null,
+        milestoneType || null, acceptanceMilestone || null, paymentPct || null, batchName
       ]);
       inserted++;
     }
 
-    res.json({ ok: true, message: "HW Acceptance listesi yüklendi", inserted });
+    res.json({ ok: true, message: "HW Acceptance listesi yüklendi", inserted, detectedColumns });
   } catch (err) {
     console.error("HW ACCEPTANCE UPLOAD ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -14641,7 +14645,7 @@ app.get("/hw-acceptance/debug-codes", async (req, res) => {
   try {
     await ensureHwAcceptanceTable();
     const engCodes = await pool.query(`
-      SELECT DISTINCT engineering_code, po_no
+      SELECT DISTINCT engineering_code, item_code, po_no
       FROM hw_acceptance_rows
       WHERE status ILIKE '%pending%'
       ORDER BY engineering_code NULLS LAST
@@ -14688,16 +14692,19 @@ app.get("/hw-acceptance/summary", async (req, res) => {
         a.status,
         a.engineering_code,
         COALESCE(
-          -- 1. Öncelik: BOQ'daki engineering_code = s_bom_code eşleşmesi
+          -- 1. Öncelik: item_code → BOQ s_bom_code eşleşmesi
           (SELECT currency FROM boq_items
-             WHERE TRIM(s_bom_code) = TRIM(a.engineering_code) LIMIT 1),
-          -- 2. PO tablosundan tam po_no eşleşmesi
+             WHERE TRIM(s_bom_code) = TRIM(a.item_code)
+             AND TRIM(COALESCE(s_bom_code,'')) <> '' LIMIT 1),
+          -- 2. engineering_code → BOQ s_bom_code eşleşmesi (fallback)
+          (SELECT currency FROM boq_items
+             WHERE TRIM(s_bom_code) = TRIM(a.engineering_code)
+             AND TRIM(COALESCE(s_bom_code,'')) <> '' LIMIT 1),
+          -- 3. PO tablosundan tam po_no eşleşmesi
           (SELECT currency FROM po_rows WHERE po_no = a.po_no LIMIT 1),
-          -- 3. PO tablosundan prefix eşleşmesi (son -XX kısmı kırpılarak)
+          -- 4. PO tablosundan prefix eşleşmesi (son -XX kısmı kırpılarak)
           (SELECT currency FROM po_rows
-             WHERE po_no = REGEXP_REPLACE(a.po_no, '-[^-]+$', '') LIMIT 1),
-          -- 4. Excel'den okunan explicit currency (genelde NULL)
-          NULLIF(a.currency, '')
+             WHERE po_no = REGEXP_REPLACE(a.po_no, '-[^-]+$', '') LIMIT 1)
         ) AS currency
       FROM hw_acceptance_rows a
       WHERE a.status ILIKE '%pending%'
