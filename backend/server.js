@@ -205,7 +205,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-flow-fix-v3" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-currency-fix-v4" }));
 
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
@@ -2038,9 +2038,19 @@ async function ensureHwAcceptanceTable() {
       milestone_type TEXT,
       acceptance_milestone TEXT,
       payment_pct TEXT,
+      currency TEXT DEFAULT 'USD',
       upload_batch TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+  // Mevcut tabloya currency sütunu yoksa ekle (mevcut verileri USD kabul et)
+  await pool.query(`
+    ALTER TABLE hw_acceptance_rows
+    ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD'
+  `);
+  // Mevcut NULL/boş currency değerlerini USD'ye set et
+  await pool.query(`
+    UPDATE hw_acceptance_rows SET currency = 'USD' WHERE currency IS NULL OR currency = ''
   `);
 }
 
@@ -14595,6 +14605,9 @@ app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
       const milestoneType  = String(r["MilestoneType"] || "").trim();
       const acceptanceMilestone = String(r["AcceptanceMilestone"] || "").trim();
       const paymentPct     = String(r["Payment Percentage"] || "").trim();
+      // Currency: Excel'den oku, yoksa USD varsayılan (HW acceptance kalemleri genelde USD)
+      const currencyRaw    = String(r["Currency"] || r["PriceCurrency"] || r["Para Birimi"] || "").trim().toUpperCase();
+      const currency       = (currencyRaw === "TRY" || currencyRaw === "TL") ? "TRY" : (currencyRaw || "USD");
 
       if (!poNo && !acceptanceNo) continue;
 
@@ -14604,14 +14617,14 @@ app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
           status, current_handler, site_code, approval_progress,
           unit_price, requested_qty, acceptance_qty,
           site_name, project_name, engineering_code,
-          milestone_type, acceptance_milestone, payment_pct, upload_batch
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+          milestone_type, acceptance_milestone, payment_pct, currency, upload_batch
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
       `, [
         acceptanceNo || null, poNo || null, poLineNo || null, shipmentNo || null,
         status || null, currentHandler || null, siteCode || null, approvalProgress || null,
         unitPrice, requestedQty, acceptanceQty,
         siteName || null, projectName || null, engineeringCode || null,
-        milestoneType || null, acceptanceMilestone || null, paymentPct || null, batchName
+        milestoneType || null, acceptanceMilestone || null, paymentPct || null, currency, batchName
       ]);
       inserted++;
     }
@@ -14645,10 +14658,11 @@ app.get("/hw-acceptance/summary", async (req, res) => {
         a.acceptance_qty,
         a.status,
         COALESCE(
+          NULLIF(a.currency, ''),
           (SELECT currency FROM po_rows WHERE po_no = a.po_no LIMIT 1),
           (SELECT currency FROM po_rows
              WHERE po_no = REGEXP_REPLACE(a.po_no, '-[^-]+$', '') LIMIT 1),
-          'TRY'
+          'USD'
         ) AS currency
       FROM hw_acceptance_rows a
       WHERE a.status ILIKE '%pending%'
