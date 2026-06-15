@@ -12237,11 +12237,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
             const qs = p.toString();
             return <a href={`${API_BASE}/hr/is-avans/excel${qs ? "?" + qs : ""}`} style={{ padding: "10px 16px", background: "#166534", color: "#fff", borderRadius: "10px", fontWeight: 600, fontSize: "14px", textDecoration: "none" }}>📥 Excel</a>;
           })()}
-          {!isMuhasebe && (
-            <button onClick={openNew} style={{ padding: isMobile?"10px 16px":"10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 600, fontSize: "14px", cursor: "pointer" }}>
-              + Yeni Talep
-            </button>
-          )}
+          <button onClick={openNew} style={{ padding: isMobile?"10px 16px":"10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 600, fontSize: "14px", cursor: "pointer" }}>
+            + Yeni Talep
+          </button>
         </div>
       </div>
 
