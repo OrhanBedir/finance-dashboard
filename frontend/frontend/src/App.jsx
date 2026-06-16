@@ -10593,7 +10593,7 @@ function HrDashboard({ onBack, currentUser }) {
   );
 }
 
-const GIDER_TURLERI = ["Yol","Konaklama","Akşam Yemeği","Yakıt","Malzeme","Ekipman","Diğer"];
+const GIDER_TURLERI = ["Yol","Konaklama","Akşam Yemeği","Yakıt","Malzeme","Ekipman","Trafik Cezası","Diğer"];
 const BOLGELER = [
   // Marmara
   "İstanbul","Tekirdağ","Edirne","Kırklareli","Çanakkale",
