@@ -4925,17 +4925,17 @@ function FinanceDashboard({
             const statusSt = (prog) => {
               const [d,t] = (prog||"0/0").split("/").map(Number);
               const ratio = t>0 ? d/t : 0;
-              if (ratio >= 1)   return { font:{bold:true,sz:11,color:{rgb:GREEN}},  fill:{fgColor:{rgb:GBG}},  alignment:{horizontal:"center",vertical:"center"}, border:allBorder("86EFAC") };
-              if (ratio >= 0.5) return { font:{bold:true,sz:11,color:{rgb:ORANGE}}, fill:{fgColor:{rgb:OBG}},  alignment:{horizontal:"center",vertical:"center"}, border:allBorder("FCD34D") };
-              return               { font:{bold:true,sz:11,color:{rgb:RED}},    fill:{fgColor:{rgb:RBG}},  alignment:{horizontal:"center",vertical:"center"}, border:allBorder("FCA5A5") };
+              if (ratio >= 1)  return { font:{bold:true,sz:11,color:{rgb:GREEN}},  fill:{fgColor:{rgb:GBG}},  alignment:{horizontal:"center",vertical:"center"}, border:allBorder("86EFAC") };
+              if (ratio > 0)   return { font:{bold:true,sz:11,color:{rgb:ORANGE}}, fill:{fgColor:{rgb:OBG}},  alignment:{horizontal:"center",vertical:"center"}, border:allBorder("FCD34D") };
+              return             { font:{bold:true,sz:11,color:{rgb:RED}},    fill:{fgColor:{rgb:RBG}},  alignment:{horizontal:"center",vertical:"center"}, border:allBorder("FCA5A5") };
             };
 
             const labelSt = (prog) => {
               const [d,t] = (prog||"0/0").split("/").map(Number);
               const ratio = t>0 ? d/t : 0;
-              if (ratio >= 1)   return "✅ Tamamlandı";
-              if (ratio >= 0.5) return "⏳ Devam Ediyor";
-              return               "❌ Başlamadı";
+              if (ratio >= 1) return "✅ Tamamlandı";
+              if (ratio > 0)  return "⏳ Devam Ediyor";
+              return            "❌ Başlamadı";
             };
 
             // ══════════════════════════════════════════════════════
