@@ -11012,6 +11012,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     if (isApprover && f.durum === "TASLAK" && f.talep_eden_email !== currentUser?.email) return false;
     if (filterDurum && f.durum !== filterDurum) return false;
     return true;
+  }).sort((a, b) => {
+    // Onay bekleyen formlar her zaman en üste gelsin
+    const aNeedsAction = (isPM && a.durum==="PM_BEKLE") || (isDirektor && a.durum==="DIREKTOR_BEKLE") || (isMuhasebe && a.durum==="TAMAMLANDI");
+    const bNeedsAction = (isPM && b.durum==="PM_BEKLE") || (isDirektor && b.durum==="DIREKTOR_BEKLE") || (isMuhasebe && b.durum==="TAMAMLANDI");
+    if (aNeedsAction && !bNeedsAction) return -1;
+    if (!aNeedsAction && bNeedsAction) return 1;
+    // Kalan formlar ID'ye göre azalan sırada (en yeni üstte)
+    return b.id - a.id;
   });
 
   const totalKalem = kalemler.reduce((s,k)=>s+Number(k.tutar),0);
