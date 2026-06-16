@@ -4944,7 +4944,7 @@ function FinanceDashboard({
             const oz = [];
 
             // Başlık bloğu
-            oz.push([{ v:"ERC Mühendislik — HW Acceptance Onay Durum Raporu", s: titleSt }, {v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt}]);
+            oz.push([{ v:"Şimşek Haberleşme — HW Acceptance Onay Durum Raporu", s: titleSt }, {v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt}]);
             oz.push([{ v:`Rapor Tarihi: ${today}`, s: subSt }, {v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt}]);
             oz.push([{ v:`Toplam Acceptance Sayısı: ${count}`, s: subSt }, {v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt}]);
             oz.push([{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt}]);
@@ -4993,6 +4993,7 @@ function FinanceDashboard({
               { s:{r:1,c:0}, e:{r:1,c:4} },
               { s:{r:2,c:0}, e:{r:2,c:4} },
             ];
+            ws1["!sheetViews"] = [{ showGridLines: false }];
             XS.utils.book_append_sheet(wb, ws1, "📊 Özet");
 
             // ══════════════════════════════════════════════════════
