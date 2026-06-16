@@ -4883,34 +4883,43 @@ function FinanceDashboard({
           const visibleHandlers = hwCardExpanded ? handlers : handlers.slice(0, SHOW_N);
           const hasMore = handlers.length > SHOW_N;
 
-          // Excel indirme — fiyatsız, sadece adet bilgisi
-          const downloadHwAcceptanceExcel = () => {
-            const rows = [];
-            // Başlık satırı
-            rows.push(["Handler", "Acceptance No", "PO No", "Site Kodu", "Site Adı", "Milestone", "Aşama"]);
+          // Excel indirme — gerçek .xlsx formatı
+          const downloadHwAcceptanceExcel = async () => {
+            const XS = (await import("xlsx-js-style")).default || (await import("xlsx-js-style"));
+            const wb = XS.utils.book_new();
+
+            const HEADERS = ["Handler", "Acceptance No", "PO No", "Site Kodu", "Site Adı", "Milestone", "Aşama", "Tutar (TRY)", "Tutar (USD)"];
+
+            // Header stili
+            const hStyle = { font:{ bold:true, color:{rgb:"FFFFFF"}, sz:11 }, fill:{ fgColor:{rgb:"1E3A5F"} }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ bottom:{style:"thin",color:{rgb:"FFFFFF"}} } };
+            const cStyle = (i) => ({ font:{ sz:11 }, fill:{ fgColor:{ rgb: i%2===0?"FFFFFF":"F0F4F8" } }, alignment:{ vertical:"center", wrapText:true }, border:{ bottom:{style:"thin",color:{rgb:"E5E7EB"}} } });
+
+            const wsData = [];
+            wsData.push(HEADERS.map(h => ({ v: h, s: hStyle })));
+
             handlers.forEach(h => {
-              (h.items || []).forEach(item => {
-                rows.push([
-                  h.handler || "",
-                  item.acceptance_no || "",
-                  item.po_no || "",
-                  item.site_code || "",
-                  item.site_name || "",
-                  item.milestone || "",
-                  item.progress || "",
+              (h.items || []).forEach((item, i) => {
+                const cs = cStyle(i);
+                wsData.push([
+                  { v: h.handler || "", s: { ...cs, font:{...cs.font, bold:true} } },
+                  { v: item.acceptance_no || "", s: cs },
+                  { v: item.po_no || "", s: cs },
+                  { v: item.site_code || "", s: cs },
+                  { v: item.site_name || "", s: cs },
+                  { v: item.milestone || "", s: cs },
+                  { v: item.progress || "", s: { ...cs, alignment:{ horizontal:"center", vertical:"center" } } },
+                  { v: (item.currency==="TRY"||item.currency==="TL") ? Number(item.line_total||0) : "", s: { ...cs, numFmt:"#,##0.00", alignment:{ horizontal:"right" } } },
+                  { v: (item.currency!=="TRY"&&item.currency!=="TL") ? Number(item.line_total||0) : "", s: { ...cs, numFmt:"#,##0.00", alignment:{ horizontal:"right" } } },
                 ]);
               });
             });
-            // CSV oluştur
-            const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-            const bom = "﻿"; // Excel UTF-8 BOM
-            const blob = new Blob([bom + csv], { type: "text/csv;charset=utf-8;" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `hw_acceptance_${new Date().toISOString().slice(0,10)}.csv`;
-            a.click();
-            URL.revokeObjectURL(url);
+
+            const ws = XS.utils.aoa_to_sheet(wsData);
+            ws["!cols"] = [22, 20, 16, 12, 28, 18, 10, 14, 12].map(w => ({ wch: w }));
+            ws["!rows"] = [{ hpt: 24 }]; // header satır yüksekliği
+
+            XS.utils.book_append_sheet(wb, ws, "HW Acceptance");
+            XS.writeFile(wb, `hw_acceptance_${new Date().toISOString().slice(0,10)}.xlsx`);
           };
 
           return (
