@@ -4883,43 +4883,155 @@ function FinanceDashboard({
           const visibleHandlers = hwCardExpanded ? handlers : handlers.slice(0, SHOW_N);
           const hasMore = handlers.length > SHOW_N;
 
-          // Excel indirme — gerçek .xlsx formatı
+          // Excel indirme — özet (pivot) + detay, premium format
           const downloadHwAcceptanceExcel = async () => {
             const XS = (await import("xlsx-js-style")).default || (await import("xlsx-js-style"));
             const wb = XS.utils.book_new();
+            const today = new Date().toLocaleDateString("tr-TR", { day:"2-digit", month:"long", year:"numeric" });
+            const dateStr = new Date().toISOString().slice(0,10);
 
-            const HEADERS = ["Handler", "Acceptance No", "PO No", "Site Kodu", "Site Adı", "Milestone", "Aşama", "Tutar (TRY)", "Tutar (USD)"];
+            // ── Stil paleti ─────────────────────────────────────────────────
+            const NAVY   = "1E3A5F";
+            const GOLD   = "F59E0B";
+            const WHITE  = "FFFFFF";
+            const LGRAY  = "F8FAFC";
+            const MGRAY  = "E2E8F0";
+            const GREEN  = "166534";
+            const GBG    = "DCFCE7";
+            const ORANGE = "92400E";
+            const OBG    = "FEF3C7";
+            const RED    = "991B1B";
+            const RBG    = "FEE2E2";
 
-            // Header stili
-            const hStyle = { font:{ bold:true, color:{rgb:"FFFFFF"}, sz:11 }, fill:{ fgColor:{rgb:"1E3A5F"} }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ bottom:{style:"thin",color:{rgb:"FFFFFF"}} } };
-            const cStyle = (i) => ({ font:{ sz:11 }, fill:{ fgColor:{ rgb: i%2===0?"FFFFFF":"F0F4F8" } }, alignment:{ vertical:"center", wrapText:true }, border:{ bottom:{style:"thin",color:{rgb:"E5E7EB"}} } });
+            const thin  = (c="D1D5DB") => ({ style:"thin", color:{ rgb:c } });
+            const allBorder = (c="D1D5DB") => ({ top:thin(c), bottom:thin(c), left:thin(c), right:thin(c) });
 
-            const wsData = [];
-            wsData.push(HEADERS.map(h => ({ v: h, s: hStyle })));
+            const titleSt  = { font:{ bold:true, sz:16, color:{rgb:NAVY} }, alignment:{ horizontal:"left", vertical:"center" } };
+            const subSt    = { font:{ sz:11, color:{rgb:"64748B"} }, alignment:{ horizontal:"left", vertical:"center" } };
+            const hSt      = { font:{ bold:true, sz:11, color:{rgb:WHITE} }, fill:{ fgColor:{rgb:NAVY} }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border: allBorder(NAVY) };
+            const hSt2     = { font:{ bold:true, sz:11, color:{rgb:WHITE} }, fill:{ fgColor:{rgb:"334155"} }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border: allBorder("334155") };
+            const totSt    = { font:{ bold:true, sz:11, color:{rgb:NAVY} }, fill:{ fgColor:{rgb:"DBEAFE"} }, alignment:{ horizontal:"center", vertical:"center" }, border: allBorder("93C5FD") };
+            const totLblSt = { font:{ bold:true, sz:11, color:{rgb:NAVY} }, fill:{ fgColor:{rgb:"DBEAFE"} }, alignment:{ horizontal:"left",  vertical:"center" }, border: allBorder("93C5FD") };
+            const emSt     = { font:{ sz:11 } };
 
+            const cellSt = (even, align="left") => ({
+              font:{ sz:11, color:{rgb:"1E293B"} },
+              fill:{ fgColor:{ rgb: even ? WHITE : LGRAY } },
+              alignment:{ horizontal:align, vertical:"center", wrapText:true },
+              border: allBorder()
+            });
+            const boldCellSt = (even) => ({ ...cellSt(even), font:{ sz:11, bold:true, color:{rgb:NAVY} } });
+
+            const statusSt = (prog) => {
+              const [d,t] = (prog||"0/0").split("/").map(Number);
+              const ratio = t>0 ? d/t : 0;
+              if (ratio >= 1)   return { font:{bold:true,sz:11,color:{rgb:GREEN}},  fill:{fgColor:{rgb:GBG}},  alignment:{horizontal:"center",vertical:"center"}, border:allBorder("86EFAC") };
+              if (ratio >= 0.5) return { font:{bold:true,sz:11,color:{rgb:ORANGE}}, fill:{fgColor:{rgb:OBG}},  alignment:{horizontal:"center",vertical:"center"}, border:allBorder("FCD34D") };
+              return               { font:{bold:true,sz:11,color:{rgb:RED}},    fill:{fgColor:{rgb:RBG}},  alignment:{horizontal:"center",vertical:"center"}, border:allBorder("FCA5A5") };
+            };
+
+            const labelSt = (prog) => {
+              const [d,t] = (prog||"0/0").split("/").map(Number);
+              const ratio = t>0 ? d/t : 0;
+              if (ratio >= 1)   return "✅ Tamamlandı";
+              if (ratio >= 0.5) return "⏳ Devam Ediyor";
+              return               "❌ Başlamadı";
+            };
+
+            // ══════════════════════════════════════════════════════
+            // SHEET 1 — ÖZET (Pivot)
+            // ══════════════════════════════════════════════════════
+            const oz = [];
+
+            // Başlık bloğu
+            oz.push([{ v:"ERC Mühendislik — HW Acceptance Onay Durum Raporu", s: titleSt }, {v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt}]);
+            oz.push([{ v:`Rapor Tarihi: ${today}`, s: subSt }, {v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt}]);
+            oz.push([{ v:`Toplam Acceptance Sayısı: ${count}`, s: subSt }, {v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt}]);
+            oz.push([{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt},{v:"",s:emSt}]);
+
+            // Tablo başlığı
+            oz.push([
+              { v:"Handler / Yetkili", s: hSt },
+              { v:"Acceptance Sayısı", s: hSt },
+              { v:"Onay Aşaması", s: hSt },
+              { v:"Durum", s: hSt },
+              { v:"Açıklama", s: hSt },
+            ]);
+
+            // Handler satırları
+            handlers.forEach((h, i) => {
+              const prog = h.progress || "0/0";
+              const [d,t] = prog.split("/").map(Number);
+              const even = i%2===0;
+              oz.push([
+                { v: h.handler || "Bilinmiyor", s: boldCellSt(even) },
+                { v: h.count || (h.items||[]).length, s: { ...cellSt(even,"center") } },
+                { v: prog, s: statusSt(prog) },
+                { v: labelSt(prog), s: { ...cellSt(even,"center"), font:{ sz:11 } } },
+                { v: t>0 ? `${t} onay adımından ${d} tanesi tamamlandı` : "", s: cellSt(even) },
+              ]);
+            });
+
+            // Toplam satırı
+            oz.push([
+              { v:"TOPLAM", s: totLblSt },
+              { v: count, s: totSt },
+              { v:"", s: totSt },
+              { v:"", s: totSt },
+              { v:"", s: totSt },
+            ]);
+
+            const ws1 = XS.utils.aoa_to_sheet(oz);
+            ws1["!cols"] = [{ wch:30 }, { wch:18 }, { wch:16 }, { wch:20 }, { wch:38 }];
+            ws1["!rows"] = [{ hpt:28 }, { hpt:20 }, { hpt:20 }, { hpt:8 }, { hpt:26 },
+              ...handlers.map(()=>({ hpt:22 })),
+              { hpt:24 }
+            ];
+            // Başlık merge
+            ws1["!merges"] = [
+              { s:{r:0,c:0}, e:{r:0,c:4} },
+              { s:{r:1,c:0}, e:{r:1,c:4} },
+              { s:{r:2,c:0}, e:{r:2,c:4} },
+            ];
+            XS.utils.book_append_sheet(wb, ws1, "📊 Özet");
+
+            // ══════════════════════════════════════════════════════
+            // SHEET 2 — DETAY
+            // ══════════════════════════════════════════════════════
+            const det = [];
+            det.push([
+              { v:"Handler", s: hSt2 },
+              { v:"Acceptance No", s: hSt2 },
+              { v:"PO No", s: hSt2 },
+              { v:"Site Kodu", s: hSt2 },
+              { v:"Site Adı", s: hSt2 },
+              { v:"Milestone", s: hSt2 },
+              { v:"Onay Aşaması", s: hSt2 },
+            ]);
+
+            let rowIdx = 0;
             handlers.forEach(h => {
-              (h.items || []).forEach((item, i) => {
-                const cs = cStyle(i);
-                wsData.push([
-                  { v: h.handler || "", s: { ...cs, font:{...cs.font, bold:true} } },
-                  { v: item.acceptance_no || "", s: cs },
-                  { v: item.po_no || "", s: cs },
-                  { v: item.site_code || "", s: cs },
-                  { v: item.site_name || "", s: cs },
-                  { v: item.milestone || "", s: cs },
-                  { v: item.progress || "", s: { ...cs, alignment:{ horizontal:"center", vertical:"center" } } },
-                  { v: (item.currency==="TRY"||item.currency==="TL") ? Number(item.line_total||0) : "", s: { ...cs, numFmt:"#,##0.00", alignment:{ horizontal:"right" } } },
-                  { v: (item.currency!=="TRY"&&item.currency!=="TL") ? Number(item.line_total||0) : "", s: { ...cs, numFmt:"#,##0.00", alignment:{ horizontal:"right" } } },
+              (h.items || []).forEach(item => {
+                const even = rowIdx%2===0;
+                det.push([
+                  { v: h.handler||"", s: boldCellSt(even) },
+                  { v: item.acceptance_no||"", s: cellSt(even) },
+                  { v: item.po_no||"", s: cellSt(even) },
+                  { v: item.site_code||"", s: { ...cellSt(even,"center") } },
+                  { v: item.site_name||"", s: cellSt(even) },
+                  { v: item.milestone||"", s: cellSt(even) },
+                  { v: item.progress||"", s: statusSt(item.progress) },
                 ]);
+                rowIdx++;
               });
             });
 
-            const ws = XS.utils.aoa_to_sheet(wsData);
-            ws["!cols"] = [22, 20, 16, 12, 28, 18, 10, 14, 12].map(w => ({ wch: w }));
-            ws["!rows"] = [{ hpt: 24 }]; // header satır yüksekliği
+            const ws2 = XS.utils.aoa_to_sheet(det);
+            ws2["!cols"] = [{ wch:26 },{ wch:22 },{ wch:16 },{ wch:12 },{ wch:30 },{ wch:20 },{ wch:14 }];
+            ws2["!rows"] = [{ hpt:24 }, ...Array(rowIdx).fill({ hpt:20 })];
+            XS.utils.book_append_sheet(wb, ws2, "📋 Detay");
 
-            XS.utils.book_append_sheet(wb, ws, "HW Acceptance");
-            XS.writeFile(wb, `hw_acceptance_${new Date().toISOString().slice(0,10)}.xlsx`);
+            XS.writeFile(wb, `hw_acceptance_ozet_${dateStr}.xlsx`);
           };
 
           return (
