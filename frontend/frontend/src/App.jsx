@@ -15987,6 +15987,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const [dagitimArama, setDagitimArama] = useState("");
   const [dagitimSiteDropdown, setDagitimSiteDropdown] = useState(false);
   const [sahaSiteDropdown, setSahaSiteDropdown] = useState(false);
+  const [dagitimMalzemeDropdown, setDagitimMalzemeDropdown] = useState(false);
 
   const token = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -18253,18 +18254,43 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
               <button onClick={()=>setDagitimModal(false)} style={{ background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#6b7280" }}>✕</button>
             </div>
             <div style={{ display:"grid",gap:12 }}>
-              {/* Malzeme seç */}
-              <div>
+              {/* Malzeme seç — arama ile */}
+              <div style={{ position:"relative" }}>
                 <label style={{ fontSize:12,fontWeight:600,display:"block",marginBottom:4 }}>Malzeme Adı <span style={{color:"#dc2626"}}>*</span></label>
-                <select value={dagitimForm.malzeme_adi} onChange={e=>{
-                  const found = depoStok.find(s=>s.malzeme_adi===e.target.value);
-                  setDagitimForm(p=>({...p, malzeme_adi:e.target.value, birim:found?.birim||p.birim }));
-                }} style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13 }}>
-                  <option value="">Depodan malzeme seçin...</option>
-                  {depoStok.filter(s=>Number(s.depoda_kalan||0)>0).map(s=>(
-                    <option key={s.id} value={s.malzeme_adi}>{s.malzeme_adi} (Kalan: {s.depoda_kalan} {s.birim})</option>
-                  ))}
-                </select>
+                <input
+                  autoComplete="off"
+                  placeholder="Malzeme adı yazın... (örn: kablo)"
+                  value={dagitimForm.malzeme_adi}
+                  onChange={e=>{
+                    setDagitimForm(p=>({...p, malzeme_adi:e.target.value, birim: depoStok.find(s=>s.malzeme_adi===e.target.value)?.birim || p.birim }));
+                    setDagitimMalzemeDropdown(true);
+                  }}
+                  onFocus={()=>setDagitimMalzemeDropdown(true)}
+                  onBlur={()=>setTimeout(()=>setDagitimMalzemeDropdown(false), 200)}
+                  style={{ width:"100%",padding:"9px 10px",border:"1px solid #d1d5db",borderRadius:7,fontSize:13,boxSizing:"border-box" }}
+                />
+                {dagitimMalzemeDropdown && (() => {
+                  const q = dagitimForm.malzeme_adi.toLowerCase().trim();
+                  const matches = depoStok.filter(s=>Number(s.depoda_kalan||0)>0 && (!q || (s.malzeme_adi||"").toLowerCase().includes(q)));
+                  return matches.length > 0 ? (
+                    <div style={{ position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #d1d5db",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.13)",zIndex:9999,maxHeight:220,overflowY:"auto" }}>
+                      {matches.map(s=>(
+                        <div key={s.id}
+                          onMouseDown={()=>{ setDagitimForm(p=>({...p, malzeme_adi:s.malzeme_adi, birim:s.birim||p.birim })); setDagitimMalzemeDropdown(false); }}
+                          style={{ padding:"9px 12px",cursor:"pointer",borderBottom:"1px solid #f3f4f6",fontSize:13 }}
+                          onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
+                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <span style={{ fontWeight:600,color:"#1e3a5f" }}>{s.malzeme_adi}</span>
+                          <span style={{ marginLeft:8,fontSize:11,color:"#6b7280" }}>Kalan: {s.depoda_kalan} {s.birim}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : q ? (
+                    <div style={{ position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #d1d5db",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.13)",zIndex:9999,padding:"12px",fontSize:13,color:"#9ca3af",textAlign:"center" }}>
+                      Depoda eşleşen malzeme bulunamadı
+                    </div>
+                  ) : null;
+                })()}
               </div>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
                 <div>
