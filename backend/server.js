@@ -13796,36 +13796,28 @@ const AUTO_MIGRATIONS = [
 
 // ─── TAŞERON KULLANICI SEED ───────────────────────────────────────────────────
 const SUBCON_USERS = [
-  { name: "Zeki Sandal",  email: "zsandal@ubstasarimmakine.com.tr", subcon_name: "UBS",     payment_rate: 0.75 },
-  { name: "Burhan Koçak", email: "b.kocak@federalgroups.com",       subcon_name: "Federal", payment_rate: 0.80 },
-  { name: "Serdar Altınova", email: "serdar.altinova@simsektel.com", subcon_name: "2KX HABERLEŞME SİSTEMLERİ MÜHENDİSLİK İNŞAAT LİMİTED ŞİRKETİ", payment_rate: 1.0 },
+  { name: "Zeki Sandal",     email: "zsandal@ubstasarimmakine.com.tr", subcon_name: "UBS",     payment_rate: 0.75, password: "123456" },
+  { name: "Burhan Koçak",    email: "b.kocak@federalgroups.com",       subcon_name: "Federal", payment_rate: 0.80, password: "123456" },
+  { name: "Serdar Altınova", email: "serdar.altinova@simsektel.com",   subcon_name: "2KX HABERLEŞME SİSTEMLERİ MÜHENDİSLİK İNŞAAT LİMİTED ŞİRKETİ", payment_rate: 1.0, password: "123456" },
 ];
 
 (async () => {
   for (const u of SUBCON_USERS) {
     try {
-      const existing = await pool.query(
-        "SELECT id, subcon_name, payment_rate FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1",
-        [u.email.toLowerCase()]
+      const hash = await bcrypt.hash(u.password || "123456", 10);
+      await pool.query(
+        `INSERT INTO users (name, email, password_hash, role, is_active, subcon_name, payment_rate)
+         VALUES ($1, $2, $3, 'subcon', true, $4, $5)
+         ON CONFLICT (email) DO UPDATE SET
+           name          = EXCLUDED.name,
+           password_hash = EXCLUDED.password_hash,
+           role          = 'subcon',
+           is_active     = true,
+           subcon_name   = EXCLUDED.subcon_name,
+           payment_rate  = EXCLUDED.payment_rate`,
+        [u.name, u.email, hash, u.subcon_name, u.payment_rate]
       );
-      if (existing.rows.length === 0) {
-        const hash = await bcrypt.hash("123456", 10);
-        await pool.query(
-          `INSERT INTO users (name, email, password_hash, role, is_active, subcon_name, payment_rate)
-           VALUES ($1, $2, $3, 'subcon', true, $4, $5)`,
-          [u.name, u.email, hash, u.subcon_name, u.payment_rate]
-        );
-        console.log(`✅ ${u.subcon_name} kullanıcısı oluşturuldu: ${u.email}`);
-      } else if (existing.rows[0].subcon_name !== u.subcon_name || Number(existing.rows[0].payment_rate) !== u.payment_rate) {
-        await pool.query(
-          `UPDATE users SET subcon_name = $1, payment_rate = $2, role = 'subcon', is_active = true
-           WHERE LOWER(TRIM(email)) = $3`,
-          [u.subcon_name, u.payment_rate, u.email.toLowerCase()]
-        );
-        console.log(`✅ ${u.subcon_name} kullanıcısı güncellendi: ${u.email}`);
-      } else {
-        console.log(`ℹ️  ${u.subcon_name} kullanıcısı zaten doğru`);
-      }
+      console.log(`✅ ${u.subcon_name} kullanıcısı upsert edildi: ${u.email}`);
     } catch (e) {
       console.error(`${u.subcon_name} seed hatası:`, e.message);
     }
