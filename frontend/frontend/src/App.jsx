@@ -12862,43 +12862,129 @@ function TwoKXPanel({ twokxData, twokxPricing, isAdmin, API_BASE, onRefresh }) {
   };
 
   const handleExcelDownload = (site) => {
-    const headers = ["Item Code", "Açıklama", "Tamamlanan Miktar", "2KX Fiyatı (KDV Hariç)", "HW Hakediş (TL)", "Toplam 2KX (TL)", "QC Durum"];
+    const headers = ["Site Kodu", "Item Code", "Açıklama", "Tamamlanan Miktar", "2KX Fiyatı (KDV Hariç)", "Toplam 2KX (TL)", "QC Durum"];
     const rows = (site.items || []).map(item => [
+      site.site_code,
       item.item_code,
       item.item_description || item.boq_description || "",
       Number(item.done_qty || 0),
       item.price_type === "package" ? `${fmt(item.taseron_unit_price)} (Paket)` :
         item.price_type === "per_item" ? fmt(item.taseron_unit_price) : "—",
-      fmt(item.huawei_total),
-      fmt(item.taseron_total),
+      item.taseron_total > 0 ? Number(item.taseron_total) : 0,
       item.qc_durum || "—",
     ]);
-    // totals
-    const totalHW = (site.items || []).reduce((s, i) => s + Number(i.huawei_total || 0), 0);
     const total2KX = site.total_hakedis;
-    rows.push(["TOPLAM", "", "", "", fmt(totalHW), fmt(total2KX), ""]);
+    rows.push(["TOPLAM", "", "", "", "", total2KX, ""]);
 
     const wb = XLSXStyle.utils.book_new();
     const wsData = [headers, ...rows];
     const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
 
-    // Header style
     const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "1e3a5f" }, patternType: "solid" }, alignment: { horizontal: "center" } };
     const headerRange = XLSXStyle.utils.decode_range(ws["!ref"]);
     for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
       const cellRef = XLSXStyle.utils.encode_cell({ r: 0, c });
       if (ws[cellRef]) ws[cellRef].s = headerStyle;
     }
-    // Totals row style
     const lastRow = wsData.length - 1;
     const totalsStyle = { font: { bold: true }, fill: { fgColor: { rgb: "f0f4f8" }, patternType: "solid" } };
     for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
       const cellRef = XLSXStyle.utils.encode_cell({ r: lastRow, c });
       if (ws[cellRef]) ws[cellRef].s = totalsStyle;
     }
-    ws["!cols"] = [{ wch: 16 }, { wch: 40 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 10 }];
-    XLSXStyle.utils.book_append_sheet(wb, ws, site.site_code);
+    ws["!cols"] = [{ wch: 20 }, { wch: 16 }, { wch: 42 }, { wch: 14 }, { wch: 22 }, { wch: 18 }, { wch: 10 }];
+    XLSXStyle.utils.book_append_sheet(wb, ws, site.site_code.slice(0, 31));
     XLSXStyle.writeFile(wb, `2KX_${site.site_code}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // Tüm sahaları tek Excel'e indir
+  const handleFullListExcel = () => {
+    if (!twokxData?.sites?.length) return;
+    const headers = ["Site Kodu", "Site Tipi", "Item Code", "Açıklama", "Tamamlanan Miktar", "2KX Fiyatı (KDV Hariç)", "Toplam 2KX (TL)", "QC Durum"];
+    const rows = [];
+    let grandTotal = 0;
+    for (const site of twokxData.sites) {
+      for (const item of (site.items || [])) {
+        rows.push([
+          site.site_code,
+          site.site_type || "",
+          item.item_code,
+          item.item_description || item.boq_description || "",
+          Number(item.done_qty || 0),
+          item.price_type === "package" ? `${fmt(item.taseron_unit_price)} (Paket)` :
+            item.price_type === "per_item" ? fmt(item.taseron_unit_price) : "—",
+          item.taseron_total > 0 ? Number(item.taseron_total) : 0,
+          item.qc_durum || "—",
+        ]);
+        grandTotal += Number(item.taseron_total || 0);
+      }
+    }
+    rows.push(["GENEL TOPLAM", "", "", "", "", "", grandTotal, ""]);
+
+    const wb = XLSXStyle.utils.book_new();
+    const wsData = [headers, ...rows];
+    const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
+    const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "1e3a5f" }, patternType: "solid" }, alignment: { horizontal: "center" } };
+    const headerRange = XLSXStyle.utils.decode_range(ws["!ref"]);
+    for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
+      const cellRef = XLSXStyle.utils.encode_cell({ r: 0, c });
+      if (ws[cellRef]) ws[cellRef].s = headerStyle;
+    }
+    const lastRow = wsData.length - 1;
+    const totalsStyle = { font: { bold: true }, fill: { fgColor: { rgb: "dbeafe" }, patternType: "solid" } };
+    for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
+      const cellRef = XLSXStyle.utils.encode_cell({ r: lastRow, c });
+      if (ws[cellRef]) ws[cellRef].s = totalsStyle;
+    }
+    ws["!cols"] = [{ wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 42 }, { wch: 12 }, { wch: 22 }, { wch: 18 }, { wch: 10 }];
+    XLSXStyle.utils.book_append_sheet(wb, ws, "Tüm Sahalar");
+    XLSXStyle.writeFile(wb, `2KX_Tum_Sahalar_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // Sadece QC OK kalemleri indir (fatura edilebilir)
+  const handleQcOkExcel = () => {
+    if (!twokxData?.sites?.length) return;
+    const headers = ["Site Kodu", "Site Tipi", "Item Code", "Açıklama", "Tamamlanan Miktar", "2KX Fiyatı (KDV Hariç)", "Toplam 2KX (TL)"];
+    const rows = [];
+    let grandTotal = 0;
+    for (const site of twokxData.sites) {
+      for (const item of (site.items || [])) {
+        if (String(item.qc_durum || "").toUpperCase() !== "OK") continue;
+        if (!(item.taseron_total > 0)) continue;
+        rows.push([
+          site.site_code,
+          site.site_type || "",
+          item.item_code,
+          item.item_description || item.boq_description || "",
+          Number(item.done_qty || 0),
+          item.price_type === "package" ? `${fmt(item.taseron_unit_price)} (Paket)` :
+            item.price_type === "per_item" ? fmt(item.taseron_unit_price) : "—",
+          Number(item.taseron_total || 0),
+        ]);
+        grandTotal += Number(item.taseron_total || 0);
+      }
+    }
+    if (rows.length === 0) { alert("QC OK olan fatura edilebilir kalem yok."); return; }
+    rows.push(["FATURA TOPLAMI", "", "", "", "", "", grandTotal]);
+
+    const wb = XLSXStyle.utils.book_new();
+    const wsData = [headers, ...rows];
+    const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
+    const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "065f46" }, patternType: "solid" }, alignment: { horizontal: "center" } };
+    const headerRange = XLSXStyle.utils.decode_range(ws["!ref"]);
+    for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
+      const cellRef = XLSXStyle.utils.encode_cell({ r: 0, c });
+      if (ws[cellRef]) ws[cellRef].s = headerStyle;
+    }
+    const lastRow = wsData.length - 1;
+    const totalsStyle = { font: { bold: true }, fill: { fgColor: { rgb: "d1fae5" }, patternType: "solid" } };
+    for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
+      const cellRef = XLSXStyle.utils.encode_cell({ r: lastRow, c });
+      if (ws[cellRef]) ws[cellRef].s = totalsStyle;
+    }
+    ws["!cols"] = [{ wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 42 }, { wch: 12 }, { wch: 22 }, { wch: 18 }];
+    XLSXStyle.utils.book_append_sheet(wb, ws, "QC OK - Fatura Edilebilir");
+    XLSXStyle.writeFile(wb, `2KX_QC_OK_Fatura_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   if (!twokxData) {
@@ -12939,7 +13025,7 @@ function TwoKXPanel({ twokxData, twokxPricing, isAdmin, API_BASE, onRefresh }) {
           { label: "Fatura Edilebilir (QC OK)", value: summary.total_qc_ok, color: "#10b981", bg: "#f0fdf4", border: "#bbf7d0" },
           { label: "Kesilmiş Fatura", value: summary.total_invoiced, color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
         ].map((card, i) => (
-          <div key={i} style={{ background: card.bg, border: `1px solid ${card.border}`, borderRadius: "14px", padding: "20px", position: "relative", overflow: "hidden" }}>
+          <div key={i} onClick={i === 1 ? handleQcOkExcel : undefined} style={{ background: card.bg, border: `1px solid ${card.border}`, borderRadius: "14px", padding: "20px", position: "relative", overflow: "hidden", cursor: i === 1 ? "pointer" : "default" }} title={i === 1 ? "QC OK kalemleri Excel olarak indir" : undefined}>
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "3px", background: card.color, borderRadius: "14px 14px 0 0" }} />
             <div style={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>{card.label}</div>
             <div style={{ fontSize: "24px", fontWeight: 800, color: card.color }}>{fmt(card.value)}</div>
@@ -12949,7 +13035,15 @@ function TwoKXPanel({ twokxData, twokxPricing, isAdmin, API_BASE, onRefresh }) {
 
       {/* Sites Table */}
       <div style={{ background: "#fff", borderRadius: "14px", border: "1px solid #e2e8f0", overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
-        <div style={{ background: NAVY, color: "#fff", padding: "14px 20px", fontWeight: 700, fontSize: "15px" }}>Sahalar</div>
+        <div style={{ background: NAVY, color: "#fff", padding: "14px 20px", fontWeight: 700, fontSize: "15px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>Sahalar</span>
+          <button
+            onClick={handleFullListExcel}
+            style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", borderRadius: "8px", padding: "6px 14px", cursor: "pointer", fontWeight: 600, fontSize: "12px" }}
+          >
+            📥 Excel İndir
+          </button>
+        </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
             <thead>
