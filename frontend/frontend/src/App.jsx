@@ -5470,7 +5470,10 @@ function FinanceDashboard({
                 const [done, total] = (h.progress || "0/0").split("/").map(Number);
                 const pct = total > 0 ? Math.round((done / total) * 100) : 0;
                 const progColor = pct === 0 ? "#ef4444" : pct < 75 ? "#f59e0b" : "#22c55e";
-                const handlerAmt = h.total_usd > 0 ? `$${Number(h.total_usd).toLocaleString("en-US",{maximumFractionDigits:0})}` : `₺${Number(h.total_try).toLocaleString("tr-TR",{maximumFractionDigits:0})}`;
+                const handlerCombined = (h.total_try || 0) + (h.total_usd || 0) * usdTryLiveRate;
+                const handlerAmt = handlerCombined >= 1000000
+                  ? `₺${(handlerCombined/1000000).toFixed(1)}M`
+                  : `₺${Math.round(handlerCombined/1000)}K`;
                 return (
                   <div key={hi} style={{ border:"1px solid #e5e7eb", borderRadius:"12px", marginBottom:"12px", overflow:"hidden" }}>
                     {/* Handler satırı */}
@@ -5499,10 +5502,13 @@ function FinanceDashboard({
                           <span style={{ color:"#6b7280", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.milestone || item.acceptance_no}</span>
                           <span style={{ background:"#eff6ff", color:"#1d4ed8", padding:"2px 7px", borderRadius:"6px", fontWeight:600, flexShrink:0 }}>{item.progress}</span>
                           <span style={{ fontWeight:700, color:"#0f172a", flexShrink:0 }}>
-                            {item.currency === "TRY" || item.currency === "TL"
-                              ? `₺${Number(item.line_total).toLocaleString("tr-TR",{maximumFractionDigits:0})}`
-                              : `$${Number(item.line_total).toLocaleString("en-US",{maximumFractionDigits:0})}`
-                            }
+                            {(() => {
+                              const isTry = item.currency === "TRY" || item.currency === "TL";
+                              const inTry = isTry ? item.line_total : item.line_total * usdTryLiveRate;
+                              return inTry >= 1000000
+                                ? `₺${(inTry/1000000).toFixed(1)}M`
+                                : `₺${Math.round(inTry/1000)}K`;
+                            })()}
                           </span>
                         </div>
                       ))}

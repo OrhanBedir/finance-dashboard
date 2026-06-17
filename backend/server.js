@@ -14879,8 +14879,12 @@ app.get("/hw-acceptance/summary", async (req, res) => {
       });
     }
 
+    // USD'yi TRY'ye çevirerek sırala
+    const sortRate = await getTcmbUsdTrySellingRate().catch(() => 40);
     const by_handler = Object.values(handlerMap)
-      .sort((a, b) => (b.total_usd + b.total_try) - (a.total_usd + a.total_try));
+      .sort((a, b) =>
+        (b.total_usd * sortRate + b.total_try) - (a.total_usd * sortRate + a.total_try)
+      );
 
     res.json({
       total_usd:   Math.round(total_usd   * 100) / 100,
