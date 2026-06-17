@@ -13798,6 +13798,7 @@ const AUTO_MIGRATIONS = [
 const SUBCON_USERS = [
   { name: "Zeki Sandal",  email: "zsandal@ubstasarimmakine.com.tr", subcon_name: "UBS",     payment_rate: 0.75 },
   { name: "Burhan Koçak", email: "b.kocak@federalgroups.com",       subcon_name: "Federal", payment_rate: 0.80 },
+  { name: "Serdar Altınova", email: "serdar.altinova@simsektel.com", subcon_name: "2KX HABERLEŞME SİSTEMLERİ MÜHENDİSLİK İNŞAAT LİMİTED ŞİRKETİ", payment_rate: 1.0 },
 ];
 
 (async () => {
@@ -14896,6 +14897,298 @@ app.get("/hw-acceptance/summary", async (req, res) => {
   } catch (err) {
     console.error("HW ACCEPTANCE SUMMARY ERROR:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   2KX HABERLEŞME — FİYATLANDIRMA TABLOSU + SEED
+   ═══════════════════════════════════════════════════════════════ */
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS taseron_2kx_pricing (
+    id               SERIAL PRIMARY KEY,
+    rule_key         TEXT UNIQUE NOT NULL,
+    item_code        TEXT NOT NULL,
+    item_description TEXT,
+    unit_price       NUMERIC NOT NULL,
+    rule_description TEXT,
+    notes            TEXT,
+    updated_at       TIMESTAMP DEFAULT NOW()
+  );
+`).catch(e => console.error("taseron_2kx_pricing tablo hatası:", e.message));
+
+(async () => {
+  const RULES = [
+    { rule_key: "PACKAGE_LTE5G_8818274542", item_code: "8818274542", item_description: "LTE/5G Ana Paket",                   unit_price: 25500, rule_description: "LTE veya 5G sahada bu kalem varsa site paketi" },
+    { rule_key: "PACKAGE_LTE5G_8818274543", item_code: "8818274543", item_description: "LTE/5G Gelişmiş Paket",              unit_price: 29500, rule_description: "LTE veya 5G sahada bu kalem varsa site paketi" },
+    { rule_key: "PACKAGE_SA_NO_UPGRADE",    item_code: "8812184592", item_description: "Standalone Paketi (Upgrade Yok)",    unit_price: 40000, rule_description: "SA sahada 8812184592/591 var, 8818274546 yok" },
+    { rule_key: "PACKAGE_SA_WITH_UPGRADE",  item_code: "8812184592", item_description: "Standalone Paketi (Upgrade Dahil)", unit_price: 52000, rule_description: "SA sahada 8812184592/591 var, 8818274546 da var" },
+    { rule_key: "PER_ITEM_8812184927",      item_code: "8812184927", item_description: "Ek Kalem 8812184927",               unit_price:   750, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_8812184697",      item_code: "8812184697", item_description: "Ek Kalem 8812184697",               unit_price:   900, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_88123MGE",        item_code: "88123MGE",   item_description: "Ek Kalem 88123MGE",                 unit_price:  2500, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_8818270786",      item_code: "8818270786", item_description: "Ek Kalem 8818270786",               unit_price:  9500, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_8818274283",      item_code: "8818274283", item_description: "Ek Kalem 8818274283",               unit_price: 14000, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_8812184609",      item_code: "8812184609", item_description: "Ek Kalem 8812184609",               unit_price:   500, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_8812184598",      item_code: "8812184598", item_description: "Ek Kalem 8812184598",               unit_price:  1500, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_8818264118",      item_code: "8818264118", item_description: "Ek Kalem 8818264118",               unit_price:   700, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_8812184597",      item_code: "8812184597", item_description: "Ek Kalem 8812184597",               unit_price:  1000, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_8818264113",      item_code: "8818264113", item_description: "Ek Kalem 8818264113",               unit_price:   500, rule_description: "Kalem bazlı" },
+    { rule_key: "PER_ITEM_8812184613",      item_code: "8812184613", item_description: "Ek Kalem 8812184613",               unit_price:   500, rule_description: "Kalem bazlı" },
+  ];
+  try {
+    for (const r of RULES) {
+      await pool.query(
+        `INSERT INTO taseron_2kx_pricing (rule_key, item_code, item_description, unit_price, rule_description)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (rule_key) DO UPDATE SET
+           item_code        = EXCLUDED.item_code,
+           item_description = EXCLUDED.item_description,
+           unit_price       = EXCLUDED.unit_price,
+           rule_description = EXCLUDED.rule_description,
+           updated_at       = NOW()`,
+        [r.rule_key, r.item_code, r.item_description, r.unit_price, r.rule_description]
+      );
+    }
+    console.log("✅ 2KX fiyatlandırma kuralları seed tamamlandı");
+  } catch (e) {
+    console.error("2KX fiyatlandırma seed hatası:", e.message);
+  }
+})();
+
+/* ── 2KX API ─────────────────────────────────────────────────────── */
+
+// GET /2kx/pricing — tüm fiyat kuralları
+app.get("/2kx/pricing", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM taseron_2kx_pricing ORDER BY id");
+    res.json({ ok: true, rules: result.rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// PUT /2kx/pricing/:id — fiyat güncelle (admin veya 2KX kullanıcısı)
+app.put("/2kx/pricing/:id", authMiddleware, async (req, res) => {
+  const userRole = String(req.user?.role || "").toLowerCase();
+  const userSubcon = String(req.user?.subcon_name || "").toUpperCase();
+  const is2KX = userSubcon.includes("2KX");
+  if (userRole !== "admin" && !is2KX) {
+    return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+  }
+  const { unit_price, item_description, notes } = req.body;
+  try {
+    await pool.query(
+      `UPDATE taseron_2kx_pricing SET unit_price=$1, item_description=$2, notes=$3, updated_at=NOW() WHERE id=$4`,
+      [Number(unit_price), item_description || null, notes || null, req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// POST /2kx/pricing — yeni kural ekle (sadece admin)
+app.post("/2kx/pricing", authMiddleware, requireAdmin, async (req, res) => {
+  const { rule_key, item_code, item_description, unit_price, rule_description, notes } = req.body;
+  if (!rule_key || !item_code || unit_price == null) {
+    return res.status(400).json({ ok: false, error: "rule_key, item_code ve unit_price zorunlu" });
+  }
+  try {
+    const r = await pool.query(
+      `INSERT INTO taseron_2kx_pricing (rule_key, item_code, item_description, unit_price, rule_description, notes)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [rule_key, item_code, item_description || null, Number(unit_price), rule_description || null, notes || null]
+    );
+    res.json({ ok: true, rule: r.rows[0] });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// GET /2kx/dashboard — 2KX hakediş paneli ana endpoint
+app.get("/2kx/dashboard", authMiddleware, async (req, res) => {
+  try {
+    // 1. Tüm fiyatlandırma kurallarını al
+    const pricingResult = await pool.query("SELECT * FROM taseron_2kx_pricing ORDER BY id");
+    const pricingRules = pricingResult.rows;
+    const pricingMap = {}; // rule_key -> unit_price
+    const perItemMap = {}; // item_code -> unit_price (PER_ITEM_ kuralları için)
+    for (const rule of pricingRules) {
+      pricingMap[rule.rule_key] = Number(rule.unit_price);
+      if (rule.rule_key.startsWith("PER_ITEM_")) {
+        perItemMap[String(rule.item_code).trim()] = Number(rule.unit_price);
+      }
+    }
+
+    // 2. USD kurunu al
+    let usdRate = 40;
+    try { usdRate = await getTcmbUsdTrySellingRate(); } catch (_) {}
+
+    // 3. 2KX iş kalemlerini çek
+    const worksResult = await pool.query(`
+      SELECT
+        m.site_code,
+        m.site_type,
+        m.item_code,
+        m.item_description,
+        m.done_qty,
+        m.qc_durum,
+        m.kabul_durum,
+        p.requested_qty,
+        p.unit_price      AS po_unit_price,
+        p.currency        AS po_currency,
+        p.billed_qty,
+        b.unit_price      AS boq_unit_price,
+        b.currency        AS boq_currency,
+        b.boq_items_en    AS boq_description
+      FROM master_works m
+      LEFT JOIN po_rows p ON p.site_code = m.site_code AND TRIM(p.item_code) = TRIM(m.item_code)
+      LEFT JOIN boq_items b ON TRIM(b.s_bom_code) = TRIM(m.item_code)
+      WHERE m.subcon_name ILIKE '%2KX%'
+      ORDER BY m.site_code, m.item_code
+    `);
+
+    // 4. Fatura toplamını al
+    const invoiceResult = await pool.query(
+      `SELECT COALESCE(SUM(genel_toplam), 0) AS total FROM taseron_fatura WHERE taseron_adi ILIKE '%2KX%'`
+    );
+    const totalInvoiced = Number(invoiceResult.rows[0]?.total || 0);
+
+    // 5. Site bazlı gruplama ve hesaplama
+    const siteMap = {};
+    for (const row of worksResult.rows) {
+      const sc = row.site_code;
+      if (!siteMap[sc]) {
+        siteMap[sc] = { site_code: sc, site_type: row.site_type || "", items: [] };
+      }
+      siteMap[sc].items.push(row);
+    }
+
+    let totalHakedis = 0;
+    let totalQcOk = 0;
+    const sites = [];
+
+    for (const [siteCode, siteData] of Object.entries(siteMap)) {
+      const siteTech = String(siteData.site_type || "").toLowerCase();
+      const isLTE = (siteTech.includes("lte") || siteTech.includes("4g")) && !siteTech.includes("standalone");
+      const is5G = siteTech.includes("5g") || siteTech.includes("nr");
+      const isSA = siteTech.includes("standalone") || siteTech.includes(" sa") || siteTech.endsWith("sa");
+
+      const itemCodes = siteData.items.map(i => String(i.item_code || "").trim());
+
+      // Paket fiyat hesabı
+      let packagePrice = 0;
+      let packageTriggerCode = null;
+
+      if (isLTE || is5G) {
+        if (itemCodes.includes("8818274542")) {
+          packagePrice = pricingMap["PACKAGE_LTE5G_8818274542"] || 0;
+          packageTriggerCode = "8818274542";
+        } else if (itemCodes.includes("8818274543")) {
+          packagePrice = pricingMap["PACKAGE_LTE5G_8818274543"] || 0;
+          packageTriggerCode = "8818274543";
+        }
+      }
+      if (isSA) {
+        const hasTrigger = itemCodes.includes("8812184592") || itemCodes.includes("8812184591");
+        const triggerCode = itemCodes.includes("8812184592") ? "8812184592" : "8812184591";
+        const hasUpgrade = itemCodes.includes("8818274546");
+        if (hasTrigger && hasUpgrade) {
+          packagePrice = pricingMap["PACKAGE_SA_WITH_UPGRADE"] || 0;
+          packageTriggerCode = triggerCode;
+        } else if (hasTrigger && !hasUpgrade) {
+          packagePrice = pricingMap["PACKAGE_SA_NO_UPGRADE"] || 0;
+          packageTriggerCode = triggerCode;
+        }
+      }
+
+      // Kalem bazlı hesaplamalar
+      let siteTotal = packagePrice;
+      const enrichedItems = [];
+      let packageIsQcOk = false;
+
+      for (const item of siteData.items) {
+        const itemCode = String(item.item_code || "").trim();
+        const doneQty = Number(item.done_qty || 0);
+        const qcOk = String(item.qc_durum || "").toUpperCase() === "OK";
+
+        // Huawei fiyatı
+        const rawPoPrice = Number(item.po_unit_price || 0);
+        const rawBoqPrice = Number(item.boq_unit_price || 0);
+        const huaweiRawPrice = rawPoPrice > 0 ? rawPoPrice : rawBoqPrice;
+        const huaweiCurrency = rawPoPrice > 0
+          ? String(item.po_currency || "TRY").toUpperCase()
+          : String(item.boq_currency || "TRY").toUpperCase();
+        const huaweiUnitPriceTry = huaweiCurrency === "USD" ? huaweiRawPrice * usdRate : huaweiRawPrice;
+        const huaweiTotal = huaweiUnitPriceTry * doneQty;
+
+        // 2KX taşeron fiyatı
+        let taseronUnitPrice = 0;
+        let taseronTotal = 0;
+        let priceType = "included";
+
+        if (itemCode === packageTriggerCode) {
+          taseronUnitPrice = packagePrice;
+          taseronTotal = packagePrice; // paket tek seferlik
+          priceType = "package";
+          if (qcOk) packageIsQcOk = true;
+        } else if (perItemMap[itemCode] !== undefined) {
+          taseronUnitPrice = perItemMap[itemCode];
+          taseronTotal = taseronUnitPrice * doneQty;
+          priceType = "per_item";
+          if (itemCode !== packageTriggerCode) {
+            siteTotal += taseronTotal;
+          }
+        }
+
+        enrichedItems.push({
+          ...item,
+          item_code: itemCode,
+          huawei_unit_price: huaweiUnitPriceTry,
+          huawei_total: huaweiTotal,
+          taseron_unit_price: taseronUnitPrice,
+          taseron_total: taseronTotal,
+          price_type: priceType,
+          qc_ok: qcOk,
+        });
+      }
+
+      // QC OK toplamı
+      let siteQcOkTotal = packageIsQcOk ? packagePrice : 0;
+      for (const item of enrichedItems) {
+        if (item.price_type === "per_item" && item.qc_ok) {
+          siteQcOkTotal += item.taseron_total;
+        }
+      }
+
+      totalHakedis += siteTotal;
+      totalQcOk += siteQcOkTotal;
+
+      sites.push({
+        site_code: siteCode,
+        site_type: siteData.site_type,
+        package_price: packagePrice,
+        package_trigger_code: packageTriggerCode,
+        total_hakedis: siteTotal,
+        qc_ok_hakedis: siteQcOkTotal,
+        items: enrichedItems,
+      });
+    }
+
+    res.json({
+      ok: true,
+      summary: {
+        total_hakedis: totalHakedis,
+        total_qc_ok: totalQcOk,
+        total_invoiced: totalInvoiced,
+        usd_rate: usdRate,
+      },
+      sites,
+      pricing: pricingRules,
+    });
+  } catch (e) {
+    console.error("2KX DASHBOARD ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 

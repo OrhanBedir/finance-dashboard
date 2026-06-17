@@ -12806,6 +12806,367 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   2KX HAKEDİŞ PANELİ
+   ═══════════════════════════════════════════════════════════════ */
+function TwoKXPanel({ twokxData, twokxPricing, isAdmin, API_BASE, onRefresh }) {
+  const [showDetailModal, setShowDetailModal] = useState(null); // site object
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [pricingEdit, setPricingEdit] = useState({}); // {id: {unit_price, item_description, notes, editing}}
+  const [newRuleForm, setNewRuleForm] = useState(null); // null = hidden
+  const [savingRule, setSavingRule] = useState(false);
+
+  const fmt = (n) =>
+    Number(n || 0).toLocaleString("tr-TR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + " ₺";
+
+  const handleSavePrice = async (rule) => {
+    const edit = pricingEdit[rule.id] || {};
+    setSavingRule(true);
+    try {
+      const token = localStorage.getItem("token") || localStorage.getItem("finance_token") || "";
+      const r = await fetch(`${API_BASE}/2kx/pricing/${rule.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          unit_price: Number(edit.unit_price ?? rule.unit_price),
+          item_description: edit.item_description ?? rule.item_description,
+          notes: edit.notes ?? rule.notes,
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || "Kayıt hatası");
+      setPricingEdit(prev => { const n = { ...prev }; delete n[rule.id]; return n; });
+      if (onRefresh) onRefresh();
+    } catch (e) { alert("Hata: " + e.message); }
+    finally { setSavingRule(false); }
+  };
+
+  const handleAddRule = async () => {
+    if (!newRuleForm?.rule_key || !newRuleForm?.item_code || !newRuleForm?.unit_price) {
+      alert("rule_key, item_code ve unit_price zorunlu"); return;
+    }
+    setSavingRule(true);
+    try {
+      const token = localStorage.getItem("token") || localStorage.getItem("finance_token") || "";
+      const r = await fetch(`${API_BASE}/2kx/pricing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(newRuleForm),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || "Eklenemedi");
+      setNewRuleForm(null);
+      if (onRefresh) onRefresh();
+    } catch (e) { alert("Hata: " + e.message); }
+    finally { setSavingRule(false); }
+  };
+
+  const handleExcelDownload = (site) => {
+    const headers = ["Item Code", "Açıklama", "Tamamlanan Miktar", "2KX Fiyatı (KDV Hariç)", "HW Hakediş (TL)", "Toplam 2KX (TL)", "QC Durum"];
+    const rows = (site.items || []).map(item => [
+      item.item_code,
+      item.item_description || item.boq_description || "",
+      Number(item.done_qty || 0),
+      item.price_type === "package" ? `${fmt(item.taseron_unit_price)} (Paket)` :
+        item.price_type === "per_item" ? fmt(item.taseron_unit_price) : "—",
+      fmt(item.huawei_total),
+      fmt(item.taseron_total),
+      item.qc_durum || "—",
+    ]);
+    // totals
+    const totalHW = (site.items || []).reduce((s, i) => s + Number(i.huawei_total || 0), 0);
+    const total2KX = site.total_hakedis;
+    rows.push(["TOPLAM", "", "", "", fmt(totalHW), fmt(total2KX), ""]);
+
+    const wb = XLSXStyle.utils.book_new();
+    const wsData = [headers, ...rows];
+    const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
+
+    // Header style
+    const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "1e3a5f" }, patternType: "solid" }, alignment: { horizontal: "center" } };
+    const headerRange = XLSXStyle.utils.decode_range(ws["!ref"]);
+    for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
+      const cellRef = XLSXStyle.utils.encode_cell({ r: 0, c });
+      if (ws[cellRef]) ws[cellRef].s = headerStyle;
+    }
+    // Totals row style
+    const lastRow = wsData.length - 1;
+    const totalsStyle = { font: { bold: true }, fill: { fgColor: { rgb: "f0f4f8" }, patternType: "solid" } };
+    for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
+      const cellRef = XLSXStyle.utils.encode_cell({ r: lastRow, c });
+      if (ws[cellRef]) ws[cellRef].s = totalsStyle;
+    }
+    ws["!cols"] = [{ wch: 16 }, { wch: 40 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 10 }];
+    XLSXStyle.utils.book_append_sheet(wb, ws, site.site_code);
+    XLSXStyle.writeFile(wb, `2KX_${site.site_code}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  if (!twokxData) {
+    return (
+      <div style={{ textAlign: "center", padding: "60px 20px", color: "#6b7280" }}>
+        <div style={{ fontSize: "40px", marginBottom: "16px" }}>⏳</div>
+        <div>Veriler yükleniyor...</div>
+      </div>
+    );
+  }
+
+  const { summary, sites } = twokxData;
+  const NAVY = "#1e3a5f";
+
+  return (
+    <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "20px 16px" }}>
+      {/* Header */}
+      <div style={{ background: `linear-gradient(135deg, ${NAVY} 0%, #2d5f8a 100%)`, borderRadius: "16px", padding: "24px 28px", marginBottom: "24px", color: "#fff" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 700 }}>2KX Hakediş Paneli</h2>
+            <div style={{ fontSize: "13px", color: "#a8c4e0", marginTop: "4px" }}>2KX HABERLEŞME SİSTEMLERİ MÜHENDİSLİK İNŞAAT LİMİTED ŞİRKETİ</div>
+            <div style={{ fontSize: "12px", color: "#7da8c8", marginTop: "2px" }}>USD/TRY Kur: {Number(summary.usd_rate || 0).toFixed(2)} ₺</div>
+          </div>
+          <button
+            onClick={() => setShowPricingModal(true)}
+            style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", borderRadius: "10px", padding: "10px 18px", cursor: "pointer", fontWeight: 600, fontSize: "14px" }}
+          >
+            💰 Fiyat Listesi
+          </button>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "24px" }}>
+        {[
+          { label: "Toplam Hakediş (KDV Hariç)", value: summary.total_hakedis, color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+          { label: "Fatura Edilebilir (QC OK)", value: summary.total_qc_ok, color: "#10b981", bg: "#f0fdf4", border: "#bbf7d0" },
+          { label: "Kesilmiş Fatura", value: summary.total_invoiced, color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
+        ].map((card, i) => (
+          <div key={i} style={{ background: card.bg, border: `1px solid ${card.border}`, borderRadius: "14px", padding: "20px", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "3px", background: card.color, borderRadius: "14px 14px 0 0" }} />
+            <div style={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>{card.label}</div>
+            <div style={{ fontSize: "24px", fontWeight: 800, color: card.color }}>{fmt(card.value)}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Sites Table */}
+      <div style={{ background: "#fff", borderRadius: "14px", border: "1px solid #e2e8f0", overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+        <div style={{ background: NAVY, color: "#fff", padding: "14px 20px", fontWeight: 700, fontSize: "15px" }}>Sahalar</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+            <thead>
+              <tr style={{ background: "#f8fafc" }}>
+                {["Site Kodu", "Site Tipi", "Paket", "Kalem Sayısı", "2KX Hakediş", "QC OK Tutar", "Detay"].map(h => (
+                  <th key={h} style={{ padding: "10px 14px", textAlign: "left", borderBottom: "1px solid #e2e8f0", color: "#374151", fontWeight: 600 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(sites || []).map((site, si) => (
+                <tr key={si} style={{ borderBottom: "1px solid #f1f5f9" }} onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"} onMouseLeave={e => e.currentTarget.style.background = ""}>
+                  <td style={{ padding: "10px 14px", fontWeight: 600, color: NAVY }}>{site.site_code}</td>
+                  <td style={{ padding: "10px 14px", color: "#64748b" }}>{site.site_type || "—"}</td>
+                  <td style={{ padding: "10px 14px" }}>
+                    {site.package_price > 0
+                      ? <span style={{ background: "#dbeafe", color: "#1d4ed8", borderRadius: "6px", padding: "2px 8px", fontSize: "12px", fontWeight: 600 }}>{fmt(site.package_price)}</span>
+                      : <span style={{ color: "#9ca3af" }}>—</span>
+                    }
+                  </td>
+                  <td style={{ padding: "10px 14px", textAlign: "center", color: "#374151" }}>{(site.items || []).length}</td>
+                  <td style={{ padding: "10px 14px", fontWeight: 700, color: "#1f2937" }}>{fmt(site.total_hakedis)}</td>
+                  <td style={{ padding: "10px 14px", color: "#10b981", fontWeight: 600 }}>{fmt(site.qc_ok_hakedis)}</td>
+                  <td style={{ padding: "10px 14px" }}>
+                    <button
+                      onClick={() => setShowDetailModal(site)}
+                      style={{ background: NAVY, color: "#fff", border: "none", borderRadius: "8px", padding: "6px 14px", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}
+                    >
+                      Detay
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {(!sites || sites.length === 0) && (
+                <tr><td colSpan={7} style={{ padding: "40px", textAlign: "center", color: "#9ca3af" }}>Henüz veri yok</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* DETAIL MODAL */}
+      {showDetailModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "#fff", borderRadius: "16px", maxWidth: "900px", width: "100%", maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            <div style={{ background: NAVY, color: "#fff", padding: "18px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: "16px 16px 0 0" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: "16px" }}>{showDetailModal.site_code} — {showDetailModal.site_type}</div>
+                <div style={{ fontSize: "12px", color: "#a8c4e0", marginTop: "2px" }}>Hakediş Detayı</div>
+              </div>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <button
+                  onClick={() => handleExcelDownload(showDetailModal)}
+                  style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", borderRadius: "8px", padding: "7px 14px", cursor: "pointer", fontSize: "13px", fontWeight: 600 }}
+                >
+                  Excel İndir
+                </button>
+                <button onClick={() => setShowDetailModal(null)} style={{ background: "none", border: "none", color: "#fff", fontSize: "22px", cursor: "pointer", lineHeight: 1 }}>×</button>
+              </div>
+            </div>
+            <div style={{ overflowY: "auto", padding: "20px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc" }}>
+                    {["Item Code", "Açıklama", "Tamamlanan Miktar", "2KX Fiyatı (KDV Hariç)", "HW Hakediş (TL)", "Toplam 2KX (TL)", "QC"].map(h => (
+                      <th key={h} style={{ padding: "10px 12px", textAlign: "left", borderBottom: "1px solid #e2e8f0", color: "#374151", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(showDetailModal.items || []).map((item, ii) => (
+                    <tr key={ii} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "9px 12px", fontFamily: "monospace", fontSize: "12px", color: "#1e3a5f", fontWeight: 600 }}>{item.item_code}</td>
+                      <td style={{ padding: "9px 12px", color: "#374151", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.item_description || item.boq_description || ""}>
+                        {item.item_description || item.boq_description || "—"}
+                      </td>
+                      <td style={{ padding: "9px 12px", textAlign: "center", color: "#374151" }}>{Number(item.done_qty || 0)}</td>
+                      <td style={{ padding: "9px 12px" }}>
+                        {item.price_type === "package"
+                          ? <span>{fmt(item.taseron_unit_price)} <span style={{ background: "#dbeafe", color: "#1d4ed8", borderRadius: "4px", padding: "1px 6px", fontSize: "11px", fontWeight: 700 }}>Paket</span></span>
+                          : item.price_type === "per_item"
+                          ? fmt(item.taseron_unit_price)
+                          : <span style={{ color: "#9ca3af" }}>—</span>
+                        }
+                      </td>
+                      <td style={{ padding: "9px 12px", color: "#64748b" }}>{fmt(item.huawei_total)}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: item.taseron_total > 0 ? 700 : 400, color: item.taseron_total > 0 ? "#1f2937" : "#9ca3af" }}>
+                        {item.taseron_total > 0 ? fmt(item.taseron_total) : "—"}
+                      </td>
+                      <td style={{ padding: "9px 12px" }}>
+                        <span style={{
+                          background: String(item.qc_durum || "").toUpperCase() === "OK" ? "#d1fae5" : "#f3f4f6",
+                          color: String(item.qc_durum || "").toUpperCase() === "OK" ? "#065f46" : "#6b7280",
+                          borderRadius: "5px", padding: "2px 8px", fontSize: "11px", fontWeight: 600,
+                        }}>
+                          {String(item.qc_durum || "").toUpperCase() === "OK" ? "OK" : item.qc_durum || "—"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#f8fafc", fontWeight: 700 }}>
+                    <td colSpan={4} style={{ padding: "10px 12px", color: "#374151", borderTop: "2px solid #e2e8f0" }}>TOPLAM</td>
+                    <td style={{ padding: "10px 12px", borderTop: "2px solid #e2e8f0", color: "#64748b" }}>
+                      {fmt((showDetailModal.items || []).reduce((s, i) => s + Number(i.huawei_total || 0), 0))}
+                    </td>
+                    <td style={{ padding: "10px 12px", borderTop: "2px solid #e2e8f0", color: NAVY, fontSize: "15px" }}>
+                      {fmt(showDetailModal.total_hakedis)}
+                    </td>
+                    <td style={{ borderTop: "2px solid #e2e8f0" }} />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRICING MODAL */}
+      {showPricingModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "#fff", borderRadius: "16px", maxWidth: "860px", width: "100%", maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            <div style={{ background: NAVY, color: "#fff", padding: "18px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: "16px 16px 0 0" }}>
+              <div style={{ fontWeight: 700, fontSize: "16px" }}>2KX Fiyat Listesi</div>
+              <button onClick={() => setShowPricingModal(false)} style={{ background: "none", border: "none", color: "#fff", fontSize: "22px", cursor: "pointer", lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ overflowY: "auto", padding: "20px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc" }}>
+                    {["Rule Key", "Item Code", "Açıklama", "Fiyat (KDV Hariç)", ...(isAdmin ? ["Güncelle"] : [])].map(h => (
+                      <th key={h} style={{ padding: "10px 12px", textAlign: "left", borderBottom: "1px solid #e2e8f0", color: "#374151", fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(twokxPricing || []).map((rule, ri) => {
+                    const edit = pricingEdit[rule.id];
+                    const isEditing = !!edit?.editing;
+                    return (
+                      <tr key={ri} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "9px 12px", fontFamily: "monospace", fontSize: "11px", color: "#374151" }}>{rule.rule_key}</td>
+                        <td style={{ padding: "9px 12px", fontWeight: 600, color: NAVY }}>{rule.item_code}</td>
+                        <td style={{ padding: "9px 12px", color: "#374151" }}>
+                          {isEditing
+                            ? <input value={edit.item_description ?? rule.item_description ?? ""} onChange={e => setPricingEdit(prev => ({ ...prev, [rule.id]: { ...prev[rule.id], item_description: e.target.value } }))} style={{ width: "100%", padding: "4px 8px", borderRadius: "6px", border: "1px solid #d1d5db", fontSize: "13px" }} />
+                            : rule.item_description || "—"
+                          }
+                        </td>
+                        <td style={{ padding: "9px 12px", fontWeight: 700, color: "#1f2937" }}>
+                          {isEditing
+                            ? <input type="number" value={edit.unit_price ?? rule.unit_price} onChange={e => setPricingEdit(prev => ({ ...prev, [rule.id]: { ...prev[rule.id], unit_price: e.target.value } }))} style={{ width: "100px", padding: "4px 8px", borderRadius: "6px", border: "1px solid #d1d5db", fontSize: "13px" }} />
+                            : fmt(rule.unit_price)
+                          }
+                        </td>
+                        {isAdmin && (
+                          <td style={{ padding: "9px 12px" }}>
+                            {isEditing ? (
+                              <div style={{ display: "flex", gap: "6px" }}>
+                                <button onClick={() => handleSavePrice(rule)} disabled={savingRule} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: "6px", padding: "5px 12px", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}>Kaydet</button>
+                                <button onClick={() => setPricingEdit(prev => { const n = { ...prev }; delete n[rule.id]; return n; })} style={{ background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "6px", padding: "5px 12px", cursor: "pointer", fontSize: "12px" }}>İptal</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => setPricingEdit(prev => ({ ...prev, [rule.id]: { unit_price: rule.unit_price, item_description: rule.item_description, notes: rule.notes, editing: true } }))} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: "6px", padding: "5px 12px", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}>Düzenle</button>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {isAdmin && (
+                <div style={{ marginTop: "20px" }}>
+                  {!newRuleForm ? (
+                    <button onClick={() => setNewRuleForm({ rule_key: "", item_code: "", item_description: "", unit_price: "", rule_description: "", notes: "" })} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: "8px", padding: "9px 18px", cursor: "pointer", fontWeight: 600, fontSize: "13px" }}>
+                      + Yeni Kalem Ekle
+                    </button>
+                  ) : (
+                    <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
+                      <div style={{ fontWeight: 700, marginBottom: "12px", color: "#1f2937" }}>Yeni Fiyat Kuralı</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "12px" }}>
+                        {[
+                          { key: "rule_key", label: "Rule Key" },
+                          { key: "item_code", label: "Item Code" },
+                          { key: "item_description", label: "Açıklama" },
+                          { key: "unit_price", label: "Fiyat (TL)", type: "number" },
+                          { key: "rule_description", label: "Kural Açıklaması" },
+                          { key: "notes", label: "Notlar" },
+                        ].map(f => (
+                          <div key={f.key}>
+                            <label style={{ fontSize: "11px", color: "#6b7280", fontWeight: 600, display: "block", marginBottom: "4px" }}>{f.label}</label>
+                            <input
+                              type={f.type || "text"}
+                              value={newRuleForm[f.key] || ""}
+                              onChange={e => setNewRuleForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                              style={{ width: "100%", padding: "7px 10px", borderRadius: "7px", border: "1px solid #d1d5db", fontSize: "13px", boxSizing: "border-box" }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button onClick={handleAddRule} disabled={savingRule} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 18px", cursor: "pointer", fontWeight: 600, fontSize: "13px" }}>Kaydet</button>
+                        <button onClick={() => setNewRuleForm(null)} style={{ background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "8px", padding: "8px 18px", cursor: "pointer", fontSize: "13px" }}>İptal</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const [filterText, setFilterText] = useState("");
   const [regionSearch, setRegionSearch] = useState("");
@@ -18778,6 +19139,10 @@ function App() {
   });
   const [token, setToken] = useState(localStorage.getItem("token") || "");
 
+  // ── 2KX Hakediş Paneli state ──────────────────────────────────────────────
+  const [twokxData, setTwokxData] = useState(null);
+  const [twokxPricing, setTwokxPricing] = useState([]);
+
   const [user, setUser] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("user") || "null");
@@ -18825,6 +19190,7 @@ function App() {
   const isSubconUser =
     String(user?.role || "").toLowerCase() === "subcon" ||
     String(user?.subcon_name || "").trim() !== "";
+  const is2KXUser = String(user?.subcon_name || "").toUpperCase().includes("2KX");
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -18880,6 +19246,8 @@ function App() {
     const rolloutOverrideEmails = ["hatice.omus@simsektel.com"];
     const isBolge = bolgeMudurEmails.includes(_ue) || ["rollout_mudur","bolge_mudur"].includes((u?.role||"").toLowerCase());
     const isRolloutOverride = rolloutOverrideEmails.includes(_ue);
+    const is2KX = String(u?.subcon_name || "").toUpperCase().includes("2KX");
+    if (is2KX) return "2kx";
     if (u?.role === "user" && !isBolge && !isRolloutOverride) return "masraf";
     if (isBolge) return "region";
     return "finance";
@@ -18944,6 +19312,18 @@ function App() {
     };
     fetchPending();
   }, [user]);
+
+  // ── 2KX verisi yükle (oturum açıkken) ────────────────────────────────────
+  useEffect(() => {
+    if (!user || !token) return;
+    const userIs2KX = String(user?.subcon_name || "").toUpperCase().includes("2KX");
+    const userIsAdmin = user?.role === "admin" || user?.role === "direktor";
+    if (!userIs2KX && !userIsAdmin) return;
+    fetch(`${API_BASE}/2kx/dashboard`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(d => { if (d.ok) setTwokxData(d); }).catch(() => {});
+    fetch(`${API_BASE}/2kx/pricing`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(d => { if (d.ok) setTwokxPricing(d.rules || []); }).catch(() => {});
+  }, [user, token]);
 
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
@@ -19233,11 +19613,22 @@ function App() {
       const _luIsBolge = _bolgeMudurEmails.includes(_lue) || ["rollout_mudur","bolge_mudur"].includes(_luRole);
       const _luIsRolloutOverride = _rolloutOverrideEmails.includes(_lue);
       const _luIsSubcon = !!_lu?.subcon_name || _luRole === "subcon";
+      const _luIs2KX = String(_lu?.subcon_name || "").toUpperCase().includes("2KX");
       const _luIsFinance = ["finance","admin","genel_mudur","muhasebe"].includes(_luRole) || _lue === "orhan@simsektel.com" || _lue === "nurcan.kus@simsektel.com";
-      if (_luIsFinance && !_luIsSubcon) setPage("finance");
+      if (_luIs2KX) setPage("2kx");
+      else if (_luIsFinance && !_luIsSubcon) setPage("finance");
       else if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("masraf");
       else if (_luIsBolge || _luIsSubcon) setPage("region");
       else setPage("finance");
+
+      // 2KX verilerini yükle
+      if (_luIs2KX || _luRole === "admin") {
+        const _tok = data.token;
+        fetch(`${API_BASE}/2kx/dashboard`, { headers: { Authorization: `Bearer ${_tok}` } })
+          .then(r => r.json()).then(d => { if (d.ok) setTwokxData(d); }).catch(() => {});
+        fetch(`${API_BASE}/2kx/pricing`, { headers: { Authorization: `Bearer ${_tok}` } })
+          .then(r => r.json()).then(d => { if (d.ok) setTwokxPricing(d.rules || []); }).catch(() => {});
+      }
 
       setFinanceLoginEmail("");
       setFinanceLoginPassword("");
@@ -19471,7 +19862,14 @@ function App() {
           </div>
 
           {/* Navigation */}
-          {isSubconUser ? (
+          {is2KXUser ? (
+            <>
+              <div className="sidebar-section-title">Menü</div>
+              <div className={`sidebar-nav-item ${page==='2kx'?'active':''}`} onClick={()=>setPage('2kx')}>
+                <span>📊</span> 2KX Paneli
+              </div>
+            </>
+          ) : isSubconUser ? (
             <>
               <div className="sidebar-section-title">Menü</div>
               <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
@@ -19732,6 +20130,20 @@ function App() {
                 isSubconUser={!isAdmin && !!user?.subcon_name}
                 userSubconName={user?.subcon_name || ""}
                 userPaymentRate={Number(user?.payment_rate || 0.8)}
+              />
+            )}
+            {page === "2kx" && (is2KXUser || isAdmin) && (
+              <TwoKXPanel
+                twokxData={twokxData}
+                twokxPricing={twokxPricing}
+                isAdmin={isAdmin}
+                API_BASE={API_BASE}
+                onRefresh={() => {
+                  fetch(`${API_BASE}/2kx/dashboard`, { headers: { Authorization: `Bearer ${token}` } })
+                    .then(r => r.json()).then(d => { if (d.ok) setTwokxData(d); }).catch(() => {});
+                  fetch(`${API_BASE}/2kx/pricing`, { headers: { Authorization: `Bearer ${token}` } })
+                    .then(r => r.json()).then(d => { if (d.ok) setTwokxPricing(d.rules || []); }).catch(() => {});
+                }}
               />
             )}
             {page === "entry" && <DailyEntry />}
