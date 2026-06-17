@@ -9497,19 +9497,19 @@ app.post("/invoice-parse", authMiddleware, uploadInvoiceParse.single("file"), as
     });
   }
 
-  // Supabase'e geçici yükle
-  const tempFilename = `fatura-temp/tmp-${Date.now()}.pdf`;
-  let tempUrl = null;
+  // Supabase'e geçici yükle — temp_key olarak gerçek storage yolunu dön
+  let tempUrl = null, tempKey = null;
   try {
-    const { url } = await uploadToStorage("fatura-belgeler", tempFilename, pdfBuffer, "application/pdf");
+    const { url, filePath } = await uploadToStorage("fatura-belgeler", `tmp-${Date.now()}.pdf`, pdfBuffer, "application/pdf");
     tempUrl = url;
+    tempKey = filePath; // "fatura-belgeler/TIMESTAMP-tmp-xxx.pdf" — invoice-add'de bu yol kullanılacak
   } catch (e) {
     console.error("[invoice-parse] storage error:", e.message);
   }
 
   const pdfText = await extractPdfText(pdfBuffer, isPDF);
   const parsed  = parseTurkishInvoice(pdfText);
-  res.json({ ok: true, parsed, temp_key: tempFilename, temp_url: tempUrl });
+  res.json({ ok: true, parsed, temp_key: tempKey, temp_url: tempUrl });
 });
 
 app.post(
