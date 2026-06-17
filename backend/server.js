@@ -9172,6 +9172,39 @@ app.get("/test-db", async (req, res) => {
   }
 });
 
+/* ===== TAŞERON FATURA TABLOSU — STARTUP MIGRATION ===== */
+pool.query(`
+  CREATE TABLE IF NOT EXISTS taseron_fatura (
+    id SERIAL PRIMARY KEY,
+    taseron_adi TEXT NOT NULL,
+    fatura_no TEXT,
+    fatura_tarihi DATE,
+    toplam_tutar NUMERIC DEFAULT 0,
+    kdv_tutar NUMERIC DEFAULT 0,
+    genel_toplam NUMERIC DEFAULT 0,
+    odenen_tutar NUMERIC DEFAULT 0,
+    kalan_tutar NUMERIC DEFAULT 0,
+    pdf_url TEXT,
+    aciklama TEXT,
+    durum TEXT DEFAULT 'bekliyor',
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+`).catch(e => console.error("taseron_fatura startup migration:", e.message));
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS taseron_fatura_kalem (
+    id SERIAL PRIMARY KEY,
+    fatura_id INTEGER REFERENCES taseron_fatura(id) ON DELETE CASCADE,
+    site_id TEXT,
+    saha_adi TEXT,
+    kalem_aciklama TEXT,
+    tutar NUMERIC DEFAULT 0,
+    odenen NUMERIC DEFAULT 0,
+    kalan NUMERIC DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+`).catch(e => console.error("taseron_fatura_kalem startup migration:", e.message));
+
 /* ===== FATURA BELGE UPLOAD & VIEW ===== */
 
 // DB kolonları ekle (idempotent)
