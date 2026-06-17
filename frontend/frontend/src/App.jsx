@@ -7701,7 +7701,7 @@ function FinanceDashboard({
                 <thead>
                   <tr>
                     <th>Taşeron</th>
-                    <th>Tamamlanan İş Bedeli</th>
+                    <th>Tamamlanan İş Bedeli (KDV %20 Dahil)</th>
                     <th>HW’ye Kesilen Fatura Bedeli</th>
                     <th>Kestiği Fatura</th>
                     <th>Ödenen</th>

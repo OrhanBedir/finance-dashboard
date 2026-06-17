@@ -8273,13 +8273,15 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
       const hakedisRaw = doneQty * unitPrice;
       const faturayaHazirRaw = billedQty * unitPrice;
 
+      // KDV %20 eklenerek hesapla (Kestiği Fatura KDV dahil olduğundan karşılaştırılabilir olsun)
+      const KDV = 1.20;
       const hakedisTL =
-        curr === "USD" ? hakedisRaw * Number(usdTryRate || 0) : hakedisRaw;
+        (curr === "USD" ? hakedisRaw * Number(usdTryRate || 0) : hakedisRaw) * KDV;
 
       const faturayaHazirTL =
-        curr === "USD"
+        (curr === "USD"
           ? faturayaHazirRaw * Number(usdTryRate || 0)
-          : faturayaHazirRaw;
+          : faturayaHazirRaw) * KDV;
 
       existing.total_hakedis += hakedisTL;
       existing.total_faturaya_hazir += faturayaHazirTL;
