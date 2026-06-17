@@ -9268,11 +9268,21 @@ function parseTurkishInvoice(rawText) {
   }
 
   // ── FATURA NO ──────────────────────────────────────────────────────────────
-  // Önce e-fatura konum tabanlı sonuç (EF_LABEL_ORDER), yoksa genel arama
+  // EF_LABEL_ORDER bazen bilinen sahte değerler verebilir (SATIS, TICARIFATURA vb.)
+  // Önce geçersiz değerleri temizle, SONRA fallback ara — aksi halde fallback hiç çalışmaz.
   let fatura_no = efFaturaNo;
+  if (/^[0-9a-f\-]{30,}$/i.test(fatura_no)) fatura_no = "";       // ETTN UUID
+  if (/^(TICARIFATURA|EARSIVFATURA|SATIS|ALIS|TR\d\.\d)$/i.test(fatura_no)) fatura_no = "";
+  if (fatura_no && !/\d/.test(fatura_no)) fatura_no = "";          // salt harfse temizle
+
+  // EFA/EFT/ERS/GIB stili e-fatura numarası — öncelikli arama (en spesifik)
+  if (!fatura_no) {
+    const m = flat.match(/\b((?:EFA|EFT|ERS|EAR|EAK|GIB|INV)\d{8,})\b/i);
+    if (m) fatura_no = m[1].toUpperCase();
+  }
+  // "Fatura No:" etiketinden sonraki satırı ara
   if (!fatura_no) fatura_no = findAfterLabel(
-    /^fatura\s*no\s*:?\s*$/i,
-    // Fatura no mutlaka rakam içermeli: TICARIFATURA, SATIS gibi salt-harf değerleri dışla
+    /fatura\s*no\s*:?\s*$/i,
     /^(?=.*\d)([A-Z0-9][A-Z0-9\/\-]{4,39})$/i
   );
   // findFlat fallback: yıl bazlı fatura no formatı (ERS2026xxx, ETS2026xxx vb.)
@@ -9284,10 +9294,6 @@ function parseTurkishInvoice(rawText) {
     const m = flat.match(/\b([A-Z]{2,8}(?:20|19)\d{2}\d{4,})\b/);
     if (m) fatura_no = m[1];
   }
-  // ETTN UUID'ini veya bilinen Senaryo/sözcük değerlerini fatura no olarak alma
-  if (/^[0-9a-f\-]{30,}$/i.test(fatura_no)) fatura_no = "";
-  if (/^(TICARIFATURA|EARSIVFATURA|SATIS|ALIS|TR\d\.\d)$/i.test(fatura_no)) fatura_no = "";
-  if (fatura_no && !/\d/.test(fatura_no)) fatura_no = ""; // salt harfse temizle
 
   // ── FATURA TARİHİ ──────────────────────────────────────────────────────────
   // Önce e-fatura konum tabanlı sonuç, yoksa genel arama
