@@ -4993,7 +4993,6 @@ function FinanceDashboard({
               { s:{r:1,c:0}, e:{r:1,c:4} },
               { s:{r:2,c:0}, e:{r:2,c:4} },
             ];
-            ws1["!sheetViews"] = [{ showGridLines: false }];
             XS.utils.book_append_sheet(wb, ws1, "📊 Özet");
 
             // ══════════════════════════════════════════════════════
@@ -5032,7 +5031,28 @@ function FinanceDashboard({
             ws2["!rows"] = [{ hpt:24 }, ...Array(rowIdx).fill({ hpt:20 })];
             XS.utils.book_append_sheet(wb, ws2, "📋 Detay");
 
-            XS.writeFile(wb, `hw_acceptance_ozet_${dateStr}.xlsx`);
+            // JSZip ile gridlines kapat (xlsx-js-style !sheetViews çalışmıyor)
+            const hwBuf = XS.write(wb, { type:"array", bookType:"xlsx" });
+            import("jszip").then(({ default: JSZip }) => {
+              JSZip.loadAsync(hwBuf).then(zip => {
+                const patchSheet = (sheetXml) =>
+                  sheetXml
+                    .replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>')
+                    .replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
+                const s1 = zip.file("xl/worksheets/sheet1.xml");
+                const s2 = zip.file("xl/worksheets/sheet2.xml");
+                return Promise.all([
+                  s1 ? s1.async("string").then(xml => { zip.file("xl/worksheets/sheet1.xml", patchSheet(xml)); }) : Promise.resolve(),
+                  s2 ? s2.async("string").then(xml => { zip.file("xl/worksheets/sheet2.xml", patchSheet(xml)); }) : Promise.resolve(),
+                ]).then(() => zip.generateAsync({ type:"blob", compression:"STORE" }));
+              }).then(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url; a.download = `hw_acceptance_ozet_${dateStr}.xlsx`;
+                document.body.appendChild(a); a.click();
+                document.body.removeChild(a); URL.revokeObjectURL(url);
+              });
+            });
           };
 
           return (

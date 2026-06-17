@@ -9352,12 +9352,16 @@ function parseTurkishInvoice(rawText) {
       const matchCombined = !matchSingle && i + 1 < lines.length
                             && labelRe.test(lines[i] + " " + lines[i + 1]);
       if (matchSingle || matchCombined) {
-        // Aynı satırda sayı: SADECE tek-satır eşleşmesinde kontrol et.
-        // matchCombined'da lines[i] bir değer satırı olabilir (13.333,33 TL gibi),
-        // o yüzden atla.
+        // Aynı satırda sayı: tek-satır eşleşmesinde kontrol et.
         if (matchSingle) {
           const m = lines[i].match(/([\d.]+,\d{2})/);
           if (m) return m[1];
+        }
+        // matchCombined: etiket lines[i+1] içinde olabilir, değer de aynı satırda olabilir.
+        // Önce lines[i+1]'i kontrol et, sonra i+2'den ileriye bak.
+        if (matchCombined) {
+          const mNext = lines[i + 1].match(/([\d.]+,\d{2})/);
+          if (mNext) return mNext[1];
         }
         // Sayıyı sonraki 1-3 satırda ara
         const searchFrom = matchCombined ? i + 2 : i + 1;
@@ -9376,11 +9380,10 @@ function parseTurkishInvoice(rawText) {
   // toplam: "Ödenecek Tutar" veya "Vergiler Dahil Toplam Tutar" — TOPLAM\s*TUTAR yok
   // (çünkü "Mal Hizmet Toplam Tutarı" da eşleşir ve yanlış değer verir)
   const toplam_raw  = findAmount(/[ÖO]DENECEK\s*TUTAR|VERGiLER\s*DAHiL\s*TOPLAM|VERGİLER\s*DAHİL\s*TOPLAM|GENEL\s*TOPLAM/i);
-  // kdv: birden fazla format destekleniyor:
-  //  - "Hesaplanan GERÇEK USULDE KATMA DEĞER VERGİSİ(%20)"  [iki satırda]
-  //  - "Hesaplanan KDV(%20.00)"                             [tek satır]
-  //  - "KDV Tutarı", "KDV %20" vb.
-  const kdv_raw     = findAmount(/HESAPLANAN\s*KDV|KATMA\s*DE[ĞG]ER\s*VERG|DEĞER\s*VERGİSİ|DEGER\s*VERGISI|KDV\s*TUTARI|KDV\s*%\d/i);
+  // kdv: önce en spesifik "Hesaplanan KDV" etiketini ara (tablo başlığı olan
+  // "KDV Tutarı" veya "KDV %20" daha önce yanlış eşleşmesin diye).
+  let kdv_raw = findAmount(/HESAPLANAN\s*KDV|KATMA\s*DE[ĞG]ER\s*VERG|DEĞER\s*VERGİSİ|DEGER\s*VERGISI/i);
+  if (!kdv_raw) kdv_raw = findAmount(/KDV\s*TUTARI|KDV\s*%\d/i);
   // matrah: "Mal Hizmet Toplam Tutarı" + genel TOPLAM\s*TUTAR
   const matrah_raw  = findAmount(/MAL\s*H[İI]ZMET\s*TOPLAM|MATRAH|KDV\s*HAR[İI][ÇC]|ARA\s*TOPLAM|TOPLAM\s*TUTAR/i);
 
