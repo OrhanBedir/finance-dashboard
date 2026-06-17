@@ -13850,6 +13850,64 @@ pool.query(`
 pool.query(`ALTER TABLE taseron_odeme_log ADD COLUMN IF NOT EXISTS dekont_url TEXT;`)
   .catch(e => console.error("dekont_url kolonu:", e.message));
 
+// ── FİRMA ADI STANDARTILAŞTIRMA ─────────────────────────────────────────────
+// Sistemdeki kısa / kırpık firma adlarını tam resmi adlarıyla güncelle.
+// Tüm tablolarda ILIKE ile eşleştirir; subcons UNIQUE kısıtı için merge yapar.
+(async () => {
+  const RENAMES = [
+    {
+      pattern: "UBS%",
+      canonical: "UBS HABERLEŞME TASARIM MAKİNE MÜHENDİSLİK SANAYİ VE TİCARET LİMİTED ŞİRKETİ",
+    },
+    {
+      pattern: "2KX%",
+      canonical: "2KX HABERLEŞME SİSTEMLERİ MÜHENDİSLİK İNŞAAT LİMİTED ŞİRKETİ",
+    },
+  ];
+
+  // Boşluk/sekme/satır normalleştirerek ILIKE karşılaştırması
+  const normalExpr = (col) =>
+    `UPPER(TRIM(REGEXP_REPLACE(${col}, '\\s+', ' ', 'g')))`;
+
+  const simpleTables = [
+    { table: "master_works",      col: "subcon_name" },
+    { table: "supplier_advances", col: "subcon_name" },
+    { table: "subcon_payables",   col: "subcon_name" },
+    { table: "invoice_entries",   col: "tedarikci" },
+    { table: "invoice_entries",   col: "rf_montaj_firma" },
+    { table: "taseron_fatura",    col: "taseron_adi" },
+    { table: "taseron_odeme",     col: "taseron_adi" },
+    { table: "taseron_odeme_log", col: "firma" },
+    { table: "taseron_banka",     col: "firma" },
+    { table: "hw_acceptance_rows",col: "current_handler" },
+    { table: "users",             col: "subcon_name" },
+  ];
+
+  for (const { pattern, canonical } of RENAMES) {
+    for (const { table, col } of simpleTables) {
+      await pool.query(
+        `UPDATE ${table} SET ${col} = $1 WHERE ${normalExpr(col)} ILIKE $2 AND ${col} IS NOT NULL AND ${col} != $1`,
+        [canonical, pattern]
+      ).catch(e => {
+        if (!e.message.includes("does not exist")) {
+          console.error(`[firma-rename] ${table}.${col}:`, e.message);
+        }
+      });
+    }
+
+    // subcons (UNIQUE NOT NULL): önce yeni adı ekle, sonra eskisini sil
+    await pool.query(
+      `INSERT INTO subcons (subcon_name) VALUES ($1) ON CONFLICT (subcon_name) DO NOTHING`,
+      [canonical]
+    ).catch(() => {});
+    await pool.query(
+      `DELETE FROM subcons WHERE ${normalExpr("subcon_name")} ILIKE $1 AND subcon_name != $2`,
+      [pattern, canonical]
+    ).catch(e => console.error(`[firma-rename] subcons:`, e.message));
+  }
+  console.log("[startup] Firma adı standartilaştırma tamamlandı.");
+})();
+
 // Firmalar listesi (kalan borcu olanlar — Ödeme Gir dropdown)
 app.get("/finance/taseron-firmalar", requireFinanceAuth, async (req, res) => {
   try {
