@@ -2814,7 +2814,7 @@ function DailyEntry() {
                   </div>
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Done Qty <span style={{ color: "#dc2626" }}>*</span></label>
-                    <input type="number" step="1" min="0" name="done_qty" value={form.done_qty} onChange={handleChange} placeholder="0" required
+                    <input type="number" step="0.01" min="0" name="done_qty" value={form.done_qty} onChange={handleChange} placeholder="0" required
                       style={{ width: "100%", height: 40, padding: "0 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 15, fontWeight: 700, boxSizing: "border-box", background: "#fafafa", outline: "none", textAlign: "center", marginTop: 0 }} />
                   </div>
                 </div>
