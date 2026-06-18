@@ -2207,8 +2207,6 @@ async function ensureHwAcceptanceTable() {
   `);
   await pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS currency TEXT`);
   await pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS item_code TEXT`);
-  // currency alanı BOQ'dan çekiliyor; eski default 'USD' değerlerini temizle
-  await pool.query(`UPDATE hw_acceptance_rows SET currency = NULL WHERE currency = 'USD'`);
 }
 
 async function ensureHwInvoiceTable() {
@@ -14895,7 +14893,9 @@ app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
       const projectName    = String(r["ProjectName"] || "").trim();
       const engineeringCode = String(r["EngineeringCode"] || "").trim();
       // BOQ ile eşleşecek item code — olası kolon adları deneniyor
+      // ServiceCode yeni Excel formatında BOQ s_bom_code'una karşılık gelir
       const itemCode       = String(
+        r["ServiceCode"] || r["Service Code"] ||
         r["ItemCode"] || r["Item Code"] || r["Item No"] || r["ItemNo"] ||
         r["Item No."] || r["MaterialCode"] || r["Material Code"] ||
         r["MaterialNo"] || r["Material No."] || r["BOQItemCode"] ||
@@ -14993,31 +14993,33 @@ app.get("/hw-acceptance/summary", async (req, res) => {
         a.engineering_code,
         a.item_code,
         COALESCE(
-          -- 1. Öncelik: HW PO tablosundan 3'lü anahtar ile item_code bul → BOQ'dan currency al
+          -- 1. item_code (ServiceCode) direkt BOQ ile eşleşme — en güvenilir kaynak
+          (SELECT b.currency FROM boq_items b
+             WHERE TRIM(b.s_bom_code) = TRIM(a.item_code)
+               AND a.item_code IS NOT NULL AND a.item_code != ''
+             LIMIT 1),
+          -- 2. engineering_code direkt BOQ ile eşleşme
+          (SELECT b.currency FROM boq_items b
+             WHERE TRIM(b.s_bom_code) = TRIM(a.engineering_code)
+               AND a.engineering_code IS NOT NULL AND a.engineering_code != ''
+             LIMIT 1),
+          -- 3. PO tablosundan 3'lü anahtar ile item_code bul → BOQ'dan currency al
           (SELECT b.currency FROM po_rows p
              JOIN boq_items b ON TRIM(b.s_bom_code) = TRIM(p.item_code)
              WHERE TRIM(p.po_no)       = TRIM(a.po_no)
                AND TRIM(p.po_line_no)  = TRIM(a.po_line_no)
                AND TRIM(p.shipment_no) = TRIM(a.shipment_no)
              LIMIT 1),
-          -- 2. po_no + po_line_no ile eşleşme (shipment_no NULL olabilir)
+          -- 4. po_no + po_line_no ile eşleşme
           (SELECT b.currency FROM po_rows p
              JOIN boq_items b ON TRIM(b.s_bom_code) = TRIM(p.item_code)
              WHERE TRIM(p.po_no)      = TRIM(a.po_no)
                AND TRIM(p.po_line_no) = TRIM(a.po_line_no)
              LIMIT 1),
-          -- 3. Sadece po_no ile eşleşme
+          -- 5. Sadece po_no ile eşleşme (son fallback)
           (SELECT b.currency FROM po_rows p
              JOIN boq_items b ON TRIM(b.s_bom_code) = TRIM(p.item_code)
              WHERE TRIM(p.po_no) = TRIM(a.po_no)
-             LIMIT 1),
-          -- 4. engineering_code direkt BOQ ile eşleşme
-          (SELECT b.currency FROM boq_items b
-             WHERE TRIM(b.s_bom_code) = TRIM(a.engineering_code)
-             LIMIT 1),
-          -- 5. item_code direkt BOQ ile eşleşme
-          (SELECT b.currency FROM boq_items b
-             WHERE TRIM(b.s_bom_code) = TRIM(a.item_code)
              LIMIT 1)
         ) AS currency
       FROM hw_acceptance_rows a
