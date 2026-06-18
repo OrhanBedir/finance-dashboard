@@ -15039,15 +15039,27 @@ app.get("/hw-acceptance/summary", async (req, res) => {
     let total_try = 0;
     const handlerMap = {};
 
+    // AcceptanceMilestone'a göre beklenen ödeme yüzdesini ve KDV'yi belirle
+    // AC2 (Customer Acceptance / PAC): genel bedelin %20'si + KDV (%20)
+    // AC1 (Huawei Acceptance): genel bedelin %80'i (KDV yok — zaten fatura kesilmemiş)
+    function getMilestoneFactor(milestone) {
+      const m = String(milestone || '').toUpperCase();
+      if (m.includes('AC2')) return { pct: 0.20, kdv: 1.20, label: 'AC2 %20+KDV' };
+      if (m.includes('AC1')) return { pct: 0.80, kdv: 1.00, label: 'AC1 %80'     };
+      return { pct: 1.00, kdv: 1.00, label: '' };
+    }
+
     for (const row of result.rows) {
       const qty       = parseFloat(row.acceptance_qty) || 1;
       const price     = parseFloat(row.unit_price) || 0;
-      const lineTotal = price * qty;
+      const milestone = row.acceptance_milestone || row.milestone_type || '';
+      const { pct, kdv, label } = getMilestoneFactor(milestone);
+      const lineTotal = price * qty * pct * kdv;
+
       // currency: SQL COALESCE'tan gelen değer; NULL ise engineering_code+price ile tahmin et
-      // inferCurrencyByItemAndPrice → bilinmeyende TRY döner (USD'yi ~38x artırma hatasını önler)
       const currency  = inferCurrencyByItemAndPrice(
         row.engineering_code || row.item_code,
-        row.currency,   // NULL ise normalizeCurrency → "TRY"
+        row.currency,
         price
       );
       const isTry     = currency === 'TRY' || currency === 'TL';
@@ -15079,7 +15091,8 @@ app.get("/hw-acceptance/summary", async (req, res) => {
         po_no: row.po_no,
         site_code: row.site_code,
         site_name: row.site_name,
-        milestone: row.acceptance_milestone || row.milestone_type || '',
+        milestone,
+        milestone_label: label,
         line_total: lineTotal,
         currency,
         progress: row.approval_progress

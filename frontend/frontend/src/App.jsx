@@ -5082,17 +5082,21 @@ function FinanceDashboard({
                   {(() => {
                     const combinedTry = totalTry + totalUsd * usdTryLiveRate;
                     const fmt = (v) => v >= 1000000 ? `₺${(v/1000000).toFixed(1)}M` : `₺${Math.round(v/1000)}K`;
+                    // Milestone dağılımını hesapla
+                    const allItems = rawHandlers.flatMap(h => h.items || []);
+                    const ac1Count = allItems.filter(it => String(it.milestone||'').toUpperCase().includes('AC1')).length;
+                    const ac2Count = allItems.filter(it => String(it.milestone||'').toUpperCase().includes('AC2')).length;
                     return (
                       <div style={{ marginBottom:"8px" }}>
                         <div style={{ display:"flex", alignItems:"baseline", gap:"6px" }}>
                           <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>{fmt(combinedTry)}</div>
                           <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
                         </div>
-                        {totalUsd > 0 && (
-                          <div style={{ fontSize:"10px", color:"#94a3b8", marginTop:"2px" }}>
-                            ${Math.round(totalUsd/1000)}K USD dahil · kur: {usdTryLiveRate.toFixed(2)} ₺/$
-                          </div>
-                        )}
+                        <div style={{ display:"flex", gap:"6px", marginTop:"4px", flexWrap:"wrap" }}>
+                          {ac1Count > 0 && <span style={{ fontSize:"9px", fontWeight:600, background:"#dbeafe", color:"#1d4ed8", borderRadius:"8px", padding:"1px 6px" }}>AC1 %80 · {ac1Count} kalem</span>}
+                          {ac2Count > 0 && <span style={{ fontSize:"9px", fontWeight:600, background:"#fef3c7", color:"#92400e", borderRadius:"8px", padding:"1px 6px" }}>AC2 %20+KDV · {ac2Count} kalem</span>}
+                          {totalUsd > 0 && <span style={{ fontSize:"9px", color:"#94a3b8" }}>${Math.round(totalUsd/1000)}K USD · {usdTryLiveRate.toFixed(1)}₺/$</span>}
+                        </div>
                       </div>
                     );
                   })()}
@@ -5101,6 +5105,14 @@ function FinanceDashboard({
                     {visibleHandlers.map((h, i) => {
                       const clr = progColor(h.progress);
                       const itemCount = h.items ? h.items.length : (h.count || 0);
+                      // Handler'ın dominant milestone'unu bul
+                      const milestones = (h.items||[]).map(it => String(it.milestone||'').toUpperCase());
+                      const hasAC1 = milestones.some(m => m.includes('AC1'));
+                      const hasAC2 = milestones.some(m => m.includes('AC2'));
+                      const milestoneTag = hasAC2 && hasAC1 ? 'AC1+AC2'
+                                         : hasAC2 ? 'AC2 %20+KDV'
+                                         : hasAC1 ? 'AC1 %80'
+                                         : '';
                       return (
                         <div key={i} style={{ display:"flex", alignItems:"center", gap:"6px" }}>
                           <div style={{ width:"22px", height:"22px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", fontSize:"9px", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
@@ -5108,6 +5120,7 @@ function FinanceDashboard({
                           </div>
                           <div style={{ flex:1, overflow:"hidden" }}>
                             <div style={{ fontSize:"11px", fontWeight:600, color:"#1e293b", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{h.handler}</div>
+                            {milestoneTag && <div style={{ fontSize:"9px", color:"#92400e", fontWeight:600 }}>{milestoneTag}</div>}
                           </div>
                           <span style={{ fontSize:"9px", fontWeight:600, color:"#6b7280", background:"#f1f5f9", borderRadius:"9px", padding:"1px 5px", flexShrink:0 }}>{itemCount} kalem</span>
                           <span style={{ fontSize:"10px", fontWeight:700, color:clr, flexShrink:0 }}>{h.progress}</span>
