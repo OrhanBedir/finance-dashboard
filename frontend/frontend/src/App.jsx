@@ -5093,7 +5093,7 @@ function FinanceDashboard({
                           <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
                         </div>
                         <div style={{ display:"flex", gap:"6px", marginTop:"4px", flexWrap:"wrap" }}>
-                          {ac1Count > 0 && <span style={{ fontSize:"9px", fontWeight:600, background:"#dbeafe", color:"#1d4ed8", borderRadius:"8px", padding:"1px 6px" }}>AC1 %80 · {ac1Count} kalem</span>}
+                          {ac1Count > 0 && <span style={{ fontSize:"9px", fontWeight:600, background:"#dbeafe", color:"#1d4ed8", borderRadius:"8px", padding:"1px 6px" }}>AC1 %80+KDV · {ac1Count} kalem</span>}
                           {ac2Count > 0 && <span style={{ fontSize:"9px", fontWeight:600, background:"#fef3c7", color:"#92400e", borderRadius:"8px", padding:"1px 6px" }}>AC2 %20+KDV · {ac2Count} kalem</span>}
                           {totalUsd > 0 && <span style={{ fontSize:"9px", color:"#94a3b8" }}>${Math.round(totalUsd/1000)}K USD · {usdTryLiveRate.toFixed(1)}₺/$</span>}
                         </div>
@@ -5111,7 +5111,7 @@ function FinanceDashboard({
                       const hasAC2 = milestones.some(m => m.includes('AC2'));
                       const milestoneTag = hasAC2 && hasAC1 ? 'AC1+AC2'
                                          : hasAC2 ? 'AC2 %20+KDV'
-                                         : hasAC1 ? 'AC1 %80'
+                                         : hasAC1 ? 'AC1 %80+KDV'
                                          : '';
                       return (
                         <div key={i} style={{ display:"flex", alignItems:"center", gap:"6px" }}>

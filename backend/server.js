@@ -15045,7 +15045,7 @@ app.get("/hw-acceptance/summary", async (req, res) => {
     function getMilestoneFactor(milestone) {
       const m = String(milestone || '').toUpperCase();
       if (m.includes('AC2')) return { pct: 0.20, kdv: 1.20, label: 'AC2 %20+KDV' };
-      if (m.includes('AC1')) return { pct: 0.80, kdv: 1.00, label: 'AC1 %80'     };
+      if (m.includes('AC1')) return { pct: 0.80, kdv: 1.20, label: 'AC1 %80+KDV' };
       return { pct: 1.00, kdv: 1.00, label: '' };
     }
 
