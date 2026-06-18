@@ -4736,7 +4736,9 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    // safeQuery Türkçe karakter içerebilir → ASCII fallback + RFC 5987
+    const invAscii = fileName.replace(/[^\x20-\x7E]/g, "_");
+    res.setHeader("Content-Disposition", `attachment; filename="${invAscii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
     applyPremiumExcelStyle(worksheet, {
       headerRowNumber: 2,
       freezeRow: 2,
@@ -10603,8 +10605,11 @@ app.get("/hr/excel/puantaj", async (req, res) => {
     ws.getColumn(totalDays + 3).width = 10;
 
     const ayPad = String(ay).padStart(2,"0");
+    // Türkçe karakterler (Mayıs, Şubat, Ağustos...) HTTP header'da geçersiz → ASCII fallback + RFC 5987 UTF-8
+    const puantajFileName = `ERC_Puantaj_${ayAdi}_${yil}.xlsx`;
+    const puantajAscii = puantajFileName.replace(/[^\x20-\x7E]/g, "_");
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename=ERC_Puantaj_${ayAdi}_${yil}.xlsx`);
+    res.setHeader("Content-Disposition", `attachment; filename="${puantajAscii}"; filename*=UTF-8''${encodeURIComponent(puantajFileName)}`);
     await wb.xlsx.write(res);
     res.end();
   } catch (e) { console.error("PUANTAJ EXCEL ERROR:", e.message); res.status(500).json({ error: e.message }); }
