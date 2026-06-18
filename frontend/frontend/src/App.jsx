@@ -3633,9 +3633,10 @@ function FinanceDashboard({
         "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
         "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Federal Hakediş (%80) KDV Dahil",
         "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
+        "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
         "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 18];
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 20, 30, 16, 18];
       const NCOLS = headers.length;
 
       const titleStyle = {
@@ -3665,6 +3666,12 @@ function FinanceDashboard({
       const federalKdvStyle = (isEven) => ({
         fill: { patternType: "solid", fgColor: { rgb: isEven ? "CFFAFE" : "ECFEFF" } },
         font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "0E7490" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const kalanStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FEE2E2" : "FEF2F2" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "B91C1C" } },
         alignment: { horizontal: "right", vertical: "middle" },
         border: cellBorder,
       });
@@ -3715,6 +3722,9 @@ function FinanceDashboard({
         const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
         const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
 
+        // Kalan bedel: taşeronun hak ettiği (KDV dahil) − şimdiye kadar kesilen fatura (KDV dahil)
+        const kalanBedel = isFaturaTaseron ? Math.max(0, federalHakedis * 1.20 - faturaToplamMiktar) : 0;
+
         aoa.push([
           { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
           { v: row.status || "",                                  s: statusStyle(row.status, isEven) },
@@ -3739,6 +3749,9 @@ function FinanceDashboard({
           { v: faturaNo,                                          s: cellStyle(isEven, false) },
           { v: faturaToplamMiktar || "",                          s: cellStyle(isEven, true) },
           { v: faturaTarihi,                                      s: cellStyle(isEven, false) },
+          { v: "",                                                s: cellStyle(isEven, false) },
+          { v: kalanBedel > 0.01 ? kalanBedel : "",               s: kalanBedel > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
+          { v: "",                                                s: cellStyle(isEven, false) },
           { v: row.subcon_name || "",                             s: cellStyle(isEven, false) },
         ]);
       });
@@ -3759,7 +3772,7 @@ function FinanceDashboard({
       const wb = XLSXStyle.utils.book_new();
       XLSXStyle.utils.book_append_sheet(wb, ws, "Taşeron Detay");
 
-      const lastColLetter = String.fromCharCode(64 + NCOLS);
+      const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
       const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
       const autoFilterRef = `A2:${lastColLetter}2`;
 
@@ -14274,9 +14287,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
         "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Federal Hakediş (%80) KDV Dahil",
         "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
+        "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
         "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 18];
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 20, 30, 16, 18];
       const NCOLS = headers.length; // 24
 
       const titleStyle = {
@@ -14316,6 +14330,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const federalKdvStyle = (isEven) => ({
         fill: { patternType: "solid", fgColor: { rgb: isEven ? "CFFAFE" : "ECFEFF" } },
         font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "0E7490" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const kalanStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FEE2E2" : "FEF2F2" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "B91C1C" } },
         alignment: { horizontal: "right", vertical: "middle" },
         border: cellBorder,
       });
@@ -14369,6 +14389,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
         const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
 
+        // Kalan bedel: taşeronun hak ettiği (KDV dahil) − şimdiye kadar kesilen fatura (KDV dahil)
+        const kalanBedel = isFaturaTaseron ? Math.max(0, federalHakedis * 1.20 - faturaToplamMiktar) : 0;
+
         aoa.push([
           { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
           { v: row.status || "",                                  s: statusStyle(row.status, isEven) },
@@ -14393,6 +14416,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           { v: faturaNo,                                          s: cellStyle(isEven, false) },
           { v: faturaToplamMiktar || "",                          s: cellStyle(isEven, true) },
           { v: faturaTarihi,                                      s: cellStyle(isEven, false) },
+          { v: "",                                                s: cellStyle(isEven, false) },
+          { v: kalanBedel > 0.01 ? kalanBedel : "",               s: kalanBedel > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
+          { v: "",                                                s: cellStyle(isEven, false) },
           { v: row.subcon_name || "",                             s: cellStyle(isEven, false) },
         ]);
       });
@@ -14420,7 +14446,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         : "";
       const fileName = `bolge_analizi_${dateFile}${searchSuffixFile}.xlsx`;
 
-      const lastColLetter = String.fromCharCode(64 + NCOLS);
+      const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
       const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
       const autoFilterRef = `A2:${lastColLetter}2`;
 
