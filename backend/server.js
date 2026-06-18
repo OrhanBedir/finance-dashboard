@@ -240,6 +240,7 @@ function applySubconFilter(req, rows) {
 }
 
 const pool = require("./db");
+const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant } = pool;
 const app = express();
 
 app.use(express.json());
@@ -286,6 +287,32 @@ app.use((req, res, next) => {
   }
 
   next();
+});
+
+// ── MULTI-TENANT BAĞLAM MIDDLEWARE ───────────────────────────────────────────
+// İsteğin tenant'ını JWT'den (varsa) çözer. erc / token'sız istekler hiçbir
+// değişikliğe uğramaz (varsayılan public havuzu). erc dışı tenant istekleri,
+// isteğin tüm süresi boyunca o tenant'ın şemasına bağlanır → tüm pool.query
+// çağrıları otomatik olarak o şemaya yönlenir. ERC yolu byte-for-byte aynıdır.
+app.use((req, res, next) => {
+  let tenant = "erc";
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    const token = authHeader.split(" ")[1];
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      tenant = decoded.tenant || "erc";
+    } catch {
+      // Geçersiz/finance token → tenant çözülemedi, public'te kal (ERC davranışı).
+    }
+  }
+  // Şema izolasyonu yalnızca allow-list'teki izole tenant'lar için devreye girer.
+  // Diğer tüm istekler (ERC, legacy '2kx' taşeron görünümü, token'sız) public'te kalır.
+  if (!isIsolatedTenant(tenant)) return next();
+  bindRequestToTenant(tenant, () => { next(); }).catch((e) => {
+    console.error("[tenant-middleware] bağlam hatası:", e.message);
+    next();
+  });
 });
 
 // TÜM KULLANICILARI LİSTELE
