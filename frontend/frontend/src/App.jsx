@@ -7882,7 +7882,7 @@ function FinanceDashboard({
           BÖLGE FATURA GİRİŞİ MODAL
       ═══════════════════════════════════════════════════════════════ */}
       {showBolgeFaturaModal && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:10001, display:"flex", alignItems:"center", justifyContent:"center" }}>
           <div style={{ background:"#fff", borderRadius:"14px", padding:"32px 28px", width:"480px", maxWidth:"95vw", boxShadow:"0 8px 40px rgba(0,0,0,0.18)" }}>
             <h3 style={{ margin:"0 0 20px", fontSize:"17px", fontWeight:700, color:"#1e3a5f" }}>+ Fatura Girişi</h3>
 
