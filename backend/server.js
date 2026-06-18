@@ -8383,6 +8383,10 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
     const bfResult = await pool.query(`SELECT * FROM bolge_fatura ORDER BY created_at DESC`).catch(() => ({ rows: [] }));
     const bfMap = {};
     for (const bf of bfResult.rows) {
+      // Boş kayıtları atla (fatura no yok VE miktar 0/boş) — fantom satırları sayma
+      const hasFaturaNo = String(bf.fatura_no || '').trim() !== '';
+      const hasMiktar = Number(bf.fatura_miktari || 0) > 0;
+      if (!hasFaturaNo && !hasMiktar) continue;
       const key = `${String(bf.site_code||'').toUpperCase()}|${String(bf.item_code||'').trim()}|${String(bf.taseron_adi||'').toLowerCase()}`;
       if (!bfMap[key]) bfMap[key] = [];
       bfMap[key].push({ fatura_no: bf.fatura_no, fatura_tarihi: bf.fatura_tarihi, fatura_miktari: bf.fatura_miktari });
@@ -14933,6 +14937,9 @@ app.post("/bolge-fatura/add", requireFinanceAuth, async (req, res) => {
     await ensureBolgeFaturaTable();
     const { taseron_adi, site_code, item_code, item_description, fatura_no, fatura_tarihi, fatura_miktari } = req.body;
     if (!taseron_adi || !site_code) return res.status(400).json({ ok: false, error: "Taşeron ve site kodu zorunlu" });
+    if (!String(fatura_no || '').trim() && !(Number(fatura_miktari || 0) > 0)) {
+      return res.status(400).json({ ok: false, error: "Fatura No veya Fatura Miktarı girilmeli (boş fatura kaydedilemez)" });
+    }
     const result = await pool.query(`
       INSERT INTO bolge_fatura (taseron_adi, site_code, item_code, item_description, fatura_no, fatura_tarihi, fatura_miktari)
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id

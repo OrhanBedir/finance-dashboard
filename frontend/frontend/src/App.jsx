@@ -8080,7 +8080,7 @@ function FinanceDashboard({
             {(() => {
               if (!bolgeFaturaForm.site_code || !bolgeFaturaForm.item_code || !bolgeFaturaForm.taseron_adi) return null;
               const fKey = `${bolgeFaturaForm.site_code.toUpperCase()}|${bolgeFaturaForm.item_code}|${bolgeFaturaForm.taseron_adi.toLowerCase()}`;
-              const prevFaturalar = bolgeFaturaMap[fKey] || [];
+              const prevFaturalar = (bolgeFaturaMap[fKey] || []).filter(f => String(f.fatura_no || "").trim() !== "" || Number(f.fatura_miktari || 0) > 0);
               if (prevFaturalar.length === 0) return null;
               const toplamKesilen = prevFaturalar.reduce((s, f) => s + (Number(f.fatura_miktari) || 0), 0);
               return (
@@ -8139,6 +8139,7 @@ function FinanceDashboard({
               <button disabled={bolgeFaturaLoading}
                 onClick={async () => {
                   if (!bolgeFaturaForm.site_code || !bolgeFaturaForm.taseron_adi) return alert("Firma ve Site ID zorunlu");
+                  if (!String(bolgeFaturaForm.fatura_no || "").trim() && !(Number(bolgeFaturaForm.fatura_miktari || 0) > 0)) return alert("Fatura No veya Fatura Miktarı girilmeli");
                   setBolgeFaturaLoading(true);
                   try {
                     await fetchJson(`${API_BASE}/bolge-fatura/add`, { method:"POST", withAuth:true, body: JSON.stringify(bolgeFaturaForm) });
