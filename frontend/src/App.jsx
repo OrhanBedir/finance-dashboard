@@ -285,35 +285,6 @@ function InvoiceEntryExcelUploadInline({ onClose, onUploaded }) {
   );
 }
 
-// Türk formatındaki sayıyı (1.234,56 → 1234.56) parse et. Faturadan kopyalanan tutarlar için.
-function parseTrNumber(str) {
-  if (str == null) return 0;
-  let s = String(str).trim().replace(/\s/g, "").replace(/₺|TL/gi, "");
-  if (!s) return 0;
-  const hasComma = s.includes(",");
-  const hasDot = s.includes(".");
-  if (hasComma && hasDot) {
-    // Nokta binlik ayıracı, virgül ondalık (22.215,23 → 22215.23)
-    s = s.replace(/\./g, "").replace(",", ".");
-  } else if (hasComma) {
-    // Sadece virgül = ondalık (22215,23 → 22215.23)
-    s = s.replace(",", ".");
-  }
-  // Sadece nokta veya düz sayı: olduğu gibi bırak (nokta ondalık kabul edilir)
-  const n = Number(s);
-  return isNaN(n) ? 0 : n;
-}
-
-// Taşeron adını kanonik token'a indirger (tam isim → kısa kod). Eşleştirme anahtarlarında kullanılır.
-function canonTaseron(name) {
-  const n = String(name || "").toLowerCase();
-  if (n.includes("federal")) return "federal";
-  if (n.includes("ubs")) return "ubs";
-  if (n.includes("2kx")) return "2kx";
-  if (n.includes("ferrum")) return "ferrumx";
-  return n.trim();
-}
-
 async function fetchJson(url, options = {}) {
   const { withAuth = true, ...fetchOptions } = options;
 
@@ -325,9 +296,6 @@ async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
     ...fetchOptions,
     headers: {
-      ...(fetchOptions.body && typeof fetchOptions.body === "string"
-        ? { "Content-Type": "application/json" }
-        : {}),
       ...(fetchOptions.headers || {}),
       ...(withAuth && token ? { Authorization: `Bearer ${token}` } : {}),
     },
@@ -3373,16 +3341,6 @@ function FinanceDashboard({
   const [subconFilter, setSubconFilter] = useState("");
   const [subconSummaryRows, setSubconSummaryRows] = useState([]);
   const [showSubconSummaryModal, setShowSubconSummaryModal] = useState(false);
-  const [bolgeFaturaMap, setBolgeFaturaMap] = useState({});
-  const [showBolgeFaturaModal, setShowBolgeFaturaModal] = useState(false);
-  const [bolgeFaturaForm, setBolgeFaturaForm] = useState({ taseron_adi:"", site_code:"", item_code:"", item_description:"", fatura_no:"", fatura_tarihi:"", fatura_miktari:"" });
-  const [bolgeFaturaSiteItems, setBolgeFaturaSiteItems] = useState([]);
-  const [bolgeFaturaLoading, setBolgeFaturaLoading] = useState(false);
-  // Manuel taşeron hakediş (saha/kalem bazında override)
-  const [taseronHakedisMap, setTaseronHakedisMap] = useState({});
-  const [showManualHakedisModal, setShowManualHakedisModal] = useState(false);
-  const [manualHakedisForm, setManualHakedisForm] = useState({ taseron_adi:"", site_code:"", item_code:"", item_description:"", hakedis_bedeli:"" });
-  const [manualHakedisLoading, setManualHakedisLoading] = useState(false);
 
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
@@ -3641,440 +3599,56 @@ function FinanceDashboard({
     return rows;
   }, [subconDetailRows, subconFilter]);
 
-  const handleExportFilteredSubconExcel = async () => {
-    try {
-      // Kırılım (%80) ile çalışan taşeronlar: yalnız Federal + UBS
-      const KIRILIM_TASERONLAR = ["federal", "ubs"];
-      const kirilimRows = (filteredSubconDetailRows || []).filter((r) => {
-        const n = String(r.subcon_name || "").toLowerCase();
-        return KIRILIM_TASERONLAR.some((t) => n.includes(t));
-      });
-      if (!kirilimRows.length) {
-        alert("Kırılım taşeron (Federal / UBS) kaydı bulunamadı");
-        return;
-      }
-
-      const dateStr = new Date().toLocaleDateString("tr-TR");
-      const safeName = subconFilter
-        ? subconFilter.replace(/[^\wğüşöçıİĞÜŞÖÇ -]/gi, "").replace(/\s+/g, "_")
-        : "tum_taseronlar";
-
-      const getAnaliz = (row) => {
-        if (row.status === "PO_BEKLER") return "Eksik";
-        if (Number(row.done_qty || 0) === 0) return "Giriş Yok";
-        if (Number(row.done_qty || 0) === Number(row.requested_qty || 0)) return "Tamam";
-        if (Number(row.done_qty || 0) > Number(row.requested_qty || 0)) return "Fazla";
-        return "Eksik";
-      };
-
-      const headers = [
-        "Bölge", "Status", "Analiz", "Project Code", "Site Code",
-        "Item Description", "Item Code", "OnAir Date",
-        "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Federal Hakediş (%80) KDV Dahil",
-        "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
-        "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
-        "Taşeron",
-      ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 20, 30, 16, 18];
-      const NCOLS = headers.length;
-
-      const titleStyle = {
-        fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
-        font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
-        alignment: { horizontal: "center", vertical: "center" },
-      };
-      const headerStyle = {
-        fill: { patternType: "solid", fgColor: { rgb: "203864" } },
-        font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
-        alignment: { horizontal: "center", vertical: "center", wrapText: true },
-        border: { top:{style:"thin",color:{rgb:"B7C9E2"}}, bottom:{style:"thin",color:{rgb:"B7C9E2"}}, left:{style:"thin",color:{rgb:"B7C9E2"}}, right:{style:"thin",color:{rgb:"B7C9E2"}} },
-      };
-      const cellBorder = { top:{style:"hair",color:{rgb:"E5E7EB"}}, bottom:{style:"hair",color:{rgb:"E5E7EB"}}, left:{style:"hair",color:{rgb:"E5E7EB"}}, right:{style:"hair",color:{rgb:"E5E7EB"}} };
-      const cellStyle = (isEven, isNum) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "F8FAFC" : "FFFFFF" } },
-        font: { sz: 11, name: "Calibri", color: { rgb: "111827" } },
-        alignment: { horizontal: isNum ? "right" : "left", vertical: "middle" },
-        border: cellBorder,
-      });
-      const federalStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const federalKdvStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "CFFAFE" : "ECFEFF" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "0E7490" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const kalanStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FEE2E2" : "FEF2F2" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "B91C1C" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const faturaStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FFF3CD" : "FFFBEA" } },
-        font: { sz: 11, name: "Calibri", color: { rgb: "92400E" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const statusStyle = (status, isEven) => {
-        const base = cellStyle(isEven, false);
-        const s = String(status || "").toUpperCase();
-        const colors = { OK: "15803D", PO_BEKLER: "D97706", CANCEL: "B91C1C", PARTIAL: "2563EB" };
-        if (colors[s]) return { ...base, font: { ...base.font, bold: true, color: { rgb: colors[s] } } };
-        return base;
-      };
-
-      const aoa = [];
-      const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
-      const titleLabel = subconFilter ? `TAŞERON BAZLI DETAY - ${subconFilter.toUpperCase()} (${dateStr})` : `TAŞERON BAZLI DETAY - TÜM TAŞERONLAR (${dateStr})`;
-      titleRow[0] = { v: titleLabel, s: titleStyle };
-      aoa.push(titleRow);
-      aoa.push(headers.map(h => ({ v: h, s: headerStyle })));
-
-      const FATURA_TASERONLAR_SUB = ["federal", "ubs"];
-      const usdR = Number(usdTryRate || 0);
-
-      kirilimRows.forEach((row, idx) => {
-        const isEven = idx % 2 === 1;
-        const isUSD = normalizeCurrency(row.currency) === "USD";
-        const unitPrice = Number(row.unit_price || 0);
-        const doneQty = Number(row.done_qty || 0);
-        const billedQty = Number(row.billed_qty || 0);
-        const dueQty = doneQty - billedQty;
-        const usdBirimFiyat = isUSD ? unitPrice : 0;
-        const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
-        const rawTotal = doneQty * unitPrice;
-        const toplamHakedis = isUSD ? rawTotal * usdR : rawTotal;
-        let federalHakedis = toplamHakedis * 0.80;
-
-        const subconLower = String(row.subcon_name || "").toLowerCase().trim();
-        const subconCanon = canonTaseron(row.subcon_name);
-        // Manuel taşeron hakedişi varsa (kalem bazlı) sistemdeki %80 hesabını override et
-        const thKeyItem = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconCanon}`;
-        const manualHak = Number((taseronHakedisMap || {})[thKeyItem] || 0);
-        if (manualHak > 0) federalHakedis = manualHak;
-
-        const isFaturaTaseron = FATURA_TASERONLAR_SUB.some(t => subconLower.includes(t));
-        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * 0.80 : 0;
-
-        const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconCanon}`;
-        const bfEntries = (bolgeFaturaMap || {})[bfKey] || [];
-        const faturaNo = bfEntries.map(e => e.fatura_no || "").filter(Boolean).join(", ");
-        const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
-        const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
-
-        // Kalan bedel: taşeronun hak ettiği (KDV dahil) − şimdiye kadar kesilen fatura (KDV dahil)
-        const kalanBedel = isFaturaTaseron ? Math.max(0, federalHakedis * 1.20 - faturaToplamMiktar) : 0;
-
-        aoa.push([
-          { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
-          { v: row.status || "",                                  s: statusStyle(row.status, isEven) },
-          { v: getAnaliz(row),                                    s: cellStyle(isEven, false) },
-          { v: row.project_code || "",                            s: cellStyle(isEven, false) },
-          { v: row.site_code || "",                               s: cellStyle(isEven, false) },
-          { v: row.item_description || "",                        s: cellStyle(isEven, false) },
-          { v: row.item_code || "",                               s: cellStyle(isEven, false) },
-          { v: row.onair_date || "",                              s: cellStyle(isEven, false) },
-          { v: doneQty,                                           s: cellStyle(isEven, true) },
-          { v: Number(row.requested_qty || 0),                    s: cellStyle(isEven, true) },
-          { v: billedQty,                                         s: cellStyle(isEven, true) },
-          { v: dueQty,                                            s: cellStyle(isEven, true) },
-          { v: row.currency || "",                                s: cellStyle(isEven, false) },
-          { v: usdBirimFiyat,                                     s: cellStyle(isEven, true) },
-          { v: usdToplamFiyat,                                    s: cellStyle(isEven, true) },
-          { v: unitPrice,                                         s: cellStyle(isEven, true) },
-          { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
-          { v: federalHakedis,                                    s: federalStyle(isEven) },
-          { v: federalHakedis * 1.20,                             s: federalKdvStyle(isEven) },
-          { v: faturaKesilecek,                                   s: faturaKesilecek > 0 ? faturaStyle(isEven) : cellStyle(isEven, true) },
-          { v: faturaNo,                                          s: cellStyle(isEven, false) },
-          { v: faturaToplamMiktar || "",                          s: cellStyle(isEven, true) },
-          { v: faturaTarihi,                                      s: cellStyle(isEven, false) },
-          { v: "",                                                s: cellStyle(isEven, false) },
-          { v: kalanBedel > 0.01 ? kalanBedel : "",               s: kalanBedel > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
-          { v: "",                                                s: cellStyle(isEven, false) },
-          { v: row.subcon_name || "",                             s: cellStyle(isEven, false) },
-        ]);
-      });
-
-      const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map(r => r.map(c => c.v)));
-      aoa.forEach((row, ri) => {
-        row.forEach((cell, ci) => {
-          const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
-          if (!ws[addr]) ws[addr] = { v: cell.v };
-          ws[addr].s = cell.s;
-        });
-      });
-
-      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
-      ws["!cols"] = COL_WIDTHS.map(wch => ({ wch }));
-      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...kirilimRows.map(() => ({ hpt: 20 }))];
-
-      const wb = XLSXStyle.utils.book_new();
-      XLSXStyle.utils.book_append_sheet(wb, ws, "Taşeron Detay");
-
-      const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
-      const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
-      const autoFilterRef = `A2:${lastColLetter}2`;
-
-      const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
-      const zip = await JSZip.loadAsync(buf);
-      let xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
-      xml = xml
-        .replace('<sheetView workbookViewId="0"/>', `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`)
-        .replace('<sheetView tabSelected="1" workbookViewId="0"/>', `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`);
-      if (!xml.includes("<autoFilter")) {
-        xml = xml.replace("</sheetData>", `</sheetData><autoFilter ref="${autoFilterRef}"/>`);
-      }
-      zip.file("xl/worksheets/sheet1.xml", xml);
-      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `subcon_detail_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("SUBCON EXCEL ERROR:", err);
-      alert(`Excel indirilemedi:\n${err.message}`);
+  const handleExportFilteredSubconExcel = () => {
+    if (!filteredSubconDetailRows.length) {
+      alert("İndirilecek kayıt bulunamadı");
+      return;
     }
-  };
 
-  // Sabit fiyat taşeronlar (sadece işçilik): 2KX + FERRUMX — SAHA (Site ID) bazında özet
-  const handleExportFixedPriceSubconExcel = async () => {
-    try {
-      const SABIT_TASERONLAR = ["2kx", "ferrumx"];
-      const usdR = Number(usdTryRate || 0);
-      const q = subconFilter.toLowerCase().trim();
+    const excelRows = filteredSubconDetailRows.map((row) => {
+      const billedQty = Number(row.billed_qty || 0);
+      const doneQty = Number(row.done_qty || 0);
+      const unitPrice = Number(row.unit_price || 0);
+      const rawTotal = doneQty * unitPrice;
+      const curr = String(row.currency || "TRY").toUpperCase();
+      const totalTl =
+        curr === "USD" ? rawTotal * Number(usdTryRate || 0) : rawTotal;
 
-      let rows = (subconDetailRows || []).filter((r) => {
-        const n = String(r.subcon_name || "").toLowerCase();
-        return SABIT_TASERONLAR.some((t) => n.includes(t));
-      });
-      if (q) rows = rows.filter((r) => (r.subcon_name || "").toLowerCase().includes(q));
-      if (!rows.length) {
-        alert("Sabit fiyat taşeron (2KX / FERRUMX) kaydı bulunamadı");
-        return;
-      }
-
-      // 2KX için bedel kaynağı: 2KX fiyatlandırma kurgusu (saha bazlı total_hakedis)
-      const twokxSiteMap = {}; // SITE(upper) → total_hakedis
-      try {
-        const dash = await fetchJson(`${API_BASE}/2kx/dashboard`, { withAuth: true });
-        (dash.sites || []).forEach((s) => {
-          twokxSiteMap[String(s.site_code || "").toUpperCase()] = Number(s.total_hakedis || 0);
-        });
-      } catch (e) { console.warn("2KX dashboard alınamadı, po_rows fiyatı kullanılacak:", e?.message); }
-
-      // Saha + Taşeron bazında grupla
-      const groups = new Map();
-      rows.forEach((r) => {
-        const site = String(r.site_code || "").trim();
-        const subcon = String(r.subcon_name || "").trim();
-        if (!site) return;
-        const canon = canonTaseron(subcon);
-        const key = `${site.toUpperCase()}||${canon}`;
-        if (!groups.has(key)) {
-          groups.set(key, {
-            site_code: site, subcon_name: subcon, canon,
-            project_code: r.project_code || "",
-            region: getRegion(r.site_code, r.project_code) || "",
-            kalemSayisi: 0, bedel: 0, items: new Set(),
-          });
-        }
-        const g = groups.get(key);
-        const isUSD = normalizeCurrency(r.currency) === "USD";
-        const raw = Number(r.done_qty || 0) * Number(r.unit_price || 0);
-        const bedel = isUSD ? raw * usdR : raw;
-        if (Number(r.done_qty || 0) > 0) { g.bedel += bedel; g.kalemSayisi += 1; }
-        if (r.item_code) g.items.add(String(r.item_code).trim());
-      });
-
-      // 2KX gruplarının bedelini 2KX fiyatlandırma kurgusundan al (varsa)
-      groups.forEach((g) => {
-        if (g.canon === "2kx") {
-          const twokxVal = twokxSiteMap[g.site_code.toUpperCase()];
-          if (twokxVal != null && twokxVal > 0) g.bedel = twokxVal;
-        }
-      });
-
-      const groupArr = [...groups.values()]
-        .filter((g) => g.bedel > 0)
-        .sort((a, b) => a.subcon_name.localeCompare(b.subcon_name, "tr") || a.site_code.localeCompare(b.site_code, "tr"));
-
-      if (!groupArr.length) {
-        alert("Tamamlanan iş bedeli olan saha bulunamadı");
-        return;
-      }
-
-      const dateStr = new Date().toLocaleDateString("tr-TR");
-      const headers = [
-        "Bölge", "Project Code", "Site Code", "Taşeron", "Kalem Sayısı",
-        "Tamamlanan İş Bedeli (KDV Hariç)", "Tamamlanan İş Bedeli (KDV %20 Dahil)",
-        "Taşeron Hakediş", "Taşeron Hakediş (KDV %20 Dahil)", "Fatura Kesilecek",
-        "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
-        "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
-      ];
-      const COL_WIDTHS = [12, 16, 22, 30, 12, 26, 28, 20, 24, 18, 18, 22, 14, 20, 30, 16];
-      const NCOLS = headers.length;
-
-      const titleStyle = {
-        fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
-        font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
-        alignment: { horizontal: "center", vertical: "center" },
+      return {
+        Bölge: getRegion(row.site_code, row.project_code) || "",
+        Status: row.status || "",
+        Project: row.project_code || "",
+        Site: row.site_code || "",
+        Item: row.item_code || "",
+        "Item Description": row.item_description || "",
+        Done: doneQty,
+        Req: Number(row.requested_qty || 0),
+        Analiz: getQtyAnalysis(row.done_qty, row.requested_qty).label,
+        Billed: billedQty,
+        Curr: curr,
+        Unit: unitPrice,
+        Total: Number(totalTl.toFixed(2)),
+        Subcon: row.subcon_name || "",
+        OnAir: formatDateTR(row.onair_date),
+        QC: row.qc_durum || "",
+        Kabul: row.kabul_durum || "",
+        "RF Not": row.kabul_not || "",
       };
-      const headerStyle = {
-        fill: { patternType: "solid", fgColor: { rgb: "203864" } },
-        font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
-        alignment: { horizontal: "center", vertical: "center", wrapText: true },
-        border: { top:{style:"thin",color:{rgb:"B7C9E2"}}, bottom:{style:"thin",color:{rgb:"B7C9E2"}}, left:{style:"thin",color:{rgb:"B7C9E2"}}, right:{style:"thin",color:{rgb:"B7C9E2"}} },
-      };
-      const cellBorder = { top:{style:"hair",color:{rgb:"E5E7EB"}}, bottom:{style:"hair",color:{rgb:"E5E7EB"}}, left:{style:"hair",color:{rgb:"E5E7EB"}}, right:{style:"hair",color:{rgb:"E5E7EB"}} };
-      const cellStyle = (isEven, isNum) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "F8FAFC" : "FFFFFF" } },
-        font: { sz: 11, name: "Calibri", color: { rgb: "111827" } },
-        alignment: { horizontal: isNum ? "right" : "left", vertical: "middle" },
-        border: cellBorder,
-      });
-      const bedelStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const kdvStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "CFFAFE" : "ECFEFF" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "0E7490" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const kalanStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FEE2E2" : "FEF2F2" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "B91C1C" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const hakedisStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const faturaStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FFF3CD" : "FFFBEA" } },
-        font: { sz: 11, name: "Calibri", color: { rgb: "92400E" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
+    });
 
-      const aoa = [];
-      const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
-      titleRow[0] = { v: `SABİT FİYAT TAŞERON - SAHA BAZLI FATURA ÖZETİ (${dateStr})`, s: titleStyle };
-      aoa.push(titleRow);
-      aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
+    const worksheet = XLSX.utils.json_to_sheet(excelRows);
+    const workbook = XLSX.utils.book_new();
 
-      groupArr.forEach((g, idx) => {
-        const isEven = idx % 2 === 1;
-        const subconLower = g.canon;
-        const siteUpper = g.site_code.toUpperCase();
-        let fNos = [], fMiktar = 0, fTarih = [];
-        g.items.forEach((item) => {
-          const bfKey = `${siteUpper}|${item}|${subconLower}`;
-          const entries = (bolgeFaturaMap || {})[bfKey] || [];
-          entries.forEach((e) => {
-            if (e.fatura_no) fNos.push(e.fatura_no);
-            fMiktar += Number(e.fatura_miktari || 0);
-            if (e.fatura_tarihi) fTarih.push(String(e.fatura_tarihi).slice(0, 10));
-          });
-        });
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Subcon Detail");
 
-        // Manuel taşeron hakedişi: önce saha bazlı (SITE||taseron), yoksa kalem bazlı toplam, yoksa tamamlanan bedel
-        const siteKey = `${siteUpper}||${subconLower}`;
-        let hakedis = g.bedel;
-        const siteManual = Number((taseronHakedisMap || {})[siteKey] || 0);
-        if (siteManual > 0) {
-          hakedis = siteManual;
-        } else {
-          let itemSum = 0, found = false;
-          g.items.forEach((item) => {
-            const k = `${siteUpper}|${item}|${subconLower}`;
-            const v = Number((taseronHakedisMap || {})[k] || 0);
-            if (v > 0) { itemSum += v; found = true; }
-          });
-          if (found) hakedis = itemSum;
-        }
-        const hakedisKdv = hakedis * 1.20;
-        const faturaKesilecek = hakedisKdv; // KDV dahil kesilmesi gereken toplam
-        const kalan = Math.max(0, hakedisKdv - fMiktar);
+    const safeName = subconFilter
+      ? subconFilter.replace(/[^\wğüşöçıİĞÜŞÖÇ -]/gi, "").replace(/\s+/g, "_")
+      : "tum_taseronlar";
 
-        aoa.push([
-          { v: g.region,                       s: cellStyle(isEven, false) },
-          { v: g.project_code,                 s: cellStyle(isEven, false) },
-          { v: g.site_code,                    s: cellStyle(isEven, false) },
-          { v: g.subcon_name,                  s: cellStyle(isEven, false) },
-          { v: g.kalemSayisi,                  s: cellStyle(isEven, true) },
-          { v: g.bedel,                        s: bedelStyle(isEven) },
-          { v: g.bedel * 1.20,                 s: kdvStyle(isEven) },
-          { v: hakedis,                        s: hakedisStyle(isEven) },
-          { v: hakedisKdv,                     s: hakedisStyle(isEven) },
-          { v: faturaKesilecek,                s: faturaStyle(isEven) },
-          { v: [...new Set(fNos)].join(", "),  s: cellStyle(isEven, false) },
-          { v: fMiktar || "",                  s: cellStyle(isEven, true) },
-          { v: [...new Set(fTarih)].join(", "),s: cellStyle(isEven, false) },
-          { v: "",                             s: cellStyle(isEven, false) },
-          { v: kalan > 0.01 ? kalan : "",      s: kalan > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
-          { v: "",                             s: cellStyle(isEven, false) },
-        ]);
-      });
-
-      const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
-      aoa.forEach((row, ri) => {
-        row.forEach((cell, ci) => {
-          const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
-          if (!ws[addr]) ws[addr] = { v: cell.v };
-          ws[addr].s = cell.s;
-        });
-      });
-
-      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
-      ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
-      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...groupArr.map(() => ({ hpt: 20 }))];
-
-      const wb = XLSXStyle.utils.book_new();
-      XLSXStyle.utils.book_append_sheet(wb, ws, "Saha Bazlı");
-
-      const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
-      const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
-      const autoFilterRef = `A2:${lastColLetter}2`;
-
-      const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
-      const zip = await JSZip.loadAsync(buf);
-      let xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
-      xml = xml
-        .replace('<sheetView workbookViewId="0"/>', `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`)
-        .replace('<sheetView tabSelected="1" workbookViewId="0"/>', `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`);
-      if (!xml.includes("<autoFilter")) {
-        xml = xml.replace("</sheetData>", `</sheetData><autoFilter ref="${autoFilterRef}"/>`);
-      }
-      zip.file("xl/worksheets/sheet1.xml", xml);
-      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `sabit_fiyat_saha_bazli_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("SABIT FIYAT EXCEL ERROR:", err);
-      alert(`Excel indirilemedi:\n${err.message}`);
-    }
+    XLSX.writeFile(
+      workbook,
+      `subcon_detail_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
   };
 
   const supplierOptions = useMemo(() => {
@@ -4369,8 +3943,6 @@ function FinanceDashboard({
 
       setSubconSummaryRows(summaryData.rows || []);
       setUsdTryRate(Number(summaryData.usd_try_rate || 0));
-      setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
-      setTaseronHakedisMap(summaryData.taseron_hakedis_map || {});
       setSubconDetailRows(detailData.rows || []);
       setShowSubconSummaryModal(true);
     } catch (err) {
@@ -4905,7 +4477,14 @@ function FinanceDashboard({
   ];
 
   const currentMonth = new Date().getMonth() + 1;
-  const thisMonthInvoiced = summary?.monthly_invoiced?.[currentMonth] || 0;
+  // USD+TRY combined totals for stat cards (converted to TRY using live rate)
+  const totalCollectionsTRY = (summary?.total_collections_try || summary?.total_collections || 0)
+    + (summary?.total_collections_usd || 0) * usdTryLiveRate;
+  const thisMonthCollectionsTRY = (summary?.this_month_collections_try || summary?.this_month_collections || 0)
+    + (summary?.this_month_collections_usd || 0) * usdTryLiveRate;
+  const thisMonthInvoicedTRY = (summary?.monthly_invoiced_try?.[currentMonth] || summary?.monthly_invoiced?.[currentMonth] || 0)
+    + (summary?.monthly_invoiced_usd?.[currentMonth] || 0) * usdTryLiveRate;
+  const thisMonthInvoiced = thisMonthInvoicedTRY;
 
   const loadSalaryRows = async () => {
     try {
@@ -5253,8 +4832,8 @@ function FinanceDashboard({
             <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>{new Date().getFullYear()} Toplam Tahsilat</div>
             <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#eff6ff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>💰</div>
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary?.total_collections || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Yıllık kümülatif</div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(totalCollectionsTRY || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Yıllık kümülatif{(summary?.total_collections_usd||0)>0 ? ` · $${Math.round(summary.total_collections_usd/1000)}K USD dahil` : ""}</div>
         </div>
         {/* Bu Ay Tahsilat */}
         <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
@@ -5263,8 +4842,8 @@ function FinanceDashboard({
             <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Bu Ay Tahsilat</div>
             <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#ecfdf5", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📈</div>
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary?.this_month_collections || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen</div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(thisMonthCollectionsTRY || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen{(summary?.this_month_collections_usd||0)>0 ? ` · $${Math.round(summary.this_month_collections_usd/1000)}K USD dahil` : ""}</div>
           {hwLastUpload?.uploaded_at && (
             <div style={{ fontSize:"10px", color:"#94a3b8", marginTop:"6px", borderTop:"1px solid #f1f5f9", paddingTop:"6px" }}>
               🕒 Son HW yükleme: {new Date(hwLastUpload.uploaded_at).toLocaleString("tr-TR")} ({hwLastUpload.row_count} kayıt)
@@ -5510,21 +5089,17 @@ function FinanceDashboard({
                   {(() => {
                     const combinedTry = totalTry + totalUsd * usdTryLiveRate;
                     const fmt = (v) => v >= 1000000 ? `₺${(v/1000000).toFixed(1)}M` : `₺${Math.round(v/1000)}K`;
-                    // Milestone dağılımını hesapla
-                    const allItems = rawHandlers.flatMap(h => h.items || []);
-                    const ac1Count = allItems.filter(it => String(it.milestone||'').toUpperCase().includes('AC1')).length;
-                    const ac2Count = allItems.filter(it => String(it.milestone||'').toUpperCase().includes('AC2')).length;
                     return (
                       <div style={{ marginBottom:"8px" }}>
                         <div style={{ display:"flex", alignItems:"baseline", gap:"6px" }}>
                           <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>{fmt(combinedTry)}</div>
                           <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
                         </div>
-                        <div style={{ display:"flex", gap:"6px", marginTop:"4px", flexWrap:"wrap" }}>
-                          {ac1Count > 0 && <span style={{ fontSize:"9px", fontWeight:600, background:"#dbeafe", color:"#1d4ed8", borderRadius:"8px", padding:"1px 6px" }}>AC1 %80+KDV · {ac1Count} kalem</span>}
-                          {ac2Count > 0 && <span style={{ fontSize:"9px", fontWeight:600, background:"#fef3c7", color:"#92400e", borderRadius:"8px", padding:"1px 6px" }}>AC2 %20+KDV · {ac2Count} kalem</span>}
-                          {totalUsd > 0 && <span style={{ fontSize:"9px", color:"#94a3b8" }}>${Math.round(totalUsd/1000)}K USD · {usdTryLiveRate.toFixed(1)}₺/$</span>}
-                        </div>
+                        {totalUsd > 0 && (
+                          <div style={{ fontSize:"10px", color:"#94a3b8", marginTop:"2px" }}>
+                            ${Math.round(totalUsd/1000)}K USD dahil · kur: {usdTryLiveRate.toFixed(2)} ₺/$
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -5533,14 +5108,6 @@ function FinanceDashboard({
                     {visibleHandlers.map((h, i) => {
                       const clr = progColor(h.progress);
                       const itemCount = h.items ? h.items.length : (h.count || 0);
-                      // Handler'ın dominant milestone'unu bul
-                      const milestones = (h.items||[]).map(it => String(it.milestone||'').toUpperCase());
-                      const hasAC1 = milestones.some(m => m.includes('AC1'));
-                      const hasAC2 = milestones.some(m => m.includes('AC2'));
-                      const milestoneTag = hasAC2 && hasAC1 ? 'AC1+AC2'
-                                         : hasAC2 ? 'AC2 %20+KDV'
-                                         : hasAC1 ? 'AC1 %80+KDV'
-                                         : '';
                       return (
                         <div key={i} style={{ display:"flex", alignItems:"center", gap:"6px" }}>
                           <div style={{ width:"22px", height:"22px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", fontSize:"9px", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
@@ -5548,7 +5115,6 @@ function FinanceDashboard({
                           </div>
                           <div style={{ flex:1, overflow:"hidden" }}>
                             <div style={{ fontSize:"11px", fontWeight:600, color:"#1e293b", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{h.handler}</div>
-                            {milestoneTag && <div style={{ fontSize:"9px", color:"#92400e", fontWeight:600 }}>{milestoneTag}</div>}
                           </div>
                           <span style={{ fontSize:"9px", fontWeight:600, color:"#6b7280", background:"#f1f5f9", borderRadius:"9px", padding:"1px 5px", flexShrink:0 }}>{itemCount} kalem</span>
                           <span style={{ fontSize:"10px", fontWeight:700, color:clr, flexShrink:0 }}>{h.progress}</span>
@@ -5588,9 +5154,18 @@ function FinanceDashboard({
         <div style={{ padding:"20px" }}>
           {(() => {
             const shortNames = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
-            const received = shortNames.map((_,i) => summary.monthly_received?.[i+1] || 0);
+            // Combine TRY + USD (converted) for chart bars
+            const received = shortNames.map((_,i) => {
+              const t = summary.monthly_received_try?.[i+1] ?? summary.monthly_received?.[i+1] ?? 0;
+              const u = summary.monthly_received_usd?.[i+1] ?? 0;
+              return t + u * usdTryLiveRate;
+            });
             const upcoming = shortNames.map((_,i) => summary.monthly_upcoming?.[i+1] || 0);
-            const invoiced = shortNames.map((_,i) => summary.monthly_invoiced?.[i+1] || 0);
+            const invoiced = shortNames.map((_,i) => {
+              const t = summary.monthly_invoiced_try?.[i+1] ?? summary.monthly_invoiced?.[i+1] ?? 0;
+              const u = summary.monthly_invoiced_usd?.[i+1] ?? 0;
+              return t + u * usdTryLiveRate;
+            });
             const allVals = [...received, ...upcoming, ...invoiced];
             const maxVal = Math.max(...allVals, 1);
             const fmt = (v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v/1000)}K` : String(Math.round(v));
@@ -8066,33 +7641,11 @@ function FinanceDashboard({
                 >
                   <button
                     type="button"
-                    style={{ padding:"8px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}
-                    onClick={() => { setBolgeFaturaForm({ taseron_adi:"FEDERAL", site_code:"", item_code:"", item_description:"", fatura_no:"", fatura_tarihi:"", fatura_miktari:"" }); setBolgeFaturaSiteItems([]); setShowBolgeFaturaModal(true); }}
+                    className="excelBtn"
+                    onClick={handleExportFilteredSubconExcel}
                   >
-                    + Fatura Girişi
+                    Excel İndir
                   </button>
-
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"2px" }}>
-                    <button
-                      type="button"
-                      className="excelBtn"
-                      onClick={handleExportFilteredSubconExcel}
-                    >
-                      Excel İndir
-                    </button>
-                    <span style={{ fontSize:"10px", color:"#64748b", fontWeight:600 }}>Kırılım — Federal / UBS</span>
-                  </div>
-
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"2px" }}>
-                    <button
-                      type="button"
-                      className="excelBtn"
-                      onClick={handleExportFixedPriceSubconExcel}
-                    >
-                      Excel İndir
-                    </button>
-                    <span style={{ fontSize:"10px", color:"#64748b", fontWeight:600 }}>Sabit Fiyat — 2KX / FERRUMX</span>
-                  </div>
 
                   <button
                     type="button"
@@ -8260,23 +7813,13 @@ function FinanceDashboard({
                           >
                             {formatMoneyByCurrency(row.fazla_odeme || 0, "TRY")}
                           </td>
-                          <td onClick={e => e.stopPropagation()} style={{ whiteSpace:"nowrap" }}>
-                            <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-                              <button
-                                onClick={() => openTaseronFaturaPanel(row.subcon_name)}
-                                style={{ padding:"5px 10px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
-                              >
-                                🧾 Fatura Yönetimi
-                              </button>
-                              {["federal","ubs"].some(t => String(row.subcon_name||"").toLowerCase().includes(t)) && (
-                                <a
-                                  href={`${API_BASE}/bolge-fatura/kesilecek-excel/${encodeURIComponent(row.subcon_name)}`}
-                                  style={{ padding:"5px 10px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", textDecoration:"none", display:"inline-flex", alignItems:"center", gap:"4px" }}
-                                >
-                                  ⬇ Fatura Kesilecek
-                                </a>
-                              )}
-                            </div>
+                          <td onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => openTaseronFaturaPanel(row.subcon_name)}
+                              style={{ padding:"5px 10px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
+                            >
+                              🧾 Fatura Yönetimi
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -8309,251 +7852,6 @@ function FinanceDashboard({
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════
-          BÖLGE FATURA GİRİŞİ MODAL
-      ═══════════════════════════════════════════════════════════════ */}
-      {showBolgeFaturaModal && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:10001, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <div style={{ background:"#fff", borderRadius:"14px", padding:"32px 28px", width:"480px", maxWidth:"95vw", boxShadow:"0 8px 40px rgba(0,0,0,0.18)" }}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", margin:"0 0 20px" }}>
-              <h3 style={{ margin:0, fontSize:"17px", fontWeight:700, color:"#1e3a5f" }}>+ Fatura Girişi</h3>
-              {bolgeFaturaForm.site_code && bolgeFaturaForm.taseron_adi && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setManualHakedisForm({
-                      taseron_adi: bolgeFaturaForm.taseron_adi,
-                      site_code: bolgeFaturaForm.site_code,
-                      item_code: bolgeFaturaForm.item_code || "",
-                      item_description: bolgeFaturaForm.item_description || "",
-                      hakedis_bedeli: "",
-                    });
-                    setShowManualHakedisModal(true);
-                  }}
-                  style={{ display:"inline-flex", alignItems:"center", gap:"6px", padding:"8px 14px", background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"#fff", border:"none", borderRadius:"10px", fontSize:"12px", fontWeight:700, cursor:"pointer", boxShadow:"0 4px 12px rgba(79,70,229,0.35)", whiteSpace:"nowrap" }}
-                  title={bolgeFaturaForm.item_code ? "Bu kalem için taşeron hakedişi gir" : "Bu saha için taşeron hakedişi gir"}
-                >
-                  💰 Taşeron Hakediş Ekle
-                </button>
-              )}
-            </div>
-
-            {/* Firma Adı */}
-            <div style={{ marginBottom:"14px" }}>
-              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Firma Adı</label>
-              <select value={bolgeFaturaForm.taseron_adi} onChange={e => setBolgeFaturaForm(f => ({...f, taseron_adi: e.target.value}))}
-                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px" }}>
-                <option value="FEDERAL">FEDERAL</option>
-                <option value="UBS">UBS</option>
-                <option value="2KX">2KX</option>
-                <option value="FERRUMX">FERRUMX</option>
-              </select>
-              {(() => {
-                const c = canonTaseron(bolgeFaturaForm.taseron_adi);
-                const isFixed = c === "2kx" || c === "ferrumx";
-                return (
-                  <div style={{ marginTop:"6px", fontSize:"11px", fontWeight:600, color: isFixed ? "#0369a1" : "#7c3aed" }}>
-                    {isFixed
-                      ? "🔹 Sabit fiyat taşeron — hakediş saha (Site ID) bazında girilir, kalem seçimi opsiyoneldir."
-                      : "🔸 Kırılım taşeron — hakediş kalem (Item) bazında %80 olarak girilir."}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Site ID */}
-            <div style={{ marginBottom:"14px" }}>
-              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Site ID</label>
-              <input type="text" placeholder="Örn: AT8416_NS_WM" value={bolgeFaturaForm.site_code}
-                onChange={async e => {
-                  const val = e.target.value.toUpperCase();
-                  setBolgeFaturaForm(f => ({...f, site_code: val, item_code:"", item_description:""}));
-                  if (val.length >= 5) {
-                    try {
-                      const data = await fetchJson(`${API_BASE}/bolge-fatura/site-items?site_code=${encodeURIComponent(val)}`, { withAuth: true });
-                      setBolgeFaturaSiteItems(data.items || []);
-                    } catch { setBolgeFaturaSiteItems([]); }
-                  } else { setBolgeFaturaSiteItems([]); }
-                }}
-                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
-              />
-            </div>
-
-            {/* Item Description */}
-            <div style={{ marginBottom:"14px" }}>
-              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>
-                Item Description
-                {(() => {
-                  const c = canonTaseron(bolgeFaturaForm.taseron_adi);
-                  const isFixed = c === "2kx" || c === "ferrumx";
-                  return <span style={{ color: isFixed ? "#94a3b8" : "#dc2626", fontWeight:600 }}>{isFixed ? " (opsiyonel)" : " (zorunlu)"}</span>;
-                })()}
-                {bolgeFaturaSiteItems.length > 0 && <span style={{ color:"#16a34a" }}> ({bolgeFaturaSiteItems.length} kalem)</span>}
-              </label>
-              <select value={bolgeFaturaForm.item_code}
-                onChange={e => {
-                  const it = bolgeFaturaSiteItems.find(i => i.item_code === e.target.value);
-                  setBolgeFaturaForm(f => ({...f, item_code: e.target.value, item_description: it?.item_description || ""}));
-                }}
-                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"13px" }}>
-                <option value="">-- Kalem seçin --</option>
-                {bolgeFaturaSiteItems.map((it, i) => (
-                  <option key={i} value={it.item_code}>{it.item_description} ({it.item_code})</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Bu item için daha önce kesilmiş faturalar */}
-            {(() => {
-              if (!bolgeFaturaForm.site_code || !bolgeFaturaForm.item_code || !bolgeFaturaForm.taseron_adi) return null;
-              const fKey = `${bolgeFaturaForm.site_code.toUpperCase()}|${bolgeFaturaForm.item_code}|${bolgeFaturaForm.taseron_adi.toLowerCase()}`;
-              const prevFaturalar = (bolgeFaturaMap[fKey] || []).filter(f => String(f.fatura_no || "").trim() !== "" || Number(f.fatura_miktari || 0) > 0);
-              if (prevFaturalar.length === 0) return null;
-              const toplamKesilen = prevFaturalar.reduce((s, f) => s + (Number(f.fatura_miktari) || 0), 0);
-              return (
-                <div style={{ marginBottom:"14px", padding:"12px 14px", background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:"10px" }}>
-                  <div style={{ fontSize:"12px", fontWeight:700, color:"#b45309", marginBottom:"8px", display:"flex", alignItems:"center", gap:"6px" }}>
-                    ⚠️ Bu kalem için daha önce {prevFaturalar.length} fatura kesilmiş — tekrar kesmeyin!
-                  </div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
-                    {prevFaturalar.map((f, i) => (
-                      <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", color:"#92400e", padding:"3px 0", borderBottom: i < prevFaturalar.length - 1 ? "1px dashed #fde68a" : "none" }}>
-                        <span>Fatura No: <strong>{f.fatura_no || "-"}</strong>{f.fatura_tarihi ? ` (${f.fatura_tarihi})` : ""}</span>
-                        <span style={{ fontWeight:700 }}>{(Number(f.fatura_miktari) || 0).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ marginTop:"8px", paddingTop:"6px", borderTop:"1px solid #fcd34d", fontSize:"12px", fontWeight:800, color:"#b45309", display:"flex", justifyContent:"space-between" }}>
-                    <span>Toplam Kesilen:</span>
-                    <span>{toplamKesilen.toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺</span>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Fatura No */}
-            <div style={{ marginBottom:"14px" }}>
-              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Fatura No</label>
-              <input type="text" placeholder="Fatura numarası" value={bolgeFaturaForm.fatura_no}
-                onChange={e => setBolgeFaturaForm(f => ({...f, fatura_no: e.target.value}))}
-                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
-              />
-            </div>
-
-            {/* Tarih + Miktar */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"20px" }}>
-              <div>
-                <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Fatura Tarihi</label>
-                <input type="date" value={bolgeFaturaForm.fatura_tarihi}
-                  onChange={e => setBolgeFaturaForm(f => ({...f, fatura_tarihi: e.target.value}))}
-                  style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Fatura Miktarı (KDV Dahil)</label>
-                <input type="text" inputMode="decimal" placeholder="22.215,23" value={bolgeFaturaForm.fatura_miktari}
-                  onChange={e => setBolgeFaturaForm(f => ({...f, fatura_miktari: e.target.value}))}
-                  style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
-                />
-                {bolgeFaturaForm.fatura_miktari && parseTrNumber(bolgeFaturaForm.fatura_miktari) > 0 && (
-                  <div style={{ fontSize:"11px", color:"#16a34a", marginTop:"4px", fontWeight:600 }}>
-                    = {parseTrNumber(bolgeFaturaForm.fatura_miktari).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
-              <button onClick={() => setShowBolgeFaturaModal(false)}
-                style={{ padding:"10px 20px", background:"#f1f5f9", border:"none", borderRadius:"8px", fontSize:"14px", cursor:"pointer" }}>
-                İptal
-              </button>
-              <button disabled={bolgeFaturaLoading}
-                onClick={async () => {
-                  if (!bolgeFaturaForm.site_code || !bolgeFaturaForm.taseron_adi) return alert("Firma ve Site ID zorunlu");
-                  const miktarNum = parseTrNumber(bolgeFaturaForm.fatura_miktari);
-                  if (!String(bolgeFaturaForm.fatura_no || "").trim() && !(miktarNum > 0)) return alert("Fatura No veya Fatura Miktarı girilmeli");
-                  setBolgeFaturaLoading(true);
-                  try {
-                    await fetchJson(`${API_BASE}/bolge-fatura/add`, { method:"POST", withAuth:true, body: JSON.stringify({ ...bolgeFaturaForm, fatura_miktari: miktarNum }) });
-                    setShowBolgeFaturaModal(false);
-                    // Özet verisini yenile
-                    const summaryData = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
-                    setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
-                    setTaseronHakedisMap(summaryData.taseron_hakedis_map || {});
-                    setSubconSummaryRows(summaryData.rows || []);
-                  } catch(err) { alert(err.message || "Kaydetme hatası"); }
-                  finally { setBolgeFaturaLoading(false); }
-                }}
-                style={{ padding:"10px 24px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
-                {bolgeFaturaLoading ? "Kaydediliyor..." : "Kaydet"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════
-          TAŞERON HAKEDİŞ (MANUEL) GİRİŞİ MODAL
-      ═══════════════════════════════════════════════════════════════ */}
-      {showManualHakedisModal && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:10600, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <div style={{ background:"#fff", borderRadius:"14px", padding:"30px 28px", width:"460px", maxWidth:"95vw", boxShadow:"0 8px 40px rgba(0,0,0,0.2)" }}>
-            <h3 style={{ margin:"0 0 6px", fontSize:"17px", fontWeight:700, color:"#4f46e5", display:"flex", alignItems:"center", gap:"8px" }}>💰 Taşeron Hakediş Girişi</h3>
-            <p style={{ margin:"0 0 18px", fontSize:"12px", color:"#64748b" }}>
-              {manualHakedisForm.item_code
-                ? "Bu kalem için taşeronun hak ettiği bedeli (KDV hariç) girin. Sistemdeki hesaplamanın yerine bu değer kullanılır."
-                : "Bu saha için taşeronun hak ettiği bedeli (KDV hariç) girin. Sistemdeki hesaplamanın yerine bu değer kullanılır."}
-            </p>
-
-            <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"12px 14px", marginBottom:"16px", fontSize:"13px", color:"#334155" }}>
-              <div style={{ marginBottom:"4px" }}><strong>Taşeron:</strong> {manualHakedisForm.taseron_adi}</div>
-              <div style={{ marginBottom:"4px" }}><strong>Site ID:</strong> {manualHakedisForm.site_code}</div>
-              <div><strong>Kalem:</strong> {manualHakedisForm.item_code ? `${manualHakedisForm.item_description} (${manualHakedisForm.item_code})` : "— Saha geneli (kalem seçilmedi) —"}</div>
-            </div>
-
-            <div style={{ marginBottom:"20px" }}>
-              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Taşeron Hakediş Bedeli (KDV Hariç)</label>
-              <input type="text" inputMode="decimal" placeholder="18.512,69" value={manualHakedisForm.hakedis_bedeli}
-                onChange={e => setManualHakedisForm(f => ({...f, hakedis_bedeli: e.target.value}))}
-                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
-              />
-              {manualHakedisForm.hakedis_bedeli && parseTrNumber(manualHakedisForm.hakedis_bedeli) > 0 && (
-                <div style={{ fontSize:"11px", color:"#16a34a", marginTop:"4px", fontWeight:600 }}>
-                  = {parseTrNumber(manualHakedisForm.hakedis_bedeli).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺ (KDV Dahil: {(parseTrNumber(manualHakedisForm.hakedis_bedeli) * 1.20).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺)
-                </div>
-              )}
-            </div>
-
-            <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
-              <button onClick={() => setShowManualHakedisModal(false)}
-                style={{ padding:"10px 20px", background:"#f1f5f9", border:"none", borderRadius:"8px", fontSize:"14px", cursor:"pointer" }}>
-                İptal
-              </button>
-              <button disabled={manualHakedisLoading}
-                onClick={async () => {
-                  const bedelNum = parseTrNumber(manualHakedisForm.hakedis_bedeli);
-                  if (!(bedelNum > 0)) return alert("Geçerli bir hakediş bedeli girin");
-                  setManualHakedisLoading(true);
-                  try {
-                    await fetchJson(`${API_BASE}/taseron-hakedis/add`, { method:"POST", withAuth:true, body: JSON.stringify({ ...manualHakedisForm, hakedis_bedeli: bedelNum }) });
-                    setShowManualHakedisModal(false);
-                    const summaryData = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
-                    setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
-                    setTaseronHakedisMap(summaryData.taseron_hakedis_map || {});
-                    setSubconSummaryRows(summaryData.rows || []);
-                    alert("✅ Taşeron hakedişi kaydedildi");
-                  } catch(err) { alert(err.message || "Kaydetme hatası"); }
-                  finally { setManualHakedisLoading(false); }
-                }}
-                style={{ padding:"10px 24px", background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
-                {manualHakedisLoading ? "Kaydediliyor..." : "Kaydet"}
-              </button>
             </div>
           </div>
         </div>
@@ -14018,7 +13316,6 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const [qcReadyModalOpen, setQcReadyModalOpen] = useState(false);
   const [qcReadyModalRegion, setQcReadyModalRegion] = useState("");
   const [qcReadyType, setQcReadyType] = useState("");
-  const [bolgeFaturaMap, setBolgeFaturaMap] = useState({});
 
   const openQcReadyModal = (regionName, type) => {
     setQcReadyModalRegion(regionName);
@@ -14691,14 +13988,6 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const handleExportRegionExcel = async () => {
     try {
-      // Fatura verisini her export'ta taze çek
-      let bfMap = bolgeFaturaMap;
-      try {
-        const sd = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
-        bfMap = sd.bolge_fatura_map || {};
-        setBolgeFaturaMap(bfMap);
-      } catch (_) { bfMap = {}; }
-
       const dateStr = new Date().toLocaleDateString("tr-TR");
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
 
@@ -14713,14 +14002,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const headers = [
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
-        "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Federal Hakediş (%80) KDV Dahil",
-        "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
-        "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
-        "Taşeron",
+        "Done Qty", "Requested Qty", "Billed Qty",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 20, 30, 16, 18];
-      const NCOLS = headers.length; // 24
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 14, 16, 14, 18, 20, 18];
+      const NCOLS = headers.length;
 
       const titleStyle = {
         fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
@@ -14756,18 +14042,6 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         alignment: { horizontal: "right", vertical: "middle" },
         border: cellBorder,
       });
-      const federalKdvStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "CFFAFE" : "ECFEFF" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "0E7490" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-      const kalanStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FEE2E2" : "FEF2F2" } },
-        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "B91C1C" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
       const statusStyle = (status, isEven) => {
         const base = cellStyle(isEven, false);
         const s = String(status || "").toUpperCase();
@@ -14785,41 +14059,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
 
 
-      // FEDERAL/UBS için fatura verileri
-      const FATURA_TASERONLAR = ["federal", "ubs"];
-      const faturaStyle = (isEven) => ({
-        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FFF3CD" : "FFFBEA" } },
-        font: { sz: 11, name: "Calibri", color: { rgb: "92400E" } },
-        alignment: { horizontal: "right", vertical: "middle" },
-        border: cellBorder,
-      });
-
       sortedRows.forEach((row, idx) => {
         const isEven = idx % 2 === 1;
         const isUSD = normalizeCurrency(row.currency) === "USD";
         const unitPrice = Number(row.unit_price || 0);
         const doneQty = Number(row.done_qty || 0);
-        const billedQty = Number(row.billed_qty || 0);
-        const dueQty = doneQty - billedQty;
         const usdBirimFiyat = isUSD ? unitPrice : 0;
         const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
         const toplamHakedis = Number(row.total_done_amount || 0);
         const federalHakedis = toplamHakedis * 0.80;
-
-        // Fatura kesilecek: sadece FEDERAL/UBS, Billed Qty > 0 ise
-        const subconLower = String(row.subcon_name || "").toLowerCase().trim();
-        const isFaturaTaseron = FATURA_TASERONLAR.some(t => subconLower.includes(t));
-        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * 0.80 : 0;
-
-        // Girilmiş fatura verisi
-        const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconLower}`;
-        const bfEntries = bfMap[bfKey] || [];
-        const faturaNo = bfEntries.map(e => e.fatura_no || "").filter(Boolean).join(", ");
-        const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
-        const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
-
-        // Kalan bedel: taşeronun hak ettiği (KDV dahil) − şimdiye kadar kesilen fatura (KDV dahil)
-        const kalanBedel = isFaturaTaseron ? Math.max(0, federalHakedis * 1.20 - faturaToplamMiktar) : 0;
 
         aoa.push([
           { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
@@ -14832,22 +14080,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           { v: row.onair_date || "",                              s: cellStyle(isEven, false) },
           { v: doneQty,                                           s: cellStyle(isEven, true) },
           { v: Number(row.requested_qty || 0),                    s: cellStyle(isEven, true) },
-          { v: billedQty,                                         s: cellStyle(isEven, true) },
-          { v: dueQty,                                            s: cellStyle(isEven, true) },
+          { v: Number(row.billed_qty || 0),                       s: cellStyle(isEven, true) },
           { v: row.currency || "",                                s: cellStyle(isEven, false) },
           { v: usdBirimFiyat,                                     s: cellStyle(isEven, true) },
           { v: usdToplamFiyat,                                    s: cellStyle(isEven, true) },
           { v: unitPrice,                                         s: cellStyle(isEven, true) },
           { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
           { v: federalHakedis,                                    s: federalStyle(isEven) },
-          { v: federalHakedis * 1.20,                             s: federalKdvStyle(isEven) },
-          { v: faturaKesilecek,                                   s: faturaKesilecek > 0 ? faturaStyle(isEven) : cellStyle(isEven, true) },
-          { v: faturaNo,                                          s: cellStyle(isEven, false) },
-          { v: faturaToplamMiktar || "",                          s: cellStyle(isEven, true) },
-          { v: faturaTarihi,                                      s: cellStyle(isEven, false) },
-          { v: "",                                                s: cellStyle(isEven, false) },
-          { v: kalanBedel > 0.01 ? kalanBedel : "",               s: kalanBedel > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
-          { v: "",                                                s: cellStyle(isEven, false) },
           { v: row.subcon_name || "",                             s: cellStyle(isEven, false) },
         ]);
       });
@@ -14875,7 +14114,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         : "";
       const fileName = `bolge_analizi_${dateFile}${searchSuffixFile}.xlsx`;
 
-      const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
+      const lastColLetter = String.fromCharCode(64 + NCOLS);
       const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
       const autoFilterRef = `A2:${lastColLetter}2`;
 
@@ -20396,7 +19635,6 @@ function App() {
   const [financeLoginLoading, setFinanceLoginLoading] = useState(false);
 
   const [authTab, setAuthTab] = useState('login');
-  const [showPassword, setShowPassword] = useState(false);
   const [regForm, setRegForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
   const [regLoading, setRegLoading] = useState(false);
   const [regMsg, setRegMsg] = useState('');
@@ -20688,8 +19926,9 @@ function App() {
                 <h2 style={{margin:'0 0 6px',fontSize:'20px',fontWeight:700,color:'#1e3a5f'}}>Şifremi Unuttum</h2>
                 <p style={{margin:'0 0 28px',fontSize:'13px',color:'#64748b',lineHeight:1.6}}>Kayıtlı e-posta adresinizi girin, şifre sıfırlama bağlantısı gönderelim.</p>
                 <div style={{marginBottom:'22px'}}>
-                  <input type="email" placeholder="E-posta adresinizi girin" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleResetRequest()}
-                    style={{width:'100%',padding:'13px 16px',border:'1px solid #cbd5e1',borderRadius:'4px',fontSize:'15px',outline:'none',boxSizing:'border-box'}}
+                  <label style={{display:'block',fontSize:'13px',color:'#374151',marginBottom:'6px',fontWeight:500}}>E-posta Adresi</label>
+                  <input type="email" placeholder="ornek@email.com" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleResetRequest()}
+                    style={{width:'100%',padding:'11px 14px',border:'1px solid #cbd5e1',borderRadius:'3px',fontSize:'14px',outline:'none',boxSizing:'border-box'}}
                     onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'} />
                 </div>
                 {resetMsg && <div style={{padding:'10px 14px',borderRadius:'3px',marginBottom:'16px',fontSize:'13px',background:resetMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:resetMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${resetMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{resetMsg}</div>}
@@ -20700,59 +19939,36 @@ function App() {
               </div>
 
             ) : (
-              /* ── Giriş Yap (Uniportal style) ── */
-              <div style={{background:'#fff',borderRadius:'4px',padding:'48px 44px 36px',width:'100%',maxWidth:'440px',boxShadow:'0 2px 16px rgba(0,0,0,0.10)'}}>
-                <h2 style={{margin:'0 0 32px',fontSize:'22px',fontWeight:700,color:'#1a202c',textAlign:'center'}}>Omnix ID ile Giriş Yapın</h2>
-
-                {/* Email input — no label */}
+              /* ── Giriş Yap (default) ── */
+              <div style={{background:'#fff',borderRadius:'4px',padding:'40px 44px',width:'100%',maxWidth:'420px',boxShadow:'0 2px 16px rgba(0,0,0,0.10)'}}>
+                <h2 style={{margin:'0 0 6px',fontSize:'20px',fontWeight:700,color:'#1a202c'}}>Omnix'e Giriş Yapın</h2>
+                <p style={{margin:'0 0 28px',fontSize:'13px',color:'#64748b'}}>Hesabınızla devam edin</p>
                 <div style={{marginBottom:'16px'}}>
-                  <input
-                    type="email"
-                    placeholder="E-posta adresi"
-                    value={financeLoginEmail||''}
-                    onChange={e=>setFinanceLoginEmail(e.target.value)}
-                    onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)}
-                    style={{width:'100%',padding:'13px 16px',border:'1px solid #cbd5e1',borderRadius:'4px',fontSize:'15px',outline:'none',boxSizing:'border-box',color:'#1a202c'}}
-                    onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'}
-                  />
+                  <label style={{display:'block',fontSize:'13px',color:'#374151',marginBottom:'6px',fontWeight:500}}>E-posta Adresi</label>
+                  <input type="email" placeholder="ornek@email.com" value={financeLoginEmail||''} onChange={e=>setFinanceLoginEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)}
+                    style={{width:'100%',padding:'11px 14px',border:'1px solid #cbd5e1',borderRadius:'3px',fontSize:'14px',outline:'none',boxSizing:'border-box'}}
+                    onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'} />
                 </div>
-
-                {/* Password input — no label */}
                 <div style={{marginBottom:'22px'}}>
-                  <input
-                    type="password"
-                    placeholder="Şifre"
-                    value={financeLoginPassword||''}
-                    onChange={e=>setFinanceLoginPassword(e.target.value)}
-                    onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)}
-                    style={{width:'100%',padding:'13px 16px',border:'1px solid #cbd5e1',borderRadius:'4px',fontSize:'15px',outline:'none',boxSizing:'border-box',color:'#1a202c'}}
-                    onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'}
-                  />
+                  <label style={{display:'block',fontSize:'13px',color:'#374151',marginBottom:'6px',fontWeight:500}}>Şifre</label>
+                  <input type="password" placeholder="Şifrenizi girin" value={financeLoginPassword||''} onChange={e=>setFinanceLoginPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)}
+                    style={{width:'100%',padding:'11px 14px',border:'1px solid #cbd5e1',borderRadius:'3px',fontSize:'14px',outline:'none',boxSizing:'border-box'}}
+                    onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'} />
                 </div>
-
-                {financeLoginError && <div style={{padding:'10px 14px',borderRadius:'4px',marginBottom:'16px',fontSize:'13px',background:'#fef2f2',color:'#991b1b',border:'1px solid #fecaca'}}>{financeLoginError}</div>}
-
-                <button
-                  onClick={handleFinanceLogin}
-                  disabled={financeLoginLoading}
-                  style={{width:'100%',padding:'14px',background:financeLoginLoading?'#64748b':'#1e3a5f',color:'#fff',border:'none',borderRadius:'4px',fontSize:'16px',fontWeight:600,cursor:financeLoginLoading?'not-allowed':'pointer',letterSpacing:'0.3px'}}
-                >
+                {financeLoginError && <div style={{padding:'10px 14px',borderRadius:'3px',marginBottom:'16px',fontSize:'13px',background:'#fef2f2',color:'#991b1b',border:'1px solid #fecaca'}}>{financeLoginError}</div>}
+                <button onClick={handleFinanceLogin} disabled={financeLoginLoading}
+                  style={{width:'100%',padding:'12px',background:financeLoginLoading?'#64748b':'#1e3a5f',color:'#fff',border:'none',borderRadius:'3px',fontSize:'15px',fontWeight:600,cursor:financeLoginLoading?'not-allowed':'pointer'}}>
                   {financeLoginLoading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
                 </button>
-
-                {/* Bottom links — Uniportal style with icons */}
-                <div style={{display:'flex',justifyContent:'center',alignItems:'center',marginTop:'22px',paddingTop:'18px',borderTop:'1px solid #f1f5f9',gap:'0',fontSize:'13px'}}>
-                  <span
-                    style={{display:'flex',alignItems:'center',gap:'5px',color:'#1e3a5f',cursor:'pointer',fontWeight:500,padding:'4px 18px',borderRight:'1px solid #dde3ec'}}
-                    onClick={()=>{setAuthTab('register');setRegMsg('');}}
-                  >
-                    <span style={{fontSize:'15px'}}>👤</span> Kayıt Ol
+                {/* Links row — Huawei style */}
+                <div style={{display:'flex',justifyContent:'center',gap:'0',marginTop:'20px',fontSize:'13px'}}>
+                  <span style={{color:'#1e3a5f',cursor:'pointer',fontWeight:500,padding:'4px 16px',borderRight:'1px solid #cbd5e1'}}
+                    onClick={()=>{setAuthTab('register');setRegMsg('');}}>
+                    Kayıt Ol
                   </span>
-                  <span
-                    style={{display:'flex',alignItems:'center',gap:'5px',color:'#1e3a5f',cursor:'pointer',fontWeight:500,padding:'4px 18px'}}
-                    onClick={()=>{setAuthTab('reset');setResetMsg('');}}
-                  >
-                    <span style={{fontSize:'15px'}}>❓</span> Şifremi Unuttum
+                  <span style={{color:'#1e3a5f',cursor:'pointer',fontWeight:500,padding:'4px 16px'}}
+                    onClick={()=>{setAuthTab('reset');setResetMsg('');}}>
+                    Şifremi Unuttum
                   </span>
                 </div>
               </div>
