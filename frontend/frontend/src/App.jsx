@@ -285,6 +285,25 @@ function InvoiceEntryExcelUploadInline({ onClose, onUploaded }) {
   );
 }
 
+// Türk formatındaki sayıyı (1.234,56 → 1234.56) parse et. Faturadan kopyalanan tutarlar için.
+function parseTrNumber(str) {
+  if (str == null) return 0;
+  let s = String(str).trim().replace(/\s/g, "").replace(/₺|TL/gi, "");
+  if (!s) return 0;
+  const hasComma = s.includes(",");
+  const hasDot = s.includes(".");
+  if (hasComma && hasDot) {
+    // Nokta binlik ayıracı, virgül ondalık (22.215,23 → 22215.23)
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (hasComma) {
+    // Sadece virgül = ondalık (22215,23 → 22215.23)
+    s = s.replace(",", ".");
+  }
+  // Sadece nokta veya düz sayı: olduğu gibi bırak (nokta ondalık kabul edilir)
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
+}
+
 async function fetchJson(url, options = {}) {
   const { withAuth = true, ...fetchOptions } = options;
 
@@ -8124,10 +8143,15 @@ function FinanceDashboard({
               </div>
               <div>
                 <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Fatura Miktarı (KDV Dahil)</label>
-                <input type="number" placeholder="0.00" value={bolgeFaturaForm.fatura_miktari}
+                <input type="text" inputMode="decimal" placeholder="22.215,23" value={bolgeFaturaForm.fatura_miktari}
                   onChange={e => setBolgeFaturaForm(f => ({...f, fatura_miktari: e.target.value}))}
                   style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
                 />
+                {bolgeFaturaForm.fatura_miktari && parseTrNumber(bolgeFaturaForm.fatura_miktari) > 0 && (
+                  <div style={{ fontSize:"11px", color:"#16a34a", marginTop:"4px", fontWeight:600 }}>
+                    = {parseTrNumber(bolgeFaturaForm.fatura_miktari).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺
+                  </div>
+                )}
               </div>
             </div>
 
@@ -8139,10 +8163,11 @@ function FinanceDashboard({
               <button disabled={bolgeFaturaLoading}
                 onClick={async () => {
                   if (!bolgeFaturaForm.site_code || !bolgeFaturaForm.taseron_adi) return alert("Firma ve Site ID zorunlu");
-                  if (!String(bolgeFaturaForm.fatura_no || "").trim() && !(Number(bolgeFaturaForm.fatura_miktari || 0) > 0)) return alert("Fatura No veya Fatura Miktarı girilmeli");
+                  const miktarNum = parseTrNumber(bolgeFaturaForm.fatura_miktari);
+                  if (!String(bolgeFaturaForm.fatura_no || "").trim() && !(miktarNum > 0)) return alert("Fatura No veya Fatura Miktarı girilmeli");
                   setBolgeFaturaLoading(true);
                   try {
-                    await fetchJson(`${API_BASE}/bolge-fatura/add`, { method:"POST", withAuth:true, body: JSON.stringify(bolgeFaturaForm) });
+                    await fetchJson(`${API_BASE}/bolge-fatura/add`, { method:"POST", withAuth:true, body: JSON.stringify({ ...bolgeFaturaForm, fatura_miktari: miktarNum }) });
                     setShowBolgeFaturaModal(false);
                     // Özet verisini yenile
                     const summaryData = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
