@@ -18,6 +18,47 @@ const path = require("path");
 const fs = require("fs");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+
+// ── RESEND EMAIL HELPER ──────────────────────────────────────────────────────
+async function sendEmail({ to, subject, html }) {
+  const apiKey = process.env.RESEND_API_KEY || "";
+  if (!apiKey) { console.warn("RESEND_API_KEY not set, skipping email to:", to); return; }
+  const fromEmail = process.env.FROM_EMAIL || "Omnix Platform <onboarding@resend.dev>";
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: fromEmail, to: Array.isArray(to) ? to : [to], subject, html }),
+    });
+    const data = await res.json();
+    if (!res.ok) console.error("Resend error:", data);
+    else console.log("✅ Email sent to:", to);
+  } catch (e) { console.error("sendEmail error:", e.message); }
+}
+
+const TENANT_CONFIG = {
+  erc: {
+    name: "ERC Mühendislik",
+    display: "ERC | Operasyon ve Hakediş Takip Sistemi",
+    owner_email: "orhan@simsektel.com",
+    domains: ["simsektel.com"],
+  },
+  "2kx": {
+    name: "2KX Haberleşme Sistemleri",
+    display: "2KX | Operasyon ve Hakediş Takip Sistemi",
+    owner_email: "serdar.altinova@simsektel.com",
+    domains: [],
+  },
+};
+
+function detectTenant(email, subconName) {
+  const s = String(subconName || "").toUpperCase();
+  if (s.includes("2KX")) return "2kx";
+  const domain = String(email || "").toLowerCase().split("@")[1] || "";
+  if (domain === "simsektel.com") return "erc";
+  return "erc";
+}
+// ────────────────────────────────────────────────────────────────────────────
 const { createWorker } = require("tesseract.js");
 const { detectRegion } = require("./utils/regionHelper");
 const { applyPremiumExcelStyle } = require("./utils/excelStyle");
@@ -555,7 +596,7 @@ app.post("/auth/login", async (req, res) => {
 
     const result = await pool.query(
       `
-      SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate
+      SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate, tenant, status
       FROM users
       WHERE LOWER(TRIM(email)) = $1
       ORDER BY id DESC
@@ -585,6 +626,14 @@ app.post("/auth/login", async (req, res) => {
         ok: false,
         error: "Kullanıcı pasif durumda",
       });
+    }
+
+    const userStatus = String(user.status || 'active');
+    if (userStatus === 'pending') {
+      return res.status(403).json({ ok: false, error: "Hesabınız onay bekliyor. Şirket yöneticiniz onayladıktan sonra giriş yapabilirsiniz." });
+    }
+    if (userStatus === 'rejected') {
+      return res.status(403).json({ ok: false, error: "Hesabınız onaylanmadı. Yöneticinizle iletişime geçin." });
     }
 
     const passwordOk = await bcrypt.compare(password, user.password_hash);
@@ -621,6 +670,8 @@ app.post("/auth/login", async (req, res) => {
         ? "finance"
         : "app";
 
+    const userTenant = user.tenant || detectTenant(user.email, user.subcon_name);
+
     const token = jwt.sign(
       {
         user_id: user.id,
@@ -629,6 +680,7 @@ app.post("/auth/login", async (req, res) => {
         name: user.name,
         subcon_name: user.subcon_name || null,
         scope,
+        tenant: userTenant,
       },
       process.env.JWT_SECRET || "simsek_secret_degistir",
       { expiresIn: "7d" },
@@ -644,6 +696,7 @@ app.post("/auth/login", async (req, res) => {
         role: user.role,
         subcon_name: user.subcon_name,
         payment_rate: Number(user.payment_rate || 0.8),
+        tenant: userTenant,
       },
     });
   } catch (err) {
@@ -653,6 +706,114 @@ app.post("/auth/login", async (req, res) => {
       error: "Giriş sırasında hata oluştu",
     });
   }
+});
+
+// POST /auth/register
+app.post("/auth/register", async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) return res.status(400).json({ ok: false, error: "Ad, e-posta ve şifre zorunlu" });
+    if (password.length < 6) return res.status(400).json({ ok: false, error: "Şifre en az 6 karakter olmalı" });
+    const existing = await pool.query("SELECT id FROM users WHERE LOWER(TRIM(email)) = $1", [email.toLowerCase().trim()]);
+    if (existing.rows.length > 0) return res.status(409).json({ ok: false, error: "Bu e-posta zaten kayıtlı" });
+    const tenant = detectTenant(email, "");
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query(
+      `INSERT INTO users (name, email, password_hash, role, is_active, status, tenant) VALUES ($1,$2,$3,'viewer',false,'pending',$4)`,
+      [name, email.toLowerCase().trim(), hash, tenant]
+    );
+    const tConf = TENANT_CONFIG[tenant] || TENANT_CONFIG.erc;
+    const appUrl = process.env.APP_URL || "https://app.omnix.global";
+    await sendEmail({
+      to: tConf.owner_email,
+      subject: `[Omnix] Yeni kayıt talebi — ${name}`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#1e3a5f">Yeni Kullanıcı Kayıt Talebi</h2><p><strong>${name}</strong> (${email}) adlı kullanıcı <strong>${tConf.name}</strong> platformuna kayıt olmak istiyor.</p><p><a href="${appUrl}" style="background:#1e3a5f;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Omnix'i Aç → Bekleyen Kullanıcılar</a></p></div>`,
+    });
+    res.json({ ok: true, message: "Kayıt talebiniz alındı. Şirket yöneticiniz onayladıktan sonra giriş yapabilirsiniz." });
+  } catch (e) { console.error("REGISTER ERROR:", e.message); res.status(500).json({ ok: false, error: "Kayıt sırasında hata oluştu" }); }
+});
+
+// POST /auth/reset-password-request
+app.post("/auth/reset-password-request", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ ok: false, error: "E-posta zorunlu" });
+    const result = await pool.query("SELECT id, name FROM users WHERE LOWER(TRIM(email)) = $1", [email.toLowerCase().trim()]);
+    if (result.rows.length === 0) return res.json({ ok: true, message: "E-posta adresiniz sistemde kayıtlıysa sıfırlama linki gönderildi." });
+    const user = result.rows[0];
+    const crypto = require("crypto");
+    const token = crypto.randomBytes(32).toString("hex");
+    const expires = new Date(Date.now() + 3600000);
+    await pool.query("UPDATE users SET reset_token=$1, reset_token_expires=$2 WHERE id=$3", [token, expires, user.id]);
+    const appUrl = process.env.APP_URL || "https://app.omnix.global";
+    await sendEmail({
+      to: email.toLowerCase().trim(),
+      subject: "[Omnix] Şifre Sıfırlama",
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#1e3a5f">Şifre Sıfırlama</h2><p>Merhaba ${user.name},</p><p>Şifre sıfırlama bağlantınız:</p><p style="margin:24px 0"><a href="${appUrl}?reset=${token}" style="background:#1e3a5f;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Şifremi Sıfırla</a></p><p style="color:#6b7280;font-size:13px">Bu link 1 saat geçerlidir.</p></div>`,
+    });
+    res.json({ ok: true, message: "E-posta adresiniz sistemde kayıtlıysa sıfırlama linki gönderildi." });
+  } catch (e) { console.error("RESET REQUEST ERROR:", e.message); res.status(500).json({ ok: false, error: "Hata oluştu" }); }
+});
+
+// POST /auth/reset-password
+app.post("/auth/reset-password", async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ ok: false, error: "Token ve yeni şifre zorunlu" });
+    if (password.length < 6) return res.status(400).json({ ok: false, error: "Şifre en az 6 karakter olmalı" });
+    const result = await pool.query("SELECT id FROM users WHERE reset_token=$1 AND reset_token_expires > NOW()", [token]);
+    if (result.rows.length === 0) return res.status(400).json({ ok: false, error: "Geçersiz veya süresi dolmuş sıfırlama linki" });
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query("UPDATE users SET password_hash=$1, reset_token=NULL, reset_token_expires=NULL WHERE id=$2", [hash, result.rows[0].id]);
+    res.json({ ok: true, message: "Şifreniz başarıyla güncellendi. Giriş yapabilirsiniz." });
+  } catch (e) { console.error("RESET PASSWORD ERROR:", e.message); res.status(500).json({ ok: false, error: "Hata oluştu" }); }
+});
+
+// GET /admin/pending-users
+app.get("/admin/pending-users", authMiddleware, async (req, res) => {
+  try {
+    const userTenant = req.user.tenant || detectTenant(req.user.email, req.user.subcon_name || "");
+    const result = await pool.query(
+      "SELECT id, name, email, tenant, created_at FROM users WHERE status='pending' AND (tenant=$1 OR $2) ORDER BY created_at DESC",
+      [userTenant, req.user.role === 'admin']
+    );
+    res.json({ ok: true, rows: result.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /admin/users/:id/approve
+app.post("/admin/users/:id/approve", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT id, name, email, tenant FROM users WHERE id=$1 AND status='pending'", [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
+    const u = result.rows[0];
+    await pool.query("UPDATE users SET status='active', is_active=true WHERE id=$1", [u.id]);
+    const tConf = TENANT_CONFIG[u.tenant] || TENANT_CONFIG.erc;
+    const appUrl = process.env.APP_URL || "https://app.omnix.global";
+    await sendEmail({
+      to: u.email,
+      subject: `[Omnix] Hesabınız onaylandı`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#065f46">Hesabınız Onaylandı ✅</h2><p>Merhaba ${u.name}, <strong>${tConf.name}</strong> platformuna erişiminiz onaylandı.</p><p><a href="${appUrl}" style="background:#1e3a5f;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Omnix'e Git</a></p></div>`,
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /admin/users/:id/reject
+app.post("/admin/users/:id/reject", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT id, name, email, tenant FROM users WHERE id=$1 AND status='pending'", [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
+    const u = result.rows[0];
+    await pool.query("UPDATE users SET status='rejected', is_active=false WHERE id=$1", [u.id]);
+    const tConf = TENANT_CONFIG[u.tenant] || TENANT_CONFIG.erc;
+    await sendEmail({
+      to: u.email,
+      subject: `[Omnix] Kayıt talebiniz hakkında`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#991b1b">Kayıt Talebiniz Onaylanmadı</h2><p>Merhaba ${u.name}, <strong>${tConf.name}</strong> platformuna kayıt talebiniz onaylanmadı. Daha fazla bilgi için yöneticinizle iletişime geçin.</p></div>`,
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.get("/rollout/mismatch-check", async (req, res) => {
@@ -13877,6 +14038,13 @@ pool.query(`
 // dekont_url kolonu ekle
 pool.query(`ALTER TABLE taseron_odeme_log ADD COLUMN IF NOT EXISTS dekont_url TEXT;`)
   .catch(e => console.error("dekont_url kolonu:", e.message));
+
+// ── OMNIX MULTI-TENANT MIGRATIONS ─────────────────────────────────────────
+pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant TEXT DEFAULT 'erc'`).catch(() => {});
+pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`).catch(() => {});
+pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT`).catch(() => {});
+pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP`).catch(() => {});
+pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,''))) LIKE '%2KX%' AND (tenant IS NULL OR tenant='erc')`).catch(() => {});
 
 // ── FİRMA ADI STANDARTILAŞTIRMA ─────────────────────────────────────────────
 // Sistemdeki kısa / kırpık firma adlarını tam resmi adlarıyla güncelle.

@@ -19407,6 +19407,15 @@ function App() {
     fetchPending();
   }, [user]);
 
+  // ── Dynamic document.title based on tenant ──────────────────────────────
+  useEffect(() => {
+    if (user) {
+      document.title = user.tenant === '2kx' ? '2KX | Operasyon ve Hakediş Takip Sistemi' : 'ERC | Operasyon ve Hakediş Takip Sistemi';
+    } else {
+      document.title = 'Omnix | Operations & Project Platform';
+    }
+  }, [user]);
+
   // ── 2KX verisi yükle (oturum açıkken) ────────────────────────────────────
   useEffect(() => {
     if (!user || !token) return;
@@ -19589,6 +19598,20 @@ function App() {
   const [financeLoginError, setFinanceLoginError] = useState("");
   const [financeLoginLoading, setFinanceLoginLoading] = useState(false);
 
+  const [authTab, setAuthTab] = useState('login');
+  const [regForm, setRegForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const [regLoading, setRegLoading] = useState(false);
+  const [regMsg, setRegMsg] = useState('');
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMsg, setResetMsg] = useState('');
+  const [resetTokenFromUrl] = useState(() => new URLSearchParams(window.location.search).get('reset') || '');
+  const [newPassword, setNewPassword] = useState('');
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [resetDoneMsg, setResetDoneMsg] = useState('');
+  const [pendingUsers, setPendingUsers] = useState([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+
   const loadSupplierAdvances = async () => {
     try {
       const response = await fetch(`${API_BASE}/finance/supplier-advances`);
@@ -19742,118 +19765,133 @@ function App() {
     setPage("finance");
   };
 
+  const handleRegister = async () => {
+    setRegMsg('');
+    if (!regForm.name || !regForm.email || !regForm.password) { setRegMsg('Tüm alanları doldurun.'); return; }
+    if (regForm.password !== regForm.confirmPassword) { setRegMsg('Şifreler eşleşmiyor.'); return; }
+    if (regForm.password.length < 6) { setRegMsg('Şifre en az 6 karakter olmalı.'); return; }
+    setRegLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: regForm.name, email: regForm.email, password: regForm.password }) });
+      const d = await r.json();
+      if (d.ok) { setRegMsg('✅ ' + d.message); setRegForm({ name: '', email: '', password: '', confirmPassword: '' }); }
+      else { setRegMsg('❌ ' + (d.error || 'Hata oluştu')); }
+    } catch { setRegMsg('❌ Bağlantı hatası'); }
+    finally { setRegLoading(false); }
+  };
+
+  const handleResetRequest = async () => {
+    setResetMsg('');
+    if (!resetEmail) { setResetMsg('E-posta adresinizi girin.'); return; }
+    setResetLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/auth/reset-password-request`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: resetEmail }) });
+      const d = await r.json();
+      setResetMsg(d.ok ? '✅ ' + d.message : '❌ ' + (d.error || 'Hata oluştu'));
+    } catch { setResetMsg('❌ Bağlantı hatası'); }
+    finally { setResetLoading(false); }
+  };
+
+  const handleResetWithToken = async () => {
+    setResetDoneMsg('');
+    if (newPassword !== newPasswordConfirm) { setResetDoneMsg('❌ Şifreler eşleşmiyor'); return; }
+    if (newPassword.length < 6) { setResetDoneMsg('❌ Şifre en az 6 karakter olmalı'); return; }
+    try {
+      const r = await fetch(`${API_BASE}/auth/reset-password`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetTokenFromUrl, password: newPassword }) });
+      const d = await r.json();
+      if (d.ok) { setResetDoneMsg('✅ Şifreniz güncellendi. Giriş yapabilirsiniz.'); window.history.replaceState({}, '', '/'); setTimeout(() => window.location.reload(), 2000); }
+      else { setResetDoneMsg('❌ ' + (d.error || 'Geçersiz link')); }
+    } catch { setResetDoneMsg('❌ Bağlantı hatası'); }
+  };
+
+  const fetchPendingUsers = async () => {
+    setPendingLoading(true);
+    try {
+      const tk = localStorage.getItem('token') || '';
+      const r = await fetch(`${API_BASE}/admin/pending-users`, { headers: { Authorization: `Bearer ${tk}` } });
+      const d = await r.json();
+      if (d.ok) setPendingUsers(d.rows || []);
+    } catch {}
+    finally { setPendingLoading(false); }
+  };
+
+  const handleApproveUser = async (id) => {
+    const tk = localStorage.getItem('token') || '';
+    await fetch(`${API_BASE}/admin/users/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${tk}` } });
+    fetchPendingUsers();
+  };
+
+  const handleRejectUser = async (id) => {
+    const tk = localStorage.getItem('token') || '';
+    await fetch(`${API_BASE}/admin/users/${id}/reject`, { method: 'POST', headers: { Authorization: `Bearer ${tk}` } });
+    fetchPendingUsers();
+  };
+
   if (!financeToken) {
     return (
-      <div style={{ height: "100vh", background: "transparent" }}>
-        {/* 🔹 HEADER */}
-        <div
-          style={{
-            height: "60px",
-            background: "#ffffff",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "0 30px",
-            borderBottom: "1px solid #eee",
-            position: "relative",
-            zIndex: 5,
-          }}
-        >
-          {/* SOL */}
-          <div style={{ fontWeight: "bold", fontSize: "18px" }}>
-            ERC Mühendislik
-          </div>
-
-          {/* SAĞ */}
-          <div style={{ color: "#666", fontSize: "14px" }}>
-            ERC | Operasyon ve Hakediş Takip Sistemi
-          </div>
-        </div>
-
-        {/* 🔹 ORTA LOGIN */}
-        <div
-          style={{
-            height: "calc(100vh - 60px)",
-            position: "relative",
-            zIndex: 10,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <form
-            onSubmit={handleFinanceLogin}
-            style={{
-              background: "#fff",
-              padding: "clamp(32px, 5vw, 56px)",
-              borderRadius: "16px",
-              width: "min(480px, calc(100vw - 32px))",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
-              position: "relative",
-              zIndex: 20,
-            }}
-          >
-            <h2 style={{ textAlign: "center", marginBottom: "10px" }}>
-              Hoş Geldiniz
-            </h2>
-
-            <p
-              style={{
-                textAlign: "center",
-                marginBottom: "24px",
-                color: "#6b7280",
-              }}
-            >
-              Hesabınızla giriş yapın
-            </p>
-
-            <input
-              type="email"
-              placeholder="E-posta"
-              value={financeLoginEmail}
-              onChange={(e) => setFinanceLoginEmail(e.target.value)}
-              style={inputStyle}
-            />
-
-            <input
-              type="password"
-              placeholder="Şifre"
-              value={financeLoginPassword}
-              onChange={(e) => setFinanceLoginPassword(e.target.value)}
-              style={inputStyle}
-            />
-
-            <button
-              type="submit"
-              style={{
-                width: "100%",
-                padding: "15px",
-                background: "#e53935",
-                color: "#fff",
-                border: "none",
-                borderRadius: "8px",
-                fontWeight: "bold",
-                fontSize: "16px",
-                cursor: "pointer",
-              }}
-            >
-              Giriş Yap
-            </button>
-            {financeLoginError && (
-              <div
-                style={{
-                  marginTop: "12px",
-                  color: "#b91c1c",
-                  fontWeight: "600",
-                  textAlign: "center",
-                }}
-              >
-                {financeLoginError}
+      <>
+        {/* PASSWORD RESET PAGE (from email link) */}
+        {resetTokenFromUrl ? (
+          <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%)'}}>
+            <div style={{background:'#fff',borderRadius:'20px',padding:'48px 40px',width:'100%',maxWidth:'420px',boxShadow:'0 25px 80px rgba(0,0,0,0.4)'}}>
+              <div style={{textAlign:'center',marginBottom:'32px'}}>
+                <div style={{fontSize:'32px',fontWeight:900,color:'#1e3a5f',letterSpacing:'-1px'}}>Omnix</div>
+                <div style={{fontSize:'14px',color:'#6b7280',marginTop:'4px'}}>Şifre Sıfırlama</div>
               </div>
-            )}
-          </form>
-        </div>
-      </div>
+              <input type="password" placeholder="Yeni Şifre" value={newPassword} onChange={e=>setNewPassword(e.target.value)} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'14px'}} />
+              <input type="password" placeholder="Yeni Şifre (Tekrar)" value={newPasswordConfirm} onChange={e=>setNewPasswordConfirm(e.target.value)} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'20px'}} />
+              {resetDoneMsg && <div style={{padding:'10px 14px',borderRadius:'8px',marginBottom:'16px',fontSize:'13px',background:resetDoneMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:resetDoneMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${resetDoneMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{resetDoneMsg}</div>}
+              <button onClick={handleResetWithToken} style={{width:'100%',padding:'14px',background:'linear-gradient(135deg,#1e3a5f,#2d5f8a)',color:'#fff',border:'none',borderRadius:'10px',fontSize:'16px',fontWeight:700,cursor:'pointer'}}>Şifremi Güncelle</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%)',position:'relative',overflow:'hidden'}}>
+            <div style={{position:'absolute',inset:0,backgroundImage:'repeating-linear-gradient(45deg,transparent,transparent 60px,rgba(255,255,255,0.02) 60px,rgba(255,255,255,0.02) 61px)',pointerEvents:'none'}} />
+            <div style={{background:'#fff',borderRadius:'24px',padding:'40px 36px',width:'100%',maxWidth:'440px',boxShadow:'0 25px 80px rgba(0,0,0,0.45)',position:'relative',zIndex:1}}>
+              <div style={{textAlign:'center',marginBottom:'28px'}}>
+                <div style={{fontSize:'38px',fontWeight:900,color:'#1e3a5f',letterSpacing:'-2px',lineHeight:1}}>Omnix</div>
+                <div style={{fontSize:'12px',color:'#9ca3af',marginTop:'6px',letterSpacing:'1px',textTransform:'uppercase'}}>Operations & Project Platform</div>
+              </div>
+              <div style={{display:'flex',background:'#f1f5f9',borderRadius:'12px',padding:'4px',marginBottom:'28px',gap:'3px'}}>
+                {[['login','Giriş Yap'],['register','Kayıt Ol'],['reset','Şifremi Unuttum']].map(([tab,label])=>(
+                  <button key={tab} onClick={()=>{setAuthTab(tab);setRegMsg('');setResetMsg('');}} style={{flex:1,padding:'9px 4px',borderRadius:'9px',border:'none',cursor:'pointer',fontSize:'12px',fontWeight:600,transition:'all 0.2s',background:authTab===tab?'#fff':'transparent',color:authTab===tab?'#1e3a5f':'#6b7280',boxShadow:authTab===tab?'0 1px 4px rgba(0,0,0,0.12)':'none'}}>{label}</button>
+                ))}
+              </div>
+
+              {authTab==='login' && (
+                <div>
+                  <input type="email" placeholder="E-posta" value={financeLoginEmail||''} onChange={e=>setFinanceLoginEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'14px'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+                  <input type="password" placeholder="Şifre" value={financeLoginPassword||''} onChange={e=>setFinanceLoginPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'20px'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+                  {financeLoginError && <div style={{padding:'10px 14px',borderRadius:'8px',marginBottom:'16px',fontSize:'13px',background:'#fef2f2',color:'#991b1b',border:'1px solid #fecaca'}}>{financeLoginError}</div>}
+                  <button onClick={handleFinanceLogin} disabled={financeLoginLoading} style={{width:'100%',padding:'14px',background:financeLoginLoading?'#93c5fd':'linear-gradient(135deg,#1e3a5f,#2d5f8a)',color:'#fff',border:'none',borderRadius:'10px',fontSize:'16px',fontWeight:700,cursor:financeLoginLoading?'not-allowed':'pointer'}}>{financeLoginLoading?'Giriş yapılıyor...':'Giriş Yap'}</button>
+                  <div style={{marginTop:'16px',textAlign:'center'}}><span style={{fontSize:'13px',color:'#6b7280',cursor:'pointer',textDecoration:'underline'}} onClick={()=>setAuthTab('reset')}>Şifremi unuttum</span></div>
+                </div>
+              )}
+
+              {authTab==='register' && (
+                <div>
+                  {[['name','Ad Soyad','text'],['email','E-posta','email'],['password','Şifre (min. 6 karakter)','password'],['confirmPassword','Şifre Tekrar','password']].map(([field,ph,type],i)=>(
+                    <input key={field} type={type} placeholder={ph} value={regForm[field]} onChange={e=>setRegForm(p=>({...p,[field]:e.target.value}))} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:i===3?'20px':'14px'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+                  ))}
+                  {regMsg && <div style={{padding:'10px 14px',borderRadius:'8px',marginBottom:'16px',fontSize:'13px',background:regMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:regMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${regMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{regMsg}</div>}
+                  <button onClick={handleRegister} disabled={regLoading} style={{width:'100%',padding:'14px',background:regLoading?'#6ee7b7':'linear-gradient(135deg,#065f46,#10b981)',color:'#fff',border:'none',borderRadius:'10px',fontSize:'16px',fontWeight:700,cursor:regLoading?'not-allowed':'pointer'}}>{regLoading?'Kaydediliyor...':'Kayıt Ol'}</button>
+                  <p style={{fontSize:'12px',color:'#9ca3af',textAlign:'center',marginTop:'14px',lineHeight:1.5}}>Kayıt sonrası şirket yöneticinizin onayı gereklidir.</p>
+                </div>
+              )}
+
+              {authTab==='reset' && (
+                <div>
+                  <p style={{fontSize:'14px',color:'#6b7280',marginBottom:'20px',lineHeight:1.6}}>Kayıtlı e-posta adresinizi girin. Şifre sıfırlama bağlantısı göndereceğiz.</p>
+                  <input type="email" placeholder="E-posta adresiniz" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleResetRequest()} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'20px'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
+                  {resetMsg && <div style={{padding:'10px 14px',borderRadius:'8px',marginBottom:'16px',fontSize:'13px',background:resetMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:resetMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${resetMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{resetMsg}</div>}
+                  <button onClick={handleResetRequest} disabled={resetLoading} style={{width:'100%',padding:'14px',background:resetLoading?'#93c5fd':'linear-gradient(135deg,#1e3a5f,#2d5f8a)',color:'#fff',border:'none',borderRadius:'10px',fontSize:'16px',fontWeight:700,cursor:resetLoading?'not-allowed':'pointer'}}>{resetLoading?'Gönderiliyor...':'Sıfırlama Linki Gönder'}</button>
+                  <div style={{marginTop:'16px',textAlign:'center'}}><span style={{fontSize:'13px',color:'#6b7280',cursor:'pointer',textDecoration:'underline'}} onClick={()=>setAuthTab('login')}>← Giriş sayfasına dön</span></div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -19862,7 +19900,7 @@ function App() {
       <div style={{ minHeight:"100vh", background:"#f8fafc" }}>
         {/* Top bar */}
         <div style={{ background:"#1e3a5f", color:"#fff", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 8px rgba(0,0,0,0.2)" }}>
-          <span style={{ fontWeight:700, fontSize:"16px" }}>ERC Mühendislik</span>
+          <span style={{ fontWeight:700, fontSize:"16px" }}>{user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'}</span>
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"2px" }}>
             <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.3)", color:"#fff", borderRadius:"8px", padding:"6px 12px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Çıkış</button>
             <span style={{ fontSize:"11px", opacity:0.7 }}>{user?.name || user?.email}</span>
@@ -19911,7 +19949,7 @@ function App() {
       case "ofis": return "Ofis & Depo";
       case "cashflow": return "Nakit Akışı";
       case "admin": return "Admin Panel";
-      default: return "ERC Mühendislik";
+      default: return user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik';
     }
   };
 
@@ -19950,8 +19988,8 @@ function App() {
           <div className="sidebar-logo">
             <div className="sidebar-logo-icon">🏗</div>
             <div>
-              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>ERC Mühendislik</div>
-              <div style={{fontSize:11,color:'#64748b'}}>Operasyon & Hakediş</div>
+              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>{user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'}</div>
+              <div style={{fontSize:11,color:'#64748b'}}>{user?.tenant === '2kx' ? '2KX Takip Sistemi' : 'Operasyon & Hakediş'}</div>
             </div>
           </div>
 
@@ -20001,6 +20039,11 @@ function App() {
                   {isAdmin && (
                     <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
                       <span>👑</span> Admin Panel
+                    </div>
+                  )}
+                  {isAdmin && (
+                    <div className={`sidebar-nav-item ${page==='pending-users'?'active':''}`} onClick={()=>{setPage('pending-users');fetchPendingUsers();}}>
+                      <span>👥</span> Bekleyen Kullanıcılar {pendingUsers.length > 0 && <span style={{background:'#ef4444',color:'#fff',borderRadius:'10px',padding:'1px 7px',fontSize:'11px',marginLeft:'4px'}}>{pendingUsers.length}</span>}
                     </div>
                   )}
                   {isAdmin && (
@@ -20241,6 +20284,55 @@ function App() {
               />
             )}
             {page === "entry" && <DailyEntry />}
+            {page === 'pending-users' && isAdmin && (
+              <div style={{maxWidth:'800px',margin:'0 auto',padding:'24px 16px'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
+                  <h2 style={{margin:0,fontSize:'20px',fontWeight:700,color:'#1e3a5f'}}>👥 Bekleyen Kullanıcı Talepleri</h2>
+                  <button onClick={fetchPendingUsers} style={{background:'#f1f5f9',border:'none',borderRadius:'8px',padding:'8px 16px',cursor:'pointer',fontSize:'13px',fontWeight:600}}>🔄 Yenile</button>
+                </div>
+                {pendingLoading ? (
+                  <div style={{textAlign:'center',padding:'40px',color:'#6b7280'}}>Yükleniyor...</div>
+                ) : pendingUsers.length === 0 ? (
+                  <div style={{textAlign:'center',padding:'60px',color:'#9ca3af',background:'#fff',borderRadius:'14px',border:'1px solid #e2e8f0'}}>
+                    <div style={{fontSize:'32px',marginBottom:'12px'}}>✅</div>
+                    <div>Bekleyen kullanıcı talebi yok</div>
+                  </div>
+                ) : (
+                  <div style={{background:'#fff',borderRadius:'14px',border:'1px solid #e2e8f0',overflow:'hidden'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:'14px'}}>
+                      <thead>
+                        <tr style={{background:'#f8fafc'}}>
+                          {['Ad Soyad','E-posta','Platform','Kayıt Tarihi','İşlem'].map(h=>(
+                            <th key={h} style={{padding:'12px 16px',textAlign:'left',borderBottom:'1px solid #e2e8f0',color:'#374151',fontWeight:600}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pendingUsers.map((u,i)=>(
+                          <tr key={i} style={{borderBottom:'1px solid #f1f5f9'}}>
+                            <td style={{padding:'12px 16px',fontWeight:600}}>{u.name}</td>
+                            <td style={{padding:'12px 16px',color:'#6b7280'}}>{u.email}</td>
+                            <td style={{padding:'12px 16px'}}>
+                              <span style={{background:u.tenant==='2kx'?'#dbeafe':'#fee2e2',color:u.tenant==='2kx'?'#1d4ed8':'#991b1b',borderRadius:'6px',padding:'2px 10px',fontSize:'12px',fontWeight:600}}>
+                                {u.tenant==='2kx'?'2KX':'ERC'}
+                              </span>
+                            </td>
+                            <td style={{padding:'12px 16px',color:'#6b7280',fontSize:'13px'}}>{new Date(u.created_at).toLocaleDateString('tr-TR')}</td>
+                            <td style={{padding:'12px 16px'}}>
+                              <div style={{display:'flex',gap:'8px'}}>
+                                <button onClick={()=>handleApproveUser(u.id)} style={{background:'#10b981',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>✓ Onayla</button>
+                                <button onClick={()=>handleRejectUser(u.id)} style={{background:'#ef4444',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>✗ Reddet</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
             {page === "admin" && isAdmin && (
               <div style={{maxWidth:"1440px",margin:"24px auto",padding:"0 20px"}}>
                 <div style={{background:"linear-gradient(135deg,#1f2937 0%,#374151 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",gap:"16px",color:"#fff"}}>
