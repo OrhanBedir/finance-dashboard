@@ -8375,6 +8375,16 @@ const normalizeSubconName = (name) =>
 app.get("/finance/subcon-hakedis-summary", async (req, res) => {
   try {
     const usdTryRate = await getTcmbUsdTrySellingRate();
+    await ensureBolgeFaturaTable().catch(() => {});
+
+    // bolge_fatura map: "site_code|item_code" → [{ fatura_no, fatura_tarihi, fatura_miktari }]
+    const bfResult = await pool.query(`SELECT * FROM bolge_fatura ORDER BY created_at DESC`).catch(() => ({ rows: [] }));
+    const bfMap = {};
+    for (const bf of bfResult.rows) {
+      const key = `${String(bf.site_code||'').toUpperCase()}|${String(bf.item_code||'').trim()}|${String(bf.taseron_adi||'').toLowerCase()}`;
+      if (!bfMap[key]) bfMap[key] = [];
+      bfMap[key].push({ fatura_no: bf.fatura_no, fatura_tarihi: bf.fatura_tarihi, fatura_miktari: bf.fatura_miktari });
+    }
 
     const detailResult = await pool.query(`
       SELECT
@@ -8495,6 +8505,7 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
       ok: true,
       usd_try_rate: Number(usdTryRate || 0),
       rows,
+      bolge_fatura_map: bfMap,
     });
   } catch (err) {
     console.error("SUBCON HAKEDIS SUMMARY ERROR:", err);
@@ -14833,6 +14844,143 @@ app.get("/taseron/qc-kalemler/:taseron_adi", authMiddleware, async (req, res) =>
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 /* ========================= / TAŞERON FATURA YÖNETİMİ ========================= */
+
+/* ========================= BÖLGE FATURA GİRİŞİ ========================= */
+// Bölge analizi panelinden FEDERAL/UBS için fatura girişi
+async function ensureBolgeFaturaTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bolge_fatura (
+      id           SERIAL PRIMARY KEY,
+      taseron_adi  TEXT NOT NULL,
+      site_code    TEXT NOT NULL,
+      item_code    TEXT,
+      item_description TEXT,
+      fatura_no    TEXT,
+      fatura_tarihi DATE,
+      fatura_miktari NUMERIC(18,2) DEFAULT 0,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
+// Site koduna göre kalem listesi (FEDERAL/UBS sahaları)
+app.get("/bolge-fatura/site-items", requireFinanceAuth, async (req, res) => {
+  try {
+    const siteCode = String(req.query.site_code || "").trim().toUpperCase();
+    if (!siteCode) return res.json({ ok: true, items: [] });
+    const result = await pool.query(`
+      SELECT DISTINCT
+        pr.item_code,
+        pr.item_description,
+        COALESCE(pr.unit_price, 0) AS unit_price,
+        COALESCE(pr.currency, 'TRY') AS currency,
+        COALESCE(pr.billed_qty, 0) AS billed_qty,
+        COALESCE(pr.done_qty, pr.requested_qty, 0) AS done_qty
+      FROM po_rows pr
+      WHERE UPPER(TRIM(pr.site_code)) = $1
+        AND pr.item_description IS NOT NULL
+      ORDER BY pr.item_description
+    `, [siteCode]);
+    res.json({ ok: true, items: result.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Fatura listesi (taseron_adi ile filtrele)
+app.get("/bolge-fatura/list", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureBolgeFaturaTable();
+    const taseron = req.query.taseron_adi ? String(req.query.taseron_adi).trim() : null;
+    const result = taseron
+      ? await pool.query(`SELECT * FROM bolge_fatura WHERE LOWER(TRIM(taseron_adi))=LOWER($1) ORDER BY created_at DESC`, [taseron])
+      : await pool.query(`SELECT * FROM bolge_fatura ORDER BY created_at DESC`);
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Fatura ekle
+app.post("/bolge-fatura/add", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureBolgeFaturaTable();
+    const { taseron_adi, site_code, item_code, item_description, fatura_no, fatura_tarihi, fatura_miktari } = req.body;
+    if (!taseron_adi || !site_code) return res.status(400).json({ ok: false, error: "Taşeron ve site kodu zorunlu" });
+    const result = await pool.query(`
+      INSERT INTO bolge_fatura (taseron_adi, site_code, item_code, item_description, fatura_no, fatura_tarihi, fatura_miktari)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id
+    `, [taseron_adi, site_code.toUpperCase(), item_code||null, item_description||null,
+        fatura_no||null, fatura_tarihi||null, Number(fatura_miktari||0)]);
+    res.json({ ok: true, id: result.rows[0].id });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Fatura sil
+app.delete("/bolge-fatura/:id", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureBolgeFaturaTable();
+    await pool.query(`DELETE FROM bolge_fatura WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Fatura Kesilecek Excel — taşeron için Billed Qty > 0 olan kalemler
+app.get("/bolge-fatura/kesilecek-excel/:taseron_adi", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureBolgeFaturaTable();
+    const taseron = req.params.taseron_adi;
+    const result = await pool.query(`
+      SELECT
+        pr.site_code,
+        pr.item_code,
+        pr.item_description,
+        COALESCE(pr.billed_qty, 0) AS billed_qty,
+        COALESCE(pr.unit_price, 0) AS unit_price,
+        COALESCE(pr.currency, 'TRY') AS currency,
+        COALESCE(pr.billed_qty, 0) * COALESCE(pr.unit_price, 0) * 0.80 AS fatura_kesilecek,
+        bf.fatura_no,
+        bf.fatura_tarihi,
+        bf.fatura_miktari
+      FROM po_rows pr
+      LEFT JOIN bolge_fatura bf
+        ON UPPER(TRIM(bf.site_code)) = UPPER(TRIM(pr.site_code))
+       AND TRIM(bf.item_code) = TRIM(pr.item_code)
+       AND LOWER(TRIM(bf.taseron_adi)) = LOWER($1)
+      WHERE COALESCE(pr.billed_qty, 0) > 0
+        AND pr.item_description IS NOT NULL
+      ORDER BY pr.site_code, pr.item_description
+    `, [taseron]);
+
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet("Fatura Kesilecek");
+    ws.addRow([`${taseron} — Fatura Kesilecek Listesi`]).font = { bold: true, size: 13 };
+    ws.addRow([]);
+    const hdr = ws.addRow([
+      "Site Code", "Item Code", "Item Description",
+      "Billed Qty", "Unit Price (TRY)", "Fatura Kesilecek (%80)",
+      "Fatura No", "Fatura Tarihi", "Fatura Miktarı (KDV Dahil)"
+    ]);
+    hdr.font = { bold: true };
+    hdr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
+    hdr.font = { bold: true, color: { argb: "FFFFFFFF" } };
+
+    for (const r of result.rows) {
+      ws.addRow([
+        r.site_code, r.item_code, r.item_description,
+        Number(r.billed_qty), Number(r.unit_price),
+        Math.round(Number(r.fatura_kesilecek) * 100) / 100,
+        r.fatura_no || "", r.fatura_tarihi ? String(r.fatura_tarihi).slice(0,10) : "",
+        Number(r.fatura_miktari || 0)
+      ]);
+    }
+    ws.columns = [
+      {width:22},{width:16},{width:45},{width:12},{width:16},{width:20},{width:18},{width:14},{width:22}
+    ];
+    const safe = taseron.replace(/[^a-zA-Z0-9_-]/g,"_");
+    res.setHeader("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition",`attachment; filename="${safe}_fatura_kesilecek.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+/* ========================= / BÖLGE FATURA GİRİŞİ ========================= */
 
 // ── Admin: belirli bir saha için QC verisini sıfırla ───────────────────────
 // DELETE /admin/clear-qc/:siteCode — qc_durum + qc_closed_date temizler

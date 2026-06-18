@@ -3341,6 +3341,11 @@ function FinanceDashboard({
   const [subconFilter, setSubconFilter] = useState("");
   const [subconSummaryRows, setSubconSummaryRows] = useState([]);
   const [showSubconSummaryModal, setShowSubconSummaryModal] = useState(false);
+  const [bolgeFaturaMap, setBolgeFaturaMap] = useState({});
+  const [showBolgeFaturaModal, setShowBolgeFaturaModal] = useState(false);
+  const [bolgeFaturaForm, setBolgeFaturaForm] = useState({ taseron_adi:"", site_code:"", item_code:"", item_description:"", fatura_no:"", fatura_tarihi:"", fatura_miktari:"" });
+  const [bolgeFaturaSiteItems, setBolgeFaturaSiteItems] = useState([]);
+  const [bolgeFaturaLoading, setBolgeFaturaLoading] = useState(false);
 
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
@@ -3943,6 +3948,7 @@ function FinanceDashboard({
 
       setSubconSummaryRows(summaryData.rows || []);
       setUsdTryRate(Number(summaryData.usd_try_rate || 0));
+      setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
       setSubconDetailRows(detailData.rows || []);
       setShowSubconSummaryModal(true);
     } catch (err) {
@@ -7638,6 +7644,14 @@ function FinanceDashboard({
                 >
                   <button
                     type="button"
+                    style={{ padding:"8px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}
+                    onClick={() => { setBolgeFaturaForm({ taseron_adi:"FEDERAL", site_code:"", item_code:"", item_description:"", fatura_no:"", fatura_tarihi:"", fatura_miktari:"" }); setBolgeFaturaSiteItems([]); setShowBolgeFaturaModal(true); }}
+                  >
+                    + Fatura Girişi
+                  </button>
+
+                  <button
+                    type="button"
                     className="excelBtn"
                     onClick={handleExportFilteredSubconExcel}
                   >
@@ -7810,13 +7824,23 @@ function FinanceDashboard({
                           >
                             {formatMoneyByCurrency(row.fazla_odeme || 0, "TRY")}
                           </td>
-                          <td onClick={e => e.stopPropagation()}>
-                            <button
-                              onClick={() => openTaseronFaturaPanel(row.subcon_name)}
-                              style={{ padding:"5px 10px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
-                            >
-                              🧾 Fatura Yönetimi
-                            </button>
+                          <td onClick={e => e.stopPropagation()} style={{ whiteSpace:"nowrap" }}>
+                            <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                              <button
+                                onClick={() => openTaseronFaturaPanel(row.subcon_name)}
+                                style={{ padding:"5px 10px", background:"linear-gradient(135deg,#1d4ed8,#4f46e5)", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
+                              >
+                                🧾 Fatura Yönetimi
+                              </button>
+                              {["federal","ubs"].some(t => String(row.subcon_name||"").toLowerCase().includes(t)) && (
+                                <a
+                                  href={`${API_BASE}/bolge-fatura/kesilecek-excel/${encodeURIComponent(row.subcon_name)}`}
+                                  style={{ padding:"5px 10px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", textDecoration:"none", display:"inline-flex", alignItems:"center", gap:"4px" }}
+                                >
+                                  ⬇ Fatura Kesilecek
+                                </a>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -7849,6 +7873,114 @@ function FinanceDashboard({
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          BÖLGE FATURA GİRİŞİ MODAL
+      ═══════════════════════════════════════════════════════════════ */}
+      {showBolgeFaturaModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"#fff", borderRadius:"14px", padding:"32px 28px", width:"480px", maxWidth:"95vw", boxShadow:"0 8px 40px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ margin:"0 0 20px", fontSize:"17px", fontWeight:700, color:"#1e3a5f" }}>+ Fatura Girişi</h3>
+
+            {/* Firma Adı */}
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Firma Adı</label>
+              <select value={bolgeFaturaForm.taseron_adi} onChange={e => setBolgeFaturaForm(f => ({...f, taseron_adi: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px" }}>
+                <option value="FEDERAL">FEDERAL</option>
+                <option value="UBS">UBS</option>
+              </select>
+            </div>
+
+            {/* Site ID */}
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Site ID</label>
+              <input type="text" placeholder="Örn: AT8416_NS_WM" value={bolgeFaturaForm.site_code}
+                onChange={async e => {
+                  const val = e.target.value.toUpperCase();
+                  setBolgeFaturaForm(f => ({...f, site_code: val, item_code:"", item_description:""}));
+                  if (val.length >= 5) {
+                    try {
+                      const data = await fetchJson(`${API_BASE}/bolge-fatura/site-items?site_code=${encodeURIComponent(val)}`, { withAuth: true });
+                      setBolgeFaturaSiteItems(data.items || []);
+                    } catch { setBolgeFaturaSiteItems([]); }
+                  } else { setBolgeFaturaSiteItems([]); }
+                }}
+                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
+              />
+            </div>
+
+            {/* Item Description */}
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>
+                Item Description {bolgeFaturaSiteItems.length > 0 && <span style={{ color:"#16a34a" }}>({bolgeFaturaSiteItems.length} kalem)</span>}
+              </label>
+              <select value={bolgeFaturaForm.item_code}
+                onChange={e => {
+                  const it = bolgeFaturaSiteItems.find(i => i.item_code === e.target.value);
+                  setBolgeFaturaForm(f => ({...f, item_code: e.target.value, item_description: it?.item_description || ""}));
+                }}
+                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"13px" }}>
+                <option value="">-- Kalem seçin --</option>
+                {bolgeFaturaSiteItems.map((it, i) => (
+                  <option key={i} value={it.item_code}>{it.item_description} ({it.item_code})</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Fatura No */}
+            <div style={{ marginBottom:"14px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Fatura No</label>
+              <input type="text" placeholder="Fatura numarası" value={bolgeFaturaForm.fatura_no}
+                onChange={e => setBolgeFaturaForm(f => ({...f, fatura_no: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
+              />
+            </div>
+
+            {/* Tarih + Miktar */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"20px" }}>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Fatura Tarihi</label>
+                <input type="date" value={bolgeFaturaForm.fatura_tarihi}
+                  onChange={e => setBolgeFaturaForm(f => ({...f, fatura_tarihi: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Fatura Miktarı (KDV Dahil)</label>
+                <input type="number" placeholder="0.00" value={bolgeFaturaForm.fatura_miktari}
+                  onChange={e => setBolgeFaturaForm(f => ({...f, fatura_miktari: e.target.value}))}
+                  style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
+              <button onClick={() => setShowBolgeFaturaModal(false)}
+                style={{ padding:"10px 20px", background:"#f1f5f9", border:"none", borderRadius:"8px", fontSize:"14px", cursor:"pointer" }}>
+                İptal
+              </button>
+              <button disabled={bolgeFaturaLoading}
+                onClick={async () => {
+                  if (!bolgeFaturaForm.site_code || !bolgeFaturaForm.taseron_adi) return alert("Firma ve Site ID zorunlu");
+                  setBolgeFaturaLoading(true);
+                  try {
+                    await fetchJson(`${API_BASE}/bolge-fatura/add`, { method:"POST", withAuth:true, body: JSON.stringify(bolgeFaturaForm) });
+                    setShowBolgeFaturaModal(false);
+                    // Özet verisini yenile
+                    const summaryData = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
+                    setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
+                    setSubconSummaryRows(summaryData.rows || []);
+                  } catch(err) { alert(err.message || "Kaydetme hatası"); }
+                  finally { setBolgeFaturaLoading(false); }
+                }}
+                style={{ padding:"10px 24px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
+                {bolgeFaturaLoading ? "Kaydediliyor..." : "Kaydet"}
+              </button>
             </div>
           </div>
         </div>
@@ -13999,11 +14131,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const headers = [
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
-        "Done Qty", "Requested Qty", "Billed Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Taşeron",
+        "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)",
+        "Fatura Kesilecek", "Fatura No", "Fatura Miktarı", "Fatura Tarihi",
+        "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 14, 16, 14, 18, 20, 18];
-      const NCOLS = headers.length;
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 20, 18, 18, 14, 18];
+      const NCOLS = headers.length; // 23
 
       const titleStyle = {
         fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
@@ -14056,15 +14190,38 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
 
 
+      // FEDERAL/UBS için fatura verileri
+      const FATURA_TASERONLAR = ["federal", "ubs"];
+      const faturaStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FFF3CD" : "FFFBEA" } },
+        font: { sz: 11, name: "Calibri", color: { rgb: "92400E" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+
       sortedRows.forEach((row, idx) => {
         const isEven = idx % 2 === 1;
         const isUSD = normalizeCurrency(row.currency) === "USD";
         const unitPrice = Number(row.unit_price || 0);
         const doneQty = Number(row.done_qty || 0);
+        const billedQty = Number(row.billed_qty || 0);
+        const dueQty = doneQty - billedQty;
         const usdBirimFiyat = isUSD ? unitPrice : 0;
         const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
         const toplamHakedis = Number(row.total_done_amount || 0);
         const federalHakedis = toplamHakedis * 0.80;
+
+        // Fatura kesilecek: sadece FEDERAL/UBS, Billed Qty > 0 ise
+        const subconLower = String(row.subcon_name || "").toLowerCase().trim();
+        const isFaturaTaseron = FATURA_TASERONLAR.some(t => subconLower.includes(t));
+        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * 0.80 : 0;
+
+        // Girilmiş fatura verisi
+        const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconLower}`;
+        const bfEntries = bolgeFaturaMap[bfKey] || [];
+        const faturaNo = bfEntries.map(e => e.fatura_no || "").filter(Boolean).join(", ");
+        const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
+        const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
 
         aoa.push([
           { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
@@ -14077,13 +14234,18 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           { v: row.onair_date || "",                              s: cellStyle(isEven, false) },
           { v: doneQty,                                           s: cellStyle(isEven, true) },
           { v: Number(row.requested_qty || 0),                    s: cellStyle(isEven, true) },
-          { v: Number(row.billed_qty || 0),                       s: cellStyle(isEven, true) },
+          { v: billedQty,                                         s: cellStyle(isEven, true) },
+          { v: dueQty,                                            s: cellStyle(isEven, true) },
           { v: row.currency || "",                                s: cellStyle(isEven, false) },
           { v: usdBirimFiyat,                                     s: cellStyle(isEven, true) },
           { v: usdToplamFiyat,                                    s: cellStyle(isEven, true) },
           { v: unitPrice,                                         s: cellStyle(isEven, true) },
           { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
           { v: federalHakedis,                                    s: federalStyle(isEven) },
+          { v: faturaKesilecek,                                   s: faturaKesilecek > 0 ? faturaStyle(isEven) : cellStyle(isEven, true) },
+          { v: faturaNo,                                          s: cellStyle(isEven, false) },
+          { v: faturaToplamMiktar || "",                          s: cellStyle(isEven, true) },
+          { v: faturaTarihi,                                      s: cellStyle(isEven, false) },
           { v: row.subcon_name || "",                             s: cellStyle(isEven, false) },
         ]);
       });
