@@ -40,6 +40,37 @@ function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5001";
 
+// ── GLOBAL FETCH INTERCEPTOR (multi-tenant izolasyon güvenliği) ──────────────
+// Backend, isteğin hangi firmaya (tenant) ait olduğunu JWT'den çözer. Eğer bir
+// API çağrısı token taşımazsa backend public (ERC) şemasına düşer — bu, izole
+// bir firma oturumunda ERC verisinin sızması demektir. Frontend'de yüzlerce
+// dağınık fetch çağrısı token göndermiyor. Bu interceptor, API_BASE'e giden ve
+// Authorization başlığı OLMAYAN tüm isteklere mevcut token'ı otomatik ekler.
+// ERC kullanıcısı için token.tenant='erc' → backend hiçbir şey yapmaz (davranış
+// birebir aynı). Açıkça finance_token gönderen çağrılara dokunulmaz.
+if (typeof window !== "undefined" && !window.__omnixFetchPatched) {
+  window.__omnixFetchPatched = true;
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    try {
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      if (url && url.indexOf(API_BASE) === 0) {
+        const opts = init ? { ...init } : {};
+        const headers = new Headers(opts.headers || (typeof input !== "string" && input.headers) || {});
+        if (!headers.has("Authorization")) {
+          const tk = localStorage.getItem("token");
+          if (tk) {
+            headers.set("Authorization", `Bearer ${tk}`);
+            opts.headers = headers;
+            return _origFetch(input, opts);
+          }
+        }
+      }
+    } catch { /* sessizce orijinal davranışa düş */ }
+    return _origFetch(input, init);
+  };
+}
+
 function normalizeCurrency(value) {
   const raw = String(value || "")
     .trim()
@@ -20207,7 +20238,9 @@ function App() {
   // ── Dynamic document.title based on tenant ──────────────────────────────
   useEffect(() => {
     if (user) {
-      document.title = user.tenant === '2kx' ? '2KX | Operasyon ve Hakediş Takip Sistemi' : 'ERC | Operasyon ve Hakediş Takip Sistemi';
+      document.title = user.tenant === '2kx' ? '2KX | Operasyon ve Hakediş Takip Sistemi'
+        : (user.tenant && user.tenant !== 'erc') ? 'Omnix | Operasyon ve Proje Platformu'
+        : 'ERC | Operasyon ve Hakediş Takip Sistemi';
     } else {
       document.title = 'Omnix | Operations & Project Platform';
     }
@@ -20623,6 +20656,29 @@ function App() {
     const tk = localStorage.getItem('token') || '';
     await fetch(`${API_BASE}/admin/users/${id}/reject`, { method: 'POST', headers: { Authorization: `Bearer ${tk}` } });
     fetchPendingUsers();
+  };
+
+  // Yeni izole firma sahibi olarak onayla: firma adı + benzersiz slug ister,
+  // backend boş şema provizyonu yapıp kullanıcıyı o firmanın admini yapar.
+  const handleApproveCompany = async (u) => {
+    const tenant_name = window.prompt(`"${u.name}" için FİRMA ADI girin (örn. 2KX Haberleşme):`, "");
+    if (!tenant_name) return;
+    let slug = window.prompt("Firma için benzersiz kısa kod (slug) — sadece harf/rakam, 'erc' ve '2kx' kullanılamaz:", "");
+    if (!slug) return;
+    slug = String(slug).toLowerCase().trim().replace(/[^a-z0-9_]/g, "");
+    if (!slug || slug === 'erc' || slug === '2kx') { alert("Geçersiz slug (erc/2kx olamaz)"); return; }
+    if (!window.confirm(`"${u.email}" → "${tenant_name}" (${slug}) izole firma sahibi olarak onaylanacak. Kendi boş çalışma alanı oluşturulacak. Onaylıyor musunuz?`)) return;
+    const tk = localStorage.getItem('token') || '';
+    try {
+      const r = await fetch(`${API_BASE}/admin/users/${u.id}/approve-company`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tk}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_slug: slug, tenant_name }),
+      });
+      const d = await r.json();
+      if (d.ok) { alert(`✅ Firma onaylandı. Şema: ${d.schema} (${d.tables_created} tablo). Kullanıcı giriş yapabilir.`); fetchPendingUsers(); }
+      else alert("❌ " + (d.error || "Onay hatası"));
+    } catch (e) { alert("❌ Bağlantı hatası: " + e.message); }
   };
 
   if (!financeToken) {
@@ -21192,8 +21248,9 @@ function App() {
                             </td>
                             <td style={{padding:'12px 16px',color:'#6b7280',fontSize:'13px'}}>{new Date(u.created_at).toLocaleDateString('tr-TR')}</td>
                             <td style={{padding:'12px 16px'}}>
-                              <div style={{display:'flex',gap:'8px'}}>
-                                <button onClick={()=>handleApproveUser(u.id)} style={{background:'#10b981',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>✓ Onayla</button>
+                              <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+                                <button onClick={()=>handleApproveUser(u.id)} title="Mevcut firmaya (ERC) çalışan olarak ekle" style={{background:'#10b981',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>✓ Onayla</button>
+                                <button onClick={()=>handleApproveCompany(u)} title="Yeni izole firma sahibi olarak onayla (kendi boş çalışma alanı)" style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>🏢 Yeni Firma</button>
                                 <button onClick={()=>handleRejectUser(u.id)} style={{background:'#ef4444',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>✗ Reddet</button>
                               </div>
                             </td>
