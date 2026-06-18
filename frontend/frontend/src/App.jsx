@@ -4477,7 +4477,14 @@ function FinanceDashboard({
   ];
 
   const currentMonth = new Date().getMonth() + 1;
-  const thisMonthInvoiced = summary?.monthly_invoiced?.[currentMonth] || 0;
+  // USD+TRY combined totals for stat cards (converted to TRY using live rate)
+  const totalCollectionsTRY = (summary?.total_collections_try || summary?.total_collections || 0)
+    + (summary?.total_collections_usd || 0) * usdTryLiveRate;
+  const thisMonthCollectionsTRY = (summary?.this_month_collections_try || summary?.this_month_collections || 0)
+    + (summary?.this_month_collections_usd || 0) * usdTryLiveRate;
+  const thisMonthInvoicedTRY = (summary?.monthly_invoiced_try?.[currentMonth] || summary?.monthly_invoiced?.[currentMonth] || 0)
+    + (summary?.monthly_invoiced_usd?.[currentMonth] || 0) * usdTryLiveRate;
+  const thisMonthInvoiced = thisMonthInvoicedTRY;
 
   const loadSalaryRows = async () => {
     try {
@@ -4825,8 +4832,8 @@ function FinanceDashboard({
             <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>{new Date().getFullYear()} Toplam Tahsilat</div>
             <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#eff6ff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>💰</div>
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary.total_collections || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Yıllık kümülatif</div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(totalCollectionsTRY || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Yıllık kümülatif{(summary?.total_collections_usd||0)>0 ? ` · $${Math.round(summary.total_collections_usd/1000)}K USD dahil` : ""}</div>
         </div>
         {/* Bu Ay Tahsilat */}
         <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
@@ -4835,8 +4842,8 @@ function FinanceDashboard({
             <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Bu Ay Tahsilat</div>
             <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#ecfdf5", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📈</div>
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary.this_month_collections || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen</div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(thisMonthCollectionsTRY || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen{(summary?.this_month_collections_usd||0)>0 ? ` · $${Math.round(summary.this_month_collections_usd/1000)}K USD dahil` : ""}</div>
           {hwLastUpload?.uploaded_at && (
             <div style={{ fontSize:"10px", color:"#94a3b8", marginTop:"6px", borderTop:"1px solid #f1f5f9", paddingTop:"6px" }}>
               🕒 Son HW yükleme: {new Date(hwLastUpload.uploaded_at).toLocaleString("tr-TR")} ({hwLastUpload.row_count} kayıt)
@@ -5147,9 +5154,18 @@ function FinanceDashboard({
         <div style={{ padding:"20px" }}>
           {(() => {
             const shortNames = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
-            const received = shortNames.map((_,i) => summary.monthly_received?.[i+1] || 0);
+            // Combine TRY + USD (converted) for chart bars
+            const received = shortNames.map((_,i) => {
+              const t = summary.monthly_received_try?.[i+1] ?? summary.monthly_received?.[i+1] ?? 0;
+              const u = summary.monthly_received_usd?.[i+1] ?? 0;
+              return t + u * usdTryLiveRate;
+            });
             const upcoming = shortNames.map((_,i) => summary.monthly_upcoming?.[i+1] || 0);
-            const invoiced = shortNames.map((_,i) => summary.monthly_invoiced?.[i+1] || 0);
+            const invoiced = shortNames.map((_,i) => {
+              const t = summary.monthly_invoiced_try?.[i+1] ?? summary.monthly_invoiced?.[i+1] ?? 0;
+              const u = summary.monthly_invoiced_usd?.[i+1] ?? 0;
+              return t + u * usdTryLiveRate;
+            });
             const allVals = [...received, ...upcoming, ...invoiced];
             const maxVal = Math.max(...allVals, 1);
             const fmt = (v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v/1000)}K` : String(Math.round(v));
@@ -5239,7 +5255,9 @@ function FinanceDashboard({
                     <td style={{ padding:"10px 16px", fontSize:"13px", color:"#7f1d1d" }}>{formatDateOnly(row.due_date)}</td>
                     <td style={{ padding:"10px 16px", textAlign:"right" }}>
                       <div style={{ fontWeight:700, color:"#dc2626", fontSize:"14px" }}>
-                        {formatMoneyByCurrency(row.gross_amount || row.amount || 0, row.currency || "TRY")}
+                        {row.currency === "USD"
+                          ? <span>{formatMoneyByCurrency(row.gross_amount||row.amount||0,"USD")} <span style={{fontSize:10,color:"#ef9999"}}>≈{formatMoneyByCurrency((row.gross_amount||row.amount||0)*usdTryLiveRate,"TRY")}</span></span>
+                          : formatMoneyByCurrency(row.gross_amount || row.amount || 0, "TRY")}
                       </div>
                     </td>
                   </tr>
@@ -5274,7 +5292,9 @@ function FinanceDashboard({
                       <td style={{ padding:"12px 16px", fontSize:"13px", color:"#374151" }}>{formatDateOnly(row.due_date)}</td>
                       <td style={{ padding:"12px 16px", textAlign:"right" }}>
                         <div style={{ fontWeight:700, color:row.amount<0?"#dc2626":"#10b981", fontSize:"14px" }}>
-                          {formatMoneyByCurrency(row.amount || 0, row.currency || "TRY")}
+                          {row.currency === "USD"
+                            ? <span>{formatMoneyByCurrency(row.amount||0,"USD")} <span style={{fontSize:10,color:"#9ca3af"}}>≈{formatMoneyByCurrency((row.amount||0)*usdTryLiveRate,"TRY")}</span></span>
+                            : formatMoneyByCurrency(row.amount || 0, "TRY")}
                         </div>
                         {row.deduction_amount < 0 && (
                           <div style={{ fontSize:11, color:"#dc2626", marginTop:2 }}>
@@ -5320,11 +5340,20 @@ function FinanceDashboard({
       {(paymentInvoiceFilter || paymentDueDateFilter) && (
         <div style={{ display:"flex", gap:"16px", marginBottom:"10px", padding:"10px 16px", background:"#f0f9ff", border:"1.5px solid #bae6fd", borderRadius:"10px", fontSize:"13px", flexWrap:"wrap" }}>
           <span>📋 <b>{filteredPaymentRows.length}</b> kayıt</span>
-          <span>🧾 Invoice Toplam: <b>{formatMoneyByCurrency(filteredPaymentRows.reduce((s,r) => s + Number(r.invoice_amount||0), 0), filteredPaymentRows[0]?.currency)}</b></span>
-          <span>✅ Ödenen: <b>{formatMoneyByCurrency(filteredPaymentRows.reduce((s,r) => s + Number(r.payment_amount||0), 0), filteredPaymentRows[0]?.currency)}</b></span>
-          <span>⏳ Kalan: <b style={{ color: filteredPaymentRows.reduce((s,r) => s + Number(r.remaining_amount||0), 0) > 0 ? "#dc2626" : "#16a34a" }}>
-            {formatMoneyByCurrency(filteredPaymentRows.reduce((s,r) => s + Number(r.remaining_amount||0), 0), filteredPaymentRows[0]?.currency)}
-          </b></span>
+          {(() => {
+            const toTry = (rows, key) => rows.reduce((s,r) => {
+              const amt = Number(r[key]||0);
+              return s + (r.currency === "USD" ? amt * usdTryLiveRate : amt);
+            }, 0);
+            const invTry = toTry(filteredPaymentRows, "invoice_amount");
+            const payTry = toTry(filteredPaymentRows, "payment_amount");
+            const remTry = toTry(filteredPaymentRows, "remaining_amount");
+            return (<>
+              <span>🧾 Invoice Toplam: <b>{formatMoneyByCurrency(invTry, "TRY")}</b></span>
+              <span>✅ Ödenen: <b>{formatMoneyByCurrency(payTry, "TRY")}</b></span>
+              <span>⏳ Kalan: <b style={{ color: remTry > 0 ? "#dc2626" : "#16a34a" }}>{formatMoneyByCurrency(remTry, "TRY")}</b></span>
+            </>);
+          })()}
         </div>
       )}
 
@@ -5413,15 +5442,22 @@ function FinanceDashboard({
                   <td style={isIade ? { color:"#dc2626", fontWeight:600 } : {}}>
                     {row.invoice_no || "-"}
                     {isIade && <span style={{ marginLeft:6, fontSize:11, background:"#fee2e2", color:"#dc2626", borderRadius:4, padding:"1px 5px" }}>İADE</span>}
+                    {row.currency === "USD" && <span style={{ marginLeft:4, fontSize:10, background:"#dbeafe", color:"#1d4ed8", borderRadius:4, padding:"1px 5px", fontWeight:600 }}>USD</span>}
                   </td>
                   <td style={isIade ? { color:"#dc2626" } : {}}>
-                    {formatMoneyByCurrency(row.invoice_amount || 0, row.currency)}
+                    {row.currency === "USD"
+                      ? <span>{formatMoneyByCurrency(row.invoice_amount || 0, "USD")} <span style={{fontSize:10,color:"#9ca3af"}}>≈{formatMoneyByCurrency((row.invoice_amount||0)*usdTryLiveRate,"TRY")}</span></span>
+                      : formatMoneyByCurrency(row.invoice_amount || 0, "TRY")}
                   </td>
                   <td style={isIade ? { color:"#dc2626" } : {}}>
-                    {formatMoneyByCurrency(row.payment_amount || 0, row.currency)}
+                    {row.currency === "USD"
+                      ? <span>{formatMoneyByCurrency(row.payment_amount || 0, "USD")} <span style={{fontSize:10,color:"#9ca3af"}}>≈{formatMoneyByCurrency((row.payment_amount||0)*usdTryLiveRate,"TRY")}</span></span>
+                      : formatMoneyByCurrency(row.payment_amount || 0, "TRY")}
                   </td>
                   <td style={isIade ? { color:"#dc2626" } : {}}>
-                    {formatMoneyByCurrency(row.remaining_amount || 0, row.currency)}
+                    {row.currency === "USD"
+                      ? <span>{formatMoneyByCurrency(row.remaining_amount || 0, "USD")} <span style={{fontSize:10,color:"#9ca3af"}}>≈{formatMoneyByCurrency((row.remaining_amount||0)*usdTryLiveRate,"TRY")}</span></span>
+                      : formatMoneyByCurrency(row.remaining_amount || 0, "TRY")}
                   </td>
                   <td>{formatDateOnly(row.payment_date)}</td>
 

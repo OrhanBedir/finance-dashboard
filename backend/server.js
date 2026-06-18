@@ -3036,7 +3036,8 @@ app.get("/finance/summary", async (req, res) => {
         `
         SELECT
           EXTRACT(MONTH FROM payment_date)::int AS month_no,
-          SUM(COALESCE(payment_amount, 0)) AS total
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) = 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_usd,
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) != 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_try
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
           AND payment_date IS NOT NULL
@@ -3050,7 +3051,8 @@ app.get("/finance/summary", async (req, res) => {
         `
         SELECT
           EXTRACT(MONTH FROM invoice_date)::int AS month_no,
-          SUM(COALESCE(invoice_amount, 0)) AS total
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) = 'USD' THEN COALESCE(invoice_amount, 0) ELSE 0 END) AS total_usd,
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) != 'USD' THEN COALESCE(invoice_amount, 0) ELSE 0 END) AS total_try
         FROM hw_invoice_rows
         WHERE EXTRACT(YEAR FROM invoice_date) = $1
         GROUP BY EXTRACT(MONTH FROM invoice_date)
@@ -3061,7 +3063,9 @@ app.get("/finance/summary", async (req, res) => {
 
       pool.query(
         `
-        SELECT SUM(COALESCE(payment_amount, 0)) AS total_collections
+        SELECT
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) = 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_usd,
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) != 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_try
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
           AND payment_date IS NOT NULL
@@ -3071,7 +3075,9 @@ app.get("/finance/summary", async (req, res) => {
 
       pool.query(
         `
-        SELECT SUM(COALESCE(payment_amount, 0)) AS this_month_collections
+        SELECT
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) = 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_usd,
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) != 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_try
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
           AND EXTRACT(MONTH FROM payment_date) = $2
@@ -3086,26 +3092,52 @@ app.get("/finance/summary", async (req, res) => {
       `),
     ]);
 
+    // monthly_received: { month_no -> { try, usd } } for frontend USD→TRY conversion
+    const monthly_received_try = {};
+    const monthly_received_usd = {};
+    const monthly_invoiced_try = {};
+    const monthly_invoiced_usd = {};
+    for (let i = 1; i <= 12; i++) {
+      monthly_received_try[i] = 0;
+      monthly_received_usd[i] = 0;
+      monthly_invoiced_try[i] = 0;
+      monthly_invoiced_usd[i] = 0;
+    }
+
     receivedResult.rows.forEach((row) => {
-      monthly_received[row.month_no] = Number(row.total || 0);
+      monthly_received_try[row.month_no] = Number(row.total_try || 0);
+      monthly_received_usd[row.month_no] = Number(row.total_usd || 0);
+      monthly_received[row.month_no] = Number(row.total_try || 0);
     });
 
     invoicedResult.rows.forEach((row) => {
-      monthly_invoiced[row.month_no] = Number(row.total || 0);
+      monthly_invoiced_try[row.month_no] = Number(row.total_try || 0);
+      monthly_invoiced_usd[row.month_no] = Number(row.total_usd || 0);
+      monthly_invoiced[row.month_no] = Number(row.total_try || 0);
     });
+
+    const totalTryCollections = Number(totalCollectionsResult.rows[0]?.total_try || 0);
+    const totalUsdCollections = Number(totalCollectionsResult.rows[0]?.total_usd || 0);
+    const thisMonthTry = Number(thisMonthCollectionsResult.rows[0]?.total_try || 0);
+    const thisMonthUsd = Number(thisMonthCollectionsResult.rows[0]?.total_usd || 0);
 
     res.json({
       ok: true,
       summary: {
-        total_collections: Number(
-          totalCollectionsResult.rows[0]?.total_collections || 0,
-        ),
-        this_month_collections: Number(
-          thisMonthCollectionsResult.rows[0]?.this_month_collections || 0,
-        ),
+        total_collections_try: totalTryCollections,
+        total_collections_usd: totalUsdCollections,
+        this_month_collections_try: thisMonthTry,
+        this_month_collections_usd: thisMonthUsd,
+        // legacy fields (kept for backward compat — TRY only)
+        total_collections: totalTryCollections,
+        this_month_collections: thisMonthTry,
         expense_count: Number(expenseCountResult.rows[0]?.expense_count || 0),
         monthly_received,
         monthly_invoiced,
+        monthly_received_try,
+        monthly_received_usd,
+        monthly_invoiced_try,
+        monthly_invoiced_usd,
         monthly_upcoming: upcomingData.monthlyUpcoming,
       },
     });
