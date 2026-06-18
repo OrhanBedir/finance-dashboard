@@ -3607,56 +3607,177 @@ function FinanceDashboard({
     return rows;
   }, [subconDetailRows, subconFilter]);
 
-  const handleExportFilteredSubconExcel = () => {
-    if (!filteredSubconDetailRows.length) {
-      alert("İndirilecek kayıt bulunamadı");
-      return;
-    }
+  const handleExportFilteredSubconExcel = async () => {
+    try {
+      if (!filteredSubconDetailRows.length) {
+        alert("İndirilecek kayıt bulunamadı");
+        return;
+      }
 
-    const excelRows = filteredSubconDetailRows.map((row) => {
-      const billedQty = Number(row.billed_qty || 0);
-      const doneQty = Number(row.done_qty || 0);
-      const unitPrice = Number(row.unit_price || 0);
-      const rawTotal = doneQty * unitPrice;
-      const curr = String(row.currency || "TRY").toUpperCase();
-      const totalTl =
-        curr === "USD" ? rawTotal * Number(usdTryRate || 0) : rawTotal;
+      const dateStr = new Date().toLocaleDateString("tr-TR");
+      const safeName = subconFilter
+        ? subconFilter.replace(/[^\wğüşöçıİĞÜŞÖÇ -]/gi, "").replace(/\s+/g, "_")
+        : "tum_taseronlar";
 
-      return {
-        Bölge: getRegion(row.site_code, row.project_code) || "",
-        Status: row.status || "",
-        Project: row.project_code || "",
-        Site: row.site_code || "",
-        Item: row.item_code || "",
-        "Item Description": row.item_description || "",
-        Done: doneQty,
-        Req: Number(row.requested_qty || 0),
-        Analiz: getQtyAnalysis(row.done_qty, row.requested_qty).label,
-        Billed: billedQty,
-        Curr: curr,
-        Unit: unitPrice,
-        Total: Number(totalTl.toFixed(2)),
-        Subcon: row.subcon_name || "",
-        OnAir: formatDateTR(row.onair_date),
-        QC: row.qc_durum || "",
-        Kabul: row.kabul_durum || "",
-        "RF Not": row.kabul_not || "",
+      const getAnaliz = (row) => {
+        if (row.status === "PO_BEKLER") return "Eksik";
+        if (Number(row.done_qty || 0) === 0) return "Giriş Yok";
+        if (Number(row.done_qty || 0) === Number(row.requested_qty || 0)) return "Tamam";
+        if (Number(row.done_qty || 0) > Number(row.requested_qty || 0)) return "Fazla";
+        return "Eksik";
       };
-    });
 
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
+      const headers = [
+        "Bölge", "Status", "Analiz", "Project Code", "Site Code",
+        "Item Description", "Item Code", "OnAir Date",
+        "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)",
+        "Fatura Kesilecek", "Fatura No", "Fatura Miktarı", "Fatura Tarihi",
+        "Taşeron",
+      ];
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 20, 18, 18, 14, 18];
+      const NCOLS = headers.length;
 
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Subcon Detail");
+      const titleStyle = {
+        fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
+        font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        alignment: { horizontal: "center", vertical: "center" },
+      };
+      const headerStyle = {
+        fill: { patternType: "solid", fgColor: { rgb: "203864" } },
+        font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        border: { top:{style:"thin",color:{rgb:"B7C9E2"}}, bottom:{style:"thin",color:{rgb:"B7C9E2"}}, left:{style:"thin",color:{rgb:"B7C9E2"}}, right:{style:"thin",color:{rgb:"B7C9E2"}} },
+      };
+      const cellBorder = { top:{style:"hair",color:{rgb:"E5E7EB"}}, bottom:{style:"hair",color:{rgb:"E5E7EB"}}, left:{style:"hair",color:{rgb:"E5E7EB"}}, right:{style:"hair",color:{rgb:"E5E7EB"}} };
+      const cellStyle = (isEven, isNum) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "F8FAFC" : "FFFFFF" } },
+        font: { sz: 11, name: "Calibri", color: { rgb: "111827" } },
+        alignment: { horizontal: isNum ? "right" : "left", vertical: "middle" },
+        border: cellBorder,
+      });
+      const federalStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const faturaStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FFF3CD" : "FFFBEA" } },
+        font: { sz: 11, name: "Calibri", color: { rgb: "92400E" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const statusStyle = (status, isEven) => {
+        const base = cellStyle(isEven, false);
+        const s = String(status || "").toUpperCase();
+        const colors = { OK: "15803D", PO_BEKLER: "D97706", CANCEL: "B91C1C", PARTIAL: "2563EB" };
+        if (colors[s]) return { ...base, font: { ...base.font, bold: true, color: { rgb: colors[s] } } };
+        return base;
+      };
 
-    const safeName = subconFilter
-      ? subconFilter.replace(/[^\wğüşöçıİĞÜŞÖÇ -]/gi, "").replace(/\s+/g, "_")
-      : "tum_taseronlar";
+      const aoa = [];
+      const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
+      const titleLabel = subconFilter ? `TAŞERON BAZLI DETAY - ${subconFilter.toUpperCase()} (${dateStr})` : `TAŞERON BAZLI DETAY - TÜM TAŞERONLAR (${dateStr})`;
+      titleRow[0] = { v: titleLabel, s: titleStyle };
+      aoa.push(titleRow);
+      aoa.push(headers.map(h => ({ v: h, s: headerStyle })));
 
-    XLSX.writeFile(
-      workbook,
-      `subcon_detail_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-    );
+      const FATURA_TASERONLAR_SUB = ["federal", "ubs"];
+      const usdR = Number(usdTryRate || 0);
+
+      filteredSubconDetailRows.forEach((row, idx) => {
+        const isEven = idx % 2 === 1;
+        const isUSD = normalizeCurrency(row.currency) === "USD";
+        const unitPrice = Number(row.unit_price || 0);
+        const doneQty = Number(row.done_qty || 0);
+        const billedQty = Number(row.billed_qty || 0);
+        const dueQty = doneQty - billedQty;
+        const usdBirimFiyat = isUSD ? unitPrice : 0;
+        const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
+        const rawTotal = doneQty * unitPrice;
+        const toplamHakedis = isUSD ? rawTotal * usdR : rawTotal;
+        const federalHakedis = toplamHakedis * 0.80;
+
+        const subconLower = String(row.subcon_name || "").toLowerCase().trim();
+        const isFaturaTaseron = FATURA_TASERONLAR_SUB.some(t => subconLower.includes(t));
+        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * 0.80 : 0;
+
+        const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconLower}`;
+        const bfEntries = (bolgeFaturaMap || {})[bfKey] || [];
+        const faturaNo = bfEntries.map(e => e.fatura_no || "").filter(Boolean).join(", ");
+        const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
+        const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
+
+        aoa.push([
+          { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
+          { v: row.status || "",                                  s: statusStyle(row.status, isEven) },
+          { v: getAnaliz(row),                                    s: cellStyle(isEven, false) },
+          { v: row.project_code || "",                            s: cellStyle(isEven, false) },
+          { v: row.site_code || "",                               s: cellStyle(isEven, false) },
+          { v: row.item_description || "",                        s: cellStyle(isEven, false) },
+          { v: row.item_code || "",                               s: cellStyle(isEven, false) },
+          { v: row.onair_date || "",                              s: cellStyle(isEven, false) },
+          { v: doneQty,                                           s: cellStyle(isEven, true) },
+          { v: Number(row.requested_qty || 0),                    s: cellStyle(isEven, true) },
+          { v: billedQty,                                         s: cellStyle(isEven, true) },
+          { v: dueQty,                                            s: cellStyle(isEven, true) },
+          { v: row.currency || "",                                s: cellStyle(isEven, false) },
+          { v: usdBirimFiyat,                                     s: cellStyle(isEven, true) },
+          { v: usdToplamFiyat,                                    s: cellStyle(isEven, true) },
+          { v: unitPrice,                                         s: cellStyle(isEven, true) },
+          { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
+          { v: federalHakedis,                                    s: federalStyle(isEven) },
+          { v: faturaKesilecek,                                   s: faturaKesilecek > 0 ? faturaStyle(isEven) : cellStyle(isEven, true) },
+          { v: faturaNo,                                          s: cellStyle(isEven, false) },
+          { v: faturaToplamMiktar || "",                          s: cellStyle(isEven, true) },
+          { v: faturaTarihi,                                      s: cellStyle(isEven, false) },
+          { v: row.subcon_name || "",                             s: cellStyle(isEven, false) },
+        ]);
+      });
+
+      const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map(r => r.map(c => c.v)));
+      aoa.forEach((row, ri) => {
+        row.forEach((cell, ci) => {
+          const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
+          if (!ws[addr]) ws[addr] = { v: cell.v };
+          ws[addr].s = cell.s;
+        });
+      });
+
+      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
+      ws["!cols"] = COL_WIDTHS.map(wch => ({ wch }));
+      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...filteredSubconDetailRows.map(() => ({ hpt: 20 }))];
+
+      const wb = XLSXStyle.utils.book_new();
+      XLSXStyle.utils.book_append_sheet(wb, ws, "Taşeron Detay");
+
+      const lastColLetter = String.fromCharCode(64 + NCOLS);
+      const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
+      const autoFilterRef = `A2:${lastColLetter}2`;
+
+      const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
+      const zip = await JSZip.loadAsync(buf);
+      let xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
+      xml = xml
+        .replace('<sheetView workbookViewId="0"/>', `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`)
+        .replace('<sheetView tabSelected="1" workbookViewId="0"/>', `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`);
+      if (!xml.includes("<autoFilter")) {
+        xml = xml.replace("</sheetData>", `</sheetData><autoFilter ref="${autoFilterRef}"/>`);
+      }
+      zip.file("xl/worksheets/sheet1.xml", xml);
+      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `subcon_detail_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("SUBCON EXCEL ERROR:", err);
+      alert(`Excel indirilemedi:\n${err.message}`);
+    }
   };
 
   const supplierOptions = useMemo(() => {
@@ -13448,6 +13569,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const [qcReadyModalOpen, setQcReadyModalOpen] = useState(false);
   const [qcReadyModalRegion, setQcReadyModalRegion] = useState("");
   const [qcReadyType, setQcReadyType] = useState("");
+  const [bolgeFaturaMap, setBolgeFaturaMap] = useState({});
 
   const openQcReadyModal = (regionName, type) => {
     setQcReadyModalRegion(regionName);
@@ -14120,6 +14242,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const handleExportRegionExcel = async () => {
     try {
+      // Fatura verisini her export'ta taze çek
+      let bfMap = bolgeFaturaMap;
+      try {
+        const sd = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
+        bfMap = sd.bolge_fatura_map || {};
+        setBolgeFaturaMap(bfMap);
+      } catch (_) { bfMap = {}; }
+
       const dateStr = new Date().toLocaleDateString("tr-TR");
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
 
@@ -14221,7 +14351,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
         // Girilmiş fatura verisi
         const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconLower}`;
-        const bfEntries = bolgeFaturaMap[bfKey] || [];
+        const bfEntries = bfMap[bfKey] || [];
         const faturaNo = bfEntries.map(e => e.fatura_no || "").filter(Boolean).join(", ");
         const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
         const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
