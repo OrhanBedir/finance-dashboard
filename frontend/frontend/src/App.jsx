@@ -19940,24 +19940,17 @@ function App() {
                   />
                 </div>
 
-                {/* Password input with eye toggle — no label */}
-                <div style={{marginBottom:'22px',position:'relative'}}>
+                {/* Password input — no label */}
+                <div style={{marginBottom:'22px'}}>
                   <input
-                    type={showPassword?'text':'password'}
+                    type="password"
                     placeholder="Şifre"
                     value={financeLoginPassword||''}
                     onChange={e=>setFinanceLoginPassword(e.target.value)}
                     onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)}
-                    style={{width:'100%',padding:'13px 44px 13px 16px',border:'1px solid #cbd5e1',borderRadius:'4px',fontSize:'15px',outline:'none',boxSizing:'border-box',color:'#1a202c'}}
+                    style={{width:'100%',padding:'13px 16px',border:'1px solid #cbd5e1',borderRadius:'4px',fontSize:'15px',outline:'none',boxSizing:'border-box',color:'#1a202c'}}
                     onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'}
                   />
-                  <span
-                    onClick={()=>setShowPassword(p=>!p)}
-                    style={{position:'absolute',right:'14px',top:'50%',transform:'translateY(-50%)',cursor:'pointer',color:'#94a3b8',fontSize:'18px',userSelect:'none',lineHeight:1}}
-                    title={showPassword?'Gizle':'Göster'}
-                  >
-                    {showPassword ? '🙈' : '👁️'}
-                  </span>
                 </div>
 
                 {financeLoginError && <div style={{padding:'10px 14px',borderRadius:'4px',marginBottom:'16px',fontSize:'13px',background:'#fef2f2',color:'#991b1b',border:'1px solid #fecaca'}}>{financeLoginError}</div>}
