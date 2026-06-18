@@ -8076,6 +8076,34 @@ function FinanceDashboard({
               </select>
             </div>
 
+            {/* Bu item için daha önce kesilmiş faturalar */}
+            {(() => {
+              if (!bolgeFaturaForm.site_code || !bolgeFaturaForm.item_code || !bolgeFaturaForm.taseron_adi) return null;
+              const fKey = `${bolgeFaturaForm.site_code.toUpperCase()}|${bolgeFaturaForm.item_code}|${bolgeFaturaForm.taseron_adi.toLowerCase()}`;
+              const prevFaturalar = bolgeFaturaMap[fKey] || [];
+              if (prevFaturalar.length === 0) return null;
+              const toplamKesilen = prevFaturalar.reduce((s, f) => s + (Number(f.fatura_miktari) || 0), 0);
+              return (
+                <div style={{ marginBottom:"14px", padding:"12px 14px", background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:"10px" }}>
+                  <div style={{ fontSize:"12px", fontWeight:700, color:"#b45309", marginBottom:"8px", display:"flex", alignItems:"center", gap:"6px" }}>
+                    ⚠️ Bu kalem için daha önce {prevFaturalar.length} fatura kesilmiş — tekrar kesmeyin!
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
+                    {prevFaturalar.map((f, i) => (
+                      <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", color:"#92400e", padding:"3px 0", borderBottom: i < prevFaturalar.length - 1 ? "1px dashed #fde68a" : "none" }}>
+                        <span>Fatura No: <strong>{f.fatura_no || "-"}</strong>{f.fatura_tarihi ? ` (${f.fatura_tarihi})` : ""}</span>
+                        <span style={{ fontWeight:700 }}>{(Number(f.fatura_miktari) || 0).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop:"8px", paddingTop:"6px", borderTop:"1px solid #fcd34d", fontSize:"12px", fontWeight:800, color:"#b45309", display:"flex", justifyContent:"space-between" }}>
+                    <span>Toplam Kesilen:</span>
+                    <span>{toplamKesilen.toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺</span>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Fatura No */}
             <div style={{ marginBottom:"14px" }}>
               <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Fatura No</label>
