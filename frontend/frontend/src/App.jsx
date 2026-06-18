@@ -3628,8 +3628,14 @@ function FinanceDashboard({
 
   const handleExportFilteredSubconExcel = async () => {
     try {
-      if (!filteredSubconDetailRows.length) {
-        alert("İndirilecek kayıt bulunamadı");
+      // Kırılım (%80) ile çalışan taşeronlar: yalnız Federal + UBS
+      const KIRILIM_TASERONLAR = ["federal", "ubs"];
+      const kirilimRows = (filteredSubconDetailRows || []).filter((r) => {
+        const n = String(r.subcon_name || "").toLowerCase();
+        return KIRILIM_TASERONLAR.some((t) => n.includes(t));
+      });
+      if (!kirilimRows.length) {
+        alert("Kırılım taşeron (Federal / UBS) kaydı bulunamadı");
         return;
       }
 
@@ -3718,7 +3724,7 @@ function FinanceDashboard({
       const FATURA_TASERONLAR_SUB = ["federal", "ubs"];
       const usdR = Number(usdTryRate || 0);
 
-      filteredSubconDetailRows.forEach((row, idx) => {
+      kirilimRows.forEach((row, idx) => {
         const isEven = idx % 2 === 1;
         const isUSD = normalizeCurrency(row.currency) === "USD";
         const unitPrice = Number(row.unit_price || 0);
@@ -3786,7 +3792,7 @@ function FinanceDashboard({
 
       ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
       ws["!cols"] = COL_WIDTHS.map(wch => ({ wch }));
-      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...filteredSubconDetailRows.map(() => ({ hpt: 20 }))];
+      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...kirilimRows.map(() => ({ hpt: 20 }))];
 
       const wb = XLSXStyle.utils.book_new();
       XLSXStyle.utils.book_append_sheet(wb, ws, "Taşeron Detay");
@@ -3815,6 +3821,182 @@ function FinanceDashboard({
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error("SUBCON EXCEL ERROR:", err);
+      alert(`Excel indirilemedi:\n${err.message}`);
+    }
+  };
+
+  // Sabit fiyat taşeronlar (sadece işçilik): 2KX + FERRUMX — SAHA (Site ID) bazında özet
+  const handleExportFixedPriceSubconExcel = async () => {
+    try {
+      const SABIT_TASERONLAR = ["2kx", "ferrumx"];
+      const usdR = Number(usdTryRate || 0);
+      const q = subconFilter.toLowerCase().trim();
+
+      let rows = (subconDetailRows || []).filter((r) => {
+        const n = String(r.subcon_name || "").toLowerCase();
+        return SABIT_TASERONLAR.some((t) => n.includes(t));
+      });
+      if (q) rows = rows.filter((r) => (r.subcon_name || "").toLowerCase().includes(q));
+      if (!rows.length) {
+        alert("Sabit fiyat taşeron (2KX / FERRUMX) kaydı bulunamadı");
+        return;
+      }
+
+      // Saha + Taşeron bazında grupla
+      const groups = new Map();
+      rows.forEach((r) => {
+        const site = String(r.site_code || "").trim();
+        const subcon = String(r.subcon_name || "").trim();
+        if (!site) return;
+        const key = `${site.toUpperCase()}||${subcon.toLowerCase()}`;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            site_code: site, subcon_name: subcon,
+            project_code: r.project_code || "",
+            region: getRegion(r.site_code, r.project_code) || "",
+            kalemSayisi: 0, bedel: 0, items: new Set(),
+          });
+        }
+        const g = groups.get(key);
+        const isUSD = normalizeCurrency(r.currency) === "USD";
+        const raw = Number(r.done_qty || 0) * Number(r.unit_price || 0);
+        const bedel = isUSD ? raw * usdR : raw;
+        if (Number(r.done_qty || 0) > 0) { g.bedel += bedel; g.kalemSayisi += 1; }
+        if (r.item_code) g.items.add(String(r.item_code).trim());
+      });
+
+      const groupArr = [...groups.values()]
+        .filter((g) => g.bedel > 0)
+        .sort((a, b) => a.subcon_name.localeCompare(b.subcon_name, "tr") || a.site_code.localeCompare(b.site_code, "tr"));
+
+      if (!groupArr.length) {
+        alert("Tamamlanan iş bedeli olan saha bulunamadı");
+        return;
+      }
+
+      const dateStr = new Date().toLocaleDateString("tr-TR");
+      const headers = [
+        "Bölge", "Project Code", "Site Code", "Taşeron", "Kalem Sayısı",
+        "Tamamlanan İş Bedeli (KDV Hariç)", "Tamamlanan İş Bedeli (KDV %20 Dahil)",
+        "Fatura No", "Kesilen Fatura (KDV Dahil)", "Kalan Bedel (KDV Dahil)", "Fatura Tarihi",
+      ];
+      const COL_WIDTHS = [12, 16, 22, 30, 12, 26, 28, 22, 22, 22, 16];
+      const NCOLS = headers.length;
+
+      const titleStyle = {
+        fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
+        font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        alignment: { horizontal: "center", vertical: "center" },
+      };
+      const headerStyle = {
+        fill: { patternType: "solid", fgColor: { rgb: "203864" } },
+        font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        border: { top:{style:"thin",color:{rgb:"B7C9E2"}}, bottom:{style:"thin",color:{rgb:"B7C9E2"}}, left:{style:"thin",color:{rgb:"B7C9E2"}}, right:{style:"thin",color:{rgb:"B7C9E2"}} },
+      };
+      const cellBorder = { top:{style:"hair",color:{rgb:"E5E7EB"}}, bottom:{style:"hair",color:{rgb:"E5E7EB"}}, left:{style:"hair",color:{rgb:"E5E7EB"}}, right:{style:"hair",color:{rgb:"E5E7EB"}} };
+      const cellStyle = (isEven, isNum) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "F8FAFC" : "FFFFFF" } },
+        font: { sz: 11, name: "Calibri", color: { rgb: "111827" } },
+        alignment: { horizontal: isNum ? "right" : "left", vertical: "middle" },
+        border: cellBorder,
+      });
+      const bedelStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const kdvStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "CFFAFE" : "ECFEFF" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "0E7490" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const kalanStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FEE2E2" : "FEF2F2" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "B91C1C" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+
+      const aoa = [];
+      const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
+      titleRow[0] = { v: `SABİT FİYAT TAŞERON - SAHA BAZLI FATURA ÖZETİ (${dateStr})`, s: titleStyle };
+      aoa.push(titleRow);
+      aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
+
+      groupArr.forEach((g, idx) => {
+        const isEven = idx % 2 === 1;
+        const subconLower = g.subcon_name.toLowerCase();
+        let fNos = [], fMiktar = 0, fTarih = [];
+        g.items.forEach((item) => {
+          const bfKey = `${g.site_code.toUpperCase()}|${item}|${subconLower}`;
+          const entries = (bolgeFaturaMap || {})[bfKey] || [];
+          entries.forEach((e) => {
+            if (e.fatura_no) fNos.push(e.fatura_no);
+            fMiktar += Number(e.fatura_miktari || 0);
+            if (e.fatura_tarihi) fTarih.push(String(e.fatura_tarihi).slice(0, 10));
+          });
+        });
+        const bedelKdv = g.bedel * 1.20;
+        const kalan = Math.max(0, bedelKdv - fMiktar);
+
+        aoa.push([
+          { v: g.region,                       s: cellStyle(isEven, false) },
+          { v: g.project_code,                 s: cellStyle(isEven, false) },
+          { v: g.site_code,                    s: cellStyle(isEven, false) },
+          { v: g.subcon_name,                  s: cellStyle(isEven, false) },
+          { v: g.kalemSayisi,                  s: cellStyle(isEven, true) },
+          { v: g.bedel,                        s: bedelStyle(isEven) },
+          { v: bedelKdv,                       s: kdvStyle(isEven) },
+          { v: [...new Set(fNos)].join(", "),  s: cellStyle(isEven, false) },
+          { v: fMiktar || "",                  s: cellStyle(isEven, true) },
+          { v: kalan > 0.01 ? kalan : "",      s: kalan > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
+          { v: [...new Set(fTarih)].join(", "),s: cellStyle(isEven, false) },
+        ]);
+      });
+
+      const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
+      aoa.forEach((row, ri) => {
+        row.forEach((cell, ci) => {
+          const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
+          if (!ws[addr]) ws[addr] = { v: cell.v };
+          ws[addr].s = cell.s;
+        });
+      });
+
+      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
+      ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
+      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...groupArr.map(() => ({ hpt: 20 }))];
+
+      const wb = XLSXStyle.utils.book_new();
+      XLSXStyle.utils.book_append_sheet(wb, ws, "Saha Bazlı");
+
+      const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
+      const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
+      const autoFilterRef = `A2:${lastColLetter}2`;
+
+      const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
+      const zip = await JSZip.loadAsync(buf);
+      let xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
+      xml = xml
+        .replace('<sheetView workbookViewId="0"/>', `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`)
+        .replace('<sheetView tabSelected="1" workbookViewId="0"/>', `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`);
+      if (!xml.includes("<autoFilter")) {
+        xml = xml.replace("</sheetData>", `</sheetData><autoFilter ref="${autoFilterRef}"/>`);
+      }
+      zip.file("xl/worksheets/sheet1.xml", xml);
+      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sabit_fiyat_saha_bazli_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("SABIT FIYAT EXCEL ERROR:", err);
       alert(`Excel indirilemedi:\n${err.message}`);
     }
   };
@@ -7813,13 +7995,27 @@ function FinanceDashboard({
                     + Fatura Girişi
                   </button>
 
-                  <button
-                    type="button"
-                    className="excelBtn"
-                    onClick={handleExportFilteredSubconExcel}
-                  >
-                    Excel İndir
-                  </button>
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"2px" }}>
+                    <button
+                      type="button"
+                      className="excelBtn"
+                      onClick={handleExportFilteredSubconExcel}
+                    >
+                      Excel İndir
+                    </button>
+                    <span style={{ fontSize:"10px", color:"#64748b", fontWeight:600 }}>Kırılım — Federal / UBS</span>
+                  </div>
+
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"2px" }}>
+                    <button
+                      type="button"
+                      className="excelBtn"
+                      onClick={handleExportFixedPriceSubconExcel}
+                    >
+                      Excel İndir
+                    </button>
+                    <span style={{ fontSize:"10px", color:"#64748b", fontWeight:600 }}>Sabit Fiyat — 2KX / FERRUMX</span>
+                  </div>
 
                   <button
                     type="button"
