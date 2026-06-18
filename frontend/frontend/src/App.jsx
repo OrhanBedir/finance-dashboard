@@ -19830,67 +19830,120 @@ function App() {
   if (!financeToken) {
     return (
       <>
-        {/* PASSWORD RESET PAGE (from email link) */}
-        {resetTokenFromUrl ? (
-          <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%)'}}>
-            <div style={{background:'#fff',borderRadius:'20px',padding:'48px 40px',width:'100%',maxWidth:'420px',boxShadow:'0 25px 80px rgba(0,0,0,0.4)'}}>
-              <div style={{textAlign:'center',marginBottom:'32px'}}>
-                <div style={{fontSize:'32px',fontWeight:900,color:'#1e3a5f',letterSpacing:'-1px'}}>Omnix</div>
-                <div style={{fontSize:'14px',color:'#6b7280',marginTop:'4px'}}>Şifre Sıfırlama</div>
-              </div>
-              <input type="password" placeholder="Yeni Şifre" value={newPassword} onChange={e=>setNewPassword(e.target.value)} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'14px'}} />
-              <input type="password" placeholder="Yeni Şifre (Tekrar)" value={newPasswordConfirm} onChange={e=>setNewPasswordConfirm(e.target.value)} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'20px'}} />
-              {resetDoneMsg && <div style={{padding:'10px 14px',borderRadius:'8px',marginBottom:'16px',fontSize:'13px',background:resetDoneMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:resetDoneMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${resetDoneMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{resetDoneMsg}</div>}
-              <button onClick={handleResetWithToken} style={{width:'100%',padding:'14px',background:'linear-gradient(135deg,#1e3a5f,#2d5f8a)',color:'#fff',border:'none',borderRadius:'10px',fontSize:'16px',fontWeight:700,cursor:'pointer'}}>Şifremi Güncelle</button>
+        {/* ── OMNIX LOGIN PAGE — HUAWEI STYLE ──────────────────────────── */}
+        <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',background:'#eef1f6'}}>
+
+          {/* Top header bar */}
+          <div style={{background:'#fff',borderBottom:'1px solid #dde3ec',padding:'0 40px',height:'60px',display:'flex',alignItems:'center',justifyContent:'space-between',boxShadow:'0 1px 4px rgba(0,0,0,0.06)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+              <img src="/omnix-logo.svg" alt="Omnix" width="36" height="36" style={{borderRadius:'8px'}} />
+              <span style={{fontSize:'20px',fontWeight:800,color:'#1e3a5f',letterSpacing:'-0.5px'}}>Omnix</span>
             </div>
+            <span style={{fontSize:'13px',color:'#94a3b8'}}>Operations &amp; Project Platform</span>
           </div>
-        ) : (
-          <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%)',position:'relative',overflow:'hidden'}}>
-            <div style={{position:'absolute',inset:0,backgroundImage:'repeating-linear-gradient(45deg,transparent,transparent 60px,rgba(255,255,255,0.02) 60px,rgba(255,255,255,0.02) 61px)',pointerEvents:'none'}} />
-            <div style={{background:'#fff',borderRadius:'24px',padding:'40px 36px',width:'100%',maxWidth:'440px',boxShadow:'0 25px 80px rgba(0,0,0,0.45)',position:'relative',zIndex:1}}>
-              <div style={{textAlign:'center',marginBottom:'28px'}}>
-                <div style={{fontSize:'38px',fontWeight:900,color:'#1e3a5f',letterSpacing:'-2px',lineHeight:1}}>Omnix</div>
-                <div style={{fontSize:'12px',color:'#9ca3af',marginTop:'6px',letterSpacing:'1px',textTransform:'uppercase'}}>Operations & Project Platform</div>
+
+          {/* Center content */}
+          <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:'40px 16px 0'}}>
+
+            {resetTokenFromUrl ? (
+              /* ── Şifre sıfırlama (email linkinden) ── */
+              <div style={{background:'#fff',borderRadius:'4px',padding:'40px 44px',width:'100%',maxWidth:'420px',boxShadow:'0 2px 16px rgba(0,0,0,0.10)'}}>
+                <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'28px'}}>
+                  <img src="/omnix-logo.svg" alt="" width="28" height="28" style={{borderRadius:'6px'}} />
+                  <span style={{fontSize:'17px',fontWeight:700,color:'#1e3a5f'}}>Şifre Sıfırlama</span>
+                </div>
+                <div style={{marginBottom:'14px'}}>
+                  <label style={{display:'block',fontSize:'13px',color:'#374151',marginBottom:'6px',fontWeight:500}}>Yeni Şifre</label>
+                  <input type="password" placeholder="En az 6 karakter" value={newPassword} onChange={e=>setNewPassword(e.target.value)} style={{width:'100%',padding:'11px 14px',border:'1px solid #cbd5e1',borderRadius:'3px',fontSize:'14px',outline:'none',boxSizing:'border-box'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'} />
+                </div>
+                <div style={{marginBottom:'24px'}}>
+                  <label style={{display:'block',fontSize:'13px',color:'#374151',marginBottom:'6px',fontWeight:500}}>Yeni Şifre Tekrar</label>
+                  <input type="password" placeholder="Şifreyi tekrar girin" value={newPasswordConfirm} onChange={e=>setNewPasswordConfirm(e.target.value)} style={{width:'100%',padding:'11px 14px',border:'1px solid #cbd5e1',borderRadius:'3px',fontSize:'14px',outline:'none',boxSizing:'border-box'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'} />
+                </div>
+                {resetDoneMsg && <div style={{padding:'10px 14px',borderRadius:'3px',marginBottom:'16px',fontSize:'13px',background:resetDoneMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:resetDoneMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${resetDoneMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{resetDoneMsg}</div>}
+                <button onClick={handleResetWithToken} style={{width:'100%',padding:'12px',background:'#1e3a5f',color:'#fff',border:'none',borderRadius:'3px',fontSize:'15px',fontWeight:600,cursor:'pointer'}}>Şifremi Güncelle</button>
               </div>
-              <div style={{display:'flex',background:'#f1f5f9',borderRadius:'12px',padding:'4px',marginBottom:'28px',gap:'3px'}}>
-                {[['login','Giriş Yap'],['register','Kayıt Ol'],['reset','Şifremi Unuttum']].map(([tab,label])=>(
-                  <button key={tab} onClick={()=>{setAuthTab(tab);setRegMsg('');setResetMsg('');}} style={{flex:1,padding:'9px 4px',borderRadius:'9px',border:'none',cursor:'pointer',fontSize:'12px',fontWeight:600,transition:'all 0.2s',background:authTab===tab?'#fff':'transparent',color:authTab===tab?'#1e3a5f':'#6b7280',boxShadow:authTab===tab?'0 1px 4px rgba(0,0,0,0.12)':'none'}}>{label}</button>
+
+            ) : authTab === 'register' ? (
+              /* ── Kayıt Ol ── */
+              <div style={{background:'#fff',borderRadius:'4px',padding:'40px 44px',width:'100%',maxWidth:'420px',boxShadow:'0 2px 16px rgba(0,0,0,0.10)'}}>
+                <h2 style={{margin:'0 0 6px',fontSize:'20px',fontWeight:700,color:'#1e3a5f'}}>Kayıt Ol</h2>
+                <p style={{margin:'0 0 28px',fontSize:'13px',color:'#64748b'}}>Omnix hesabı oluşturun</p>
+                {[['name','Ad Soyad','text'],['email','E-posta adresi','email'],['password','Şifre (min. 6 karakter)','password'],['confirmPassword','Şifre Tekrar','password']].map(([field,ph,type],i)=>(
+                  <div key={field} style={{marginBottom:i===3?'22px':'16px'}}>
+                    <input type={type} placeholder={ph} value={regForm[field]} onChange={e=>setRegForm(p=>({...p,[field]:e.target.value}))}
+                      style={{width:'100%',padding:'11px 14px',border:'1px solid #cbd5e1',borderRadius:'3px',fontSize:'14px',outline:'none',boxSizing:'border-box'}}
+                      onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'} />
+                  </div>
                 ))}
+                {regMsg && <div style={{padding:'10px 14px',borderRadius:'3px',marginBottom:'16px',fontSize:'13px',background:regMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:regMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${regMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{regMsg}</div>}
+                <button onClick={handleRegister} disabled={regLoading} style={{width:'100%',padding:'12px',background:regLoading?'#64748b':'#1e3a5f',color:'#fff',border:'none',borderRadius:'3px',fontSize:'15px',fontWeight:600,cursor:regLoading?'not-allowed':'pointer'}}>{regLoading?'Kaydediliyor...':'Kayıt Ol'}</button>
+                <p style={{fontSize:'12px',color:'#94a3b8',textAlign:'center',marginTop:'14px',lineHeight:1.6}}>Kayıt sonrası şirket yöneticinizin onayı gereklidir.</p>
+                <div style={{borderTop:'1px solid #e2e8f0',marginTop:'20px',paddingTop:'16px',textAlign:'center'}}>
+                  <span style={{fontSize:'13px',color:'#1e3a5f',cursor:'pointer',fontWeight:500}} onClick={()=>{setAuthTab('login');setRegMsg('');}}>← Giriş sayfasına dön</span>
+                </div>
               </div>
 
-              {authTab==='login' && (
-                <div>
-                  <input type="email" placeholder="E-posta" value={financeLoginEmail||''} onChange={e=>setFinanceLoginEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'14px'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
-                  <input type="password" placeholder="Şifre" value={financeLoginPassword||''} onChange={e=>setFinanceLoginPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'20px'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
-                  {financeLoginError && <div style={{padding:'10px 14px',borderRadius:'8px',marginBottom:'16px',fontSize:'13px',background:'#fef2f2',color:'#991b1b',border:'1px solid #fecaca'}}>{financeLoginError}</div>}
-                  <button onClick={handleFinanceLogin} disabled={financeLoginLoading} style={{width:'100%',padding:'14px',background:financeLoginLoading?'#93c5fd':'linear-gradient(135deg,#1e3a5f,#2d5f8a)',color:'#fff',border:'none',borderRadius:'10px',fontSize:'16px',fontWeight:700,cursor:financeLoginLoading?'not-allowed':'pointer'}}>{financeLoginLoading?'Giriş yapılıyor...':'Giriş Yap'}</button>
-                  <div style={{marginTop:'16px',textAlign:'center'}}><span style={{fontSize:'13px',color:'#6b7280',cursor:'pointer',textDecoration:'underline'}} onClick={()=>setAuthTab('reset')}>Şifremi unuttum</span></div>
+            ) : authTab === 'reset' ? (
+              /* ── Şifremi Unuttum ── */
+              <div style={{background:'#fff',borderRadius:'4px',padding:'40px 44px',width:'100%',maxWidth:'420px',boxShadow:'0 2px 16px rgba(0,0,0,0.10)'}}>
+                <h2 style={{margin:'0 0 6px',fontSize:'20px',fontWeight:700,color:'#1e3a5f'}}>Şifremi Unuttum</h2>
+                <p style={{margin:'0 0 28px',fontSize:'13px',color:'#64748b',lineHeight:1.6}}>Kayıtlı e-posta adresinizi girin, şifre sıfırlama bağlantısı gönderelim.</p>
+                <div style={{marginBottom:'22px'}}>
+                  <label style={{display:'block',fontSize:'13px',color:'#374151',marginBottom:'6px',fontWeight:500}}>E-posta Adresi</label>
+                  <input type="email" placeholder="ornek@email.com" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleResetRequest()}
+                    style={{width:'100%',padding:'11px 14px',border:'1px solid #cbd5e1',borderRadius:'3px',fontSize:'14px',outline:'none',boxSizing:'border-box'}}
+                    onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'} />
                 </div>
-              )}
+                {resetMsg && <div style={{padding:'10px 14px',borderRadius:'3px',marginBottom:'16px',fontSize:'13px',background:resetMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:resetMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${resetMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{resetMsg}</div>}
+                <button onClick={handleResetRequest} disabled={resetLoading} style={{width:'100%',padding:'12px',background:resetLoading?'#64748b':'#1e3a5f',color:'#fff',border:'none',borderRadius:'3px',fontSize:'15px',fontWeight:600,cursor:resetLoading?'not-allowed':'pointer'}}>{resetLoading?'Gönderiliyor...':'Sıfırlama Linki Gönder'}</button>
+                <div style={{borderTop:'1px solid #e2e8f0',marginTop:'20px',paddingTop:'16px',textAlign:'center'}}>
+                  <span style={{fontSize:'13px',color:'#1e3a5f',cursor:'pointer',fontWeight:500}} onClick={()=>{setAuthTab('login');setResetMsg('');}}>← Giriş sayfasına dön</span>
+                </div>
+              </div>
 
-              {authTab==='register' && (
-                <div>
-                  {[['name','Ad Soyad','text'],['email','E-posta','email'],['password','Şifre (min. 6 karakter)','password'],['confirmPassword','Şifre Tekrar','password']].map(([field,ph,type],i)=>(
-                    <input key={field} type={type} placeholder={ph} value={regForm[field]} onChange={e=>setRegForm(p=>({...p,[field]:e.target.value}))} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:i===3?'20px':'14px'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
-                  ))}
-                  {regMsg && <div style={{padding:'10px 14px',borderRadius:'8px',marginBottom:'16px',fontSize:'13px',background:regMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:regMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${regMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{regMsg}</div>}
-                  <button onClick={handleRegister} disabled={regLoading} style={{width:'100%',padding:'14px',background:regLoading?'#6ee7b7':'linear-gradient(135deg,#065f46,#10b981)',color:'#fff',border:'none',borderRadius:'10px',fontSize:'16px',fontWeight:700,cursor:regLoading?'not-allowed':'pointer'}}>{regLoading?'Kaydediliyor...':'Kayıt Ol'}</button>
-                  <p style={{fontSize:'12px',color:'#9ca3af',textAlign:'center',marginTop:'14px',lineHeight:1.5}}>Kayıt sonrası şirket yöneticinizin onayı gereklidir.</p>
+            ) : (
+              /* ── Giriş Yap (default) ── */
+              <div style={{background:'#fff',borderRadius:'4px',padding:'40px 44px',width:'100%',maxWidth:'420px',boxShadow:'0 2px 16px rgba(0,0,0,0.10)'}}>
+                <h2 style={{margin:'0 0 6px',fontSize:'20px',fontWeight:700,color:'#1a202c'}}>Omnix'e Giriş Yapın</h2>
+                <p style={{margin:'0 0 28px',fontSize:'13px',color:'#64748b'}}>Hesabınızla devam edin</p>
+                <div style={{marginBottom:'16px'}}>
+                  <label style={{display:'block',fontSize:'13px',color:'#374151',marginBottom:'6px',fontWeight:500}}>E-posta Adresi</label>
+                  <input type="email" placeholder="ornek@email.com" value={financeLoginEmail||''} onChange={e=>setFinanceLoginEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)}
+                    style={{width:'100%',padding:'11px 14px',border:'1px solid #cbd5e1',borderRadius:'3px',fontSize:'14px',outline:'none',boxSizing:'border-box'}}
+                    onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'} />
                 </div>
-              )}
-
-              {authTab==='reset' && (
-                <div>
-                  <p style={{fontSize:'14px',color:'#6b7280',marginBottom:'20px',lineHeight:1.6}}>Kayıtlı e-posta adresinizi girin. Şifre sıfırlama bağlantısı göndereceğiz.</p>
-                  <input type="email" placeholder="E-posta adresiniz" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleResetRequest()} style={{width:'100%',padding:'14px 16px',borderRadius:'10px',border:'1.5px solid #e5e7eb',fontSize:'15px',outline:'none',boxSizing:'border-box',marginBottom:'20px'}} onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
-                  {resetMsg && <div style={{padding:'10px 14px',borderRadius:'8px',marginBottom:'16px',fontSize:'13px',background:resetMsg.startsWith('✅')?'#f0fdf4':'#fef2f2',color:resetMsg.startsWith('✅')?'#065f46':'#991b1b',border:`1px solid ${resetMsg.startsWith('✅')?'#bbf7d0':'#fecaca'}`}}>{resetMsg}</div>}
-                  <button onClick={handleResetRequest} disabled={resetLoading} style={{width:'100%',padding:'14px',background:resetLoading?'#93c5fd':'linear-gradient(135deg,#1e3a5f,#2d5f8a)',color:'#fff',border:'none',borderRadius:'10px',fontSize:'16px',fontWeight:700,cursor:resetLoading?'not-allowed':'pointer'}}>{resetLoading?'Gönderiliyor...':'Sıfırlama Linki Gönder'}</button>
-                  <div style={{marginTop:'16px',textAlign:'center'}}><span style={{fontSize:'13px',color:'#6b7280',cursor:'pointer',textDecoration:'underline'}} onClick={()=>setAuthTab('login')}>← Giriş sayfasına dön</span></div>
+                <div style={{marginBottom:'22px'}}>
+                  <label style={{display:'block',fontSize:'13px',color:'#374151',marginBottom:'6px',fontWeight:500}}>Şifre</label>
+                  <input type="password" placeholder="Şifrenizi girin" value={financeLoginPassword||''} onChange={e=>setFinanceLoginPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)}
+                    style={{width:'100%',padding:'11px 14px',border:'1px solid #cbd5e1',borderRadius:'3px',fontSize:'14px',outline:'none',boxSizing:'border-box'}}
+                    onFocus={e=>e.target.style.borderColor='#1e3a5f'} onBlur={e=>e.target.style.borderColor='#cbd5e1'} />
                 </div>
-              )}
-            </div>
+                {financeLoginError && <div style={{padding:'10px 14px',borderRadius:'3px',marginBottom:'16px',fontSize:'13px',background:'#fef2f2',color:'#991b1b',border:'1px solid #fecaca'}}>{financeLoginError}</div>}
+                <button onClick={handleFinanceLogin} disabled={financeLoginLoading}
+                  style={{width:'100%',padding:'12px',background:financeLoginLoading?'#64748b':'#1e3a5f',color:'#fff',border:'none',borderRadius:'3px',fontSize:'15px',fontWeight:600,cursor:financeLoginLoading?'not-allowed':'pointer'}}>
+                  {financeLoginLoading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
+                </button>
+                {/* Links row — Huawei style */}
+                <div style={{display:'flex',justifyContent:'center',gap:'0',marginTop:'20px',fontSize:'13px'}}>
+                  <span style={{color:'#1e3a5f',cursor:'pointer',fontWeight:500,padding:'4px 16px',borderRight:'1px solid #cbd5e1'}}
+                    onClick={()=>{setAuthTab('register');setRegMsg('');}}>
+                    Kayıt Ol
+                  </span>
+                  <span style={{color:'#1e3a5f',cursor:'pointer',fontWeight:500,padding:'4px 16px'}}
+                    onClick={()=>{setAuthTab('reset');setResetMsg('');}}>
+                    Şifremi Unuttum
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Footer */}
+          <div style={{textAlign:'center',padding:'28px 16px',fontSize:'12px',color:'#94a3b8'}}>
+            © {new Date().getFullYear()} Omnix Platform. Tüm hakları saklıdır.
+          </div>
+        </div>
       </>
     );
   }
