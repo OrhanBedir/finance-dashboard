@@ -127,6 +127,14 @@ function isIsolatedTenant(tenant) {
   const t = String(tenant || "").toLowerCase();
   return !!t && t !== "erc" && ISOLATED_TENANTS.has(t);
 }
+// Çalışma zamanında izole tenant ekle (onay anında, DB registry'den yükleme).
+// Güvenlik: 'erc' ve legacy '2kx' asla izole olarak işaretlenemez.
+function addIsolatedTenant(tenant) {
+  const t = String(tenant || "").toLowerCase().trim();
+  if (!t || t === "erc" || t === "2kx") return false;
+  ISOLATED_TENANTS.add(t);
+  return true;
+}
 
 // ── Tenant şeması provizyonu ─────────────────────────────────────────────────
 // public şemasındaki tüm tabloları, yeni tenant şemasına aynı yapı ile (boş)
@@ -171,4 +179,5 @@ module.exports.ensureTenantSchema = ensureTenantSchema;
 module.exports.tenantSchema = tenantSchema;
 module.exports.SHARED_PUBLIC_TABLES = SHARED_PUBLIC_TABLES;
 module.exports.isIsolatedTenant = isIsolatedTenant;
+module.exports.addIsolatedTenant = addIsolatedTenant;
 module.exports.ISOLATED_TENANTS = ISOLATED_TENANTS;

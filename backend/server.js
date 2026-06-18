@@ -51,6 +51,9 @@ const TENANT_CONFIG = {
   },
 };
 
+// Platform sahibi — yeni firma/kullanıcı kayıt taleplerinin onayı buraya gelir.
+const PLATFORM_ADMIN_EMAIL = "orhan.bedir@gmail.com";
+
 function detectTenant(email, subconName) {
   const s = String(subconName || "").toUpperCase();
   if (s.includes("2KX")) return "2kx";
@@ -240,7 +243,7 @@ function applySubconFilter(req, rows) {
 }
 
 const pool = require("./db");
-const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant } = pool;
+const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant, addIsolatedTenant } = pool;
 const app = express();
 
 app.use(express.json());
@@ -751,10 +754,13 @@ app.post("/auth/register", async (req, res) => {
     );
     const tConf = TENANT_CONFIG[tenant] || TENANT_CONFIG.erc;
     const appUrl = process.env.APP_URL || "https://app.omnix.global";
+    // Onay her zaman platform sahibine (PLATFORM_ADMIN_EMAIL) gider; ayrıca ilgili
+    // tenant sahibine de bilgi verilir. Tekrarlı adresler ayıklanır.
+    const notifyTo = [...new Set([PLATFORM_ADMIN_EMAIL, tConf.owner_email].filter(Boolean))];
     await sendEmail({
-      to: tConf.owner_email,
+      to: notifyTo,
       subject: `[Omnix] Yeni kayıt talebi — ${name}`,
-      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#1e3a5f">Yeni Kullanıcı Kayıt Talebi</h2><p><strong>${name}</strong> (${email}) adlı kullanıcı <strong>${tConf.name}</strong> platformuna kayıt olmak istiyor.</p><p><a href="${appUrl}" style="background:#1e3a5f;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Omnix'i Aç → Bekleyen Kullanıcılar</a></p></div>`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#1e3a5f">Yeni Kullanıcı Kayıt Talebi</h2><p><strong>${name}</strong> (${email}) adlı kullanıcı Omnix platformuna kayıt olmak istiyor.</p><p>Bu kişi <strong>mevcut bir firmaya çalışan</strong> olarak mı yoksa <strong>yeni bir firma sahibi</strong> olarak mı eklenecek — onay ekranından seçebilirsiniz.</p><p><a href="${appUrl}" style="background:#1e3a5f;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Omnix'i Aç → Bekleyen Kullanıcılar</a></p></div>`,
     });
     res.json({ ok: true, message: "Kayıt talebiniz alındı. Şirket yöneticiniz onayladıktan sonra giriş yapabilirsiniz." });
   } catch (e) { console.error("REGISTER ERROR:", e.message); res.status(500).json({ ok: false, error: "Kayıt sırasında hata oluştu" }); }
@@ -824,6 +830,63 @@ app.post("/admin/users/:id/approve", authMiddleware, async (req, res) => {
     });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /admin/users/:id/approve-company
+// Bekleyen kullanıcıyı YENİ BİR İZOLE FİRMA SAHİBİ olarak onaylar:
+//  - benzersiz tenant slug verilir ('erc'/'2kx' yasak)
+//  - o tenant için boş şema provizyon edilir (ERC verisi kopyalanmaz)
+//  - tenant_registry'ye yazılır + allow-list'e eklenir (anında izolasyon aktif)
+//  - kullanıcı o tenant'ın admin'i yapılır (status active)
+// Yalnızca platform admini (genel admin rolü) çağırabilir.
+app.post("/admin/users/:id/approve-company", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const { tenant_slug, tenant_name } = req.body || {};
+    const slug = String(tenant_slug || "").toLowerCase().trim().replace(/[^a-z0-9_]/g, "");
+    if (!slug) return res.status(400).json({ ok: false, error: "tenant_slug zorunlu" });
+    if (slug === "erc" || slug === "2kx") return res.status(400).json({ ok: false, error: "Bu slug rezerve (erc/2kx kullanılamaz)" });
+
+    const result = await pool.query("SELECT id, name, email FROM users WHERE id=$1 AND status='pending'", [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: "Bekleyen kullanıcı bulunamadı" });
+    const u = result.rows[0];
+
+    // Slug başka bir firmaya aitse ve sahibi farklıysa engelle
+    const existing = await pool.query("SELECT tenant, owner_email FROM tenant_registry WHERE tenant=$1", [slug]);
+    if (existing.rows.length > 0 && String(existing.rows[0].owner_email || "").toLowerCase() !== u.email.toLowerCase()) {
+      return res.status(409).json({ ok: false, error: "Bu slug zaten başka bir firmaya ait" });
+    }
+
+    // 1) Boş şema provizyonu (public yapısını kopyalar, veri kopyalamaz)
+    const prov = await ensureTenantSchema(slug);
+    if (!prov.ok) return res.status(500).json({ ok: false, error: prov.error || "Şema provizyonu başarısız" });
+
+    // 2) Registry + allow-list (anında izolasyon)
+    await pool.query(
+      `INSERT INTO tenant_registry (tenant, name, owner_email, schema_name, isolated)
+       VALUES ($1,$2,$3,$4,true)
+       ON CONFLICT (tenant) DO UPDATE SET name=EXCLUDED.name, owner_email=EXCLUDED.owner_email, schema_name=EXCLUDED.schema_name, isolated=true`,
+      [slug, tenant_name || slug, u.email, prov.schema]
+    );
+    addIsolatedTenant(slug);
+
+    // 3) Kullanıcıyı bu tenant'ın admini yap + aktifleştir
+    await pool.query(
+      "UPDATE users SET status='active', is_active=true, tenant=$1, role='admin' WHERE id=$2",
+      [slug, u.id]
+    );
+
+    const appUrl = process.env.APP_URL || "https://app.omnix.global";
+    await sendEmail({
+      to: u.email,
+      subject: `[Omnix] Firma hesabınız onaylandı`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#065f46">Hesabınız Onaylandı ✅</h2><p>Merhaba ${u.name}, <strong>${tenant_name || slug}</strong> için Omnix platformuna erişiminiz onaylandı. Giriş yaptığınızda kendi firmanıza ait boş bir çalışma alanı göreceksiniz.</p><p><a href="${appUrl}" style="background:#1e3a5f;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Omnix'e Git</a></p></div>`,
+    });
+
+    res.json({ ok: true, tenant: slug, schema: prov.schema, tables_created: prov.tables_created });
+  } catch (e) {
+    console.error("APPROVE-COMPANY ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // POST /admin/users/:id/reject
@@ -14100,6 +14163,33 @@ pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'acti
 pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT`).catch(() => {});
 pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP`).catch(() => {});
 pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,''))) LIKE '%2KX%' AND (tenant IS NULL OR tenant='erc')`).catch(() => {});
+
+// ── İZOLE TENANT KAYIT DEFTERİ (registry) ───────────────────────────────────
+// İzole (kendi şemasında, sıfırdan veri giren) firmaların kaydı. Onayda buraya
+// eklenir; startup'ta hafızadaki allow-list'e yüklenir. 'erc' ve legacy '2kx'
+// asla burada izole olarak yer almaz.
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tenant_registry (
+        tenant      TEXT PRIMARY KEY,
+        name        TEXT,
+        owner_email TEXT,
+        schema_name TEXT,
+        isolated    BOOLEAN DEFAULT true,
+        created_at  TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    const { rows } = await pool.query(
+      `SELECT tenant FROM tenant_registry WHERE isolated = true`
+    );
+    let n = 0;
+    for (const r of rows) { if (addIsolatedTenant(r.tenant)) n++; }
+    if (n > 0) console.log(`[tenant] ${n} izole tenant allow-list'e yüklendi.`);
+  } catch (e) {
+    console.error("[tenant-registry] başlatma hatası:", e.message);
+  }
+})();
 
 // ── FİRMA ADI STANDARTILAŞTIRMA ─────────────────────────────────────────────
 // Sistemdeki kısa / kırpık firma adlarını tam resmi adlarıyla güncelle.
