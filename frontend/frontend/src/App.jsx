@@ -3368,6 +3368,11 @@ function FinanceDashboard({
   const [bolgeFaturaForm, setBolgeFaturaForm] = useState({ taseron_adi:"", site_code:"", item_code:"", item_description:"", fatura_no:"", fatura_tarihi:"", fatura_miktari:"" });
   const [bolgeFaturaSiteItems, setBolgeFaturaSiteItems] = useState([]);
   const [bolgeFaturaLoading, setBolgeFaturaLoading] = useState(false);
+  // Manuel taşeron hakediş (saha/kalem bazında override)
+  const [taseronHakedisMap, setTaseronHakedisMap] = useState({});
+  const [showManualHakedisModal, setShowManualHakedisModal] = useState(false);
+  const [manualHakedisForm, setManualHakedisForm] = useState({ taseron_adi:"", site_code:"", item_code:"", item_description:"", hakedis_bedeli:"" });
+  const [manualHakedisLoading, setManualHakedisLoading] = useState(false);
 
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   const [showSupplierSuggestions, setShowSupplierSuggestions] = useState(false);
@@ -3735,9 +3740,14 @@ function FinanceDashboard({
         const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
         const rawTotal = doneQty * unitPrice;
         const toplamHakedis = isUSD ? rawTotal * usdR : rawTotal;
-        const federalHakedis = toplamHakedis * 0.80;
+        let federalHakedis = toplamHakedis * 0.80;
 
         const subconLower = String(row.subcon_name || "").toLowerCase().trim();
+        // Manuel taşeron hakedişi varsa (kalem bazlı) sistemdeki %80 hesabını override et
+        const thKeyItem = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconLower}`;
+        const manualHak = Number((taseronHakedisMap || {})[thKeyItem] || 0);
+        if (manualHak > 0) federalHakedis = manualHak;
+
         const isFaturaTaseron = FATURA_TASERONLAR_SUB.some(t => subconLower.includes(t));
         const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * 0.80 : 0;
 
@@ -3878,9 +3888,11 @@ function FinanceDashboard({
       const headers = [
         "Bölge", "Project Code", "Site Code", "Taşeron", "Kalem Sayısı",
         "Tamamlanan İş Bedeli (KDV Hariç)", "Tamamlanan İş Bedeli (KDV %20 Dahil)",
-        "Fatura No", "Kesilen Fatura (KDV Dahil)", "Kalan Bedel (KDV Dahil)", "Fatura Tarihi",
+        "Taşeron Hakediş", "Taşeron Hakediş (KDV %20 Dahil)", "Fatura Kesilecek",
+        "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
+        "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
       ];
-      const COL_WIDTHS = [12, 16, 22, 30, 12, 26, 28, 22, 22, 22, 16];
+      const COL_WIDTHS = [12, 16, 22, 30, 12, 26, 28, 20, 24, 18, 18, 22, 14, 20, 30, 16];
       const NCOLS = headers.length;
 
       const titleStyle = {
@@ -3919,6 +3931,18 @@ function FinanceDashboard({
         alignment: { horizontal: "right", vertical: "middle" },
         border: cellBorder,
       });
+      const hakedisStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const faturaStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "FFF3CD" : "FFFBEA" } },
+        font: { sz: 11, name: "Calibri", color: { rgb: "92400E" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
 
       const aoa = [];
       const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
@@ -3929,9 +3953,10 @@ function FinanceDashboard({
       groupArr.forEach((g, idx) => {
         const isEven = idx % 2 === 1;
         const subconLower = g.subcon_name.toLowerCase();
+        const siteUpper = g.site_code.toUpperCase();
         let fNos = [], fMiktar = 0, fTarih = [];
         g.items.forEach((item) => {
-          const bfKey = `${g.site_code.toUpperCase()}|${item}|${subconLower}`;
+          const bfKey = `${siteUpper}|${item}|${subconLower}`;
           const entries = (bolgeFaturaMap || {})[bfKey] || [];
           entries.forEach((e) => {
             if (e.fatura_no) fNos.push(e.fatura_no);
@@ -3939,8 +3964,25 @@ function FinanceDashboard({
             if (e.fatura_tarihi) fTarih.push(String(e.fatura_tarihi).slice(0, 10));
           });
         });
-        const bedelKdv = g.bedel * 1.20;
-        const kalan = Math.max(0, bedelKdv - fMiktar);
+
+        // Manuel taşeron hakedişi: önce saha bazlı (SITE||taseron), yoksa kalem bazlı toplam, yoksa tamamlanan bedel
+        const siteKey = `${siteUpper}||${subconLower}`;
+        let hakedis = g.bedel;
+        const siteManual = Number((taseronHakedisMap || {})[siteKey] || 0);
+        if (siteManual > 0) {
+          hakedis = siteManual;
+        } else {
+          let itemSum = 0, found = false;
+          g.items.forEach((item) => {
+            const k = `${siteUpper}|${item}|${subconLower}`;
+            const v = Number((taseronHakedisMap || {})[k] || 0);
+            if (v > 0) { itemSum += v; found = true; }
+          });
+          if (found) hakedis = itemSum;
+        }
+        const hakedisKdv = hakedis * 1.20;
+        const faturaKesilecek = hakedisKdv; // KDV dahil kesilmesi gereken toplam
+        const kalan = Math.max(0, hakedisKdv - fMiktar);
 
         aoa.push([
           { v: g.region,                       s: cellStyle(isEven, false) },
@@ -3949,11 +3991,16 @@ function FinanceDashboard({
           { v: g.subcon_name,                  s: cellStyle(isEven, false) },
           { v: g.kalemSayisi,                  s: cellStyle(isEven, true) },
           { v: g.bedel,                        s: bedelStyle(isEven) },
-          { v: bedelKdv,                       s: kdvStyle(isEven) },
+          { v: g.bedel * 1.20,                 s: kdvStyle(isEven) },
+          { v: hakedis,                        s: hakedisStyle(isEven) },
+          { v: hakedisKdv,                     s: hakedisStyle(isEven) },
+          { v: faturaKesilecek,                s: faturaStyle(isEven) },
           { v: [...new Set(fNos)].join(", "),  s: cellStyle(isEven, false) },
           { v: fMiktar || "",                  s: cellStyle(isEven, true) },
-          { v: kalan > 0.01 ? kalan : "",      s: kalan > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
           { v: [...new Set(fTarih)].join(", "),s: cellStyle(isEven, false) },
+          { v: "",                             s: cellStyle(isEven, false) },
+          { v: kalan > 0.01 ? kalan : "",      s: kalan > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
+          { v: "",                             s: cellStyle(isEven, false) },
         ]);
       });
 
@@ -4294,6 +4341,7 @@ function FinanceDashboard({
       setSubconSummaryRows(summaryData.rows || []);
       setUsdTryRate(Number(summaryData.usd_try_rate || 0));
       setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
+      setTaseronHakedisMap(summaryData.taseron_hakedis_map || {});
       setSubconDetailRows(detailData.rows || []);
       setShowSubconSummaryModal(true);
     } catch (err) {
@@ -8243,7 +8291,28 @@ function FinanceDashboard({
       {showBolgeFaturaModal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:10001, display:"flex", alignItems:"center", justifyContent:"center" }}>
           <div style={{ background:"#fff", borderRadius:"14px", padding:"32px 28px", width:"480px", maxWidth:"95vw", boxShadow:"0 8px 40px rgba(0,0,0,0.18)" }}>
-            <h3 style={{ margin:"0 0 20px", fontSize:"17px", fontWeight:700, color:"#1e3a5f" }}>+ Fatura Girişi</h3>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", margin:"0 0 20px" }}>
+              <h3 style={{ margin:0, fontSize:"17px", fontWeight:700, color:"#1e3a5f" }}>+ Fatura Girişi</h3>
+              {bolgeFaturaForm.site_code && bolgeFaturaForm.taseron_adi && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualHakedisForm({
+                      taseron_adi: bolgeFaturaForm.taseron_adi,
+                      site_code: bolgeFaturaForm.site_code,
+                      item_code: bolgeFaturaForm.item_code || "",
+                      item_description: bolgeFaturaForm.item_description || "",
+                      hakedis_bedeli: "",
+                    });
+                    setShowManualHakedisModal(true);
+                  }}
+                  style={{ display:"inline-flex", alignItems:"center", gap:"6px", padding:"8px 14px", background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"#fff", border:"none", borderRadius:"10px", fontSize:"12px", fontWeight:700, cursor:"pointer", boxShadow:"0 4px 12px rgba(79,70,229,0.35)", whiteSpace:"nowrap" }}
+                  title={bolgeFaturaForm.item_code ? "Bu kalem için taşeron hakedişi gir" : "Bu saha için taşeron hakedişi gir"}
+                >
+                  💰 Taşeron Hakediş Ekle
+                </button>
+              )}
+            </div>
 
             {/* Firma Adı */}
             <div style={{ marginBottom:"14px" }}>
@@ -8368,12 +8437,74 @@ function FinanceDashboard({
                     // Özet verisini yenile
                     const summaryData = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
                     setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
+                    setTaseronHakedisMap(summaryData.taseron_hakedis_map || {});
                     setSubconSummaryRows(summaryData.rows || []);
                   } catch(err) { alert(err.message || "Kaydetme hatası"); }
                   finally { setBolgeFaturaLoading(false); }
                 }}
                 style={{ padding:"10px 24px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
                 {bolgeFaturaLoading ? "Kaydediliyor..." : "Kaydet"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          TAŞERON HAKEDİŞ (MANUEL) GİRİŞİ MODAL
+      ═══════════════════════════════════════════════════════════════ */}
+      {showManualHakedisModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:10600, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"#fff", borderRadius:"14px", padding:"30px 28px", width:"460px", maxWidth:"95vw", boxShadow:"0 8px 40px rgba(0,0,0,0.2)" }}>
+            <h3 style={{ margin:"0 0 6px", fontSize:"17px", fontWeight:700, color:"#4f46e5", display:"flex", alignItems:"center", gap:"8px" }}>💰 Taşeron Hakediş Girişi</h3>
+            <p style={{ margin:"0 0 18px", fontSize:"12px", color:"#64748b" }}>
+              {manualHakedisForm.item_code
+                ? "Bu kalem için taşeronun hak ettiği bedeli (KDV hariç) girin. Sistemdeki hesaplamanın yerine bu değer kullanılır."
+                : "Bu saha için taşeronun hak ettiği bedeli (KDV hariç) girin. Sistemdeki hesaplamanın yerine bu değer kullanılır."}
+            </p>
+
+            <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"12px 14px", marginBottom:"16px", fontSize:"13px", color:"#334155" }}>
+              <div style={{ marginBottom:"4px" }}><strong>Taşeron:</strong> {manualHakedisForm.taseron_adi}</div>
+              <div style={{ marginBottom:"4px" }}><strong>Site ID:</strong> {manualHakedisForm.site_code}</div>
+              <div><strong>Kalem:</strong> {manualHakedisForm.item_code ? `${manualHakedisForm.item_description} (${manualHakedisForm.item_code})` : "— Saha geneli (kalem seçilmedi) —"}</div>
+            </div>
+
+            <div style={{ marginBottom:"20px" }}>
+              <label style={{ fontSize:"12px", fontWeight:600, color:"#64748b", display:"block", marginBottom:"4px" }}>Taşeron Hakediş Bedeli (KDV Hariç)</label>
+              <input type="text" inputMode="decimal" placeholder="18.512,69" value={manualHakedisForm.hakedis_bedeli}
+                onChange={e => setManualHakedisForm(f => ({...f, hakedis_bedeli: e.target.value}))}
+                style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
+              />
+              {manualHakedisForm.hakedis_bedeli && parseTrNumber(manualHakedisForm.hakedis_bedeli) > 0 && (
+                <div style={{ fontSize:"11px", color:"#16a34a", marginTop:"4px", fontWeight:600 }}>
+                  = {parseTrNumber(manualHakedisForm.hakedis_bedeli).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺ (KDV Dahil: {(parseTrNumber(manualHakedisForm.hakedis_bedeli) * 1.20).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₺)
+                </div>
+              )}
+            </div>
+
+            <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
+              <button onClick={() => setShowManualHakedisModal(false)}
+                style={{ padding:"10px 20px", background:"#f1f5f9", border:"none", borderRadius:"8px", fontSize:"14px", cursor:"pointer" }}>
+                İptal
+              </button>
+              <button disabled={manualHakedisLoading}
+                onClick={async () => {
+                  const bedelNum = parseTrNumber(manualHakedisForm.hakedis_bedeli);
+                  if (!(bedelNum > 0)) return alert("Geçerli bir hakediş bedeli girin");
+                  setManualHakedisLoading(true);
+                  try {
+                    await fetchJson(`${API_BASE}/taseron-hakedis/add`, { method:"POST", withAuth:true, body: JSON.stringify({ ...manualHakedisForm, hakedis_bedeli: bedelNum }) });
+                    setShowManualHakedisModal(false);
+                    const summaryData = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
+                    setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
+                    setTaseronHakedisMap(summaryData.taseron_hakedis_map || {});
+                    setSubconSummaryRows(summaryData.rows || []);
+                    alert("✅ Taşeron hakedişi kaydedildi");
+                  } catch(err) { alert(err.message || "Kaydetme hatası"); }
+                  finally { setManualHakedisLoading(false); }
+                }}
+                style={{ padding:"10px 24px", background:"linear-gradient(135deg,#7c3aed,#4f46e5)", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
+                {manualHakedisLoading ? "Kaydediliyor..." : "Kaydet"}
               </button>
             </div>
           </div>

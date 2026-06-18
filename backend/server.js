@@ -8378,6 +8378,7 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
   try {
     const usdTryRate = await getTcmbUsdTrySellingRate();
     await ensureBolgeFaturaTable().catch(() => {});
+    await ensureTaseronHakedisTable().catch(() => {});
 
     // bolge_fatura map: "site_code|item_code" → [{ fatura_no, fatura_tarihi, fatura_miktari }]
     const bfResult = await pool.query(`SELECT * FROM bolge_fatura ORDER BY created_at DESC`).catch(() => ({ rows: [] }));
@@ -8390,6 +8391,18 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
       const key = `${String(bf.site_code||'').toUpperCase()}|${String(bf.item_code||'').trim()}|${String(bf.taseron_adi||'').toLowerCase()}`;
       if (!bfMap[key]) bfMap[key] = [];
       bfMap[key].push({ fatura_no: bf.fatura_no, fatura_tarihi: bf.fatura_tarihi, fatura_miktari: bf.fatura_miktari });
+    }
+
+    // taseron_hakedis map (manuel hakediş override): item bazlı → "SITE|ITEM|taseron", saha bazlı → "SITE||taseron"
+    const thResult = await pool.query(`SELECT * FROM taseron_hakedis ORDER BY created_at DESC`).catch(() => ({ rows: [] }));
+    const thMap = {};
+    for (const th of thResult.rows) {
+      const site = String(th.site_code || '').toUpperCase();
+      const item = String(th.item_code || '').trim();
+      const tas = String(th.taseron_adi || '').toLowerCase();
+      const key = `${site}|${item}|${tas}`;
+      // En güncel kayıt önce geldiği için yalnız ilkini (en yeni) tut
+      if (!(key in thMap)) thMap[key] = Number(th.hakedis_bedeli || 0);
     }
 
     const detailResult = await pool.query(`
@@ -8512,6 +8525,7 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
       usd_try_rate: Number(usdTryRate || 0),
       rows,
       bolge_fatura_map: bfMap,
+      taseron_hakedis_map: thMap,
     });
   } catch (err) {
     console.error("SUBCON HAKEDIS SUMMARY ERROR:", err);
@@ -14957,6 +14971,67 @@ app.delete("/bolge-fatura/:id", requireFinanceAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+
+/* ========================= TAŞERON HAKEDİŞ (MANUEL) ========================= */
+// Taşeronun saha/kalem bazında hak ettiği bedelin manuel girişi (sistemdeki hesaplamayı override eder)
+async function ensureTaseronHakedisTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS taseron_hakedis (
+      id            SERIAL PRIMARY KEY,
+      taseron_adi   TEXT NOT NULL,
+      site_code     TEXT NOT NULL,
+      item_code     TEXT,
+      item_description TEXT,
+      hakedis_bedeli NUMERIC(18,2) DEFAULT 0,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
+// Manuel hakediş ekle/güncelle (upsert: aynı taseron+site+item varsa yenile)
+app.post("/taseron-hakedis/add", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureTaseronHakedisTable();
+    const { taseron_adi, site_code, item_code, item_description, hakedis_bedeli } = req.body || {};
+    if (!taseron_adi || !site_code) return res.status(400).json({ ok: false, error: "Taşeron ve site kodu zorunlu" });
+    if (!(Number(hakedis_bedeli || 0) > 0)) return res.status(400).json({ ok: false, error: "Hakediş bedeli girilmeli" });
+    const site = String(site_code).toUpperCase();
+    const item = item_code ? String(item_code).trim() : null;
+    // Aynı kayıt varsa sil (upsert mantığı)
+    if (item) {
+      await pool.query(`DELETE FROM taseron_hakedis WHERE UPPER(site_code)=$1 AND TRIM(COALESCE(item_code,''))=$2 AND LOWER(TRIM(taseron_adi))=LOWER($3)`, [site, item, taseron_adi]);
+    } else {
+      await pool.query(`DELETE FROM taseron_hakedis WHERE UPPER(site_code)=$1 AND COALESCE(item_code,'')='' AND LOWER(TRIM(taseron_adi))=LOWER($2)`, [site, taseron_adi]);
+    }
+    const result = await pool.query(`
+      INSERT INTO taseron_hakedis (taseron_adi, site_code, item_code, item_description, hakedis_bedeli)
+      VALUES ($1,$2,$3,$4,$5) RETURNING id
+    `, [taseron_adi, site, item, item_description || null, Number(hakedis_bedeli || 0)]);
+    res.json({ ok: true, id: result.rows[0].id });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Manuel hakediş listesi (opsiyonel taseron filtresi)
+app.get("/taseron-hakedis/list", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureTaseronHakedisTable();
+    const taseron = req.query.taseron_adi ? String(req.query.taseron_adi).trim() : null;
+    const result = taseron
+      ? await pool.query(`SELECT * FROM taseron_hakedis WHERE LOWER(TRIM(taseron_adi))=LOWER($1) ORDER BY created_at DESC`, [taseron])
+      : await pool.query(`SELECT * FROM taseron_hakedis ORDER BY created_at DESC`);
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Manuel hakediş sil
+app.delete("/taseron-hakedis/:id", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureTaseronHakedisTable();
+    await pool.query(`DELETE FROM taseron_hakedis WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+/* ========================= / TAŞERON HAKEDİŞ (MANUEL) ========================= */
 
 // Fatura Kesilecek Excel — taşeron için Billed Qty > 0 olan kalemler
 app.get("/bolge-fatura/kesilecek-excel/:taseron_adi", requireFinanceAuth, async (req, res) => {
