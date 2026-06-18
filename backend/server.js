@@ -14863,24 +14863,49 @@ async function ensureBolgeFaturaTable() {
   `);
 }
 
-// Site koduna göre kalem listesi (FEDERAL/UBS sahaları)
+// Site koduna göre kalem listesi — master_works + po_rows join (Bölge Analizi ile aynı kaynak)
 app.get("/bolge-fatura/site-items", requireFinanceAuth, async (req, res) => {
   try {
     const siteCode = String(req.query.site_code || "").trim().toUpperCase();
     if (!siteCode) return res.json({ ok: true, items: [] });
+
+    // Önce master_works + po_rows join ile dene (Bölge Analizi'nin kaynağı)
     const result = await pool.query(`
       SELECT DISTINCT
-        pr.item_code,
-        pr.item_description,
-        COALESCE(pr.unit_price, 0) AS unit_price,
-        COALESCE(pr.currency, 'TRY') AS currency,
-        COALESCE(pr.billed_qty, 0) AS billed_qty,
-        COALESCE(pr.done_qty, pr.requested_qty, 0) AS done_qty
-      FROM po_rows pr
-      WHERE UPPER(TRIM(pr.site_code)) = $1
-        AND pr.item_description IS NOT NULL
-      ORDER BY pr.item_description
+        mw.item_code,
+        COALESCE(mw.item_description, pr.item_description) AS item_description,
+        COALESCE(pr.unit_price, 0)        AS unit_price,
+        COALESCE(pr.currency, 'TRY')      AS currency,
+        COALESCE(pr.billed_qty, 0)        AS billed_qty,
+        COALESCE(mw.done_qty, 0)          AS done_qty
+      FROM master_works mw
+      LEFT JOIN po_rows pr
+        ON  pr.project_code = mw.project_code
+        AND UPPER(TRIM(pr.site_code))   = UPPER(TRIM(mw.site_code))
+        AND TRIM(pr.item_code)          = TRIM(mw.item_code)
+      WHERE UPPER(TRIM(mw.site_code)) = $1
+        AND mw.item_code IS NOT NULL
+      ORDER BY item_description
     `, [siteCode]);
+
+    // Hiç sonuç yoksa doğrudan po_rows'a bak
+    if (result.rows.length === 0) {
+      const fallback = await pool.query(`
+        SELECT DISTINCT
+          item_code,
+          item_description,
+          COALESCE(unit_price, 0)   AS unit_price,
+          COALESCE(currency, 'TRY') AS currency,
+          COALESCE(billed_qty, 0)   AS billed_qty,
+          0                         AS done_qty
+        FROM po_rows
+        WHERE UPPER(TRIM(site_code)) = $1
+          AND item_description IS NOT NULL
+        ORDER BY item_description
+      `, [siteCode]);
+      return res.json({ ok: true, items: fallback.rows });
+    }
+
     res.json({ ok: true, items: result.rows });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
