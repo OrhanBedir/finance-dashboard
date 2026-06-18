@@ -4477,14 +4477,7 @@ function FinanceDashboard({
   ];
 
   const currentMonth = new Date().getMonth() + 1;
-  // USD+TRY combined totals for stat cards (converted to TRY using live rate)
-  const totalCollectionsTRY = (summary?.total_collections_try || summary?.total_collections || 0)
-    + (summary?.total_collections_usd || 0) * usdTryLiveRate;
-  const thisMonthCollectionsTRY = (summary?.this_month_collections_try || summary?.this_month_collections || 0)
-    + (summary?.this_month_collections_usd || 0) * usdTryLiveRate;
-  const thisMonthInvoicedTRY = (summary?.monthly_invoiced_try?.[currentMonth] || summary?.monthly_invoiced?.[currentMonth] || 0)
-    + (summary?.monthly_invoiced_usd?.[currentMonth] || 0) * usdTryLiveRate;
-  const thisMonthInvoiced = thisMonthInvoicedTRY;
+  const thisMonthInvoiced = summary?.monthly_invoiced?.[currentMonth] || 0;
 
   const loadSalaryRows = async () => {
     try {
@@ -4832,8 +4825,8 @@ function FinanceDashboard({
             <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>{new Date().getFullYear()} Toplam Tahsilat</div>
             <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#eff6ff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>💰</div>
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(totalCollectionsTRY || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Yıllık kümülatif{(summary?.total_collections_usd||0)>0 ? ` · $${Math.round(summary.total_collections_usd/1000)}K USD dahil` : ""}</div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary?.total_collections || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Yıllık kümülatif</div>
         </div>
         {/* Bu Ay Tahsilat */}
         <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
@@ -4842,8 +4835,8 @@ function FinanceDashboard({
             <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Bu Ay Tahsilat</div>
             <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#ecfdf5", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📈</div>
           </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(thisMonthCollectionsTRY || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen{(summary?.this_month_collections_usd||0)>0 ? ` · $${Math.round(summary.this_month_collections_usd/1000)}K USD dahil` : ""}</div>
+          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary?.this_month_collections || 0, "TRY")}</div>
+          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen</div>
           {hwLastUpload?.uploaded_at && (
             <div style={{ fontSize:"10px", color:"#94a3b8", marginTop:"6px", borderTop:"1px solid #f1f5f9", paddingTop:"6px" }}>
               🕒 Son HW yükleme: {new Date(hwLastUpload.uploaded_at).toLocaleString("tr-TR")} ({hwLastUpload.row_count} kayıt)
@@ -5154,18 +5147,9 @@ function FinanceDashboard({
         <div style={{ padding:"20px" }}>
           {(() => {
             const shortNames = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
-            // Combine TRY + USD (converted) for chart bars
-            const received = shortNames.map((_,i) => {
-              const t = summary.monthly_received_try?.[i+1] ?? summary.monthly_received?.[i+1] ?? 0;
-              const u = summary.monthly_received_usd?.[i+1] ?? 0;
-              return t + u * usdTryLiveRate;
-            });
+            const received = shortNames.map((_,i) => summary.monthly_received?.[i+1] || 0);
             const upcoming = shortNames.map((_,i) => summary.monthly_upcoming?.[i+1] || 0);
-            const invoiced = shortNames.map((_,i) => {
-              const t = summary.monthly_invoiced_try?.[i+1] ?? summary.monthly_invoiced?.[i+1] ?? 0;
-              const u = summary.monthly_invoiced_usd?.[i+1] ?? 0;
-              return t + u * usdTryLiveRate;
-            });
+            const invoiced = shortNames.map((_,i) => summary.monthly_invoiced?.[i+1] || 0);
             const allVals = [...received, ...upcoming, ...invoiced];
             const maxVal = Math.max(...allVals, 1);
             const fmt = (v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v/1000)}K` : String(Math.round(v));

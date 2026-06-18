@@ -3036,8 +3036,7 @@ app.get("/finance/summary", async (req, res) => {
         `
         SELECT
           EXTRACT(MONTH FROM payment_date)::int AS month_no,
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) = 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_usd,
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) != 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_try
+          SUM(COALESCE(payment_amount, 0)) AS total
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
           AND payment_date IS NOT NULL
@@ -3051,8 +3050,7 @@ app.get("/finance/summary", async (req, res) => {
         `
         SELECT
           EXTRACT(MONTH FROM invoice_date)::int AS month_no,
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) = 'USD' THEN COALESCE(invoice_amount, 0) ELSE 0 END) AS total_usd,
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) != 'USD' THEN COALESCE(invoice_amount, 0) ELSE 0 END) AS total_try
+          SUM(COALESCE(invoice_amount, 0)) AS total
         FROM hw_invoice_rows
         WHERE EXTRACT(YEAR FROM invoice_date) = $1
         GROUP BY EXTRACT(MONTH FROM invoice_date)
@@ -3063,9 +3061,7 @@ app.get("/finance/summary", async (req, res) => {
 
       pool.query(
         `
-        SELECT
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) = 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_usd,
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) != 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_try
+        SELECT SUM(COALESCE(payment_amount, 0)) AS total_collections
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
           AND payment_date IS NOT NULL
@@ -3075,9 +3071,7 @@ app.get("/finance/summary", async (req, res) => {
 
       pool.query(
         `
-        SELECT
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) = 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_usd,
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY')) != 'USD' THEN COALESCE(payment_amount, 0) ELSE 0 END) AS total_try
+        SELECT SUM(COALESCE(payment_amount, 0)) AS this_month_collections
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
           AND EXTRACT(MONTH FROM payment_date) = $2
@@ -3092,52 +3086,22 @@ app.get("/finance/summary", async (req, res) => {
       `),
     ]);
 
-    // monthly_received: { month_no -> { try, usd } } for frontend USD→TRY conversion
-    const monthly_received_try = {};
-    const monthly_received_usd = {};
-    const monthly_invoiced_try = {};
-    const monthly_invoiced_usd = {};
-    for (let i = 1; i <= 12; i++) {
-      monthly_received_try[i] = 0;
-      monthly_received_usd[i] = 0;
-      monthly_invoiced_try[i] = 0;
-      monthly_invoiced_usd[i] = 0;
-    }
-
     receivedResult.rows.forEach((row) => {
-      monthly_received_try[row.month_no] = Number(row.total_try || 0);
-      monthly_received_usd[row.month_no] = Number(row.total_usd || 0);
-      monthly_received[row.month_no] = Number(row.total_try || 0);
+      monthly_received[row.month_no] = Number(row.total || 0);
     });
 
     invoicedResult.rows.forEach((row) => {
-      monthly_invoiced_try[row.month_no] = Number(row.total_try || 0);
-      monthly_invoiced_usd[row.month_no] = Number(row.total_usd || 0);
-      monthly_invoiced[row.month_no] = Number(row.total_try || 0);
+      monthly_invoiced[row.month_no] = Number(row.total || 0);
     });
-
-    const totalTryCollections = Number(totalCollectionsResult.rows[0]?.total_try || 0);
-    const totalUsdCollections = Number(totalCollectionsResult.rows[0]?.total_usd || 0);
-    const thisMonthTry = Number(thisMonthCollectionsResult.rows[0]?.total_try || 0);
-    const thisMonthUsd = Number(thisMonthCollectionsResult.rows[0]?.total_usd || 0);
 
     res.json({
       ok: true,
       summary: {
-        total_collections_try: totalTryCollections,
-        total_collections_usd: totalUsdCollections,
-        this_month_collections_try: thisMonthTry,
-        this_month_collections_usd: thisMonthUsd,
-        // legacy fields (kept for backward compat — TRY only)
-        total_collections: totalTryCollections,
-        this_month_collections: thisMonthTry,
+        total_collections: Number(totalCollectionsResult.rows[0]?.total_collections || 0),
+        this_month_collections: Number(thisMonthCollectionsResult.rows[0]?.this_month_collections || 0),
         expense_count: Number(expenseCountResult.rows[0]?.expense_count || 0),
         monthly_received,
         monthly_invoiced,
-        monthly_received_try,
-        monthly_received_usd,
-        monthly_invoiced_try,
-        monthly_invoiced_usd,
         monthly_upcoming: upcomingData.monthlyUpcoming,
       },
     });
@@ -15027,6 +14991,7 @@ app.get("/hw-acceptance/summary", async (req, res) => {
         a.acceptance_qty,
         a.status,
         a.engineering_code,
+        a.item_code,
         COALESCE(
           -- 1. Öncelik: HW PO tablosundan 3'lü anahtar ile item_code bul → BOQ'dan currency al
           (SELECT b.currency FROM po_rows p
@@ -15041,10 +15006,18 @@ app.get("/hw-acceptance/summary", async (req, res) => {
              WHERE TRIM(p.po_no)      = TRIM(a.po_no)
                AND TRIM(p.po_line_no) = TRIM(a.po_line_no)
              LIMIT 1),
-          -- 3. Sadece po_no ile eşleşme (son fallback)
+          -- 3. Sadece po_no ile eşleşme
           (SELECT b.currency FROM po_rows p
              JOIN boq_items b ON TRIM(b.s_bom_code) = TRIM(p.item_code)
              WHERE TRIM(p.po_no) = TRIM(a.po_no)
+             LIMIT 1),
+          -- 4. engineering_code direkt BOQ ile eşleşme
+          (SELECT b.currency FROM boq_items b
+             WHERE TRIM(b.s_bom_code) = TRIM(a.engineering_code)
+             LIMIT 1),
+          -- 5. item_code direkt BOQ ile eşleşme
+          (SELECT b.currency FROM boq_items b
+             WHERE TRIM(b.s_bom_code) = TRIM(a.item_code)
              LIMIT 1)
         ) AS currency
       FROM hw_acceptance_rows a
@@ -15068,7 +15041,13 @@ app.get("/hw-acceptance/summary", async (req, res) => {
       const qty       = parseFloat(row.acceptance_qty) || 1;
       const price     = parseFloat(row.unit_price) || 0;
       const lineTotal = price * qty;
-      const currency  = row.currency || 'USD';
+      // currency: SQL COALESCE'tan gelen değer; NULL ise engineering_code+price ile tahmin et
+      // inferCurrencyByItemAndPrice → bilinmeyende TRY döner (USD'yi ~38x artırma hatasını önler)
+      const currency  = inferCurrencyByItemAndPrice(
+        row.engineering_code || row.item_code,
+        row.currency,   // NULL ise normalizeCurrency → "TRY"
+        price
+      );
       const isTry     = currency === 'TRY' || currency === 'TL';
 
       if (isTry) total_try += lineTotal;
