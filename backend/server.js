@@ -253,8 +253,19 @@ app.use(express.urlencoded({ extended: true }));
 app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-taslak-resume-v10" }));
 
 function requireAdmin(req, res, next) {
-  if (!req.user || req.user.role !== "admin") {
+  // platform_admin (uygulama sahibi) firma admininin yapabildiği her şeyi yapabilir.
+  if (!req.user || (req.user.role !== "admin" && req.user.role !== "platform_admin")) {
     return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+  }
+  next();
+}
+
+// Yalnızca platform sahibi (uygulamanın admini). Firma adminleri (role='admin')
+// buradan geçemez → yeni firma onayı / tenant yönetimi gibi platform-seviyesi
+// işlemler sadece platform_admin'e açıktır.
+function requirePlatformAdmin(req, res, next) {
+  if (!req.user || req.user.role !== "platform_admin") {
+    return res.status(403).json({ ok: false, error: "Bu işlem yalnızca platform sahibine açıktır" });
   }
   next();
 }
@@ -686,6 +697,7 @@ app.post("/auth/login", async (req, res) => {
     const isAdminUser =
       userEmail === "orhan@simsektel.com" ||
       userRole === "admin" ||
+      userRole === "platform_admin" ||
       userRole === "genel_mudur";
 
     // Finans erişimi olan kullanıcılar: admin, FINANCE_ALLOWED_USERS listesi,
@@ -838,8 +850,9 @@ app.post("/admin/users/:id/approve", authMiddleware, async (req, res) => {
 //  - o tenant için boş şema provizyon edilir (ERC verisi kopyalanmaz)
 //  - tenant_registry'ye yazılır + allow-list'e eklenir (anında izolasyon aktif)
 //  - kullanıcı o tenant'ın admin'i yapılır (status active)
-// Yalnızca platform admini (genel admin rolü) çağırabilir.
-app.post("/admin/users/:id/approve-company", authMiddleware, requireAdmin, async (req, res) => {
+// Yalnızca platform sahibi (role='platform_admin') çağırabilir → yeni firma
+// onayı firma adminlerine değil, uygulamanın sahibine aittir.
+app.post("/admin/users/:id/approve-company", authMiddleware, requirePlatformAdmin, async (req, res) => {
   try {
     const { tenant_slug, tenant_name } = req.body || {};
     const slug = String(tenant_slug || "").toLowerCase().trim().replace(/[^a-z0-9_]/g, "");
@@ -14188,6 +14201,34 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     if (n > 0) console.log(`[tenant] ${n} izole tenant allow-list'e yüklendi.`);
   } catch (e) {
     console.error("[tenant-registry] başlatma hatası:", e.message);
+  }
+})();
+
+// ── PLATFORM SAHİBİ (super-admin) ROLÜ ──────────────────────────────────────
+// Uygulamanın sahibi orhan.bedir@gmail.com, kendi gmail adresiyle kayıt olup
+// onay beklerken VEYA zaten kayıtlıyken otomatik olarak 'platform_admin' rolüne
+// yükseltilir ve aktifleştirilir (şifresine dokunulmaz — kendi belirlediği
+// şifre korunur). Bu rol, firma adminlerinin (role='admin') üstündedir ve yeni
+// firma onaylarını yalnızca bu hesap yapabilir. ERC verisi etkilenmez:
+// gmail adresi tenant='erc' olduğu için public şemada kalır (izole değildir).
+(async () => {
+  try {
+    const PLATFORM_OWNER = "orhan.bedir@gmail.com";
+    const r = await pool.query(
+      `UPDATE users SET role='platform_admin', is_active=true, status='active'
+       WHERE LOWER(email)=$1 RETURNING id`,
+      [PLATFORM_OWNER]
+    );
+    if (r.rowCount > 0) {
+      console.log(`[platform] ${PLATFORM_OWNER} platform_admin olarak ayarlandı.`);
+    }
+    // ERC firma admini: duzgun.simsek@simsektel.com (kayıtlıysa admin yapılır).
+    await pool.query(
+      `UPDATE users SET role='admin', is_active=true
+       WHERE LOWER(email)='duzgun.simsek@simsektel.com' AND role NOT IN ('admin','platform_admin')`
+    ).catch(() => {});
+  } catch (e) {
+    console.error("[platform-admin] başlatma hatası:", e.message);
   }
 })();
 

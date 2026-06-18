@@ -17348,7 +17348,7 @@ function PersonelMalzemePanel({ currentUser }) {
 
 function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const _email = (currentUser?.email || "").toLowerCase();
-  const isAdmin    = currentUser?.role === "admin";
+  const isAdmin    = currentUser?.role === "admin" || currentUser?.role === "platform_admin";
   const isPM       = _email === "orhan.bedir@simsektel.com";
   const isDirektor   = _email === "duzgun.simsek@simsektel.com";
   const isNurcan     = _email === "nurcan.kus@simsektel.com";
@@ -20072,7 +20072,9 @@ function App() {
       return null;
     }
   });
-  const isAdmin = user?.role === "admin" || user?.role === "direktor";
+  // Platform sahibi (uygulamanın admini) — firma adminlerinin üstünde; yeni firma onayı vb. platform işlemleri yalnızca bu role açıktır.
+  const isPlatformAdmin = user?.role === "platform_admin";
+  const isAdmin = user?.role === "admin" || user?.role === "direktor" || isPlatformAdmin;
   const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role) || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com";
 
   // Ünvan görüntüleme fonksiyonu
@@ -21250,7 +21252,9 @@ function App() {
                             <td style={{padding:'12px 16px'}}>
                               <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
                                 <button onClick={()=>handleApproveUser(u.id)} title="Mevcut firmaya (ERC) çalışan olarak ekle" style={{background:'#10b981',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>✓ Onayla</button>
-                                <button onClick={()=>handleApproveCompany(u)} title="Yeni izole firma sahibi olarak onayla (kendi boş çalışma alanı)" style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>🏢 Yeni Firma</button>
+                                {isPlatformAdmin && (
+                                  <button onClick={()=>handleApproveCompany(u)} title="Yeni izole firma sahibi olarak onayla (kendi boş çalışma alanı)" style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>🏢 Yeni Firma</button>
+                                )}
                                 <button onClick={()=>handleRejectUser(u.id)} style={{background:'#ef4444',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>✗ Reddet</button>
                               </div>
                             </td>
@@ -21330,7 +21334,7 @@ function App() {
                             {/* Rol + Durum badge */}
                             <div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
                               <span style={{background:u.role==="admin"?"#fef3c7":u.role==="rollout_mudur"?"#f0fdf4":u.role==="pm"?"#eff6ff":u.role==="direktor"?"#fdf2f8":u.role==="muhasebe"?"#f0f9ff":"#f3f4f6",color:u.role==="admin"?"#92400e":u.role==="rollout_mudur"?"#166534":u.role==="pm"?"#1e40af":u.role==="direktor"?"#7e22ce":u.role==="muhasebe"?"#0369a1":"#374151",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",textTransform:"uppercase",letterSpacing:"0.05em",display:"inline-block",width:"fit-content"}}>
-                                {u.role==="admin"?"👑 Admin":u.role==="rollout_mudur"?(u.email?.toLowerCase()==="serdar.altinova@simsektel.com"?"📍 Bölge Müdürü":"🏗 Rollout Müdürü"):u.role==="pm"?"📋 Proje Müdürü":u.role==="direktor"?"🎯 Direktör":u.role==="muhasebe"?"💼 Muhasebe":"👤 Personel"}
+                                {u.role==="platform_admin"?"🌐 Platform Admin":u.role==="admin"?"👑 Admin":u.role==="rollout_mudur"?(u.email?.toLowerCase()==="serdar.altinova@simsektel.com"?"📍 Bölge Müdürü":"🏗 Rollout Müdürü"):u.role==="pm"?"📋 Proje Müdürü":u.role==="direktor"?"🎯 Direktör":u.role==="muhasebe"?"💼 Muhasebe":"👤 Personel"}
                               </span>
                               <span style={{background:u.is_active?"#dcfce7":"#f3f4f6",color:u.is_active?"#166534":"#6b7280",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",display:"inline-block",width:"fit-content"}}>
                                 {u.is_active?"✓ Aktif":"Pasif"}
