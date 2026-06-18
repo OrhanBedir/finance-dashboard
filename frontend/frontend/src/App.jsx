@@ -3631,11 +3631,11 @@ function FinanceDashboard({
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
         "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)",
-        "Fatura Kesilecek", "Fatura No", "Fatura Miktarı", "Fatura Tarihi",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Federal Hakediş (%80) KDV Dahil",
+        "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
         "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 20, 18, 18, 14, 18];
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 18];
       const NCOLS = headers.length;
 
       const titleStyle = {
@@ -3659,6 +3659,12 @@ function FinanceDashboard({
       const federalStyle = (isEven) => ({
         fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
         font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const federalKdvStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "CFFAFE" : "ECFEFF" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "0E7490" } },
         alignment: { horizontal: "right", vertical: "middle" },
         border: cellBorder,
       });
@@ -3728,6 +3734,7 @@ function FinanceDashboard({
           { v: unitPrice,                                         s: cellStyle(isEven, true) },
           { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
           { v: federalHakedis,                                    s: federalStyle(isEven) },
+          { v: federalHakedis * 1.20,                             s: federalKdvStyle(isEven) },
           { v: faturaKesilecek,                                   s: faturaKesilecek > 0 ? faturaStyle(isEven) : cellStyle(isEven, true) },
           { v: faturaNo,                                          s: cellStyle(isEven, false) },
           { v: faturaToplamMiktar || "",                          s: cellStyle(isEven, true) },
@@ -14265,12 +14272,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
         "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)",
-        "Fatura Kesilecek", "Fatura No", "Fatura Miktarı", "Fatura Tarihi",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Federal Hakediş (%80) KDV Dahil",
+        "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
         "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 20, 18, 18, 14, 18];
-      const NCOLS = headers.length; // 23
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 18];
+      const NCOLS = headers.length; // 24
 
       const titleStyle = {
         fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
@@ -14303,6 +14310,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const federalStyle = (isEven) => ({
         fill: { patternType: "solid", fgColor: { rgb: isEven ? "DCFCE7" : "F0FDF4" } },
         font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "166534" } },
+        alignment: { horizontal: "right", vertical: "middle" },
+        border: cellBorder,
+      });
+      const federalKdvStyle = (isEven) => ({
+        fill: { patternType: "solid", fgColor: { rgb: isEven ? "CFFAFE" : "ECFEFF" } },
+        font: { sz: 11, name: "Calibri", bold: true, color: { rgb: "0E7490" } },
         alignment: { horizontal: "right", vertical: "middle" },
         border: cellBorder,
       });
@@ -14375,6 +14388,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           { v: unitPrice,                                         s: cellStyle(isEven, true) },
           { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
           { v: federalHakedis,                                    s: federalStyle(isEven) },
+          { v: federalHakedis * 1.20,                             s: federalKdvStyle(isEven) },
           { v: faturaKesilecek,                                   s: faturaKesilecek > 0 ? faturaStyle(isEven) : cellStyle(isEven, true) },
           { v: faturaNo,                                          s: cellStyle(isEven, false) },
           { v: faturaToplamMiktar || "",                          s: cellStyle(isEven, true) },
