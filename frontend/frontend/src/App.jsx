@@ -296,6 +296,9 @@ async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
     ...fetchOptions,
     headers: {
+      ...(fetchOptions.body && typeof fetchOptions.body === "string"
+        ? { "Content-Type": "application/json" }
+        : {}),
       ...(fetchOptions.headers || {}),
       ...(withAuth && token ? { Authorization: `Bearer ${token}` } : {}),
     },
