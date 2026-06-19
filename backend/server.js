@@ -728,6 +728,17 @@ app.post("/auth/login", async (req, res) => {
 
     const userTenant = user.tenant || detectTenant(user.email, user.subcon_name);
 
+    // Firma markası (white-label): kullanıcı giriş yapınca kendi firma adını
+    // görür. erc/2kx yerleşik; izole firmalar tenant_registry'den okunur.
+    let tenantName = TENANT_CONFIG[userTenant]?.name;
+    if (!tenantName) {
+      try {
+        const tr = await pool.query("SELECT name FROM tenant_registry WHERE tenant=$1", [userTenant]);
+        tenantName = tr.rows[0]?.name;
+      } catch {}
+    }
+    tenantName = tenantName || (userTenant ? String(userTenant).toUpperCase() : "Omnix");
+
     const token = jwt.sign(
       {
         user_id: user.id,
@@ -737,6 +748,7 @@ app.post("/auth/login", async (req, res) => {
         subcon_name: user.subcon_name || null,
         scope,
         tenant: userTenant,
+        tenant_name: tenantName,
       },
       process.env.JWT_SECRET || "simsek_secret_degistir",
       { expiresIn: "7d" },
@@ -753,6 +765,7 @@ app.post("/auth/login", async (req, res) => {
         subcon_name: user.subcon_name,
         payment_rate: Number(user.payment_rate || 0.8),
         tenant: userTenant,
+        tenant_name: tenantName,
       },
     });
   } catch (err) {

@@ -20241,7 +20241,9 @@ function App() {
   // ── Dynamic document.title based on tenant ──────────────────────────────
   useEffect(() => {
     if (user) {
-      document.title = user.tenant === '2kx' ? '2KX | Operasyon ve Hakediş Takip Sistemi'
+      document.title = user.tenant_name
+        ? `${user.tenant_name} | Operasyon ve Hakediş Takip Sistemi`
+        : user.tenant === '2kx' ? '2KX | Operasyon ve Hakediş Takip Sistemi'
         : (user.tenant && user.tenant !== 'erc') ? 'Omnix | Operasyon ve Proje Platformu'
         : 'ERC | Operasyon ve Hakediş Takip Sistemi';
     } else {
@@ -20850,7 +20852,7 @@ function App() {
       <div style={{ minHeight:"100vh", background:"#f8fafc" }}>
         {/* Top bar */}
         <div style={{ background:"#1e3a5f", color:"#fff", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 8px rgba(0,0,0,0.2)" }}>
-          <span style={{ fontWeight:700, fontSize:"16px" }}>{user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'}</span>
+          <span style={{ fontWeight:700, fontSize:"16px" }}>{user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik')}</span>
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"2px" }}>
             <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.3)", color:"#fff", borderRadius:"8px", padding:"6px 12px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Çıkış</button>
             <span style={{ fontSize:"11px", opacity:0.7 }}>{user?.name || user?.email}</span>
@@ -20899,7 +20901,7 @@ function App() {
       case "ofis": return "Ofis & Depo";
       case "cashflow": return "Nakit Akışı";
       case "admin": return "Admin Panel";
-      default: return user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik';
+      default: return user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik');
     }
   };
 
@@ -20938,7 +20940,7 @@ function App() {
           <div className="sidebar-logo">
             <div className="sidebar-logo-icon">🏗</div>
             <div>
-              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>{user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'}</div>
+              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>{user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik')}</div>
               <div style={{fontSize:11,color:'#64748b'}}>{user?.tenant === '2kx' ? '2KX Takip Sistemi' : 'Operasyon & Hakediş'}</div>
             </div>
           </div>
