@@ -20241,7 +20241,9 @@ function App() {
   // ── Dynamic document.title based on tenant ──────────────────────────────
   useEffect(() => {
     if (user) {
-      document.title = user.tenant_name
+      document.title = user.role === 'platform_admin'
+        ? 'Omnix | Operasyon ve Hakediş Platformu'
+        : user.tenant_name
         ? `${user.tenant_name} | Operasyon ve Hakediş Takip Sistemi`
         : user.tenant === '2kx' ? '2KX | Operasyon ve Hakediş Takip Sistemi'
         : (user.tenant && user.tenant !== 'erc') ? 'Omnix | Operasyon ve Proje Platformu'
@@ -20669,6 +20671,19 @@ function App() {
     if (page === "platform" && !platformData && !platformLoading) fetchPlatformOverview();
   }, [page]);
 
+  // Platform konsolundan kullanıcıyı aktif/pasif yap, sonra listeyi tazele.
+  const handlePlatformToggleActive = async (userId) => {
+    try {
+      const tk = localStorage.getItem('token') || '';
+      const r = await fetch(`${API_BASE}/admin/users/${userId}/active`, {
+        method: "PUT", headers: { Authorization: `Bearer ${tk}` },
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Durum güncellenemedi");
+      fetchPlatformOverview();
+    } catch (e) { alert(e.message || "Durum güncellenemedi"); }
+  };
+
   const handleApproveUser = async (id) => {
     const tk = localStorage.getItem('token') || '';
     await fetch(`${API_BASE}/admin/users/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${tk}` } });
@@ -20852,7 +20867,7 @@ function App() {
       <div style={{ minHeight:"100vh", background:"#f8fafc" }}>
         {/* Top bar */}
         <div style={{ background:"#1e3a5f", color:"#fff", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 8px rgba(0,0,0,0.2)" }}>
-          <span style={{ fontWeight:700, fontSize:"16px" }}>{user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik')}</span>
+          <span style={{ fontWeight:700, fontSize:"16px" }}>{isPlatformAdmin ? 'Omnix' : (user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</span>
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"2px" }}>
             <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.3)", color:"#fff", borderRadius:"8px", padding:"6px 12px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Çıkış</button>
             <span style={{ fontSize:"11px", opacity:0.7 }}>{user?.name || user?.email}</span>
@@ -20901,6 +20916,7 @@ function App() {
       case "ofis": return "Ofis & Depo";
       case "cashflow": return "Nakit Akışı";
       case "admin": return "Admin Panel";
+      case "platform": return "Omnix — Platform Yönetimi";
       default: return user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik');
     }
   };
@@ -20940,8 +20956,8 @@ function App() {
           <div className="sidebar-logo">
             <div className="sidebar-logo-icon">🏗</div>
             <div>
-              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>{user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik')}</div>
-              <div style={{fontSize:11,color:'#64748b'}}>{user?.tenant === '2kx' ? '2KX Takip Sistemi' : 'Operasyon & Hakediş'}</div>
+              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>{isPlatformAdmin ? 'Omnix' : (user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</div>
+              <div style={{fontSize:11,color:'#64748b'}}>{isPlatformAdmin ? 'Operasyon & Hakediş Platformu' : (user?.tenant === '2kx' ? '2KX Takip Sistemi' : 'Operasyon & Hakediş')}</div>
             </div>
           </div>
 
@@ -21309,6 +21325,52 @@ function App() {
                 </div>
                 <div style={{marginTop:"16px",fontSize:"13px",color:"#94a3b8"}}>
                   Yeni firma onayı için <strong style={{color:"#7c3aed"}}>Bekleyen Kayıt</strong> kartına tıklayıp "🏢 Yeni Firma" ile onaylayın.
+                </div>
+
+                {/* Kullanıcılar — kimler kullanıyor + aktif/pasif kontrolü */}
+                <div style={{background:'#fff',borderRadius:'14px',border:'1px solid #e2e8f0',overflow:'hidden',marginTop:'24px'}}>
+                  <div style={{padding:"16px 20px",borderBottom:"1px solid #e2e8f0",fontWeight:700,color:"#0f172a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span>Kullanıcılar — kimler kullanıyor <span style={{color:"#94a3b8",fontWeight:400}}>({platformData?.users?.length||0})</span></span>
+                  </div>
+                  {platformLoading ? (
+                    <div style={{textAlign:'center',padding:'40px',color:'#6b7280'}}>Yükleniyor...</div>
+                  ) : (platformData?.users||[]).length === 0 ? (
+                    <div style={{textAlign:'center',padding:'40px',color:'#9ca3af'}}>Kullanıcı yok</div>
+                  ) : (
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:'14px'}}>
+                      <thead>
+                        <tr style={{background:'#f8fafc'}}>
+                          {['Ad Soyad','E-posta','Firma','Rol','Durum','İşlem'].map(h=>(
+                            <th key={h} style={{padding:'12px 16px',textAlign:'left',borderBottom:'1px solid #e2e8f0',color:'#374151',fontWeight:600}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(platformData?.users||[]).map((u,i)=>(
+                          <tr key={i} style={{borderBottom:'1px solid #f1f5f9'}}>
+                            <td style={{padding:'12px 16px',fontWeight:600,color:"#0f172a"}}>{u.name}</td>
+                            <td style={{padding:'12px 16px',color:'#6b7280'}}>{u.email}</td>
+                            <td style={{padding:'12px 16px'}}>
+                              <span style={{background:u.tenant==='erc'?'#fee2e2':u.tenant==='2kx'?'#dbeafe':'#ede9fe',color:u.tenant==='erc'?'#991b1b':u.tenant==='2kx'?'#1d4ed8':'#6d28d9',borderRadius:'6px',padding:'2px 10px',fontSize:'12px',fontWeight:600}}>{u.firm}</span>
+                            </td>
+                            <td style={{padding:'12px 16px',color:'#475569',fontSize:'13px'}}>{u.role==='platform_admin'?'🌐 Platform':u.role==='admin'?'👑 Admin':u.role}</td>
+                            <td style={{padding:'12px 16px'}}>
+                              {u.status==='pending'
+                                ? <span style={{background:'#fef9c3',color:'#854d0e',borderRadius:'6px',padding:'2px 10px',fontSize:'12px',fontWeight:600}}>⏳ Bekliyor</span>
+                                : u.is_active
+                                ? <span style={{background:'#dcfce7',color:'#166534',borderRadius:'6px',padding:'2px 10px',fontSize:'12px',fontWeight:600}}>✓ Aktif</span>
+                                : <span style={{background:'#fee2e2',color:'#991b1b',borderRadius:'6px',padding:'2px 10px',fontSize:'12px',fontWeight:600}}>● Pasif</span>}
+                            </td>
+                            <td style={{padding:'12px 16px'}}>
+                              {u.status==='pending'
+                                ? <button onClick={()=>{setPage('pending-users');fetchPendingUsers();}} style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 12px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>Onayla →</button>
+                                : <button onClick={()=>handlePlatformToggleActive(u.id)} style={{background:u.is_active?'#fef3c7':'#f0fdf4',color:u.is_active?'#92400e':'#166534',border:'none',borderRadius:'7px',padding:'6px 12px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>{u.is_active?'Pasife Al':'Aktif Et'}</button>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </div>
             )}

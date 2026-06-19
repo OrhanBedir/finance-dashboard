@@ -1041,7 +1041,20 @@ app.get("/platform/overview", authMiddleware, requirePlatformAdmin, async (req, 
       })),
     ];
 
-    res.json({ ok: true, firms, pending_count: pending });
+    // Tüm kullanıcılar (kimler kullanıyor) — platform sahibi hepsini görür/yönetir.
+    let users = [];
+    try {
+      const u = await pool.query(
+        `SELECT id, name, email, role, is_active, status, COALESCE(tenant,'erc') AS tenant, created_at
+         FROM users ORDER BY COALESCE(is_active,false) DESC, id DESC`
+      );
+      // Firma adını eşle
+      const nameByTenant = {};
+      for (const f of firms) nameByTenant[f.tenant] = f.name;
+      users = (u.rows || []).map(r => ({ ...r, firm: nameByTenant[r.tenant] || r.tenant }));
+    } catch (e) { users = []; }
+
+    res.json({ ok: true, firms, pending_count: pending, users });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
