@@ -270,6 +270,44 @@ function requirePlatformAdmin(req, res, next) {
   next();
 }
 
+// ── FİRMA-BAZLI KULLANICI GÖRÜNÜRLÜĞÜ ────────────────────────────────────────
+// Bir adminin başka bir kullanıcıyı görebilmesi/yönetebilmesi kuralı:
+//  - platform_admin (uygulama sahibi) → tüm firmaların kullanıcıları
+//  - izole firma admini → YALNIZCA kendi tenant'ının kullanıcıları
+//  - ERC ailesi admini (erc / legacy 2kx / null) → izole OLMAYAN tüm kullanıcılar
+//    (ERC'nin mevcut davranışı korunur; yeni izole firmaların kullanıcıları sızmaz)
+function adminCanSeeUserTenant(reqUser, targetTenant) {
+  if (reqUser?.role === "platform_admin") return true;
+  const myTenant = String(reqUser?.tenant || "erc").toLowerCase();
+  const tt = String(targetTenant || "erc").toLowerCase();
+  if (isIsolatedTenant(myTenant)) return tt === myTenant;
+  return !isIsolatedTenant(tt);
+}
+// İzole firma admini ise yeni oluşturduğu kullanıcı kendi firmasına ait olur;
+// değilse (ERC ailesi) tenant null bırakılır → mevcut davranış korunur.
+function adminCreateTenant(reqUser) {
+  const myTenant = String(reqUser?.tenant || "").toLowerCase();
+  return isIsolatedTenant(myTenant) ? myTenant : null;
+}
+// Bir mutasyon ucunda hedef kullanıcıyı görme yetkisini kontrol eder.
+async function guardUserScope(req, res, id) {
+  try {
+    const r = await pool.query("SELECT tenant FROM users WHERE id=$1", [id]);
+    if (r.rows.length === 0) {
+      res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
+      return false;
+    }
+    if (!adminCanSeeUserTenant(req.user, r.rows[0].tenant)) {
+      res.status(403).json({ ok: false, error: "Bu kullanıcı sizin firmanıza ait değil" });
+      return false;
+    }
+    return true;
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+    return false;
+  }
+}
+
 function getWeekNumber(date) {
   const d = new Date(date);
   const oneJan = new Date(d.getFullYear(), 0, 1);
@@ -333,12 +371,14 @@ app.use((req, res, next) => {
 app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, email, role, is_active, created_at
+      SELECT id, name, email, role, is_active, created_at, tenant
       FROM users
       ORDER BY id DESC
     `);
 
-    res.json({ ok: true, users: result.rows });
+    // Firma-bazlı görünürlük: admin sadece kendi kapsamındaki kullanıcıları görür.
+    const visible = result.rows.filter((u) => adminCanSeeUserTenant(req.user, u.tenant));
+    res.json({ ok: true, users: visible });
   } catch (err) {
     console.error("ADMIN USERS LIST ERROR:", err);
     res.status(500).json({ ok: false, error: "Kullanıcılar alınamadı" });
@@ -371,11 +411,13 @@ app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
         [name, hashed, role, existing.rows[0].id]
       );
     } else {
+      // İzole firma admini eklerse kullanıcı kendi firmasına ait olur.
+      const newTenant = adminCreateTenant(req.user);
       result = await pool.query(
-        `INSERT INTO users (name, email, password_hash, role, is_active)
-         VALUES ($1, $2, $3, $4, true)
+        `INSERT INTO users (name, email, password_hash, role, is_active, tenant)
+         VALUES ($1, $2, $3, $4, true, $5)
          RETURNING id, name, email, role, is_active`,
-        [name, email, hashed, role],
+        [name, email, hashed, role, newTenant],
       );
     }
 
@@ -393,6 +435,7 @@ app.put(
 
     try {
       const { id } = req.params;
+      if (!(await guardUserScope(req, res, id))) return;
 
       const result = await pool.query(
         `
@@ -427,6 +470,7 @@ app.delete(
   async (req, res) => {
     try {
       const { id } = req.params;
+      if (!(await guardUserScope(req, res, id))) return;
 
       await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
 
@@ -494,6 +538,7 @@ app.put(
       if (!role || !["admin", "user", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe"].includes(role)) {
         return res.status(400).json({ ok: false, error: "Geçersiz rol" });
       }
+      if (!(await guardUserScope(req, res, id))) return;
 
       const result = await pool.query(
         `
@@ -528,6 +573,7 @@ app.put(
     try {
       const { id } = req.params;
       const { is_active } = req.body;
+      if (!(await guardUserScope(req, res, id))) return;
 
       const result = await pool.query(
         `
@@ -566,6 +612,7 @@ app.put(
       if (!password) {
         return res.status(400).json({ ok: false, error: "Yeni şifre zorunlu" });
       }
+      if (!(await guardUserScope(req, res, id))) return;
 
       const passwordHash = await bcrypt.hash(password, 10);
 
@@ -844,12 +891,13 @@ app.post("/auth/reset-password", async (req, res) => {
 // GET /admin/pending-users
 app.get("/admin/pending-users", authMiddleware, async (req, res) => {
   try {
-    const userTenant = req.user.tenant || detectTenant(req.user.email, req.user.subcon_name || "");
     const result = await pool.query(
-      "SELECT id, name, email, tenant, created_at FROM users WHERE status='pending' AND (tenant=$1 OR $2) ORDER BY created_at DESC",
-      [userTenant, req.user.role === 'admin']
+      "SELECT id, name, email, tenant, created_at FROM users WHERE status='pending' ORDER BY created_at DESC"
     );
-    res.json({ ok: true, rows: result.rows });
+    // Firma-bazlı görünürlük: izole firma admini sadece kendi bekleyenlerini,
+    // platform sahibi hepsini, ERC ailesi admini izole olmayanları görür.
+    const visible = result.rows.filter((u) => adminCanSeeUserTenant(req.user, u.tenant));
+    res.json({ ok: true, rows: visible });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -859,6 +907,7 @@ app.post("/admin/users/:id/approve", authMiddleware, async (req, res) => {
     const result = await pool.query("SELECT id, name, email, tenant FROM users WHERE id=$1 AND status='pending'", [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
     const u = result.rows[0];
+    if (!adminCanSeeUserTenant(req.user, u.tenant)) return res.status(403).json({ ok: false, error: "Bu kullanıcı sizin firmanıza ait değil" });
     await pool.query("UPDATE users SET status='active', is_active=true WHERE id=$1", [u.id]);
     const tConf = TENANT_CONFIG[u.tenant] || TENANT_CONFIG.erc;
     const appUrl = process.env.APP_URL || "https://app.omnix.global";
@@ -935,6 +984,7 @@ app.post("/admin/users/:id/reject", authMiddleware, async (req, res) => {
     const result = await pool.query("SELECT id, name, email, tenant FROM users WHERE id=$1 AND status='pending'", [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
     const u = result.rows[0];
+    if (!adminCanSeeUserTenant(req.user, u.tenant)) return res.status(403).json({ ok: false, error: "Bu kullanıcı sizin firmanıza ait değil" });
     await pool.query("UPDATE users SET status='rejected', is_active=false WHERE id=$1", [u.id]);
     const tConf = TENANT_CONFIG[u.tenant] || TENANT_CONFIG.erc;
     await sendEmail({
