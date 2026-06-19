@@ -935,9 +935,14 @@ app.post("/admin/users/:id/approve-company", authMiddleware, requirePlatformAdmi
     if (!slug) return res.status(400).json({ ok: false, error: "tenant_slug zorunlu" });
     if (slug === "erc" || slug === "2kx") return res.status(400).json({ ok: false, error: "Bu slug rezerve (erc/2kx kullanılamaz)" });
 
-    const result = await pool.query("SELECT id, name, email FROM users WHERE id=$1 AND status='pending'", [req.params.id]);
-    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: "Bekleyen kullanıcı bulunamadı" });
+    // Platform sahibi herhangi bir kullanıcıyı (bekleyen VEYA mevcut) izole firma
+    // sahibine dönüştürebilir. Sadece platform sahibi hesabı korunur.
+    const result = await pool.query("SELECT id, name, email, role FROM users WHERE id=$1", [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
     const u = result.rows[0];
+    if (String(u.email || "").toLowerCase() === PLATFORM_ADMIN_EMAIL || u.role === "platform_admin") {
+      return res.status(400).json({ ok: false, error: "Platform sahibi hesabı firmaya dönüştürülemez" });
+    }
 
     // Slug başka bir firmaya aitse ve sahibi farklıysa engelle
     const existing = await pool.query("SELECT tenant, owner_email FROM tenant_registry WHERE tenant=$1", [slug]);

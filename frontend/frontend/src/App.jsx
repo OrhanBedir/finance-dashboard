@@ -20671,6 +20671,12 @@ function App() {
     if (page === "platform" && !platformData && !platformLoading) fetchPlatformOverview();
   }, [page]);
 
+  // Platform konsolundan kullanıcıyı izole firma sahibi yap, sonra listeyi tazele.
+  const handleApproveCompanyThenRefresh = async (u) => {
+    await handleApproveCompany(u);
+    fetchPlatformOverview();
+  };
+
   // Platform konsolundan kullanıcıyı aktif/pasif yap, sonra listeyi tazele.
   const handlePlatformToggleActive = async (userId) => {
     try {
@@ -21362,9 +21368,14 @@ function App() {
                                 : <span style={{background:'#fee2e2',color:'#991b1b',borderRadius:'6px',padding:'2px 10px',fontSize:'12px',fontWeight:600}}>● Pasif</span>}
                             </td>
                             <td style={{padding:'12px 16px'}}>
-                              {u.status==='pending'
-                                ? <button onClick={()=>{setPage('pending-users');fetchPendingUsers();}} style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 12px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>Onayla →</button>
-                                : <button onClick={()=>handlePlatformToggleActive(u.id)} style={{background:u.is_active?'#fef3c7':'#f0fdf4',color:u.is_active?'#92400e':'#166534',border:'none',borderRadius:'7px',padding:'6px 12px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>{u.is_active?'Pasife Al':'Aktif Et'}</button>}
+                              <div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
+                                {u.status==='pending'
+                                  ? <button onClick={()=>{setPage('pending-users');fetchPendingUsers();}} style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 12px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>Onayla →</button>
+                                  : <button onClick={()=>handlePlatformToggleActive(u.id)} style={{background:u.is_active?'#fef3c7':'#f0fdf4',color:u.is_active?'#92400e':'#166534',border:'none',borderRadius:'7px',padding:'6px 12px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>{u.is_active?'Pasife Al':'Aktif Et'}</button>}
+                                {u.role!=='platform_admin' && !(u.tenant && u.tenant!=='erc' && u.tenant!=='2kx' && (platformData?.firms||[]).some(f=>f.tenant===u.tenant&&f.isolated)) && (
+                                  <button onClick={()=>handleApproveCompanyThenRefresh(u)} title="Bu kullanıcıyı kendi izole firmasının sahibi yap (boş çalışma alanı)" style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 12px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>🏢 Firma Yap</button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}
