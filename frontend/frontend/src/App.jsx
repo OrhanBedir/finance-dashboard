@@ -20171,6 +20171,7 @@ function App() {
     const isBolge = bolgeMudurEmails.includes(_ue) || ["rollout_mudur","bolge_mudur"].includes((u?.role||"").toLowerCase());
     const isRolloutOverride = rolloutOverrideEmails.includes(_ue);
     const is2KX = String(u?.subcon_name || "").toUpperCase().includes("2KX");
+    if (u?.role === "platform_admin") return "platform";
     if (is2KX) return "2kx";
     if (u?.role === "user" && !isBolge && !isRolloutOverride) return "masraf";
     if (isBolge) return "region";
@@ -20444,6 +20445,8 @@ function App() {
   const [resetDoneMsg, setResetDoneMsg] = useState('');
   const [pendingUsers, setPendingUsers] = useState([]);
   const [pendingLoading, setPendingLoading] = useState(false);
+  const [platformData, setPlatformData] = useState(null);
+  const [platformLoading, setPlatformLoading] = useState(false);
 
   const loadSupplierAdvances = async () => {
     try {
@@ -20565,7 +20568,8 @@ function App() {
       const _luIsSubcon = !!_lu?.subcon_name || _luRole === "subcon";
       const _luIs2KX = String(_lu?.subcon_name || "").toUpperCase().includes("2KX");
       const _luIsFinance = ["finance","admin","genel_mudur","muhasebe"].includes(_luRole) || _lue === "orhan@simsektel.com" || _lue === "nurcan.kus@simsektel.com";
-      if (_luIs2KX) setPage("2kx");
+      if (_luRole === "platform_admin") setPage("platform");
+      else if (_luIs2KX) setPage("2kx");
       else if (_luIsFinance && !_luIsSubcon) setPage("finance");
       else if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("masraf");
       else if (_luIsBolge || _luIsSubcon) setPage("region");
@@ -20647,6 +20651,21 @@ function App() {
     } catch {}
     finally { setPendingLoading(false); }
   };
+
+  const fetchPlatformOverview = async () => {
+    setPlatformLoading(true);
+    try {
+      const tk = localStorage.getItem('token') || '';
+      const r = await fetch(`${API_BASE}/platform/overview`, { headers: { Authorization: `Bearer ${tk}` } });
+      const d = await r.json();
+      if (d.ok) setPlatformData(d);
+    } catch {}
+    finally { setPlatformLoading(false); }
+  };
+
+  useEffect(() => {
+    if (page === "platform" && !platformData && !platformLoading) fetchPlatformOverview();
+  }, [page]);
 
   const handleApproveUser = async (id) => {
     const tk = localStorage.getItem('token') || '';
@@ -20948,6 +20967,11 @@ function App() {
               </div>
               {openSections.anaMeny && (
                 <div>
+                  {isPlatformAdmin && (
+                    <div className={`sidebar-nav-item ${page==='platform'?'active':''}`} onClick={()=>{setPage('platform');fetchPlatformOverview();}}>
+                      <span>🌐</span> Platform Yönetimi
+                    </div>
+                  )}
                   {isFinanceUser && (
                     <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
                       <span>📊</span> Finans Paneli
@@ -21215,6 +21239,77 @@ function App() {
               />
             )}
             {page === "entry" && <DailyEntry />}
+            {page === "platform" && isPlatformAdmin && (
+              <div style={{maxWidth:'1100px',margin:'0 auto',padding:'24px 16px'}}>
+                <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",justifyContent:"space-between",color:"#fff"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:"16px"}}>
+                    <div style={{fontSize:"40px"}}>🌐</div>
+                    <div>
+                      <h2 style={{margin:0,fontSize:"22px",fontWeight:800}}>Platform Yönetimi</h2>
+                      <div style={{opacity:.8,fontSize:"14px",marginTop:"2px"}}>Tüm firmalar ve kayıt talepleri — uygulamanın sahibi konsolu</div>
+                    </div>
+                  </div>
+                  <button onClick={fetchPlatformOverview} style={{background:"rgba(255,255,255,.15)",color:"#fff",border:"none",borderRadius:"8px",padding:"8px 16px",cursor:"pointer",fontSize:"13px",fontWeight:600}}>🔄 Yenile</button>
+                </div>
+
+                {/* Özet kartları */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:"14px",marginBottom:"24px"}}>
+                  <div style={{background:"#fff",borderRadius:"14px",border:"1px solid #e2e8f0",padding:"18px 20px"}}>
+                    <div style={{fontSize:"13px",color:"#64748b",fontWeight:600}}>Toplam Firma</div>
+                    <div style={{fontSize:"28px",fontWeight:800,color:"#0f172a"}}>{platformData?.firms?.length ?? '—'}</div>
+                  </div>
+                  <div style={{background:"#fff",borderRadius:"14px",border:"1px solid #e2e8f0",padding:"18px 20px"}}>
+                    <div style={{fontSize:"13px",color:"#64748b",fontWeight:600}}>İzole Firma</div>
+                    <div style={{fontSize:"28px",fontWeight:800,color:"#7c3aed"}}>{platformData?.firms?.filter(f=>f.isolated)?.length ?? '—'}</div>
+                  </div>
+                  <div onClick={()=>{setPage('pending-users');fetchPendingUsers();}} style={{background:"#fff",borderRadius:"14px",border:"1px solid #e2e8f0",padding:"18px 20px",cursor:"pointer"}}>
+                    <div style={{fontSize:"13px",color:"#64748b",fontWeight:600}}>Bekleyen Kayıt</div>
+                    <div style={{fontSize:"28px",fontWeight:800,color:(platformData?.pending_count||0)>0?'#ef4444':'#10b981'}}>{platformData?.pending_count ?? '—'}</div>
+                    <div style={{fontSize:"11px",color:"#94a3b8",marginTop:"2px"}}>Onaylamak için tıkla →</div>
+                  </div>
+                </div>
+
+                {/* Firma listesi */}
+                <div style={{background:'#fff',borderRadius:'14px',border:'1px solid #e2e8f0',overflow:'hidden'}}>
+                  <div style={{padding:"16px 20px",borderBottom:"1px solid #e2e8f0",fontWeight:700,color:"#0f172a"}}>Firmalar</div>
+                  {platformLoading ? (
+                    <div style={{textAlign:'center',padding:'40px',color:'#6b7280'}}>Yükleniyor...</div>
+                  ) : (
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:'14px'}}>
+                      <thead>
+                        <tr style={{background:'#f8fafc'}}>
+                          {['Firma','Tür','Sahibi','Aktif Kullanıcı','İşlem'].map(h=>(
+                            <th key={h} style={{padding:'12px 16px',textAlign:'left',borderBottom:'1px solid #e2e8f0',color:'#374151',fontWeight:600}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(platformData?.firms||[]).map((f,i)=>(
+                          <tr key={i} style={{borderBottom:'1px solid #f1f5f9'}}>
+                            <td style={{padding:'12px 16px',fontWeight:600,color:"#0f172a"}}>{f.name}<span style={{color:"#94a3b8",fontWeight:400,marginLeft:"6px",fontSize:"12px"}}>({f.tenant})</span></td>
+                            <td style={{padding:'12px 16px'}}>
+                              <span style={{background:f.isolated?'#ede9fe':'#dbeafe',color:f.isolated?'#6d28d9':'#1d4ed8',borderRadius:'6px',padding:'2px 10px',fontSize:'12px',fontWeight:600}}>
+                                {f.isolated?'🔒 İzole Firma':(f.builtin?'⭐ Yerleşik':'Firma')}
+                              </span>
+                            </td>
+                            <td style={{padding:'12px 16px',color:'#6b7280'}}>{f.owner_email||'—'}</td>
+                            <td style={{padding:'12px 16px',color:'#374151',fontWeight:600}}>{f.users}</td>
+                            <td style={{padding:'12px 16px'}}>
+                              {f.tenant==='erc' && (
+                                <button onClick={()=>setPage('finance')} style={{background:'#0f172a',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>ERC Paneline Gir →</button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <div style={{marginTop:"16px",fontSize:"13px",color:"#94a3b8"}}>
+                  Yeni firma onayı için <strong style={{color:"#7c3aed"}}>Bekleyen Kayıt</strong> kartına tıklayıp "🏢 Yeni Firma" ile onaylayın.
+                </div>
+              </div>
+            )}
             {page === 'pending-users' && isAdmin && (
               <div style={{maxWidth:'800px',margin:'0 auto',padding:'24px 16px'}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>

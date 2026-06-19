@@ -933,6 +933,57 @@ app.post("/admin/users/:id/reject", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// GET /platform/overview — platform sahibi konsolu: tüm firmalar + bekleyen
+// kayıt sayısı + kullanıcı sayıları. Yalnızca platform_admin erişebilir.
+app.get("/platform/overview", authMiddleware, requirePlatformAdmin, async (req, res) => {
+  try {
+    // Kayıtlı izole firmalar
+    let registry = [];
+    try {
+      const r = await pool.query(
+        `SELECT tenant, name, owner_email, schema_name, isolated, created_at
+         FROM tenant_registry ORDER BY created_at DESC`
+      );
+      registry = r.rows || [];
+    } catch { registry = []; }
+
+    // Tenant başına kullanıcı sayısı (users tablosu paylaşımlı/public)
+    let counts = {};
+    try {
+      const c = await pool.query(
+        `SELECT COALESCE(tenant,'erc') AS tenant, COUNT(*)::int AS n
+         FROM users WHERE COALESCE(is_active,false)=true GROUP BY COALESCE(tenant,'erc')`
+      );
+      for (const row of c.rows) counts[row.tenant] = row.n;
+    } catch { counts = {}; }
+
+    // Bekleyen kayıt sayısı
+    let pending = 0;
+    try {
+      const p = await pool.query(`SELECT COUNT(*)::int AS n FROM users WHERE status='pending'`);
+      pending = p.rows[0]?.n || 0;
+    } catch { pending = 0; }
+
+    // ERC + legacy 2KX her zaman listede (built-in firmalar)
+    const builtins = [
+      { tenant: "erc", name: "ERC Mühendislik", owner_email: "orhan@simsektel.com", isolated: false, builtin: true },
+      { tenant: "2kx", name: "2KX (Şimşek taşeronu)", owner_email: "serdar.altinova@simsektel.com", isolated: false, builtin: true },
+    ];
+    const firms = [
+      ...builtins.map(b => ({ ...b, users: counts[b.tenant] || 0 })),
+      ...registry.map(r => ({
+        tenant: r.tenant, name: r.name, owner_email: r.owner_email,
+        isolated: r.isolated, schema_name: r.schema_name, created_at: r.created_at,
+        builtin: false, users: counts[r.tenant] || 0,
+      })),
+    ];
+
+    res.json({ ok: true, firms, pending_count: pending });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("/rollout/mismatch-check", async (req, res) => {
   try {
     const masterResult = await pool.query(buildMasterJoinedQuery());
