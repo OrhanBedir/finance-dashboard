@@ -40,7 +40,7 @@ const TENANT_CONFIG = {
   erc: {
     name: "ERC Mühendislik",
     display: "ERC | Operasyon ve Hakediş Takip Sistemi",
-    owner_email: "orhan.bedir@simsektel.com",
+    owner_email: "duzgun.simsek@simsektel.com",
     domains: ["simsektel.com"],
   },
   "2kx": {
@@ -1029,7 +1029,7 @@ app.get("/platform/overview", authMiddleware, requirePlatformAdmin, async (req, 
 
     // ERC + legacy 2KX her zaman listede (built-in firmalar)
     const builtins = [
-      { tenant: "erc", name: "ERC Mühendislik", owner_email: "orhan.bedir@simsektel.com", isolated: false, builtin: true },
+      { tenant: "erc", name: "ERC Mühendislik", owner_email: "duzgun.simsek@simsektel.com", isolated: false, builtin: true },
       { tenant: "2kx", name: "2KX (Şimşek taşeronu)", owner_email: "serdar.altinova@simsektel.com", isolated: false, builtin: true },
     ];
     const firms = [
