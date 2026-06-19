@@ -655,11 +655,25 @@ app.post("/auth/login", async (req, res) => {
 
     const user = result.rows[0];
 
-    if (!user.is_active) {
-      return res.status(403).json({
-        ok: false,
-        error: "Kullanıcı pasif durumda",
-      });
+    // ── PLATFORM SAHİBİ OTOMATİK ONARIM ───────────────────────────────────────
+    // Uygulamanın sahibi (orhan.bedir@gmail.com) giriş anında, eğer pasif veya
+    // platform_admin değilse, otomatik olarak aktif + platform_admin yapılır.
+    // Şifresine dokunulmaz. Böylece kayıt/deploy zamanlamasından bağımsız olarak
+    // ilk giriş denemesinde platform sahibi yetkisiyle içeri girer.
+    if (String(user.email || "").toLowerCase() === PLATFORM_ADMIN_EMAIL) {
+      if (!user.is_active || user.role !== "platform_admin" || user.status !== "active") {
+        try {
+          await pool.query(
+            `UPDATE users SET role='platform_admin', is_active=true, status='active' WHERE id=$1`,
+            [user.id]
+          );
+        } catch (e) {
+          console.error("[platform-admin] login onarımı:", e.message);
+        }
+        user.is_active = true;
+        user.role = "platform_admin";
+        user.status = "active";
+      }
     }
 
     if (!user.is_active) {
