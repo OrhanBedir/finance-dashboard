@@ -15267,6 +15267,40 @@ app.post("/bolge-fatura/add", requireFinanceAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Belirli bir saha için girilmiş tüm fatura kayıtları (her taşeron/kalem) — modal'da göster/düzelt/sil
+app.get("/bolge-fatura/by-site", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureBolgeFaturaTable();
+    const site = String(req.query.site_code || "").trim().toUpperCase();
+    if (!site) return res.json({ ok: true, rows: [] });
+    const result = await pool.query(
+      `SELECT id, taseron_adi, site_code, item_code, item_description, fatura_no, fatura_tarihi, fatura_miktari, created_at
+       FROM bolge_fatura WHERE UPPER(TRIM(site_code))=$1 ORDER BY taseron_adi, created_at DESC`,
+      [site]
+    );
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Fatura güncelle (düzelt)
+app.put("/bolge-fatura/:id", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureBolgeFaturaTable();
+    const { taseron_adi, site_code, item_code, item_description, fatura_no, fatura_tarihi, fatura_miktari } = req.body;
+    if (!taseron_adi || !site_code) return res.status(400).json({ ok: false, error: "Taşeron ve site kodu zorunlu" });
+    if (!String(fatura_no || '').trim() && !(Number(fatura_miktari || 0) > 0)) {
+      return res.status(400).json({ ok: false, error: "Fatura No veya Fatura Miktarı girilmeli" });
+    }
+    const result = await pool.query(
+      `UPDATE bolge_fatura SET taseron_adi=$1, site_code=$2, item_code=$3, item_description=$4, fatura_no=$5, fatura_tarihi=$6, fatura_miktari=$7
+       WHERE id=$8 RETURNING id`,
+      [taseron_adi, site_code.toUpperCase(), item_code||null, item_description||null, fatura_no||null, fatura_tarihi||null, Number(fatura_miktari||0), req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    res.json({ ok: true, id: result.rows[0].id });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // Fatura sil
 app.delete("/bolge-fatura/:id", requireFinanceAuth, async (req, res) => {
   try {

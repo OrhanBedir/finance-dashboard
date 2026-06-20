@@ -3409,6 +3409,27 @@ function FinanceDashboard({
   const [bolgeFaturaForm, setBolgeFaturaForm] = useState({ taseron_adi:"", site_code:"", item_code:"", item_description:"", fatura_no:"", fatura_tarihi:"", fatura_miktari:"" });
   const [bolgeFaturaSiteItems, setBolgeFaturaSiteItems] = useState([]);
   const [bolgeFaturaLoading, setBolgeFaturaLoading] = useState(false);
+  // Bu saha için DAHA ÖNCE girilmiş tüm fatura kayıtları (her taşeron/kalem) + düzenleme
+  const [bolgeFaturaSiteEntries, setBolgeFaturaSiteEntries] = useState([]);
+  const [editingBolgeFaturaId, setEditingBolgeFaturaId] = useState(null);
+  const fetchBolgeFaturaBySite = async (site) => {
+    if (!site || site.length < 3) { setBolgeFaturaSiteEntries([]); return; }
+    try {
+      const d = await fetchJson(`${API_BASE}/bolge-fatura/by-site?site_code=${encodeURIComponent(site)}`, { withAuth: true });
+      setBolgeFaturaSiteEntries(d.rows || []);
+    } catch { setBolgeFaturaSiteEntries([]); }
+  };
+  const deleteBolgeFatura = async (id, site) => {
+    if (!window.confirm("Bu fatura kaydı silinecek. Emin misiniz?")) return;
+    try {
+      await fetchJson(`${API_BASE}/bolge-fatura/${id}`, { method:"DELETE", withAuth:true });
+      await fetchBolgeFaturaBySite(site);
+      const summaryData = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
+      setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
+      setTaseronHakedisMap(summaryData.taseron_hakedis_map || {});
+      setSubconSummaryRows(summaryData.rows || []);
+    } catch(err){ alert(err.message || "Silme hatası"); }
+  };
   // Manuel taşeron hakediş (saha/kalem bazında override)
   const [taseronHakedisMap, setTaseronHakedisMap] = useState({});
   const [showManualHakedisModal, setShowManualHakedisModal] = useState(false);
@@ -8102,7 +8123,7 @@ function FinanceDashboard({
                   <button
                     type="button"
                     style={{ padding:"8px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}
-                    onClick={() => { setBolgeFaturaForm({ taseron_adi:"FEDERAL", site_code:"", item_code:"", item_description:"", fatura_no:"", fatura_tarihi:"", fatura_miktari:"" }); setBolgeFaturaSiteItems([]); setShowBolgeFaturaModal(true); }}
+                    onClick={() => { setBolgeFaturaForm({ taseron_adi:"FEDERAL", site_code:"", item_code:"", item_description:"", fatura_no:"", fatura_tarihi:"", fatura_miktari:"" }); setBolgeFaturaSiteItems([]); setBolgeFaturaSiteEntries([]); setEditingBolgeFaturaId(null); setShowBolgeFaturaModal(true); }}
                   >
                     + Fatura Girişi
                   </button>
@@ -8414,6 +8435,7 @@ function FinanceDashboard({
                       setBolgeFaturaSiteItems(data.items || []);
                     } catch { setBolgeFaturaSiteItems([]); }
                   } else { setBolgeFaturaSiteItems([]); }
+                  fetchBolgeFaturaBySite(val);
                 }}
                 style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }}
               />
@@ -8504,7 +8526,7 @@ function FinanceDashboard({
             </div>
 
             <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
-              <button onClick={() => setShowBolgeFaturaModal(false)}
+              <button onClick={() => { setShowBolgeFaturaModal(false); setEditingBolgeFaturaId(null); }}
                 style={{ padding:"10px 20px", background:"#f1f5f9", border:"none", borderRadius:"8px", fontSize:"14px", cursor:"pointer" }}>
                 İptal
               </button>
@@ -8515,9 +8537,15 @@ function FinanceDashboard({
                   if (!String(bolgeFaturaForm.fatura_no || "").trim() && !(miktarNum > 0)) return alert("Fatura No veya Fatura Miktarı girilmeli");
                   setBolgeFaturaLoading(true);
                   try {
-                    await fetchJson(`${API_BASE}/bolge-fatura/add`, { method:"POST", withAuth:true, body: JSON.stringify({ ...bolgeFaturaForm, fatura_miktari: miktarNum }) });
-                    setShowBolgeFaturaModal(false);
-                    // Özet verisini yenile
+                    if (editingBolgeFaturaId) {
+                      await fetchJson(`${API_BASE}/bolge-fatura/${editingBolgeFaturaId}`, { method:"PUT", withAuth:true, body: JSON.stringify({ ...bolgeFaturaForm, fatura_miktari: miktarNum }) });
+                    } else {
+                      await fetchJson(`${API_BASE}/bolge-fatura/add`, { method:"POST", withAuth:true, body: JSON.stringify({ ...bolgeFaturaForm, fatura_miktari: miktarNum }) });
+                    }
+                    setEditingBolgeFaturaId(null);
+                    // Bu sahanın kayıtlarını ve özeti yenile, modal açık kalsın
+                    await fetchBolgeFaturaBySite(bolgeFaturaForm.site_code);
+                    setBolgeFaturaForm(f => ({ ...f, item_code:"", item_description:"", fatura_no:"", fatura_tarihi:"", fatura_miktari:"" }));
                     const summaryData = await fetchJson(`${API_BASE}/finance/subcon-hakedis-summary`);
                     setBolgeFaturaMap(summaryData.bolge_fatura_map || {});
                     setTaseronHakedisMap(summaryData.taseron_hakedis_map || {});
@@ -8525,10 +8553,39 @@ function FinanceDashboard({
                   } catch(err) { alert(err.message || "Kaydetme hatası"); }
                   finally { setBolgeFaturaLoading(false); }
                 }}
-                style={{ padding:"10px 24px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
-                {bolgeFaturaLoading ? "Kaydediliyor..." : "Kaydet"}
+                style={{ padding:"10px 24px", background: editingBolgeFaturaId ? "#b45309" : "#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:600, cursor:"pointer" }}>
+                {bolgeFaturaLoading ? "Kaydediliyor..." : (editingBolgeFaturaId ? "Güncelle" : "Kaydet")}
               </button>
             </div>
+
+            {/* ── Bu saha için DAHA ÖNCE girilen kayıtlar (Sil / Düzelt) ── */}
+            {bolgeFaturaForm.site_code && bolgeFaturaForm.site_code.length >= 3 && (
+              <div style={{ marginTop:"18px", paddingTop:"16px", borderTop:"2px solid #e2e8f0" }}>
+                <div style={{ fontSize:"13px", fontWeight:700, color:"#1e3a5f", marginBottom:"8px" }}>
+                  📋 "{bolgeFaturaForm.site_code}" için girilen kayıtlar <span style={{ color:"#94a3b8", fontWeight:600 }}>({bolgeFaturaSiteEntries.length})</span>
+                </div>
+                {bolgeFaturaSiteEntries.length === 0 ? (
+                  <div style={{ fontSize:"12px", color:"#94a3b8", padding:"8px 0" }}>Bu saha için henüz kayıt yok.</div>
+                ) : (
+                  <div style={{ display:"flex", flexDirection:"column", gap:"6px", maxHeight:"220px", overflowY:"auto" }}>
+                    {bolgeFaturaSiteEntries.map((r) => (
+                      <div key={r.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", padding:"8px 10px", background: editingBolgeFaturaId===r.id ? "#fef3c7" : "#f8fafc", border:"1px solid #e2e8f0", borderRadius:"8px", fontSize:"12px" }}>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontWeight:700, color:"#0f172a" }}>{r.taseron_adi} <span style={{ color:"#64748b", fontWeight:500 }}>· {r.item_code || "kalemsiz"}</span></div>
+                          <div style={{ color:"#64748b" }}>Fatura: {r.fatura_no || "-"}{r.fatura_tarihi ? ` (${String(r.fatura_tarihi).slice(0,10)})` : ""} · <strong style={{ color:"#166534" }}>{(Number(r.fatura_miktari)||0).toLocaleString("tr-TR",{minimumFractionDigits:2,maximumFractionDigits:2})} ₺</strong></div>
+                        </div>
+                        <div style={{ display:"flex", gap:"6px", flexShrink:0 }}>
+                          <button onClick={() => { setEditingBolgeFaturaId(r.id); setBolgeFaturaForm(f => ({ ...f, taseron_adi:r.taseron_adi||f.taseron_adi, site_code:r.site_code, item_code:r.item_code||"", item_description:r.item_description||"", fatura_no:r.fatura_no||"", fatura_tarihi:r.fatura_tarihi?String(r.fatura_tarihi).slice(0,10):"", fatura_miktari:String(r.fatura_miktari||"") })); }}
+                            style={{ padding:"5px 10px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"6px", fontSize:"11px", fontWeight:600, cursor:"pointer" }}>Düzelt</button>
+                          <button onClick={() => deleteBolgeFatura(r.id, bolgeFaturaForm.site_code)}
+                            style={{ padding:"5px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", fontSize:"11px", fontWeight:600, cursor:"pointer" }}>Sil</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
