@@ -361,7 +361,7 @@ app.use((req, res, next) => {
   // Şema izolasyonu yalnızca allow-list'teki izole tenant'lar için devreye girer.
   // Diğer tüm istekler (ERC, legacy '2kx' taşeron görünümü, token'sız) public'te kalır.
   if (!isIsolatedTenant(tenant)) return next();
-  bindRequestToTenant(tenant, () => { next(); }).catch((e) => {
+  bindRequestToTenant(tenant, res, () => { next(); }).catch((e) => {
     console.error("[tenant-middleware] bağlam hatası:", e.message);
     next();
   });

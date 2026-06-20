@@ -70,7 +70,13 @@ pool.query = function (...args) {
 // Bir Express isteğini belirli bir tenant şemasına bağlar.
 // erc / boş tenant için hiçbir şey yapmaz (next() doğrudan çağrılır) → ERC yolu
 // byte-for-byte değişmez.
-async function bindRequestToTenant(tenant, run) {
+//
+// ÖNEMLİ: İzole client, isteğin TÜM yaşam döngüsü boyunca (route handler'ın
+// async sorguları dahil) açık kalmalı. Bu yüzden bağlantı `next()` döndüğünde
+// DEĞİL, yanıt bittiğinde (res 'finish'/'close') serbest bırakılır. Aksi halde
+// search_path, handler'ın await'li sorguları çalışmadan public'e döner ve veri
+// public (ERC) şemasından gelir → tenant sızıntısı.
+async function bindRequestToTenant(tenant, res, run) {
   if (!isIsolatedTenant(tenant)) {
     return run();
   }
@@ -99,11 +105,18 @@ async function bindRequestToTenant(tenant, run) {
         try { client.release(); } catch {}
       });
   };
-  try {
-    return await tenantContext.run({ client, tenant, schema }, run);
-  } finally {
-    release();
+  // Yanıt tamamlanınca (veya bağlantı kopunca) bağlantıyı serbest bırak.
+  if (res && typeof res.once === "function") {
+    res.once("finish", release);
+    res.once("close", release);
+  } else {
+    // res yoksa güvenli tarafta kal: bir sonraki tick'te serbest bırak.
+    setImmediate(release);
   }
+  // ALS bağlamını kur ve next()'i bu bağlam içinde çağır. run() senkron dönse de
+  // (next() undefined döner) handler'ın async devamı bu bağlamı miras alır;
+  // client release edilene (res finish) kadar canlı kalır.
+  return tenantContext.run({ client, tenant, schema }, run);
 }
 
 // Tüm tenant'larda paylaşılan, public'te kalan tablolar (kopyalanmaz).
