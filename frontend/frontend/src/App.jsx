@@ -3948,6 +3948,29 @@ function FinanceDashboard({
         if (r.item_code) g.items.add(String(r.item_code).trim());
       });
 
+      // Faturası girilmiş ama tamamlanan işi olmayan sahaları da ekle
+      // (örn. sadece fatura girilen 5G sahaları — TRAYK gibi). Aksi halde fatura
+      // satırı hiç görünmez çünkü grup yalnızca iş bedeli olan sahalardan oluşuyor.
+      const _canonName = {}; // canon → temsili taşeron adı (mevcut gruplardan)
+      groups.forEach((g) => { if (!_canonName[g.canon]) _canonName[g.canon] = g.subcon_name; });
+      Object.keys(bolgeFaturaMap || {}).forEach((k) => {
+        const parts = String(k).split("|"); // SITE|ITEM|taseron
+        const site = (parts[0] || "").trim();
+        const canon = canonTaseron((parts[2] || "").trim());
+        if (!site || !SABIT_TASERONLAR.includes(canon)) return;
+        const entries = (bolgeFaturaMap[k] || []);
+        const hasAmt = entries.some((e) => Number(e.fatura_miktari || 0) > 0 || String(e.fatura_no || "").trim());
+        if (!hasAmt) return;
+        const key = `${site.toUpperCase()}||${canon}`;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            site_code: site, subcon_name: _canonName[canon] || canon.toUpperCase(), canon,
+            project_code: "", region: getRegion(site, "") || "",
+            kalemSayisi: 0, bedel: 0, items: new Set(),
+          });
+        }
+      });
+
       // 2KX gruplarının bedelini 2KX fiyatlandırma kurgusundan al (varsa)
       groups.forEach((g) => {
         if (g.canon === "2kx") {
@@ -3956,12 +3979,19 @@ function FinanceDashboard({
         }
       });
 
+      // Bir grubun faturası var mı? (saha-bazlı veya kalem-bazlı)
+      const groupHasFatura = (g) => {
+        const su = g.site_code.toUpperCase();
+        if (((bolgeFaturaMap || {})[`${su}||${g.canon}`] || []).length) return true;
+        for (const it of g.items) { if (((bolgeFaturaMap || {})[`${su}|${it}|${g.canon}`] || []).length) return true; }
+        return false;
+      };
       const groupArr = [...groups.values()]
-        .filter((g) => g.bedel > 0)
+        .filter((g) => g.bedel > 0 || groupHasFatura(g))
         .sort((a, b) => a.subcon_name.localeCompare(b.subcon_name, "tr") || a.site_code.localeCompare(b.site_code, "tr"));
 
       if (!groupArr.length) {
-        alert("Tamamlanan iş bedeli olan saha bulunamadı");
+        alert("Tamamlanan iş bedeli veya faturası olan saha bulunamadı");
         return;
       }
 
@@ -8524,32 +8554,6 @@ function FinanceDashboard({
                 )}
               </div>
             </div>
-
-            {/* Bu saha için daha önce girilmiş faturalar — yanlış girileni sil */}
-            {bolgeFaturaSiteEntries.length > 0 && (
-              <div style={{ marginBottom:"16px", border:"1px solid #e2e8f0", borderRadius:"8px", overflow:"hidden" }}>
-                <div style={{ padding:"8px 12px", background:"#f8fafc", fontSize:"12px", fontWeight:700, color:"#475569" }}>
-                  Bu sahaya girilmiş faturalar ({bolgeFaturaSiteEntries.length}) — yanlış girileni silebilirsiniz
-                </div>
-                <div style={{ maxHeight:"160px", overflowY:"auto" }}>
-                  {bolgeFaturaSiteEntries.map((e) => (
-                    <div key={e.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", padding:"8px 12px", borderTop:"1px solid #f1f5f9", fontSize:"12px" }}>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <span style={{ fontWeight:700, color:"#1e3a5f" }}>{e.taseron_adi}</span>
-                        <span style={{ color:"#94a3b8" }}> · {e.item_code || "saha"}</span>
-                        <span style={{ color:"#64748b" }}> · {e.fatura_no || "—"}</span>
-                        <span style={{ color:"#64748b" }}> · {e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "—"}</span>
-                        <span style={{ fontWeight:700, color:"#166534", marginLeft:"6px" }}>{Number(e.fatura_miktari||0).toLocaleString("tr-TR",{minimumFractionDigits:2,maximumFractionDigits:2})} ₺</span>
-                      </div>
-                      <button onClick={() => deleteBolgeFatura(e.id, bolgeFaturaForm.site_code)}
-                        style={{ flexShrink:0, padding:"4px 10px", background:"#fee2e2", color:"#b91c1c", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
-                        🗑 Sil
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
               <button onClick={() => { setShowBolgeFaturaModal(false); setEditingBolgeFaturaId(null); }}
