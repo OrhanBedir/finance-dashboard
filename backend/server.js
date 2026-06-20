@@ -1127,6 +1127,21 @@ app.get("/debug/bind-test", async (req, res) => {
   }
 });
 
+// 4) GERÇEK middleware akışını birebir taklit eder: bindRequestToTenant(slug, res, sync-run),
+//    handler async ve bind tarafından AWAIT EDİLMEZ (Express'teki gibi). Token'sız.
+app.get("/debug/whoami-as", async (req, res) => {
+  const slug = String(req.query.slug || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+  pool.bindRequestToTenant(slug, res, () => {
+    (async () => {
+      try {
+        const sp = await pool.query("SELECT current_setting('search_path') AS sp"); // patched
+        const c = await pool.query("SELECT count(*)::int AS n FROM invoice_entries"); // patched
+        res.json({ ok: true, slug, note: "gerçek middleware akışı taklidi", search_path: sp.rows[0].sp, invoice_entries_count: c.rows[0].n });
+      } catch (e) { res.json({ ok: false, error: e.message }); }
+    })();
+  }).catch((e) => { try { res.json({ ok: false, error: e.message }); } catch {} });
+});
+
 app.get("/rollout/mismatch-check", async (req, res) => {
   try {
     const masterResult = await pool.query(buildMasterJoinedQuery());
