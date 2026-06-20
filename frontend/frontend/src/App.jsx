@@ -4015,15 +4015,19 @@ function FinanceDashboard({
         const subconLower = g.canon;
         const siteUpper = g.site_code.toUpperCase();
         let fNos = [], fMiktar = 0, fTarih = [];
-        g.items.forEach((item) => {
-          const bfKey = `${siteUpper}|${item}|${subconLower}`;
-          const entries = (bolgeFaturaMap || {})[bfKey] || [];
-          entries.forEach((e) => {
+        const _collectFatura = (entries) => {
+          (entries || []).forEach((e) => {
             if (e.fatura_no) fNos.push(e.fatura_no);
             fMiktar += Number(e.fatura_miktari || 0);
             if (e.fatura_tarihi) fTarih.push(String(e.fatura_tarihi).slice(0, 10));
           });
+        };
+        // Kalem-bazlı faturalar (Federal/UBS): SITE|ITEM|taseron
+        g.items.forEach((item) => {
+          _collectFatura((bolgeFaturaMap || {})[`${siteUpper}|${item}|${subconLower}`]);
         });
+        // Saha-bazlı (kalemsiz) faturalar (2KX/FERRUMX sabit fiyat): SITE||taseron
+        _collectFatura((bolgeFaturaMap || {})[`${siteUpper}||${subconLower}`]);
 
         // Manuel taşeron hakedişi: önce saha bazlı (SITE||taseron), yoksa kalem bazlı toplam, yoksa tamamlanan bedel
         const siteKey = `${siteUpper}||${subconLower}`;
