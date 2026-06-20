@@ -1105,6 +1105,28 @@ app.get("/debug/whoami", authMiddleware, async (req, res) => {
   res.json({ ok: true, email: req.user?.email, role: req.user?.role, tenant, isolated: isIsolatedTenant(tenant), search_path, invoice_entries_count: ie, query_err: err });
 });
 
+// 3) AsyncLocalStorage + patched pool.query mekanizmasını doğrudan sınar (token'sız).
+app.get("/debug/bind-test", async (req, res) => {
+  const slug = String(req.query.slug || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+  const schema = "t_" + slug;
+  let client;
+  try {
+    client = await pool.tenantPool.connect();
+    await client.query(`SET search_path TO "${schema}", public`);
+    const out = await pool.tenantContext.run({ client, tenant: slug, schema }, async () => {
+      const sp = await pool.query("SELECT current_setting('search_path') AS sp"); // patched
+      const c = await pool.query("SELECT count(*)::int AS n FROM invoice_entries"); // patched
+      return { search_path: sp.rows[0].sp, invoice_entries_count: c.rows[0].n };
+    });
+    res.json({ ok: true, slug, note: "ALS+patched pool.query yolu", ...out });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  } finally {
+    try { await client.query("SET search_path TO public"); } catch {}
+    try { client.release(); } catch {}
+  }
+});
+
 app.get("/rollout/mismatch-check", async (req, res) => {
   try {
     const masterResult = await pool.query(buildMasterJoinedQuery());
