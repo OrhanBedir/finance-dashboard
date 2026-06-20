@@ -8525,6 +8525,32 @@ function FinanceDashboard({
               </div>
             </div>
 
+            {/* Bu saha için daha önce girilmiş faturalar — yanlış girileni sil */}
+            {bolgeFaturaSiteEntries.length > 0 && (
+              <div style={{ marginBottom:"16px", border:"1px solid #e2e8f0", borderRadius:"8px", overflow:"hidden" }}>
+                <div style={{ padding:"8px 12px", background:"#f8fafc", fontSize:"12px", fontWeight:700, color:"#475569" }}>
+                  Bu sahaya girilmiş faturalar ({bolgeFaturaSiteEntries.length}) — yanlış girileni silebilirsiniz
+                </div>
+                <div style={{ maxHeight:"160px", overflowY:"auto" }}>
+                  {bolgeFaturaSiteEntries.map((e) => (
+                    <div key={e.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", padding:"8px 12px", borderTop:"1px solid #f1f5f9", fontSize:"12px" }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <span style={{ fontWeight:700, color:"#1e3a5f" }}>{e.taseron_adi}</span>
+                        <span style={{ color:"#94a3b8" }}> · {e.item_code || "saha"}</span>
+                        <span style={{ color:"#64748b" }}> · {e.fatura_no || "—"}</span>
+                        <span style={{ color:"#64748b" }}> · {e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "—"}</span>
+                        <span style={{ fontWeight:700, color:"#166534", marginLeft:"6px" }}>{Number(e.fatura_miktari||0).toLocaleString("tr-TR",{minimumFractionDigits:2,maximumFractionDigits:2})} ₺</span>
+                      </div>
+                      <button onClick={() => deleteBolgeFatura(e.id, bolgeFaturaForm.site_code)}
+                        style={{ flexShrink:0, padding:"4px 10px", background:"#fee2e2", color:"#b91c1c", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
+                        🗑 Sil
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
               <button onClick={() => { setShowBolgeFaturaModal(false); setEditingBolgeFaturaId(null); }}
                 style={{ padding:"10px 20px", background:"#f1f5f9", border:"none", borderRadius:"8px", fontSize:"14px", cursor:"pointer" }}>
