@@ -1065,6 +1065,23 @@ app.get("/platform/overview", authMiddleware, requirePlatformAdmin, async (req, 
   }
 });
 
+// GEÇİCİ: HW payment para birimi kırılımı teşhisi (sonra silinecek)
+app.get("/debug/hw-pay-curr", async (req, res) => {
+  try {
+    let usdRate = 0;
+    try { usdRate = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
+    const byCurr = await pool.query(`
+      SELECT UPPER(COALESCE(currency,'TRY')) AS curr,
+             COUNT(*)::int AS n,
+             SUM(COALESCE(payment_amount,0)) AS pay_sum,
+             SUM(COALESCE(remaining_amount,0)) AS rem_sum,
+             COUNT(CASE WHEN COALESCE(payment_amount,0)<>0 THEN 1 END)::int AS pay_nonzero
+      FROM hw_payment_rows GROUP BY UPPER(COALESCE(currency,'TRY'))`);
+    const distinctCurr = await pool.query(`SELECT DISTINCT currency FROM hw_payment_rows`);
+    res.json({ ok: true, usdRate, by_currency: byCurr.rows, distinct_currency_raw: distinctCurr.rows.map(r=>r.currency) });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
 app.get("/rollout/mismatch-check", async (req, res) => {
   try {
     const masterResult = await pool.query(buildMasterJoinedQuery());
