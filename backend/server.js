@@ -1065,23 +1065,6 @@ app.get("/platform/overview", authMiddleware, requirePlatformAdmin, async (req, 
   }
 });
 
-// GEÇİCİ: HW payment para birimi kırılımı teşhisi (sonra silinecek)
-app.get("/debug/hw-pay-curr", async (req, res) => {
-  try {
-    let usdRate = 0;
-    try { usdRate = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
-    const byCurr = await pool.query(`
-      SELECT UPPER(COALESCE(currency,'TRY')) AS curr,
-             COUNT(*)::int AS n,
-             SUM(COALESCE(payment_amount,0)) AS pay_sum,
-             SUM(COALESCE(remaining_amount,0)) AS rem_sum,
-             COUNT(CASE WHEN COALESCE(payment_amount,0)<>0 THEN 1 END)::int AS pay_nonzero
-      FROM hw_payment_rows GROUP BY UPPER(COALESCE(currency,'TRY'))`);
-    const distinctCurr = await pool.query(`SELECT DISTINCT currency FROM hw_payment_rows`);
-    res.json({ ok: true, usdRate, by_currency: byCurr.rows, distinct_currency_raw: distinctCurr.rows.map(r=>r.currency) });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
-});
-
 app.get("/rollout/mismatch-check", async (req, res) => {
   try {
     const masterResult = await pool.query(buildMasterJoinedQuery());
@@ -1922,8 +1905,13 @@ async function buildUpcomingCollectionsData() {
   const groupedMap = new Map();
   const overdueGroupedMap = new Map();
 
+  // USD bekleyen tutarları TL'ye çevir (TCMB satış kuru). Alınamazsa 0 → USD satırı sayılmaz, TRY etkilenmez.
+  let usdRate = 0;
+  try { usdRate = Number(await getTcmbUsdTrySellingRate()) || 0; } catch { usdRate = 0; }
+
   for (const row of result.rows) {
-    const amount = Number(row.remaining_amount || 0);
+    const rawAmt = Number(row.remaining_amount || 0);
+    const amount = String(row.currency || "TRY").toUpperCase() === "USD" ? rawAmt * usdRate : rawAmt;
     if (amount === 0) continue;  // Sadece sıfırı atla; H01 negatifleri dahil et
 
     // due_date UTC gece yarısı olarak parse et (timezone kaymasını önle)
@@ -1938,7 +1926,7 @@ async function buildUpcomingCollectionsData() {
       const dayName = dueDate.toLocaleDateString("tr-TR", { weekday: "long" });
       const day_name = dayName.charAt(0).toLocaleUpperCase("tr-TR") + dayName.slice(1);
       if (!overdueGroupedMap.has(key)) {
-        overdueGroupedMap.set(key, { due_date: key, day_name, amount: 0, gross_amount: 0, deduction_amount: 0, currency: row.currency || "TRY" });
+        overdueGroupedMap.set(key, { due_date: key, day_name, amount: 0, gross_amount: 0, deduction_amount: 0, currency: "TRY" /* USD tutarlar TL'ye çevrildi */ });
       }
       const ov = overdueGroupedMap.get(key);
       ov.amount += amount;
@@ -1977,7 +1965,7 @@ async function buildUpcomingCollectionsData() {
         amount: 0,
         gross_amount: 0,
         deduction_amount: 0,
-        currency: row.currency || "TRY",
+        currency: "TRY" /* USD tutarlar TL'ye çevrildi */,
       });
     }
 
@@ -7454,7 +7442,7 @@ app.get("/export/qc-ready-excel", async (req, res) => {
         requested_qty: row.requested_qty ?? "",
         due_qty: row.due_qty ?? "",
         done_qty: row.done_qty ?? "",
-        currency: row.currency || "TRY",
+        currency: "TRY" /* USD tutarlar TL'ye çevrildi */,
         unit_price: Number(row.unit_price || 0),
         qc_durum: row.qc_durum || "",
         kabul_durum: row.kabul_durum || "",
