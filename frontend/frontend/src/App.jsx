@@ -10058,7 +10058,9 @@ function HrDashboard({ onBack, currentUser }) {
                       const isAvans  = isAvansMapByPer[p.id] || 0;
                       const banka    = bankaByPer[p.id]     || 0;
                       const elden    = eldenByPer[p.id]     || 0;
-                      const odenen   = avans + isAvans + banka + elden;
+                      // İş avansı MAAŞ ödemesi değildir → maaş ödeneni/kalanı hesabına KATILMAZ.
+                      // Sadece maaş avansı (M.Avans) + banka + elden maaş ödemesidir.
+                      const odenen   = avans + banka + elden;
                       const kalan    = Math.max(0, hakEdis - odenen);
                       return { ...p, hakEdis, avans, isAvans, banka, elden, odenen, kalan };
                     });
