@@ -5666,9 +5666,9 @@ function FinanceDashboard({
             <div style={{ fontSize:"11px", color:"#64748b", marginTop:"2px" }}>Ocak — Aralık {new Date().getFullYear()}</div>
           </div>
           <div style={{ display:"flex", gap:"12px", fontSize:"11px" }}>
-            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"linear-gradient(180deg,#3b82f6,#6366f1)", display:"inline-block" }}></span>Tahsilat</span>
-            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"#10b981", display:"inline-block" }}></span>Gelecek</span>
-            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"#f59e0b", display:"inline-block" }}></span>Fatura</span>
+            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"#10b981", display:"inline-block" }}></span>Tahsilat</span>
+            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"#f59e0b", display:"inline-block" }}></span>Gelecek</span>
+            <span style={{ display:"flex", alignItems:"center", gap:"4px" }}><span style={{ width:10, height:10, borderRadius:2, background:"linear-gradient(180deg,#3b82f6,#6366f1)", display:"inline-block" }}></span>Fatura</span>
           </div>
         </div>
         <div style={{ padding:"20px" }}>
@@ -5694,21 +5694,21 @@ function FinanceDashboard({
                       <div style={{ width:"100%", display:"flex", gap:"1px", alignItems:"flex-end", position:"relative" }}>
                         {/* Tahsilat bar */}
                         <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
-                          {r > 0 && <div style={{ fontSize:"10px", color:"#1d4ed8", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(r)}</div>}
-                          <div style={{ width:"100%", height:`${rH}px`, background:"linear-gradient(180deg,#3b82f6,#6366f1)", borderRadius:"3px 3px 0 0" }}/>
+                          {r > 0 && <div style={{ fontSize:"10px", color:"#059669", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(r)}</div>}
+                          <div style={{ width:"100%", height:`${rH}px`, background:"linear-gradient(180deg,#10b981,#059669)", borderRadius:"3px 3px 0 0" }}/>
                         </div>
                         {/* Gelecek bar */}
                         {u > 0 && (
                           <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
-                            <div style={{ fontSize:"10px", color:"#059669", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(u)}</div>
-                            <div style={{ width:"100%", height:`${uH}px`, background:"#10b981", borderRadius:"3px 3px 0 0" }}/>
+                            <div style={{ fontSize:"10px", color:"#b45309", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(u)}</div>
+                            <div style={{ width:"100%", height:`${uH}px`, background:"#f59e0b", borderRadius:"3px 3px 0 0" }}/>
                           </div>
                         )}
                         {/* Fatura bar */}
                         {inv > 0 && (
                           <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center" }}>
-                            <div style={{ fontSize:"10px", color:"#b45309", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(inv)}</div>
-                            <div style={{ width:"100%", height:`${invH}px`, background:"#f59e0b", borderRadius:"3px 3px 0 0" }}/>
+                            <div style={{ fontSize:"10px", color:"#1d4ed8", fontWeight:800, whiteSpace:"nowrap", marginBottom:"2px", lineHeight:1, textShadow:"0 0 2px #fff" }}>{fmt(inv)}</div>
+                            <div style={{ width:"100%", height:`${invH}px`, background:"linear-gradient(180deg,#3b82f6,#6366f1)", borderRadius:"3px 3px 0 0" }}/>
                           </div>
                         )}
                       </div>
