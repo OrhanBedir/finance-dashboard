@@ -3262,6 +3262,10 @@ app.get("/finance/summary", async (req, res) => {
     const year  = nowTR.getUTCFullYear();
     const month = nowTR.getUTCMonth() + 1;
 
+    // USD ödemeleri TL'ye çevirmek için TCMB satış kuru (alınamazsa 0 → USD satırları sayılmaz, TRY etkilenmez)
+    let usdRate = 0;
+    try { usdRate = Number(await getTcmbUsdTrySellingRate()) || 0; } catch { usdRate = 0; }
+
     const monthly_received = {};
     const monthly_invoiced = {};
 
@@ -3283,14 +3287,16 @@ app.get("/finance/summary", async (req, res) => {
         `
         SELECT
           EXTRACT(MONTH FROM payment_date)::int AS month_no,
-          SUM(COALESCE(payment_amount, 0)) AS total
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))='USD'
+                   THEN COALESCE(payment_amount, 0) * $2
+                   ELSE COALESCE(payment_amount, 0) END) AS total
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
           AND payment_date IS NOT NULL
         GROUP BY EXTRACT(MONTH FROM payment_date)
         ORDER BY month_no
         `,
-        [year],
+        [year, usdRate],
       ),
 
       pool.query(
@@ -3308,23 +3314,27 @@ app.get("/finance/summary", async (req, res) => {
 
       pool.query(
         `
-        SELECT SUM(COALESCE(payment_amount, 0)) AS total_collections
+        SELECT SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))='USD'
+                        THEN COALESCE(payment_amount, 0) * $2
+                        ELSE COALESCE(payment_amount, 0) END) AS total_collections
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
           AND payment_date IS NOT NULL
         `,
-        [year],
+        [year, usdRate],
       ),
 
       pool.query(
         `
-        SELECT SUM(COALESCE(payment_amount, 0)) AS this_month_collections
+        SELECT SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))='USD'
+                        THEN COALESCE(payment_amount, 0) * $3
+                        ELSE COALESCE(payment_amount, 0) END) AS this_month_collections
         FROM hw_payment_rows
         WHERE EXTRACT(YEAR FROM payment_date) = $1
           AND EXTRACT(MONTH FROM payment_date) = $2
           AND payment_date IS NOT NULL
         `,
-        [year, month],
+        [year, month, usdRate],
       ),
 
       pool.query(`
