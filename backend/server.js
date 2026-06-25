@@ -7383,10 +7383,15 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       }
 
       if (type === "20_fac_ok") {
+        // PAC OK sahaları (rollout'tan pac_actual_end_date girilmiş): done_qty>0 olan
+        // tüm kalemler dahil (PO/kabul şartı aranmaz) — frontend ile birebir.
+        if (row.pac_from_rollout) return Number(row.done_qty || 0) > 0;
         return statusOk && progressedQty > 0 && kabulOk;
       }
 
       if (type === "20_fac_nok") {
+        // PAC OK sahaları NOK'a dahil edilmez (frontend ile birebir).
+        if (row.pac_from_rollout) return false;
         return statusOk && progressedQty > 0 && !kabulOk;
       }
 
@@ -7429,7 +7434,9 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       if (type === "80") {
         shownTotal = rawTotal * 0.8;
       } else if (type === "20_fac_ok" || type === "20_fac_nok") {
-        const facBase = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+        // PAC satırları: done_qty × unit_price; klasik kabul satırları: due_qty × unit_price (frontend ile birebir).
+        const facQty = row.pac_from_rollout ? Number(row.done_qty || 0) : Number(row.due_qty || 0);
+        const facBase = facQty * Number(row.unit_price || 0);
 
         shownTotal = currency === "USD" ? facBase * usdRate : facBase;
       }
