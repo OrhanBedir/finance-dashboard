@@ -15065,6 +15065,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const [qcReadyType, setQcReadyType] = useState("");
   const [bolgeFaturaMap, setBolgeFaturaMap] = useState({});
 
+  // Faz 3: Huawei'ye faturalanmış kalemlerden taşeronun kesebileceği kalemler
+  const [billableModalOpen, setBillableModalOpen] = useState(false);
+  const [billableRows, setBillableRows] = useState([]);
+  const [billableLoading, setBillableLoading] = useState(false);
+
   const openQcReadyModal = (regionName, type) => {
     setQcReadyModalRegion(regionName);
     setQcReadyType(type);
@@ -15651,6 +15656,116 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
     return sum + rowTotal * rate;
   }, 0);
+
+  // Faz 3: Huawei'ye faturalanmış kalemler ile taşeronun yaptığı işi çarpıştır
+  const handleOpenBillable = async () => {
+    try {
+      setBillableLoading(true);
+      setBillableModalOpen(true);
+      setBillableRows([]);
+      const r = await fetch(
+        `${API_BASE}/finance/hw-invoice-items/billable-keys`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+          },
+        },
+      );
+      const d = await r.json().catch(() => ({}));
+      const keys = d.keys || [];
+      const keySet = new Set();
+      const invMap = {};
+      keys.forEach((k) => {
+        const key = `${String(k.site_id || "").toUpperCase()}|${String(k.item_code || "").trim()}`;
+        keySet.add(key);
+        invMap[key] = k.invoice_nos || "";
+      });
+      const matched = (sortedRows || [])
+        .filter((row) => {
+          const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
+          return Number(row.done_qty || 0) > 0 && keySet.has(key);
+        })
+        .map((row) => {
+          const rate = getSubconRateByRow(row);
+          const currency = normalizeCurrency(row.currency);
+          const unitRaw = Number(row.unit_price || 0);
+          const unitTRY = currency === "USD" ? unitRaw * usdRate : unitRaw;
+          const taseronUnit = unitTRY * rate;
+          const totalTRY = getRowTotalTRY(row) * rate;
+          const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
+          return {
+            site_id: row.site_code,
+            item_description: row.item_description,
+            item_code: row.item_code,
+            done_qty: Number(row.done_qty || 0),
+            requested_qty: Number(row.requested_qty || 0),
+            unit_price: taseronUnit,
+            total_price: totalTRY,
+            invoice_nos: invMap[key] || "",
+          };
+        });
+      setBillableRows(matched);
+    } catch (e) {
+      setBillableRows([]);
+    } finally {
+      setBillableLoading(false);
+    }
+  };
+
+  const handleExportBillable = () => {
+    const header = [
+      "Site ID",
+      "İş Açıklaması",
+      "Item Code",
+      "Done Qty",
+      "Request Qty",
+      "Birim Fiyat (₺)",
+      "Toplam Fiyat (₺)",
+    ];
+    const aoa = [header];
+    let grand = 0;
+    for (const x of billableRows) {
+      grand += Number(x.total_price || 0);
+      aoa.push([
+        x.site_id || "",
+        x.item_description || "",
+        x.item_code || "",
+        x.done_qty,
+        x.requested_qty,
+        Number(x.unit_price || 0),
+        Number(x.total_price || 0),
+      ]);
+    }
+    aoa.push(["", "", "", "", "", "TOPLAM", grand]);
+    const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [
+      { wch: 18 },
+      { wch: 40 },
+      { wch: 14 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 16 },
+    ];
+    const range = XLSXStyle.utils.decode_range(ws["!ref"]);
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = ws[XLSXStyle.utils.encode_cell({ r: 0, c })];
+      if (cell)
+        cell.s = {
+          font: { bold: true, color: { rgb: "FFFFFF" } },
+          fill: { patternType: "solid", fgColor: { rgb: "15803D" } },
+          alignment: { horizontal: "center" },
+        };
+    }
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws, "Fatura Kesilebilir");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSXStyle.writeFile(
+      wb,
+      `${userSubconName || "Taseron"}_Fatura_Kesilebilir_${dateStr}.xlsx`,
+    );
+  };
+
   const searchHasValue = regionSearch.trim() !== "";
 
   const uniqueSubconsInFilteredRows = [
@@ -16747,6 +16862,156 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         </div>
       )}
 
+      {billableModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={() => setBillableModalOpen(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1100px",
+              maxHeight: "85vh",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+              borderRadius: "20px",
+              padding: "24px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+                marginBottom: "14px",
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0 }}>💰 Fatura Kesilebilir Kalemler</h3>
+                <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                  Huawei'ye faturalanmış ve senin yaptığın işlerle eşleşen
+                  kalemler — bu tutarlarla bize fatura kesebilirsin.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBillableModalOpen(false)}
+                style={{
+                  border: "1px solid #e2e8f0",
+                  background: "#fff",
+                  borderRadius: "10px",
+                  padding: "8px 14px",
+                  cursor: "pointer",
+                }}
+              >
+                Kapat
+              </button>
+            </div>
+
+            {billableLoading ? (
+              <div style={{ padding: "30px", textAlign: "center", color: "#64748b" }}>
+                Yükleniyor...
+              </div>
+            ) : billableRows.length === 0 ? (
+              <div style={{ padding: "30px", textAlign: "center", color: "#94a3b8" }}>
+                Şu an fatura kesilebilecek eşleşen kalem yok. (Huawei'ye
+                faturalanmış kalemlerle senin yaptığın işler henüz örtüşmüyor.)
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                    marginBottom: "10px",
+                  }}
+                >
+                  <div style={{ fontSize: "14px" }}>
+                    <b>{billableRows.length}</b> kalem · Toplam:{" "}
+                    <b style={{ color: "#15803d" }}>
+                      {formatTRY(
+                        billableRows.reduce(
+                          (s, x) => s + Number(x.total_price || 0),
+                          0,
+                        ),
+                      )}
+                    </b>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleExportBillable}
+                    style={{
+                      height: "38px",
+                      padding: "0 16px",
+                      borderRadius: "10px",
+                      border: "none",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                      color: "#fff",
+                      background: "linear-gradient(135deg,#15803d,#22c55e)",
+                    }}
+                  >
+                    📥 Excel İndir
+                  </button>
+                </div>
+                <div style={{ overflow: "auto", flex: 1 }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ textAlign: "left", color: "#64748b", position: "sticky", top: 0, background: "#fff" }}>
+                        <th style={{ padding: "6px 8px" }}>Site ID</th>
+                        <th style={{ padding: "6px 8px" }}>İş Açıklaması</th>
+                        <th style={{ padding: "6px 8px" }}>Item Code</th>
+                        <th style={{ padding: "6px 8px", textAlign: "right" }}>Done</th>
+                        <th style={{ padding: "6px 8px", textAlign: "right" }}>Request</th>
+                        <th style={{ padding: "6px 8px", textAlign: "right" }}>Birim ₺</th>
+                        <th style={{ padding: "6px 8px", textAlign: "right" }}>Toplam ₺</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {billableRows.map((x, i) => (
+                        <tr key={i} style={{ borderTop: "1px solid #e2e8f0" }}>
+                          <td style={{ padding: "6px 8px", fontWeight: 600 }}>{x.site_id}</td>
+                          <td style={{ padding: "6px 8px" }}>{x.item_description}</td>
+                          <td style={{ padding: "6px 8px" }}>{x.item_code}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right" }}>{x.done_qty}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right" }}>{x.requested_qty}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right" }}>{formatTRY(x.unit_price)}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 600 }}>{formatTRY(x.total_price)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {detailModalOpen && (
         <div
           style={{
@@ -17153,6 +17418,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               🏗 Saha bazında
             </button>
           </div>
+          {isSubconUser && (
+            <button type="button" onClick={handleOpenBillable}
+              style={{ height:"42px", display:"flex", alignItems:"center", justifyContent:"center", whiteSpace:"nowrap", borderRadius:"10px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#b45309,#f59e0b)", boxShadow:"0 3px 8px rgba(245,158,11,0.32)" }}>
+              💰 Fatura Kesilebilir
+            </button>
+          )}
         </div>
       </div>
 

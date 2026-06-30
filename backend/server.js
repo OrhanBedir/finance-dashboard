@@ -9544,6 +9544,31 @@ app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
   }
 });
 
+// Huawei'ye FATURALANMIŞ (invoice_no dolu) kalemlerin site_id|item_code anahtarları
+// Taşeron "Fatura Kesilebilir" çarpıştırması için.
+app.get("/finance/hw-invoice-items/billable-keys", async (req, res) => {
+  try {
+    await ensureHwInvoiceItemsTable();
+    const r = await pool.query(`
+      SELECT
+        UPPER(TRIM(COALESCE(site_id, ''))) AS site_id,
+        TRIM(COALESCE(item_code, '')) AS item_code,
+        string_agg(DISTINCT invoice_no, ', ') AS invoice_nos,
+        SUM(COALESCE(invoiced_amount_incl, 0)) AS invoiced_amount
+      FROM hw_invoice_items
+      WHERE invoice_no IS NOT NULL
+        AND TRIM(COALESCE(site_id, '')) <> ''
+      GROUP BY UPPER(TRIM(COALESCE(site_id, ''))), TRIM(COALESCE(item_code, ''))
+    `);
+    return res.json({ ok: true, keys: r.rows });
+  } catch (err) {
+    console.error("HW BILLABLE KEYS ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Anahtarlar alınamadı" });
+  }
+});
+
 // Manuel fatura ekle (PDF okunamadı / Excel'de yok ise)
 app.post("/finance/hw-invoice-items/manual", async (req, res) => {
   try {
