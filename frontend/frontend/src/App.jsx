@@ -15120,24 +15120,35 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               {/* ── Hakediş Oranları: RF & Gizleme ── */}
               <div style={{ padding:"12px 16px", borderBottom:"1px solid #e5e7eb", background:"#fff" }}>
                 <div style={{ fontSize:"12px", color:"#6b7280", marginBottom:"10px", fontWeight:500 }}>Hakediş Oranları</div>
-                <div style={{ display:"flex", gap:"10px" }}>
-                  {/* RF */}
-                  <div style={{ flex:1, background:"linear-gradient(135deg,#eff6ff,#dbeafe)", border:"1px solid #bfdbfe", borderRadius:"10px", padding:"12px 10px", textAlign:"center", position:"relative", overflow:"hidden" }}>
+                {subconRates.rf === subconRates.gizleme ? (
+                  /* Tek oran (AHY / Federal gibi tüm işlerde aynı %): tek kutu */
+                  <div style={{ background:"linear-gradient(135deg,#eff6ff,#dbeafe)", border:"1px solid #bfdbfe", borderRadius:"10px", padding:"12px 10px", textAlign:"center", position:"relative", overflow:"hidden" }}>
                     <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#3b82f6,#6366f1)", borderRadius:"10px 10px 0 0" }} />
                     <div style={{ fontSize:"22px", fontWeight:"800", color:"#1d4ed8", letterSpacing:"-0.5px" }}>
-                      %{Math.round(subconRates.rf * 100)}
+                      %{Math.round(subconRates.genel * 100)}
                     </div>
-                    <div style={{ fontSize:"11px", color:"#3b82f6", fontWeight:"600", marginTop:"3px", textTransform:"uppercase", letterSpacing:"0.5px" }}>RF</div>
+                    <div style={{ fontSize:"11px", color:"#3b82f6", fontWeight:"600", marginTop:"3px", textTransform:"uppercase", letterSpacing:"0.5px" }}>Tüm İşler</div>
                   </div>
-                  {/* Gizleme */}
-                  <div style={{ flex:1, background:"linear-gradient(135deg,#f0fdf4,#dcfce7)", border:"1px solid #bbf7d0", borderRadius:"10px", padding:"12px 10px", textAlign:"center", position:"relative", overflow:"hidden" }}>
-                    <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#10b981,#059669)", borderRadius:"10px 10px 0 0" }} />
-                    <div style={{ fontSize:"22px", fontWeight:"800", color:"#065f46", letterSpacing:"-0.5px" }}>
-                      %{Math.round(subconRates.gizleme * 100)}
+                ) : (
+                  <div style={{ display:"flex", gap:"10px" }}>
+                    {/* RF */}
+                    <div style={{ flex:1, background:"linear-gradient(135deg,#eff6ff,#dbeafe)", border:"1px solid #bfdbfe", borderRadius:"10px", padding:"12px 10px", textAlign:"center", position:"relative", overflow:"hidden" }}>
+                      <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#3b82f6,#6366f1)", borderRadius:"10px 10px 0 0" }} />
+                      <div style={{ fontSize:"22px", fontWeight:"800", color:"#1d4ed8", letterSpacing:"-0.5px" }}>
+                        %{Math.round(subconRates.rf * 100)}
+                      </div>
+                      <div style={{ fontSize:"11px", color:"#3b82f6", fontWeight:"600", marginTop:"3px", textTransform:"uppercase", letterSpacing:"0.5px" }}>RF</div>
                     </div>
-                    <div style={{ fontSize:"11px", color:"#10b981", fontWeight:"600", marginTop:"3px", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gizleme</div>
+                    {/* Gizleme */}
+                    <div style={{ flex:1, background:"linear-gradient(135deg,#f0fdf4,#dcfce7)", border:"1px solid #bbf7d0", borderRadius:"10px", padding:"12px 10px", textAlign:"center", position:"relative", overflow:"hidden" }}>
+                      <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#10b981,#059669)", borderRadius:"10px 10px 0 0" }} />
+                      <div style={{ fontSize:"22px", fontWeight:"800", color:"#065f46", letterSpacing:"-0.5px" }}>
+                        %{Math.round(subconRates.gizleme * 100)}
+                      </div>
+                      <div style={{ fontSize:"11px", color:"#10b981", fontWeight:"600", marginTop:"3px", textTransform:"uppercase", letterSpacing:"0.5px" }}>Gizleme</div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               <Row label="Hakediş Tutarı" value={subconSummary.hakedis} />
