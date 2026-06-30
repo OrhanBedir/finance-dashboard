@@ -14636,71 +14636,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   }, [regionSummary, usdRate]);
 
   const exportDetailRowsToExcel = async () => {
-    try {
-      if (!detailRows.length) {
-        alert("İndirilecek kayıt bulunamadı");
-        return;
-      }
-
-      // detailRows'u doğrudan kullan — backend filter hatalarından bağımsız,
-      // kullanıcının gördüğü ile birebir aynı satırlar
-      const XLSX = await import("xlsx");
-      const wb = XLSX.utils.book_new();
-
-      const headers = [
-        "Bölge", "Status", "QC Durum", "Kabul Durum", "Kabul Not",
-        "Project Code", "Site Code", "Item Code", "Item Description",
-        "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
-        "Birim Fiyat", "Para Birimi", "Toplam Tutar", "Taşeron", "OnAir Date", "RF Not"
-      ];
-
-      const data = detailRows.map(row => {
-        const unitPrice = Number(row.unit_price || 0);
-        const doneQty   = Number(row.done_qty   || 0);
-        const currency  = normalizeCurrency(row.currency);
-        return [
-          getRegion(row.site_code, row.project_code) || "",
-          row.status || "",
-          row.qc_durum || "NOK",
-          row.kabul_durum || "NOK",
-          row.kabul_not || "",
-          row.project_code || "",
-          row.site_code || "",
-          row.item_code || "",
-          row.item_description || "",
-          doneQty,
-          Number(row.requested_qty || 0),
-          Number(row.billed_qty    || 0),
-          Number(row.due_qty       || 0),
-          unitPrice,
-          currency,
-          Math.round(doneQty * unitPrice * 100) / 100,
-          row.subcon_name || "",
-          row.onair_date  || "",
-          row.note        || "",
-        ];
-      });
-
-      const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
-
-      // Kolon genişlikleri
-      ws["!cols"] = [
-        {wch:10},{wch:12},{wch:10},{wch:12},{wch:24},
-        {wch:14},{wch:22},{wch:18},{wch:45},
-        {wch:10},{wch:13},{wch:10},{wch:10},
-        {wch:12},{wch:10},{wch:14},{wch:20},{wch:12},{wch:24}
-      ];
-
-      XLSX.utils.book_append_sheet(wb, ws, "Detay");
-      const regionName = String(detailTitle || "").includes(" - ")
-        ? String(detailTitle || "").split(" - ")[0].trim()
-        : "Tüm";
-      const safeTitle = detailTitle.replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ _-]/g, "").slice(0, 40);
-      XLSX.writeFile(wb, `${safeTitle}_${new Date().toISOString().slice(0,10)}.xlsx`);
-    } catch (err) {
-      console.error("DETAIL EXCEL EXPORT ERROR:", err);
-      alert(`Excel indirilemedi:\n${err.message}`);
+    if (!detailRows.length) {
+      alert("İndirilecek kayıt bulunamadı");
+      return;
     }
+    // Ana Bölge Analizi export'unun birebir stilli formatını kullan (detailRows ile).
+    await handleExportRegionExcel(detailRows, detailTitle || "Detay", detailTitle || "Bölge Analizi");
   };
 
   const filteredRegionRows = useMemo(() => {
@@ -14821,8 +14762,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     }));
   };
 
-  const handleExportRegionExcel = async () => {
+  const handleExportRegionExcel = async (overrideRows = null, overrideFileBase = null, overrideTitle = null) => {
     try {
+      // Hangi satırlar export edilecek: detay modalı kendi satırlarını gönderir, yoksa tüm bölge listesi
+      const _exportRows = Array.isArray(overrideRows) ? overrideRows : sortedRows;
       // Fatura verisini her export'ta taze çek
       let bfMap = bolgeFaturaMap;
       try {
@@ -14916,7 +14859,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const aoa = [];
 
       const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
-      titleRow[0] = { v: `BÖLGE ANALİZİ${searchSuffix} (${dateStr})`, s: titleStyle };
+      titleRow[0] = { v: overrideTitle ? `${overrideTitle} (${dateStr})` : `BÖLGE ANALİZİ${searchSuffix} (${dateStr})`, s: titleStyle };
       aoa.push(titleRow);
 
       aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
@@ -14931,7 +14874,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         border: cellBorder,
       });
 
-      sortedRows.forEach((row, idx) => {
+      _exportRows.forEach((row, idx) => {
         const isEven = idx % 2 === 1;
         const isUSD = normalizeCurrency(row.currency) === "USD";
         const unitPrice = Number(row.unit_price || 0);
@@ -15001,7 +14944,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
       ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
-      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...sortedRows.map(() => ({ hpt: 20 }))];
+      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ..._exportRows.map(() => ({ hpt: 20 }))];
 
       const wb = XLSXStyle.utils.book_new();
       XLSXStyle.utils.book_append_sheet(wb, ws, "Bölge Analizi");
@@ -15010,7 +14953,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const searchSuffixFile = regionSearch.trim()
         ? `-${regionSearch.trim().replace(/[^a-zA-Z0-9_]/g, "_")}`
         : "";
-      const fileName = `bolge_analizi_${dateFile}${searchSuffixFile}.xlsx`;
+      const fileName = overrideFileBase
+        ? `${String(overrideFileBase).replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ _-]/g, "").slice(0, 50)}_${dateFile}.xlsx`
+        : `bolge_analizi_${dateFile}${searchSuffixFile}.xlsx`;
 
       const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
       const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
