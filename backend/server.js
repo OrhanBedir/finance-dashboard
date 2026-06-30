@@ -7878,14 +7878,11 @@ async function fetchData(isAdmin, subconName) {
   const notInvoiced = Math.max(completed - totalBilled, 0);
   const poOpenedButNotInvoiced = Math.max(okAmount - totalBilled, 0);
 
+  const _scnLower = String(subconName || "").trim().toLowerCase();
   const paymentRate =
-    String(subconName || "")
-      .trim()
-      .toLowerCase() === "federal"
+    _scnLower === "federal" || _scnLower === "ahy"
       ? 0.8
-      : String(subconName || "")
-            .trim()
-            .toLowerCase() === "ubs"
+      : _scnLower === "ubs"
         ? 0.75
         : 1;
 
@@ -8308,7 +8305,7 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
 
       let subconRate = 1;
 
-      if (subconName === "federal") {
+      if (subconName === "federal" || subconName === "ahy") {
         subconRate = 0.8;
       } else if (subconName === "ubs") {
         subconRate = ubsSpecial90Items.has(itemCode) ? 0.9 : 0.75;
@@ -15659,9 +15656,10 @@ app.get("/hw-acceptance/summary", async (req, res) => {
     let total_try = 0;
     const handlerMap = {};
 
-    // AcceptanceMilestone'a göre beklenen ödeme yüzdesini ve KDV'yi belirle
-    // AC2 (Customer Acceptance / PAC): genel bedelin %20'si + KDV (%20)
-    // AC1 (Huawei Acceptance): genel bedelin %80'i (KDV yok — zaten fatura kesilmemiş)
+    // AcceptanceMilestone'a göre beklenen ödeme yüzdesini ve KDV'yi belirle.
+    // Ekranda her iki milestone da KDV DAHİL gösterilir (kullanıcı kdv'li görmek istiyor).
+    // AC2 (Customer Acc / Acceptance / PAC): genel bedelin %20'si + KDV (×1.20)
+    // AC1 (Huawei Acceptance): genel bedelin %80'i + KDV (×1.20)
     function getMilestoneFactor(milestone) {
       const m = String(milestone || '').toUpperCase();
       if (m.includes('AC2')) return { pct: 0.20, kdv: 1.20, label: 'AC2 %20+KDV' };

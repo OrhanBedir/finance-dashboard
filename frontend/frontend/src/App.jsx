@@ -340,6 +340,7 @@ function canonTaseron(name) {
   const n = String(name || "").toLowerCase();
   if (n.includes("federal")) return "federal";
   if (n.includes("ubs")) return "ubs";
+  if (n.includes("ahy")) return "ahy";
   if (n.includes("2kx")) return "2kx";
   if (n.includes("ferrum")) return "ferrumx";
   return n.trim();
@@ -3696,7 +3697,7 @@ function FinanceDashboard({
   const handleExportFilteredSubconExcel = async () => {
     try {
       // Kırılım (%80) ile çalışan taşeronlar: yalnız Federal + UBS
-      const KIRILIM_TASERONLAR = ["federal", "ubs"];
+      const KIRILIM_TASERONLAR = ["federal", "ubs", "ahy"];
       const kirilimRows = (filteredSubconDetailRows || []).filter((r) => {
         const n = String(r.subcon_name || "").toLowerCase();
         return KIRILIM_TASERONLAR.some((t) => n.includes(t));
@@ -3788,7 +3789,7 @@ function FinanceDashboard({
       aoa.push(titleRow);
       aoa.push(headers.map(h => ({ v: h, s: headerStyle })));
 
-      const FATURA_TASERONLAR_SUB = ["federal", "ubs"];
+      const FATURA_TASERONLAR_SUB = ["federal", "ubs", "ahy"];
       const usdR = Number(usdTryRate || 0);
 
       kirilimRows.forEach((row, idx) => {
@@ -8354,7 +8355,7 @@ function FinanceDashboard({
                               >
                                 🧾 Fatura Yönetimi
                               </button>
-                              {["federal","ubs"].some(t => String(row.subcon_name||"").toLowerCase().includes(t)) && (
+                              {["federal","ubs","ahy"].some(t => String(row.subcon_name||"").toLowerCase().includes(t)) && (
                                 <a
                                   href={`${API_BASE}/bolge-fatura/kesilecek-excel/${encodeURIComponent(row.subcon_name)}`}
                                   style={{ padding:"5px 10px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", textDecoration:"none", display:"inline-flex", alignItems:"center", gap:"4px" }}
@@ -8436,6 +8437,7 @@ function FinanceDashboard({
                 style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px" }}>
                 <option value="FEDERAL">FEDERAL</option>
                 <option value="UBS">UBS</option>
+                <option value="AHY">AHY</option>
                 <option value="2KX">2KX</option>
                 <option value="FERRUMX">FERRUMX</option>
               </select>
@@ -14760,7 +14762,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
     const itemCode = String(row.item_code || "").trim();
 
-    if (subconName === "federal") return 0.8;
+    if (subconName === "federal" || subconName === "ahy") return 0.8;
 
     if (subconName === "ubs") {
       return ubsSpecial90Items.has(itemCode) ? 0.9 : 0.75;
@@ -14910,7 +14912,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
 
       // FEDERAL/UBS için fatura verileri
-      const FATURA_TASERONLAR = ["federal", "ubs"];
+      const FATURA_TASERONLAR = ["federal", "ubs", "ahy"];
       const faturaStyle = (isEven) => ({
         fill: { patternType: "solid", fgColor: { rgb: isEven ? "FFF3CD" : "FFFBEA" } },
         font: { sz: 11, name: "Calibri", color: { rgb: "92400E" } },
@@ -15055,11 +15057,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     whiteSpace: "nowrap",
   };
 
-  const _subconKey = String(userSubconName || "").toLowerCase();
+  const _subconKey = canonTaseron(userSubconName || "");
   // Her taşeron için iş tipine göre ayrı hakediş oranları
   const subconRateMap = {
     ubs:     { rf: 0.75, gizleme: 0.90, genel: 0.75 },
     federal: { rf: 0.80, gizleme: 0.80, genel: 0.80 },
+    ahy:     { rf: 0.80, gizleme: 0.80, genel: 0.80 },
   };
   const subconRates = subconRateMap[_subconKey] || { rf: 1, gizleme: 1, genel: 1 };
   const subconRate  = subconRates.genel; // geriye dönük hesaplamalar için
@@ -17847,7 +17850,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const BOLGELER = ["İzmir","İstanbul","Ankara","Bursa","Antalya","Adana","Samsun","Trabzon","Erzurum","Diyarbakır","Diğer"];
   const PROJELER = ["TT","TC","VF","Diğer"];
   const SITE_TYPES = ["5G","LTE","DSS","STANDALONE","Diğer"];
-  const FIRMALAR = ["Şimşek","UBS","FEDERAL","2KX","Diğer"];
+  const FIRMALAR = ["Şimşek","UBS","FEDERAL","AHY","2KX","Diğer"];
 
   // ── LOAD ──
   const loadTalepler = async () => {
