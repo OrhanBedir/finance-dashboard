@@ -9538,6 +9538,20 @@ app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
   }
 });
 
+// Tüm kalem master'ını sıfırla (yanlış Excel yüklendiyse temiz başlamak için)
+app.delete("/finance/hw-invoice-items-clear", async (req, res) => {
+  try {
+    await ensureHwInvoiceItemsTable();
+    const r = await pool.query(`DELETE FROM hw_invoice_items`);
+    return res.json({ ok: true, deleted: r.rowCount || 0 });
+  } catch (err) {
+    console.error("HW INVOICE ITEMS CLEAR ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Temizleme hatası" });
+  }
+});
+
 // Tüm kalemleri subcon_name (master_works'ten eşlenmiş) ile dök — Excel için
 // NOT: /:invoiceNo route'u ile çakışmasın diye ayrı path
 app.get("/finance/hw-invoice-items-export", async (req, res) => {

@@ -3432,6 +3432,37 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
       ? "-"
       : Number(v).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
 
+  const [clearing, setClearing] = useState(false);
+  const handleClearMaster = async () => {
+    if (
+      !window.confirm(
+        "Tüm kalem master'ı silinecek (eşleşmiş fatura no'lar dahil). " +
+          "Yanlış Excel yüklediysen temiz başlamak için kullan.\n\nDevam edilsin mi?",
+      )
+    )
+      return;
+    try {
+      setClearing(true);
+      const r = await fetch(`${API_BASE}/finance/hw-invoice-items-clear`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+        },
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!d.ok) throw new Error(d.error || "Temizleme hatası");
+      setMessage(`🗑 ${d.deleted} kalem silindi. Şimdi doğru Excel'i yükle.`);
+      setPdfResults([]);
+      setPdfMessage("");
+      await loadList();
+      if (onUploaded) await onUploaded();
+    } catch (err) {
+      setMessage(`❌ ${err.message}`);
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const [exporting, setExporting] = useState(false);
   const handleExportItemData = async () => {
     try {
@@ -3578,7 +3609,10 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
               />
             </div>
           </div>
-          <div className="entryActions">
+          <div
+            className="entryActions"
+            style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}
+          >
             <button
               type="button"
               className="saveButton"
@@ -3586,6 +3620,19 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
               disabled={uploading}
             >
               {uploading ? "Yükleniyor..." : "Kalem Master'ı Yükle"}
+            </button>
+            <button
+              type="button"
+              className="tab"
+              onClick={handleClearMaster}
+              disabled={clearing}
+              style={{
+                padding: "10px 14px",
+                color: "#dc2626",
+                borderColor: "#fecaca",
+              }}
+            >
+              {clearing ? "Siliniyor..." : "🗑 Master'ı Temizle"}
             </button>
           </div>
           {message && <div className="entryMessage">{message}</div>}
