@@ -4465,6 +4465,46 @@ function FinanceDashboard({
     );
   }, [recalculatedSubconSummaryRows, subconFilter]);
 
+  // Taşeron mutabakat kartları: arama yapınca eşleşen taşeron için detay çek
+  const [reconcileData, setReconcileData] = useState(null);
+  const [reconcileLoading, setReconcileLoading] = useState(false);
+  useEffect(() => {
+    const q = subconFilter.trim();
+    if (q.length < 2 || filteredSubconSummaryRows.length === 0) {
+      setReconcileData(null);
+      return;
+    }
+    const tas = filteredSubconSummaryRows[0].subcon_name;
+    if (!tas) {
+      setReconcileData(null);
+      return;
+    }
+    let cancelled = false;
+    setReconcileLoading(true);
+    const t = setTimeout(() => {
+      fetch(
+        `${API_BASE}/finance/subcon-reconcile?taseron=${encodeURIComponent(tas)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+          },
+        },
+      )
+        .then((r) => r.json())
+        .then((d) => {
+          if (!cancelled && d.ok) setReconcileData(d);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setReconcileLoading(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [subconFilter, filteredSubconSummaryRows]);
+
   const subcontractorPeriodStats = useMemo(() => {
     if (!selectedSubcontractor) return null;
 
@@ -9145,6 +9185,87 @@ function FinanceDashboard({
                 </div>
               )}
             </div>
+
+            {/* ── Taşeron Mutabakat Kartları (arama yapınca) ── */}
+            {subconFilter.trim().length >= 2 && (reconcileLoading || reconcileData) && (
+              <div style={{ marginTop: "14px" }}>
+                {reconcileLoading && !reconcileData ? (
+                  <div style={{ fontSize: "13px", color: "#64748b", padding: "8px" }}>
+                    Mutabakat yükleniyor...
+                  </div>
+                ) : reconcileData ? (
+                  <>
+                    <div style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b", marginBottom: "8px" }}>
+                      📋 {reconcileData.taseron} — Mutabakat
+                    </div>
+                    <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "10px" }}>
+                      {/* Kestiği Fatura */}
+                      <div style={{ flex: "1 1 200px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "12px", padding: "12px 16px" }}>
+                        <div style={{ fontSize: "12px", color: "#166534" }}>Bize Kestiği Fatura</div>
+                        <div style={{ fontSize: "20px", fontWeight: 800, color: "#15803d" }}>
+                          ₺{Number(reconcileData.invoiced?.total || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#16a34a" }}>{reconcileData.invoiced?.count || 0} kalem</div>
+                      </div>
+                      {/* Unutulan */}
+                      <div style={{ flex: "1 1 200px", background: reconcileData.forgotten?.count ? "#fffbeb" : "#f8fafc", border: `1px solid ${reconcileData.forgotten?.count ? "#fde68a" : "#e2e8f0"}`, borderRadius: "12px", padding: "12px 16px" }}>
+                        <div style={{ fontSize: "12px", color: "#92400e" }}>Kesmeyi Unuttuğu (kesilebilir)</div>
+                        <div style={{ fontSize: "20px", fontWeight: 800, color: reconcileData.forgotten?.count ? "#b45309" : "#94a3b8" }}>
+                          {reconcileData.forgotten?.count || 0} kalem
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#a16207" }}>
+                          {reconcileData.forgotten?.count ? "Huawei'ye faturalı ama henüz bize kesmemiş" : "Eksik kalem yok"}
+                        </div>
+                      </div>
+                      {/* Bilinmeyen vade */}
+                      {Number(reconcileData.unknown_due_total || 0) > 0 && (
+                        <div style={{ flex: "1 1 200px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "12px 16px" }}>
+                          <div style={{ fontSize: "12px", color: "#64748b" }}>Vadesi Belirsiz</div>
+                          <div style={{ fontSize: "20px", fontWeight: 800, color: "#475569" }}>
+                            ₺{Number(reconcileData.unknown_due_total).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}
+                          </div>
+                          <div style={{ fontSize: "11px", color: "#94a3b8" }}>HW ödeme vadesi henüz yok</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Gelecek ödeme planı */}
+                    {(reconcileData.payments || []).length > 0 && (
+                      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "10px 14px", marginBottom: "8px" }}>
+                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#1e40af", marginBottom: "6px" }}>
+                          💰 Gelecek Ödeme Planı (Huawei vadesinden)
+                        </div>
+                        {reconcileData.payments.map((p, i) => (
+                          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", padding: "4px 0", borderTop: i > 0 ? "1px solid #f1f5f9" : "none" }}>
+                            <span>📅 {p.due_date ? new Date(p.due_date).toLocaleDateString("tr-TR") : "-"}{p.invoice_nos ? <span style={{ color: "#94a3b8" }}> · {p.invoice_nos}</span> : null}</span>
+                            <b style={{ color: "#15803d" }}>₺{Number(p.amount || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}</b>
+                          </div>
+                        ))}
+                        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
+                          Bu tarihlerde Huawei ödeyince bu taşerona kestiği bedel kadar ödenecek.
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Unutulan kalem listesi */}
+                    {(reconcileData.forgotten?.items || []).length > 0 && (
+                      <details style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "12px", padding: "8px 14px", marginBottom: "8px" }}>
+                        <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "#92400e" }}>
+                          ⚠️ Kesmeyi unuttuğu {reconcileData.forgotten.items.length} kalem (göster)
+                        </summary>
+                        <div style={{ marginTop: "6px", maxHeight: "180px", overflowY: "auto" }}>
+                          {reconcileData.forgotten.items.map((it, i) => (
+                            <div key={i} style={{ fontSize: "12px", padding: "3px 0", borderTop: i > 0 ? "1px solid #fef3c7" : "none" }}>
+                              <b>{it.site_code}</b> · {it.item_code} · {it.item_description} <span style={{ color: "#a16207" }}>(done: {it.done_qty})</span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            )}
 
             <div
               className="tableWrap"

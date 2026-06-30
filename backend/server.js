@@ -8843,6 +8843,158 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
 });
 
 // GET /finance/subcon-hakedis-detail?subcon=Federal
+// Taşeron mutabakat: kestiği fatura + unutulan (kesilebilir ama kesilmemiş) +
+// gelecek ödeme planı (Huawei payment vade'sinden). Modal kartları için.
+app.get("/finance/subcon-reconcile", async (req, res) => {
+  try {
+    const taseron = (req.query.taseron || "").trim();
+    if (!taseron) {
+      return res.status(400).json({ ok: false, error: "taseron gerekli" });
+    }
+    await ensureBolgeFaturaTable().catch(() => {});
+    await ensureHwInvoiceItemsTable().catch(() => {});
+
+    const tasUpper = taseron.toUpperCase().trim();
+    const norm = (s) => String(s || "").toUpperCase().trim();
+    const matchTas = (name) => {
+      const n = norm(name);
+      if (!n) return false;
+      return n === tasUpper || n.includes(tasUpper) || tasUpper.includes(n);
+    };
+    const keyOf = (site, item) =>
+      `${norm(site)}|${String(item || "").trim()}`;
+
+    // 1) Taşeronun bize kestiği faturalar (bolge_fatura)
+    const bf = await pool.query(`SELECT * FROM bolge_fatura`).catch(() => ({ rows: [] }));
+    const invoiced = bf.rows.filter(
+      (r) =>
+        matchTas(r.taseron_adi) &&
+        (String(r.fatura_no || "").trim() !== "" ||
+          Number(r.fatura_miktari || 0) > 0),
+    );
+    const invoicedKeys = new Set(invoiced.map((r) => keyOf(r.site_code, r.item_code)));
+    const invoicedTotal = invoiced.reduce(
+      (s, r) => s + Number(r.fatura_miktari || 0),
+      0,
+    );
+
+    // 2) Huawei'ye faturalanmış kalemler (site|item -> invoice_no'lar)
+    const hw = await pool.query(
+      `SELECT DISTINCT UPPER(TRIM(site_id)) AS site, TRIM(item_code) AS item, invoice_no
+       FROM hw_invoice_items
+       WHERE invoice_no IS NOT NULL AND TRIM(COALESCE(site_id,'')) <> ''`,
+    ).catch(() => ({ rows: [] }));
+    const hwInvByKey = new Map();
+    hw.rows.forEach((r) => {
+      const k = `${r.site}|${r.item}`;
+      if (!hwInvByKey.has(k)) hwInvByKey.set(k, new Set());
+      if (r.invoice_no) hwInvByKey.get(k).add(r.invoice_no);
+    });
+
+    // 3) Taşeronun yaptığı işler (master_works) — faturalanabilir kalemler
+    const mw = await pool.query(
+      `SELECT subcon_name, site_code, item_code, item_description, done_qty
+       FROM master_works
+       WHERE subcon_name IS NOT NULL AND TRIM(subcon_name) <> '' AND COALESCE(done_qty,0) > 0`,
+    ).catch(() => ({ rows: [] }));
+
+    // Unutulan = bu taşeron yaptı + Huawei'ye faturalanmış AMA taşeron bize kesmemiş
+    const forgottenSeen = new Set();
+    const forgotten = [];
+    for (const r of mw.rows) {
+      if (!matchTas(r.subcon_name)) continue;
+      const k = keyOf(r.site_code, r.item_code);
+      if (!hwInvByKey.has(k)) continue; // Huawei'ye faturalanmamış → kesemez
+      if (invoicedKeys.has(k)) continue; // zaten kesmiş
+      if (forgottenSeen.has(k)) continue;
+      forgottenSeen.add(k);
+      forgotten.push({
+        site_code: r.site_code,
+        item_code: r.item_code,
+        item_description: r.item_description,
+        done_qty: Number(r.done_qty || 0),
+        hw_invoice_nos: Array.from(hwInvByKey.get(k) || []).join(", "),
+      });
+    }
+
+    // 4) Gelecek ödeme planı: kestiği faturalar → Huawei invoice → HW Payment vade
+    const pay = await pool.query(
+      `SELECT invoice_no, MIN(due_date) AS due_date
+       FROM hw_payment_rows
+       WHERE due_date IS NOT NULL AND invoice_no IS NOT NULL
+       GROUP BY invoice_no`,
+    ).catch(() => ({ rows: [] }));
+    const dueByInvoice = new Map();
+    pay.rows.forEach((r) => {
+      if (r.invoice_no)
+        dueByInvoice.set(String(r.invoice_no).trim(), r.due_date);
+    });
+
+    const payBuckets = new Map(); // due_date -> { amount, invoice_nos:Set }
+    let unknownDue = 0;
+    for (const r of invoiced) {
+      const amt = Number(r.fatura_miktari || 0);
+      if (amt <= 0) continue;
+      const k = keyOf(r.site_code, r.item_code);
+      const hwInvs = hwInvByKey.get(k);
+      let due = null;
+      let usedInv = null;
+      if (hwInvs) {
+        for (const inv of hwInvs) {
+          if (dueByInvoice.has(String(inv).trim())) {
+            due = dueByInvoice.get(String(inv).trim());
+            usedInv = inv;
+            break;
+          }
+        }
+      }
+      if (!due) {
+        unknownDue += amt;
+        continue;
+      }
+      const dueKey =
+        due instanceof Date ? due.toISOString().slice(0, 10) : String(due).slice(0, 10);
+      if (!payBuckets.has(dueKey))
+        payBuckets.set(dueKey, { due_date: dueKey, amount: 0, invoice_nos: new Set() });
+      const b = payBuckets.get(dueKey);
+      b.amount += amt;
+      if (usedInv) b.invoice_nos.add(usedInv);
+    }
+    const payments = Array.from(payBuckets.values())
+      .map((b) => ({
+        due_date: b.due_date,
+        amount: b.amount,
+        invoice_nos: Array.from(b.invoice_nos).join(", "),
+      }))
+      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+
+    return res.json({
+      ok: true,
+      taseron,
+      invoiced: {
+        count: invoiced.length,
+        total: invoicedTotal,
+        items: invoiced.map((r) => ({
+          site_code: r.site_code,
+          item_code: r.item_code,
+          item_description: r.item_description,
+          fatura_no: r.fatura_no,
+          fatura_tarihi: r.fatura_tarihi,
+          fatura_miktari: Number(r.fatura_miktari || 0),
+        })),
+      },
+      forgotten: { count: forgotten.length, items: forgotten },
+      payments,
+      unknown_due_total: unknownDue,
+    });
+  } catch (err) {
+    console.error("SUBCON RECONCILE ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Mutabakat alınamadı" });
+  }
+});
+
 app.get("/finance/subcon-hakedis-detail", authMiddleware, async (req, res) => {
   try {
     const subconQ = (req.query.subcon || "").trim().toLowerCase();
