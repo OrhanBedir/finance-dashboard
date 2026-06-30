@@ -16419,6 +16419,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     ubs:     { rf: 0.75, gizleme: 0.90, genel: 0.75 },
     federal: { rf: 0.80, gizleme: 0.80, genel: 0.80 },
     ahy:     { rf: 0.80, gizleme: 0.80, genel: 0.80 },
+    "2kx":   { rf: 0.75, gizleme: 0.75, genel: 0.75 },
   };
   const subconRates = subconRateMap[_subconKey] || { rf: 1, gizleme: 1, genel: 1 };
   const subconRate  = subconRates.genel; // geriye dönük hesaplamalar için
