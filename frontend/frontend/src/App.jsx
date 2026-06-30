@@ -16411,6 +16411,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   };
 
   const _subconKey = canonTaseron(userSubconName || "");
+  // Uzun yasal adı kısalt (ör. 2KX HABERLEŞME SİSTEMLERİ... -> 2KX HABERLEŞME)
+  const subconDisplayName = String(userSubconName || "")
+    .toUpperCase()
+    .includes("2KX")
+    ? "2KX HABERLEŞME"
+    : userSubconName;
   // Her taşeron için iş tipine göre ayrı hakediş oranları
   const subconRateMap = {
     ubs:     { rf: 0.75, gizleme: 0.90, genel: 0.75 },
@@ -16453,7 +16459,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             textAlign: "center",
           }}
         >
-          {isSubconUser ? `${userSubconName} GENEL ÖZET` : "GENEL ÖZET"}
+          {isSubconUser ? `${subconDisplayName} GENEL ÖZET` : "GENEL ÖZET"}
         </div>
 
         <div style={{ background: "#f9fafb" }}>
@@ -17700,7 +17706,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             }}
           >
             <div style={{ fontSize: "12px", color: "#6b7280" }}>
-              {`${userSubconName} Hakediş`}
+              {`${subconDisplayName} Hakediş`}
             </div>
             <div
               style={{ fontWeight: "700", fontSize: "20px", color: "#166534" }}
