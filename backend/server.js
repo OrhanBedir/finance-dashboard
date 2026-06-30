@@ -2401,6 +2401,7 @@ function getRegion(siteCode, projectCode = "") {
     code.startsWith("BO") ||
     code.startsWith("ZO") ||
     code.startsWith("KA") ||
+    code.startsWith("DU") ||
     code.includes("_ANK") ||
     code.startsWith("AN")
   ) {
