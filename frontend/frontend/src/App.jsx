@@ -14762,7 +14762,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     }));
   };
 
-  const handleExportRegionExcel = async (overrideRows = null, overrideFileBase = null, overrideTitle = null) => {
+  const handleExportRegionExcel = async (overrideRows = null, overrideFileBase = null, overrideTitle = null, aggregateBySite = false) => {
     try {
       // Hangi satırlar export edilecek: detay modalı kendi satırlarını gönderir, yoksa tüm bölge listesi
       const _exportRows = Array.isArray(overrideRows) ? overrideRows : sortedRows;
@@ -14874,6 +14874,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         border: cellBorder,
       });
 
+      const _siteAgg = new Map(); // saha bazında toplama (aggregateBySite için)
       _exportRows.forEach((row, idx) => {
         const isEven = idx % 2 === 1;
         const isUSD = normalizeCurrency(row.currency) === "USD";
@@ -14900,6 +14901,26 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
         // Kalan bedel: taşeronun hak ettiği (KDV dahil) − şimdiye kadar kesilen fatura (KDV dahil)
         const kalanBedel = isFaturaTaseron ? Math.max(0, federalHakedis * 1.20 - faturaToplamMiktar) : 0;
+
+        if (aggregateBySite) {
+          // Saha bazında topla: aynı saha kodundaki kalemleri tek satırda birleştir
+          const key = String(row.site_code || "").toUpperCase();
+          let a = _siteAgg.get(key);
+          if (!a) {
+            a = { region: getRegion(row.site_code, row.project_code) || "", project: row.project_code || "", site: row.site_code || "", subcon: row.subcon_name || "", onair: row.onair_date || "", currencySet: new Set(), kalem: 0, doneQty: 0, reqQty: 0, billedQty: 0, usdToplam: 0, toplamHakedis: 0, federalHakedis: 0, faturaKesilecek: 0, faturaMiktar: 0, faturaNos: new Set(), faturaTarihler: new Set() };
+            _siteAgg.set(key, a);
+          }
+          a.kalem += 1;
+          a.doneQty += doneQty; a.reqQty += Number(row.requested_qty || 0); a.billedQty += billedQty;
+          a.usdToplam += usdToplamFiyat;
+          a.toplamHakedis += toplamHakedis; a.federalHakedis += federalHakedis;
+          a.faturaKesilecek += faturaKesilecek; a.faturaMiktar += faturaToplamMiktar;
+          if (row.currency) a.currencySet.add(String(row.currency).toUpperCase());
+          if (!a.subcon && row.subcon_name) a.subcon = row.subcon_name;
+          faturaNo.split(", ").filter(Boolean).forEach(x => a.faturaNos.add(x));
+          faturaTarihi.split(", ").filter(Boolean).forEach(x => a.faturaTarihler.add(x));
+          return;
+        }
 
         aoa.push([
           { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
@@ -14932,6 +14953,43 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         ]);
       });
 
+      if (aggregateBySite) {
+        [..._siteAgg.values()].forEach((a, idx) => {
+          const isEven = idx % 2 === 1;
+          const curr = a.currencySet.size === 1 ? [...a.currencySet][0] : (a.currencySet.size > 1 ? "KARMA" : "");
+          const kalanBedel = Math.max(0, a.federalHakedis * 1.20 - a.faturaMiktar);
+          aoa.push([
+            { v: a.region,                              s: cellStyle(isEven, false) },
+            { v: "SAHA",                                s: cellStyle(isEven, false) },
+            { v: `${a.kalem} kalem`,                    s: cellStyle(isEven, false) },
+            { v: a.project,                             s: cellStyle(isEven, false) },
+            { v: a.site,                                s: cellStyle(isEven, false) },
+            { v: `${a.kalem} kalem toplamı`,            s: cellStyle(isEven, false) },
+            { v: "",                                    s: cellStyle(isEven, false) },
+            { v: a.onair,                               s: cellStyle(isEven, false) },
+            { v: a.doneQty,                             s: cellStyle(isEven, true) },
+            { v: a.reqQty,                              s: cellStyle(isEven, true) },
+            { v: a.billedQty,                           s: cellStyle(isEven, true) },
+            { v: a.doneQty - a.billedQty,               s: cellStyle(isEven, true) },
+            { v: curr,                                  s: cellStyle(isEven, false) },
+            { v: "",                                    s: cellStyle(isEven, true) },
+            { v: a.usdToplam || "",                     s: cellStyle(isEven, true) },
+            { v: "",                                    s: cellStyle(isEven, true) },
+            { v: a.toplamHakedis,                       s: cellStyle(isEven, true) },
+            { v: a.federalHakedis,                      s: federalStyle(isEven) },
+            { v: a.federalHakedis * 1.20,               s: federalKdvStyle(isEven) },
+            { v: a.faturaKesilecek,                     s: a.faturaKesilecek > 0 ? faturaStyle(isEven) : cellStyle(isEven, true) },
+            { v: [...a.faturaNos].join(", "),           s: cellStyle(isEven, false) },
+            { v: a.faturaMiktar || "",                  s: cellStyle(isEven, true) },
+            { v: [...a.faturaTarihler].join(", "),      s: cellStyle(isEven, false) },
+            { v: "",                                    s: cellStyle(isEven, false) },
+            { v: kalanBedel > 0.01 ? kalanBedel : "",   s: kalanBedel > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
+            { v: "",                                    s: cellStyle(isEven, false) },
+            { v: a.subcon,                              s: cellStyle(isEven, false) },
+          ]);
+        });
+      }
+
       const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
 
       aoa.forEach((row, ri) => {
@@ -14944,7 +15002,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
       ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
-      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ..._exportRows.map(() => ({ hpt: 20 }))];
+      ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...aoa.slice(2).map(() => ({ hpt: 20 }))];
 
       const wb = XLSXStyle.utils.book_new();
       XLSXStyle.utils.book_append_sheet(wb, ws, "Bölge Analizi");
@@ -16157,9 +16215,19 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           </div>
         )}
 
-        <button type="button" className="tab" onClick={handleExportRegionExcel}>
-          Excel İndir
-        </button>
+        <div style={{ display:"flex", flexDirection:"column", gap:"6px", minWidth:"190px" }}>
+          <div style={{ fontSize:"11px", color:"#6b7280", fontWeight:700, textAlign:"center", letterSpacing:"0.02em" }}>📥 EXCEL İNDİR</div>
+          <div style={{ display:"flex", gap:"6px" }}>
+            <button type="button" onClick={() => handleExportRegionExcel()}
+              style={{ flex:1, padding:"8px 10px", borderRadius:"9px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#15803d,#22c55e)", boxShadow:"0 2px 6px rgba(34,197,94,0.3)" }}>
+              📋 Kalem bazında
+            </button>
+            <button type="button" onClick={() => handleExportRegionExcel(null, null, null, true)}
+              style={{ flex:1, padding:"8px 10px", borderRadius:"9px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#1e3a8a,#3b82f6)", boxShadow:"0 2px 6px rgba(59,130,246,0.3)" }}>
+              🏗 Saha bazında
+            </button>
+          </div>
+        </div>
       </div>
 
       <div
@@ -20237,6 +20305,8 @@ function App() {
     const is2KX = String(u?.subcon_name || "").toUpperCase().includes("2KX");
     if (u?.role === "platform_admin") return "platform";
     if (is2KX) return "2kx";
+    // Alt yüklenici (AHY/Federal/UBS gibi) → doğrudan Bölge Analizi kartları
+    if (String(u?.role||"").toLowerCase() === "subcon" || String(u?.subcon_name||"").trim() !== "") return "region";
     if (u?.role === "user" && !isBolge && !isRolloutOverride) return "masraf";
     if (isBolge) return "region";
     return "finance";
