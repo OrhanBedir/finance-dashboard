@@ -15223,8 +15223,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
           gap: "24px",
           maxWidth: "1200px",
           margin: "20px auto",
@@ -15259,6 +15260,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               <div
                 key={item.region}
                 style={{
+                  flex: "0 1 360px",
+                  maxWidth: "400px",
+                  width: "100%",
                   borderRadius: "16px",
                   overflow: "hidden",
                   boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
@@ -16224,15 +16228,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           </div>
         )}
 
-        <div style={{ display:"flex", flexDirection:"column", gap:"6px", minWidth:"190px" }}>
-          <div style={{ fontSize:"11px", color:"#6b7280", fontWeight:700, textAlign:"center", letterSpacing:"0.02em" }}>📥 EXCEL İNDİR</div>
-          <div style={{ display:"flex", gap:"6px" }}>
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px", minWidth:"300px" }}>
+          <div style={{ fontSize:"11px", color:"#6b7280", fontWeight:700, textAlign:"center", letterSpacing:"0.04em" }}>📥 EXCEL İNDİR</div>
+          <div style={{ display:"flex", gap:"8px" }}>
             <button type="button" onClick={() => handleExportRegionExcel()}
-              style={{ flex:1, padding:"8px 10px", borderRadius:"9px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#15803d,#22c55e)", boxShadow:"0 2px 6px rgba(34,197,94,0.3)" }}>
+              style={{ flex:1, height:"42px", display:"flex", alignItems:"center", justifyContent:"center", whiteSpace:"nowrap", borderRadius:"10px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#15803d,#22c55e)", boxShadow:"0 3px 8px rgba(34,197,94,0.32)" }}>
               📋 Kalem bazında
             </button>
             <button type="button" onClick={() => handleExportRegionExcel(null, null, null, true)}
-              style={{ flex:1, padding:"8px 10px", borderRadius:"9px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#1e3a8a,#3b82f6)", boxShadow:"0 2px 6px rgba(59,130,246,0.3)" }}>
+              style={{ flex:1, height:"42px", display:"flex", alignItems:"center", justifyContent:"center", whiteSpace:"nowrap", borderRadius:"10px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#1e3a8a,#3b82f6)", boxShadow:"0 3px 8px rgba(59,130,246,0.32)" }}>
               🏗 Saha bazında
             </button>
           </div>
