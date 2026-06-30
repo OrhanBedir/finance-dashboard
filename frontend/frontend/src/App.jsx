@@ -20329,7 +20329,13 @@ function App() {
   const [pendingMalzemeCount, setPendingMalzemeCount] = useState(0);
   const [openSections, setOpenSections] = useState({ anaMeny: true, ik: false, muhasebe: false, depo: false });
   const toggleSection = (key) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    // Alt yüklenici (AHY/Federal/UBS gibi) giriş yapınca sol menü kapalı başlasın → sadece kartlar.
+    try {
+      const u = JSON.parse(localStorage.getItem("user") || "null");
+      return String(u?.role || "").toLowerCase() === "subcon" || String(u?.subcon_name || "").trim() !== "";
+    } catch { return false; }
+  });
   const [financeActionTrigger, setFinanceActionTrigger] = useState(null);
 
   useEffect(() => {
