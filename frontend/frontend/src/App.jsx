@@ -20732,6 +20732,9 @@ function App() {
       else if (_luIsBolge || _luIsSubcon) setPage("region");
       else setPage("finance");
 
+      // Alt yüklenici (AHY/Federal/UBS) giriş yapınca sol menü kapalı açılsın → sadece kartlar
+      if (_luIsSubcon) setSidebarCollapsed(true);
+
       // 2KX verilerini yükle
       if (_luIs2KX || _luRole === "admin") {
         const _tok = data.token;
