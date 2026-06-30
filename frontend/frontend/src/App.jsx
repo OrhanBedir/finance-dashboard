@@ -3313,24 +3313,67 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
   const [invoices, setInvoices] = useState([]);
   const [totals, setTotals] = useState({});
   const [loadingList, setLoadingList] = useState(false);
+  const [batches, setBatches] = useState([]);
+
+  const authHeaders = () => ({
+    Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+  });
+
+  const loadBatches = async () => {
+    try {
+      const r = await fetch(
+        `${API_BASE}/finance/hw-invoice-items-batches`,
+        { headers: authHeaders() },
+      );
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) setBatches(d.batches || []);
+    } catch (e) {
+      // sessiz
+    }
+  };
 
   const loadList = async () => {
     try {
       setLoadingList(true);
       const r = await fetch(`${API_BASE}/finance/hw-invoice-items`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
-        },
+        headers: authHeaders(),
       });
       const d = await r.json().catch(() => ({}));
       if (d.ok) {
         setInvoices(d.invoices || []);
         setTotals(d.totals || {});
       }
+      await loadBatches();
     } catch (e) {
       // sessiz
     } finally {
       setLoadingList(false);
+    }
+  };
+
+  const handleDeleteBatch = async (b) => {
+    const label = b.upload_date
+      ? new Date(b.upload_date).toLocaleDateString("tr-TR")
+      : b.batch_id;
+    if (
+      !window.confirm(
+        `${label} tarihli yükleme (${b.item_count} kalem) silinecek.\n` +
+          `Bu sadece o yüklemenin eklediği satırları siler, geçmiş kalır.\n\nDevam?`,
+      )
+    )
+      return;
+    try {
+      const r = await fetch(
+        `${API_BASE}/finance/hw-invoice-items-batch?batch_id=${encodeURIComponent(b.batch_id)}`,
+        { method: "DELETE", headers: authHeaders() },
+      );
+      const d = await r.json().catch(() => ({}));
+      if (!d.ok) throw new Error(d.error || "Silme hatası");
+      setMessage(`🗑 ${d.deleted} kalem silindi (parti).`);
+      await loadList();
+      if (onUploaded) await onUploaded();
+    } catch (err) {
+      setMessage(`❌ ${err.message}`);
     }
   };
 
@@ -3632,10 +3675,75 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
                 borderColor: "#fecaca",
               }}
             >
-              {clearing ? "Siliniyor..." : "🗑 Master'ı Temizle"}
+              {clearing ? "Siliniyor..." : "🗑 Tümünü Temizle"}
             </button>
           </div>
           {message && <div className="entryMessage">{message}</div>}
+
+          {batches.length > 0 && (
+            <div style={{ marginTop: "12px" }}>
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "#64748b",
+                  marginBottom: "6px",
+                }}
+              >
+                Yüklenen partiler (yanlış yüklediğini tek tek silebilirsin):
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {batches.map((b) => (
+                  <div
+                    key={b.batch_id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "10px",
+                      fontSize: "12.5px",
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                      padding: "6px 10px",
+                    }}
+                  >
+                    <span>
+                      📅{" "}
+                      {b.upload_date
+                        ? new Date(b.upload_date).toLocaleDateString("tr-TR")
+                        : "-"}{" "}
+                      · <b>{b.item_count}</b> kalem
+                      {b.invoiced_count > 0 && (
+                        <span style={{ color: "#16a34a" }}>
+                          {" "}
+                          ({b.invoiced_count} faturalı)
+                        </span>
+                      )}
+                      {b.file_name && (
+                        <span style={{ color: "#94a3b8" }}>
+                          {" "}
+                          · {b.file_name}
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      className="tab"
+                      onClick={() => handleDeleteBatch(b)}
+                      style={{
+                        padding: "4px 10px",
+                        fontSize: "12px",
+                        color: "#dc2626",
+                        borderColor: "#fecaca",
+                      }}
+                    >
+                      Sil
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── ADIM 2: Kesilen Fatura PDF'leri ── */}

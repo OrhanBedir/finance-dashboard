@@ -2536,6 +2536,8 @@ async function ensureHwInvoiceItemsTable() {
   `);
   // PDF eşleştirmesi için ek kolonlar (tablo zaten oluştuysa)
   await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS shipment_no TEXT`);
+  await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS batch_id TEXT`);
+  await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS upload_date DATE`);
   await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS invoiced_amount_incl NUMERIC`);
   await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS invoiced_amount_excl NUMERIC`);
   await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS invoice_matched_at TIMESTAMP`);
@@ -9368,6 +9370,10 @@ app.post(
 
       await ensureHwInvoiceItemsTable();
 
+      // Her yükleme bir batch (parti): yanlış dosya yüklenirse sadece bu parti geri alınır
+      const batchId = String(Date.now());
+      const uploadDate = new Date().toISOString().slice(0, 10);
+
       const get = (rowArr, key) => {
         const idx = colMap[key];
         if (idx === undefined) return null;
@@ -9456,9 +9462,9 @@ app.post(
              (site_id, release_no, po_qty, ac_qty, billed_qty, currency,
               unit_price, tax_rate, acceptance_milestone, description,
               payment_terms, item_code, project_code, upload_batch,
-              po_no, line_no, shipment_no, invoice_no)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
-            [...masterVals, poNo, lineNo, shipmentNo, invoiceNo],
+              po_no, line_no, shipment_no, invoice_no, batch_id, upload_date)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+            [...masterVals, poNo, lineNo, shipmentNo, invoiceNo, batchId, uploadDate],
           );
         }
         inserted++;
@@ -9538,7 +9544,54 @@ app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
   }
 });
 
-// Tüm kalem master'ını sıfırla (yanlış Excel yüklendiyse temiz başlamak için)
+// Yüklenen partileri (batch) listele — tarih, dosya, kalem sayısı
+app.get("/finance/hw-invoice-items-batches", async (req, res) => {
+  try {
+    await ensureHwInvoiceItemsTable();
+    const r = await pool.query(`
+      SELECT batch_id,
+             MIN(upload_date) AS upload_date,
+             MAX(upload_batch) AS file_name,
+             COUNT(*)::int AS item_count,
+             COUNT(*) FILTER (WHERE invoice_no IS NOT NULL)::int AS invoiced_count,
+             MIN(created_at) AS created_at
+      FROM hw_invoice_items
+      WHERE batch_id IS NOT NULL
+      GROUP BY batch_id
+      ORDER BY MIN(created_at) DESC
+    `);
+    return res.json({ ok: true, batches: r.rows });
+  } catch (err) {
+    console.error("HW INVOICE ITEMS BATCHES ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Parti listesi alınamadı" });
+  }
+});
+
+// Tek bir partiyi (batch) sil — sadece o yüklemenin EKLEDİĞİ satırlar gider,
+// güncellenmiş eski satırlar (kendi batch'inde) korunur.
+app.delete("/finance/hw-invoice-items-batch", async (req, res) => {
+  try {
+    await ensureHwInvoiceItemsTable();
+    const batchId = (req.query.batch_id || "").toString().trim();
+    if (!batchId) {
+      return res.status(400).json({ ok: false, error: "batch_id gerekli" });
+    }
+    const r = await pool.query(
+      `DELETE FROM hw_invoice_items WHERE batch_id = $1`,
+      [batchId],
+    );
+    return res.json({ ok: true, deleted: r.rowCount || 0, batch_id: batchId });
+  } catch (err) {
+    console.error("HW INVOICE ITEMS BATCH DELETE ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Parti silme hatası" });
+  }
+});
+
+// Tüm kalem master'ını sıfırla (tam reset — nadiren)
 app.delete("/finance/hw-invoice-items-clear", async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
