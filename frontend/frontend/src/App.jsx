@@ -14592,6 +14592,249 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 /* ═══════════════════════════════════════════════════════════════
    2KX HAKEDİŞ PANELİ
    ═══════════════════════════════════════════════════════════════ */
+// 2KX özel item (5 kalem) manuel fiyat girişi — admin
+function TwokxSpecialPrices() {
+  const SPECIAL = [
+    "8812184927",
+    "8812184919",
+    "8812184920",
+    "8812184930",
+    "8812184870",
+  ];
+  const [rows, setRows] = useState([]);
+  const [prices, setPrices] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [savingKey, setSavingKey] = useState("");
+  const [msg, setMsg] = useState("");
+  const auth = {
+    Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+  };
+  const yearOf = (d) => {
+    if (!d || d === "__NA__") return null;
+    const dt = new Date(d);
+    return isNaN(dt.getTime()) ? null : dt.getFullYear();
+  };
+  const keyOf = (r) =>
+    `${String(r.site_code || "").toUpperCase()}|${String(r.item_code || "").trim()}`;
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [dRes, pRes] = await Promise.all([
+        fetch(`${API_BASE}/dashboard/result`, { headers: auth }).then((r) =>
+          r.json(),
+        ),
+        fetch(`${API_BASE}/2kx/manual-prices`, { headers: auth }).then((r) =>
+          r.json(),
+        ),
+      ]);
+      const all = dRes.rows || [];
+      const filtered = all.filter(
+        (r) =>
+          String(r.subcon_name || "")
+            .toUpperCase()
+            .includes("2KX") &&
+          SPECIAL.includes(String(r.item_code || "").trim()) &&
+          (yearOf(r.onair_date) === 2026 || yearOf(r.created_at) === 2026),
+      );
+      const seen = {};
+      const uniq = [];
+      filtered.forEach((r) => {
+        const k = keyOf(r);
+        if (!seen[k]) {
+          seen[k] = 1;
+          uniq.push(r);
+        }
+      });
+      setRows(uniq);
+      const pmap = {};
+      (pRes.prices || []).forEach((p) => {
+        pmap[
+          `${String(p.site_code || "").toUpperCase()}|${String(p.item_code || "").trim()}`
+        ] = { unit_price: p.unit_price ?? "", currency: p.currency || "TRY" };
+      });
+      setPrices(pmap);
+    } catch (e) {
+      setMsg("❌ " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    load();
+  }, []);
+
+  const setP = (k, field, v) =>
+    setPrices((p) => ({
+      ...p,
+      [k]: { ...(p[k] || { currency: "TRY" }), [field]: v },
+    }));
+
+  const save = async (r) => {
+    const k = keyOf(r);
+    const p = prices[k] || {};
+    setSavingKey(k);
+    setMsg("");
+    try {
+      const res = await fetch(`${API_BASE}/2kx/manual-prices`, {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          site_code: r.site_code,
+          item_code: r.item_code,
+          unit_price: p.unit_price,
+          currency: p.currency || "TRY",
+        }),
+      });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error || "Kaydedilemedi");
+      setMsg(`✅ ${r.site_code} / ${r.item_code} kaydedildi`);
+    } catch (e) {
+      setMsg("❌ " + e.message);
+    } finally {
+      setSavingKey("");
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "24px 16px" }}>
+      <div
+        style={{
+          background: "linear-gradient(135deg,#7c2d12,#b45309)",
+          borderRadius: "16px",
+          padding: "24px 28px",
+          marginBottom: "20px",
+          color: "#fff",
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800 }}>
+          💲 2KX Özel Item Fiyatları
+        </h2>
+        <div style={{ opacity: 0.85, fontSize: "14px", marginTop: "4px" }}>
+          Bu 5 item'ı 2KX adına farklı firma yapıyor; fiyatları manuel
+          girilir. Diğer tüm itemlar otomatik %75 kırılımla hesaplanır. Sadece
+          2026 sahaları listelenir.
+        </div>
+      </div>
+
+      {msg && (
+        <div
+          style={{
+            marginBottom: "12px",
+            padding: "10px 14px",
+            borderRadius: "10px",
+            background: msg.startsWith("✅") ? "#dcfce7" : "#fef2f2",
+            color: msg.startsWith("✅") ? "#166534" : "#dc2626",
+            fontSize: "13px",
+          }}
+        >
+          {msg}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ padding: "30px", color: "#64748b" }}>Yükleniyor...</div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding: "30px", color: "#94a3b8" }}>
+          2026'da bu 5 özel item için 2KX işi bulunamadı.
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: "13px",
+              background: "#fff",
+              borderRadius: "12px",
+              overflow: "hidden",
+            }}
+          >
+            <thead>
+              <tr style={{ background: "#f8fafc", textAlign: "left", color: "#475569" }}>
+                <th style={{ padding: "10px 12px" }}>Site</th>
+                <th style={{ padding: "10px 12px" }}>Item Code</th>
+                <th style={{ padding: "10px 12px" }}>Açıklama</th>
+                <th style={{ padding: "10px 12px", textAlign: "right" }}>Done</th>
+                <th style={{ padding: "10px 12px" }}>Birim Fiyat</th>
+                <th style={{ padding: "10px 12px" }}>Para</th>
+                <th style={{ padding: "10px 12px" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const k = keyOf(r);
+                const p = prices[k] || { unit_price: "", currency: "TRY" };
+                return (
+                  <tr key={k} style={{ borderTop: "1px solid #e2e8f0" }}>
+                    <td style={{ padding: "8px 12px", fontWeight: 600 }}>
+                      {r.site_code}
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>{r.item_code}</td>
+                    <td style={{ padding: "8px 12px", maxWidth: "320px" }}>
+                      {r.item_description}
+                    </td>
+                    <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                      {Number(r.done_qty || 0)}
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>
+                      <input
+                        type="text"
+                        value={p.unit_price ?? ""}
+                        onChange={(e) => setP(k, "unit_price", e.target.value)}
+                        placeholder="0.00"
+                        style={{
+                          width: "110px",
+                          padding: "6px 8px",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "6px",
+                        }}
+                      />
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>
+                      <select
+                        value={p.currency || "TRY"}
+                        onChange={(e) => setP(k, "currency", e.target.value)}
+                        style={{
+                          padding: "6px 8px",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "6px",
+                        }}
+                      >
+                        <option value="TRY">TRY</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                      </select>
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>
+                      <button
+                        type="button"
+                        onClick={() => save(r)}
+                        disabled={savingKey === k}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: "8px",
+                          border: "none",
+                          cursor: "pointer",
+                          fontWeight: 700,
+                          color: "#fff",
+                          background: "#15803d",
+                        }}
+                      >
+                        {savingKey === k ? "..." : "Kaydet"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TwoKXPanel({ twokxData, twokxPricing, isAdmin, API_BASE, onRefresh }) {
   const [showDetailModal, setShowDetailModal] = useState(null); // site object
   const [showPricingModal, setShowPricingModal] = useState(false);
@@ -22324,6 +22567,7 @@ function App() {
       case "ofis": return "Ofis & Depo";
       case "cashflow": return "Nakit Akışı";
       case "admin": return "Admin Panel";
+      case "twokx-prices": return "2KX Özel Item Fiyatları";
       case "platform": return "Omnix — Platform Yönetimi";
       default: return user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik');
     }
@@ -22437,6 +22681,9 @@ function App() {
                       </div>
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); }}>
                         <span>📋</span> HW Acceptance Yükle
+                      </div>
+                      <div className={`sidebar-nav-item ${page==='twokx-prices'?'active':''}`} onClick={()=>setPage('twokx-prices')}>
+                        <span>💲</span> 2KX Özel Fiyat
                       </div>
                     </>
                   )}
@@ -22660,6 +22907,7 @@ function App() {
                 }}
               />
             )}
+            {page === "twokx-prices" && isAdmin && <TwokxSpecialPrices />}
             {page === "entry" && <DailyEntry />}
             {page === "platform" && isPlatformAdmin && (
               <div style={{maxWidth:'1100px',margin:'0 auto',padding:'24px 16px'}}>
