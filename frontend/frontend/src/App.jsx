@@ -15500,24 +15500,21 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         withAuth: true,
       });
       let resultRows = data.rows || [];
-      // 2KX: sadece 2026 sahaları (OnAir veya iş giriş tarihi 2026)
+      // 2KX: sadece 2026 sahaları + 5 özel item panelden hariç
+      // (bu 5 kalemi başka firma yapıyor, 2KX üzerinden faturalanıyor; ayrı/manuel takip)
       if (is2KXRegion) {
-        resultRows = resultRows.filter((r) => is2026Row(r));
-        // Özel item manuel fiyatlarını çek
-        try {
-          const mp = await fetchJson(`${API_BASE}/2kx/manual-prices`, {
-            withAuth: true,
-          });
-          const map = {};
-          (mp.prices || []).forEach((p) => {
-            map[
-              `${String(p.site_code || "").toUpperCase()}|${String(p.item_code || "").trim()}`
-            ] = { unit_price: p.unit_price, currency: p.currency };
-          });
-          setTwokxManualPrices(map);
-        } catch (e) {
-          /* sessiz */
-        }
+        const HIDDEN_2KX_ITEMS = new Set([
+          "8812184927",
+          "8812184919",
+          "8812184920",
+          "8812184930",
+          "8812184870",
+        ]);
+        resultRows = resultRows.filter(
+          (r) =>
+            is2026Row(r) &&
+            !HIDDEN_2KX_ITEMS.has(String(r.item_code || "").trim()),
+        );
       }
       setRows(resultRows);
     } catch (err) {
@@ -22683,9 +22680,6 @@ function App() {
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); }}>
                         <span>📋</span> HW Acceptance Yükle
                       </div>
-                      <div className={`sidebar-nav-item ${page==='twokx-prices'?'active':''}`} onClick={()=>setPage('twokx-prices')}>
-                        <span>💲</span> 2KX Özel Fiyat
-                      </div>
                     </>
                   )}
                 </div>
@@ -22908,7 +22902,6 @@ function App() {
                 }}
               />
             )}
-            {page === "twokx-prices" && isAdmin && <TwokxSpecialPrices />}
             {page === "entry" && <DailyEntry />}
             {page === "platform" && isPlatformAdmin && (
               <div style={{maxWidth:'1100px',margin:'0 auto',padding:'24px 16px'}}>
