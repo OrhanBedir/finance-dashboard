@@ -16904,8 +16904,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               <div>
                 <h3 style={{ margin: 0 }}>💰 Fatura Kesilebilir Kalemler</h3>
                 <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                  Huawei'ye faturalanmış ve senin yaptığın işlerle eşleşen
-                  kalemler — bu tutarlarla bize fatura kesebilirsin.
+                  Huawei'ye faturalanmış ve sizin yaptığınız işlerle eşleşen
+                  kalemler — bu tutarlarla bize fatura kesebilirsiniz.
                 </div>
               </div>
               <button
@@ -16930,7 +16930,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             ) : billableRows.length === 0 ? (
               <div style={{ padding: "30px", textAlign: "center", color: "#94a3b8" }}>
                 Şu an fatura kesilebilecek eşleşen kalem yok. (Huawei'ye
-                faturalanmış kalemlerle senin yaptığın işler henüz örtüşmüyor.)
+                faturalanmış kalemlerle sizin yaptığınız işler henüz
+                örtüşmüyor.)
               </div>
             ) : (
               <>
