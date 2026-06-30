@@ -16106,6 +16106,28 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         keySet.add(key);
         invMap[key] = k.invoice_nos || "";
       });
+
+      // Taşeronun kestiği fatura + vade bilgisi (mutabakat) — kendi adıyla
+      let invoicedByKey = {};
+      let dueByKey = {};
+      try {
+        const rec = await fetch(
+          `${API_BASE}/finance/subcon-reconcile?taseron=${encodeURIComponent(userSubconName || "")}`,
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+            },
+          },
+        );
+        const rd = await rec.json().catch(() => ({}));
+        if (rd.ok) {
+          invoicedByKey = rd.invoiced_by_key || {};
+          dueByKey = rd.due_by_key || {};
+        }
+      } catch (e) {
+        /* sessiz */
+      }
+
       const matched = (sortedRows || [])
         .filter((row) => {
           const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
@@ -16116,6 +16138,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           const doneQty = Number(row.done_qty || 0);
           const taseronUnit = doneQty > 0 ? totalTRY / doneQty : 0;
           const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
+          const inv = invoicedByKey[key] || null;
           return {
             site_id: row.site_code,
             item_description: row.item_description,
@@ -16125,6 +16148,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             unit_price: taseronUnit,
             total_price: totalTRY,
             invoice_nos: invMap[key] || "",
+            // Mutabakat: taşeronun kestiği fatura + vade
+            durum: inv ? "Faturalandı" : "Kesilebilir",
+            fatura_no: inv ? inv.fatura_no || "" : "",
+            fatura_tarihi: inv ? inv.fatura_tarihi || "" : "",
+            fatura_miktari: inv ? Number(inv.fatura_miktari || 0) : null,
+            vade: dueByKey[key] || "",
           };
         });
       setBillableRows(matched);
@@ -16144,6 +16173,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       "Request Qty",
       "Birim Fiyat (₺)",
       "Toplam Fiyat (₺)",
+      "Durum",
+      "Fatura No",
+      "Fatura Tarihi",
+      "Kestiği Tutar (₺)",
+      "Vade (Ödeme)",
     ];
     const aoa = [header];
     let grand = 0;
@@ -16157,9 +16191,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         x.requested_qty,
         Number(x.unit_price || 0),
         Number(x.total_price || 0),
+        x.durum || "",
+        x.fatura_no || "",
+        x.fatura_tarihi || "",
+        x.fatura_miktari != null ? Number(x.fatura_miktari) : "",
+        x.vade || "",
       ]);
     }
-    aoa.push(["", "", "", "", "", "TOPLAM", grand]);
+    aoa.push(["", "", "", "", "", "TOPLAM", grand, "", "", "", "", ""]);
     const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
     ws["!cols"] = [
       { wch: 18 },
@@ -16169,6 +16208,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       { wch: 10 },
       { wch: 14 },
       { wch: 16 },
+      { wch: 13 },
+      { wch: 18 },
+      { wch: 13 },
+      { wch: 16 },
+      { wch: 13 },
     ];
     const range = XLSXStyle.utils.decode_range(ws["!ref"]);
     for (let c = range.s.c; c <= range.e.c; c++) {
@@ -17420,6 +17464,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         <th style={{ padding: "6px 8px", textAlign: "right" }}>Request</th>
                         <th style={{ padding: "6px 8px", textAlign: "right" }}>Birim ₺</th>
                         <th style={{ padding: "6px 8px", textAlign: "right" }}>Toplam ₺</th>
+                        <th style={{ padding: "6px 8px" }}>Durum</th>
+                        <th style={{ padding: "6px 8px", textAlign: "right" }}>Kestiği ₺</th>
+                        <th style={{ padding: "6px 8px" }}>Vade</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -17432,6 +17479,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                           <td style={{ padding: "6px 8px", textAlign: "right" }}>{x.requested_qty}</td>
                           <td style={{ padding: "6px 8px", textAlign: "right" }}>{formatTRY(x.unit_price)}</td>
                           <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 600 }}>{formatTRY(x.total_price)}</td>
+                          <td style={{ padding: "6px 8px", color: x.durum === "Faturalandı" ? "#16a34a" : "#b45309", fontWeight: 600 }}>{x.durum}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right" }}>{x.fatura_miktari != null ? formatTRY(x.fatura_miktari) : "-"}</td>
+                          <td style={{ padding: "6px 8px" }}>{x.vade ? new Date(x.vade).toLocaleDateString("tr-TR") : "-"}</td>
                         </tr>
                       ))}
                     </tbody>

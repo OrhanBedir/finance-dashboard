@@ -8968,9 +8968,45 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
       }))
       .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
 
+    // Per-item map'ler (taşeron Excel'i için): site|item -> fatura bilgisi / vade
+    const invoicedByKey = {};
+    for (const r of invoiced) {
+      const k = keyOf(r.site_code, r.item_code);
+      if (!invoicedByKey[k]) {
+        invoicedByKey[k] = {
+          fatura_no: r.fatura_no || "",
+          fatura_tarihi: r.fatura_tarihi
+            ? String(r.fatura_tarihi).slice(0, 10)
+            : "",
+          fatura_miktari: 0,
+        };
+      }
+      invoicedByKey[k].fatura_miktari += Number(r.fatura_miktari || 0);
+      if (r.fatura_no && !invoicedByKey[k].fatura_no.includes(r.fatura_no)) {
+        invoicedByKey[k].fatura_no = [invoicedByKey[k].fatura_no, r.fatura_no]
+          .filter(Boolean)
+          .join(", ");
+      }
+    }
+    const dueByKey = {};
+    for (const [k, invs] of hwInvByKey.entries()) {
+      for (const inv of invs) {
+        const due = dueByInvoice.get(String(inv).trim());
+        if (due) {
+          dueByKey[k] =
+            due instanceof Date
+              ? due.toISOString().slice(0, 10)
+              : String(due).slice(0, 10);
+          break;
+        }
+      }
+    }
+
     return res.json({
       ok: true,
       taseron,
+      invoiced_by_key: invoicedByKey,
+      due_by_key: dueByKey,
       invoiced: {
         count: invoiced.length,
         total: invoicedTotal,
