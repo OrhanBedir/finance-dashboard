@@ -2509,6 +2509,35 @@ async function ensureHwInvoiceTable() {
   `);
 }
 
+// Huawei'ye kesilen faturaların KALEM bazında detayı (hangi site+item'a fatura kesildi)
+async function ensureHwInvoiceItemsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hw_invoice_items (
+      id SERIAL PRIMARY KEY,
+      invoice_no TEXT,
+      site_id TEXT,
+      po_no TEXT,
+      release_no TEXT,
+      line_no TEXT,
+      po_qty NUMERIC,
+      ac_qty NUMERIC,
+      billed_qty NUMERIC,
+      currency TEXT DEFAULT 'TRY',
+      unit_price NUMERIC,
+      tax_rate NUMERIC,
+      acceptance_milestone TEXT,
+      description TEXT,
+      payment_terms TEXT,
+      item_code TEXT,
+      project_code TEXT,
+      upload_batch TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hw_invoice_items_site_item ON hw_invoice_items (site_id, item_code)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hw_invoice_items_invoice ON hw_invoice_items (invoice_no)`);
+}
+
 /* ================== COMMON CTE ================== */
 const COMMON_MATCH_CTES = `
   WITH best_site_po AS (
@@ -9236,6 +9265,249 @@ app.post(
     }
   },
 );
+
+/* ================== HW FATURA ITEM (KALEM) UPLOAD ================== */
+// Manufacturer alanından site_id çek: "200000706586012<!>MN0426_NS_AE<!>MN0426_NS_AE" -> "MN0426_NS_AE"
+function parseHwSiteId(manufacturer) {
+  if (manufacturer === null || manufacturer === undefined) return null;
+  const s = String(manufacturer);
+  const parts = s.split("<!>");
+  if (parts.length >= 2) return (parts[1] || "").trim() || null;
+  return s.trim() || null;
+}
+
+// poCreateExp Excel'inde İngilizce başlık satırını bul ve kolon haritası çıkar
+function buildHwItemColMap(rawRows) {
+  const LABELS = {
+    po_no: ["po no.", "po no"],
+    release_no: ["release no.", "release no"],
+    line_no: ["line no.", "line no"],
+    po_qty: ["po qty", "po qty."],
+    ac_qty: ["ac qty.", "ac qty"],
+    billed_qty: ["billed qty", "billed qty."],
+    currency: ["currency"],
+    unit_price: ["unit price"],
+    tax_rate: ["tax rate"],
+    acceptance_milestone: ["acceptance milestone"],
+    description: ["description"],
+    payment_terms: ["payment terms"],
+    item_code: ["item code"],
+    project_code: ["project code"],
+    manufacturer: ["manufacturer"],
+  };
+
+  let headerRowIdx = -1;
+  for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
+    const row = rawRows[i] || [];
+    const hasPoNo = row.some(
+      (c) => c != null && String(c).trim().toLowerCase() === "po no.",
+    );
+    if (hasPoNo) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+  if (headerRowIdx < 0) return null;
+
+  const headerRow = rawRows[headerRowIdx] || [];
+  const colMap = {};
+  for (const [key, variants] of Object.entries(LABELS)) {
+    for (let c = 0; c < headerRow.length; c++) {
+      const cell = headerRow[c];
+      if (cell == null) continue;
+      const norm = String(cell).trim().toLowerCase();
+      if (variants.includes(norm)) {
+        if (colMap[key] === undefined) colMap[key] = c;
+      }
+    }
+  }
+  return { headerRowIdx, colMap };
+}
+
+app.post(
+  "/finance/hw-invoice-items/upload",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ ok: false, error: "Dosya yok" });
+      }
+      const invoiceNo = (req.body.invoice_no || "").toString().trim();
+      if (!invoiceNo) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "Fatura No girilmedi" });
+      }
+
+      const workbook = XLSX.read(req.file.buffer);
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "Excel içinde sheet bulunamadı" });
+      }
+      const sheet = workbook.Sheets[firstSheetName];
+      const rawRows = XLSX.utils.sheet_to_json(sheet, {
+        header: 1,
+        defval: null,
+      });
+
+      const mapInfo = buildHwItemColMap(rawRows);
+      if (!mapInfo || mapInfo.colMap.po_no === undefined) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Excel formatı tanınamadı (PO No. başlık satırı bulunamadı). Huawei poCreateExp dosyasını yükleyin.",
+        });
+      }
+      const { headerRowIdx, colMap } = mapInfo;
+
+      await ensureHwInvoiceItemsTable();
+      // Aynı fatura no tekrar yüklenirse o faturanın kalemlerini değiştir (diğer faturalar birikmeye devam)
+      await pool.query(`DELETE FROM hw_invoice_items WHERE invoice_no = $1`, [
+        invoiceNo,
+      ]);
+
+      const get = (rowArr, key) => {
+        const idx = colMap[key];
+        if (idx === undefined) return null;
+        return rowArr[idx];
+      };
+
+      let inserted = 0;
+      let skipped = 0;
+      for (let i = headerRowIdx + 1; i < rawRows.length; i++) {
+        const rowArr = rawRows[i] || [];
+        if (rowArr.length === 0) continue;
+
+        const poNoRaw = get(rowArr, "po_no");
+        const poNo = poNoRaw == null ? "" : String(poNoRaw).trim();
+        // Boş satır / Çince başlık satırı / tekrar eden başlığı atla
+        if (!poNo) {
+          skipped++;
+          continue;
+        }
+        const poNoLower = poNo.toLowerCase();
+        if (poNoLower === "po no." || poNoLower === "po号") {
+          skipped++;
+          continue;
+        }
+
+        const siteId = parseHwSiteId(get(rowArr, "manufacturer"));
+        const itemCode = (() => {
+          const v = get(rowArr, "item_code");
+          return v == null ? null : String(v).trim() || null;
+        })();
+
+        const txt = (key) => {
+          const v = get(rowArr, key);
+          return v == null ? null : String(v).trim() || null;
+        };
+        const num = (key) => {
+          const v = get(rowArr, key);
+          if (v == null || v === "") return null;
+          return parseFinanceNumber(v);
+        };
+
+        await pool.query(
+          `
+          INSERT INTO hw_invoice_items
+          (invoice_no, site_id, po_no, release_no, line_no, po_qty, ac_qty,
+           billed_qty, currency, unit_price, tax_rate, acceptance_milestone,
+           description, payment_terms, item_code, project_code, upload_batch)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+          `,
+          [
+            invoiceNo,
+            siteId,
+            poNo,
+            txt("release_no"),
+            txt("line_no"),
+            num("po_qty"),
+            num("ac_qty"),
+            num("billed_qty"),
+            normalizeCurrency(get(rowArr, "currency")) || "TRY",
+            num("unit_price"),
+            num("tax_rate"),
+            txt("acceptance_milestone"),
+            txt("description"),
+            txt("payment_terms"),
+            itemCode,
+            txt("project_code"),
+            req.file.filename || req.file.originalname || null,
+          ],
+        );
+        inserted++;
+      }
+
+      return res.json({
+        ok: true,
+        invoice_no: invoiceNo,
+        inserted,
+        skipped,
+        sheet_name: firstSheetName,
+        message: `${inserted} kalem kaydedildi (Fatura ${invoiceNo})`,
+      });
+    } catch (err) {
+      console.error("HW INVOICE ITEMS UPLOAD ERROR:", err);
+      return res.status(500).json({
+        ok: false,
+        error: err.message || "HW Fatura Item upload sırasında hata oluştu",
+      });
+    }
+  },
+);
+
+// Yüklenen kalemleri listele (fatura no bazında özet + son kayıtlar)
+app.get("/finance/hw-invoice-items", async (req, res) => {
+  try {
+    await ensureHwInvoiceItemsTable();
+    const summary = await pool.query(`
+      SELECT invoice_no,
+             COUNT(*)::int AS item_count,
+             COUNT(DISTINCT site_id)::int AS site_count,
+             MIN(currency) AS currency,
+             SUM(COALESCE(unit_price,0) * COALESCE(billed_qty, ac_qty, po_qty, 0)) AS total_amount,
+             MAX(created_at) AS uploaded_at
+      FROM hw_invoice_items
+      GROUP BY invoice_no
+      ORDER BY MAX(created_at) DESC
+    `);
+    const totals = await pool.query(`
+      SELECT COUNT(*)::int AS total_items,
+             COUNT(DISTINCT invoice_no)::int AS total_invoices,
+             COUNT(DISTINCT site_id)::int AS total_sites
+      FROM hw_invoice_items
+    `);
+    return res.json({
+      ok: true,
+      invoices: summary.rows,
+      totals: totals.rows[0] || {},
+    });
+  } catch (err) {
+    console.error("HW INVOICE ITEMS LIST ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Liste alınamadı" });
+  }
+});
+
+// Tek bir faturanın kalem detayları
+app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
+  try {
+    await ensureHwInvoiceItemsTable();
+    const result = await pool.query(
+      `SELECT * FROM hw_invoice_items WHERE invoice_no = $1 ORDER BY site_id, line_no`,
+      [req.params.invoiceNo],
+    );
+    return res.json({ ok: true, items: result.rows });
+  } catch (err) {
+    console.error("HW INVOICE ITEMS DETAIL ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Detay alınamadı" });
+  }
+});
 
 /* ================== FINANCE EXPENSE ADD ================== */
 app.post("/finance/expense/add", async (req, res) => {

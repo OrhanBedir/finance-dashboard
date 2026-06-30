@@ -3302,6 +3302,250 @@ function FinanceInvoiceUploadInline({ onClose, onUploaded }) {
   );
 }
 
+function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [invoiceNo, setInvoiceNo] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [invoices, setInvoices] = useState([]);
+  const [totals, setTotals] = useState({});
+  const [loadingList, setLoadingList] = useState(false);
+
+  const loadList = async () => {
+    try {
+      setLoadingList(true);
+      const r = await fetch(`${API_BASE}/finance/hw-invoice-items`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+        },
+      });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) {
+        setInvoices(d.invoices || []);
+        setTotals(d.totals || {});
+      }
+    } catch (e) {
+      // sessiz
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  useEffect(() => {
+    loadList();
+  }, []);
+
+  const handleUpload = async () => {
+    if (!file) {
+      setMessage("❌ Lütfen Huawei PO/fatura Excel dosyası seç");
+      return;
+    }
+    if (!invoiceNo.trim()) {
+      setMessage("❌ Lütfen Fatura No gir");
+      return;
+    }
+    try {
+      setUploading(true);
+      setMessage("");
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("invoice_no", invoiceNo.trim());
+
+      const response = await fetch(
+        `${API_BASE}/finance/hw-invoice-items/upload`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+          },
+          body: formData,
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "Yükleme sırasında hata oluştu");
+      }
+      setMessage(
+        `✅ ${data.message || `${data.inserted || 0} kalem kaydedildi`}`,
+      );
+      setFile(null);
+      setInvoiceNo("");
+      const input = document.getElementById("finance-hw-invoice-items-input");
+      if (input) input.value = "";
+      await loadList();
+      if (onUploaded) await onUploaded();
+    } catch (err) {
+      console.error("HW INVOICE ITEMS UPLOAD ERROR:", err);
+      setMessage(`❌ ${err.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const fmt = (v) =>
+    v == null
+      ? "-"
+      : Number(v).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+
+  return (
+    <div className="entryPanel" style={{ marginBottom: "18px" }}>
+      <div className="entryForm">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "14px",
+            gap: "12px",
+            flexWrap: "wrap",
+          }}
+        >
+          <h3 className="listTitle" style={{ margin: 0 }}>
+            📑 Huawei Fatura Item Yükle
+          </h3>
+          <button
+            type="button"
+            className="tab"
+            onClick={onClose}
+            style={{ padding: "10px 14px" }}
+          >
+            Kapat
+          </button>
+        </div>
+
+        <p
+          style={{
+            margin: "0 0 14px",
+            fontSize: "13px",
+            color: "#64748b",
+            lineHeight: 1.5,
+          }}
+        >
+          Huawei'ye kesilen faturanın <b>kalem (item) bazında</b> detayını yükle.
+          poCreateExp Excel'ini seç ve bu faturanın <b>Fatura No</b>'sunu gir.
+          Sistem site_id (Manufacturer'dan), item code, qty ve birim fiyatları
+          kaydeder. Her fatura ayrı birikir.
+        </p>
+
+        <div className="formGrid">
+          <div className="formGroup">
+            <label>Fatura No *</label>
+            <input
+              type="text"
+              value={invoiceNo}
+              onChange={(e) => setInvoiceNo(e.target.value)}
+              placeholder="Örn: GIB2026000000123"
+            />
+          </div>
+          <div className="formGroup formGroupWide">
+            <label>Huawei PO/Fatura Excel (poCreateExp .xlsm/.xlsx)</label>
+            <input
+              id="finance-hw-invoice-items-input"
+              type="file"
+              accept=".xlsm,.xlsx,.xls"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+          </div>
+        </div>
+
+        <div className="entryActions">
+          <button
+            type="button"
+            className="saveButton"
+            onClick={handleUpload}
+            disabled={uploading}
+          >
+            {uploading ? "Yükleniyor..." : "Kalemleri Yükle"}
+          </button>
+        </div>
+
+        {message && <div className="entryMessage">{message}</div>}
+
+        <div style={{ marginTop: "18px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "16px",
+              flexWrap: "wrap",
+              marginBottom: "10px",
+            }}
+          >
+            <h4 style={{ margin: 0, fontSize: "14px" }}>
+              Yüklenmiş Faturalar
+            </h4>
+            <span style={{ fontSize: "12px", color: "#64748b" }}>
+              {totals.total_invoices || 0} fatura · {totals.total_items || 0}{" "}
+              kalem · {totals.total_sites || 0} site
+            </span>
+            <button
+              type="button"
+              className="tab"
+              onClick={loadList}
+              style={{ padding: "6px 12px", fontSize: "12px" }}
+            >
+              {loadingList ? "..." : "Yenile"}
+            </button>
+          </div>
+          {invoices.length === 0 ? (
+            <div style={{ fontSize: "13px", color: "#94a3b8" }}>
+              Henüz kalem yüklenmedi.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "13px",
+                }}
+              >
+                <thead>
+                  <tr style={{ textAlign: "left", color: "#64748b" }}>
+                    <th style={{ padding: "6px 8px" }}>Fatura No</th>
+                    <th style={{ padding: "6px 8px" }}>Kalem</th>
+                    <th style={{ padding: "6px 8px" }}>Site</th>
+                    <th style={{ padding: "6px 8px" }}>Para</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>
+                      Toplam
+                    </th>
+                    <th style={{ padding: "6px 8px" }}>Yüklenme</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((inv) => (
+                    <tr
+                      key={inv.invoice_no}
+                      style={{ borderTop: "1px solid #e2e8f0" }}
+                    >
+                      <td style={{ padding: "6px 8px", fontWeight: 600 }}>
+                        {inv.invoice_no}
+                      </td>
+                      <td style={{ padding: "6px 8px" }}>{inv.item_count}</td>
+                      <td style={{ padding: "6px 8px" }}>{inv.site_count}</td>
+                      <td style={{ padding: "6px 8px" }}>
+                        {inv.currency || "-"}
+                      </td>
+                      <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                        {fmt(inv.total_amount)}
+                      </td>
+                      <td style={{ padding: "6px 8px", color: "#94a3b8" }}>
+                        {inv.uploaded_at
+                          ? new Date(inv.uploaded_at).toLocaleString("tr-TR")
+                          : "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatTLInput(value) {
   const numeric = String(value || "").replace(/[^\d]/g, "");
   if (!numeric) return "";
@@ -3482,6 +3726,7 @@ function FinanceDashboard({
   const [showHwAcceptanceModal, setShowHwAcceptanceModal] = useState(false);
   const [hwCardExpanded, setHwCardExpanded] = useState(false);
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
+  const [showHwInvoiceItemsUpload, setShowHwInvoiceItemsUpload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [paymentRows, setPaymentRows] = useState([]);
   const [paymentInvoiceFilter, setPaymentInvoiceFilter] = useState("");
@@ -4487,7 +4732,9 @@ function FinanceDashboard({
     } else if (actionTrigger === 'hw_payment') {
       setShowUpload(true); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false); setShowFinanceHwAcceptanceUpload(false);
     } else if (actionTrigger === 'hw_fatura') {
-      setShowInvoiceUpload(true); setShowUpload(false); setShowFinanceHwPoUpload(false); setShowFinanceHwAcceptanceUpload(false);
+      setShowInvoiceUpload(true); setShowUpload(false); setShowFinanceHwPoUpload(false); setShowFinanceHwAcceptanceUpload(false); setShowHwInvoiceItemsUpload(false);
+    } else if (actionTrigger === 'hw_fatura_item') {
+      setShowHwInvoiceItemsUpload(true); setShowInvoiceUpload(false); setShowUpload(false); setShowFinanceHwPoUpload(false); setShowFinanceHwAcceptanceUpload(false);
     } else if (actionTrigger === 'hw_po') {
       setShowFinanceHwPoUpload(true); setShowUpload(false); setShowInvoiceUpload(false); setShowFinanceHwAcceptanceUpload(false);
     } else if (actionTrigger === 'hw_acceptance') {
@@ -5321,6 +5568,13 @@ function FinanceDashboard({
       {showInvoiceUpload && (
         <FinanceInvoiceUploadInline
           onClose={() => setShowInvoiceUpload(false)}
+          onUploaded={loadFinance}
+        />
+      )}
+
+      {showHwInvoiceItemsUpload && (
+        <FinanceHwInvoiceItemsUploadInline
+          onClose={() => setShowHwInvoiceItemsUpload(false)}
           onUploaded={loadFinance}
         />
       )}
@@ -21226,6 +21480,9 @@ function App() {
                       </div>
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura'); }}>
                         <span>🧾</span> HW Fatura Yükle
+                      </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura_item'); }}>
+                        <span>📑</span> Huawei Fatura Item Yükle
                       </div>
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); }}>
                         <span>🔩</span> HW PO Yükle
