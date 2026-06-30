@@ -3711,6 +3711,11 @@ function FinanceDashboard({
       const safeName = subconFilter
         ? subconFilter.replace(/[^\wğüşöçıİĞÜŞÖÇ -]/gi, "").replace(/\s+/g, "_")
         : "tum_taseronlar";
+      // Hakediş kolon başlığı seçili taşerona göre dinamik (yoksa genel "Taşeron Hakediş")
+      const _expSub = String(subconFilter || "").trim();
+      const _expPct = canonTaseron(_expSub) === "ubs" ? 75 : 80;
+      const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş (Kırılım)";
+      const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş (Kırılım) KDV Dahil";
 
       const getAnaliz = (row) => {
         if (row.status === "PO_BEKLER") return "Eksik";
@@ -3724,7 +3729,7 @@ function FinanceDashboard({
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
         "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Federal Hakediş (%80) KDV Dahil",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", _hakHdr, _hakKdvHdr,
         "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
         "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
         "Taşeron",
@@ -14827,6 +14832,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       const dateStr = new Date().toLocaleDateString("tr-TR");
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
+      // Hakediş kolon başlığı taşerona göre dinamik (Federal → AHY → UBS ...)
+      const _expSub = String(userSubconName || "").trim();
+      const _expPct = canonTaseron(_expSub) === "ubs" ? 75 : 80;
+      const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş";
+      const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş KDV Dahil";
 
       const getAnaliz = (row) => {
         if (row.status === "PO_BEKLER") return "Eksik";
@@ -14840,7 +14850,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
         "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", "Federal Hakediş (%80)", "Federal Hakediş (%80) KDV Dahil",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", _hakHdr, _hakKdvHdr,
         "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
         "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
         "Taşeron",
