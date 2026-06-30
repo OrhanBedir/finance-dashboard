@@ -16473,6 +16473,72 @@ pool.query(`
 
 /* ── 2KX API ─────────────────────────────────────────────────────── */
 
+// 2KX özel item'ları için manuel fiyat (5 item: farklı firma yapıyor)
+async function ensureTwokxManualPricesTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS twokx_manual_prices (
+      id SERIAL PRIMARY KEY,
+      site_code TEXT NOT NULL,
+      item_code TEXT NOT NULL,
+      unit_price NUMERIC,
+      currency TEXT DEFAULT 'TRY',
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (site_code, item_code)
+    );
+  `);
+}
+
+// GET /2kx/manual-prices — özel item manuel fiyatları
+app.get("/2kx/manual-prices", authMiddleware, async (req, res) => {
+  try {
+    await ensureTwokxManualPricesTable();
+    const r = await pool.query(
+      `SELECT site_code, item_code, unit_price, currency, updated_at
+       FROM twokx_manual_prices ORDER BY site_code, item_code`,
+    );
+    return res.json({ ok: true, prices: r.rows });
+  } catch (err) {
+    console.error("2KX MANUAL PRICES GET ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Fiyatlar alınamadı" });
+  }
+});
+
+// POST /2kx/manual-prices — tek fiyat upsert (admin)
+app.post("/2kx/manual-prices", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    await ensureTwokxManualPricesTable();
+    const siteCode = (req.body.site_code || "").toString().trim();
+    const itemCode = (req.body.item_code || "").toString().trim();
+    if (!siteCode || !itemCode) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "site_code ve item_code gerekli" });
+    }
+    const unitPrice =
+      req.body.unit_price === "" || req.body.unit_price == null
+        ? null
+        : parseFinanceNumber(req.body.unit_price);
+    const currency = normalizeCurrency(req.body.currency) || "TRY";
+    await pool.query(
+      `INSERT INTO twokx_manual_prices (site_code, item_code, unit_price, currency, updated_at)
+       VALUES ($1,$2,$3,$4,CURRENT_TIMESTAMP)
+       ON CONFLICT (site_code, item_code)
+       DO UPDATE SET unit_price = EXCLUDED.unit_price,
+                     currency = EXCLUDED.currency,
+                     updated_at = CURRENT_TIMESTAMP`,
+      [siteCode, itemCode, unitPrice, currency],
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("2KX MANUAL PRICES POST ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Fiyat kaydedilemedi" });
+  }
+});
+
 // GET /2kx/pricing — tüm fiyat kuralları
 app.get("/2kx/pricing", authMiddleware, async (req, res) => {
   try {

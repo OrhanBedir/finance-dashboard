@@ -15070,6 +15070,31 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const [billableRows, setBillableRows] = useState([]);
   const [billableLoading, setBillableLoading] = useState(false);
 
+  // 2KX özel kurgu: %75 kırılım + 5 özel item manuel fiyat + sadece 2026 sahaları
+  const is2KXRegion =
+    isSubconUser &&
+    String(userSubconName || "").toUpperCase().includes("2KX");
+  const TWOKX_SPECIAL_ITEMS = useMemo(
+    () =>
+      new Set([
+        "8812184927",
+        "8812184919",
+        "8812184920",
+        "8812184930",
+        "8812184870",
+      ]),
+    [],
+  );
+  const [twokxManualPrices, setTwokxManualPrices] = useState({}); // "SITE|ITEM" -> {unit_price, currency}
+
+  const yearOf = (d) => {
+    if (!d || d === "__NA__") return null;
+    const dt = new Date(d);
+    return isNaN(dt.getTime()) ? null : dt.getFullYear();
+  };
+  const is2026Row = (row) =>
+    yearOf(row.onair_date) === 2026 || yearOf(row.created_at) === 2026;
+
   const openQcReadyModal = (regionName, type) => {
     setQcReadyModalRegion(regionName);
     setQcReadyType(type);
@@ -15231,7 +15256,27 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const data = await fetchJson(`${API_BASE}/dashboard/result`, {
         withAuth: true,
       });
-      setRows(data.rows || []);
+      let resultRows = data.rows || [];
+      // 2KX: sadece 2026 sahaları (OnAir veya iş giriş tarihi 2026)
+      if (is2KXRegion) {
+        resultRows = resultRows.filter((r) => is2026Row(r));
+        // Özel item manuel fiyatlarını çek
+        try {
+          const mp = await fetchJson(`${API_BASE}/2kx/manual-prices`, {
+            withAuth: true,
+          });
+          const map = {};
+          (mp.prices || []).forEach((p) => {
+            map[
+              `${String(p.site_code || "").toUpperCase()}|${String(p.item_code || "").trim()}`
+            ] = { unit_price: p.unit_price, currency: p.currency };
+          });
+          setTwokxManualPrices(map);
+        } catch (e) {
+          /* sessiz */
+        }
+      }
+      setRows(resultRows);
     } catch (err) {
       console.error("REGION RESULT ERROR:", err);
       setRows([]);
@@ -15633,6 +15678,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       return ubsSpecial90Items.has(itemCode) ? 0.9 : 0.75;
     }
 
+    // 2KX: %75 kırılım (ERC %25 keser). Özel item'lar manuel fiyatla ayrı hesaplanır.
+    if (subconName.includes("2kx")) return 0.75;
+
     return Number(userPaymentRate || 1);
   };
 
@@ -15646,15 +15694,32 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     return currency === "USD" ? rawTotal * usdRate : rawTotal;
   };
 
+  // Taşeronun bu satırdan hak ettiği tutar (TRY). 2KX özel item'larında manuel fiyat,
+  // diğer her durumda kırılım × ham tutar. (AHY/Federal/UBS davranışı değişmez.)
+  const getSubconManualUnit = (row) => {
+    const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
+    return twokxManualPrices[key] || null;
+  };
+  const getSubconAmountTRY = (row) => {
+    if (
+      is2KXRegion &&
+      TWOKX_SPECIAL_ITEMS.has(String(row.item_code || "").trim())
+    ) {
+      const mp = getSubconManualUnit(row);
+      if (!mp || mp.unit_price == null || mp.unit_price === "") return 0; // fiyat girilmemiş
+      const doneQty = Number(row.done_qty || 0);
+      const raw = doneQty * Number(mp.unit_price || 0);
+      return normalizeCurrency(mp.currency) === "USD" ? raw * usdRate : raw;
+    }
+    return getRowTotalTRY(row) * getSubconRateByRow(row);
+  };
+
   const regionFilteredRowTotal = sortedRows.reduce((sum, row) => {
     return sum + getRowTotalTRY(row);
   }, 0);
 
   const subconHakedisTotal = sortedRows.reduce((sum, row) => {
-    const rowTotal = getRowTotalTRY(row);
-    const rate = getSubconRateByRow(row);
-
-    return sum + rowTotal * rate;
+    return sum + getSubconAmountTRY(row);
   }, 0);
 
   // Faz 3: Huawei'ye faturalanmış kalemler ile taşeronun yaptığı işi çarpıştır
@@ -15686,18 +15751,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           return Number(row.done_qty || 0) > 0 && keySet.has(key);
         })
         .map((row) => {
-          const rate = getSubconRateByRow(row);
-          const currency = normalizeCurrency(row.currency);
-          const unitRaw = Number(row.unit_price || 0);
-          const unitTRY = currency === "USD" ? unitRaw * usdRate : unitRaw;
-          const taseronUnit = unitTRY * rate;
-          const totalTRY = getRowTotalTRY(row) * rate;
+          const totalTRY = getSubconAmountTRY(row);
+          const doneQty = Number(row.done_qty || 0);
+          const taseronUnit = doneQty > 0 ? totalTRY / doneQty : 0;
           const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
           return {
             site_id: row.site_code,
             item_description: row.item_description,
             item_code: row.item_code,
-            done_qty: Number(row.done_qty || 0),
+            done_qty: doneQty,
             requested_qty: Number(row.requested_qty || 0),
             unit_price: taseronUnit,
             total_price: totalTRY,
@@ -21502,8 +21564,8 @@ function App() {
     const isRolloutOverride = rolloutOverrideEmails.includes(_ue);
     const is2KX = String(u?.subcon_name || "").toUpperCase().includes("2KX");
     if (u?.role === "platform_admin") return "platform";
-    if (is2KX) return "2kx";
-    // Alt yüklenici (AHY/Federal/UBS gibi) → doğrudan Bölge Analizi kartları
+    // 2KX artık AHY gibi Bölge Analizi paneli kullanıyor (eski 2kx paneli kaldırıldı)
+    // Alt yüklenici (AHY/Federal/UBS/2KX gibi) → doğrudan Bölge Analizi kartları
     if (String(u?.role||"").toLowerCase() === "subcon" || String(u?.subcon_name||"").trim() !== "") return "region";
     if (u?.role === "user" && !isBolge && !isRolloutOverride) return "masraf";
     if (isBolge) return "region";
@@ -21911,7 +21973,6 @@ function App() {
       const _luIs2KX = String(_lu?.subcon_name || "").toUpperCase().includes("2KX");
       const _luIsFinance = ["finance","admin","genel_mudur","muhasebe"].includes(_luRole) || _lue === "orhan@simsektel.com" || _lue === "nurcan.kus@simsektel.com";
       if (_luRole === "platform_admin") setPage("platform");
-      else if (_luIs2KX) setPage("2kx");
       else if (_luIsFinance && !_luIsSubcon) setPage("finance");
       else if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("masraf");
       else if (_luIsBolge || _luIsSubcon) setPage("region");
@@ -22309,14 +22370,7 @@ function App() {
           </div>
 
           {/* Navigation */}
-          {is2KXUser ? (
-            <>
-              <div className="sidebar-section-title">Menü</div>
-              <div className={`sidebar-nav-item ${page==='2kx'?'active':''}`} onClick={()=>setPage('2kx')}>
-                <span>📊</span> 2KX Paneli
-              </div>
-            </>
-          ) : isSubconUser ? (
+          {isSubconUser ? (
             <>
               <div className="sidebar-section-title">Menü</div>
               <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
