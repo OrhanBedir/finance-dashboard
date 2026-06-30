@@ -3304,9 +3304,12 @@ function FinanceInvoiceUploadInline({ onClose, onUploaded }) {
 
 function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
-  const [invoiceNo, setInvoiceNo] = useState("");
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
+  const [pdfFiles, setPdfFiles] = useState([]);
+  const [pdfUploading, setPdfUploading] = useState(false);
+  const [pdfMessage, setPdfMessage] = useState("");
+  const [pdfResults, setPdfResults] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [totals, setTotals] = useState({});
   const [loadingList, setLoadingList] = useState(false);
@@ -3335,13 +3338,10 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
     loadList();
   }, []);
 
+  // 1) Excel = kalem master (PO+Line+Shipment). Fatura no GEREKMEZ.
   const handleUpload = async () => {
     if (!file) {
-      setMessage("❌ Lütfen Huawei PO/fatura Excel dosyası seç");
-      return;
-    }
-    if (!invoiceNo.trim()) {
-      setMessage("❌ Lütfen Fatura No gir");
+      setMessage("❌ Lütfen Huawei poCreateExp Excel dosyası seç");
       return;
     }
     try {
@@ -3349,7 +3349,6 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
       setMessage("");
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("invoice_no", invoiceNo.trim());
 
       const response = await fetch(
         `${API_BASE}/finance/hw-invoice-items/upload`,
@@ -3369,7 +3368,6 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
         `✅ ${data.message || `${data.inserted || 0} kalem kaydedildi`}`,
       );
       setFile(null);
-      setInvoiceNo("");
       const input = document.getElementById("finance-hw-invoice-items-input");
       if (input) input.value = "";
       await loadList();
@@ -3379,6 +3377,53 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
       setMessage(`❌ ${err.message}`);
     } finally {
       setUploading(false);
+    }
+  };
+
+  // 2) Kesilen fatura PDF'leri (toplu) → PO+Line+Shipment ile eşleştir
+  const handleUploadPdfs = async () => {
+    if (!pdfFiles || pdfFiles.length === 0) {
+      setPdfMessage("❌ Lütfen kesilen fatura PDF'lerini seç (birden çok olabilir)");
+      return;
+    }
+    try {
+      setPdfUploading(true);
+      setPdfMessage("");
+      setPdfResults([]);
+      const formData = new FormData();
+      for (const f of pdfFiles) formData.append("files", f);
+
+      const response = await fetch(
+        `${API_BASE}/finance/hw-invoice-items/match-pdf`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+          },
+          body: formData,
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || "PDF eşleştirme sırasında hata oluştu");
+      }
+      setPdfResults(data.results || []);
+      setPdfMessage(
+        `✅ ${data.total_files} PDF işlendi · ${data.matched_items} kalem eşleşti` +
+          (data.unmatched_count
+            ? ` · ⚠️ ${data.unmatched_count} eşleşmeyen`
+            : ""),
+      );
+      setPdfFiles([]);
+      const input = document.getElementById("finance-hw-invoice-pdf-input");
+      if (input) input.value = "";
+      await loadList();
+      if (onUploaded) await onUploaded();
+    } catch (err) {
+      console.error("HW INVOICE PDF MATCH ERROR:", err);
+      setPdfMessage(`❌ ${err.message}`);
+    } finally {
+      setPdfUploading(false);
     }
   };
 
@@ -3415,51 +3460,154 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
 
         <p
           style={{
-            margin: "0 0 14px",
+            margin: "0 0 16px",
             fontSize: "13px",
             color: "#64748b",
             lineHeight: 1.5,
           }}
         >
-          Huawei'ye kesilen faturanın <b>kalem (item) bazında</b> detayını yükle.
-          poCreateExp Excel'ini seç ve bu faturanın <b>Fatura No</b>'sunu gir.
-          Sistem site_id (Manufacturer'dan), item code, qty ve birim fiyatları
-          kaydeder. Her fatura ayrı birikir.
+          İki adım: <b>(1)</b> Huawei poCreateExp Excel'ini yükle (kalem master:
+          site_id, item code, qty, birim fiyat). <b>(2)</b> Huawei'ye kesilen
+          fatura PDF'lerini (toplu) yükle — sistem her PDF'ten Fatura No +
+          PO/Line/Shipment + tutarı okuyup kalemlere otomatik eşler.
         </p>
 
-        <div className="formGrid">
-          <div className="formGroup">
-            <label>Fatura No *</label>
-            <input
-              type="text"
-              value={invoiceNo}
-              onChange={(e) => setInvoiceNo(e.target.value)}
-              placeholder="Örn: GIB2026000000123"
-            />
+        {/* ── ADIM 1: Kalem Master (Excel) ── */}
+        <div
+          style={{
+            border: "1px solid #e2e8f0",
+            borderRadius: "12px",
+            padding: "14px 16px",
+            marginBottom: "14px",
+            background: "#f8fafc",
+          }}
+        >
+          <h4 style={{ margin: "0 0 10px", fontSize: "14px" }}>
+            1️⃣ Kalem Master — poCreateExp Excel
+          </h4>
+          <div className="formGrid">
+            <div className="formGroup formGroupWide">
+              <label>Huawei PO Excel (poCreateExp .xlsm/.xlsx)</label>
+              <input
+                id="finance-hw-invoice-items-input"
+                type="file"
+                accept=".xlsm,.xlsx,.xls"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+            </div>
           </div>
-          <div className="formGroup formGroupWide">
-            <label>Huawei PO/Fatura Excel (poCreateExp .xlsm/.xlsx)</label>
-            <input
-              id="finance-hw-invoice-items-input"
-              type="file"
-              accept=".xlsm,.xlsx,.xls"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-            />
+          <div className="entryActions">
+            <button
+              type="button"
+              className="saveButton"
+              onClick={handleUpload}
+              disabled={uploading}
+            >
+              {uploading ? "Yükleniyor..." : "Kalem Master'ı Yükle"}
+            </button>
           </div>
+          {message && <div className="entryMessage">{message}</div>}
         </div>
 
-        <div className="entryActions">
-          <button
-            type="button"
-            className="saveButton"
-            onClick={handleUpload}
-            disabled={uploading}
-          >
-            {uploading ? "Yükleniyor..." : "Kalemleri Yükle"}
-          </button>
-        </div>
+        {/* ── ADIM 2: Kesilen Fatura PDF'leri ── */}
+        <div
+          style={{
+            border: "1px solid #e2e8f0",
+            borderRadius: "12px",
+            padding: "14px 16px",
+            marginBottom: "14px",
+            background: "#f8fafc",
+          }}
+        >
+          <h4 style={{ margin: "0 0 10px", fontSize: "14px" }}>
+            2️⃣ Kesilen Fatura PDF'leri (toplu seç)
+          </h4>
+          <div className="formGrid">
+            <div className="formGroup formGroupWide">
+              <label>e-Fatura PDF'leri (birden çok seçebilirsin)</label>
+              <input
+                id="finance-hw-invoice-pdf-input"
+                type="file"
+                accept=".pdf"
+                multiple
+                onChange={(e) =>
+                  setPdfFiles(Array.from(e.target.files || []))
+                }
+              />
+              {pdfFiles.length > 0 && (
+                <span style={{ fontSize: "12px", color: "#64748b" }}>
+                  {pdfFiles.length} PDF seçildi
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="entryActions">
+            <button
+              type="button"
+              className="saveButton"
+              onClick={handleUploadPdfs}
+              disabled={pdfUploading}
+            >
+              {pdfUploading ? "Eşleştiriliyor..." : "Faturaları Eşleştir"}
+            </button>
+          </div>
+          {pdfMessage && <div className="entryMessage">{pdfMessage}</div>}
 
-        {message && <div className="entryMessage">{message}</div>}
+          {pdfResults.length > 0 && (
+            <div style={{ overflowX: "auto", marginTop: "10px" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "12.5px",
+                }}
+              >
+                <thead>
+                  <tr style={{ textAlign: "left", color: "#64748b" }}>
+                    <th style={{ padding: "5px 8px" }}>PDF</th>
+                    <th style={{ padding: "5px 8px" }}>Fatura No</th>
+                    <th style={{ padding: "5px 8px" }}>PO / L / S</th>
+                    <th style={{ padding: "5px 8px" }}>Eşleşen</th>
+                    <th style={{ padding: "5px 8px" }}>Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pdfResults.map((r, i) => (
+                    <tr
+                      key={i}
+                      style={{
+                        borderTop: "1px solid #e2e8f0",
+                        background:
+                          r.matched > 0 ? "transparent" : "#fef2f2",
+                      }}
+                    >
+                      <td style={{ padding: "5px 8px" }}>{r.file}</td>
+                      <td style={{ padding: "5px 8px" }}>
+                        {r.invoice_no || "-"}
+                      </td>
+                      <td style={{ padding: "5px 8px" }}>
+                        {r.po_no
+                          ? `${r.po_no} / ${r.line_no ?? "-"} / ${
+                              r.shipment_no ?? "-"
+                            }`
+                          : "-"}
+                      </td>
+                      <td style={{ padding: "5px 8px" }}>{r.matched}</td>
+                      <td
+                        style={{
+                          padding: "5px 8px",
+                          color: r.matched > 0 ? "#16a34a" : "#dc2626",
+                        }}
+                      >
+                        {r.status}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         <div style={{ marginTop: "18px" }}>
           <div
@@ -3472,11 +3620,18 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
             }}
           >
             <h4 style={{ margin: 0, fontSize: "14px" }}>
-              Yüklenmiş Faturalar
+              Eşleşmiş Faturalar
             </h4>
             <span style={{ fontSize: "12px", color: "#64748b" }}>
-              {totals.total_invoices || 0} fatura · {totals.total_items || 0}{" "}
-              kalem · {totals.total_sites || 0} site
+              {totals.total_invoices || 0} fatura ·{" "}
+              <b style={{ color: "#16a34a" }}>
+                {totals.invoiced_items || 0}
+              </b>{" "}
+              faturalı /{" "}
+              <b style={{ color: "#f59e0b" }}>
+                {totals.uninvoiced_items || 0}
+              </b>{" "}
+              faturasız kalem · {totals.total_sites || 0} site
             </span>
             <button
               type="button"
@@ -3507,9 +3662,12 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
                     <th style={{ padding: "6px 8px" }}>Site</th>
                     <th style={{ padding: "6px 8px" }}>Para</th>
                     <th style={{ padding: "6px 8px", textAlign: "right" }}>
-                      Toplam
+                      Kalem Toplamı
                     </th>
-                    <th style={{ padding: "6px 8px" }}>Yüklenme</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>
+                      Faturalanan (PDF)
+                    </th>
+                    <th style={{ padding: "6px 8px" }}>Eşleşme</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3528,6 +3686,17 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
                       </td>
                       <td style={{ padding: "6px 8px", textAlign: "right" }}>
                         {fmt(inv.total_amount)}
+                      </td>
+                      <td
+                        style={{
+                          padding: "6px 8px",
+                          textAlign: "right",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {inv.invoiced_amount != null
+                          ? `₺${fmt(inv.invoiced_amount)}`
+                          : "-"}
                       </td>
                       <td style={{ padding: "6px 8px", color: "#94a3b8" }}>
                         {inv.uploaded_at

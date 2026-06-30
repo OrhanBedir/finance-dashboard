@@ -2534,8 +2534,14 @@ async function ensureHwInvoiceItemsTable() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  // PDF eşleştirmesi için ek kolonlar (tablo zaten oluştuysa)
+  await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS shipment_no TEXT`);
+  await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS invoiced_amount_incl NUMERIC`);
+  await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS invoiced_amount_excl NUMERIC`);
+  await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS invoice_matched_at TIMESTAMP`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_hw_invoice_items_site_item ON hw_invoice_items (site_id, item_code)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_hw_invoice_items_invoice ON hw_invoice_items (invoice_no)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_hw_invoice_items_pols ON hw_invoice_items (po_no, line_no, shipment_no)`);
 }
 
 /* ================== COMMON CTE ================== */
@@ -9282,6 +9288,7 @@ function buildHwItemColMap(rawRows) {
     po_no: ["po no.", "po no"],
     release_no: ["release no.", "release no"],
     line_no: ["line no.", "line no"],
+    shipment_no: ["shipment no.", "shipment no"],
     po_qty: ["po qty", "po qty."],
     ac_qty: ["ac qty.", "ac qty"],
     billed_qty: ["billed qty", "billed qty."],
@@ -9332,12 +9339,9 @@ app.post(
       if (!req.file) {
         return res.status(400).json({ ok: false, error: "Dosya yok" });
       }
-      const invoiceNo = (req.body.invoice_no || "").toString().trim();
-      if (!invoiceNo) {
-        return res
-          .status(400)
-          .json({ ok: false, error: "Fatura No girilmedi" });
-      }
+      // Fatura No artık opsiyonel — kesilen fatura no'ları PDF yüklemesi getirir.
+      // Bu Excel "kalem master"ıdır (PO+Line+Shipment bazında).
+      const invoiceNo = (req.body.invoice_no || "").toString().trim() || null;
 
       const workbook = XLSX.read(req.file.buffer);
       const firstSheetName = workbook.SheetNames[0];
@@ -9363,10 +9367,6 @@ app.post(
       const { headerRowIdx, colMap } = mapInfo;
 
       await ensureHwInvoiceItemsTable();
-      // Aynı fatura no tekrar yüklenirse o faturanın kalemlerini değiştir (diğer faturalar birikmeye devam)
-      await pool.query(`DELETE FROM hw_invoice_items WHERE invoice_no = $1`, [
-        invoiceNo,
-      ]);
 
       const get = (rowArr, key) => {
         const idx = colMap[key];
@@ -9409,34 +9409,58 @@ app.post(
           return parseFinanceNumber(v);
         };
 
-        await pool.query(
-          `
-          INSERT INTO hw_invoice_items
-          (invoice_no, site_id, po_no, release_no, line_no, po_qty, ac_qty,
-           billed_qty, currency, unit_price, tax_rate, acceptance_milestone,
-           description, payment_terms, item_code, project_code, upload_batch)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-          `,
-          [
-            invoiceNo,
-            siteId,
-            poNo,
-            txt("release_no"),
-            txt("line_no"),
-            num("po_qty"),
-            num("ac_qty"),
-            num("billed_qty"),
-            normalizeCurrency(get(rowArr, "currency")) || "TRY",
-            num("unit_price"),
-            num("tax_rate"),
-            txt("acceptance_milestone"),
-            txt("description"),
-            txt("payment_terms"),
-            itemCode,
-            txt("project_code"),
-            req.file.filename || req.file.originalname || null,
-          ],
+        const lineNo = txt("line_no");
+        const shipmentNo = txt("shipment_no");
+
+        // Upsert: aynı PO+Line+Shipment varsa master alanları güncelle,
+        // ama önceden eşleşmiş invoice_no / faturalanan tutarı KORU.
+        const existing = await pool.query(
+          `SELECT id FROM hw_invoice_items
+           WHERE po_no = $1
+             AND line_no IS NOT DISTINCT FROM $2
+             AND shipment_no IS NOT DISTINCT FROM $3
+           LIMIT 1`,
+          [poNo, lineNo, shipmentNo],
         );
+
+        const masterVals = [
+          siteId,
+          txt("release_no"),
+          num("po_qty"),
+          num("ac_qty"),
+          num("billed_qty"),
+          normalizeCurrency(get(rowArr, "currency")) || "TRY",
+          num("unit_price"),
+          num("tax_rate"),
+          txt("acceptance_milestone"),
+          txt("description"),
+          txt("payment_terms"),
+          itemCode,
+          txt("project_code"),
+          req.file.filename || req.file.originalname || null,
+        ];
+
+        if (existing.rows.length > 0) {
+          await pool.query(
+            `UPDATE hw_invoice_items SET
+               site_id=$1, release_no=$2, po_qty=$3, ac_qty=$4, billed_qty=$5,
+               currency=$6, unit_price=$7, tax_rate=$8, acceptance_milestone=$9,
+               description=$10, payment_terms=$11, item_code=$12, project_code=$13,
+               upload_batch=$14
+             WHERE id=$15`,
+            [...masterVals, existing.rows[0].id],
+          );
+        } else {
+          await pool.query(
+            `INSERT INTO hw_invoice_items
+             (site_id, release_no, po_qty, ac_qty, billed_qty, currency,
+              unit_price, tax_rate, acceptance_milestone, description,
+              payment_terms, item_code, project_code, upload_batch,
+              po_no, line_no, shipment_no, invoice_no)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+            [...masterVals, poNo, lineNo, shipmentNo, invoiceNo],
+          );
+        }
         inserted++;
       }
 
@@ -9446,7 +9470,7 @@ app.post(
         inserted,
         skipped,
         sheet_name: firstSheetName,
-        message: `${inserted} kalem kaydedildi (Fatura ${invoiceNo})`,
+        message: `${inserted} kalem master'a kaydedildi`,
       });
     } catch (err) {
       console.error("HW INVOICE ITEMS UPLOAD ERROR:", err);
@@ -9462,20 +9486,25 @@ app.post(
 app.get("/finance/hw-invoice-items", async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
+    // Sadece fatura kesilmiş (invoice_no dolu) kalemleri fatura bazında grupla
     const summary = await pool.query(`
       SELECT invoice_no,
              COUNT(*)::int AS item_count,
              COUNT(DISTINCT site_id)::int AS site_count,
              MIN(currency) AS currency,
              SUM(COALESCE(unit_price,0) * COALESCE(billed_qty, ac_qty, po_qty, 0)) AS total_amount,
-             MAX(created_at) AS uploaded_at
+             MAX(invoiced_amount_incl) AS invoiced_amount,
+             MAX(COALESCE(invoice_matched_at, created_at)) AS uploaded_at
       FROM hw_invoice_items
+      WHERE invoice_no IS NOT NULL
       GROUP BY invoice_no
-      ORDER BY MAX(created_at) DESC
+      ORDER BY MAX(COALESCE(invoice_matched_at, created_at)) DESC
     `);
     const totals = await pool.query(`
       SELECT COUNT(*)::int AS total_items,
-             COUNT(DISTINCT invoice_no)::int AS total_invoices,
+             COUNT(*) FILTER (WHERE invoice_no IS NOT NULL)::int AS invoiced_items,
+             COUNT(*) FILTER (WHERE invoice_no IS NULL)::int AS uninvoiced_items,
+             COUNT(DISTINCT invoice_no) FILTER (WHERE invoice_no IS NOT NULL)::int AS total_invoices,
              COUNT(DISTINCT site_id)::int AS total_sites
       FROM hw_invoice_items
     `);
@@ -9508,6 +9537,148 @@ app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
       .json({ ok: false, error: err.message || "Detay alınamadı" });
   }
 });
+
+// Kesilen fatura PDF'lerini parse et: Fatura No + Not(PO/Line/Shipment) + tutar
+// çıkar, PO+Line+Shipment ile kalem master'a eşleştir, invoice_no'yu yaz.
+function parseHwInvoicePdfText(text) {
+  const t = text || "";
+  // Fatura No: SIM... veya GIB... gibi (büyük harf+rakam, 10+ uzunluk)
+  let invoiceNo = null;
+  const mFatura = t.match(/Fatura\s*No[:\s]*([A-Z]{2,5}\d{8,})/i);
+  if (mFatura) invoiceNo = mFatura[1].trim();
+  if (!invoiceNo) {
+    const mAny = t.match(/\b([A-Z]{2,5}\d{10,})\b/);
+    if (mAny) invoiceNo = mAny[1].trim();
+  }
+  // Not: PO Line Shipment  (örn "Not:3621HG3429121-7 1 2")
+  let poNo = null,
+    lineNo = null,
+    shipmentNo = null;
+  const mNot = t.match(/Not:\s*([0-9A-Za-z\-]+)\s+(\d+)\s+(\d+)/);
+  if (mNot) {
+    poNo = mNot[1].trim();
+    lineNo = mNot[2].trim();
+    shipmentNo = mNot[3].trim();
+  }
+  // Tutarlar: tüm "X,XX TL" değerleri; son değer = Ödenecek (KDV dahil)
+  const tls = (t.match(/([\d.]+,\d{2})\s*TL/g) || []).map((s) =>
+    parseFinanceNumber(s.replace(/\s*TL/i, "")),
+  );
+  const amountIncl = tls.length ? tls[tls.length - 1] : null;
+  // KDV-hariç tahmini: ilk değer çoğu faturada Mal Hizmet (birim) tutarı
+  const amountExcl = tls.length ? tls[0] : null;
+  return { invoiceNo, poNo, lineNo, shipmentNo, amountIncl, amountExcl };
+}
+
+const uploadHwPdfs = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024, files: 100 },
+});
+app.post(
+  "/finance/hw-invoice-items/match-pdf",
+  uploadHwPdfs.array("files"),
+  async (req, res) => {
+    try {
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ ok: false, error: "PDF gelmedi" });
+      }
+      await ensureHwInvoiceItemsTable();
+
+      const results = [];
+      let matchedCount = 0;
+      for (const file of req.files) {
+        const name = file.originalname || "dosya.pdf";
+        const isPDF =
+          name.toLowerCase().endsWith(".pdf") ||
+          file.mimetype === "application/pdf";
+        try {
+          const text = await extractPdfText(file.buffer, isPDF);
+          const parsed = parseHwInvoicePdfText(text);
+          // Fatura no dosya adından da düşebilir (SIM2026000000724.pdf)
+          if (!parsed.invoiceNo) {
+            const mName = name.match(/([A-Z]{2,5}\d{8,})/i);
+            if (mName) parsed.invoiceNo = mName[1];
+          }
+
+          if (!parsed.poNo || !parsed.invoiceNo) {
+            results.push({
+              file: name,
+              matched: 0,
+              invoice_no: parsed.invoiceNo,
+              po_no: parsed.poNo,
+              status: "Not satırı / Fatura No okunamadı",
+            });
+            continue;
+          }
+
+          const upd = await pool.query(
+            `UPDATE hw_invoice_items
+               SET invoice_no = $1,
+                   invoiced_amount_incl = $2,
+                   invoiced_amount_excl = $3,
+                   invoice_matched_at = CURRENT_TIMESTAMP
+             WHERE po_no = $4
+               AND line_no IS NOT DISTINCT FROM $5
+               AND shipment_no IS NOT DISTINCT FROM $6
+             RETURNING id, site_id, item_code`,
+            [
+              parsed.invoiceNo,
+              parsed.amountIncl,
+              parsed.amountExcl,
+              parsed.poNo,
+              parsed.lineNo,
+              parsed.shipmentNo,
+            ],
+          );
+
+          if (upd.rows.length === 0) {
+            results.push({
+              file: name,
+              matched: 0,
+              invoice_no: parsed.invoiceNo,
+              po_no: parsed.poNo,
+              line_no: parsed.lineNo,
+              shipment_no: parsed.shipmentNo,
+              status: "Eşleşen kalem yok (önce Excel master yükle?)",
+            });
+          } else {
+            matchedCount += upd.rows.length;
+            results.push({
+              file: name,
+              matched: upd.rows.length,
+              invoice_no: parsed.invoiceNo,
+              po_no: parsed.poNo,
+              line_no: parsed.lineNo,
+              shipment_no: parsed.shipmentNo,
+              amount_incl: parsed.amountIncl,
+              status: "OK",
+            });
+          }
+        } catch (e) {
+          results.push({
+            file: name,
+            matched: 0,
+            status: `Parse hatası: ${e.message}`,
+          });
+        }
+      }
+
+      const unmatched = results.filter((r) => r.matched === 0);
+      return res.json({
+        ok: true,
+        total_files: req.files.length,
+        matched_items: matchedCount,
+        unmatched_count: unmatched.length,
+        results,
+      });
+    } catch (err) {
+      console.error("HW INVOICE PDF MATCH ERROR:", err);
+      return res
+        .status(500)
+        .json({ ok: false, error: err.message || "PDF eşleştirme hatası" });
+    }
+  },
+);
 
 /* ================== FINANCE EXPENSE ADD ================== */
 app.post("/finance/expense/add", async (req, res) => {
