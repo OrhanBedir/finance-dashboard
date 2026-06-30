@@ -15231,6 +15231,17 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             const notBilled = Math.max(completed - billed, 0);
             const ratio = completed > 0 ? (billed / completed) * 100 : 0;
 
+            // Para birimi bazında (native) değerler — subcon kartında TRY ve USD ayrı gösterilir.
+            const rGenel = subconRate;
+            const completedTry = (item.total_try || 0) * rGenel;
+            const completedUsd = (item.total_usd || 0) * rGenel;
+            const poBeklerTry  = (item.po_bekler_try || 0) * rGenel;
+            const poBeklerUsd  = (item.po_bekler_usd || 0) * rGenel;
+            const notBilledTry = Math.max(((item.total_try || 0) - (item.billed_try || 0)) * rGenel, 0);
+            const notBilledUsd = Math.max(((item.total_usd || 0) - (item.billed_usd || 0)) * rGenel, 0);
+            const fUSD = (v) => "$" + Math.round(v).toLocaleString("tr-TR");
+            const _grid3 = { display:"grid", gridTemplateColumns:"1.3fr 1fr 1fr", alignItems:"center", padding:"9px 16px", borderBottom:"1px solid #e5e7eb" };
+
             return (
               <div
                 key={item.region}
@@ -15258,49 +15269,39 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 <div style={{ background: "#f9fafb" }}>
                   {isSubconUser ? (
                     <>
-                      <div style={regionRowStyle}>
-                        <span style={{ color: "#374151", textAlign: "left" }}>
-                          Hakediş
-                        </span>
-                        <strong style={{ textAlign: "right" }}>
-                          {formatTRY(completed * subconRate)}
-                        </strong>
+                      {/* TCMB kuru */}
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 16px", borderBottom:"1px solid #e5e7eb", background:"#eef2ff" }}>
+                        <span style={{ fontSize:"11px", color:"#6366f1", fontWeight:600 }}>💱 USD/TRY · TCMB</span>
+                        <span style={{ fontSize:"12px", fontWeight:800, color:"#4338ca" }}>₺{Number(usdRate||0).toFixed(2)}</span>
                       </div>
-
-                      <div
-                        style={{ ...regionRowStyle, cursor: "pointer" }}
-                        onClick={() =>
-                          openRegionDetail(item.region, "PO_BEKLER")
-                        }
-                      >
-                        <span style={{ color: "#374151", textAlign: "left" }}>
-                          PO Bekleyen Hakediş
-                        </span>
-                        <strong
-                          style={{ color: "#dc2626", textAlign: "right" }}
-                        >
-                          {formatTRY(poBekler * subconRate)}
-                        </strong>
+                      {/* Kolon başlıkları */}
+                      <div style={{ ..._grid3, padding:"7px 16px", background:"#f1f5f9" }}>
+                        <span></span>
+                        <span style={{ textAlign:"right", fontSize:"11px", fontWeight:700, color:"#64748b" }}>TRY ₺</span>
+                        <span style={{ textAlign:"right", fontSize:"11px", fontWeight:700, color:"#0e7490" }}>USD $</span>
                       </div>
-
-                      <div
-                        style={{
-                          ...regionRowStyle,
-                          cursor: "pointer",
-                          borderBottom: "none",
-                        }}
-                        onClick={() =>
-                          openRegionDetail(item.region, "NOT_INVOICED")
-                        }
-                      >
-                        <span style={{ color: "#374151", textAlign: "left" }}>
-                          Faturalanmamış Hakediş
-                        </span>
-                        <strong
-                          style={{ color: "#dc2626", textAlign: "right" }}
-                        >
-                          {formatTRY(notBilled * subconRate)}
-                        </strong>
+                      {/* Hakediş */}
+                      <div style={_grid3}>
+                        <span style={{ color:"#374151" }}>Hakediş</span>
+                        <strong style={{ textAlign:"right" }}>{formatTRY(completedTry)}</strong>
+                        <strong style={{ textAlign:"right", color:"#0e7490" }}>{completedUsd>0?fUSD(completedUsd):"—"}</strong>
+                      </div>
+                      {/* PO Bekleyen */}
+                      <div style={{ ..._grid3, cursor:"pointer" }} onClick={() => openRegionDetail(item.region, "PO_BEKLER")}>
+                        <span style={{ color:"#374151" }}>PO Bekleyen</span>
+                        <strong style={{ textAlign:"right", color:"#dc2626" }}>{formatTRY(poBeklerTry)}</strong>
+                        <strong style={{ textAlign:"right", color:"#dc2626" }}>{poBeklerUsd>0?fUSD(poBeklerUsd):"—"}</strong>
+                      </div>
+                      {/* Faturalanmamış */}
+                      <div style={{ ..._grid3, cursor:"pointer" }} onClick={() => openRegionDetail(item.region, "NOT_INVOICED")}>
+                        <span style={{ color:"#374151" }}>Faturalanmamış</span>
+                        <strong style={{ textAlign:"right", color:"#dc2626" }}>{formatTRY(notBilledTry)}</strong>
+                        <strong style={{ textAlign:"right", color:"#dc2626" }}>{notBilledUsd>0?fUSD(notBilledUsd):"—"}</strong>
+                      </div>
+                      {/* Toplam Hakediş (TRY karşılığı, USD dahil) */}
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"11px 16px", background:"linear-gradient(135deg,#0f172a,#1e293b)", color:"#fff" }}>
+                        <span style={{ fontSize:"12px", opacity:0.85 }}>Toplam Hakediş (TRY karşılığı)</span>
+                        <strong style={{ fontSize:"15px" }}>{formatTRY(completed * subconRate)}</strong>
                       </div>
                     </>
                   ) : (
