@@ -3475,6 +3475,60 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
       ? "-"
       : Number(v).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
 
+  const emptyManual = {
+    invoice_no: "",
+    site_id: "",
+    item_code: "",
+    description: "",
+    po_no: "",
+    line_no: "",
+    shipment_no: "",
+    currency: "TRY",
+    unit_price: "",
+    qty: "",
+    amount_incl: "",
+  };
+  const [showManual, setShowManual] = useState(false);
+  const [manualForm, setManualForm] = useState(emptyManual);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualMsg, setManualMsg] = useState("");
+  const setMf = (k, v) => setManualForm((p) => ({ ...p, [k]: v }));
+
+  const handleManualSave = async () => {
+    if (!manualForm.invoice_no.trim()) {
+      setManualMsg("❌ Fatura No gir");
+      return;
+    }
+    if (!manualForm.site_id.trim()) {
+      setManualMsg("❌ Site ID gir (subcon eşlemesi için şart)");
+      return;
+    }
+    try {
+      setManualSaving(true);
+      setManualMsg("");
+      const r = await fetch(`${API_BASE}/finance/hw-invoice-items/manual`, {
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(manualForm),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!d.ok) throw new Error(d.error || "Kaydedilemedi");
+      setManualMsg(
+        `✅ ${d.message}${d.mode === "matched" ? " (mevcut kaleme bağlandı)" : " (yeni kalem)"}`,
+      );
+      setManualForm(emptyManual);
+      await loadList();
+      if (onUploaded) await onUploaded();
+    } catch (err) {
+      setManualMsg(`❌ ${err.message}`);
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
   const [clearing, setClearing] = useState(false);
   const handleClearMaster = async () => {
     if (
@@ -3842,6 +3896,159 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+
+        {/* ── Manuel Fatura Ekle (okunamayan/eşleşmeyen için) ── */}
+        <div
+          style={{
+            border: "1px solid #e2e8f0",
+            borderRadius: "12px",
+            padding: "14px 16px",
+            marginBottom: "14px",
+            background: "#fffbeb",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              cursor: "pointer",
+            }}
+            onClick={() => setShowManual((s) => !s)}
+          >
+            <h4 style={{ margin: 0, fontSize: "14px" }}>
+              ✍️ Manuel Fatura Ekle{" "}
+              <span style={{ fontSize: "12px", color: "#92400e" }}>
+                (PDF okunamadı / Excel'de yok ise)
+              </span>
+            </h4>
+            <span style={{ fontSize: "16px" }}>{showManual ? "▴" : "▾"}</span>
+          </div>
+
+          {showManual && (
+            <div style={{ marginTop: "12px" }}>
+              <div className="formGrid">
+                <div className="formGroup">
+                  <label>Fatura No *</label>
+                  <input
+                    type="text"
+                    value={manualForm.invoice_no}
+                    onChange={(e) => setMf("invoice_no", e.target.value)}
+                    placeholder="SIM2026000000728"
+                  />
+                </div>
+                <div className="formGroup">
+                  <label>Site ID * (subcon eşlemesi için)</label>
+                  <input
+                    type="text"
+                    value={manualForm.site_id}
+                    onChange={(e) => setMf("site_id", e.target.value)}
+                    placeholder="MN0426_NS_AE"
+                  />
+                </div>
+                <div className="formGroup">
+                  <label>Item Code</label>
+                  <input
+                    type="text"
+                    value={manualForm.item_code}
+                    onChange={(e) => setMf("item_code", e.target.value)}
+                  />
+                </div>
+                <div className="formGroup formGroupWide">
+                  <label>Açıklama</label>
+                  <input
+                    type="text"
+                    value={manualForm.description}
+                    onChange={(e) => setMf("description", e.target.value)}
+                  />
+                </div>
+                <div className="formGroup">
+                  <label>PO No</label>
+                  <input
+                    type="text"
+                    value={manualForm.po_no}
+                    onChange={(e) => setMf("po_no", e.target.value)}
+                    placeholder="3621HG3493442-4"
+                  />
+                </div>
+                <div className="formGroup">
+                  <label>Line</label>
+                  <input
+                    type="text"
+                    value={manualForm.line_no}
+                    onChange={(e) => setMf("line_no", e.target.value)}
+                  />
+                </div>
+                <div className="formGroup">
+                  <label>Shipment</label>
+                  <input
+                    type="text"
+                    value={manualForm.shipment_no}
+                    onChange={(e) => setMf("shipment_no", e.target.value)}
+                  />
+                </div>
+                <div className="formGroup">
+                  <label>Currency</label>
+                  <select
+                    value={manualForm.currency}
+                    onChange={(e) => setMf("currency", e.target.value)}
+                  >
+                    <option value="TRY">TRY</option>
+                    <option value="USD">USD</option>
+                    <option value="EUR">EUR</option>
+                  </select>
+                </div>
+                <div className="formGroup">
+                  <label>Birim Fiyat</label>
+                  <input
+                    type="text"
+                    value={manualForm.unit_price}
+                    onChange={(e) => setMf("unit_price", e.target.value)}
+                  />
+                </div>
+                <div className="formGroup">
+                  <label>Qty</label>
+                  <input
+                    type="text"
+                    value={manualForm.qty}
+                    onChange={(e) => setMf("qty", e.target.value)}
+                  />
+                </div>
+                <div className="formGroup">
+                  <label>Faturalanan Tutar (KDV dahil)</label>
+                  <input
+                    type="text"
+                    value={manualForm.amount_incl}
+                    onChange={(e) => setMf("amount_incl", e.target.value)}
+                    placeholder="17880.88"
+                  />
+                </div>
+              </div>
+              <p
+                style={{
+                  margin: "4px 0 10px",
+                  fontSize: "12px",
+                  color: "#92400e",
+                }}
+              >
+                PO No girersen önce mevcut master kalemine bağlamayı dener;
+                bulamazsa yeni manuel kalem oluşturur. Sonraki adımlar (export,
+                subcon, ödeme) bunda da çalışır.
+              </p>
+              <button
+                type="button"
+                className="saveButton"
+                onClick={handleManualSave}
+                disabled={manualSaving}
+              >
+                {manualSaving ? "Kaydediliyor..." : "Manuel Kalemi Kaydet"}
+              </button>
+              {manualMsg && (
+                <div className="entryMessage">{manualMsg}</div>
+              )}
             </div>
           )}
         </div>

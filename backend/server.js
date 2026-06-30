@@ -9544,6 +9544,101 @@ app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
   }
 });
 
+// Manuel fatura ekle (PDF okunamadı / Excel'de yok ise)
+app.post("/finance/hw-invoice-items/manual", async (req, res) => {
+  try {
+    await ensureHwInvoiceItemsTable();
+    const b = req.body || {};
+    const invoiceNo = (b.invoice_no || "").toString().trim();
+    const siteId = (b.site_id || "").toString().trim() || null;
+    if (!invoiceNo) {
+      return res.status(400).json({ ok: false, error: "Fatura No gerekli" });
+    }
+    if (!siteId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Site ID gerekli (subcon eşlemesi için)" });
+    }
+    const poNo = (b.po_no || "").toString().trim() || null;
+    const lineNo = (b.line_no || "").toString().trim() || null;
+    const shipmentNo = (b.shipment_no || "").toString().trim() || null;
+    const itemCode = (b.item_code || "").toString().trim() || null;
+    const description = (b.description || "").toString().trim() || null;
+    const currency = normalizeCurrency(b.currency) || "TRY";
+    const unitPrice =
+      b.unit_price === "" || b.unit_price == null
+        ? null
+        : parseFinanceNumber(b.unit_price);
+    const qty =
+      b.qty === "" || b.qty == null ? null : parseFinanceNumber(b.qty);
+    const amountIncl =
+      b.amount_incl === "" || b.amount_incl == null
+        ? null
+        : parseFinanceNumber(b.amount_incl);
+
+    // Önce PO+Line+Shipment ile mevcut master'a bağlamayı dene
+    let updated = { rows: [] };
+    if (poNo) {
+      updated = await pool.query(
+        `UPDATE hw_invoice_items
+           SET invoice_no = $1,
+               invoiced_amount_incl = COALESCE($2, invoiced_amount_incl),
+               invoice_matched_at = CURRENT_TIMESTAMP
+         WHERE po_no = $3
+           AND line_no IS NOT DISTINCT FROM $4
+           AND shipment_no IS NOT DISTINCT FROM $5
+         RETURNING id`,
+        [invoiceNo, amountIncl, poNo, lineNo, shipmentNo],
+      );
+    }
+
+    if (updated.rows.length > 0) {
+      return res.json({
+        ok: true,
+        mode: "matched",
+        matched: updated.rows.length,
+        message: `Mevcut ${updated.rows.length} kaleme fatura no yazıldı`,
+      });
+    }
+
+    // Eşleşmedi → manuel yeni kalem oluştur
+    const batchId = "manual-" + Date.now();
+    const uploadDate = new Date().toISOString().slice(0, 10);
+    await pool.query(
+      `INSERT INTO hw_invoice_items
+       (invoice_no, site_id, po_no, line_no, shipment_no, item_code,
+        description, currency, unit_price, billed_qty, ac_qty,
+        invoiced_amount_incl, invoice_matched_at, batch_id, upload_date, upload_batch)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,CURRENT_TIMESTAMP,$12,$13,'MANUEL')`,
+      [
+        invoiceNo,
+        siteId,
+        poNo,
+        lineNo,
+        shipmentNo,
+        itemCode,
+        description,
+        currency,
+        unitPrice,
+        qty,
+        amountIncl,
+        batchId,
+        uploadDate,
+      ],
+    );
+    return res.json({
+      ok: true,
+      mode: "created",
+      message: `Manuel kalem eklendi (Fatura ${invoiceNo})`,
+    });
+  } catch (err) {
+    console.error("HW INVOICE ITEMS MANUAL ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Manuel ekleme hatası" });
+  }
+});
+
 // Yüklenen partileri (batch) listele — tarih, dosya, kalem sayısı
 app.get("/finance/hw-invoice-items-batches", async (req, res) => {
   try {
