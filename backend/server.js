@@ -14288,6 +14288,7 @@ const AUTO_MIGRATIONS = [
 const SUBCON_USERS = [
   { name: "Zeki Sandal",     email: "zsandal@ubstasarimmakine.com.tr", subcon_name: "UBS",     payment_rate: 0.75, password: "123456" },
   { name: "Burhan Koçak",    email: "b.kocak@federalgroups.com",       subcon_name: "Federal", payment_rate: 0.80, password: "123456" },
+  { name: "AHY Elektrik",    email: "ahy",                             subcon_name: "AHY",     payment_rate: 0.80, password: "ahy2026" },
   { name: "Serdar Altınova", email: "serdar.altinova@simsektel.com",   subcon_name: "2KX HABERLEŞME SİSTEMLERİ MÜHENDİSLİK İNŞAAT LİMİTED ŞİRKETİ", payment_rate: 1.0, password: "123456" },
 ];
 
