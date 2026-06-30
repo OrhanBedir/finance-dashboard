@@ -11165,6 +11165,11 @@ function HrDashboard({ onBack, currentUser }) {
                 .filter(p => p.aktif && (isgFirmaTip === "taseron" ? (p.firma_tipi||"simsek")==="taseron" : (p.firma_tipi||"simsek")==="simsek"))
                 .map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
             </select>
+            {isgFirmaTip === "taseron" && personelList.filter(p => p.aktif && (p.firma_tipi||"simsek")==="taseron").length === 0 && (
+              <span style={{ fontSize:"12px", color:"#b45309", background:"#fffbeb", border:"1px solid #fde68a", borderRadius:"8px", padding:"7px 12px", lineHeight:1.4 }}>
+                ⚠️ Henüz taşeron personeli yok. <strong>👤 Personel Maaş</strong> sekmesinden yeni personel eklerken <strong>Firma Tipi: Taşeron</strong> seçin; sonra burada görünür.
+              </span>
+            )}
           </div>
 
           {!selectedPersonel ? (
