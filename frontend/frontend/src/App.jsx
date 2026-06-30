@@ -14859,7 +14859,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const aoa = [];
 
       const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
-      titleRow[0] = { v: overrideTitle ? `${overrideTitle} (${dateStr})` : `BÖLGE ANALİZİ${searchSuffix} (${dateStr})`, s: titleStyle };
+      const _baseTitle = aggregateBySite ? "BÖLGE ANALİZİ - SAHA BAZINDA" : "BÖLGE ANALİZİ";
+      titleRow[0] = { v: overrideTitle ? `${overrideTitle}${aggregateBySite ? " - Saha Bazında" : ""} (${dateStr})` : `${_baseTitle}${searchSuffix} (${dateStr})`, s: titleStyle };
       aoa.push(titleRow);
 
       aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
@@ -14990,6 +14991,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         });
       }
 
+      // Saha bazında: gereksiz kalem-detay kolonlarını çıkar (USD Birim Fiyat, USD Toplam Fiyat, Unit Price TRY)
+      const _dropIdx = aggregateBySite ? new Set([13, 14, 15]) : null;
+      if (_dropIdx) {
+        for (let i = 0; i < aoa.length; i++) aoa[i] = aoa[i].filter((_, ci) => !_dropIdx.has(ci));
+      }
+      const _effColWidths = _dropIdx ? COL_WIDTHS.filter((_, ci) => !_dropIdx.has(ci)) : COL_WIDTHS;
+      const _effNCOLS = aoa[1] ? aoa[1].length : NCOLS;
+
       const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
 
       aoa.forEach((row, ri) => {
@@ -15000,8 +15009,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         });
       });
 
-      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
-      ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
+      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: _effNCOLS - 1 } }];
+      ws["!cols"] = _effColWidths.map((wch) => ({ wch }));
       ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...aoa.slice(2).map(() => ({ hpt: 20 }))];
 
       const wb = XLSXStyle.utils.book_new();
@@ -15012,10 +15021,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         ? `-${regionSearch.trim().replace(/[^a-zA-Z0-9_]/g, "_")}`
         : "";
       const fileName = overrideFileBase
-        ? `${String(overrideFileBase).replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ _-]/g, "").slice(0, 50)}_${dateFile}.xlsx`
-        : `bolge_analizi_${dateFile}${searchSuffixFile}.xlsx`;
+        ? `${String(overrideFileBase).replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ _-]/g, "").slice(0, 50)}${aggregateBySite ? "_saha" : ""}_${dateFile}.xlsx`
+        : `bolge_analizi${aggregateBySite ? "_saha" : ""}_${dateFile}${searchSuffixFile}.xlsx`;
 
-      const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
+      const lastColLetter = XLSXStyle.utils.encode_col(_effNCOLS - 1);
       const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
       const autoFilterRef = `A2:${lastColLetter}2`;
 
