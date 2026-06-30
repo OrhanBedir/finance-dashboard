@@ -9526,6 +9526,30 @@ function HrDashboard({ onBack, currentUser }) {
     const r = await fetch(`${API_BASE}/hr/personel`);
     setPersonelList(await r.json());
   };
+  // ISG/Belgeler'den hızlı taşeron personeli ekleme (tek tek)
+  const addTaseronPersonel = async () => {
+    const ad = window.prompt("Taşeron personeli — Ad Soyad:");
+    if (!ad || !ad.trim()) return;
+    const taseron = window.prompt("Hangi taşeron firması? (örn. AHY, Federal — opsiyonel):", "") || "";
+    const unvan = window.prompt("Ünvan (opsiyonel):", "") || "";
+    try {
+      const res = await fetch(`${API_BASE}/hr/personel`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_soyad: ad.trim(), unvan: unvan.trim() || null, alt_yuklenici: taseron.trim() || null, firma_tipi: "taseron" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.ok === false) throw new Error(j.error || "Eklenemedi");
+      await loadPersonel();
+      await loadIsgMatris();
+      if (j.id || j.personel?.id || j.rows?.[0]?.id) {
+        const newId = j.id || j.personel?.id || j.rows?.[0]?.id;
+        const fresh = await (await fetch(`${API_BASE}/hr/personel`)).json();
+        const np = (fresh || []).find(x => String(x.id) === String(newId));
+        if (np) { setPersonelList(fresh); loadPersonelDetail(np); }
+      }
+      alert(`✅ Taşeron personeli eklendi: ${ad.trim()}`);
+    } catch (e) { alert(e.message || "Personel eklenemedi"); }
+  };
   const loadIsgMatris = async () => {
     const r = await fetch(`${API_BASE}/hr/isg/matris`);
     setIsgMatris(await r.json());
@@ -9960,7 +9984,7 @@ function HrDashboard({ onBack, currentUser }) {
                   <h2 style={{ margin:0, fontSize:"20px" }}>
                     👤 Personel Listesi
                     <span style={{ marginLeft:"10px", fontSize:"13px", fontWeight:500, color:"#6b7280", background:"#f3f4f6", borderRadius:"20px", padding:"2px 10px" }}>
-                      {personelList.filter(p=>p.aktif).length} aktif
+                      {personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek").length} aktif
                     </span>
                   </h2>
                   {/* Tam ay tahmini bütçe + an itibariyle — alt alta, aynı format */}
@@ -9973,7 +9997,7 @@ function HrDashboard({ onBack, currentUser }) {
                         <div style={labelSt}>
                           📊 {ayAdi} {yilStr} Tahmini Maaş Bütçesi:
                           <span style={amountSt("#1e40af")}>
-                            ₺{personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0).toLocaleString("tr-TR")}
+                            ₺{personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek").reduce((s,p) => s + Number(p.net_maas||0), 0).toLocaleString("tr-TR")}
                           </span>
                           <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:500 }}>(tüm personel tam çalışırsa)</span>
                         </div>
@@ -9982,7 +10006,7 @@ function HrDashboard({ onBack, currentUser }) {
                           <span style={amountSt("#15803d")}>
                             ₺{(ozet.length > 0
                               ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
-                              : personelList.filter(p=>p.aktif).reduce((s,p) => s + Number(p.net_maas||0), 0)
+                              : personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek").reduce((s,p) => s + Number(p.net_maas||0), 0)
                             ).toLocaleString("tr-TR")}
                           </span>
                         </div>
@@ -9990,7 +10014,7 @@ function HrDashboard({ onBack, currentUser }) {
                           // Her personel için: bankadan_gosterilen üzerinden brüt (vergi var),
                           // elden_verilen doğrudan eklenir (vergi yok).
                           // ozet varsa çalışılan güne göre orantılı hesaplanır.
-                          const aktifP = personelList.filter(p => p.aktif);
+                          const aktifP = personelList.filter(p => p.aktif && (p.firma_tipi||"simsek")==="simsek");
                           let _toplamIsverenMal = 0;
                           let _toplamSgkIsv = 0;
                           if (ozet.length > 0) {
@@ -10058,7 +10082,7 @@ function HrDashboard({ onBack, currentUser }) {
                       });
 
                     // Aktif personel + hakedişleri
-                    const aktifPer = personelList.filter(p=>p.aktif);
+                    const aktifPer = personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek");
                     const allRows = aktifPer.map(p => {
                       const ozO    = ozet.find(o=>String(o.personel_id)===String(p.id));
                       const hakEdis  = ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0);
@@ -10116,7 +10140,7 @@ function HrDashboard({ onBack, currentUser }) {
                                     onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                                     onMouseLeave={e=>e.currentTarget.style.background=""}
                                   >👥 Tüm Personel</div>
-                                  {personelList.filter(p=>p.aktif && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
+                                  {personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek" && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
                                     <div key={p.id}
                                       onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); setOdemeTabloAcik(true); }}
                                       style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
@@ -10604,9 +10628,10 @@ function HrDashboard({ onBack, currentUser }) {
                       ))}
                       <div>
                         <label style={labelSt}>Firma Tipi</label>
+                        {/* Personel Maaş yalnız Şimşek içindir; taşeron personeli ISG/Belgeler'den eklenir */}
                         <select value={pForm.firma_tipi||"simsek"} onChange={e=>setPForm(f=>({...f,firma_tipi:e.target.value}))} style={inputSt}>
                           <option value="simsek">Şimşek</option>
-                          <option value="taseron">Taşeron</option>
+                          {pForm.firma_tipi === "taseron" && <option value="taseron">Taşeron</option>}
                         </select>
                       </div>
                       <div>
@@ -11165,9 +11190,15 @@ function HrDashboard({ onBack, currentUser }) {
                 .filter(p => p.aktif && (isgFirmaTip === "taseron" ? (p.firma_tipi||"simsek")==="taseron" : (p.firma_tipi||"simsek")==="simsek"))
                 .map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
             </select>
+            {isgFirmaTip === "taseron" && (
+              <button onClick={addTaseronPersonel}
+                style={{ padding:"8px 14px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#7c3aed,#a855f7)", whiteSpace:"nowrap" }}>
+                ➕ Taşeron Personeli Ekle
+              </button>
+            )}
             {isgFirmaTip === "taseron" && personelList.filter(p => p.aktif && (p.firma_tipi||"simsek")==="taseron").length === 0 && (
-              <span style={{ fontSize:"12px", color:"#b45309", background:"#fffbeb", border:"1px solid #fde68a", borderRadius:"8px", padding:"7px 12px", lineHeight:1.4 }}>
-                ⚠️ Henüz taşeron personeli yok. <strong>👤 Personel Maaş</strong> sekmesinden yeni personel eklerken <strong>Firma Tipi: Taşeron</strong> seçin; sonra burada görünür.
+              <span style={{ fontSize:"12px", color:"#6b7280", lineHeight:1.4 }}>
+                Henüz taşeron personeli yok — <strong>➕ Taşeron Personeli Ekle</strong> ile tek tek ekleyip belgelerini girebilirsin.
               </span>
             )}
           </div>
@@ -11327,8 +11358,9 @@ function HrDashboard({ onBack, currentUser }) {
             // Görüntülenecek kolonlar
             const gorunenKolonlar = seciliEgitim ? [seciliEgitim] : TUM_KOLONLAR;
 
-            // Temel filtre: aktif personel
-            let liste = isgMatris.filter(p => p.aktif);
+            // Temel filtre: aktif personel + Şimşek/Taşeron toggle'a göre firma tipi
+            const _isgFirmaMatch = (p) => isgFirmaTip === "taseron" ? (p.firma_tipi||"simsek")==="taseron" : (p.firma_tipi||"simsek")==="simsek";
+            let liste = isgMatris.filter(p => p.aktif && _isgFirmaMatch(p));
 
             // Personel filtresi
             if (isgMatrisPersonel) {
@@ -11355,8 +11387,8 @@ function HrDashboard({ onBack, currentUser }) {
               return aMin - bMin;
             });
 
-            // Sayaçlar — tüm aktif personel üzerinden (filtreden bağımsız)
-            const tamListe = isgMatris.filter(p => p.aktif);
+            // Sayaçlar — tüm aktif personel üzerinden (filtreden bağımsız), firma tipine göre
+            const tamListe = isgMatris.filter(p => p.aktif && _isgFirmaMatch(p));
             const dolduSayisi = tamListe.filter(p=>TUM_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="DOLDU")).length;
             const yakSayisi   = tamListe.filter(p=>TUM_KOLONLAR.some(k=>egitimDurum(p.egitimler,k.tur).durum==="YAKLASAN")).length;
 
@@ -11392,7 +11424,7 @@ function HrDashboard({ onBack, currentUser }) {
                         style={{ padding:"7px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", minWidth:"180px",
                           background: isgMatrisPersonel?"#eff6ff":"#fff", borderColor: isgMatrisPersonel?"#3b82f6":"#e5e7eb" }}>
                         <option value="">— Tüm Personel —</option>
-                        {isgMatris.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+                        {isgMatris.filter(p=>p.aktif && (isgFirmaTip === "taseron" ? (p.firma_tipi||"simsek")==="taseron" : (p.firma_tipi||"simsek")==="simsek")).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
                       </select>
                     </div>
                     {/* Eğitim türü filtresi */}
