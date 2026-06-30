@@ -9538,6 +9538,53 @@ app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
   }
 });
 
+// Tüm kalemleri subcon_name (master_works'ten eşlenmiş) ile dök — Excel için
+// NOT: /:invoiceNo route'u ile çakışmasın diye ayrı path
+app.get("/finance/hw-invoice-items-export", async (req, res) => {
+  try {
+    await ensureHwInvoiceItemsTable();
+    const result = await pool.query(`
+      SELECT
+        h.invoice_no,
+        h.site_id,
+        h.item_code,
+        h.description,
+        h.po_no,
+        h.line_no,
+        h.shipment_no,
+        h.po_qty,
+        h.ac_qty,
+        h.billed_qty,
+        h.currency,
+        h.unit_price,
+        h.tax_rate,
+        h.acceptance_milestone,
+        h.project_code,
+        h.invoiced_amount_incl,
+        sub.subcon_names,
+        sub.done_qty_total,
+        sub.item_desc_mw
+      FROM hw_invoice_items h
+      LEFT JOIN LATERAL (
+        SELECT
+          string_agg(DISTINCT NULLIF(TRIM(m.subcon_name), ''), ', ') AS subcon_names,
+          SUM(COALESCE(m.done_qty, 0)) AS done_qty_total,
+          MAX(NULLIF(TRIM(m.item_description), '')) AS item_desc_mw
+        FROM master_works m
+        WHERE UPPER(TRIM(COALESCE(m.site_code, ''))) = UPPER(TRIM(COALESCE(h.site_id, '')))
+          AND TRIM(COALESCE(m.item_code, '')) = TRIM(COALESCE(h.item_code, ''))
+      ) sub ON TRUE
+      ORDER BY (h.invoice_no IS NULL), h.invoice_no, h.site_id, h.line_no
+    `);
+    return res.json({ ok: true, rows: result.rows });
+  } catch (err) {
+    console.error("HW INVOICE ITEMS EXPORT ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Export verisi alınamadı" });
+  }
+});
+
 // Kesilen fatura PDF'lerini parse et: Fatura No + Not(PO/Line/Shipment) + tutar
 // çıkar, PO+Line+Shipment ile kalem master'a eşleştir, invoice_no'yu yaz.
 function parseHwInvoicePdfText(text) {

@@ -3432,6 +3432,88 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
       ? "-"
       : Number(v).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
 
+  const [exporting, setExporting] = useState(false);
+  const handleExportItemData = async () => {
+    try {
+      setExporting(true);
+      const r = await fetch(`${API_BASE}/finance/hw-invoice-items-export`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("finance_token")}`,
+        },
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!d.ok) throw new Error(d.error || "Veri alınamadı");
+      const rows = d.rows || [];
+      const header = [
+        "Fatura No",
+        "Subcon",
+        "Site ID",
+        "Item Code",
+        "Açıklama",
+        "PO No",
+        "Line",
+        "Shipment",
+        "PO Qty",
+        "AC Qty",
+        "Billed Qty",
+        "Done Qty",
+        "Currency",
+        "Birim Fiyat",
+        "Tax Rate",
+        "Milestone",
+        "Project Code",
+        "Faturalanan (PDF)",
+      ];
+      const aoa = [header];
+      for (const x of rows) {
+        aoa.push([
+          x.invoice_no || "",
+          x.subcon_names || "",
+          x.site_id || "",
+          x.item_code || "",
+          x.description || x.item_desc_mw || "",
+          x.po_no || "",
+          x.line_no || "",
+          x.shipment_no || "",
+          x.po_qty ?? "",
+          x.ac_qty ?? "",
+          x.billed_qty ?? "",
+          x.done_qty_total ?? "",
+          x.currency || "",
+          x.unit_price ?? "",
+          x.tax_rate ?? "",
+          x.acceptance_milestone || "",
+          x.project_code || "",
+          x.invoiced_amount_incl ?? "",
+        ]);
+      }
+      const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = header.map((h, i) => ({
+        wch:
+          i === 4 ? 38 : i === 0 || i === 1 ? 20 : i === 2 ? 16 : 12,
+      }));
+      // Başlık satırını koyu yap
+      const range = XLSXStyle.utils.decode_range(ws["!ref"]);
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cell = ws[XLSXStyle.utils.encode_cell({ r: 0, c })];
+        if (cell)
+          cell.s = {
+            font: { bold: true, color: { rgb: "FFFFFF" } },
+            fill: { patternType: "solid", fgColor: { rgb: "1E40AF" } },
+            alignment: { horizontal: "center" },
+          };
+      }
+      const wb = XLSXStyle.utils.book_new();
+      XLSXStyle.utils.book_append_sheet(wb, ws, "Huawei Fatura Item");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSXStyle.writeFile(wb, `Huawei_Fatura_Item_Data_${dateStr}.xlsx`);
+    } catch (err) {
+      alert("İndirme hatası: " + err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="entryPanel" style={{ marginBottom: "18px" }}>
       <div className="entryForm">
@@ -3640,6 +3722,15 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
               style={{ padding: "6px 12px", fontSize: "12px" }}
             >
               {loadingList ? "..." : "Yenile"}
+            </button>
+            <button
+              type="button"
+              className="saveButton"
+              onClick={handleExportItemData}
+              disabled={exporting}
+              style={{ padding: "6px 14px", fontSize: "12px" }}
+            >
+              {exporting ? "İndiriliyor..." : "⬇ Huawei Fatura Item Data"}
             </button>
           </div>
           {invoices.length === 0 ? (
