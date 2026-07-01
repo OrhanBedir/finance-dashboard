@@ -10103,8 +10103,26 @@ function PuantajPanel({ currentUser, onBack }) {
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
-    setPersonelList((await r.json()).filter(p => p.aktif));
+    // Tüm personeli yükle (pasif/ayrılan dahil) — arşiv/geçmiş ay Excel'i için.
+    // Görünürlük ay-bazında visiblePersonel ile belirlenir.
+    setPersonelList(await r.json());
   };
+
+  // Seçili ayda ÇALIŞAN personel: işe giriş <= ay sonu VE (ayrılma yok VEYA ayrılma >= ay başı)
+  // Böylece ayrılan personel ayrıldığı aya kadar görünür, sonraki aylarda görünmez;
+  // geçmiş ay Excel'inde (o ay çalıştıysa) yer alır.
+  const visiblePersonel = useMemo(() => {
+    const [vy, vm] = puantajAy.split("-");
+    const monthStart = `${puantajAy}-01`;
+    const monthEnd = `${puantajAy}-${String(new Date(Number(vy), Number(vm), 0).getDate()).padStart(2, "0")}`;
+    return personelList.filter((p) => {
+      const giris = (p.ise_giris_tarihi || "").split("T")[0];
+      const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
+      if (giris && giris > monthEnd) return false; // o ay henüz işe girmemiş
+      if (ayrilma && ayrilma < monthStart) return false; // bu aydan önce ayrılmış
+      return true;
+    });
+  }, [personelList, puantajAy]);
   const loadPuantaj = async () => {
     const [yil, ay] = puantajAy.split("-");
     const r = await fetch(`${API_BASE}/hr/puantaj?ay=${ay}&yil=${yil}`);
@@ -10189,7 +10207,7 @@ function PuantajPanel({ currentUser, onBack }) {
         <select value={personelFilter} onChange={e=>setPersonelFilter(e.target.value)}
           style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", minWidth:"160px" }}>
           <option value="">👥 Tüm Personel</option>
-          {personelList.map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+          {visiblePersonel.map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
         </select>
 
         <span style={{ fontSize:"12px", color:"#9ca3af" }}>Tıkla: ✅→❌→🏖→☪️→⭕→💤→🎌</span>
@@ -10288,7 +10306,7 @@ function PuantajPanel({ currentUser, onBack }) {
             </tr>
           </thead>
           <tbody>
-            {personelList.filter(p => !personelFilter || String(p.id) === String(personelFilter)).map((p, pi) => {
+            {visiblePersonel.filter(p => !personelFilter || String(p.id) === String(personelFilter)).map((p, pi) => {
               const calisilan = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="CALISDI").length;
               const rowBg = pi%2===0?"#fff":"#fafafa";
               return (

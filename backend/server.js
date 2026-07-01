@@ -11652,11 +11652,17 @@ app.get("/hr/excel/puantaj", async (req, res) => {
     const totalDays = new Date(Number(yil), Number(ay), 0).getDate();
     const ayAdi = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ay)-1];
 
-    let personelQuery = "SELECT * FROM personel WHERE aktif=true";
-    const queryParams = [];
+    // Ay-farkındalıklı arşiv: seçili ayda çalışan personeli al (ayrılan personel
+    // ayrıldığı aya kadarki Excel'lerde görünür, sonraki aylarda görünmez).
+    const monthStart = `${yil}-${String(ay).padStart(2, "0")}-01`;
+    const monthEnd = `${yil}-${String(ay).padStart(2, "0")}-${String(totalDays).padStart(2, "0")}`;
+    const queryParams = [monthStart, monthEnd];
+    let personelQuery = `SELECT * FROM personel
+       WHERE (ise_giris_tarihi IS NULL OR ise_giris_tarihi <= $2)
+         AND (isten_ayrilma_tarihi IS NULL OR isten_ayrilma_tarihi >= $1)`;
     if (personel_id) {
       queryParams.push(personel_id);
-      personelQuery += ` AND id=$1`;
+      personelQuery += ` AND id=$3`;
     }
     personelQuery += " ORDER BY ad_soyad";
     const personelList = await pool.query(personelQuery, queryParams);
