@@ -11707,7 +11707,7 @@ function HrDashboard({ onBack, currentUser }) {
                         {/* Personel Maaş yalnız Şimşek içindir; taşeron personeli ISG/Belgeler'den eklenir */}
                         <select value={pForm.firma_tipi||"simsek"} onChange={e=>setPForm(f=>({...f,firma_tipi:e.target.value}))} style={inputSt}>
                           <option value="simsek">Şimşek</option>
-                          {pForm.firma_tipi === "taseron" && <option value="taseron">Taşeron</option>}
+                          <option value="taseron">Taşeron (sadece ISG)</option>
                         </select>
                       </div>
                       <div>
