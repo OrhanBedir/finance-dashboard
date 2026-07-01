@@ -10536,6 +10536,30 @@ function HrDashboard({ onBack, currentUser }) {
   const [isgMatrisFiltre, setIsgMatrisFiltre] = useState("tumu"); // "tumu"|"doldu"|"yaklasan"|"gecerli"
   const [isgMatrisPersonel, setIsgMatrisPersonel] = useState(""); // personel id filtresi
   const [isgMatrisEgitim, setIsgMatrisEgitim] = useState(""); // eğitim türü filtresi
+  // Taşeron personeli ekleme (ISG'ye özel, satır içi form — maaş formu DEĞİL)
+  const [showTaseronForm, setShowTaseronForm] = useState(false);
+  const [taseronForm, setTaseronForm] = useState({ ad_soyad:"", alt_yuklenici:"", unvan:"" });
+  const [taseronSaving, setTaseronSaving] = useState(false);
+  const saveTaseronPersonel = async () => {
+    if (!taseronForm.ad_soyad.trim()) { alert("Ad Soyad gir"); return; }
+    try {
+      setTaseronSaving(true);
+      const res = await fetch(`${API_BASE}/hr/personel`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_soyad: taseronForm.ad_soyad.trim(), unvan: taseronForm.unvan.trim()||null, alt_yuklenici: taseronForm.alt_yuklenici.trim()||null, firma_tipi: "taseron" }),
+      });
+      const j = await res.json().catch(()=>({}));
+      if (!res.ok || j.error) throw new Error(j.error || "Eklenemedi");
+      setTaseronForm({ ad_soyad:"", alt_yuklenici:"", unvan:"" });
+      setShowTaseronForm(false);
+      const fresh = await (await fetch(`${API_BASE}/hr/personel`)).json();
+      setPersonelList(fresh);
+      await loadIsgMatris();
+      const np = (fresh||[]).find(x => String(x.id) === String(j.id));
+      if (np) loadPersonelDetail(np); // ISG belge/eğitim görünümünde aç (maaş değil)
+    } catch(e){ alert(e.message || "Personel eklenemedi"); }
+    finally { setTaseronSaving(false); }
+  };
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
@@ -12241,17 +12265,46 @@ function HrDashboard({ onBack, currentUser }) {
                 .map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
             </select>
             {isgFirmaTip === "taseron" && (
-              <button onClick={addTaseronPersonel}
+              <button onClick={()=>setShowTaseronForm(s=>!s)}
                 style={{ padding:"8px 14px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#7c3aed,#a855f7)", whiteSpace:"nowrap" }}>
-                ➕ Taşeron Personeli Ekle
+                {showTaseronForm ? "✕ Kapat" : "➕ Taşeron Personeli Ekle"}
               </button>
             )}
-            {isgFirmaTip === "taseron" && personelList.filter(p => p.aktif && (p.firma_tipi||"simsek")==="taseron").length === 0 && (
+            {isgFirmaTip === "taseron" && !showTaseronForm && personelList.filter(p => p.aktif && (p.firma_tipi||"simsek")==="taseron").length === 0 && (
               <span style={{ fontSize:"12px", color:"#6b7280", lineHeight:1.4 }}>
                 Henüz taşeron personeli yok — <strong>➕ Taşeron Personeli Ekle</strong> ile tek tek ekleyip belgelerini girebilirsin.
               </span>
             )}
           </div>
+
+          {/* Taşeron personeli — ISG'ye özel satır içi ekleme formu (maaş formu DEĞİL) */}
+          {isgFirmaTip === "taseron" && showTaseronForm && (
+            <div style={{ marginTop:"12px", background:"#faf5ff", border:"1.5px solid #e9d5ff", borderRadius:"12px", padding:"14px 16px" }}>
+              <div style={{ fontSize:"13px", fontWeight:700, color:"#6b21a8", marginBottom:"4px" }}>➕ Taşeron Personeli Ekle (yalnız ISG takibi için)</div>
+              <div style={{ fontSize:"11.5px", color:"#7c3aed", marginBottom:"10px" }}>Bu personel sadece ISG/eğitim ve RFQ takibi için eklenir — maaş tarafında görünmez, maaş bilgisi istenmez.</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1.4fr 1.2fr 1fr auto", gap:"10px", alignItems:"end", flexWrap:"wrap" }}>
+                <div>
+                  <label style={{ fontSize:"11px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"3px" }}>Ad Soyad *</label>
+                  <input value={taseronForm.ad_soyad} onChange={e=>setTaseronForm(f=>({...f, ad_soyad:e.target.value}))} placeholder="Ad Soyad"
+                    style={{ width:"100%", padding:"8px 10px", border:"1px solid #d8b4fe", borderRadius:"7px", fontSize:"13px", boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:"11px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"3px" }}>Taşeron Firma</label>
+                  <input value={taseronForm.alt_yuklenici} onChange={e=>setTaseronForm(f=>({...f, alt_yuklenici:e.target.value}))} placeholder="Örn. AHY, Federal"
+                    style={{ width:"100%", padding:"8px 10px", border:"1px solid #d8b4fe", borderRadius:"7px", fontSize:"13px", boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:"11px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"3px" }}>Ünvan</label>
+                  <input value={taseronForm.unvan} onChange={e=>setTaseronForm(f=>({...f, unvan:e.target.value}))} placeholder="Örn. Montajcı"
+                    style={{ width:"100%", padding:"8px 10px", border:"1px solid #d8b4fe", borderRadius:"7px", fontSize:"13px", boxSizing:"border-box" }} />
+                </div>
+                <button onClick={saveTaseronPersonel} disabled={taseronSaving}
+                  style={{ padding:"9px 18px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"#7c3aed", whiteSpace:"nowrap" }}>
+                  {taseronSaving ? "..." : "Kaydet"}
+                </button>
+              </div>
+            </div>
+          )}
 
           {!selectedPersonel ? (
             <div style={{ ...secSt, textAlign:"center", color:"#9ca3af", padding:"32px" }}>
