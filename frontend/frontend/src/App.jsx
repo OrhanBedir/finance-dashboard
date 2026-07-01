@@ -429,18 +429,21 @@ function getQtyAnalysis(doneQty, requestedQty) {
     };
   }
 
+  // PO merkezli analiz:
+  //  done < PO (diff<0) → PO FAZLA açılmış
+  //  done > PO (diff>0) → PO EKSİK (daha çok PO açılmalı — müşteriye bildir)
   if (diff < 0) {
     return {
       diff,
-      label: "Eksik",
-      className: "analysis-missing",
+      label: "Fazla",
+      className: "analysis-over",
     };
   }
 
   return {
     diff,
-    label: "Fazla",
-    className: "analysis-over",
+    label: "Eksik",
+    className: "analysis-missing",
   };
 }
 
@@ -4649,8 +4652,9 @@ function FinanceDashboard({
         if (row.status === "PO_BEKLER") return "Eksik";
         if (Number(row.done_qty || 0) === 0) return "Giriş Yok";
         if (Number(row.done_qty || 0) === Number(row.requested_qty || 0)) return "Tamam";
-        if (Number(row.done_qty || 0) > Number(row.requested_qty || 0)) return "Fazla";
-        return "Eksik";
+        // PO merkezli: done > PO ise PO EKSİK (daha çok PO açılmalı); done < PO ise PO FAZLA açılmış
+        if (Number(row.done_qty || 0) > Number(row.requested_qty || 0)) return "Eksik";
+        return "Fazla";
       };
 
       const headers = [
@@ -16486,8 +16490,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         if (row.status === "PO_BEKLER") return "Eksik";
         if (Number(row.done_qty || 0) === 0) return "Giriş Yok";
         if (Number(row.done_qty || 0) === Number(row.requested_qty || 0)) return "Tamam";
-        if (Number(row.done_qty || 0) > Number(row.requested_qty || 0)) return "Fazla";
-        return "Eksik";
+        // PO merkezli: done > PO ise PO EKSİK (daha çok PO açılmalı); done < PO ise PO FAZLA açılmış
+        if (Number(row.done_qty || 0) > Number(row.requested_qty || 0)) return "Eksik";
+        return "Fazla";
       };
 
       const headers = [
