@@ -12194,7 +12194,22 @@ function HrDashboard({ onBack, currentUser }) {
             <div style={{ marginTop:"24px" }}>
               <h3 style={{ marginBottom:"12px" }}>💰 Ay Özeti</h3>
               <div style={{ display:"grid", gap:"8px" }}>
-                {ozet.filter(o => !hrPersonelFilter || String(o.personel_id) === String(hrPersonelFilter)).map(o => {
+                {ozet.filter(o => {
+                  if (hrPersonelFilter && String(o.personel_id) !== String(hrPersonelFilter)) return false;
+                  const p = personelList.find(pp => String(pp.id) === String(o.personel_id));
+                  if (!p) return false;
+                  // Taşeron hariç — Ay Özeti sadece Şimşek maaşlı personel
+                  if ((p.firma_tipi||"simsek") !== "simsek") return false;
+                  // Bu ay istihdamda mı? (ayrılan/henüz girmemiş hariç)
+                  const [oy, om] = puantajAy.split("-");
+                  const mStart = `${puantajAy}-01`;
+                  const mEnd = `${puantajAy}-${String(new Date(Number(oy), Number(om), 0).getDate()).padStart(2,"0")}`;
+                  const giris = (p.ise_giris_tarihi||"").split("T")[0];
+                  const ayrilma = (p.isten_ayrilma_tarihi||"").split("T")[0];
+                  if (giris && giris > mEnd) return false;
+                  if (ayrilma && ayrilma < mStart) return false;
+                  return true;
+                }).map(o => {
                   const tooltipOzet = [
                     `Çalışılan: ${o.calisilan_gun} gün`,
                     `Gelmedi: ${o.gelmedi_gun||0} gün (kesinti: ₺${Math.round((o.gelmedi_gun||0)*(o.net_maas||0)/26).toLocaleString("tr-TR")})`,
