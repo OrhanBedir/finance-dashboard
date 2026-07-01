@@ -12189,10 +12189,15 @@ app.post("/hr/is-avans", async (req, res) => {
     if (!talep_eden_email)  return res.status(400).json({ error: "talep_eden_email zorunlu" });
     if (!tutar)             return res.status(400).json({ error: "tutar zorunlu" });
 
-    // Herkes Rollout Manager'dan başlar
+    // Herkes Rollout Manager'dan başlar.
+    // İSTİSNA: Talep sahibi Rollout onaycısının kendisi (Orhan) ise, kendi talebi
+    // kendi onayına düşmesin → doğrudan Proje Direktörü (Düzgün Şimşek) onayına gitsin.
+    // Bunun için durum PM_ONAY başlar (Rollout+PM aşamaları otomatik geçilir).
     const today = new Date().toISOString().split("T")[0];
-    const durumFinal = "TALEP";
-    const pmOnayTarihi = null;
+    const requesterEmail = String(talep_eden_email || "").toLowerCase().trim();
+    const isRolloutApprover = requesterEmail === "orhan.bedir@simsektel.com";
+    const durumFinal = isRolloutApprover ? "PM_ONAY" : "TALEP";
+    const pmOnayTarihi = isRolloutApprover ? today : null;
 
     // banka_adi / iban kolonları yoksa ekle (ilk çalışmada oluşturulur)
     await pool.query(`
