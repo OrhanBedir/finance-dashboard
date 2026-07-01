@@ -11658,7 +11658,8 @@ app.get("/hr/excel/puantaj", async (req, res) => {
     const monthEnd = `${yil}-${String(ay).padStart(2, "0")}-${String(totalDays).padStart(2, "0")}`;
     const queryParams = [monthStart, monthEnd];
     let personelQuery = `SELECT * FROM personel
-       WHERE (ise_giris_tarihi IS NULL OR ise_giris_tarihi <= $2)
+       WHERE (firma_tipi IS NULL OR firma_tipi = 'simsek')
+         AND (ise_giris_tarihi IS NULL OR ise_giris_tarihi <= $2)
          AND (isten_ayrilma_tarihi IS NULL OR isten_ayrilma_tarihi >= $1)`;
     if (personel_id) {
       queryParams.push(personel_id);

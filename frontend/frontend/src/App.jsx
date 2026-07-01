@@ -10116,6 +10116,8 @@ function PuantajPanel({ currentUser, onBack }) {
     const monthStart = `${puantajAy}-01`;
     const monthEnd = `${puantajAy}-${String(new Date(Number(vy), Number(vm), 0).getDate()).padStart(2, "0")}`;
     return personelList.filter((p) => {
+      // Taşeron personeli puantajda görünmez (sadece ISG için) — yalnız Şimşek
+      if ((p.firma_tipi || "simsek") !== "simsek") return false;
       const giris = (p.ise_giris_tarihi || "").split("T")[0];
       const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
       if (giris && giris > monthEnd) return false; // o ay henüz işe girmemiş
@@ -11211,7 +11213,7 @@ function HrDashboard({ onBack, currentUser }) {
                                 const headerMN = { fill:{ patternType:"solid", fgColor:{ rgb:"1E5F3A" } }, font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3BA57A"}}, right:{style:"thin",color:{rgb:"3BA57A"}} } };
                                 const cellS = (ri, isNum, isDurum, val, isMN) => ({ fill:{ patternType:"solid", fgColor:{ rgb: isMN ? (ri%2===0?"ECFDF5":"F0FDF4") : ri%2===0 ? "EFF6FF":"FFFFFF" } }, font:{ sz:10, name:"Calibri", bold: isNum, color:{ rgb: isDurum ? (val==="Aktif"?"166534":"991B1B") : isMN ? "065F46" : isNum ? "1E3A8A" : "1F2937" } }, alignment:{ horizontal: isNum?"right":isDurum?"center":"left", vertical:"center" }, border:{ top:{style:"thin",color:{rgb:"DBEAFE"}}, bottom:{style:"thin",color:{rgb:"DBEAFE"}}, left:{style:"thin",color:{rgb:"DBEAFE"}}, right:{style:"thin",color:{rgb:"DBEAFE"}} } });
                                 const wsData = [headers];
-                                personelList.forEach(p => {
+                                personelList.filter(p=>(p.firma_tipi||"simsek")==="simsek").forEach(p => {
                                   const ode = odenenByPerId[p.id] || { banka:0, elden:0 };
                                   wsData.push(keys.map(k => {
                                     if (k==="aktif") return p[k]?"Aktif":"Pasif";
@@ -11734,7 +11736,7 @@ function HrDashboard({ onBack, currentUser }) {
               )}
 
               <div style={{ display:"grid", gap:"10px" }}>
-                {personelList.filter(p => !hrPersonelFilter || String(p.id) === String(hrPersonelFilter)).map(p => (
+                {personelList.filter(p => (p.firma_tipi||"simsek")==="simsek" && (!hrPersonelFilter || String(p.id) === String(hrPersonelFilter))).map(p => (
                   <div key={p.id} style={{ background:"#fff", borderRadius:"14px", padding:"16px 20px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"grid", gridTemplateColumns:"44px 1fr auto auto auto", alignItems:"center", gap:"16px", opacity: p.aktif?1:0.6 }}>
                     <div style={{ width:44, height:44, borderRadius:"12px", background: p.aktif?"linear-gradient(135deg,#60a5fa,#3b82f6)":"#e5e7eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"18px", fontWeight:700, color:"#fff" }}>
                       {p.ad_soyad.charAt(0)}
@@ -12013,7 +12015,7 @@ function HrDashboard({ onBack, currentUser }) {
                     onMouseLeave={e=>e.currentTarget.style.background=""}>
                     👥 Tüm Personel
                   </div>
-                  {personelList.filter(p=>p.aktif && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
+                  {personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek" && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
                     <div key={p.id} onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); }}
                       style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
                       onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
@@ -12061,7 +12063,7 @@ function HrDashboard({ onBack, currentUser }) {
                 </tr>
               </thead>
               <tbody>
-                {personelList.filter(p=>p.aktif && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
+                {personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek" && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
                   const calisilan = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="CALISDI").length;
                   const gelmediCount = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="GELMEDI").length;
                   const pazarCalisdiCount = ayGunleri.filter(g => {
