@@ -10595,14 +10595,14 @@ function HrDashboard({ onBack, currentUser }) {
   useEffect(() => { if (tab==="personel" && hrPersonelFilter) loadMaasOde(hrPersonelFilter); else setMaasOdeList([]); }, [tab, hrPersonelFilter, puantajAy]);
   useEffect(() => {
     if (tab==="personel" && hrPersonelFilter) {
-      fetch(`${API_BASE}/hr/trafik-ceza?personel_id=${hrPersonelFilter}`)
+      fetch(`${API_BASE}/hr/trafik-ceza?personel_id=${hrPersonelFilter}&donem=${puantajAy}`)
         .then(r=>r.json())
         .then(d=>setTrafikCezaList(Array.isArray(d.list)?d.list:[]))
         .catch(()=>setTrafikCezaList([]));
     } else {
       setTrafikCezaList([]);
     }
-  }, [tab, hrPersonelFilter]);
+  }, [tab, hrPersonelFilter, puantajAy]);
 
   const handleSavePersonel = async (e) => {
     e.preventDefault();
@@ -11547,12 +11547,47 @@ function HrDashboard({ onBack, currentUser }) {
                                 <span style={{ fontSize:"14px", fontWeight:800, color:"#fff" }}>₺{trafikCezaToplam.toLocaleString("tr-TR")}</span>
                               </div>
                               {trafikCezaList.map((a,i) => (
-                                <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"10px", color:"#fed7aa", borderTop: i===0?"1px solid rgba(255,255,255,0.3)":"none", paddingTop: i===0?"4px":"2px" }}>
-                                  <span style={{ opacity:0.9, maxWidth:"130px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"6px", fontSize:"10px", color:"#fed7aa", borderTop: i===0?"1px solid rgba(255,255,255,0.3)":"none", paddingTop: i===0?"4px":"2px" }}>
+                                  <span style={{ opacity:0.9, flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                                     {a.aciklama||a.plaka||"—"}
                                     {a.kaynak==="BEKLEMEDE" && <span style={{ marginLeft:"4px", background:"#fbbf24", color:"#78350f", borderRadius:"4px", padding:"0 4px", fontSize:"9px", fontWeight:700 }}>BEKL.</span>}
                                   </span>
                                   <span style={{ fontWeight:700, color:"#fff" }}>₺{Number(a.tutar||0).toLocaleString("tr-TR")}</span>
+                                  {a.maastan_kesildi ? (
+                                    <button
+                                      type="button"
+                                      title="Bu ceza bu ay maaştan kesildi. Geri almak için tıkla."
+                                      onClick={async()=>{
+                                        if(!window.confirm("Bu cezanın 'maaştan kesildi' işareti geri alınsın mı? (Tekrar aktif ceza olur)")) return;
+                                        try {
+                                          const rr = await fetch(`${API_BASE}/hr/trafik-ceza/${a.id}/kesildi`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ kesildi:false }) });
+                                          const dd = await rr.json();
+                                          if(dd.error) throw new Error(dd.error);
+                                          const rl = await fetch(`${API_BASE}/hr/trafik-ceza?personel_id=${hrPersonelFilter}&donem=${puantajAy}`);
+                                          const dl = await rl.json();
+                                          setTrafikCezaList(Array.isArray(dl.list)?dl.list:[]);
+                                        } catch(e){ alert("Hata: "+e.message); }
+                                      }}
+                                      style={{ flexShrink:0, background:"#16a34a", color:"#fff", border:"none", borderRadius:"5px", padding:"2px 6px", fontSize:"9px", fontWeight:800, cursor:"pointer" }}
+                                    >✓ Kesildi ⟲</button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      title="Maaş ödemesinde kesildi olarak işaretle — sonraki aylarda görünmez"
+                                      onClick={async()=>{
+                                        if(!window.confirm(`Bu ceza (₺${Number(a.tutar||0).toLocaleString("tr-TR")}) bu ay maaştan kesildi olarak işaretlensin mi?\nBu aydan sonra görünmeyecek.`)) return;
+                                        try {
+                                          const rr = await fetch(`${API_BASE}/hr/trafik-ceza/${a.id}/kesildi`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ kesildi:true, donem: puantajAy }) });
+                                          const dd = await rr.json();
+                                          if(dd.error) throw new Error(dd.error);
+                                          const rl = await fetch(`${API_BASE}/hr/trafik-ceza?personel_id=${hrPersonelFilter}&donem=${puantajAy}`);
+                                          const dl = await rl.json();
+                                          setTrafikCezaList(Array.isArray(dl.list)?dl.list:[]);
+                                        } catch(e){ alert("Hata: "+e.message); }
+                                      }}
+                                      style={{ flexShrink:0, background:"rgba(255,255,255,0.9)", color:"#c2410c", border:"none", borderRadius:"5px", padding:"2px 6px", fontSize:"9px", fontWeight:800, cursor:"pointer" }}
+                                    >✓ Kesildi</button>
+                                  )}
                                 </div>
                               ))}
                             </div>

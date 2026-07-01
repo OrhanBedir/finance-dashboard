@@ -12651,6 +12651,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
        FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
        WHERE mk.kategori='TRAFIK_CEZA'
+         AND COALESCE(mk.maastan_kesildi, false) = false
          AND (LOWER(mf.talep_eden_email)=LOWER($1) OR ($2::int IS NOT NULL AND mk.ceza_personel_id=$2::int))
        ORDER BY mk.tarih DESC LIMIT 20`,
       [queryEmail, personelId]
@@ -13063,22 +13064,61 @@ app.get("/hr/trafik-ceza", async (req, res) => {
 
     // masraf_kalem tablosundan direkt oku — avans tablosuna bağımlılık yok
     // REDDEDILDI formlar hariç hepsi göster
+    // donem (YYYY-MM) verilirse: kesilmemiş cezalar HER ay görünür; kesilen ceza
+    // SADECE kesildiği donem'de görünür (o ay düşüş uygulandı), sonraki aylarda görünmez.
+    // includeKesildi=1 ise tüm kesilenler gelir (geçmiş görünümü).
+    const includeKesildi = String(req.query.includeKesildi || "") === "1";
+    const donem = (req.query.donem || "").toString().trim() || null;
+    let kesildiFilter = "";
+    const params = [personel_id];
+    if (includeKesildi) {
+      kesildiFilter = "";
+    } else if (donem) {
+      params.push(donem);
+      kesildiFilter =
+        "AND (COALESCE(mk.maastan_kesildi, false) = false OR mk.kesildi_donem = $2)";
+    } else {
+      kesildiFilter = "AND COALESCE(mk.maastan_kesildi, false) = false";
+    }
     const r = await pool.query(
       `SELECT mk.id, mk.tutar, mk.aciklama, mk.tarih, mk.plaka,
               mf.id as masraf_form_id, mf.durum as form_durum,
+              COALESCE(mk.maastan_kesildi, false) AS maastan_kesildi,
+              mk.kesildi_tarihi, mk.kesildi_donem,
               CASE WHEN mf.durum IN ('TAMAMLANDI','ARSIVLENDI') THEN 'ONAYLANDI' ELSE 'BEKLEMEDE' END as kaynak
        FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
        WHERE mk.ceza_personel_id=$1
          AND mk.kategori='TRAFIK_CEZA'
          AND mf.durum NOT IN ('REDDEDILDI')
+         ${kesildiFilter}
        ORDER BY mk.tarih DESC`,
-      [personel_id]
+      params
     );
 
     const list = r.rows;
     const toplam = list.reduce((s,x) => s + Number(x.tutar||0), 0);
     res.json({ list, toplam });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /hr/trafik-ceza/:id/kesildi — maaş ödemesinde kesildi olarak işaretle
+// (bir daha sonraki aylarda görünmez). kesildi=false ile geri alınabilir.
+app.put("/hr/trafik-ceza/:id/kesildi", async (req, res) => {
+  try {
+    const kesildi = req.body.kesildi !== false; // varsayılan true
+    const donem = (req.body.donem || "").toString().trim() || null;
+    const r = await pool.query(
+      `UPDATE masraf_kalem
+         SET maastan_kesildi=$1,
+             kesildi_tarihi=CASE WHEN $1 THEN CURRENT_DATE ELSE NULL END,
+             kesildi_donem=CASE WHEN $1 THEN $2 ELSE NULL END
+       WHERE id=$3 AND kategori='TRAFIK_CEZA'
+       RETURNING id, maastan_kesildi, kesildi_tarihi, kesildi_donem`,
+      [kesildi, donem, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Ceza bulunamadı" });
+    res.json({ ok: true, ...r.rows[0] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -14738,6 +14778,9 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_belge_url TEXT",
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS odeme_belge_url TEXT",
   "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS ceza_sirket BOOLEAN DEFAULT FALSE",
+  "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS maastan_kesildi BOOLEAN DEFAULT FALSE",
+  "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS kesildi_tarihi DATE",
+  "ALTER TABLE masraf_kalem ADD COLUMN IF NOT EXISTS kesildi_donem TEXT",
   `CREATE TABLE IF NOT EXISTS malzeme_fiyat_gecmisi (
   id SERIAL PRIMARY KEY,
   malzeme_adi TEXT NOT NULL,
