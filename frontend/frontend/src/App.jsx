@@ -10489,6 +10489,7 @@ function HrDashboard({ onBack, currentUser }) {
   const [personelList, setPersonelList] = useState([]);
   const [isgTurleri, setIsgTurleri] = useState([]);
   const [isgUyarilar, setIsgUyarilar] = useState([]);
+  const [isgUyariModalOpen, setIsgUyariModalOpen] = useState(false);
   const [selectedPersonel, setSelectedPersonel] = useState(null);
   const [showPersonelForm, setShowPersonelForm] = useState(false);
   const [editingPersonel, setEditingPersonel] = useState(null);
@@ -10845,6 +10846,34 @@ function HrDashboard({ onBack, currentUser }) {
     a.href = url; a.download = `${kisiAdi}_Belgeler.zip`;
     a.click(); URL.revokeObjectURL(url);
   };
+  // Tek personelin tüm belgelerini (belge + ISG) ZIP indir — matris satırından direkt
+  const downloadPersonelBelgeleri = async (personel) => {
+    if (!personel) return;
+    try {
+      const [belgeler, isg] = await Promise.all([
+        fetch(`${API_BASE}/hr/personel/${personel.id}/belgeler`).then(r=>r.json()).catch(()=>[]),
+        fetch(`${API_BASE}/hr/personel/${personel.id}/isg`).then(r=>r.json()).catch(()=>[]),
+      ]);
+      const zip = new JSZip();
+      const kisiAdi = personel.ad_soyad.replace(/\s+/g, "_");
+      const kok = zip.folder(kisiAdi);
+      const KLASOR_MAP = { fotograf:"01_Fotograf", tc_kimlik:"02_TC_Kimlik", ehliyet:"03_Ehliyet", saglik_raporu:"04_Saglik_Raporu", sgk_bildirge:"05_SGK_Bildirge", diger:"09_Diger_Belgeler" };
+      const fetchBuf = async (url) => { const r = await fetch(url); if(!r.ok) throw new Error("HTTP "+r.status); return r.arrayBuffer(); };
+      let count = 0;
+      for (const b of (belgeler||[])) {
+        if (!b.dosya_yolu) continue;
+        try { const ext=(b.dosya_yolu.split(".").pop().split("?")[0]||"bin").toLowerCase(); kok.folder(KLASOR_MAP[b.belge_turu]||"09_Diger_Belgeler").file(`${b.belge_turu}.${ext}`, await fetchBuf(b.dosya_yolu)); count++; } catch(e){}
+      }
+      for (const i of (isg||[])) {
+        if (!i.belge_yolu) continue;
+        try { const ext=(i.belge_yolu.split(".").pop().split("?")[0]||"bin").toLowerCase(); kok.folder("06_ISG_Sertifikalari").file(`${String(i.egitim_turu).replace(/[/\\:*?"<>|]/g,"_")}.${ext}`, await fetchBuf(i.belge_yolu)); count++; } catch(e){}
+      }
+      if (count===0) { alert(`${personel.ad_soyad}: indirilecek yüklü belge bulunamadı.`); return; }
+      const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href=url; a.download=`${kisiAdi}_Belgeler.zip`; a.click(); URL.revokeObjectURL(url);
+    } catch(e){ alert("İndirme hatası: "+(e.message||e)); }
+  };
   const handleIsgBelgeUpload = async (personelId, isgId, file) => {
     try {
       await uploadIsgBelge(isgId, file);
@@ -10975,15 +11004,54 @@ function HrDashboard({ onBack, currentUser }) {
         <h2 style={{ margin:0, fontSize:"22px", fontWeight:700, color:"#1f2937" }}>👤 İnsan Kaynakları Modülü</h2>
       </div>
       {/* ISG Uyarı Bandı */}
-      {isgUyarilar.length > 0 && (
-        <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:"12px", padding:"12px 20px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
-          <span style={{ fontSize:"20px" }}>🚨</span>
-          <span style={{ fontWeight:700, color:"#991b1b", fontSize:"14px" }}>ISG Eğitim Uyarısı:</span>
-          {isgUyarilar.map((u,i) => (
-            <span key={i} style={{ background: u.durum==="SURESI_DOLDU"?"#fee2e2":"#fef3c7", color: u.durum==="SURESI_DOLDU"?"#991b1b":"#92400e", padding:"3px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:600 }}>
-              {u.ad_soyad} — {u.egitim_turu} {u.durum==="SURESI_DOLDU"?"(SÜRESİ DOLDU!)":"(30 gün kaldı)"}
-            </span>
-          ))}
+      {isgUyarilar.length > 0 && (() => {
+        const doldu = isgUyarilar.filter(u=>u.durum==="SURESI_DOLDU").length;
+        const yaklasan = isgUyarilar.length - doldu;
+        return (
+          <div onClick={()=>setIsgUyariModalOpen(true)}
+            style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:"12px", padding:"12px 20px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"12px", flexWrap:"wrap", cursor:"pointer" }}
+            title="Detayları görmek için tıkla">
+            <span style={{ fontSize:"20px" }}>🚨</span>
+            <span style={{ fontWeight:700, color:"#991b1b", fontSize:"14px" }}>ISG Eğitim Uyarısı</span>
+            {doldu>0 && <span style={{ background:"#fee2e2", color:"#991b1b", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>🔴 {doldu} belge süresi doldu</span>}
+            {yaklasan>0 && <span style={{ background:"#fef3c7", color:"#92400e", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>🟡 {yaklasan} yaklaşan</span>}
+            <span style={{ marginLeft:"auto", color:"#b91c1c", fontSize:"12px", fontWeight:600 }}>Detay için tıkla →</span>
+          </div>
+        );
+      })()}
+
+      {isgUyariModalOpen && (
+        <div onClick={()=>setIsgUyariModalOpen(false)}
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:12000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"680px", maxHeight:"82vh", display:"flex", flexDirection:"column", overflow:"hidden", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 22px", borderBottom:"1px solid #f1f5f9" }}>
+              <h3 style={{ margin:0, fontSize:"17px", color:"#991b1b" }}>🚨 ISG Eğitim / Belge Uyarıları</h3>
+              <button onClick={()=>setIsgUyariModalOpen(false)} style={{ border:"1px solid #e5e7eb", background:"#fff", borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontWeight:700 }}>Kapat</button>
+            </div>
+            <div style={{ overflow:"auto", padding:"14px 22px 22px" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+                <thead>
+                  <tr style={{ textAlign:"left", color:"#64748b" }}>
+                    <th style={{ padding:"8px 10px" }}>Personel</th>
+                    <th style={{ padding:"8px 10px" }}>Belge / Eğitim</th>
+                    <th style={{ padding:"8px 10px" }}>Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...isgUyarilar].sort((a,b)=> (a.durum==="SURESI_DOLDU"?0:1)-(b.durum==="SURESI_DOLDU"?0:1)).map((u,i)=>(
+                    <tr key={i} style={{ borderTop:"1px solid #f1f5f9", background: u.durum==="SURESI_DOLDU"?"#fef2f2":"#fffbeb" }}>
+                      <td style={{ padding:"8px 10px", fontWeight:600 }}>{u.ad_soyad}</td>
+                      <td style={{ padding:"8px 10px" }}>{u.egitim_turu}</td>
+                      <td style={{ padding:"8px 10px", fontWeight:700, color: u.durum==="SURESI_DOLDU"?"#dc2626":"#b45309" }}>
+                        {u.durum==="SURESI_DOLDU" ? "🔴 Süresi doldu" : "🟡 Süresi yaklaşıyor (30 gün)"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
@@ -12209,17 +12277,7 @@ function HrDashboard({ onBack, currentUser }) {
       {/* ===== ISG / BELGELER SEKMESİ ===== */}
       {tab==="isg" && (
         <div>
-          {/* ISG Uyarı Bandı */}
-          {isgUyarilar.length > 0 && (
-            <div style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:"12px", padding:"12px 16px", marginBottom:"16px", display:"flex", gap:"12px", alignItems:"flex-start", flexWrap:"wrap" }}>
-              <span style={{ fontWeight:700, color:"#991b1b", fontSize:"14px" }}>⚠️ ISG Eğitim Uyarısı:</span>
-              {isgUyarilar.map((u,i) => (
-                <span key={i} style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"8px", padding:"3px 10px", fontSize:"13px" }}>
-                  {u.ad_soyad} — {u.egitim_turu} ({u.durum})
-                </span>
-              ))}
-            </div>
-          )}
+          {/* ISG uyarı bandı üstte (tıklanabilir modal) tek yerde gösteriliyor — burada tekrar edilmez */}
 
           {/* ── Üst bar: başlık + Excel butonları ── */}
           <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"14px", flexWrap:"wrap" }}>
@@ -12605,6 +12663,10 @@ function HrDashboard({ onBack, currentUser }) {
                               {p.ad_soyad}
                             </button>
                             <div style={{ fontSize:"11px", color:"#9ca3af", fontWeight:400 }}>{p.unvan}</div>
+                            <button onClick={()=>downloadPersonelBelgeleri(p)} title="Bu personelin tüm belgelerini ZIP indir"
+                              style={{ marginTop:"3px", background:"#064e3b", color:"#fff", border:"none", borderRadius:"6px", padding:"2px 8px", fontSize:"10px", fontWeight:700, cursor:"pointer" }}>
+                              ⬇ Belgeler
+                            </button>
                           </td>
                           <td style={{ padding:"8px", textAlign:"center", color:"#6b7280", whiteSpace:"nowrap" }}>{p.ekip_bilgisi||"—"}</td>
                           {gorunenKolonlar.map(k => {
