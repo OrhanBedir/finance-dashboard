@@ -2356,6 +2356,26 @@ function DailyEntry() {
     setShowItemCodeList(false);
     setShowItemDescriptionList(false);
 
+    // Double önleme: yeni girişte aynı saha + item_code daha önce girilmişse uyar
+    if (!editingId) {
+      const dup = siteEntries.find(
+        (r) =>
+          String(r.item_code || "").trim() === String(form.item_code || "").trim() &&
+          String(r.site_code || "").trim().toUpperCase() ===
+            String(form.site_code || "").trim().toUpperCase(),
+      );
+      if (dup) {
+        const ok = window.confirm(
+          `⚠️ Bu item bu saha için DAHA ÖNCE GİRİLMİŞ:\n\n` +
+            `Item: ${dup.item_code} — ${dup.item_description || ""}\n` +
+            `Saha: ${dup.site_code}  ·  Girilen Done: ${dup.done_qty}\n\n` +
+            `Çift kayıt olmaması için normalde tekrar girilmez.\n` +
+            `Yine de eklemek istiyor musunuz?`,
+        );
+        if (!ok) { setSaving(false); return; }
+      }
+    }
+
     try {
       // Normalize subcon name to UPPERCASE
       const normalizedSubcon = (form.subcon_name || "").trim().toUpperCase();
