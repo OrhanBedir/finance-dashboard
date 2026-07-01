@@ -2687,8 +2687,8 @@ function DailyEntry() {
                       <td style={{ ...tdSt, fontFamily:"monospace", fontSize:11 }}>{row.project_code}</td>
                       <td style={{ ...tdSt, fontWeight:700, color:"#1e3a5f" }}>{row.site_code}</td>
                       <td style={{ ...tdSt, fontFamily:"monospace", fontSize:11 }}>{row.item_code}</td>
-                      <td style={{ ...tdSt, maxWidth:220 }} title={row.item_description}>
-                        <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:200 }}>{row.item_description}</div>
+                      <td style={{ ...tdSt, minWidth:300, maxWidth:400 }} title={row.item_description}>
+                        <div style={{ display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden", lineHeight:1.35, whiteSpace:"normal", wordBreak:"break-word" }}>{row.item_description}</div>
                       </td>
                       <td style={{ ...tdSt, fontWeight:800, fontSize:14, textAlign:"center", color:"#1d4ed8" }}>{row.done_qty}</td>
                       <td style={{ ...tdSt, textAlign:"center" }}>{row.requested_qty ?? "-"}</td>
