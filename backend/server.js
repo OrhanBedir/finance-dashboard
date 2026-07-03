@@ -7978,15 +7978,23 @@ app.get("/export/site-entry-excel", async (req, res) => {
     const worksheet = workbook.addWorksheet("Site Entries");
 
     worksheet.columns = [
+      { header: "Saha Türü", key: "site_type", width: 14 },
       { header: "Bölge", key: "region", width: 14 },
+      { header: "Status", key: "status", width: 14 },
+      { header: "Analiz", key: "analysis", width: 14 },
       { header: "Project Code", key: "project_code", width: 16 },
       { header: "Site Code", key: "site_code", width: 22 },
       { header: "Item Code", key: "item_code", width: 16 },
       { header: "Item Description", key: "item_description", width: 45 },
       { header: "Done Qty", key: "done_qty", width: 12 },
       { header: "Requested Qty", key: "requested_qty", width: 14 },
+      { header: "Due Qty", key: "due_qty", width: 12 },
+      { header: "Billed Quantity", key: "billed_qty", width: 14 },
+      { header: "QC Durum", key: "qc_durum", width: 12 },
       { header: "OnAir Date", key: "onair_date", width: 14 },
-      { header: "Subcon Name", key: "subcon_name", width: 20 },
+      { header: "Subcon Name", key: "subcon_name", width: 18 },
+      { header: "RF Not", key: "note", width: 35 },
+      { header: "Kabul Not", key: "kabul_not", width: 35 },
     ];
 
     rows.forEach((row) => {
@@ -8026,7 +8034,7 @@ app.get("/export/site-entry-excel", async (req, res) => {
         analysis = "Fazla";
       }
 
-      sheet.addRow({
+      worksheet.addRow({
         site_type: detectedSiteType,
         region: region || "",
         status: row.status || "",
@@ -8063,11 +8071,11 @@ app.get("/export/site-entry-excel", async (req, res) => {
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     applyPremiumExcelStyle(worksheet, {
-      headerRowNumber: 2,
-      freezeRow: 2,
-      filterFrom: "A2",
-      filterTo: "P2",
-      statusColumn: "B",
+      headerRowNumber: 1,
+      freezeRow: 1,
+      filterFrom: "A1",
+      filterTo: "Q1",
+      statusColumn: "C",
     });
     await workbook.xlsx.write(res);
     res.end();
