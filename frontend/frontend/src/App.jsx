@@ -996,11 +996,11 @@ function RolloutDashboard({ currentUser }) {
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [summaryRows, setSummaryRows] = useState([]);
   const [search, setSearch] = useState("");
   const [regionFilter, setRegionFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [qcFilter, setQcFilter] = useState("ALL");
+  const [enhFilter, setEnhFilter] = useState("ALL");
   const [errorMessage, setErrorMessage] = useState("");
   const [showRolloutEntryModal, setShowRolloutEntryModal] = useState(false);
   const [selectedRolloutSite, setSelectedRolloutSite] = useState("");
@@ -1271,11 +1271,6 @@ function RolloutDashboard({ currentUser }) {
       });
 
       setRows(data.rows || []);
-      const summaryData = await fetchJson(
-        `${API_BASE}/rollout/summary?region=${encodeURIComponent(regionFilter)}`,
-        { withAuth: true },
-      );
-      setSummaryRows(summaryData.rows || []);
       try {
         const cleanupData = await fetchJson(`${API_BASE}/rollout/cleanup`, { withAuth: true });
         setCleanupRows(cleanupData.rows || []);
@@ -1287,14 +1282,14 @@ function RolloutDashboard({ currentUser }) {
     } finally {
       setLoading(false);
     }
-  }, [regionFilter]);
+  }, []);
 
   useEffect(() => {
     // DB migration + site type fix
     fetch(`${API_BASE}/migrate`).catch(() => {});
     fetch(`${API_BASE}/rollout/fix-site-types`).catch(() => {});
     loadData();
-  }, [regionFilter]);
+  }, []);
 
   useEffect(() => {
     const handleDataUpdate = () => {
@@ -1330,6 +1325,14 @@ function RolloutDashboard({ currentUser }) {
           ? true
           : String(row.qc_durum || "").toUpperCase() === qcFilter;
 
+      const enhT = String(row.enh_site_type || "").trim().toLowerCase();
+      const enhOk =
+        enhFilter === "ALL" ? true :
+        enhFilter === "ABONE" ? (enhT === "abone" || enhT === "abone + süzme") :
+        enhFilter === "SUZME" ? (enhT === "süzme" || enhT === "abone + süzme") :
+        enhFilter === "ABONE_SUZME" ? enhT === "abone + süzme" :
+        true;
+
       const text = `
         ${row.site_type || ""}
         ${row.project_code || ""}
@@ -1346,9 +1349,9 @@ function RolloutDashboard({ currentUser }) {
 
       const searchOk = q ? text.includes(q) : true;
 
-      return regionOk && typeOk && qcOk && searchOk;
+      return regionOk && typeOk && qcOk && enhOk && searchOk;
     });
-  }, [rows, search, regionFilter, typeFilter, qcFilter]);
+  }, [rows, search, regionFilter, typeFilter, qcFilter, enhFilter]);
 
   const summary = useMemo(() => {
     const total = filteredRows.length;
@@ -1397,10 +1400,10 @@ function RolloutDashboard({ currentUser }) {
         </div>
       )}
 
-      <RolloutSummaryTables
-        summaryRows={summaryRows}
-        rows={rows}
+      <RolloutSummaryCard
+        rows={filteredRows}
         regionFilter={regionFilter}
+        enhFilter={enhFilter}
       />
 
       <div
@@ -1443,6 +1446,17 @@ function RolloutDashboard({ currentUser }) {
           <option value="DSS">DSS</option>
           <option value="POWER">⚡ Power (Enerji)</option>
           <option value="SURVEY_BTK">📋 Survey &amp; BTK</option>
+        </select>
+
+        <select
+          className="select"
+          value={enhFilter}
+          onChange={(e) => setEnhFilter(e.target.value)}
+        >
+          <option value="ALL">ENH Tipi (Tümü)</option>
+          <option value="ABONE">🔌 Abone</option>
+          <option value="SUZME">💧 Süzme</option>
+          <option value="ABONE_SUZME">🔌💧 Abone + Süzme</option>
         </select>
 
         <div className="qcActionBox">
@@ -23635,587 +23649,90 @@ function QCUploadInline({ onClose, onUploaded }) {
     </div>
   );
 }
-function RolloutSummaryTables({ summaryRows, rows = [], regionFilter }) {
-  if (!summaryRows || summaryRows.length === 0) return null;
-
+function RolloutSummaryCard({ rows, regionFilter, enhFilter }) {
   const regionTitle = regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter;
+  const isEnhMode = enhFilter !== "ALL";
 
-  const getWeekNumber = (dateValue) => {
-    if (!dateValue) return null;
-    const d = new Date(dateValue);
-    if (Number.isNaN(d.getTime())) return null;
-
-    const oneJan = new Date(d.getFullYear(), 0, 1);
-    return Math.ceil(((d - oneJan) / 86400000 + oneJan.getDay() + 1) / 7);
+  // Ham tarih dolu mu? (N/A ve __NA__ dolu sayılmaz)
+  const has = (v) => {
+    const s = String(v || "").trim();
+    return s !== "" && s !== "__NA__" && s !== "N/A";
   };
-
-  const getRow = (type) =>
-    summaryRows.find(
-      (r) => String(r.site_type || "").toUpperCase() === type.toUpperCase(),
-    ) || {};
-  const calcActualFromRows = (type, dateField) => {
-    return getRowsByType(type).filter((r) => {
-      if (!dateField) return true;
-      return String(r[dateField] || "").trim() !== "";
-    }).length;
-  };
-  const getSmartDateValue = (row, dateField) => {
-    const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
-
-    const materialOk =
-      String(row.malzeme_status || "").toUpperCase() === "OK" ||
-      String(row.malzeme_status || "").trim() !== "";
-
-    const installationStart =
-      row.installation_actual_start_date ||
-      row.inst_actual_start_date ||
-      row.install_start_date ||
-      row.plan_start_date ||
-      row.inst_plan_start_date ||
-      row.rf_plan_start_date ||
-      "";
-
-    const installationEnd =
-      row.installation_actual_end_date ||
-      row.inst_actual_end_date ||
-      row.install_end_date ||
-      row.onair_date ||
-      "";
-
-    const onAir =
-      row.onair_date ||
-      row.installation_actual_end_date ||
-      row.inst_actual_end_date ||
-      row.install_end_date ||
-      "";
-
-    if (dateField === "plan_start_date") {
-      return (
-        row.plan_start_date ||
-        row.inst_plan_start_date ||
-        row.rf_plan_start_date ||
-        installationStart ||
-        installationEnd ||
-        onAir ||
-        (qcOk ? "SMART_OK" : "")
-      );
-    }
-
-    if (dateField === "installation_actual_start_date") {
-      return (
-        row.installation_actual_start_date ||
-        row.inst_actual_start_date ||
-        row.install_start_date ||
-        installationEnd ||
-        onAir ||
-        (qcOk ? "SMART_OK" : "")
-      );
-    }
-
-    if (dateField === "installation_actual_end_date") {
-      // onair_date fallback KALDIRILDI: installation_end_date boşsa "bitmedi" sayılır
-      return (
-        row.installation_actual_end_date ||
-        row.inst_actual_end_date ||
-        row.install_end_date ||
-        ""
-      );
-    }
-
-    if (dateField === "qc_closed_date") {
-      return (
-        row.qc_closed_date || row.qc_close_date || (qcOk ? "SMART_OK" : "")
-      );
-    }
-
-    if (dateField === "pac_actual_end_date") {
-      return row.pac_actual_end_date || row.pac_end_date || "";
-    }
-
-    if (dateField === "btk_approved" || dateField === "btk_certificate_date") {
-      return row.btk_approved || row.btk_certificate_date || "";
-    }
-
-    if (dateField === "tssr_plan_start_date") {
-      return row.tssr_plan_start_date || row.tssr_plan_date || "";
-    }
-
-    if (dateField === "tssr_actual_end_date") {
-      return row.tssr_actual_end_date || row.tssr_end_date || "";
-    }
-
-    if (dateField === "btk_plan_start_date") {
-      return row.btk_plan_start_date || row.btk_plan_date || "";
-    }
-
-    if (dateField === "btk_actual_end_date") {
-      return row.btk_actual_end_date || row.btk_end_date || "";
-    }
-
-    if (dateField === "power_plan_start_date") {
-      return row.power_plan_start_date || row.power_start_date || "";
-    }
-
-    if (dateField === "power_actual_end_date") {
-      return row.power_actual_end_date || row.power_end_date || "";
-    }
-
-    if (dateField === "enh_plan_start_date") {
-      return row.enh_plan_start_date || "";
-    }
-
-    if (dateField === "enh_actual_end_date") {
-      return row.enh_actual_end_date || "";
-    }
-
-    if (dateField === "enh_qc_closed_date") {
-      return row.enh_qc_closed_date || "";
-    }
-
-    if (dateField === "suzme_date") {
-      return row.suzme_date || "";
-    }
-
-    if (dateField === "abonelik_actual_end_date") {
-      return row.abonelik_actual_end_date || row.abonelik_end_date || "";
-    }
-
-    return row[dateField] || "";
-  };
-
-  const getActualValue = (type, item, data) => {
-    const backendValue = Number(data[item.key] || 0);
-
-    if (item.key === "rf_equipment_received") {
-      // Otomasyon: kurulum başlamışsa malzeme kesinlikle gelmiş demektir
-      // Manuel fallback: malzeme_status = "OK" olarak elle girilmişse
-      return getRowsByType(type).filter((r) => {
-        const hasInstallStart = String(r.installation_actual_start_date || "").trim() !== "";
-        const hasMalzemeOk = String(r.malzeme_status || "").toUpperCase().trim() === "OK";
-        return hasInstallStart || hasMalzemeOk;
-      }).length;
-    }
-
-    // PO Closed: backend summary'den gelen değeri kullan (site_po.due_qty = 0 kontrolü)
-    if (item.key === "po_closed") {
-      return backendValue;
-    }
-
-    // Süzme: bölge filtreli frontend listesinden say (getRowsByType artık süzme sahalarını da içeriyor)
-    if (item.key === "suzme") {
-      return getRowsByType("STANDALONE_ABONE").filter(
-        (r) => String(r.enh_site_type || "").trim().toLowerCase() === "süzme"
-      ).length;
-    }
-
-    if (
-      ["5G", "DSS", "LTE", "STANDALONE", "STANDALONE_ABONE"].includes(type) &&
-      item.key === "target"
-    ) {
-      const uniqueSites = new Set();
-
-      getRowsByType(type).forEach((r) => {
-        const siteCode = String(r.site_code || "")
-          .trim()
-          .toUpperCase();
-
-        if (siteCode) {
-          uniqueSites.add(siteCode);
-        }
-      });
-
-      return uniqueSites.size;
-    }
-    const calculatedValue = item.dateField
-      ? getRowsByType(type).filter((r) => {
-          const value = getSmartDateValue(r, item.dateField);
-
-          return String(value || "").trim() !== "";
-        }).length
-      : getRowsByType(type).length;
-
-    return calculatedValue;
-  };
-  const getEffectivePlanStartDate = (row) => {
-    return (
-      row.plan_start_date ||
-      row.inst_plan_start_date ||
-      row.rf_plan_start_date ||
-      row.onair_date ||
-      ""
-    );
-  };
-
-  const getRowRegion = (r) => {
-    const detected = getRegion(r.site_code);
-
-    if (detected && detected !== "Tanımsız") {
-      return detected;
-    }
-
-    return String(r.bolge || r.region || "").trim();
-  };
-
-  const normalizeRegionName = (value) =>
-    String(value || "")
-      .trim()
-      .toLocaleLowerCase("tr-TR");
-
-  const getRowsByType = (type) =>
-    rows.filter((r) => {
-      const rowType = String(r.site_type || "")
-        .toUpperCase()
-        .trim();
-
-      const siteCode = String(r.site_code || "")
-        .toUpperCase()
-        .trim();
-
-      const detectedRegion = getRowRegion(r);
-
-      const regionOk =
-        regionFilter === "ALL" ||
-        normalizeRegionName(detectedRegion) ===
-          normalizeRegionName(regionFilter);
-
-      if (!regionOk) return false;
-
-      if (type === "5G") {
-        return rowType === "5G" || siteCode.includes("_5GEXP_");
-      }
-
-      if (type === "DSS") {
-        return rowType === "DSS" || siteCode.includes("_DSS_");
-      }
-
-      if (type === "LTE") {
-        return (
-          rowType === "LTE" ||
-          siteCode.includes("L800") ||
-          siteCode.includes("L1800") ||
-          siteCode.includes("L2600") ||
-          siteCode.includes("L2100") ||
-          siteCode.includes("NR700") ||
-          siteCode.includes("TRP")
-        );
-      }
-
-      if (type === "STANDALONE") {
-        return rowType === "STANDALONE";
-      }
-
-      if (type === "STANDALONE_ABONE") {
-        // Hem "Abone" hem "Süzme" (ve "Abone + Süzme") tipindeki STANDALONE sahalar
-        const enhT = String(r.enh_site_type || "").trim().toLowerCase();
-        return rowType === "STANDALONE" &&
-          (enhT === "abone" || enhT === "süzme" || enhT === "abone + süzme");
-      }
-
-      return rowType === type;
-    });
-
-  const pct = (actual, target) =>
-    target > 0
-      ? `${Math.round((Number(actual || 0) / Number(target || 0)) * 100)}%`
-      : "0%";
-
-  const currentWeek = getWeekNumber(new Date());
-  const previousWeek = currentWeek - 1;
-
-  const weekCount = (type, item, weekNo) => {
-    const typeRows = getRowsByType(type);
-
-    // po_closed için hafta bazlı sayım yapılamaz (tarih yok)
-    if (item.key === "po_closed") return 0;
-
-    // rf_equipment_received için tarih alanı yok ama installation_actual_start_date kullanabiliriz
-    if (item.key === "rf_equipment_received") {
-      return typeRows.filter((r) => {
-        // Önce installation start date dene (otomasyon)
-        const dateVal = String(r.installation_actual_start_date || "").trim();
-        if (!dateVal) return false;
-        const week = getWeekNumber(dateVal);
-        return week && week <= weekNo;
-      }).length;
-    }
-
-    if (!item.dateField) return Number(getRow(type)[item.key] || 0);
-
-    return typeRows.filter((r) => {
-      const value =
-        item.dateField === "plan_start_date"
-          ? getSmartDateValue(r, "plan_start_date")
-          : getSmartDateValue(r, item.dateField);
-      if (value === "SMART_OK") return false;
-      const week = getWeekNumber(value);
-      return week && week <= weekNo;
-    }).length;
-  };
-
-  const makeTable = (title, type, statusTitle, items, opts = {}) => {
-    const data = getRow(type);
-
-    const target = getActualValue(type, { key: "target" }, data);
-
-    return (
-      <div className="excelSummaryBox" key={title}>
-        <table className="excelSummaryTable">
-          <colgroup>
-            <col className="excelColLabel" />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-            <col />
-          </colgroup>
-
-          <thead></thead>
-
-          <thead>
-            <tr>
-              <th colSpan="7" className="excelTitle">
-                {title}
-              </th>
-            </tr>
-
-            <tr className="excelHeader">
-              <th></th>
-              <th>Target</th>
-              <th>Actual</th>
-              <th>%</th>
-              <th>Week{previousWeek}</th>
-              <th>Week{currentWeek}</th>
-              <th>Δ</th>
-            </tr>
-
-            {!opts.hideTypeRow && (
-              <tr className="excelTypeRow">
-                <th>{type}</th>
-                <th>{target}</th>
-                <th></th>
-                <th></th>
-                <th></th>
-                <th></th>
-                <th></th>
-              </tr>
-            )}
-
-            <tr>
-              <th colSpan="7" className="excelStatusTitle">
-                {statusTitle || "RF STATUS"}
-              </th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {items.map((item) => {
-              const actual = getActualValue(type, item, data);
-              const week13 = weekCount(type, item, previousWeek);
-              const week14 = weekCount(type, item, currentWeek);
-              const delta = week14 - week13;
-
-              return (
-                <tr key={item.label}>
-                  <td className="excelLabel">{item.label}</td>
-                  <td>{target}</td>
-                  <td className="excelActual">{actual}</td>
-                  <td>{pct(actual, target)}</td>
-                  <td>{week13}</td>
-                  <td>{week14}</td>
-                  <td className="excelDelta">{delta}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
+  const enhTip = (r) => String(r.enh_site_type || "").trim().toLowerCase();
+  const qcOk = (r) => String(r.qc_durum || "").toUpperCase().trim() === "OK";
+
+  // ENH kalemleri kendi kapsamında sayılır: proje/abonelik yalnız Abone,
+  // süzme yalnız Süzme sahaları için anlamlı
+  const aboneKapsam = rows.filter(
+    (r) => enhTip(r) === "abone" || enhTip(r) === "abone + süzme",
+  );
+  const suzmeKapsam = rows.filter(
+    (r) => enhTip(r) === "süzme" || enhTip(r) === "abone + süzme",
+  );
+
+  const items = isEnhMode
+    ? [
+        // ENH/enerji tarafında türetme yok — yalnız ham tarih alanları sayılır
+        { icon: "📐", label: "ENH Proje", kapsam: aboneKapsam, done: (r) => has(r.enh_proje_hazir) },
+        { icon: "🔧", label: "ENH Montaj", kapsam: rows, done: (r) => has(r.enh_actual_end_date) },
+        { icon: "⚡", label: "Power", kapsam: rows, done: (r) => has(r.power_actual_end_date) },
+        { icon: "📄", label: "Abonelik", kapsam: aboneKapsam, done: (r) => has(r.abonelik_actual_end_date) },
+        { icon: "💧", label: "Süzme", kapsam: suzmeKapsam, done: (r) => has(r.suzme_date) },
+        { icon: "🛡️", label: "ENH QC", kapsam: rows, done: (r) => has(r.enh_qc_closed_date) },
+      ].filter((it) => it.kapsam.length > 0)
+    : [
+        // RF tarafında türetme geçerli: QC OK veya OnAir olan sahada malzeme
+        // gelmiş ve montaj fiilen başlamış/tamamlanmış demektir
+        { icon: "📦", label: "Malzeme", kapsam: rows, done: (r) => has(r.installation_actual_start_date) || has(r.installation_actual_end_date) || has(r.onair_date) || String(r.malzeme_status || "").toUpperCase().trim() === "OK" || qcOk(r) },
+        { icon: "🔧", label: "Montaj Başladı", kapsam: rows, done: (r) => has(r.installation_actual_start_date) || has(r.installation_actual_end_date) || has(r.onair_date) || qcOk(r) },
+        { icon: "🏗️", label: "Montaj Bitti", kapsam: rows, done: (r) => has(r.installation_actual_end_date) || qcOk(r) },
+        { icon: "🛡️", label: "QC", kapsam: rows, done: (r) => qcOk(r) || has(r.qc_closed_date) },
+        { icon: "✅", label: "Acceptance", kapsam: rows, done: (r) => has(r.pac_actual_end_date) },
+      ];
+
+  const enhLabel =
+    enhFilter === "ABONE" ? "Abone" : enhFilter === "SUZME" ? "Süzme" : "Abone + Süzme";
 
   return (
-    <div className="excelSummarySection">
-      <h2 className="summaryMainTitle">📊 {regionTitle} Genel Durum</h2>
-
-      <div className="excelSummaryGrid">
-        {makeTable(`${regionTitle} 5G PLAN TOTAL`, "5G", "RF STATUS", [
-          {
-            label: "RF Equipment (BTS@DBS) Received",
-            key: "rf_equipment_received",
-          },
-          {
-            label: "RF Installation Started",
-            key: "rf_installation_started",
-            dateField: "installation_actual_start_date",
-          },
-          {
-            label: "RF Installation Finished",
-            key: "rf_installation_finished",
-            dateField: "installation_actual_end_date",
-          },
-          {
-            label: "QC(Closed)",
-            key: "qc_closed",
-            dateField: "qc_closed_date",
-          },
-          {
-            label: "Acceptance",
-            key: "acceptance",
-            dateField: "pac_actual_end_date",
-          },
-          { label: "PO Status(Closed)", key: "po_closed" },
-        ])}
-
-        {makeTable(
-          `${regionTitle} STANDALONE PLAN TOTAL`,
-          "STANDALONE",
-          "RF STATUS",
-          [
-            {
-              label: "RF Equipment (BTS@DBS) Received",
-              key: "rf_equipment_received",
-            },
-            {
-              label: "RF Installation Started",
-              key: "rf_installation_started",
-              dateField: "installation_actual_start_date",
-            },
-            {
-              label: "RF Installation Finished",
-              key: "rf_installation_finished",
-              dateField: "installation_actual_end_date",
-            },
-            {
-              label: "QC(Closed)",
-              key: "qc_closed",
-              dateField: "qc_closed_date",
-            },
-            {
-              label: "Acceptance",
-              key: "acceptance",
-              dateField: "pac_actual_end_date",
-            },
-            { label: "PO Status(Closed)", key: "po_closed" },
-          ],
-        )}
-
-        {makeTable(`${regionTitle} DSS PLAN TOTAL`, "DSS", "RF STATUS", [
-          {
-            label: "RF Equipment (BTS@DBS) Received",
-            key: "rf_equipment_received",
-          },
-          {
-            label: "RF Installation Started",
-            key: "rf_installation_started",
-            dateField: "installation_actual_start_date",
-          },
-          {
-            label: "RF Installation Finished",
-            key: "rf_installation_finished",
-            dateField: "installation_actual_end_date",
-          },
-          {
-            label: "QC(Closed)",
-            key: "qc_closed",
-            dateField: "qc_closed_date",
-          },
-          {
-            label: "Acceptance",
-            key: "acceptance",
-            dateField: "pac_actual_end_date",
-          },
-          { label: "PO Status(Closed)", key: "po_closed" },
-        ])}
-
-        {makeTable(`${regionTitle} LTE PLAN TOTAL`, "LTE", "RF STATUS", [
-          {
-            label: "RF Equipment (BTS@DBS) Received",
-            key: "rf_equipment_received",
-          },
-          {
-            label: "RF Installation Started",
-            key: "rf_installation_started",
-            dateField: "installation_actual_start_date",
-          },
-          {
-            label: "RF Installation Finished",
-            key: "rf_installation_finished",
-            dateField: "installation_actual_end_date",
-          },
-          {
-            label: "QC(Closed)",
-            key: "qc_closed",
-            dateField: "qc_closed_date",
-          },
-          {
-            label: "Acceptance",
-            key: "acceptance",
-            dateField: "pac_actual_end_date",
-          },
-          { label: "PO Status(Closed)", key: "po_closed" },
-        ])}
-
-        {makeTable(`${regionTitle} Survey&BTK PLAN TOTAL`, "DSS", "", [
-          {
-            label: "TSSR Plan Start Date",
-            key: "tssr_plan_start",
-            dateField: "tssr_plan_start_date",
-          },
-          {
-            label: "TSSR Actual End Date",
-            key: "tssr_actual_end",
-            dateField: "tssr_actual_end_date",
-          },
-          {
-            label: "BTK Plan Start Date",
-            key: "btk_plan_start",
-            dateField: "btk_plan_start_date",
-          },
-          {
-            label: "BTK Actual End Date",
-            key: "btk_actual_end",
-            dateField: "btk_actual_end_date",
-          },
-          { label: "BTK Approved by BTK", key: "btk_approved" },
-          { label: "BTK Certificate Date", key: "btk_certificate_date" },
-        ], { hideTypeRow: true })}
-
-        {makeTable(`${regionTitle} POWER PLAN TOTAL (Standalone - Abone)`, "STANDALONE_ABONE", "", [
-          {
-            label: "ENH Proje Plan Start Date",
-            key: "enh_plan_start",
-            dateField: "enh_plan_start_date",
-          },
-          {
-            label: "ENH Proje Actual End Date",
-            key: "enh_actual_end",
-            dateField: "enh_actual_end_date",
-          },
-          {
-            label: "POWER Project Actual End Date",
-            key: "power_actual_end",
-            dateField: "power_actual_end_date",
-          },
-          {
-            label: "Abonelik Belgesi Actual End Date",
-            key: "abonelik_end",
-            dateField: "abonelik_actual_end_date",
-          },
-          {
-            label: "Süzme",
-            key: "suzme",
-            dateField: "suzme_date",
-          },
-          {
-            label: "QC(Closed)",
-            key: "enh_qc_closed",
-            dateField: "enh_qc_closed_date",
-          },
-        ], { hideTypeRow: true })}
+    <div style={{ background: "#fff", borderRadius: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.08)", padding: "18px 22px", margin: "12px 0 4px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
+        <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1f2937" }}>
+          📊 {regionTitle} — {isEnhMode ? `${enhLabel} Sahaları (ENH)` : "Genel Durum"}
+        </h3>
+        <span style={{ marginLeft: "auto", background: "#1e293b", color: "#fff", borderRadius: "999px", padding: "5px 14px", fontSize: "14px", fontWeight: 700 }}>
+          {rows.length} saha
+        </span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
+        {items.map((it) => {
+          const total = it.kapsam.length;
+          const done = it.kapsam.filter(it.done).length;
+          const bekleyen = total - done;
+          const pctNum = total > 0 ? Math.round((done / total) * 100) : 0;
+          return (
+            <div key={it.label} style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "10px 12px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "6px" }}>
+                {it.icon} {it.label}
+                {total !== rows.length && (
+                  <span style={{ fontWeight: 500, color: "#94a3b8" }}> ({total} saha)</span>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
+                <span style={{ fontSize: "18px", fontWeight: 800, color: "#16a34a" }}>✅ {done}</span>
+                <span style={{ fontSize: "13px", fontWeight: 700, color: bekleyen > 0 ? "#d97706" : "#94a3b8" }}>⏳ {bekleyen}</span>
+                <span style={{ marginLeft: "auto", fontSize: "12px", fontWeight: 700, color: "#64748b" }}>{pctNum}%</span>
+              </div>
+              <div style={{ height: "5px", background: "#e5e7eb", borderRadius: "999px", marginTop: "7px", overflow: "hidden" }}>
+                <div style={{ width: `${pctNum}%`, height: "100%", background: pctNum === 100 ? "#16a34a" : "#3b82f6", borderRadius: "999px" }} />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
+
 function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDeleted }) {
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString("tr-TR") : "—";
 
