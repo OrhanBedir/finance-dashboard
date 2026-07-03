@@ -10146,6 +10146,8 @@ function PuantajPanel({ currentUser, onBack }) {
       const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
       if (giris && giris > monthEnd) return false; // o ay henüz işe girmemiş
       if (ayrilma && ayrilma < monthStart) return false; // bu aydan önce ayrılmış
+      // Pasif personel ayrılma tarihi girilmeden sisteme öylece kalmışsa listede sürünmesin
+      if (!p.aktif && !ayrilma) return false;
       return true;
     });
   }, [personelList, puantajAy]);
