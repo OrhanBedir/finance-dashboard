@@ -9285,6 +9285,41 @@ function FinanceDashboard({
                       </div>
                     )}
 
+                    {/* Bize kestiği kalemler (hangi sahaya ne kesmiş) */}
+                    {(reconcileData.invoiced?.items || []).length > 0 && (
+                      <details style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "12px", padding: "8px 14px", marginBottom: "8px" }}>
+                        <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "#166534" }}>
+                          🧾 Bize kestiği {reconcileData.invoiced.items.length} kalem — hangi sahaya ne kesmiş (göster)
+                        </summary>
+                        <div style={{ marginTop: "6px", maxHeight: "220px", overflowY: "auto" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                            <thead>
+                              <tr style={{ textAlign: "left", color: "#64748b" }}>
+                                <th style={{ padding: "4px 6px" }}>Site</th>
+                                <th style={{ padding: "4px 6px" }}>Item</th>
+                                <th style={{ padding: "4px 6px" }}>Açıklama</th>
+                                <th style={{ padding: "4px 6px" }}>Fatura No</th>
+                                <th style={{ padding: "4px 6px" }}>Tarih</th>
+                                <th style={{ padding: "4px 6px", textAlign: "right" }}>Tutar ₺</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {reconcileData.invoiced.items.map((it, i) => (
+                                <tr key={i} style={{ borderTop: i > 0 ? "1px solid #dcfce7" : "none" }}>
+                                  <td style={{ padding: "3px 6px", fontWeight: 600 }}>{it.site_code}</td>
+                                  <td style={{ padding: "3px 6px" }}>{it.item_code}</td>
+                                  <td style={{ padding: "3px 6px", maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.item_description}>{it.item_description}</td>
+                                  <td style={{ padding: "3px 6px" }}>{it.fatura_no || "-"}</td>
+                                  <td style={{ padding: "3px 6px", color: "#64748b" }}>{it.fatura_tarihi ? new Date(it.fatura_tarihi).toLocaleDateString("tr-TR") : "-"}</td>
+                                  <td style={{ padding: "3px 6px", textAlign: "right", fontWeight: 600 }}>{Number(it.fatura_miktari || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    )}
+
                     {/* Unutulan kalem listesi */}
                     {(reconcileData.forgotten?.items || []).length > 0 && (
                       <details style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "12px", padding: "8px 14px", marginBottom: "8px" }}>
