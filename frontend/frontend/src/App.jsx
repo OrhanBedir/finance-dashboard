@@ -447,6 +447,93 @@ function getQtyAnalysis(doneQty, requestedQty) {
   };
 }
 
+// ── PLATFORM STANDART EXCEL EXPORT ──────────────────────────────────────────
+// Tüm indirmelerin tek tip olması için: Bölge Analizi formatı (lacivert başlık,
+// koyu header + autofilter + dondurulmuş üst satırlar, zebra satırlar, gridsiz).
+// rows: dizi dizisi; numericCols: sağa yaslanacak kolon indexleri (Set/dizi).
+async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, sheetName = "Rapor", numericCols = [] }) {
+  const numSet = new Set(numericCols);
+  const NCOLS = headers.length;
+  const titleStyle = {
+    fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
+    font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
+    alignment: { horizontal: "center", vertical: "center" },
+  };
+  const headerStyle = {
+    fill: { patternType: "solid", fgColor: { rgb: "203864" } },
+    font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+    alignment: { horizontal: "center", vertical: "center", wrapText: true },
+    border: {
+      top: { style: "thin", color: { rgb: "B7C9E2" } },
+      bottom: { style: "thin", color: { rgb: "B7C9E2" } },
+      left: { style: "thin", color: { rgb: "B7C9E2" } },
+      right: { style: "thin", color: { rgb: "B7C9E2" } },
+    },
+  };
+  const cellBorder = {
+    top: { style: "hair", color: { rgb: "E5E7EB" } },
+    bottom: { style: "hair", color: { rgb: "E5E7EB" } },
+    left: { style: "hair", color: { rgb: "E5E7EB" } },
+    right: { style: "hair", color: { rgb: "E5E7EB" } },
+  };
+  const cellStyle = (isEven, isNum) => ({
+    fill: { patternType: "solid", fgColor: { rgb: isEven ? "F8FAFC" : "FFFFFF" } },
+    font: { sz: 11, name: "Calibri", color: { rgb: "111827" } },
+    alignment: { horizontal: isNum ? "right" : "left", vertical: "middle" },
+    border: cellBorder,
+  });
+
+  const dateStr = new Date().toLocaleDateString("tr-TR");
+  const aoa = [];
+  const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
+  titleRow[0] = { v: `${title} (${dateStr})`, s: titleStyle };
+  aoa.push(titleRow);
+  aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
+  rows.forEach((r, idx) => {
+    const isEven = idx % 2 === 1;
+    aoa.push(r.map((v, ci) => ({ v: v ?? "", s: cellStyle(isEven, numSet.has(ci)) })));
+  });
+
+  const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
+  aoa.forEach((row, ri) => {
+    row.forEach((cell, ci) => {
+      const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
+      if (!ws[addr]) ws[addr] = { v: cell.v };
+      ws[addr].s = cell.s;
+    });
+  });
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
+  ws["!cols"] = (colWidths || headers.map(() => 18)).map((wch) => ({ wch }));
+  ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...aoa.slice(2).map(() => ({ hpt: 20 }))];
+
+  const wb = XLSXStyle.utils.book_new();
+  XLSXStyle.utils.book_append_sheet(wb, ws, sheetName);
+
+  const dateFile = new Date().toISOString().slice(0, 10);
+  const fileName = `${String(fileBase).replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ _-]/g, "").slice(0, 60)}_${dateFile}.xlsx`;
+
+  // Gridline kapat + üst 2 satırı dondur + header'a autofilter (Bölge Analizi ile aynı)
+  const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
+  const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
+  const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
+  const zip = await JSZip.loadAsync(buf);
+  let xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
+  xml = xml
+    .replace('<sheetView workbookViewId="0"/>', `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`)
+    .replace('<sheetView tabSelected="1" workbookViewId="0"/>', `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`);
+  if (!xml.includes("<autoFilter")) {
+    xml = xml.replace("</sheetData>", `</sheetData><autoFilter ref="A2:${lastColLetter}2"/>`);
+  }
+  zip.file("xl/worksheets/sheet1.xml", xml);
+  const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function getRegion(siteCode = "", projectCode = "") {
   const code = String(siteCode || "")
     .trim()
@@ -3652,26 +3739,17 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
           x.invoiced_amount_incl ?? "",
         ]);
       }
-      const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
-      ws["!cols"] = header.map((h, i) => ({
-        wch:
+      await exportStandardExcel({
+        title: "Huawei Fatura Item Data",
+        sheetName: "Huawei Fatura Item",
+        fileBase: "Huawei Fatura Item Data",
+        headers: header,
+        colWidths: header.map((h, i) =>
           i === 4 ? 38 : i === 0 || i === 1 ? 20 : i === 2 ? 16 : 12,
-      }));
-      // Başlık satırını koyu yap
-      const range = XLSXStyle.utils.decode_range(ws["!ref"]);
-      for (let c = range.s.c; c <= range.e.c; c++) {
-        const cell = ws[XLSXStyle.utils.encode_cell({ r: 0, c })];
-        if (cell)
-          cell.s = {
-            font: { bold: true, color: { rgb: "FFFFFF" } },
-            fill: { patternType: "solid", fgColor: { rgb: "1E40AF" } },
-            alignment: { horizontal: "center" },
-          };
-      }
-      const wb = XLSXStyle.utils.book_new();
-      XLSXStyle.utils.book_append_sheet(wb, ws, "Huawei Fatura Item");
-      const dateStr = new Date().toISOString().slice(0, 10);
-      XLSXStyle.writeFile(wb, `Huawei_Fatura_Item_Data_${dateStr}.xlsx`);
+        ),
+        numericCols: [8, 9, 10, 11, 13, 14, 17],
+        rows: aoa.slice(1),
+      });
     } catch (err) {
       alert("İndirme hatası: " + err.message);
     } finally {
@@ -9291,6 +9369,35 @@ function FinanceDashboard({
                         <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "#166534" }}>
                           🧾 Bize kestiği {reconcileData.invoiced.items.length} kalem — hangi sahaya ne kesmiş (göster)
                         </summary>
+                        <div style={{ margin: "8px 0 4px" }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const items = reconcileData.invoiced?.items || [];
+                              if (!items.length) return;
+                              const tasSafe = String(reconcileData.taseron || "Taseron").split(" ")[0];
+                              exportStandardExcel({
+                                title: `${tasSafe} - Bize Kestiği Faturalar`,
+                                sheetName: "Kestiği Faturalar",
+                                fileBase: `${tasSafe} - Bize Kestigi Faturalar`,
+                                headers: ["Site ID", "Item Code", "Açıklama", "Fatura No", "Fatura Tarihi", "Tutar (KDV Dahil)"],
+                                colWidths: [20, 14, 44, 22, 14, 18],
+                                numericCols: [5],
+                                rows: items.map((it) => [
+                                  it.site_code || "",
+                                  it.item_code || "",
+                                  it.item_description || "",
+                                  it.fatura_no || "",
+                                  it.fatura_tarihi ? String(it.fatura_tarihi).slice(0, 10) : "",
+                                  Number(it.fatura_miktari || 0),
+                                ]),
+                              }).catch((e) => alert("Excel indirilemedi: " + e.message));
+                            }}
+                            style={{ padding: "5px 14px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "#fff", background: "#15803d" }}
+                          >
+                            📥 Excel İndir
+                          </button>
+                        </div>
                         <div style={{ marginTop: "6px", maxHeight: "220px", overflowY: "auto" }}>
                           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
                             <thead>
@@ -9332,33 +9439,22 @@ function FinanceDashboard({
                             onClick={() => {
                               const items = reconcileData.forgotten?.items || [];
                               if (!items.length) return;
-                              const header = ["Site ID", "Item Code", "Açıklama", "Done Qty", "HW Fatura No"];
-                              const aoa = [header];
-                              items.forEach((it) => {
-                                aoa.push([
+                              const tasSafe = String(reconcileData.taseron || "Taseron").split(" ")[0];
+                              exportStandardExcel({
+                                title: `${tasSafe} - Kesmesi Gereken Faturalar`,
+                                sheetName: "Kesilecek Fatura",
+                                fileBase: `${tasSafe} - Kesmesi Gereken Faturalar`,
+                                headers: ["Site ID", "Item Code", "Açıklama", "Done Qty", "HW Fatura No"],
+                                colWidths: [20, 14, 44, 10, 26],
+                                numericCols: [3],
+                                rows: items.map((it) => [
                                   it.site_code || "",
                                   it.item_code || "",
                                   it.item_description || "",
                                   Number(it.done_qty || 0),
                                   it.hw_invoice_nos || "",
-                                ]);
-                              });
-                              const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
-                              ws["!cols"] = [{ wch: 18 }, { wch: 14 }, { wch: 44 }, { wch: 10 }, { wch: 26 }];
-                              const range = XLSXStyle.utils.decode_range(ws["!ref"]);
-                              for (let c = range.s.c; c <= range.e.c; c++) {
-                                const cell = ws[XLSXStyle.utils.encode_cell({ r: 0, c })];
-                                if (cell)
-                                  cell.s = {
-                                    font: { bold: true, color: { rgb: "FFFFFF" } },
-                                    fill: { patternType: "solid", fgColor: { rgb: "B45309" } },
-                                    alignment: { horizontal: "center" },
-                                  };
-                              }
-                              const wb = XLSXStyle.utils.book_new();
-                              XLSXStyle.utils.book_append_sheet(wb, ws, "Kesilecek Fatura");
-                              const tasSafe = String(reconcileData.taseron || "Taseron").split(" ")[0].replace(/[^\wğüşöçıİĞÜŞÖÇ-]/gi, "_");
-                              XLSXStyle.writeFile(wb, `${tasSafe}_Kesmesi_Gereken_Faturalar_${new Date().toISOString().slice(0, 10)}.xlsx`);
+                                ]),
+                              }).catch((e) => alert("Excel indirilemedi: " + e.message));
                             }}
                             style={{ padding: "5px 14px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "#fff", background: "#b45309" }}
                           >
@@ -16508,38 +16604,16 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       ]);
     }
     aoa.push(["", "", "", "", "", "TOPLAM", grand, "", "", "", "", ""]);
-    const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [
-      { wch: 18 },
-      { wch: 40 },
-      { wch: 14 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 14 },
-      { wch: 16 },
-      { wch: 13 },
-      { wch: 18 },
-      { wch: 13 },
-      { wch: 16 },
-      { wch: 13 },
-    ];
-    const range = XLSXStyle.utils.decode_range(ws["!ref"]);
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      const cell = ws[XLSXStyle.utils.encode_cell({ r: 0, c })];
-      if (cell)
-        cell.s = {
-          font: { bold: true, color: { rgb: "FFFFFF" } },
-          fill: { patternType: "solid", fgColor: { rgb: "15803D" } },
-          alignment: { horizontal: "center" },
-        };
-    }
-    const wb = XLSXStyle.utils.book_new();
-    XLSXStyle.utils.book_append_sheet(wb, ws, "Fatura Kesilebilir");
-    const dateStr = new Date().toISOString().slice(0, 10);
-    XLSXStyle.writeFile(
-      wb,
-      `${userSubconName || "Taseron"}_Fatura_Kesilebilir_${dateStr}.xlsx`,
-    );
+    const _name = subconDisplayName || userSubconName || "Taşeron";
+    exportStandardExcel({
+      title: `${_name} - Fatura Kesilebilir Kalemler`,
+      sheetName: "Fatura Kesilebilir",
+      fileBase: `${_name} - Fatura Kesilebilir`,
+      headers: header,
+      colWidths: [18, 40, 14, 10, 10, 14, 16, 13, 18, 13, 16, 13],
+      numericCols: [3, 4, 5, 6, 10],
+      rows: aoa.slice(1),
+    }).catch((e) => alert("Excel indirilemedi: " + e.message));
   };
 
   const searchHasValue = regionSearch.trim() !== "";
