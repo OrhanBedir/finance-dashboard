@@ -4658,7 +4658,7 @@ function FinanceDashboard({
         : "tum_taseronlar";
       // Hakediş kolon başlığı seçili taşerona göre dinamik (yoksa genel "Taşeron Hakediş")
       const _expSub = String(subconFilter || "").trim();
-      const _expPct = canonTaseron(_expSub) === "ubs" ? 75 : 80;
+      const _expPct = ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş (Kırılım)";
       const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş (Kırılım) KDV Dahil";
 
@@ -9326,6 +9326,45 @@ function FinanceDashboard({
                         <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "#92400e" }}>
                           ⚠️ Kesmeyi unuttuğu {reconcileData.forgotten.items.length} kalem (göster)
                         </summary>
+                        <div style={{ margin: "8px 0 4px" }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const items = reconcileData.forgotten?.items || [];
+                              if (!items.length) return;
+                              const header = ["Site ID", "Item Code", "Açıklama", "Done Qty", "HW Fatura No"];
+                              const aoa = [header];
+                              items.forEach((it) => {
+                                aoa.push([
+                                  it.site_code || "",
+                                  it.item_code || "",
+                                  it.item_description || "",
+                                  Number(it.done_qty || 0),
+                                  it.hw_invoice_nos || "",
+                                ]);
+                              });
+                              const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
+                              ws["!cols"] = [{ wch: 18 }, { wch: 14 }, { wch: 44 }, { wch: 10 }, { wch: 26 }];
+                              const range = XLSXStyle.utils.decode_range(ws["!ref"]);
+                              for (let c = range.s.c; c <= range.e.c; c++) {
+                                const cell = ws[XLSXStyle.utils.encode_cell({ r: 0, c })];
+                                if (cell)
+                                  cell.s = {
+                                    font: { bold: true, color: { rgb: "FFFFFF" } },
+                                    fill: { patternType: "solid", fgColor: { rgb: "B45309" } },
+                                    alignment: { horizontal: "center" },
+                                  };
+                              }
+                              const wb = XLSXStyle.utils.book_new();
+                              XLSXStyle.utils.book_append_sheet(wb, ws, "Kesilecek Fatura");
+                              const tasSafe = String(reconcileData.taseron || "Taseron").split(" ")[0].replace(/[^\wğüşöçıİĞÜŞÖÇ-]/gi, "_");
+                              XLSXStyle.writeFile(wb, `${tasSafe}_Kesmesi_Gereken_Faturalar_${new Date().toISOString().slice(0, 10)}.xlsx`);
+                            }}
+                            style={{ padding: "5px 14px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "#fff", background: "#b45309" }}
+                          >
+                            📥 Excel İndir (taşerona gönder)
+                          </button>
+                        </div>
                         <div style={{ marginTop: "6px", maxHeight: "180px", overflowY: "auto" }}>
                           {reconcileData.forgotten.items.map((it, i) => (
                             <div key={i} style={{ fontSize: "12px", padding: "3px 0", borderTop: i > 0 ? "1px solid #fef3c7" : "none" }}>
@@ -15680,6 +15719,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const [detailRows, setDetailRows] = useState([]);
 
   const [rows, setRows] = useState([]);
+  // Filtresiz ham satırlar (2KX'te 2026/özel-item filtresi öncesi) — billable eşleştirmesi için
+  const [allRows, setAllRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const usdRate = useUsdRate();
@@ -15881,6 +15922,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         withAuth: true,
       });
       let resultRows = data.rows || [];
+      setAllRows(resultRows);
       // 2KX: sadece 2026 sahaları + 5 özel item panelden hariç
       // (bu 5 kalemi başka firma yapıyor, 2KX üzerinden faturalanıyor; ayrı/manuel takip)
       if (is2KXRegion) {
@@ -16388,7 +16430,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         /* sessiz */
       }
 
-      const matched = (sortedRows || [])
+      // 2KX: panel 2026-filtreli ama faturalanan işler önceki yıllarda olabilir →
+      // eşleştirmeyi HAM satırlar üzerinden yap (5 özel item yine hariç, manuel takip)
+      const baseRows = is2KXRegion
+        ? (allRows || []).filter(
+            (r) => !TWOKX_SPECIAL_ITEMS.has(String(r.item_code || "").trim()),
+          )
+        : sortedRows || [];
+      const matched = baseRows
         .filter((row) => {
           const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
           return Number(row.done_qty || 0) > 0 && keySet.has(key);
@@ -16533,7 +16582,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
       // Hakediş kolon başlığı taşerona göre dinamik (Federal → AHY → UBS ...)
       const _expSub = String(userSubconName || "").trim();
-      const _expPct = canonTaseron(_expSub) === "ubs" ? 75 : 80;
+      const _expPct = ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş";
       const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş KDV Dahil";
 
@@ -16622,8 +16671,19 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
 
 
-      // FEDERAL/UBS için fatura verileri
-      const FATURA_TASERONLAR = ["federal", "ubs", "ahy"];
+      // FEDERAL/UBS/AHY/2KX için fatura verileri
+      const FATURA_TASERONLAR = ["federal", "ubs", "ahy", "2kx"];
+      // bolge_fatura girişleri kısa adla ("2KX") yapılmış olabilir; satırdaki subcon_name
+      // uzun yasal ad → canonTaseron ile normalize edilmiş anahtar haritası kur
+      const bfMapCanon = {};
+      Object.entries(bfMap || {}).forEach(([k, v]) => {
+        const parts = k.split("|");
+        if (parts.length >= 3) {
+          const ck = `${parts[0]}|${parts[1]}|${canonTaseron(parts.slice(2).join("|"))}`;
+          if (!bfMapCanon[ck]) bfMapCanon[ck] = [];
+          bfMapCanon[ck].push(...(v || []));
+        }
+      });
       const faturaStyle = (isEven) => ({
         fill: { patternType: "solid", fgColor: { rgb: isEven ? "FFF3CD" : "FFFBEA" } },
         font: { sz: 11, name: "Calibri", color: { rgb: "92400E" } },
@@ -16642,16 +16702,18 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const usdBirimFiyat = isUSD ? unitPrice : 0;
         const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
         const toplamHakedis = Number(row.total_done_amount || 0);
-        const federalHakedis = toplamHakedis * 0.80;
+        // Taşerona göre kırılım oranı (Federal/AHY %80, UBS %75-90, 2KX %75)
+        const _rowRate = getSubconRateByRow(row);
+        const federalHakedis = toplamHakedis * _rowRate;
 
-        // Fatura kesilecek: sadece FEDERAL/UBS, Billed Qty > 0 ise
+        // Fatura kesilecek: FEDERAL/UBS/AHY/2KX, Billed Qty > 0 ise
         const subconLower = String(row.subcon_name || "").toLowerCase().trim();
         const isFaturaTaseron = FATURA_TASERONLAR.some(t => subconLower.includes(t));
-        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * 0.80 : 0;
+        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * _rowRate : 0;
 
-        // Girilmiş fatura verisi
-        const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconLower}`;
-        const bfEntries = bfMap[bfKey] || [];
+        // Girilmiş fatura verisi (canon taşeron adıyla eşle — "2KX" kısa adı da yakalar)
+        const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${canonTaseron(row.subcon_name)}`;
+        const bfEntries = bfMapCanon[bfKey] || [];
         const faturaNo = bfEntries.map(e => e.fatura_no || "").filter(Boolean).join(", ");
         const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
         const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");

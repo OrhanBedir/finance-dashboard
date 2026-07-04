@@ -8907,10 +8907,16 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
     ).catch(() => ({ rows: [] }));
 
     // Unutulan = bu taşeron yaptı + Huawei'ye faturalanmış AMA taşeron bize kesmemiş
+    // 2KX'in 5 özel itemi (başka firma yapıyor, manuel takip) listeye girmez
+    const TWOKX_HIDDEN_ITEMS = new Set([
+      "8812184927", "8812184919", "8812184920", "8812184930", "8812184870",
+    ]);
+    const isTwoKxTas = tasUpper.includes("2KX");
     const forgottenSeen = new Set();
     const forgotten = [];
     for (const r of mw.rows) {
       if (!matchTas(r.subcon_name)) continue;
+      if (isTwoKxTas && TWOKX_HIDDEN_ITEMS.has(String(r.item_code || "").trim())) continue;
       const k = keyOf(r.site_code, r.item_code);
       if (!hwInvByKey.has(k)) continue; // Huawei'ye faturalanmamış → kesemez
       if (invoicedKeys.has(k)) continue; // zaten kesmiş
