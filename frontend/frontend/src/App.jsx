@@ -18577,7 +18577,8 @@ function CashFlowPanel({ currentUser, onBack }) {
       setHwPending(toMap(cfData.pending));
       setHwOverdue(toMap(cfData.overdue_hw));
       setHwDeduct(toMap(cfData.deductions));
-      setPersonelList(Array.isArray(perData) ? perData.filter(p => p.aktif) : []);
+      // Sadece Şimşek maaşlı personel (taşeron ISG kayıtları hariç — maaş/ticket hesabına girmez)
+      setPersonelList(Array.isArray(perData) ? perData.filter(p => p.aktif && (p.firma_tipi || "simsek") === "simsek") : []);
       setAraclar(Array.isArray(aracData) ? aracData.filter(a => a.durum === "AKTİF") : []);
       setOfisList(Array.isArray(ofisData?.rows) ? ofisData.rows : Array.isArray(ofisData) ? ofisData : []);
       setSarkanlar(Array.isArray(sarkanData) ? sarkanData : []);
