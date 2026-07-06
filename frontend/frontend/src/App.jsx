@@ -18536,6 +18536,7 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [taseronModal,setTaseronModal]= useState(null); // {gun, items, rect}
   const [odemeler,    setOdemeler]    = useState([]); // manuel ödemeler (araç/ticket/diğer)
   const [maasOdemeler,setMaasOdemeler]= useState([]); // İK maas_odeme (bu ay yapılan)
+  const [isAvanslar,  setIsAvanslar]  = useState([]); // PD onaylı iş avansları (otomatik)
   const [showOdemeModal, setShowOdemeModal] = useState(false);
   const [odemeForm,   setOdemeForm]   = useState({ kategori:"ARAC", tarih:"", tutar:"", donem:"", aciklama:"" });
   const [odemeSaving, setOdemeSaving] = useState(false);
@@ -18586,6 +18587,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       const odemeData = await odemeRes.json().catch(() => ({}));
       setOdemeler(Array.isArray(odemeData?.odemeler) ? odemeData.odemeler : []);
       setMaasOdemeler(Array.isArray(odemeData?.maaslar) ? odemeData.maaslar : []);
+      setIsAvanslar(Array.isArray(odemeData?.avanslar) ? odemeData.avanslar : []);
     } catch(e) { console.error("CashFlow load error:", e); }
     setLoading(false);
   };
@@ -18684,6 +18686,15 @@ function CashFlowPanel({ currentUser, onBack }) {
     else if (o.kategori === "TICKET" && !eskiDonem) addTo(ticketByDay, ticketTips, d, t, tip);
     else addTo(digerByDay, digerTips, d, t, eskiDonem ? `⏰ Geciken ${tip}` : tip);
   });
+  // İş avansları (PD onaylı — otomatik) → Diğer Ödemeler, tooltip'te kırılım
+  isAvanslar.forEach((a) => {
+    const d = dayOf(a.tarih);
+    const t = Number(a.tutar || 0);
+    if (t <= 0) return;
+    const detay = [a.gider_turu, a.aciklama].filter(Boolean).join(" · ");
+    addTo(digerByDay, digerTips, d, t,
+      `💼 İş avansı — ${a.talep_eden_ad || "?"}${detay ? ` (${detay})` : ""}: ₺${t.toLocaleString("tr-TR")}${a.durum === "DIREKTOR_ONAY" ? " · onaylandı, ödeme bekliyor" : ""}`);
+  });
 
   const KATEGORILER = [
     { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",     type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived },
@@ -18693,7 +18704,7 @@ function CashFlowPanel({ currentUser, onBack }) {
     { key:"ticket",      label:"🎫 Ticket'lar",                 type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: ticketByDay, tips: ticketTips, note: "Ödendikçe görünür (+ Ödeme Ekle)" },
     { key:"ofis",        label:`🏢 ${prevAyAdi} Depo & Ofis Kirası`, type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0 ? {5: totalOfis} : {}, note: `${prevAyAdi} kirası · Ödeme: 5. gün` },
     { key:"taseron",     label:"🔧 Taşeron Ödemeleri",          type:"expense", color:"#fdf4ff", textColor:"#7e22ce", byDay: taseronByDay, isTaseron: true },
-    { key:"diger",       label:"📋 Diğer Ödemeler",             type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: digerByDay,  tips: digerTips,  note: "Geciken maaş/kira + yemek, konaklama vb. · üzerine gel" },
+    { key:"diger",       label:"📋 Diğer Ödemeler",             type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: digerByDay,  tips: digerTips,  note: "İş avansı (otomatik) + geciken maaş/kira + yemek vb. · üzerine gel" },
   ];
 
   // Günlük net ve kümülatif bakiye

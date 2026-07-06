@@ -10213,7 +10213,19 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
        FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
        WHERE EXTRACT(YEAR FROM m.tarih)=$1 AND EXTRACT(MONTH FROM m.tarih)=$2`,
       [yil, ay]).catch(() => ({ rows: [] }));
-    res.json({ ok: true, odemeler: r.rows, maaslar: m.rows });
+    // İş avansları: PD (Direktör) onayından geçenler — otomatik gider
+    // Tarih: ödeme tarihi varsa o, yoksa direktör onay tarihi
+    const av = await pool.query(
+      `SELECT id,
+              TO_CHAR(COALESCE(odeme_tarihi, direktor_onay_tarihi),'YYYY-MM-DD') AS tarih,
+              tutar, talep_eden_ad, gider_turu, aciklama, durum
+       FROM is_avans_talep
+       WHERE durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
+         AND COALESCE(odeme_tarihi, direktor_onay_tarihi) IS NOT NULL
+         AND EXTRACT(YEAR FROM COALESCE(odeme_tarihi, direktor_onay_tarihi))=$1
+         AND EXTRACT(MONTH FROM COALESCE(odeme_tarihi, direktor_onay_tarihi))=$2`,
+      [yil, ay]).catch(() => ({ rows: [] }));
+    res.json({ ok: true, odemeler: r.rows, maaslar: m.rows, avanslar: av.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
