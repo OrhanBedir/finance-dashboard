@@ -10179,6 +10179,65 @@ app.get("/debug/db-check", async (req, res) => {
   }
 });
 
+/* ================== NAKİT AKIŞI MANUEL ÖDEMELER ==================
+   Araç kirası / ticket-yemek / diğer ödemeler ödendikçe buradan girilir.
+   Maaş ödemeleri İK'daki maas_odeme tablosundan otomatik gelir. */
+async function ensureCashflowOdemeTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cashflow_odeme (
+      id SERIAL PRIMARY KEY,
+      kategori TEXT NOT NULL,
+      tarih DATE NOT NULL,
+      tutar NUMERIC NOT NULL,
+      donem TEXT,
+      aciklama TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+}
+
+app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureCashflowOdemeTable();
+    const { yil, ay } = req.query;
+    if (!yil || !ay) return res.status(400).json({ ok: false, error: "yil ve ay gerekli" });
+    const r = await pool.query(
+      `SELECT id, kategori, TO_CHAR(tarih,'YYYY-MM-DD') AS tarih, tutar, donem, aciklama
+       FROM cashflow_odeme
+       WHERE EXTRACT(YEAR FROM tarih)=$1 AND EXTRACT(MONTH FROM tarih)=$2
+       ORDER BY tarih, id`, [yil, ay]);
+    // Maaş ödemeleri: İK'daki maas_odeme kayıtları (bu ay yapılan ödemeler)
+    const m = await pool.query(
+      `SELECT m.id, TO_CHAR(m.tarih,'YYYY-MM-DD') AS tarih,
+              (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
+              m.donem, p.ad_soyad
+       FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
+       WHERE EXTRACT(YEAR FROM m.tarih)=$1 AND EXTRACT(MONTH FROM m.tarih)=$2`,
+      [yil, ay]).catch(() => ({ rows: [] }));
+    res.json({ ok: true, odemeler: r.rows, maaslar: m.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
+  try {
+    await ensureCashflowOdemeTable();
+    const { kategori, tarih, tutar, donem, aciklama } = req.body;
+    if (!kategori || !tarih || !tutar)
+      return res.status(400).json({ ok: false, error: "kategori, tarih, tutar zorunlu" });
+    const r = await pool.query(
+      `INSERT INTO cashflow_odeme (kategori,tarih,tutar,donem,aciklama)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [kategori, tarih, parseFinanceNumber(tutar), donem || null, aciklama || null]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.delete("/finance/cashflow-odeme/:id", requireFinanceAuth, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 /* ================== FINANCE CASHFLOW MONTHLY ================== */
 app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
   try {
@@ -13209,6 +13268,19 @@ app.put("/hr/araclar/:id", async (req, res) => {
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
        sigorta_bitis||null,muayene_bitis||null,durum,notlar,aktif??null]
     );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Sadece durum güncelle (AKTİF/PASİF/SERVİSTE) — diğer alanları bozmadan
+app.put("/hr/araclar/:id/durum", async (req, res) => {
+  try {
+    const { durum } = req.body;
+    if (!["AKTİF", "PASİF", "SERVİSTE"].includes(durum))
+      return res.status(400).json({ error: "Geçersiz durum" });
+    const { rows } = await pool.query(
+      `UPDATE araclar SET durum=$1, aktif=$2 WHERE id=$3 RETURNING *`,
+      [durum, durum === "AKTİF", req.params.id]);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

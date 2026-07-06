@@ -18534,6 +18534,11 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [taseronByDay,setTaseronByDay]= useState({}); // gun→toplam taşeron ödemesi
   const [taseronDet,  setTaseronDet]  = useState({}); // gun→[{firma,tutar,fatura_no}]
   const [taseronModal,setTaseronModal]= useState(null); // {gun, items, rect}
+  const [odemeler,    setOdemeler]    = useState([]); // manuel ödemeler (araç/ticket/diğer)
+  const [maasOdemeler,setMaasOdemeler]= useState([]); // İK maas_odeme (bu ay yapılan)
+  const [showOdemeModal, setShowOdemeModal] = useState(false);
+  const [odemeForm,   setOdemeForm]   = useState({ kategori:"ARAC", tarih:"", tutar:"", donem:"", aciklama:"" });
+  const [odemeSaving, setOdemeSaving] = useState(false);
   const [loading,     setLoading]     = useState(false);
 
   const AY_ADLARI = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
@@ -18548,7 +18553,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       const prevYil  = String(prevDate.getFullYear());
       const prevAy   = String(prevDate.getMonth() + 1).padStart(2, "0");
 
-      const [cfRes, perRes, aracRes, ofisRes, sarkanRes, prevOzetRes, taseronRes] = await Promise.all([
+      const [cfRes, perRes, aracRes, ofisRes, sarkanRes, prevOzetRes, taseronRes, odemeRes] = await Promise.all([
         fetch(`${API_BASE}/finance/cashflow-monthly?yil=${yil}&ay=${ay}`, { headers }),
         fetch(`${API_BASE}/hr/personel`, { headers }),
         fetch(`${API_BASE}/hr/araclar`, { headers }),
@@ -18556,6 +18561,7 @@ function CashFlowPanel({ currentUser, onBack }) {
         fetch(`${API_BASE}/finance/sarkan-odemeler`, { headers }),
         fetch(`${API_BASE}/hr/puantaj/ozet?yil=${prevYil}&ay=${prevAy}`, { headers }),
         fetch(`${API_BASE}/finance/taseron-cashflow?yil=${yil}&ay=${ay}`, { headers }),
+        fetch(`${API_BASE}/finance/cashflow-odeme?yil=${yil}&ay=${ay}`, { headers }),
       ]);
       const cfData      = await cfRes.json();
       const perData     = await perRes.json();
@@ -18577,6 +18583,9 @@ function CashFlowPanel({ currentUser, onBack }) {
       setPrevOzet(Array.isArray(prevOzetData) ? prevOzetData : []);
       setTaseronByDay(taseronData?.byDay || {});
       setTaseronDet(taseronData?.details || {});
+      const odemeData = await odemeRes.json().catch(() => ({}));
+      setOdemeler(Array.isArray(odemeData?.odemeler) ? odemeData.odemeler : []);
+      setMaasOdemeler(Array.isArray(odemeData?.maaslar) ? odemeData.maaslar : []);
     } catch(e) { console.error("CashFlow load error:", e); }
     setLoading(false);
   };
@@ -18636,30 +18645,55 @@ function CashFlowPanel({ currentUser, onBack }) {
                          .map(Number).filter(n => !isNaN(n) && n > 0);
   const firstHWDay   = hwDaysAll.length > 0 ? Math.min(...hwDaysAll) : null;
 
-  // Kategoriler
-  const hwDeductAbs = Object.fromEntries(Object.entries(hwDeduct).map(([k,v])=>[k,Math.abs(v)]));
-  const hwOverdueTotal = Object.values(hwOverdue).reduce((s,v)=>s+v,0);
+  // ── Gerçekleşen ödemeleri satırlara dağıt (projeksiyon yok, ödendikçe görünür) ──
+  // Beklenen dönem: görüntülenen ayın bir öncesi (Temmuz'da Haziran maaşı/kirası ödenir)
+  const expDonem = `${prevDate2.getFullYear()}-${String(prevDate2.getMonth() + 1).padStart(2, "0")}`;
+  const dayOf = (t) => Number(String(t || "").slice(8, 10)) || 0;
+  const addTo = (map, tips, d, tutar, tip) => {
+    if (!d) return;
+    map[d] = (map[d] || 0) + tutar;
+    if (!tips[d]) tips[d] = [];
+    tips[d].push(tip);
+  };
+  const maasByDay = {}, maasTips = {};
+  const aracByDay = {}, aracTips = {};
+  const ticketByDay = {}, ticketTips = {};
+  const digerByDay = {}, digerTips = {};
+  const AY_KISA = (dn) => {
+    const m = String(dn || "").match(/^(\d{4})-(\d{2})$/);
+    return m ? `${AY_ADLARI[Number(m[2]) - 1]} ${m[1]}` : dn || "";
+  };
+  // Maaş ödemeleri (İK'dan otomatik): beklenen dönem → Maaş satırı, eski dönem → Diğer
+  maasOdemeler.forEach((m) => {
+    const d = dayOf(m.tarih);
+    const t = Number(m.tutar || 0);
+    if (t <= 0) return;
+    const tip = `${AY_KISA(m.donem)} maaşı — ${m.ad_soyad}: ₺${t.toLocaleString("tr-TR")}`;
+    if (!m.donem || m.donem === expDonem) addTo(maasByDay, maasTips, d, t, tip);
+    else addTo(digerByDay, digerTips, d, t, `⏰ Geciken ${tip}`);
+  });
+  // Manuel ödemeler (araç/ticket/diğer): beklenen dönem → kendi satırı, eski dönem → Diğer
+  const KAT_LBL = { ARAC: "Araç kirası", TICKET: "Ticket/Yemek", DIGER: "Diğer" };
+  odemeler.forEach((o) => {
+    const d = dayOf(o.tarih);
+    const t = Number(o.tutar || 0);
+    if (t <= 0) return;
+    const tip = `${o.aciklama || KAT_LBL[o.kategori] || o.kategori}${o.donem ? ` (${AY_KISA(o.donem)})` : ""}: ₺${t.toLocaleString("tr-TR")}`;
+    const eskiDonem = o.donem && o.donem !== expDonem;
+    if (o.kategori === "ARAC" && !eskiDonem) addTo(aracByDay, aracTips, d, t, tip);
+    else if (o.kategori === "TICKET" && !eskiDonem) addTo(ticketByDay, ticketTips, d, t, tip);
+    else addTo(digerByDay, digerTips, d, t, eskiDonem ? `⏰ Geciken ${tip}` : tip);
+  });
+
   const KATEGORILER = [
-    { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",               type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived },
-    { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",              type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending  },
-    ...(hwOverdueTotal > 0 ? [{ key:"hw_overdue", label:"⚠️ HW Geciken Tahsilat",  type:"income",  color:"#fee2e2", textColor:"#991b1b", byDay: hwOverdue, overdue: true }] : []),
-    { key:"hw_deduct",   label:"↩️ İade / Kesinti",                      type:"expense", color:"#fff1f2", textColor:"#9f1239", byDay: hwDeductAbs },
-    { key:"maas",        label:`👥 ${prevAyAdi} Maaşları`,               type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: totalMaas>0   ? {15: totalMaas}   : {}, note: `${prevAyAdi} ayı hakedilen · Ödeme: 15. gün`, overdue: maasOverdue },
-    { key:"arac",        label:`🚗 ${prevAyAdi} Araç Kiraları`,           type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: totalArac>0   ? {10: totalArac}   : {}, note: `${prevAyAdi} kirası · Ödeme: 10. gün`,          overdue: totalArac>0 && paymentOverdue(10) },
-    { key:"ticket",      label:"🎫 Ticket'lar",                           type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: totalTicket>0 ? {5:  totalTicket} : {}, note: `${personelList.length} kişi × ₺10.000 · 5. gün`, overdue: totalTicket>0 && paymentOverdue(5) },
-    { key:"ofis",        label:`🏢 ${prevAyAdi} Depo & Ofis Kirası`,      type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0   ? {5:  totalOfis}   : {}, note: `${prevAyAdi} kirası · Ödeme: 5. gün`,           overdue: totalOfis>0 && paymentOverdue(5) },
-    ...(totalSarkan > 0 && firstHWDay ? [{
-      key:"spillover",
-      label:"⚠️ Önceki Ay Borcu",
-      type:"expense",
-      color:"#fff7ed",
-      textColor:"#c2410c",
-      byDay: { [firstHWDay]: totalSarkan },
-      note: `${sarkanlar.length} aydan sarkan · HW geliri ile ödenmeli (${firstHWDay}. gün)`,
-      overdue: true,
-    }] : []),
-    { key:"taseron",     label:"🔧 Taşeron Ödemeleri",                    type:"expense", color:"#fdf4ff", textColor:"#7e22ce", byDay: taseronByDay, isTaseron: true },
-    { key:"diger",       label:"📋 Diğer Giderler",                       type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: {} },
+    { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",     type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived },
+    { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",    type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending  },
+    { key:"maas",        label:`👥 ${prevAyAdi} Maaşları`,     type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: maasByDay,   tips: maasTips,   note: "Ödendikçe görünür (İK → Öde)" },
+    { key:"arac",        label:`🚗 ${prevAyAdi} Araç Kiraları`, type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: aracByDay,   tips: aracTips,   note: "Ödendikçe görünür (+ Ödeme Ekle)" },
+    { key:"ticket",      label:"🎫 Ticket'lar",                 type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: ticketByDay, tips: ticketTips, note: "Ödendikçe görünür (+ Ödeme Ekle)" },
+    { key:"ofis",        label:`🏢 ${prevAyAdi} Depo & Ofis Kirası`, type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0 ? {5: totalOfis} : {}, note: `${prevAyAdi} kirası · Ödeme: 5. gün` },
+    { key:"taseron",     label:"🔧 Taşeron Ödemeleri",          type:"expense", color:"#fdf4ff", textColor:"#7e22ce", byDay: taseronByDay, isTaseron: true },
+    { key:"diger",       label:"📋 Diğer Ödemeler",             type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: digerByDay,  tips: digerTips,  note: "Geciken maaş/kira + yemek, konaklama vb. · üzerine gel" },
   ];
 
   // Günlük net ve kümülatif bakiye
@@ -18815,12 +18849,73 @@ function CashFlowPanel({ currentUser, onBack }) {
           <select value={ay} onChange={e=>setAy(e.target.value)} style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", fontWeight:600, minWidth:"100px" }}>
             {AY_ADLARI.map((a,i)=><option key={i} value={String(i+1).padStart(2,"0")}>{a}</option>)}
           </select>
+          <button onClick={()=>{ setOdemeForm({ kategori:"ARAC", tarih:`${yil}-${ay}-${String(new Date().getDate()).padStart(2,"0")}`, tutar:"", donem:expDonem, aciklama:"" }); setShowOdemeModal(true); }}
+            style={{ padding:"8px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>
+            ＋ Ödeme Ekle
+          </button>
           <button onClick={handleExcelIndir} style={{ padding:"8px 18px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}>
             📥 Excel İndir
           </button>
           {loading && <span style={{ fontSize:"12px", color:"#6b7280" }}>⏳ Yükleniyor...</span>}
         </div>
       </div>
+
+      {showOdemeModal && (
+        <div onClick={()=>setShowOdemeModal(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:12000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"440px", padding:"22px 24px", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+            <h3 style={{ margin:"0 0 14px", fontSize:"17px" }}>＋ Ödeme Ekle (gerçekleşen)</h3>
+            <div style={{ display:"grid", gap:"12px" }}>
+              <div>
+                <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Kategori</label>
+                <select value={odemeForm.kategori} onChange={e=>setOdemeForm(f=>({...f, kategori:e.target.value}))} style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box" }}>
+                  <option value="ARAC">🚗 Araç Kirası</option>
+                  <option value="TICKET">🎫 Ticket / Yemek</option>
+                  <option value="DIGER">📋 Diğer (yemek, konaklama vb.)</option>
+                </select>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+                <div>
+                  <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Ödeme Tarihi</label>
+                  <input type="date" value={odemeForm.tarih} onChange={e=>setOdemeForm(f=>({...f, tarih:e.target.value}))} style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Tutar (₺)</label>
+                  <input type="text" value={odemeForm.tutar} onChange={e=>setOdemeForm(f=>({...f, tutar:e.target.value}))} placeholder="0,00" style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box" }} />
+                </div>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+                <div>
+                  <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Ait Olduğu Dönem</label>
+                  <input type="month" value={odemeForm.donem} onChange={e=>setOdemeForm(f=>({...f, donem:e.target.value}))} style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Açıklama</label>
+                  <input type="text" value={odemeForm.aciklama} onChange={e=>setOdemeForm(f=>({...f, aciklama:e.target.value}))} placeholder="Örn. 06CUM676 plaka" style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box" }} />
+                </div>
+              </div>
+              <div style={{ fontSize:"11px", color:"#92400e", background:"#fffbeb", padding:"6px 10px", borderRadius:"8px" }}>
+                💡 Dönem, görüntülenen aydan eskiyse ödeme <b>"Diğer Ödemeler"</b> satırına (geciken) düşer.
+              </div>
+              <div style={{ display:"flex", justifyContent:"flex-end", gap:"8px" }}>
+                <button onClick={()=>setShowOdemeModal(false)} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"8px", cursor:"pointer", fontWeight:600 }}>İptal</button>
+                <button disabled={odemeSaving} onClick={async()=>{
+                  if(!odemeForm.tarih || !odemeForm.tutar){ alert("Tarih ve tutar zorunlu"); return; }
+                  try {
+                    setOdemeSaving(true);
+                    const r = await fetch(`${API_BASE}/finance/cashflow-odeme`, { method:"POST", headers:{...headers,"Content-Type":"application/json"}, body: JSON.stringify(odemeForm) });
+                    const d = await r.json();
+                    if(!d.ok) throw new Error(d.error||"Kaydedilemedi");
+                    setShowOdemeModal(false);
+                    await loadData();
+                  } catch(e){ alert(e.message); } finally { setOdemeSaving(false); }
+                }} style={{ padding:"9px 20px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", cursor:"pointer", fontWeight:700 }}>
+                  {odemeSaving ? "..." : "Kaydet"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Özet kartları */}
       <div style={{ display:"flex", gap:"12px", marginBottom:"20px", flexWrap:"wrap" }}>
@@ -18920,6 +19015,7 @@ function CashFlowPanel({ currentUser, onBack }) {
                       : (kat.overdue ? "#fff5f5" : (isWeekend(d)?"#f8f9fe":"transparent"));
                     return (
                       <td key={d}
+                        title={kat.tips?.[d]?.length ? kat.tips[d].join("\n") : undefined}
                         onClick={kat.isTaseron && val!==0 ? (e) => {
                           const rect = e.currentTarget.getBoundingClientRect();
                           setTaseronModal({ gun: d, items: taseronDet[d]||[], rect });
@@ -25034,10 +25130,29 @@ function AraclarPanel({ currentUser, onBack }) {
                 </div>
                 {/* Actions */}
                 {canEdit && (
-                  <button onClick={()=>openEdit(a)}
-                    style={{ marginTop:"12px", width:"100%", padding:"8px", background:"#f3f4f6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer", color:"#374151" }}>
-                    ✏️ Düzenle / Belge Yükle
-                  </button>
+                  <div style={{ marginTop:"12px", display:"flex", gap:"6px", alignItems:"center" }}>
+                    <select value={a.durum||"AKTİF"}
+                      onChange={async(e)=>{
+                        const yeni = e.target.value;
+                        try {
+                          const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/durum`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ durum: yeni }) });
+                          if(!r.ok) throw new Error("Durum güncellenemedi");
+                          load();
+                        } catch(err){ alert(err.message); }
+                      }}
+                      onClick={(e)=>e.stopPropagation()}
+                      style={{ padding:"8px 10px", borderRadius:"8px", border:"1px solid #d1d5db", fontSize:"12px", fontWeight:700, cursor:"pointer",
+                        background: a.durum==="AKTİF" ? "#dcfce7" : a.durum==="SERVİSTE" ? "#fef3c7" : "#f3f4f6",
+                        color: a.durum==="AKTİF" ? "#166534" : a.durum==="SERVİSTE" ? "#92400e" : "#6b7280" }}>
+                      <option value="AKTİF">🟢 Aktif</option>
+                      <option value="PASİF">⚪ Pasif</option>
+                      <option value="SERVİSTE">🔧 Serviste</option>
+                    </select>
+                    <button onClick={()=>openEdit(a)}
+                      style={{ flex:1, padding:"8px", background:"#f3f4f6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer", color:"#374151" }}>
+                      ✏️ Düzenle / Belge
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
