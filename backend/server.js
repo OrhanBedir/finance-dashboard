@@ -10246,17 +10246,23 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
 
     const monthStr = `${yil}-${String(ay).padStart(2,"0")}`;
 
+    // USD kayıtları TL'ye çevir (TCMB satış kuru) — Gelecek Ödemeler paneli ile tutarlı
+    let usdRate = 0;
+    try { usdRate = Number(await getTcmbUsdTrySellingRate()) || 0; } catch { usdRate = 0; }
+    const AMT = (col, idx = 2) =>
+      `CASE WHEN UPPER(COALESCE(currency,'TRY'))='USD' THEN COALESCE(${col},0) * $${idx} ELSE COALESCE(${col},0) END`;
+
     // 1) Gerçekleşen ödemeler — payment_date bu ayda, payment_amount > 0
     const received = await pool.query(`
       SELECT
         EXTRACT(DAY FROM payment_date)::int AS gun,
-        SUM(COALESCE(payment_amount, 0)) AS tutar
+        SUM(${AMT("payment_amount")}) AS tutar
       FROM hw_payment_rows
       WHERE to_char(payment_date, 'YYYY-MM') = $1
         AND COALESCE(payment_amount, 0) > 0
       GROUP BY gun
       ORDER BY gun
-    `, [monthStr]);
+    `, [monthStr, usdRate]);
 
     // Türkiye saati ile bugünün tarihi
     const todayTR = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
@@ -10266,27 +10272,27 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
     const pending = await pool.query(`
       SELECT
         EXTRACT(DAY FROM due_date)::int AS gun,
-        SUM(COALESCE(remaining_amount, 0)) AS tutar
+        SUM(${AMT("remaining_amount", 3)}) AS tutar
       FROM hw_payment_rows
       WHERE to_char(due_date, 'YYYY-MM') = $1
         AND COALESCE(remaining_amount, 0) > 0
         AND due_date > $2::date
       GROUP BY gun
       ORDER BY gun
-    `, [monthStr, todayStr]);
+    `, [monthStr, todayStr, usdRate]);
 
     // 2b) Geciken/bugün vadeli ödenmemiş — due_date bu ayda, DUE_DATE <= BUGÜN, remaining_amount > 0
     const overdueHw = await pool.query(`
       SELECT
         EXTRACT(DAY FROM due_date)::int AS gun,
-        SUM(COALESCE(remaining_amount, 0)) AS tutar
+        SUM(${AMT("remaining_amount", 3)}) AS tutar
       FROM hw_payment_rows
       WHERE to_char(due_date, 'YYYY-MM') = $1
         AND COALESCE(remaining_amount, 0) > 0
         AND due_date <= $2::date
       GROUP BY gun
       ORDER BY gun
-    `, [monthStr, todayStr]);
+    `, [monthStr, todayStr, usdRate]);
 
     // 3) Kesintiler — iki kaynak:
     //   a) Mahsup edilmiş: payment_amount < 0 VE remaining = 0 → payment_date bazlı
@@ -10296,7 +10302,7 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
       SELECT gun, SUM(tutar)::numeric AS tutar FROM (
         SELECT
           EXTRACT(DAY FROM payment_date)::int AS gun,
-          SUM(COALESCE(payment_amount, 0)) AS tutar
+          SUM(${AMT("payment_amount")}) AS tutar
         FROM hw_payment_rows
         WHERE to_char(payment_date, 'YYYY-MM') = $1
           AND COALESCE(payment_amount, 0) < 0
@@ -10307,7 +10313,7 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
 
         SELECT
           EXTRACT(DAY FROM due_date)::int AS gun,
-          SUM(COALESCE(remaining_amount, 0)) AS tutar
+          SUM(${AMT("remaining_amount")}) AS tutar
         FROM hw_payment_rows
         WHERE to_char(due_date, 'YYYY-MM') = $1
           AND COALESCE(remaining_amount, 0) < 0
@@ -10315,7 +10321,7 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
       ) t
       GROUP BY gun
       ORDER BY gun
-    `, [monthStr]);
+    `, [monthStr, usdRate]);
 
     res.json({
       ok: true,
