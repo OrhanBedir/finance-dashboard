@@ -9986,16 +9986,16 @@ function parseHwInvoicePdfText(text) {
     const mAny = t.match(/\b([A-Z]{2,5}\d{10,})\b/);
     if (mAny) invoiceNo = mAny[1].trim();
   }
-  // Not: PO Line Shipment  (örn "Not:3621HG3429121-7 1 2")
-  let poNo = null,
-    lineNo = null,
-    shipmentNo = null;
-  const mNot = t.match(/Not:\s*([0-9A-Za-z\-]+)\s+(\d+)\s+(\d+)/);
-  if (mNot) {
-    poNo = mNot[1].trim();
-    lineNo = mNot[2].trim();
-    shipmentNo = mNot[3].trim();
+  // Not: PO Line Shipment — bir faturada BİRDEN ÇOK Not satırı olabilir
+  // (örn "Not:3621HG3454795-8 1 2" ... "Not:3621HG3454795-8 30 2") → hepsini topla
+  const notes = [];
+  for (const m of t.matchAll(/Not:\s*([0-9A-Za-z\-]+)\s+(\d+)\s+(\d+)/g)) {
+    notes.push({ poNo: m[1].trim(), lineNo: m[2].trim(), shipmentNo: m[3].trim() });
   }
+  // Geriye dönük alanlar (ilk not)
+  const poNo = notes[0]?.poNo || null;
+  const lineNo = notes[0]?.lineNo || null;
+  const shipmentNo = notes[0]?.shipmentNo || null;
   // Tutarlar: tüm "X,XX TL" değerleri; son değer = Ödenecek (KDV dahil)
   const tls = (t.match(/([\d.]+,\d{2})\s*TL/g) || []).map((s) =>
     parseFinanceNumber(s.replace(/\s*TL/i, "")),
@@ -10003,7 +10003,7 @@ function parseHwInvoicePdfText(text) {
   const amountIncl = tls.length ? tls[tls.length - 1] : null;
   // KDV-hariç tahmini: ilk değer çoğu faturada Mal Hizmet (birim) tutarı
   const amountExcl = tls.length ? tls[0] : null;
-  return { invoiceNo, poNo, lineNo, shipmentNo, amountIncl, amountExcl };
+  return { invoiceNo, notes, poNo, lineNo, shipmentNo, amountIncl, amountExcl };
 }
 
 const uploadHwPdfs = multer({
@@ -10036,7 +10036,7 @@ app.post(
             if (mName) parsed.invoiceNo = mName[1];
           }
 
-          if (!parsed.poNo || !parsed.invoiceNo) {
+          if (!parsed.notes?.length || !parsed.invoiceNo) {
             results.push({
               file: name,
               matched: 0,
@@ -10047,49 +10047,49 @@ app.post(
             continue;
           }
 
-          const upd = await pool.query(
-            `UPDATE hw_invoice_items
-               SET invoice_no = $1,
-                   invoiced_amount_incl = $2,
-                   invoiced_amount_excl = $3,
-                   invoice_matched_at = CURRENT_TIMESTAMP
-             WHERE po_no = $4
-               AND line_no IS NOT DISTINCT FROM $5
-               AND shipment_no IS NOT DISTINCT FROM $6
-             RETURNING id, site_id, item_code`,
-            [
-              parsed.invoiceNo,
-              parsed.amountIncl,
-              parsed.amountExcl,
-              parsed.poNo,
-              parsed.lineNo,
-              parsed.shipmentNo,
-            ],
-          );
-
-          if (upd.rows.length === 0) {
-            results.push({
-              file: name,
-              matched: 0,
-              invoice_no: parsed.invoiceNo,
-              po_no: parsed.poNo,
-              line_no: parsed.lineNo,
-              shipment_no: parsed.shipmentNo,
-              status: "Eşleşen kalem yok (önce Excel master yükle?)",
-            });
-          } else {
-            matchedCount += upd.rows.length;
-            results.push({
-              file: name,
-              matched: upd.rows.length,
-              invoice_no: parsed.invoiceNo,
-              po_no: parsed.poNo,
-              line_no: parsed.lineNo,
-              shipment_no: parsed.shipmentNo,
-              amount_incl: parsed.amountIncl,
-              status: "OK",
-            });
+          // Faturadaki TÜM Not satırlarını (PO+Line+Shipment) eşle
+          let fileMatched = 0;
+          const missedNotes = [];
+          for (const n of parsed.notes) {
+            const upd = await pool.query(
+              `UPDATE hw_invoice_items
+                 SET invoice_no = $1,
+                     invoiced_amount_incl = $2,
+                     invoiced_amount_excl = $3,
+                     invoice_matched_at = CURRENT_TIMESTAMP
+               WHERE po_no = $4
+                 AND line_no IS NOT DISTINCT FROM $5
+                 AND shipment_no IS NOT DISTINCT FROM $6
+               RETURNING id`,
+              [
+                parsed.invoiceNo,
+                parsed.amountIncl,
+                parsed.amountExcl,
+                n.poNo,
+                n.lineNo,
+                n.shipmentNo,
+              ],
+            );
+            if (upd.rows.length === 0) missedNotes.push(`${n.poNo}/${n.lineNo}/${n.shipmentNo}`);
+            else fileMatched += upd.rows.length;
           }
+
+          matchedCount += fileMatched;
+          results.push({
+            file: name,
+            matched: fileMatched,
+            invoice_no: parsed.invoiceNo,
+            po_no: parsed.poNo,
+            line_no: parsed.notes.length > 1 ? `${parsed.notes.length} Not satırı` : parsed.lineNo,
+            shipment_no: parsed.notes.length > 1 ? "" : parsed.shipmentNo,
+            amount_incl: parsed.amountIncl,
+            status:
+              fileMatched === 0
+                ? "Eşleşen kalem yok (önce Excel master yükle?)"
+                : missedNotes.length
+                  ? `OK · ${fileMatched} eşleşti, ${missedNotes.length} eşleşmedi: ${missedNotes.slice(0, 3).join(", ")}${missedNotes.length > 3 ? "…" : ""}`
+                  : `OK · ${fileMatched} kalem`,
+          });
         } catch (e) {
           results.push({
             file: name,
