@@ -9620,6 +9620,12 @@ function FinanceDashboard({
           <div style={{ background:"#fff", borderRadius:"14px", padding:"32px 28px", width:"480px", maxWidth:"95vw", boxShadow:"0 8px 40px rgba(0,0,0,0.18)" }}>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", margin:"0 0 20px" }}>
               <h3 style={{ margin:0, fontSize:"17px", fontWeight:700, color:"#1e3a5f" }}>+ Fatura Girişi</h3>
+              <button
+                type="button"
+                onClick={() => { setShowBolgeFaturaModal(false); setEditingBolgeFaturaId(null); }}
+                title="Kapat"
+                style={{ order:2, marginLeft:"4px", width:"32px", height:"32px", flexShrink:0, background:"#f3f4f6", border:"none", borderRadius:"8px", fontSize:"16px", fontWeight:700, color:"#6b7280", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+              >✕</button>
               {bolgeFaturaForm.site_code && bolgeFaturaForm.taseron_adi && (
                 <button
                   type="button"
@@ -9771,7 +9777,7 @@ function FinanceDashboard({
             <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end" }}>
               <button onClick={() => { setShowBolgeFaturaModal(false); setEditingBolgeFaturaId(null); }}
                 style={{ padding:"10px 20px", background:"#f1f5f9", border:"none", borderRadius:"8px", fontSize:"14px", cursor:"pointer" }}>
-                İptal
+                Kapat
               </button>
               <button disabled={bolgeFaturaLoading}
                 onClick={async () => {
