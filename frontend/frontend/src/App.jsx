@@ -12058,8 +12058,13 @@ function HrDashboard({ onBack, currentUser }) {
             {/* Kalan özeti */}
             {(() => {
               const modalMaasAvans = avansList.filter(a => String(a.personel_id)===String(maasOdeModal.id) && (a.tarih||"").startsWith(puantajAy)).reduce((s,a)=>s+Number(a.tutar||0),0);
+              // İş avansı da kalandan düşülür (personel maaş kartıyla birebir aynı hesap)
+              const modalIsAvans = isAvansList.filter(a => String(a.personel_id)===String(maasOdeModal.id) && (a.tarih||"").startsWith(puantajAy)).reduce((s,a)=>s+Number(a.tutar||0),0);
+              // Trafik cezası yalnız aynı personel seçiliyken güvenli
+              const modalTrafik = String(hrPersonelFilter)===String(maasOdeModal.id)
+                ? trafikCezaList.reduce((s,a)=>s+Number(a.tutar||0),0) : 0;
               const modalOdenen = maasOdeList.filter(o => o.donem===puantajAy).reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0),0);
-              const modalKalan = maasOdeHak - modalMaasAvans - modalOdenen;
+              const modalKalan = maasOdeHak - modalMaasAvans - modalIsAvans - modalTrafik - modalOdenen;
               return (
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginBottom:"16px", padding:"12px", background:"#f8fafc", borderRadius:"12px", textAlign:"center" }}>
                   <div>
@@ -12067,8 +12072,10 @@ function HrDashboard({ onBack, currentUser }) {
                     <div style={{ fontSize:"16px", fontWeight:800, color:"#166534" }}>₺{maasOdeHak.toLocaleString("tr-TR")}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize:"10px", fontWeight:600, color:"#6b7280" }}>Ödendi (avans + nakdi)</div>
-                    <div style={{ fontSize:"16px", fontWeight:800, color:"#92400e" }}>₺{(modalMaasAvans+modalOdenen).toLocaleString("tr-TR")}</div>
+                    <div style={{ fontSize:"10px", fontWeight:600, color:"#6b7280" }}>Ödenen + Avanslar</div>
+                    <div style={{ fontSize:"16px", fontWeight:800, color:"#92400e" }}
+                      title={`Nakdi ödeme: ₺${modalOdenen.toLocaleString("tr-TR")}\nMaaş avansı: ₺${modalMaasAvans.toLocaleString("tr-TR")}\nİş avansı: ₺${modalIsAvans.toLocaleString("tr-TR")}${modalTrafik>0?`\nTrafik ceza: ₺${modalTrafik.toLocaleString("tr-TR")}`:""}`}>
+                      ₺{(modalMaasAvans+modalIsAvans+modalTrafik+modalOdenen).toLocaleString("tr-TR")}</div>
                   </div>
                   <div style={{ background: modalKalan<=0?"#dcfce7":"#eff6ff", borderRadius:"8px", padding:"4px" }}>
                     <div style={{ fontSize:"10px", fontWeight:600, color: modalKalan<=0?"#166534":"#1d4ed8" }}>{modalKalan<=0?"✅ Tamamlandı":"Kalan Ödeme"}</div>
