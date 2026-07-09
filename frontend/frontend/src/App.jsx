@@ -10357,6 +10357,9 @@ function formatTRY(value) {
    PUANTAJ PANEL - Sadece Rollout Müdürü için (maaş bilgisi yok)
    ============================================================ */
 function PuantajPanel({ currentUser, onBack }) {
+  // MAAŞ BİLGİSİ yetkisi: hakediş kartı sadece Orhan Bedir + Düzgün Şimşek
+  const _pEmail = (currentUser?.email || "").toLowerCase();
+  const _pYetkili = _pEmail === "orhan.bedir@simsektel.com" || _pEmail === "duzgun.simsek@simsektel.com";
   const [puantajAy, setPuantajAy] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
@@ -10570,11 +10573,13 @@ function PuantajPanel({ currentUser, onBack }) {
                 </div>
               )}
             </div>
+            {_pYetkili && (
             <div title={tooltipText} style={{ background:"linear-gradient(135deg,#15803d,#166534)", borderRadius:"14px", padding:"16px 22px", textAlign:"center", color:"#fff", minWidth:"140px", cursor:"help" }}>
               <div style={{ fontSize:"11px", fontWeight:600, opacity:0.8, marginBottom:"4px" }}>Bu Ay Hakediş ℹ️</div>
               <div style={{ fontSize:"26px", fontWeight:800, letterSpacing:"-0.5px" }}>₺{hak.toLocaleString("tr-TR")}</div>
               <div style={{ fontSize:"11px", opacity:0.7, marginTop:"4px" }}>{cal} gün · {pazarCalisdi > 0 ? `${pazarCalisdi} pazar` : "ref: 26 gün"}</div>
             </div>
+            )}
           </div>
         );
       })()}
@@ -12451,7 +12456,7 @@ function HrDashboard({ onBack, currentUser }) {
                     );
                   })}
                   <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"80px" }}>Çalışılan</th>
-                  <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"110px" }}>Hakediş</th>
+                  {_hrYetkili && <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"110px" }}>Hakediş</th>}
                 </tr>
               </thead>
               <tbody>
@@ -12505,7 +12510,7 @@ function HrDashboard({ onBack, currentUser }) {
                         );
                       })}
                       <td style={{ padding:"8px", textAlign:"center", fontWeight:700, color:"#1f2937", borderLeft:"2px solid #e5e7eb" }}>{calisilan}/{ayGunleri.length}</td>
-                      <td style={{ padding:"8px", textAlign:"right", fontWeight:700, color:"#166534", fontSize:"13px" }}>₺{hakedilen.toLocaleString("tr-TR")}</td>
+                      {_hrYetkili && <td style={{ padding:"8px", textAlign:"right", fontWeight:700, color:"#166534", fontSize:"13px" }}>₺{hakedilen.toLocaleString("tr-TR")}</td>}
                     </tr>
                   );
                 })}
@@ -12513,8 +12518,8 @@ function HrDashboard({ onBack, currentUser }) {
             </table>
           </div>
 
-          {/* Ay Özeti */}
-          {ozet.length > 0 && (
+          {/* Ay Özeti — MAAŞ BİLGİSİ: sadece yetkili (Orhan Bedir + Düzgün Şimşek) görür */}
+          {ozet.length > 0 && _hrYetkili && (
             <div style={{ marginTop:"24px" }}>
               <h3 style={{ marginBottom:"12px" }}>💰 Ay Özeti</h3>
               <div style={{ display:"grid", gap:"8px" }}>
