@@ -10834,6 +10834,8 @@ function HrDashboard({ onBack, currentUser }) {
   const [maasOdeSaving, setMaasOdeSaving] = useState(false);
   const [maasOdeEditId, setMaasOdeEditId] = useState(null); // düzenlenen ödeme id'si
   const [aylikOdemeler, setAylikOdemeler] = useState([]); // tüm personel bu ay ödeme özeti
+  const [prevAyOzet, setPrevAyOzet] = useState([]);       // önceki ay hakediş özeti (fazla ödeme devri için)
+  const [prevAyOdemeler, setPrevAyOdemeler] = useState([]); // önceki ay ödemeleri (fazla ödeme devri için)
   const [odemeTabloAcik, setOdemeTabloAcik] = useState(false); // ödeme takip tablosu açık/kapalı
   const [notText, setNotText] = useState("");
   const [notFile, setNotFile] = useState(null);
@@ -10887,6 +10889,23 @@ function HrDashboard({ onBack, currentUser }) {
   };
   // Maaş avansı bu ayın maaşına mı ait? donem varsa ona göre, yoksa tarih (eski kayıt)
   const maasAvansAit = (a) => a.donem ? String(a.donem) === puantajAy : (a.tarih || "").startsWith(puantajAy);
+  // Önceki aydan devreden FAZLA maaş ödemesi: geçen ay hakedişten fazla ödendiyse
+  // (avans + banka + elden > hakediş) fark bu ayın maaşından düşülür.
+  const _prevAyStr = (() => { const [y, m] = puantajAy.split("-").map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
+  const getDevirFazla = (personelId) => {
+    const prevOz = prevAyOzet.find(o => String(o.personel_id) === String(personelId));
+    if (!prevOz) return 0; // önceki ay verisi yoksa devir hesaplama (güvenli taraf)
+    const prevAvans = avansList
+      .filter(a => String(a.personel_id) === String(personelId)
+        && (a.avans_turu || "MAAS").toUpperCase() === "MAAS"
+        && (a.donem ? String(a.donem) === _prevAyStr : (a.tarih || "").startsWith(_prevAyStr)))
+      .reduce((s, a) => s + Number(a.tutar || 0), 0);
+    const prevOde = prevAyOdemeler
+      .filter(o => String(o.personel_id) === String(personelId))
+      .reduce((s, o) => s + Number(o.bankadan || 0) + Number(o.elden || 0), 0);
+    const toplam = prevAvans + prevOde;
+    return toplam > 0 ? Math.max(0, toplam - Number(prevOz.hakedilen_maas || 0)) : 0;
+  };
   // ISG/Belgeler'den hızlı taşeron personeli ekleme (tek tek)
   const addTaseronPersonel = async () => {
     const ad = window.prompt("Taşeron personeli — Ad Soyad:");
@@ -11014,6 +11033,21 @@ function HrDashboard({ onBack, currentUser }) {
       const data = await res.json();
       setAylikOdemeler(Array.isArray(data) ? data : []);
     } catch { setAylikOdemeler([]); }
+    // Önceki ay verisi: fazla ödeme devri hesabı için (ör. mayısta ₺10bin fazla
+    // ödendiyse haziran maaşından düşülür)
+    try {
+      const [py, pm] = puantajAy.split("-").map(Number);
+      const pd = new Date(py, pm - 2, 1);
+      const prevDonem = `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, "0")}`;
+      const [r1, r2] = await Promise.all([
+        fetch(`${API_BASE}/hr/maas-odeme-aylik?donem=${prevDonem}`),
+        fetch(`${API_BASE}/hr/puantaj/ozet?ay=${String(pd.getMonth() + 1).padStart(2, "0")}&yil=${pd.getFullYear()}`),
+      ]);
+      const d1 = await r1.json().catch(() => []);
+      const d2 = await r2.json().catch(() => []);
+      setPrevAyOdemeler(Array.isArray(d1) ? d1 : []);
+      setPrevAyOzet(Array.isArray(d2) ? d2 : []);
+    } catch { setPrevAyOdemeler([]); setPrevAyOzet([]); }
   };
   const handleSaveMaasOde = async (e) => {
     e.preventDefault();
@@ -11524,8 +11558,12 @@ function HrDashboard({ onBack, currentUser }) {
                       // İş avansı MAAŞ ödemesi değildir → maaş ödeneni/kalanı hesabına KATILMAZ.
                       // Sadece maaş avansı (M.Avans) + banka + elden maaş ödemesidir.
                       const odenen   = avans + banka + elden;
-                      const kalan    = Math.max(0, hakEdis - odenen);
-                      return { ...p, hakEdis, avans, isAvans, banka, elden, odenen, kalan };
+                      // Önceki aydan devreden fazla ödeme bu ayın alacağından düşülür
+                      const devir    = getDevirFazla(p.id);
+                      const gereken  = Math.max(0, hakEdis - devir);
+                      const kalan    = Math.max(0, gereken - odenen);
+                      const fazla    = odenen > 0 ? Math.max(0, odenen - gereken) : 0;
+                      return { ...p, hakEdis, avans, isAvans, banka, elden, odenen, kalan, fazla, devir };
                     });
                     // Tablo satırları: filtre seçiliyse sadece o personel
                     const perRows = hrPersonelFilter
@@ -11534,9 +11572,11 @@ function HrDashboard({ onBack, currentUser }) {
                     // Toplamlar her zaman tüm personel üzerinden (filtreden bağımsız)
                     const topHak   = allRows.reduce((s,r)=>s+r.hakEdis,0);
                     const topOde   = allRows.reduce((s,r)=>s+r.odenen,0);
-                    const topKalan = Math.max(0, topHak - topOde);
+                    const topKalan = allRows.reduce((s,r)=>s+r.kalan,0);
+                    const topFazla = allRows.reduce((s,r)=>s+r.fazla,0);
                     const tamamlandi = allRows.filter(r=>r.kalan===0 && r.odenen>0).length;
                     const bekleyen   = allRows.filter(r=>r.kalan>0).length;
+                    const fazlaSay   = allRows.filter(r=>r.fazla>0).length;
                     return (
                       <div style={{ marginTop:"14px" }}>
                         {/* ── Filtre satırı — üstte, bloğun dışında ── */}
@@ -11657,6 +11697,7 @@ function HrDashboard({ onBack, currentUser }) {
                             </span>
                             <span style={{ background:"#dcfce7", color:"#166534", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>✅ {tamamlandi} tamamlandı</span>
                             {bekleyen>0 && <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>⏳ {bekleyen} bekliyor</span>}
+                            {fazlaSay>0 && <span style={{ background:"#fef3c7", color:"#92400e", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>⚠️ {fazlaSay} fazla ödeme</span>}
                             <span style={{ color:"#93c5fd", fontSize:"16px", marginLeft:"6px", transition:"transform 0.25s", display:"inline-block", transform: odemeTabloAcik?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
                           </div>
                           {/* Alt özet şeridi (her zaman görünür) */}
@@ -11665,8 +11706,9 @@ function HrDashboard({ onBack, currentUser }) {
                               { label:"Toplam Hakediş", val:`₺${topHak.toLocaleString("tr-TR")}`, color:"#93c5fd" },
                               { label:"Ödenen",         val:`₺${topOde.toLocaleString("tr-TR")}`, color:"#86efac" },
                               { label:"Kalan",          val: topKalan===0 ? "✅ Tamamlandı" : `₺${topKalan.toLocaleString("tr-TR")}`, color: topKalan===0?"#86efac":"#fca5a5" },
-                            ].map((s,i)=>(
-                              <div key={i} style={{ flex:1, textAlign:"center", borderRight: i<2?"1px solid rgba(255,255,255,0.1)":"none", padding:"4px 12px" }}>
+                              ...(topFazla>0 ? [{ label:"Fazla Ödeme", val:`⚠️ ₺${topFazla.toLocaleString("tr-TR")}`, color:"#fcd34d" }] : []),
+                            ].map((s,i,arr)=>(
+                              <div key={i} style={{ flex:1, textAlign:"center", borderRight: i<arr.length-1?"1px solid rgba(255,255,255,0.1)":"none", padding:"4px 12px" }}>
                                 <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.55)", fontWeight:600, marginBottom:"2px" }}>{s.label}</div>
                                 <div style={{ fontSize:"15px", fontWeight:800, color:s.color }}>{s.val}</div>
                               </div>
@@ -11720,12 +11762,19 @@ function HrDashboard({ onBack, currentUser }) {
                                       {p.odenen>0 ? `₺${p.odenen.toLocaleString("tr-TR")}` : "—"}
                                     </td>
                                     <td style={{ padding:"7px 12px", textAlign:"right" }}>
-                                      {p.kalan===0 && p.odenen>0
-                                        ? <span style={{ color:"#166534", fontWeight:700 }}>✅ Tam</span>
-                                        : p.kalan>0
-                                          ? <span style={{ color:"#dc2626", fontWeight:800 }}>₺{p.kalan.toLocaleString("tr-TR")}</span>
-                                          : <span style={{ color:"#9ca3af" }}>—</span>
+                                      {p.fazla>0
+                                        ? <span style={{ color:"#b45309", fontWeight:800 }}>⚠️ ₺{p.fazla.toLocaleString("tr-TR")} fazla</span>
+                                        : p.kalan===0 && p.odenen>0
+                                          ? <span style={{ color:"#166534", fontWeight:700 }}>✅ Tam</span>
+                                          : p.kalan>0
+                                            ? <span style={{ color:"#dc2626", fontWeight:800 }}>₺{p.kalan.toLocaleString("tr-TR")}</span>
+                                            : <span style={{ color:"#9ca3af" }}>—</span>
                                       }
+                                      {p.devir>0 && (
+                                        <div style={{ fontSize:"10px", color:"#7c3aed", fontWeight:600, marginTop:"2px" }}>
+                                          geçen aydan devir −₺{p.devir.toLocaleString("tr-TR")}
+                                        </div>
+                                      )}
                                     </td>
                                   </tr>
                                 ))}
@@ -11796,8 +11845,9 @@ function HrDashboard({ onBack, currentUser }) {
                 const hakRatio   = Number(sp.net_maas||0) > 0 ? hakedilen / Number(sp.net_maas) : 1;
                 const proratedBanka = Math.round(Number(sp.bankadan_gosterilen||0) * hakRatio);
                 const proratedElden = Math.round(Number(sp.elden_verilen||0) * hakRatio);
-                // Kalan ödeme = hakedilen - maaş avansı - iş avansı - trafik ceza - ödenen bu ay
-                const toplamOdenmesi = Math.max(0, hakedilen - maasAvans - isAvans - trafikCezaToplam - odenenBuAy);
+                // Kalan ödeme = hakedilen - maaş avansı - iş avansı - trafik ceza - ödenen bu ay - geçen ay fazla ödeme devri
+                const devirFazlaHR = getDevirFazla(sp.id);
+                const toplamOdenmesi = Math.max(0, hakedilen - maasAvans - isAvans - trafikCezaToplam - odenenBuAy - devirFazlaHR);
                 return (
                   <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"20px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
                     <div style={{ minWidth:"130px" }}>
@@ -12170,7 +12220,8 @@ function HrDashboard({ onBack, currentUser }) {
               const modalTrafik = String(hrPersonelFilter)===String(maasOdeModal.id)
                 ? trafikCezaList.reduce((s,a)=>s+Number(a.tutar||0),0) : 0;
               const modalOdenen = maasOdeList.filter(o => o.donem===puantajAy).reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0),0);
-              const modalKalan = maasOdeHak - modalMaasAvans - modalIsAvans - modalTrafik - modalOdenen;
+              const modalDevir = getDevirFazla(maasOdeModal.id); // geçen ay fazla ödeme devri
+              const modalKalan = maasOdeHak - modalMaasAvans - modalIsAvans - modalTrafik - modalOdenen - modalDevir;
               return (
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginBottom:"16px", padding:"12px", background:"#f8fafc", borderRadius:"12px", textAlign:"center" }}>
                   <div>
@@ -12186,6 +12237,7 @@ function HrDashboard({ onBack, currentUser }) {
                   <div style={{ background: modalKalan<=0?"#dcfce7":"#eff6ff", borderRadius:"8px", padding:"4px" }}>
                     <div style={{ fontSize:"10px", fontWeight:600, color: modalKalan<=0?"#166534":"#1d4ed8" }}>{modalKalan<=0?"✅ Tamamlandı":"Kalan Ödeme"}</div>
                     <div style={{ fontSize:"16px", fontWeight:800, color: modalKalan<=0?"#166534":"#1d4ed8" }}>₺{Math.max(0,modalKalan).toLocaleString("tr-TR")}</div>
+                    {modalDevir>0 && <div style={{ fontSize:"9px", fontWeight:600, color:"#7c3aed" }}>geçen ay fazla ödeme devri −₺{modalDevir.toLocaleString("tr-TR")}</div>}
                   </div>
                 </div>
               );
