@@ -18937,6 +18937,45 @@ function CashFlowPanel({ currentUser, onBack }) {
                   {odemeSaving ? "..." : "Kaydet"}
                 </button>
               </div>
+
+              {/* Bu ay girilen MANUEL ödemeler — düzelt/sil */}
+              <div style={{ borderTop:"1px solid #e5e7eb", paddingTop:"12px", marginTop:"4px" }}>
+                <div style={{ fontSize:"12px", fontWeight:700, color:"#374151", marginBottom:"8px" }}>
+                  📋 Bu ay girilen manuel ödemeler ({odemeler.length})
+                </div>
+                <div style={{ fontSize:"11px", color:"#92400e", background:"#fffbeb", padding:"6px 10px", borderRadius:"8px", marginBottom:"8px" }}>
+                  ℹ️ İş avansları burada değil — onlar İş Avansı panelinden otomatik gelir, oradan düzeltilir/silinir.
+                </div>
+                {odemeler.length === 0 ? (
+                  <div style={{ fontSize:"12px", color:"#9ca3af" }}>Bu ay elle girilmiş ödeme yok.</div>
+                ) : (
+                  <div style={{ maxHeight:"200px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"6px" }}>
+                    {odemeler.map((o) => (
+                      <div key={o.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"8px", padding:"7px 10px", fontSize:"12px" }}>
+                        <span style={{ flex:1, minWidth:0 }}>
+                          <b>{({ARAC:"🚗 Araç",TICKET:"🎫 Ticket/Yemek",DIGER:"📋 Diğer"})[o.kategori] || o.kategori}</b>
+                          {" · "}{o.tarih ? new Date(o.tarih).toLocaleDateString("tr-TR") : "-"}
+                          {o.donem ? ` · ${o.donem}` : ""}
+                          {o.aciklama ? <span style={{ color:"#64748b" }}> · {o.aciklama}</span> : ""}
+                        </span>
+                        <b style={{ color:"#dc2626", whiteSpace:"nowrap" }}>₺{Number(o.tutar||0).toLocaleString("tr-TR")}</b>
+                        <button
+                          onClick={async()=>{
+                            if(!window.confirm(`Bu manuel ödeme silinsin mi?\n${o.aciklama||o.kategori} · ₺${Number(o.tutar||0).toLocaleString("tr-TR")}`)) return;
+                            try {
+                              const r = await fetch(`${API_BASE}/finance/cashflow-odeme/${o.id}`, { method:"DELETE", headers });
+                              const d = await r.json();
+                              if(!d.ok) throw new Error(d.error||"Silinemedi");
+                              await loadData();
+                            } catch(e){ alert(e.message); }
+                          }}
+                          style={{ flexShrink:0, background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}
+                        >🗑 Sil</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
