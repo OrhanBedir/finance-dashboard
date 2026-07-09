@@ -10796,6 +10796,8 @@ function HrDashboard({ onBack, currentUser }) {
     if (ayrilma && ayrilma < mStart) return false;  // bu aydan önce ayrılmış
     return true;
   };
+  // Maaş avansı bu ayın maaşına mı ait? donem varsa ona göre, yoksa tarih (eski kayıt)
+  const maasAvansAit = (a) => a.donem ? String(a.donem) === puantajAy : (a.tarih || "").startsWith(puantajAy);
   // ISG/Belgeler'den hızlı taşeron personeli ekleme (tek tek)
   const addTaseronPersonel = async () => {
     const ad = window.prompt("Taşeron personeli — Ad Soyad:");
@@ -11168,8 +11170,11 @@ function HrDashboard({ onBack, currentUser }) {
 
   const handleSaveAvans = async (e) => {
     e.preventDefault();
-    await fetch(`${API_BASE}/hr/avans`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ...avansForm, avans_turu:"MAAS" }) });
-    setAvansForm({ personel_id:"", tarih: new Date().toISOString().split("T")[0], tutar:"", aciklama:"" });
+    // Dönem boşsa varsayılan bir önceki ay (henüz kapatılmamış maaş dönemi)
+    let donem = avansForm.donem;
+    if (!donem) { const d = new Date(); d.setMonth(d.getMonth()-1); donem = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
+    await fetch(`${API_BASE}/hr/avans`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ...avansForm, avans_turu:"MAAS", donem }) });
+    setAvansForm({ personel_id:"", tarih: new Date().toISOString().split("T")[0], tutar:"", aciklama:"", donem:"" });
     loadAvans();
   };
   const handleSaveIsAvans = async (e) => {
@@ -11404,7 +11409,7 @@ function HrDashboard({ onBack, currentUser }) {
                     avansList
                       .filter(a => {
                         const tur = (a.avans_turu||"MAAS").toUpperCase();
-                        return tur === "MAAS" && (a.tarih||"").startsWith(puantajAy);
+                        return tur === "MAAS" && maasAvansAit(a);
                       })
                       .forEach(a => {
                         avansMapByPer[a.personel_id] = (avansMapByPer[a.personel_id]||0) + Number(a.tutar||0);
@@ -11685,7 +11690,7 @@ function HrDashboard({ onBack, currentUser }) {
                   `Toplam extra hakediş: ₺${extraHakedisHR.toLocaleString("tr-TR")}`,
                 ].join("\n");
                 const maasAvans = avansList
-                  .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy))
+                  .filter(a => String(a.personel_id)===String(sp.id) && maasAvansAit(a))
                   .reduce((s,a)=>s+Number(a.tutar||0), 0);
                 const isAvans = isAvansList
                   .filter(a => String(a.personel_id)===String(sp.id) && (a.tarih||"").startsWith(puantajAy))
@@ -12069,7 +12074,7 @@ function HrDashboard({ onBack, currentUser }) {
 
             {/* Kalan özeti */}
             {(() => {
-              const modalMaasAvans = avansList.filter(a => String(a.personel_id)===String(maasOdeModal.id) && (a.tarih||"").startsWith(puantajAy)).reduce((s,a)=>s+Number(a.tutar||0),0);
+              const modalMaasAvans = avansList.filter(a => String(a.personel_id)===String(maasOdeModal.id) && maasAvansAit(a)).reduce((s,a)=>s+Number(a.tutar||0),0);
               // İş avansı da kalandan düşülür (personel maaş kartıyla birebir aynı hesap)
               const modalIsAvans = isAvansList.filter(a => String(a.personel_id)===String(maasOdeModal.id) && (a.tarih||"").startsWith(puantajAy)).reduce((s,a)=>s+Number(a.tutar||0),0);
               // Trafik cezası yalnız aynı personel seçiliyken güvenli
@@ -12990,9 +12995,22 @@ function HrDashboard({ onBack, currentUser }) {
                     </select>
                   </div>
                   <div>
-                    <label style={labelSt}>Tarih</label>
+                    <label style={labelSt}>Ödeme Tarihi</label>
                     <input type="date" value={form.tarih} onChange={e=>setForm(f=>({...f,tarih:e.target.value}))} style={inputSt} required />
                   </div>
+                  {isMaas && (() => {
+                    const _d = new Date(); _d.setMonth(_d.getMonth()-1);
+                    const defDonem = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,"0")}`;
+                    return (
+                      <div>
+                        <label style={labelSt}>Hangi ay maaşından kesilecek? (Dönem)</label>
+                        <input type="month" value={form.donem || defDonem} onChange={e=>setForm(f=>({...f,donem:e.target.value}))} style={inputSt} />
+                        <div style={{ fontSize:"11px", color:"#92400e", marginTop:"3px", lineHeight:1.4 }}>
+                          💡 Avansı bugün versen de, seçtiğin ayın maaşından kesilir. Varsayılan: bir önceki (henüz kapatılmamış) ay.
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div>
                     <label style={labelSt}>Tutar (₺)</label>
                     <input type="number" value={form.tutar} onChange={e=>setForm(f=>({...f,tutar:e.target.value}))} style={inputSt} required />

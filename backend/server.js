@@ -11473,10 +11473,12 @@ app.get("/hr/avans", async (req, res) => {
 
 app.post("/hr/avans", async (req, res) => {
   try {
-    const { personel_id, tarih, tutar, aciklama, avans_turu = "MAAS" } = req.body;
+    await pool.query(`ALTER TABLE avans ADD COLUMN IF NOT EXISTS donem TEXT`).catch(() => {});
+    const { personel_id, tarih, tutar, aciklama, avans_turu = "MAAS", donem = null } = req.body;
+    // Maaş avansında donem = hangi ay maaşından kesilecek (YYYY-MM); tarih = fiili ödeme günü
     const r = await pool.query(
-      "INSERT INTO avans (personel_id,tarih,tutar,aciklama,avans_turu) VALUES ($1,$2,$3,$4,$5) RETURNING *",
-      [personel_id, tarih, tutar, aciklama, avans_turu]
+      "INSERT INTO avans (personel_id,tarih,tutar,aciklama,avans_turu,donem) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
+      [personel_id, tarih, tutar, aciklama, avans_turu, donem]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
