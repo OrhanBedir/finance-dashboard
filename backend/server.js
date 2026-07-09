@@ -13013,14 +13013,19 @@ app.post("/hr/masraf-kalem", async (req, res) => {
 // PUT update kalem (fis_var, tutar_uyari_aciklama etc)
 app.put("/hr/masraf-kalem/:id", async (req, res) => {
   try {
-    const { fis_var, fis_olmadan_aciklama, tutar_uyari_aciklama } = req.body;
+    const { fis_var, fis_olmadan_aciklama, tutar_uyari_aciklama, tutar } = req.body;
+    // tutar gönderildiyse düzelt (yanlış/eksik girilen bedeli elle düzeltme)
+    const tutarVal = (tutar === undefined || tutar === null || tutar === "")
+      ? null
+      : parseFinanceNumber(tutar);
     const { rows } = await pool.query(
       `UPDATE masraf_kalem
        SET fis_var = COALESCE($1, fis_var),
            fis_olmadan_aciklama = COALESCE($2, fis_olmadan_aciklama),
-           tutar_uyari_aciklama = COALESCE($3, tutar_uyari_aciklama)
+           tutar_uyari_aciklama = COALESCE($3, tutar_uyari_aciklama),
+           tutar = COALESCE($5, tutar)
        WHERE id=$4 RETURNING *`,
-      [fis_var ?? null, fis_olmadan_aciklama||null, tutar_uyari_aciklama||null, req.params.id]
+      [fis_var ?? null, fis_olmadan_aciklama||null, tutar_uyari_aciklama||null, req.params.id, tutarVal]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }

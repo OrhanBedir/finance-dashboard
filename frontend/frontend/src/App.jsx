@@ -13286,6 +13286,25 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     refreshActive(activeForm.id);
   };
 
+  // Detay ekranında kalem tutarını düzelt (yanlış/eksik girilmişse)
+  const handleEditKalemTutar = async (k) => {
+    const cur = Number(k.tutar || 0);
+    const inp = window.prompt(`Tutarı düzelt (₺):\n${k.belge_no || k.aciklama || k.kategori}`, String(cur).replace(".", ","));
+    if (inp === null) return;
+    const yeni = parseTrNumber(inp);
+    if (!(yeni > 0)) { alert("Geçerli bir tutar gir"); return; }
+    if (Math.abs(yeni - cur) < 0.001) return;
+    try {
+      const r = await fetch(`${API_BASE}/hr/masraf-kalem/${k.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tutar: yeni }),
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      if (viewForm?.id) await loadDetail(viewForm.id);
+    } catch (e) { alert("Düzeltilemedi: " + e.message); }
+  };
+
   const closeFotoModal = () => {
     if (cropSrc?.startsWith("blob:")) URL.revokeObjectURL(cropSrc);
     setFotoModal(null);
@@ -13601,7 +13620,11 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                       )}
                     </td>
                     <td style={{ padding:"10px 12px", fontWeight:700 }}>
-                      ₺{Number(k.tutar).toLocaleString("tr-TR")}
+                      <span style={{ display:"inline-flex", alignItems:"center", gap:"6px" }}>
+                        ₺{Number(k.tutar).toLocaleString("tr-TR")}
+                        <button type="button" onClick={()=>handleEditKalemTutar(k)} title="Tutarı düzelt"
+                          style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:"6px", padding:"1px 6px", fontSize:"11px", cursor:"pointer", color:"#1d4ed8", fontWeight:700 }}>✏️</button>
+                      </span>
                       {ocrFark && (
                         <div style={{ marginTop:"4px", background:"#dc2626", color:"#fff", borderRadius:"5px", padding:"2px 7px", fontSize:"10px", fontWeight:700, display:"inline-block" }}>
                           ⚠ Fiş: ₺{Number(ocrFark).toLocaleString("tr-TR")}
