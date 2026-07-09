@@ -371,7 +371,7 @@ app.use((req, res, next) => {
 app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, email, role, is_active, created_at, tenant
+      SELECT id, name, email, role, is_active, created_at, tenant, marka
       FROM users
       ORDER BY id DESC
     `);
@@ -564,6 +564,43 @@ app.put(
   },
 );
 
+// MARKA DEĞİŞTİR (ERC / AHY vb. — tenant içi white-label)
+app.put(
+  "/admin/users/:id/marka",
+  authMiddleware,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const marka = String(req.body.marka || "").trim().toUpperCase();
+      const mr = await pool.query("SELECT kod FROM markalar WHERE kod=$1 AND aktif=true", [marka]);
+      if (!mr.rows.length) return res.status(400).json({ ok: false, error: "Geçersiz marka" });
+      if (!(await guardUserScope(req, res, id))) return;
+      const result = await pool.query(
+        "UPDATE users SET marka=$1 WHERE id=$2 RETURNING id, name, email, role, marka",
+        [marka, id],
+      );
+      if (!result.rows.length) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
+      res.json({ ok: true, user: result.rows[0] });
+    } catch (err) {
+      console.error("ADMIN USER MARKA UPDATE ERROR:", err);
+      res.status(500).json({ ok: false, error: "Marka güncellenemedi" });
+    }
+  },
+);
+
+// MARKA LİSTESİ (admin panel dropdown'u için)
+app.get("/admin/markalar", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT kod, ad, hw_yukleme, kirilim_yuzde FROM markalar WHERE aktif=true ORDER BY id",
+    );
+    res.json({ ok: true, markalar: r.rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: "Markalar alınamadı" });
+  }
+});
+
 // AKTİF / PASİF
 app.put(
   "/admin/users/:id/status",
@@ -684,7 +721,7 @@ app.post("/auth/login", async (req, res) => {
 
     const result = await pool.query(
       `
-      SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate, tenant, status
+      SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate, tenant, status, marka
       FROM users
       WHERE LOWER(TRIM(email)) = $1
       ORDER BY id DESC
@@ -786,6 +823,20 @@ app.post("/auth/login", async (req, res) => {
     }
     tenantName = tenantName || (userTenant ? String(userTenant).toUpperCase() : "Omnix");
 
+    // Marka katmanı: kullanıcının bağlı olduğu marka (ERC / AHY vb.).
+    // marka_ad panelde tenant adının yerine gösterilir; hw_yukleme=false ise
+    // HW yükleme menüleri gizlenir ve endpointler 403 döner.
+    let markaKod = user.marka || null, markaAd = null, hwYukleme = true;
+    if (markaKod) {
+      try {
+        const mr = await pool.query(
+          "SELECT ad, hw_yukleme FROM markalar WHERE kod=$1 AND tenant=$2 AND aktif=true",
+          [markaKod, userTenant],
+        );
+        if (mr.rows[0]) { markaAd = mr.rows[0].ad; hwYukleme = mr.rows[0].hw_yukleme !== false; }
+      } catch {}
+    }
+
     const token = jwt.sign(
       {
         user_id: user.id,
@@ -796,6 +847,9 @@ app.post("/auth/login", async (req, res) => {
         scope,
         tenant: userTenant,
         tenant_name: tenantName,
+        marka: markaKod,
+        marka_ad: markaAd,
+        hw_yukleme: hwYukleme,
       },
       process.env.JWT_SECRET || "simsek_secret_degistir",
       { expiresIn: "7d" },
@@ -813,6 +867,9 @@ app.post("/auth/login", async (req, res) => {
         payment_rate: Number(user.payment_rate || 0.8),
         tenant: userTenant,
         tenant_name: tenantName,
+        marka: markaKod,
+        marka_ad: markaAd,
+        hw_yukleme: hwYukleme,
       },
     });
   } catch (err) {
@@ -1682,6 +1739,35 @@ function createFinanceToken(email) {
     process.env.JWT_SECRET || "finance_secret",
     { expiresIn: "12h" },
   );
+}
+
+// HW yükleme koruması: hw_yukleme=false markadaki (ör. AHY) kullanıcılar
+// HW payment/fatura/item/po/acceptance yükleyemez. Token yoksa veya
+// çözülemezse eski davranış korunur (mevcut akışları bozmamak için) —
+// frontend tüm yükleme çağrılarına token ekliyor.
+async function requireHwYukleme(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return next();
+    let decoded = null;
+    for (const secret of [process.env.JWT_SECRET || "simsek_secret_degistir", process.env.JWT_SECRET || "finance_secret"]) {
+      try { decoded = jwt.verify(token, secret); break; } catch {}
+    }
+    if (!decoded || !decoded.email) return next();
+    const r = await pool.query(
+      `SELECT COALESCE(m.hw_yukleme, true) AS hw
+       FROM users u
+       LEFT JOIN markalar m ON m.kod = u.marka AND m.tenant = COALESCE(u.tenant,'erc')
+       WHERE LOWER(TRIM(u.email)) = LOWER($1)
+       ORDER BY u.id DESC LIMIT 1`,
+      [String(decoded.email).trim()],
+    );
+    if (r.rows[0] && r.rows[0].hw === false) {
+      return res.status(403).json({ ok: false, error: "HW yüklemeleri sadece ana yüklenici (ERC Mühendislik) tarafından yapılabilir" });
+    }
+  } catch (e) { console.error("requireHwYukleme:", e.message); }
+  next();
 }
 
 function requireFinanceAuth(req, res, next) {
@@ -5254,7 +5340,7 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 /* ================== IMPORT COMPLETED WORKS ================== */
 
 /* ================== HW PO UPLOAD ================== */
-app.post("/hw-po/upload", upload.single("file"), async (req, res) => {
+app.post("/hw-po/upload", requireHwYukleme, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ ok: false, error: "Dosya yok" });
@@ -9079,6 +9165,7 @@ app.get("/finance/subcon-hakedis-detail", authMiddleware, async (req, res) => {
 /* ================== FINANCE HW PAYMENT UPLOAD ================== */
 app.post(
   "/finance/hw-payment/upload",
+  requireHwYukleme,
   upload.single("file"),
   async (req, res) => {
     try {
@@ -9356,6 +9443,7 @@ app.get("/finance/payments/list", requireFinanceAuth, async (req, res) => {
 /* ================== FINANCE HW INVOICE UPLOAD ================== */
 app.post(
   "/finance/hw-invoice/upload",
+  requireHwYukleme,
   upload.single("file"),
   async (req, res) => {
     try {
@@ -9537,6 +9625,7 @@ function buildHwItemColMap(rawRows) {
 
 app.post(
   "/finance/hw-invoice-items/upload",
+  requireHwYukleme,
   upload.single("file"),
   async (req, res) => {
     try {
@@ -15375,6 +15464,37 @@ pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT`).catch(
 pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP`).catch(() => {});
 pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,''))) LIKE '%2KX%' AND (tenant IS NULL OR tenant='erc')`).catch(() => {});
 
+// ── MARKA KATMANI (tenant içi white-label: ERC / AHY Elektrik vb.) ──────────
+// Aynı tenant verisini paylaşan firmalar. hw_yukleme=false olan markanın
+// kullanıcıları HW yükleme (payment/fatura/item/po/acceptance) yapamaz.
+// kirilim_yuzde: ana yüklenici (ERC) payı — hakediş kırılım raporunda kullanılır.
+(async () => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS markalar (
+      id SERIAL PRIMARY KEY,
+      tenant TEXT DEFAULT 'erc',
+      kod TEXT UNIQUE NOT NULL,
+      ad TEXT NOT NULL,
+      hw_yukleme BOOLEAN DEFAULT false,
+      kirilim_yuzde NUMERIC DEFAULT 0,
+      aktif BOOLEAN DEFAULT true
+    )`);
+    await pool.query(`INSERT INTO markalar (tenant,kod,ad,hw_yukleme,kirilim_yuzde) VALUES ('erc','ERC','ERC Mühendislik',true,0) ON CONFLICT (kod) DO NOTHING`);
+    await pool.query(`INSERT INTO markalar (tenant,kod,ad,hw_yukleme,kirilim_yuzde) VALUES ('erc','AHY','AHY Elektrik',false,10) ON CONFLICT (kod) DO NOTHING`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS marka TEXT DEFAULT 'ERC'`);
+    // Bir defalık migration: hiç AHY kullanıcısı yoksa saha ekibini AHY'ye taşı.
+    // Yönetim + muhasebe ERC'de kalır. Sonradan admin panelden düzeltilebilir;
+    // AHY kullanıcısı oluştuğu için bu blok bir daha çalışmaz.
+    const chk = await pool.query(`SELECT COUNT(*)::int AS n FROM users WHERE marka='AHY'`);
+    if (chk.rows[0].n === 0) {
+      const mig = await pool.query(`UPDATE users SET marka='AHY'
+        WHERE COALESCE(tenant,'erc')='erc'
+          AND LOWER(COALESCE(role,'user')) NOT IN ('admin','platform_admin','muhasebe','finance','direktor','genel_mudur')`);
+      console.log(`[marka] Saha ekibi AHY markasına taşındı: ${mig.rowCount} kullanıcı`);
+    }
+  } catch (e) { console.error("markalar migration hatası:", e.message); }
+})();
+
 // ── İZOLE TENANT KAYIT DEFTERİ (registry) ───────────────────────────────────
 // İzole (kendi şemasında, sıfırdan veri giren) firmaların kaydı. Onayda buraya
 // eklenir; startup'ta hafızadaki allow-list'e yüklenir. 'erc' ve legacy '2kx'
@@ -16505,7 +16625,7 @@ app.delete("/admin/clear-qc/:siteCode", authMiddleware, async (req, res) => {
 });
 
 /* ================== HW ACCEPTANCE UPLOAD ================== */
-app.post("/hw-acceptance/upload", upload.single("file"), async (req, res) => {
+app.post("/hw-acceptance/upload", requireHwYukleme, upload.single("file"), async (req, res) => {
   try {
     await ensureHwAcceptanceTable();
     if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });

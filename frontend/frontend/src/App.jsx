@@ -813,6 +813,7 @@ function HWPoUploadInline({ onClose, onUploaded }) {
 
       const response = await fetch(`${API_BASE}/hw-po/upload`, {
         method: "POST",
+        headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
         body: formData,
       });
 
@@ -909,7 +910,7 @@ function HWAcceptanceUploadInline({ onClose, onUploaded }) {
       setMessage("");
       const formData = new FormData();
       formData.append("file", file);
-      const response = await fetch(`${API_BASE}/hw-acceptance/upload`, { method: "POST", body: formData });
+      const response = await fetch(`${API_BASE}/hw-acceptance/upload`, { method: "POST", headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` }, body: formData });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.ok === false) throw new Error(data.error || "HW Acceptance upload sırasında hata oluştu");
       setMessage(`✅ HW Acceptance listesi yüklendi. Eklenen kayıt: ${data.inserted || 0}`);
@@ -22546,6 +22547,9 @@ function App() {
   // Platform sahibi (uygulamanın admini) — firma adminlerinin üstünde; yeni firma onayı vb. platform işlemleri yalnızca bu role açıktır.
   const isPlatformAdmin = user?.role === "platform_admin";
   const isAdmin = user?.role === "admin" || user?.role === "direktor" || isPlatformAdmin;
+  // HW yükleme yetkisi: markası hw_yukleme=false olanlar (ör. AHY Elektrik)
+  // HW Payment/Fatura/Item/PO/Acceptance yükleyemez — sadece görüntüler.
+  const canHwUpload = isPlatformAdmin || user?.hw_yukleme !== false;
   const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role) || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com";
 
   // Ünvan görüntüleme fonksiyonu
@@ -22745,6 +22749,7 @@ function App() {
   }, [user, token]);
 
   const [adminUsers, setAdminUsers] = useState([]);
+  const [adminMarkalar, setAdminMarkalar] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState("");
   const loadAdminUsers = async () => {
@@ -22766,10 +22771,31 @@ function App() {
       }
 
       setAdminUsers(data.users || []);
+      // Marka listesi (ERC / AHY vb.) — dropdown için; hata olursa sessiz geç
+      try {
+        const mr = await fetch(`${API_BASE}/admin/markalar`, { headers: { Authorization: `Bearer ${token}` } });
+        const md = await mr.json().catch(() => ({}));
+        if (mr.ok && md.markalar) setAdminMarkalar(md.markalar);
+      } catch {}
     } catch (err) {
       setAdminError(err.message || "Kullanıcılar alınamadı");
     } finally {
       setAdminLoading(false);
+    }
+  };
+
+  const handleAdminMarkaChange = async (userId, newMarka) => {
+    try {
+      const response = await fetch(`${API_BASE}/admin/users/${userId}/marka`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ marka: newMarka }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.error || "Marka güncellenemedi");
+      await loadAdminUsers();
+    } catch (err) {
+      alert(err.message || "Marka güncellenemedi");
     }
   };
 
@@ -23354,7 +23380,7 @@ function App() {
       <div style={{ minHeight:"100vh", background:"#f8fafc" }}>
         {/* Top bar */}
         <div style={{ background:"#1e3a5f", color:"#fff", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 8px rgba(0,0,0,0.2)" }}>
-          <span style={{ fontWeight:700, fontSize:"16px" }}>{isPlatformAdmin ? 'Omnix' : (user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</span>
+          <span style={{ fontWeight:700, fontSize:"16px" }}>{isPlatformAdmin ? 'Omnix' : (user?.marka_ad || user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</span>
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"2px" }}>
             <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.3)", color:"#fff", borderRadius:"8px", padding:"6px 12px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Çıkış</button>
             <span style={{ fontSize:"11px", opacity:0.7 }}>{user?.name || user?.email}</span>
@@ -23405,7 +23431,7 @@ function App() {
       case "admin": return "Admin Panel";
       case "twokx-prices": return "2KX Özel Item Fiyatları";
       case "platform": return "Omnix — Platform Yönetimi";
-      default: return user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik');
+      default: return user?.marka_ad || user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik');
     }
   };
 
@@ -23444,7 +23470,7 @@ function App() {
           <div className="sidebar-logo">
             <div className="sidebar-logo-icon">🏗</div>
             <div>
-              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>{isPlatformAdmin ? 'Omnix' : (user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</div>
+              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>{isPlatformAdmin ? 'Omnix' : (user?.marka_ad || user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</div>
               <div style={{fontSize:11,color:'#64748b'}}>{isPlatformAdmin ? 'Operasyon & Hakediş Platformu' : (user?.tenant === '2kx' ? '2KX Takip Sistemi' : 'Operasyon & Hakediş')}</div>
             </div>
           </div>
@@ -23500,7 +23526,7 @@ function App() {
                       <span>👥</span> Bekleyen Kullanıcılar {pendingUsers.length > 0 && <span style={{background:'#ef4444',color:'#fff',borderRadius:'10px',padding:'1px 7px',fontSize:'11px',marginLeft:'4px'}}>{pendingUsers.length}</span>}
                     </div>
                   )}
-                  {isAdmin && (
+                  {isAdmin && canHwUpload && (
                     <>
                       <div style={{margin:'4px 8px 2px',height:'1px',background:'#1e2a3a'}}/>
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); }}>
@@ -24001,6 +24027,11 @@ function App() {
                                 <option value="direktor">🎯 Direktör</option>
                                 <option value="muhasebe">💼 Muhasebe</option>
                               </select>
+                              {adminMarkalar.length > 1 && (u.tenant||'erc')==='erc' && (
+                                <select value={u.marka||"ERC"} onChange={e=>handleAdminMarkaChange(u.id,e.target.value)} title="Firma markası" style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:(u.marka==="AHY")?"#fff7ed":"#f9fafb",color:(u.marka==="AHY")?"#9a3412":"#374151"}}>
+                                  {adminMarkalar.map(m=>(<option key={m.kod} value={m.kod}>🏢 {m.ad}</option>))}
+                                </select>
+                              )}
                               <button onClick={()=>handleResetPassword(u.id,u.name)} style={{padding:"7px 14px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}} title="Şifre değiştir">
                                 🔑 Şifre
                               </button>
