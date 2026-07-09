@@ -10784,6 +10784,18 @@ function HrDashboard({ onBack, currentUser }) {
     const r = await fetch(`${API_BASE}/hr/personel`);
     setPersonelList(await r.json());
   };
+  // Seçili ayda istihdamda mı? (ayrılan personel ayrıldığı aya kadar puantajda görünür)
+  const puantajIstihdam = (p) => {
+    if ((p.firma_tipi || "simsek") !== "simsek") return false;
+    const [py, pm] = puantajAy.split("-");
+    const mStart = `${puantajAy}-01`;
+    const mEnd = `${puantajAy}-${String(new Date(Number(py), Number(pm), 0).getDate()).padStart(2, "0")}`;
+    const giris = (p.ise_giris_tarihi || "").split("T")[0];
+    const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
+    if (giris && giris > mEnd) return false;        // o ay henüz işe girmemiş
+    if (ayrilma && ayrilma < mStart) return false;  // bu aydan önce ayrılmış
+    return true;
+  };
   // ISG/Belgeler'den hızlı taşeron personeli ekleme (tek tek)
   const addTaseronPersonel = async () => {
     const ad = window.prompt("Taşeron personeli — Ad Soyad:");
@@ -12306,7 +12318,7 @@ function HrDashboard({ onBack, currentUser }) {
                     onMouseLeave={e=>e.currentTarget.style.background=""}>
                     👥 Tüm Personel
                   </div>
-                  {personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek" && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
+                  {personelList.filter(p=>puantajIstihdam(p) && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
                     <div key={p.id} onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); }}
                       style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
                       onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
@@ -12354,7 +12366,7 @@ function HrDashboard({ onBack, currentUser }) {
                 </tr>
               </thead>
               <tbody>
-                {personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek" && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
+                {personelList.filter(p=>puantajIstihdam(p) && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
                   const calisilan = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="CALISDI").length;
                   const gelmediCount = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="GELMEDI").length;
                   const pazarCalisdiCount = ayGunleri.filter(g => {
