@@ -951,6 +951,89 @@ function HWAcceptanceUploadInline({ onClose, onUploaded }) {
   );
 }
 
+// Hakediş Kırılım Raporu: HW'ye kesilen faturaların aylık ERC / AHY payı.
+// Yüzde backend'den (markalar.kirilim_yuzde) gelir — kod içinde sabit değil.
+function KirilimRaporuPanel() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/finance/kirilim-raporu`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.ok === false) throw new Error(d.error || "Kırılım raporu alınamadı");
+        setData(d);
+      } catch (e) { setErr(e.message); } finally { setLoading(false); }
+    })();
+  }, []);
+  const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
+  if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+  const yuzde = data?.yuzde ?? 10;
+  const aylar = data?.aylar || [];
+  const tTry = aylar.reduce((s, a) => s + a.try_toplam, 0);
+  const tUsd = aylar.reduce((s, a) => s + a.usd_toplam, 0);
+  const th = { padding: "10px 14px", fontSize: "12px", fontWeight: 700, color: "#fff", background: "#1e3a5f", textAlign: "right", whiteSpace: "nowrap" };
+  const td = { padding: "9px 14px", fontSize: "13px", textAlign: "right", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" };
+  return (
+    <div style={{ padding: "24px", maxWidth: "1100px" }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🧮 Hakediş Kırılımı</h2>
+      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>
+        HW'ye kesilen faturalar üzerinden aylık pay dağılımı — ERC Mühendislik %{yuzde} • AHY Elektrik %{100 - yuzde}
+      </div>
+      <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
+        <div style={{ background: "linear-gradient(135deg,#1e3a5f,#2d5a8f)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
+          <div style={{ fontSize: "11px", opacity: 0.85, textTransform: "uppercase", letterSpacing: "0.05em" }}>Toplam HW Fatura</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tTry)}{tUsd > 0 && <span style={{ fontSize: "14px", fontWeight: 600 }}> + ${fmt(tUsd)}</span>}</div>
+        </div>
+        <div style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
+          <div style={{ fontSize: "11px", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.05em" }}>ERC Payı (%{yuzde})</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tTry * yuzde / 100)}{tUsd > 0 && <span style={{ fontSize: "14px", fontWeight: 600 }}> + ${fmt(tUsd * yuzde / 100)}</span>}</div>
+        </div>
+        <div style={{ background: "linear-gradient(135deg,#059669,#047857)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
+          <div style={{ fontSize: "11px", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.05em" }}>AHY Payı (%{100 - yuzde})</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tTry * (100 - yuzde) / 100)}{tUsd > 0 && <span style={{ fontSize: "14px", fontWeight: 600 }}> + ${fmt(tUsd * (100 - yuzde) / 100)}</span>}</div>
+        </div>
+      </div>
+      <div style={{ background: "#fff", borderRadius: "14px", overflow: "auto", border: "1px solid #e5e7eb" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead><tr>
+            <th style={{ ...th, textAlign: "left" }}>Ay</th>
+            <th style={th}>Fatura Adedi</th>
+            <th style={th}>HW Fatura ₺</th>
+            <th style={th}>ERC %{yuzde} ₺</th>
+            <th style={th}>AHY %{100 - yuzde} ₺</th>
+            {tUsd > 0 && <th style={th}>HW Fatura $</th>}
+            {tUsd > 0 && <th style={th}>ERC %{yuzde} $</th>}
+            {tUsd > 0 && <th style={th}>AHY %{100 - yuzde} $</th>}
+          </tr></thead>
+          <tbody>
+            {aylar.map((a) => (
+              <tr key={a.ay}>
+                <td style={{ ...td, textAlign: "left", fontWeight: 700 }}>{a.ay}</td>
+                <td style={td}>{a.fatura_sayisi}</td>
+                <td style={td}>₺{fmt(a.try_toplam)}</td>
+                <td style={{ ...td, color: "#b45309", fontWeight: 600 }}>₺{fmt(a.erc_try)}</td>
+                <td style={{ ...td, color: "#047857", fontWeight: 600 }}>₺{fmt(a.ahy_try)}</td>
+                {tUsd > 0 && <td style={td}>${fmt(a.usd_toplam)}</td>}
+                {tUsd > 0 && <td style={{ ...td, color: "#b45309" }}>${fmt(a.erc_usd)}</td>}
+                {tUsd > 0 && <td style={{ ...td, color: "#047857" }}>${fmt(a.ahy_usd)}</td>}
+              </tr>
+            ))}
+            {aylar.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>Henüz HW fatura verisi yok</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
+        💡 Kaynak: HW Fatura yüklemeleri (fatura tarihi bazında). Yüzde, Admin → markalar tablosundaki kirilim_yuzde değerinden okunur.
+      </div>
+    </div>
+  );
+}
+
 function RolloutUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -23526,6 +23609,11 @@ function App() {
                       <span>👥</span> Bekleyen Kullanıcılar {pendingUsers.length > 0 && <span style={{background:'#ef4444',color:'#fff',borderRadius:'10px',padding:'1px 7px',fontSize:'11px',marginLeft:'4px'}}>{pendingUsers.length}</span>}
                     </div>
                   )}
+                  {isAdmin && (
+                    <div className={`sidebar-nav-item ${page==='kirilim'?'active':''}`} onClick={()=>setPage('kirilim')}>
+                      <span>🧮</span> Hakediş Kırılımı
+                    </div>
+                  )}
                   {isAdmin && canHwUpload && (
                     <>
                       <div style={{margin:'4px 8px 2px',height:'1px',background:'#1e2a3a'}}/>
@@ -23744,6 +23832,7 @@ function App() {
             {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
+            {page === "kirilim" && isAdmin && <KirilimRaporuPanel />}
             {page === "executive" && <RolloutDashboard currentUser={user} />}
             {page === "region" && (
               <RegionAnalysis

@@ -5340,6 +5340,51 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 /* ================== IMPORT COMPLETED WORKS ================== */
 
 /* ================== HW PO UPLOAD ================== */
+// HAKEDİŞ KIRILIM RAPORU: HW'ye kesilen faturalar (hw_invoice_rows) üzerinden
+// aylık ana yüklenici (ERC) / alt yüklenici (AHY) payı. Yüzde markalar
+// tablosundan okunur (AHY.kirilim_yuzde = ERC payı, ör. 10).
+app.get("/finance/kirilim-raporu", authMiddleware, async (req, res) => {
+  try {
+    // Yönetim seviyesi: admin, direktör, muhasebe, genel müdür, platform admin
+    const rol = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(rol)) {
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    }
+    let yuzde = 10;
+    try {
+      const m = await pool.query("SELECT kirilim_yuzde FROM markalar WHERE kod='AHY' LIMIT 1");
+      if (m.rows[0]) yuzde = Number(m.rows[0].kirilim_yuzde || 10);
+    } catch {}
+    const r = await pool.query(`
+      SELECT to_char(invoice_date,'YYYY-MM') AS ay,
+        SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))='USD' THEN invoice_amount ELSE 0 END) AS usd_toplam,
+        SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))<>'USD' THEN invoice_amount ELSE 0 END) AS try_toplam,
+        COUNT(*)::int AS fatura_sayisi
+      FROM hw_invoice_rows
+      WHERE invoice_date IS NOT NULL
+      GROUP BY 1
+      ORDER BY 1 DESC
+    `);
+    const aylar = r.rows.map((x) => {
+      const tryT = Number(x.try_toplam || 0), usdT = Number(x.usd_toplam || 0);
+      return {
+        ay: x.ay,
+        fatura_sayisi: x.fatura_sayisi,
+        try_toplam: tryT,
+        usd_toplam: usdT,
+        erc_try: +(tryT * yuzde / 100).toFixed(2),
+        ahy_try: +(tryT * (100 - yuzde) / 100).toFixed(2),
+        erc_usd: +(usdT * yuzde / 100).toFixed(2),
+        ahy_usd: +(usdT * (100 - yuzde) / 100).toFixed(2),
+      };
+    });
+    res.json({ ok: true, yuzde, aylar });
+  } catch (e) {
+    console.error("KIRILIM RAPORU ERROR:", e.message);
+    res.status(500).json({ ok: false, error: "Kırılım raporu alınamadı" });
+  }
+});
+
 app.post("/hw-po/upload", requireHwYukleme, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
