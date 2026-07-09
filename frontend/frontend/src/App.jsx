@@ -18547,6 +18547,7 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [taseronByDay,setTaseronByDay]= useState({}); // gun→toplam taşeron ödemesi
   const [taseronDet,  setTaseronDet]  = useState({}); // gun→[{firma,tutar,fatura_no}]
   const [taseronModal,setTaseronModal]= useState(null); // {gun, items, rect}
+  const [manualDelModal,setManualDelModal]= useState(null); // {gun} — o günün manuel ödemeleri (sil)
   const [odemeler,    setOdemeler]    = useState([]); // manuel ödemeler (araç/ticket/diğer)
   const [maasOdemeler,setMaasOdemeler]= useState([]); // İK maas_odeme (bu ay yapılan)
   const [isAvanslar,  setIsAvanslar]  = useState([]); // PD onaylı iş avansları (otomatik)
@@ -19077,18 +19078,24 @@ function CashFlowPanel({ currentUser, onBack }) {
                     const cellBg = val!==0
                       ? (kat.overdue ? "#fecaca" : kat.color)
                       : (kat.overdue ? "#fff5f5" : (isWeekend(d)?"#f8f9fe":"transparent"));
+                    const isManualKat = ["arac","ticket","diger"].includes(kat.key);
+                    const hasManualThisDay = isManualKat && odemeler.some(o => dayOf(o.tarih) === d);
                     return (
                       <td key={d}
                         title={kat.tips?.[d]?.length ? kat.tips[d].join("\n") : undefined}
-                        onClick={kat.isTaseron && val!==0 ? (e) => {
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          setTaseronModal({ gun: d, items: taseronDet[d]||[], rect });
-                        } : undefined}
-                        style={{ ...tdSt, background: cellBg, borderBottom:"1px solid #f3f4f6", borderRight:"1px solid #f3f4f6", cursor: kat.isTaseron && val!==0 ? "pointer" : "default" }}>
+                        onClick={
+                          kat.isTaseron && val!==0 ? (e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setTaseronModal({ gun: d, items: taseronDet[d]||[], rect });
+                          }
+                          : hasManualThisDay ? () => setManualDelModal({ gun: d })
+                          : undefined
+                        }
+                        style={{ ...tdSt, background: cellBg, borderBottom:"1px solid #f3f4f6", borderRight:"1px solid #f3f4f6", cursor: (kat.isTaseron && val!==0) || hasManualThisDay ? "pointer" : "default" }}>
                         {val!==0 && (
                           <div style={{ color: kat.overdue ? "#dc2626" : kat.textColor, fontWeight:700, fontSize:"10px" }}>
                             {kat.type==="income" ? "+" : "-"}{fmt(val)}
-                            {kat.isTaseron && <div style={{ fontSize:"9px", opacity:0.7 }}>ℹ️</div>}
+                            {(kat.isTaseron || hasManualThisDay) && <div style={{ fontSize:"9px", opacity:0.7 }}>{hasManualThisDay ? "🗑" : "ℹ️"}</div>}
                           </div>
                         )}
                       </td>
@@ -19150,6 +19157,50 @@ function CashFlowPanel({ currentUser, onBack }) {
       </div>
 
       {/* Taşeron Detay Modal */}
+      {manualDelModal && (() => {
+        const gunOdemeler = odemeler.filter(o => dayOf(o.tarih) === manualDelModal.gun);
+        const KAT_LBL = { ARAC:"🚗 Araç kirası", TICKET:"🎫 Ticket/Yemek", DIGER:"📋 Diğer" };
+        return (
+          <div onClick={() => setManualDelModal(null)} style={{ position:"fixed", inset:0, zIndex:12500, background:"rgba(0,0,0,0.4)", display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", padding:"20px 22px", width:"100%", maxWidth:"520px", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"6px" }}>
+                <h3 style={{ margin:0, fontSize:"16px" }}>🗑 {manualDelModal.gun}. gün — Elle Girilen Ödemeler</h3>
+                <button onClick={()=>setManualDelModal(null)} style={{ border:"1px solid #e5e7eb", background:"#fff", borderRadius:"8px", padding:"5px 10px", cursor:"pointer", fontWeight:700 }}>Kapat</button>
+              </div>
+              <div style={{ fontSize:"11px", color:"#92400e", background:"#fffbeb", padding:"6px 10px", borderRadius:"8px", marginBottom:"12px" }}>
+                ℹ️ Yalnız elle girdiğin ödemeler silinebilir. İş avansları ve maaş ödemeleri buradan silinmez (kaynak: İş Avansı / İK panelleri).
+              </div>
+              {gunOdemeler.length === 0 ? (
+                <div style={{ fontSize:"13px", color:"#9ca3af" }}>Bu güne ait elle girilmiş ödeme yok.</div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+                  {gunOdemeler.map(o => (
+                    <div key={o.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"9px 12px", fontSize:"13px" }}>
+                      <span style={{ flex:1, minWidth:0 }}>
+                        <b>{KAT_LBL[o.kategori] || o.kategori}</b>
+                        {o.donem ? ` · ${o.donem}` : ""}
+                        {o.aciklama ? <span style={{ color:"#64748b" }}> · {o.aciklama}</span> : ""}
+                      </span>
+                      <b style={{ color:"#dc2626", whiteSpace:"nowrap" }}>₺{Number(o.tutar||0).toLocaleString("tr-TR")}</b>
+                      <button onClick={async()=>{
+                        if(!window.confirm(`Bu ödeme silinsin mi?\n${o.aciklama||o.kategori} · ₺${Number(o.tutar||0).toLocaleString("tr-TR")}`)) return;
+                        try {
+                          const r = await fetch(`${API_BASE}/finance/cashflow-odeme/${o.id}`, { method:"DELETE", headers });
+                          const d = await r.json();
+                          if(!d.ok) throw new Error(d.error||"Silinemedi");
+                          setManualDelModal(null);
+                          await loadData();
+                        } catch(e){ alert(e.message); }
+                      }} style={{ flexShrink:0, background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"7px", padding:"5px 12px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>🗑 Sil</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {taseronModal && (
         <div
           onClick={() => setTaseronModal(null)}
