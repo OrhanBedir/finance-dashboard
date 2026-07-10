@@ -11726,12 +11726,14 @@ function HrDashboard({ onBack, currentUser }) {
                             </div>
                             <div style={{ flex:1 }} />
                             <button style={{ padding:"5px 12px", background:"#16a34a", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
-                              onClick={() => {
+                              onClick={async () => {
                                 const today = new Date().toISOString().slice(0,10);
+                                // Seçili ayın adı — maaş kolonları o ayın geçerli maaşını içerir
+                                const ayAdiX = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1];
                                 const fmtDate = v => { if (!v) return ""; const d = new Date(v); return isNaN(d)?String(v):`${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`; };
                                 const fmtNum  = v => v ? Number(v).toLocaleString("tr-TR") : "0";
-                                const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi","Net Maaş (₺)","Bankadan (₺)","Elden (₺)","Bankadan Ödenen (₺)","Elden Ödenen (₺)","IBAN","Banka Adı","Hesap No","Durum"];
-                                const cols    = [26,18,14,14,13,14,28,13,13,16,14,12,18,16,34,16,18,8];
+                                const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi",`Net Maaş ${ayAdiX} ${yilStr} (₺)`,`Bankadan ${ayAdiX} (₺)`,`Elden ${ayAdiX} (₺)`,`Bankadan Ödenen ${ayAdiX} (₺)`,`Elden Ödenen ${ayAdiX} (₺)`,"IBAN","Banka Adı","Hesap No","Durum"];
+                                const cols    = [26,18,14,14,13,14,28,13,13,17,15,13,19,17,34,16,18,8];
                                 const dateKeys = ["dogum_tarihi","ise_giris_tarihi","isten_ayrilma_tarihi"];
                                 const numKeys  = ["net_maas","bankadan_gosterilen","elden_verilen"];
                                 const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","_banka_odenen","_elden_odenen","iban","banka_adi","banka_hesap_no","aktif"];
@@ -11743,39 +11745,70 @@ function HrDashboard({ onBack, currentUser }) {
                                 });
                                 const headerS = { fill:{ patternType:"solid", fgColor:{ rgb:"1E3A5F" } }, font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3B6EA5"}}, right:{style:"thin",color:{rgb:"3B6EA5"}} } };
                                 const headerMN = { fill:{ patternType:"solid", fgColor:{ rgb:"1E5F3A" } }, font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3BA57A"}}, right:{style:"thin",color:{rgb:"3BA57A"}} } };
+                                const headerGR = { fill:{ patternType:"solid", fgColor:{ rgb:"6B7280" } }, font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"9CA3AF"}}, right:{style:"thin",color:{rgb:"9CA3AF"}} } };
                                 const cellS = (ri, isNum, isDurum, val, isMN) => ({ fill:{ patternType:"solid", fgColor:{ rgb: isMN ? (ri%2===0?"ECFDF5":"F0FDF4") : ri%2===0 ? "EFF6FF":"FFFFFF" } }, font:{ sz:10, name:"Calibri", bold: isNum, color:{ rgb: isDurum ? (val==="Aktif"?"166534":"991B1B") : isMN ? "065F46" : isNum ? "1E3A8A" : "1F2937" } }, alignment:{ horizontal: isNum?"right":isDurum?"center":"left", vertical:"center" }, border:{ top:{style:"thin",color:{rgb:"DBEAFE"}}, bottom:{style:"thin",color:{rgb:"DBEAFE"}}, left:{style:"thin",color:{rgb:"DBEAFE"}}, right:{style:"thin",color:{rgb:"DBEAFE"}} } });
-                                const wsData = [headers];
-                                personelList.filter(p=>(p.firma_tipi||"simsek")==="simsek").forEach(p => {
-                                  const ode = odenenByPerId[p.id] || { banka:0, elden:0 };
-                                  wsData.push(keys.map(k => {
-                                    if (k==="aktif") return p[k]?"Aktif":"Pasif";
-                                    if (k==="_banka_odenen") return fmtNum(ode.banka);
-                                    if (k==="_elden_odenen") return fmtNum(ode.elden);
-                                    if (dateKeys.includes(k)) return fmtDate(p[k]);
-                                    if (numKeys.includes(k)) return fmtNum(p[k]);
-                                    return p[k]||"";
-                                  }));
-                                });
-                                const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
-                                ws["!cols"] = cols.map(w=>({wch:w}));
-                                ws["!rows"] = [{ hpt:26 }, ...personelList.map(()=>({hpt:20}))];
-                                headers.forEach((_,ci) => { const a = XLSXStyle.utils.encode_cell({r:0,c:ci}); if (ws[a]) ws[a].s = (ci >= 12 && ci <= 13) ? headerMN : headerS; });
-                                personelList.forEach((_,ri) => { keys.forEach((k,ci) => { const a = XLSXStyle.utils.encode_cell({r:ri+1,c:ci}); if (!ws[a]) return; const isNum = numKeys.includes(k)||k==="_banka_odenen"||k==="_elden_odenen"; const isDurum = k==="aktif"; const isMN = k==="_banka_odenen"||k==="_elden_odenen"; ws[a].s = cellS(ri,isNum,isDurum,ws[a].v,isMN); }); });
-                                ws["!freeze"] = { xSplit:0, ySplit:1 };
+                                // Ortak sayfa üretici: aynı format, farklı satır kümesi
+                                const buildSheet = (rows, grayHeader) => {
+                                  const wsData = [headers];
+                                  rows.forEach(p => {
+                                    const ode = odenenByPerId[p.id] || { banka:0, elden:0 };
+                                    wsData.push(keys.map(k => {
+                                      if (k==="aktif") return p[k]?"Aktif":"Pasif";
+                                      if (k==="_banka_odenen") return fmtNum(ode.banka);
+                                      if (k==="_elden_odenen") return fmtNum(ode.elden);
+                                      if (dateKeys.includes(k)) return fmtDate(p[k]);
+                                      if (numKeys.includes(k)) return fmtNum(p[k]);
+                                      return p[k]||"";
+                                    }));
+                                  });
+                                  const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
+                                  ws["!cols"] = cols.map(w=>({wch:w}));
+                                  ws["!rows"] = [{ hpt:26 }, ...rows.map(()=>({hpt:20}))];
+                                  headers.forEach((_,ci) => { const a = XLSXStyle.utils.encode_cell({r:0,c:ci}); if (ws[a]) ws[a].s = grayHeader ? headerGR : ((ci >= 12 && ci <= 13) ? headerMN : headerS); });
+                                  rows.forEach((_,ri) => { keys.forEach((k,ci) => { const a = XLSXStyle.utils.encode_cell({r:ri+1,c:ci}); if (!ws[a]) return; const isNum = numKeys.includes(k)||k==="_banka_odenen"||k==="_elden_odenen"; const isDurum = k==="aktif"; const isMN = k==="_banka_odenen"||k==="_elden_odenen"; ws[a].s = cellS(ri,isNum,isDurum,ws[a].v,isMN); }); });
+                                  ws["!freeze"] = { xSplit:0, ySplit:1 };
+                                  return ws;
+                                };
+                                const simsekler  = personelList.filter(p=>(p.firma_tipi||"simsek")==="simsek");
+                                const aktifler   = simsekler.filter(p=>p.aktif);
+                                const ayrilanlar = simsekler.filter(p=>!p.aktif);
                                 const wb = XLSXStyle.utils.book_new();
-                                XLSXStyle.utils.book_append_sheet(wb, ws, "Personel Listesi");
+                                XLSXStyle.utils.book_append_sheet(wb, buildSheet(aktifler, false), "Aktif Personel");
+                                if (ayrilanlar.length) XLSXStyle.utils.book_append_sheet(wb, buildSheet(ayrilanlar, true), "İşten Ayrılanlar");
+                                // Maaş Geçmişi sayfası: kim, hangi aydan itibaren, ne maaş
+                                try {
+                                  const gr = await fetch(`${API_BASE}/hr/maas-gecmisi`);
+                                  const gd = await gr.json();
+                                  const ids = new Set(simsekler.map(p=>String(p.id)));
+                                  const grows = (Array.isArray(gd)?gd:[]).filter(g=>ids.has(String(g.personel_id)));
+                                  if (grows.length) {
+                                    const gHead = ["Ad Soyad","Geçerlilik Başlangıcı","Net Maaş (₺)","Bankadan (₺)","Elden (₺)"];
+                                    const gData = [gHead, ...grows.map(g=>[g.ad_soyad, g.donem==="1900-01"?"Başlangıç":g.donem, fmtNum(g.net_maas), fmtNum(g.bankadan_gosterilen), fmtNum(g.elden_verilen)])];
+                                    const gws = XLSXStyle.utils.aoa_to_sheet(gData);
+                                    gws["!cols"] = [{wch:26},{wch:19},{wch:14},{wch:14},{wch:12}];
+                                    gws["!rows"] = [{ hpt:26 }, ...grows.map(()=>({hpt:20}))];
+                                    gHead.forEach((_,ci)=>{ const a=XLSXStyle.utils.encode_cell({r:0,c:ci}); if(gws[a]) gws[a].s=headerS; });
+                                    grows.forEach((_,ri)=>{ gHead.forEach((__,ci)=>{ const a=XLSXStyle.utils.encode_cell({r:ri+1,c:ci}); if(gws[a]) gws[a].s=cellS(ri, ci>=2, false, gws[a].v, false); }); });
+                                    gws["!freeze"] = { xSplit:0, ySplit:1 };
+                                    XLSXStyle.utils.book_append_sheet(wb, gws, "Maaş Geçmişi");
+                                  }
+                                } catch {}
                                 const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
                                 JSZip.loadAsync(buf).then(zip => {
-                                  const sheetFile = zip.file("xl/worksheets/sheet1.xml");
-                                  return sheetFile.async("string").then(xml => {
-                                    const patched = xml.replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>').replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
-                                    zip.file("xl/worksheets/sheet1.xml", patched);
-                                    return zip.generateAsync({ type:"blob", compression:"STORE" });
+                                  // Tüm sayfalarda gridline'ları kapat
+                                  const jobs = [];
+                                  zip.folder("xl/worksheets").forEach((name, file) => {
+                                    if (!/^sheet\d+\.xml$/.test(name)) return;
+                                    jobs.push(file.async("string").then(xml => {
+                                      const patched = xml.replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>').replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>');
+                                      zip.file(`xl/worksheets/${name}`, patched);
+                                    }));
                                   });
+                                  return Promise.all(jobs).then(() => zip.generateAsync({ type:"blob", compression:"STORE" }));
                                 }).then(blob => {
                                   const url = URL.createObjectURL(blob);
                                   const a = document.createElement("a");
-                                  a.href = url; a.download = `ERC_Personel_Listesi_${today}.xlsx`;
+                                  a.href = url; a.download = `ERC_Personel_Listesi_${puantajAy}_${today}.xlsx`;
                                   document.body.appendChild(a); a.click();
                                   document.body.removeChild(a);
                                   URL.revokeObjectURL(url);

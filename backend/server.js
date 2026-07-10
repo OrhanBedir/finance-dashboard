@@ -11422,6 +11422,17 @@ app.get("/hr/personel", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Maaş geçmişi (Excel "Maaş Geçmişi" sayfası için): kim, hangi aydan itibaren, ne maaş
+app.get("/hr/maas-gecmisi", async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT g.personel_id, g.donem, g.net_maas, g.bankadan_gosterilen, g.elden_verilen, g.created_at, p.ad_soyad
+      FROM personel_maas_gecmisi g JOIN personel p ON p.id = g.personel_id
+      ORDER BY p.ad_soyad ASC, g.donem ASC`);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post("/hr/personel", async (req, res) => {
   try {
     const { ad_soyad, tc_no, dogum_tarihi, telefon, email, unvan, bolge, ise_giris_tarihi,
