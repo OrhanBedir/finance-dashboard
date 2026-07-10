@@ -1123,7 +1123,20 @@ app.get("/platform/overview", authMiddleware, requirePlatformAdmin, async (req, 
       users = (u.rows || []).map(r => ({ ...r, firm: nameByTenant[r.tenant] || r.tenant }));
     } catch (e) { users = []; }
 
-    res.json({ ok: true, firms, pending_count: pending, users });
+    // ERC tenant'ı içindeki markalar (white-label: ERC Mühendislik / AHY Elektrik)
+    // + marka başına aktif kullanıcı sayısı — konsolda alt satır olarak gösterilir.
+    let markalar = [];
+    try {
+      const m = await pool.query(`
+        SELECT m.kod, m.ad, m.kirilim_yuzde,
+          (SELECT COUNT(*)::int FROM users x
+            WHERE COALESCE(x.tenant,'erc')='erc' AND COALESCE(x.marka,'ERC')=m.kod
+              AND COALESCE(x.is_active,false)=true) AS users
+        FROM markalar m WHERE m.tenant='erc' AND m.aktif=true ORDER BY m.id`);
+      markalar = m.rows || [];
+    } catch { markalar = []; }
+
+    res.json({ ok: true, firms, pending_count: pending, users, markalar });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

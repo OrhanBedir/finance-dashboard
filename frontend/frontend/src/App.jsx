@@ -22795,6 +22795,10 @@ function App() {
     if (isBolge) return "region";
     return "finance";
   });
+  // Platform sahibi (platform_admin) varsayılan olarak KONSOL modunda gezer:
+  // sadece platform yönetim menüleri görünür. "Firma Paneline Gir" ile
+  // operasyonel görünüme (firmaMode) geçer, konsola geri dönebilir.
+  const [firmaMode, setFirmaMode] = useState(false);
   const [pendingAvansCount, setPendingAvansCount] = useState(0);
   const [pendingMasrafCount, setPendingMasrafCount] = useState(0);
   const [pendingMalzemeCount, setPendingMalzemeCount] = useState(0);
@@ -23617,7 +23621,25 @@ function App() {
           </div>
 
           {/* Navigation */}
-          {isSubconUser ? (
+          {isPlatformAdmin && !firmaMode ? (
+            <>
+              {/* ── PLATFORM SAHİBİ KONSOLU — sadece yönetim menüleri ── */}
+              <div className="sidebar-section-title"><span>Platform Yönetimi</span></div>
+              <div className={`sidebar-nav-item ${page==='platform'?'active':''}`} onClick={()=>{setPage('platform');fetchPlatformOverview();}}>
+                <span>🌐</span> Genel Bakış
+              </div>
+              <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
+                <span>👑</span> Kullanıcı Yönetimi
+              </div>
+              <div className={`sidebar-nav-item ${page==='pending-users'?'active':''}`} onClick={()=>{setPage('pending-users');fetchPendingUsers();}}>
+                <span>👥</span> Bekleyen Kayıtlar {pendingUsers.length > 0 && <span style={{background:'#ef4444',color:'#fff',borderRadius:'10px',padding:'1px 7px',fontSize:'11px',marginLeft:'4px'}}>{pendingUsers.length}</span>}
+              </div>
+              <div className="sidebar-section-title" style={{marginTop:'12px'}}><span>Firmalar</span></div>
+              <div className="sidebar-nav-item" onClick={()=>{ setFirmaMode(true); setPage('finance'); }}>
+                <span>🏗</span> ERC Paneline Gir →
+              </div>
+            </>
+          ) : isSubconUser ? (
             <>
               <div className="sidebar-section-title">Menü</div>
               <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
@@ -23634,8 +23656,8 @@ function App() {
               {openSections.anaMeny && (
                 <div>
                   {isPlatformAdmin && (
-                    <div className={`sidebar-nav-item ${page==='platform'?'active':''}`} onClick={()=>{setPage('platform');fetchPlatformOverview();}}>
-                      <span>🌐</span> Platform Yönetimi
+                    <div className="sidebar-nav-item" style={{background:'#0f172a',border:'1px solid #2d3f55',borderRadius:'8px',marginBottom:'6px'}} onClick={()=>{ setFirmaMode(false); setPage('platform'); fetchPlatformOverview(); }}>
+                      <span>←</span> Platform Konsolu
                     </div>
                   )}
                   {isFinanceUser && (
@@ -23817,21 +23839,21 @@ function App() {
           </div>
 
           {/* Notification bars */}
-          {pendingAvansCount > 0 && page !== "is_avans" && (
+          {!(isPlatformAdmin && !firmaMode) && pendingAvansCount > 0 && page !== "is_avans" && (
             <div className="notification-bar" onClick={()=>setPage("is_avans")} style={{background:"#fef2f2",borderBottom:"2px solid #fca5a5"}}>
               <span style={{fontSize:"18px"}}>🔔</span>
               <span style={{fontWeight:700,color:"#991b1b"}}>{pendingAvansCount} adet iş avansı talebi onayınızı bekliyor</span>
               <span style={{color:"#dc2626",marginLeft:"4px"}}>→ git</span>
             </div>
           )}
-          {pendingMasrafCount > 0 && page !== "masraf" && (
+          {!(isPlatformAdmin && !firmaMode) && pendingMasrafCount > 0 && page !== "masraf" && (
             <div className="notification-bar" onClick={()=>setPage("masraf")} style={{background:"#fff7ed",borderBottom:"2px solid #fed7aa"}}>
               <span style={{fontSize:"18px"}}>🧾</span>
               <span style={{fontWeight:700,color:"#92400e"}}>{pendingMasrafCount} adet masraf formu onayınızı bekliyor</span>
               <span style={{color:"#b45309",marginLeft:"4px"}}>→ git</span>
             </div>
           )}
-          {pendingMalzemeCount > 0 && page !== "malzeme" && (
+          {!(isPlatformAdmin && !firmaMode) && pendingMalzemeCount > 0 && page !== "malzeme" && (
             <div className="notification-bar" onClick={()=>setPage("malzeme")} style={{background:"#f0fdf4",borderBottom:"2px solid #86efac"}}>
               <span style={{fontSize:"18px"}}>📦</span>
               <span style={{fontWeight:700,color:"#166534"}}>{pendingMalzemeCount} adet malzeme talebi onayınızı bekliyor</span>
@@ -23916,12 +23938,13 @@ function App() {
             {page === "entry" && <DailyEntry />}
             {page === "platform" && isPlatformAdmin && (
               <div style={{maxWidth:'1100px',margin:'0 auto',padding:'24px 16px'}}>
-                <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",justifyContent:"space-between",color:"#fff"}}>
+                <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 60%,#1e3a5f 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",justifyContent:"space-between",color:"#fff"}}>
                   <div style={{display:"flex",alignItems:"center",gap:"16px"}}>
-                    <div style={{fontSize:"40px"}}>🌐</div>
+                    <img src="/omnix-logo.svg" alt="Omnix" width="46" height="46" style={{borderRadius:'12px',background:'rgba(255,255,255,.1)',padding:'4px'}} />
                     <div>
-                      <h2 style={{margin:0,fontSize:"22px",fontWeight:800}}>Platform Yönetimi</h2>
-                      <div style={{opacity:.8,fontSize:"14px",marginTop:"2px"}}>Tüm firmalar ve kayıt talepleri — uygulamanın sahibi konsolu</div>
+                      <div style={{fontSize:"12px",fontWeight:700,letterSpacing:"0.12em",color:"#93c5fd",textTransform:"uppercase"}}>Omnix Platform Konsolu</div>
+                      <h2 style={{margin:"2px 0 0",fontSize:"22px",fontWeight:800}}>Hoş geldin, {user?.name?.split(" ")[0] || "Platform Sahibi"} 👋</h2>
+                      <div style={{opacity:.75,fontSize:"13px",marginTop:"3px"}}>Firmaları, markaları ve kullanıcı yetkilerini buradan yönetirsin — operasyon ekranları firma panellerinin içindedir.</div>
                     </div>
                   </div>
                   <button onClick={fetchPlatformOverview} style={{background:"rgba(255,255,255,.15)",color:"#fff",border:"none",borderRadius:"8px",padding:"8px 16px",cursor:"pointer",fontSize:"13px",fontWeight:600}}>🔄 Yenile</button>
@@ -23959,7 +23982,8 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(platformData?.firms||[]).map((f,i)=>(
+                        {(platformData?.firms||[]).flatMap((f,i)=>{
+                          const rows = [(
                           <tr key={i} style={{borderBottom:'1px solid #f1f5f9'}}>
                             <td style={{padding:'12px 16px',fontWeight:600,color:"#0f172a"}}>{f.name}<span style={{color:"#94a3b8",fontWeight:400,marginLeft:"6px",fontSize:"12px"}}>({f.tenant})</span></td>
                             <td style={{padding:'12px 16px'}}>
@@ -23971,11 +23995,31 @@ function App() {
                             <td style={{padding:'12px 16px',color:'#374151',fontWeight:600}}>{f.users}</td>
                             <td style={{padding:'12px 16px'}}>
                               {f.tenant==='erc' && (
-                                <button onClick={()=>setPage('finance')} style={{background:'#0f172a',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>ERC Paneline Gir →</button>
+                                <button onClick={()=>{ setFirmaMode(true); setPage('finance'); }} style={{background:'#0f172a',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>Panele Gir →</button>
                               )}
                             </td>
                           </tr>
-                        ))}
+                          )];
+                          // ERC altındaki markalar (AHY Elektrik vb.) — aynı veriyi paylaşan white-label firmalar
+                          if (f.tenant==='erc') {
+                            (platformData?.markalar||[]).filter(m=>m.kod!=='ERC').forEach((m,mi)=>{
+                              rows.push(
+                                <tr key={`m-${i}-${mi}`} style={{borderBottom:'1px solid #f1f5f9',background:'#fffbf5'}}>
+                                  <td style={{padding:'10px 16px 10px 36px',fontWeight:600,color:"#9a3412"}}>↳ {m.ad}<span style={{color:"#c2a37e",fontWeight:400,marginLeft:"6px",fontSize:"12px"}}>({m.kod})</span></td>
+                                  <td style={{padding:'10px 16px'}}>
+                                    <span style={{background:'#ffedd5',color:'#9a3412',borderRadius:'6px',padding:'2px 10px',fontSize:'12px',fontWeight:600}}>
+                                      🏷 Marka — ortak veri · %{100-Number(m.kirilim_yuzde||0)} pay
+                                    </span>
+                                  </td>
+                                  <td style={{padding:'10px 16px',color:'#6b7280'}}>—</td>
+                                  <td style={{padding:'10px 16px',color:'#374151',fontWeight:600}}>{m.users}</td>
+                                  <td style={{padding:'10px 16px',fontSize:'11px',color:'#94a3b8'}}>HW yükleme kapalı · ERC panelini kendi markasıyla görür</td>
+                                </tr>
+                              );
+                            });
+                          }
+                          return rows;
+                        })}
                       </tbody>
                     </table>
                   )}
