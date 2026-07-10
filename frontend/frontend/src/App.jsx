@@ -22670,6 +22670,7 @@ function App() {
     email: "",
     password: "",
     role: "user",
+    marka: "ERC",
   });
   const [token, setToken] = useState(localStorage.getItem("token") || "");
 
@@ -22977,7 +22978,7 @@ function App() {
 
       if (!res.ok) throw new Error(data.error);
 
-      setNewUser({ name: "", email: "", password: "", role: "user" });
+      setNewUser({ name: "", email: "", password: "", role: "user", marka: "ERC" });
       loadAdminUsers();
     } catch (err) {
       alert(err.message);
@@ -24118,6 +24119,11 @@ function App() {
                         <option value="direktor">🎯 Direktör</option>
                         <option value="muhasebe">💼 Muhasebe</option>
                       </select>
+                      {adminMarkalar.length > 1 && (
+                        <select value={newUser.marka||"ERC"} onChange={e=>setNewUser({...newUser,marka:e.target.value})} title="Firma markası" style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",background:"#fff",cursor:"pointer"}}>
+                          {adminMarkalar.map(m=>(<option key={m.kod} value={m.kod}>🏢 {m.ad}</option>))}
+                        </select>
+                      )}
                       <button onClick={handleCreateUser} style={{padding:"11px",background:"#1f2937",color:"#fff",border:"none",borderRadius:"10px",fontWeight:"700",fontSize:"14px",cursor:"pointer",marginTop:"4px"}}>
                         Kullanıcı Ekle
                       </button>

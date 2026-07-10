@@ -396,6 +396,13 @@ app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
       });
     }
 
+    // Marka (ERC / AHY vb.) — geçersizse ERC'ye düşer
+    let marka = String(req.body.marka || "ERC").trim().toUpperCase();
+    try {
+      const mr = await pool.query("SELECT kod FROM markalar WHERE kod=$1 AND aktif=true", [marka]);
+      if (!mr.rows.length) marka = "ERC";
+    } catch { marka = "ERC"; }
+
     const hashed = await bcrypt.hash(password, 10);
 
     // Aynı email varsa şifre + aktif güncelle, yoksa yeni kayıt ekle
@@ -406,18 +413,18 @@ app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
     let result;
     if (existing.rows.length > 0) {
       result = await pool.query(
-        `UPDATE users SET name=$1, password_hash=$2, role=$3, is_active=true
-         WHERE id=$4 RETURNING id, name, email, role, is_active`,
-        [name, hashed, role, existing.rows[0].id]
+        `UPDATE users SET name=$1, password_hash=$2, role=$3, is_active=true, marka=$5
+         WHERE id=$4 RETURNING id, name, email, role, is_active, marka`,
+        [name, hashed, role, existing.rows[0].id, marka]
       );
     } else {
       // İzole firma admini eklerse kullanıcı kendi firmasına ait olur.
       const newTenant = adminCreateTenant(req.user);
       result = await pool.query(
-        `INSERT INTO users (name, email, password_hash, role, is_active, tenant)
-         VALUES ($1, $2, $3, $4, true, $5)
-         RETURNING id, name, email, role, is_active`,
-        [name, email, hashed, role, newTenant],
+        `INSERT INTO users (name, email, password_hash, role, is_active, tenant, marka)
+         VALUES ($1, $2, $3, $4, true, $5, $6)
+         RETURNING id, name, email, role, is_active, marka`,
+        [name, email, hashed, role, newTenant, marka],
       );
     }
 
