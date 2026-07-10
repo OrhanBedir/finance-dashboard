@@ -148,23 +148,46 @@ function plakaEsles(ocrRaw, dbPlakalar) {
 function parseOcrText(text) {
   const lines = text.split("\n");
   let amount = null;
-  for (const line of lines) {
-    if (/^[\s*]*(TOPLAM|NAK[İI]T|TUTAR|GENEL TOPLAM|TOTAL)/i.test(line)) {
-      const nums = (line.match(TR_NUM_RE) || []).map(parseTrNumber).filter(n => n >= 1 && n <= 999999);
+  const KEY_RE = /(GENEL\s*TOPLAM|TOPLAM|KRED[İI]|NAK[İI]T|TUTAR|TOTAL)/i;
+  // Kimlik/no satırları: MERSİS, REF, ONAY, terminal vb. — tutar DEĞİLDİR,
+  // fallback'te bunlardan sayı alınmaz (879 hatası: MERSİS 0879'dan geliyordu)
+  const ID_RE = /(MERS[İI]S|REF|ONAY|TERM[İI]NAL|S[İI]C[İI]L|EK[ÜU]|Z\s*NO|F[İI][ŞS]\s*NO|[ÇC]EK\s*NO|MASA|K\.?\s*N\.?|VERG[İI]|V\.?D\.?|TAR[İI]H|SAAT|TEL|NO\s*[:.]|\bAID\b|BANKA|https?|WWW)/i;
+  const numsOf = (s) => (s.match(TR_NUM_RE) || []).map(parseTrNumber).filter(n => n >= 1 && n <= 999999);
+  // 1) Satır başında anahtar kelime; tutar aynı satırda yoksa (sütunlu fiş)
+  //    bir sonraki satıra da bak
+  for (let i = 0; i < lines.length; i++) {
+    if (/^[\s*]*(GENEL\s*TOPLAM|TOPLAM|KRED[İI]|NAK[İI]T|TUTAR|TOTAL)/i.test(lines[i])) {
+      let nums = numsOf(lines[i]);
+      if (!nums.length && lines[i + 1] && !KEY_RE.test(lines[i + 1]) && !ID_RE.test(lines[i + 1])) {
+        nums = numsOf(lines[i + 1]);
+      }
       if (nums.length) { amount = Math.max(...nums); break; }
     }
   }
+  // 2) Anahtar kelime satır içinde (kimlik satırları hariç)
   if (!amount) {
     for (const line of lines) {
-      if (/TOPLAM|NAK[İI]T|TUTAR|TOTAL/i.test(line)) {
-        const nums = (line.match(TR_NUM_RE) || []).map(parseTrNumber).filter(n => n >= 1 && n <= 999999);
+      if (KEY_RE.test(line) && !ID_RE.test(line)) {
+        const nums = numsOf(line);
         if (nums.length) { amount = Math.max(...nums); break; }
       }
     }
   }
+  // 3) Son çare: kimlik/no satırları HARİÇ; önce ondalıklı (,00 biçimli)
+  //    sayılar — çıplak no'lar (MERSİS, ref, onay) tutar sanılmaz
   if (!amount) {
-    const allNums = (text.match(TR_NUM_RE) || []).map(parseTrNumber).filter(n => n >= 1 && n <= 999999);
-    if (allNums.length) amount = Math.max(...allNums);
+    const decNums = [], anyNums = [];
+    for (const line of lines) {
+      if (ID_RE.test(line)) continue;
+      for (const m of (line.match(TR_NUM_RE) || [])) {
+        const n = parseTrNumber(m);
+        if (n < 1 || n > 999999) continue;
+        anyNums.push(n);
+        if (/[.,]\d{2}$/.test(m)) decNums.push(n);
+      }
+    }
+    const pool = decNums.length ? decNums : anyNums;
+    if (pool.length) amount = Math.max(...pool);
   }
   // Türk plaka formatı: 2 rakam + 1-3 HARF (rakam değil) + 2-4 rakam
   // Örn: 16GB307, 34ABC1234, 06A1234
