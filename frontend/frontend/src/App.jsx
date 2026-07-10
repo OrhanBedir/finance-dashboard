@@ -4904,7 +4904,7 @@ function FinanceDashboard({
         : "tum_taseronlar";
       // Hakediş kolon başlığı seçili taşerona göre dinamik (yoksa genel "Taşeron Hakediş")
       const _expSub = String(subconFilter || "").trim();
-      const _expPct = ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş (Kırılım)";
       const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş (Kırılım) KDV Dahil";
 
@@ -5000,17 +5000,19 @@ function FinanceDashboard({
         const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
         const rawTotal = doneQty * unitPrice;
         const toplamHakedis = isUSD ? rawTotal * usdR : rawTotal;
-        let federalHakedis = toplamHakedis * 0.80;
-
         const subconLower = String(row.subcon_name || "").toLowerCase().trim();
         const subconCanon = canonTaseron(row.subcon_name);
-        // Manuel taşeron hakedişi varsa (kalem bazlı) sistemdeki %80 hesabını override et
+        // Kırılım oranı taşerona göre: AHY %90 (2026-07 anlaşması), diğerleri %80
+        const kirilimOran = subconCanon === "ahy" ? 0.90 : 0.80;
+        let federalHakedis = toplamHakedis * kirilimOran;
+
+        // Manuel taşeron hakedişi varsa (kalem bazlı) sistemdeki kırılım hesabını override et
         const thKeyItem = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconCanon}`;
         const manualHak = Number((taseronHakedisMap || {})[thKeyItem] || 0);
         if (manualHak > 0) federalHakedis = manualHak;
 
         const isFaturaTaseron = FATURA_TASERONLAR_SUB.some(t => subconLower.includes(t));
-        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * 0.80 : 0;
+        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * kirilimOran : 0;
 
         const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconCanon}`;
         const bfEntries = (bolgeFaturaMap || {})[bfKey] || [];
@@ -9833,7 +9835,7 @@ function FinanceDashboard({
                   <div style={{ marginTop:"6px", fontSize:"11px", fontWeight:600, color: isFixed ? "#0369a1" : "#7c3aed" }}>
                     {isFixed
                       ? "🔹 Sabit fiyat taşeron — hakediş saha (Site ID) bazında girilir, kalem seçimi opsiyoneldir."
-                      : "🔸 Kırılım taşeron — hakediş kalem (Item) bazında %80 olarak girilir."}
+                      : `🔸 Kırılım taşeron — hakediş kalem (Item) bazında %${c === "ahy" ? 90 : 80} olarak girilir.`}
                   </div>
                 );
               })()}
@@ -16786,7 +16788,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
     const itemCode = String(row.item_code || "").trim();
 
-    if (subconName === "federal" || subconName === "ahy") return 0.8;
+    if (subconName.includes("ahy")) return 0.9; // AHY Elektrik %90 (2026-07 anlaşması)
+    if (subconName === "federal") return 0.8;
 
     if (subconName === "ubs") {
       return ubsSpecial90Items.has(itemCode) ? 0.9 : 0.75;
@@ -17011,7 +17014,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
       // Hakediş kolon başlığı taşerona göre dinamik (Federal → AHY → UBS ...)
       const _expSub = String(userSubconName || "").trim();
-      const _expPct = ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş";
       const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş KDV Dahil";
 
@@ -17338,7 +17341,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const subconRateMap = {
     ubs:     { rf: 0.75, gizleme: 0.90, genel: 0.75 },
     federal: { rf: 0.80, gizleme: 0.80, genel: 0.80 },
-    ahy:     { rf: 0.80, gizleme: 0.80, genel: 0.80 },
+    // AHY Elektrik: anahtar teslim %90 kırılım (2026-07 anlaşması, eski %80)
+    ahy:     { rf: 0.90, gizleme: 0.90, genel: 0.90 },
     "2kx":   { rf: 0.75, gizleme: 0.75, genel: 0.75 },
   };
   const subconRates = subconRateMap[_subconKey] || { rf: 1, gizleme: 1, genel: 1 };

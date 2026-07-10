@@ -8216,11 +8216,13 @@ async function fetchData(isAdmin, subconName) {
 
   const _scnLower = String(subconName || "").trim().toLowerCase();
   const paymentRate =
-    _scnLower === "federal" || _scnLower === "ahy"
-      ? 0.8
-      : _scnLower === "ubs"
-        ? 0.75
-        : 1;
+    _scnLower.includes("ahy") // AHY Elektrik %90 (2026-07 anlaşması)
+      ? 0.9
+      : _scnLower === "federal"
+        ? 0.8
+        : _scnLower === "ubs"
+          ? 0.75
+          : 1;
 
   const subcon_hakedis = completed * paymentRate;
   const po_bekler_hakedis = po_bekler * paymentRate;
@@ -8649,7 +8651,9 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
 
       let subconRate = 1;
 
-      if (subconName === "federal" || subconName === "ahy") {
+      if (subconName.includes("ahy")) {
+        subconRate = 0.9; // AHY Elektrik %90 (2026-07 anlaşması)
+      } else if (subconName === "federal") {
         subconRate = 0.8;
       } else if (subconName === "ubs") {
         subconRate = ubsSpecial90Items.has(itemCode) ? 0.9 : 0.75;
@@ -15705,7 +15709,7 @@ const AUTO_MIGRATIONS = [
 const SUBCON_USERS = [
   { name: "Zeki Sandal",     email: "zsandal@ubstasarimmakine.com.tr", subcon_name: "UBS",     payment_rate: 0.75, password: "123456" },
   { name: "Burhan Koçak",    email: "b.kocak@federalgroups.com",       subcon_name: "Federal", payment_rate: 0.80, password: "123456" },
-  { name: "AHY Elektrik",    email: "ahy",                             subcon_name: "AHY",     payment_rate: 0.80, password: "ahy2026" },
+  { name: "AHY Elektrik",    email: "ahy",                             subcon_name: "AHY",     payment_rate: 0.90, password: "ahy2026" },
   { name: "Serdar Altınova", email: "serdar.altinova@simsektel.com",   subcon_name: "2KX HABERLEŞME SİSTEMLERİ MÜHENDİSLİK İNŞAAT LİMİTED ŞİRKETİ", payment_rate: 1.0, password: "123456" },
 ];
 
@@ -15797,6 +15801,9 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     await pool.query(`UPDATE users SET subcon_name='AHY ELEKTRİK', payment_rate=0.90
       WHERE LOWER(email) LIKE '%@ahyelektrik.com'
         AND (COALESCE(subcon_name,'') <> 'AHY ELEKTRİK' OR COALESCE(payment_rate,0) <> 0.90)`);
+    // Eski AHY taşeron hesapları da (%80'lik dönem) yeni %90 orana çekilir
+    await pool.query(`UPDATE users SET payment_rate=0.90
+      WHERE UPPER(COALESCE(subcon_name,'')) LIKE '%AHY%' AND COALESCE(payment_rate,0) <> 0.90`);
     // Personel de marka'ya ayrılır: İK panelleri marka-bazlı izole görünür.
     // Bir defalık: Şimşek maaşlı kadro AHY'ye (kadro AHY'ye geçti);
     // Tuğçe Yelmen (ERC'de kalan muhasebeci) ve taşeron ISG kayıtları ERC'de kalır.
