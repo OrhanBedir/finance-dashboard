@@ -15792,6 +15792,11 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     // markalıdır — dropdown seçimi unutulsa/karışsa bile her açılışta düzelir.
     await pool.query(`UPDATE users SET marka='AHY'
       WHERE LOWER(email) LIKE '%@ahyelektrik.com' AND COALESCE(marka,'ERC') <> 'AHY'`);
+    // AHY iş görünümü: Bölge Analizi'nde yalnız taşeronu 'AHY ELEKTRİK' olan
+    // sahaları %90 kırılımla görür (UBS/Federal/2KX ile aynı mekanizma).
+    await pool.query(`UPDATE users SET subcon_name='AHY ELEKTRİK', payment_rate=0.90
+      WHERE LOWER(email) LIKE '%@ahyelektrik.com'
+        AND (COALESCE(subcon_name,'') <> 'AHY ELEKTRİK' OR COALESCE(payment_rate,0) <> 0.90)`);
     // Personel de marka'ya ayrılır: İK panelleri marka-bazlı izole görünür.
     // Bir defalık: Şimşek maaşlı kadro AHY'ye (kadro AHY'ye geçti);
     // Tuğçe Yelmen (ERC'de kalan muhasebeci) ve taşeron ISG kayıtları ERC'de kalır.

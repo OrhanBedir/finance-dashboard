@@ -22894,9 +22894,11 @@ function App() {
     "murat.istek@simsektel.com",
     "serdar.altinova@simsektel.com",
   ].includes(_userEmail);
+  // Alt marka (AHY) subcon_name taşısa da dar taşeron menüsüne DÜŞMEZ —
+  // kendi tam menüsünü (Finans Özeti, İK, avans...) kullanır
   const isSubconUser =
-    String(user?.role || "").toLowerCase() === "subcon" ||
-    String(user?.subcon_name || "").trim() !== "";
+    (String(user?.role || "").toLowerCase() === "subcon" ||
+    String(user?.subcon_name || "").trim() !== "") && !isAltMarka;
   const is2KXUser = String(user?.subcon_name || "").toUpperCase().includes("2KX");
 
   const handleLogout = () => {
@@ -22955,6 +22957,8 @@ function App() {
     const isRolloutOverride = rolloutOverrideEmails.includes(_ue);
     const is2KX = String(u?.subcon_name || "").toUpperCase().includes("2KX");
     if (u?.role === "platform_admin") return "platform";
+    // Alt marka (AHY) yöneticisi: subcon_name taşısa da kendi Finans Özeti'ne iner
+    if (u?.hw_yukleme === false && ["admin","direktor","muhasebe","genel_mudur"].includes(String(u?.role||"").toLowerCase())) return "marka_finans";
     // 2KX artık AHY gibi Bölge Analizi paneli kullanıyor (eski 2kx paneli kaldırıldı)
     // Alt yüklenici (AHY/Federal/UBS/2KX gibi) → doğrudan Bölge Analizi kartları
     if (String(u?.role||"").toLowerCase() === "subcon" || String(u?.subcon_name||"").trim() !== "") return "region";
@@ -23842,9 +23846,11 @@ function App() {
                   <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
                     <span>🗺</span> Bölge Analizi
                   </div>
-                  <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
-                    <span>📡</span> Rollout Data
-                  </div>
+                  {!isAltMarka && (
+                    <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
+                      <span>📡</span> Rollout Data
+                    </div>
+                  )}
                   <div className={`sidebar-nav-item ${page==='entry'?'active':''}`} onClick={()=>setPage('entry')}>
                     <span>✏️</span> Günlük İş Girişi
                   </div>
@@ -24088,10 +24094,10 @@ function App() {
             {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
             {page === "kirilim" && isAdmin && <KirilimRaporuPanel />}
-            {page === "executive" && <RolloutDashboard currentUser={user} />}
+            {page === "executive" && !isAltMarka && <RolloutDashboard currentUser={user} />}
             {page === "region" && (
               <RegionAnalysis
-                isSubconUser={!isAdmin && !!user?.subcon_name}
+                isSubconUser={(!isAdmin || (user?.hw_yukleme === false)) && !!user?.subcon_name}
                 userSubconName={user?.subcon_name || ""}
                 userPaymentRate={Number(user?.payment_rate || 0.8)}
               />
