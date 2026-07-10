@@ -911,6 +911,50 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
+// GET /auth/me — oturum tazeleme: rol/marka bilgisi DB'den güncel döner.
+// Admin panelde yapılan marka/rol değişiklikleri yeniden giriş GEREKTİRMEZ;
+// uygulama her açılışta bunu çağırıp kullanıcı bilgisini yeniler.
+app.get("/auth/me", authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || "").trim().toLowerCase();
+    if (!email) return res.status(401).json({ ok: false, error: "Oturum geçersiz" });
+    const r = await pool.query(
+      `SELECT id, name, email, role, is_active, subcon_name, payment_rate, tenant, status, marka
+       FROM users WHERE LOWER(TRIM(email)) = $1 ORDER BY id DESC LIMIT 1`, [email]);
+    const u = r.rows[0];
+    if (!u || !u.is_active || String(u.status || "active") !== "active") {
+      return res.status(401).json({ ok: false, error: "Kullanıcı pasif" });
+    }
+    const userTenant = u.tenant || detectTenant(u.email, u.subcon_name);
+    let tenantName = TENANT_CONFIG[userTenant]?.name;
+    if (!tenantName) {
+      try {
+        const tr = await pool.query("SELECT name FROM tenant_registry WHERE tenant=$1", [userTenant]);
+        tenantName = tr.rows[0]?.name;
+      } catch {}
+    }
+    tenantName = tenantName || (userTenant ? String(userTenant).toUpperCase() : "Omnix");
+    let markaKod = u.marka || null, markaAd = null, hwYukleme = true;
+    if (markaKod) {
+      try {
+        const mr = await pool.query(
+          "SELECT ad, hw_yukleme FROM markalar WHERE kod=$1 AND tenant=$2 AND aktif=true",
+          [markaKod, userTenant]);
+        if (mr.rows[0]) { markaAd = mr.rows[0].ad; hwYukleme = mr.rows[0].hw_yukleme !== false; }
+      } catch {}
+    }
+    res.json({ ok: true, user: {
+      id: u.id, name: u.name, email: u.email, role: u.role,
+      subcon_name: u.subcon_name, payment_rate: Number(u.payment_rate || 0.8),
+      tenant: userTenant, tenant_name: tenantName,
+      marka: markaKod, marka_ad: markaAd, hw_yukleme: hwYukleme,
+    }});
+  } catch (e) {
+    console.error("AUTH ME ERROR:", e.message);
+    res.status(500).json({ ok: false, error: "Oturum bilgisi alınamadı" });
+  }
+});
+
 // POST /auth/register
 app.post("/auth/register", async (req, res) => {
   try {

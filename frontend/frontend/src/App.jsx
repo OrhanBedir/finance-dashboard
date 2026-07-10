@@ -22833,6 +22833,22 @@ function App() {
       return null;
     }
   });
+  // OTURUM TAZELEME: her açılışta rol/marka bilgisi DB'den yenilenir.
+  // Admin panelde marka/rol değişince kullanıcının yeniden giriş yapması
+  // gerekmez — sayfayı yenilemesi yeter (AHY marka gecikmesi sorunu bundandı).
+  useEffect(() => {
+    const tk = localStorage.getItem("token");
+    if (!tk) return;
+    fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${tk}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (d?.ok && d.user) {
+          setUser(d.user);
+          localStorage.setItem("user", JSON.stringify(d.user));
+        }
+      })
+      .catch(() => {});
+  }, []);
   // Platform sahibi (uygulamanın admini) — firma adminlerinin üstünde; yeni firma onayı vb. platform işlemleri yalnızca bu role açıktır.
   const isPlatformAdmin = user?.role === "platform_admin";
   const isAdmin = user?.role === "admin" || user?.role === "direktor" || isPlatformAdmin;
