@@ -5392,6 +5392,54 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 /* ================== IMPORT COMPLETED WORKS ================== */
 
 /* ================== HW PO UPLOAD ================== */
+// MARKA KAR/ZARAR ÖZETİ: alt markanın (AHY) kendi finans görünümü.
+// Gelir = HW faturaları × marka payı (%90); Gider = marka personelinin
+// maaş ödemeleri + maaş avansları + iş avansları (aylık).
+app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
+  try {
+    const rol = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(rol)) {
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    }
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    let yuzde = 10;
+    try {
+      const m = await pool.query("SELECT kirilim_yuzde FROM markalar WHERE kod=$1 LIMIT 1", [marka]);
+      if (m.rows[0]) yuzde = Number(m.rows[0].kirilim_yuzde || 10);
+    } catch {}
+    const pay = (100 - yuzde) / 100;
+    const [gelir, maas, mavans, iavans] = await Promise.all([
+      pool.query(`SELECT to_char(invoice_date,'YYYY-MM') AS ay,
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))='USD' THEN invoice_amount ELSE 0 END) AS usd,
+          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))<>'USD' THEN invoice_amount ELSE 0 END) AS tl
+        FROM hw_invoice_rows WHERE invoice_date IS NOT NULL GROUP BY 1`),
+      pool.query(`SELECT m.donem AS ay, SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS t
+        FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
+        WHERE COALESCE(p.marka,'ERC')=$1 AND m.donem IS NOT NULL GROUP BY 1`, [marka]),
+      pool.query(`SELECT COALESCE(a.donem, to_char(a.tarih,'YYYY-MM')) AS ay, SUM(a.tutar) AS t
+        FROM avans a JOIN personel p ON p.id=a.personel_id
+        WHERE COALESCE(p.marka,'ERC')=$1 AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`, [marka]),
+      pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
+        FROM avans a JOIN personel p ON p.id=a.personel_id
+        WHERE COALESCE(p.marka,'ERC')=$1 AND UPPER(COALESCE(a.avans_turu,''))='IS' GROUP BY 1`, [marka]),
+    ]);
+    const map = {};
+    const rowOf = (ay) => (map[ay] = map[ay] || { ay, gelir_try: 0, gelir_usd: 0, maas: 0, maas_avans: 0, is_avans: 0 });
+    gelir.rows.forEach(r => { if (!r.ay) return; const o = rowOf(r.ay); o.gelir_try = +(Number(r.tl || 0) * pay).toFixed(2); o.gelir_usd = +(Number(r.usd || 0) * pay).toFixed(2); });
+    maas.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).maas = Number(r.t || 0); });
+    mavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).maas_avans = Number(r.t || 0); });
+    iavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).is_avans = Number(r.t || 0); });
+    const aylar = Object.values(map).sort((a, b) => b.ay.localeCompare(a.ay)).map(o => {
+      const gider = o.maas + o.maas_avans + o.is_avans;
+      return { ...o, gider, net: +(o.gelir_try - gider).toFixed(2) };
+    });
+    res.json({ ok: true, marka, pay_yuzde: 100 - yuzde, aylar });
+  } catch (e) {
+    console.error("MARKA OZET ERROR:", e.message);
+    res.status(500).json({ ok: false, error: "Marka özeti alınamadı" });
+  }
+});
+
 // HAKEDİŞ KIRILIM RAPORU: HW'ye kesilen faturalar (hw_invoice_rows) üzerinden
 // aylık ana yüklenici (ERC) / alt yüklenici (AHY) payı. Yüzde markalar
 // tablosundan okunur (AHY.kirilim_yuzde = ERC payı, ör. 10).
@@ -11339,19 +11387,19 @@ app.post("/hr/personel", async (req, res) => {
       net_maas, bankadan_gosterilen, elden_verilen, iban, banka_adi, banka_hesap_no,
       ekip_bilgisi, alt_yuklenici, firma_tipi, isdp_account, iresource_giris,
       kkd_zimmet_tarihi, mesleki_yeterlilik_durum, mesleki_yeterlilik_tarihi,
-      elektrik_isi, yuksekte_calisma, arac_kullanim } = req.body;
+      elektrik_isi, yuksekte_calisma, arac_kullanim, marka } = req.body;
     const r = await pool.query(
       `INSERT INTO personel (ad_soyad,tc_no,dogum_tarihi,telefon,email,unvan,bolge,ise_giris_tarihi,
         net_maas,bankadan_gosterilen,elden_verilen,iban,banka_adi,banka_hesap_no,
         ekip_bilgisi,alt_yuklenici,firma_tipi,isdp_account,iresource_giris,
         kkd_zimmet_tarihi,mesleki_yeterlilik_durum,mesleki_yeterlilik_tarihi,
-        elektrik_isi,yuksekte_calisma,arac_kullanim)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
+        elektrik_isi,yuksekte_calisma,arac_kullanim,marka)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
       [ad_soyad,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
        net_maas||0,bankadan_gosterilen||0,elden_verilen||0,iban,banka_adi,banka_hesap_no,
        ekip_bilgisi||null,alt_yuklenici||null,firma_tipi||"simsek",isdp_account||null,iresource_giris||null,
        kkd_zimmet_tarihi||null,mesleki_yeterlilik_durum||null,mesleki_yeterlilik_tarihi||null,
-       elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false]
+       elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,String(marka||"ERC").toUpperCase()]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -11365,21 +11413,22 @@ app.put("/hr/personel/:id", async (req, res) => {
       banka_hesap_no, aktif,
       ekip_bilgisi, alt_yuklenici, firma_tipi, isdp_account, iresource_giris,
       kkd_zimmet_tarihi, mesleki_yeterlilik_durum, mesleki_yeterlilik_tarihi,
-      elektrik_isi, yuksekte_calisma, arac_kullanim } = req.body;
+      elektrik_isi, yuksekte_calisma, arac_kullanim, marka } = req.body;
     const r = await pool.query(
       `UPDATE personel SET ad_soyad=$1,tc_no=$2,dogum_tarihi=$3,telefon=$4,email=$5,unvan=$6,
         bolge=$7,ise_giris_tarihi=$8,isten_ayrilma_tarihi=$9,net_maas=$10,bankadan_gosterilen=$11,
         elden_verilen=$12,iban=$13,banka_adi=$14,banka_hesap_no=$15,aktif=$16,
         ekip_bilgisi=$17,alt_yuklenici=$18,firma_tipi=$19,isdp_account=$20,iresource_giris=$21,
         kkd_zimmet_tarihi=$22,mesleki_yeterlilik_durum=$23,mesleki_yeterlilik_tarihi=$24,
-        elektrik_isi=$25,yuksekte_calisma=$26,arac_kullanim=$27
-       WHERE id=$28 RETURNING *`,
+        elektrik_isi=$25,yuksekte_calisma=$26,arac_kullanim=$27,marka=COALESCE($28,marka)
+       WHERE id=$29 RETURNING *`,
       [ad_soyad,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
        isten_ayrilma_tarihi||null,net_maas||0,bankadan_gosterilen||0,elden_verilen||0,
        iban,banka_adi,banka_hesap_no,aktif!==undefined?aktif:true,
        ekip_bilgisi||null,alt_yuklenici||null,firma_tipi||"simsek",isdp_account||null,iresource_giris||null,
        kkd_zimmet_tarihi||null,mesleki_yeterlilik_durum||null,mesleki_yeterlilik_tarihi||null,
-       elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,id]
+       elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,
+       marka?String(marka).toUpperCase():null,id]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -15588,6 +15637,16 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
         WHERE COALESCE(tenant,'erc')='erc'
           AND LOWER(COALESCE(role,'user')) NOT IN ('admin','platform_admin','muhasebe','finance','direktor','genel_mudur')`);
       console.log(`[marka] Saha ekibi AHY markasına taşındı: ${mig.rowCount} kullanıcı`);
+    }
+    // Personel de marka'ya ayrılır: İK panelleri marka-bazlı izole görünür.
+    // Bir defalık: Şimşek maaşlı kadro AHY'ye (kadro AHY'ye geçti);
+    // Tuğçe Yelmen (ERC'de kalan muhasebeci) ve taşeron ISG kayıtları ERC'de kalır.
+    await pool.query(`ALTER TABLE personel ADD COLUMN IF NOT EXISTS marka TEXT DEFAULT 'ERC'`);
+    const pchk = await pool.query(`SELECT COUNT(*)::int AS n FROM personel WHERE marka='AHY'`);
+    if (pchk.rows[0].n === 0) {
+      const pmig = await pool.query(`UPDATE personel SET marka='AHY'
+        WHERE COALESCE(firma_tipi,'simsek')='simsek' AND ad_soyad NOT ILIKE '%YELMEN%'`);
+      console.log(`[marka] Personel AHY markasına taşındı: ${pmig.rowCount} kayıt`);
     }
   } catch (e) { console.error("markalar migration hatası:", e.message); }
 })();

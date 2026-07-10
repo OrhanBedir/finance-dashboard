@@ -1034,6 +1034,90 @@ function KirilimRaporuPanel() {
   );
 }
 
+// Alt marka (AHY) Kar/Zarar özeti: gelir = HW faturaları × marka payı,
+// gider = kendi personelinin maaş ödemeleri + avansları. ERC finansı görünmez.
+function MarkaFinansPanel({ currentUser }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const marka = String(currentUser?.marka || "AHY").toUpperCase();
+  const markaAd = currentUser?.marka_ad || marka;
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/finance/marka-ozet?marka=${marka}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.ok === false) throw new Error(d.error || "Finans özeti alınamadı");
+        setData(d);
+      } catch (e) { setErr(e.message); } finally { setLoading(false); }
+    })();
+  }, []);
+  const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
+  if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+  const aylar = data?.aylar || [];
+  const tGelir = aylar.reduce((s, a) => s + a.gelir_try, 0);
+  const tGelirUsd = aylar.reduce((s, a) => s + (a.gelir_usd || 0), 0);
+  const tGider = aylar.reduce((s, a) => s + a.gider, 0);
+  const tNet = tGelir - tGider;
+  const th = { padding: "10px 14px", fontSize: "12px", fontWeight: 700, color: "#fff", background: "#1e3a5f", textAlign: "right", whiteSpace: "nowrap" };
+  const td = { padding: "9px 14px", fontSize: "13px", textAlign: "right", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" };
+  return (
+    <div style={{ padding: "24px", maxWidth: "1150px" }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>📊 {markaAd} — Finans Özeti</h2>
+      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>
+        Gelir: yapılan işlerin hakedişi (%{data?.pay_yuzde ?? 90} pay) • Gider: personel maaş, maaş avansı ve iş avansları
+      </div>
+      <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
+        <div style={{ background: "linear-gradient(135deg,#059669,#047857)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
+          <div style={{ fontSize: "11px", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.05em" }}>Toplam Gelir (%{data?.pay_yuzde ?? 90})</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tGelir)}{tGelirUsd > 0 && <span style={{ fontSize: "14px", fontWeight: 600 }}> + ${fmt(tGelirUsd)}</span>}</div>
+        </div>
+        <div style={{ background: "linear-gradient(135deg,#dc2626,#b91c1c)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
+          <div style={{ fontSize: "11px", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.05em" }}>Toplam Gider</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tGider)}</div>
+        </div>
+        <div style={{ background: tNet >= 0 ? "linear-gradient(135deg,#1e3a5f,#2d5a8f)" : "linear-gradient(135deg,#7f1d1d,#991b1b)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
+          <div style={{ fontSize: "11px", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.05em" }}>Net ({tNet >= 0 ? "Kâr" : "Zarar"})</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tNet)}</div>
+        </div>
+      </div>
+      <div style={{ background: "#fff", borderRadius: "14px", overflow: "auto", border: "1px solid #e5e7eb" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead><tr>
+            <th style={{ ...th, textAlign: "left" }}>Ay</th>
+            <th style={th}>Gelir ₺ (%{data?.pay_yuzde ?? 90})</th>
+            <th style={th}>Maaş Ödeme</th>
+            <th style={th}>Maaş Avansı</th>
+            <th style={th}>İş Avansı</th>
+            <th style={th}>Toplam Gider</th>
+            <th style={th}>Net</th>
+          </tr></thead>
+          <tbody>
+            {aylar.map((a) => (
+              <tr key={a.ay}>
+                <td style={{ ...td, textAlign: "left", fontWeight: 700 }}>{a.ay}</td>
+                <td style={{ ...td, color: "#047857", fontWeight: 600 }}>₺{fmt(a.gelir_try)}{(a.gelir_usd || 0) > 0 && <span style={{ fontSize: "11px", color: "#0369a1" }}> +${fmt(a.gelir_usd)}</span>}</td>
+                <td style={td}>₺{fmt(a.maas)}</td>
+                <td style={td}>₺{fmt(a.maas_avans)}</td>
+                <td style={td}>₺{fmt(a.is_avans)}</td>
+                <td style={{ ...td, color: "#b91c1c", fontWeight: 600 }}>₺{fmt(a.gider)}</td>
+                <td style={{ ...td, color: a.net >= 0 ? "#047857" : "#b91c1c", fontWeight: 700 }}>₺{fmt(a.net)}</td>
+              </tr>
+            ))}
+            {aylar.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>Henüz veri yok</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
+        💡 Gelir HW fatura tarihine, giderler maaş dönemine/avans tarihine göre aylıklanır. Masraf formu giderleri bir sonraki sürümde eklenecek.
+      </div>
+    </div>
+  );
+}
+
 function RolloutUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -10406,7 +10490,10 @@ function PuantajPanel({ currentUser, onBack }) {
     const r = await fetch(`${API_BASE}/hr/personel`);
     // Tüm personeli yükle (pasif/ayrılan dahil) — arşiv/geçmiş ay Excel'i için.
     // Görünürlük ay-bazında visiblePersonel ile belirlenir.
-    setPersonelList(await r.json());
+    // Marka izolasyonu: yalnız kullanıcının markasındaki personel görünür.
+    const _um = String(currentUser?.marka || "ERC").toUpperCase();
+    const all = await r.json();
+    setPersonelList((Array.isArray(all) ? all : []).filter(p => String(p.marka || "ERC").toUpperCase() === _um));
   };
 
   // Seçili ayda ÇALIŞAN personel: işe giriş <= ay sonu VE (ayrılma yok VEYA ayrılma >= ay başı)
@@ -10785,6 +10872,10 @@ function hesaplaVergi(netBankadan) {
 function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
+  // İK marka izolasyonu: herkes yalnız KENDİ markasının personelini görür
+  // (ERC kullanıcısı AHY kadrosunu, AHY kullanıcısı ERC/taşeron kayıtlarını görmez)
+  const _hrMarka = String(currentUser?.marka || "ERC").toUpperCase();
+  const _markaFiltre = (list) => (Array.isArray(list) ? list : []).filter(p => String(p.marka || "ERC").toUpperCase() === _hrMarka);
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
   const _isMuhasebe = currentUser?.role === "muhasebe";
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
@@ -10856,13 +10947,13 @@ function HrDashboard({ onBack, currentUser }) {
       setTaseronSaving(true);
       const res = await fetch(`${API_BASE}/hr/personel`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ad_soyad: taseronForm.ad_soyad.trim(), unvan: taseronForm.unvan.trim()||null, alt_yuklenici: taseronForm.alt_yuklenici.trim()||null, firma_tipi: "taseron" }),
+        body: JSON.stringify({ ad_soyad: taseronForm.ad_soyad.trim(), unvan: taseronForm.unvan.trim()||null, alt_yuklenici: taseronForm.alt_yuklenici.trim()||null, firma_tipi: "taseron", marka: _hrMarka }),
       });
       const j = await res.json().catch(()=>({}));
       if (!res.ok || j.error) throw new Error(j.error || "Eklenemedi");
       setTaseronForm({ ad_soyad:"", alt_yuklenici:"", unvan:"" });
       setShowTaseronForm(false);
-      const fresh = await (await fetch(`${API_BASE}/hr/personel`)).json();
+      const fresh = _markaFiltre(await (await fetch(`${API_BASE}/hr/personel`)).json());
       setPersonelList(fresh);
       await loadIsgMatris();
       const np = (fresh||[]).find(x => String(x.id) === String(j.id));
@@ -10873,7 +10964,7 @@ function HrDashboard({ onBack, currentUser }) {
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
-    setPersonelList(await r.json());
+    setPersonelList(_markaFiltre(await r.json()));
   };
   // Seçili ayda istihdamda mı? (ayrılan personel ayrıldığı aya kadar puantajda görünür)
   const puantajIstihdam = (p) => {
@@ -10915,7 +11006,7 @@ function HrDashboard({ onBack, currentUser }) {
     try {
       const res = await fetch(`${API_BASE}/hr/personel`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ad_soyad: ad.trim(), unvan: unvan.trim() || null, alt_yuklenici: taseron.trim() || null, firma_tipi: "taseron" }),
+        body: JSON.stringify({ ad_soyad: ad.trim(), unvan: unvan.trim() || null, alt_yuklenici: taseron.trim() || null, firma_tipi: "taseron", marka: _hrMarka }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.ok === false) throw new Error(j.error || "Eklenemedi");
@@ -10923,7 +11014,7 @@ function HrDashboard({ onBack, currentUser }) {
       await loadIsgMatris();
       if (j.id || j.personel?.id || j.rows?.[0]?.id) {
         const newId = j.id || j.personel?.id || j.rows?.[0]?.id;
-        const fresh = await (await fetch(`${API_BASE}/hr/personel`)).json();
+        const fresh = _markaFiltre(await (await fetch(`${API_BASE}/hr/personel`)).json());
         const np = (fresh || []).find(x => String(x.id) === String(newId));
         if (np) { setPersonelList(fresh); loadPersonelDetail(np); }
       }
@@ -10991,7 +11082,8 @@ function HrDashboard({ onBack, currentUser }) {
     e.preventDefault();
     const method = editingPersonel ? "PUT" : "POST";
     const url = editingPersonel ? `${API_BASE}/hr/personel/${editingPersonel.id}` : `${API_BASE}/hr/personel`;
-    await fetch(url, { method, headers: { "Content-Type":"application/json" }, body: JSON.stringify(pForm) });
+    // Yeni personel, ekleyen kullanıcının markasına yazılır (İK marka izolasyonu)
+    await fetch(url, { method, headers: { "Content-Type":"application/json" }, body: JSON.stringify({ ...pForm, marka: pForm.marka || _hrMarka }) });
     setShowPersonelForm(false); setEditingPersonel(null);
     loadPersonel();
     loadAylikOdemeler();
@@ -14718,7 +14810,10 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
-    setPersonelList(await r.json());
+    // Marka izolasyonu: avans personel seçiminde yalnız kendi markası listelenir
+    const _um = String(currentUser?.marka || "ERC").toUpperCase();
+    const all = await r.json();
+    setPersonelList((Array.isArray(all) ? all : []).filter(p => String(p.marka || "ERC").toUpperCase() === _um));
   };
 
   useEffect(() => { load(); loadPersonel(); loadBakiye(); }, []);
@@ -22691,6 +22786,9 @@ function App() {
   // HW yükleme yetkisi: markası hw_yukleme=false olanlar (ör. AHY Elektrik)
   // HW Payment/Fatura/Item/PO/Acceptance yükleyemez — sadece görüntüler.
   const canHwUpload = isPlatformAdmin || user?.hw_yukleme !== false;
+  // Alt marka (AHY Elektrik gibi): ERC'nin finans ekranları gizli —
+  // kendi Kar/Zarar özetini (marka_finans) ve kendi İK'sını görür.
+  const isAltMarka = !isPlatformAdmin && user?.hw_yukleme === false;
   const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role) || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com";
 
   // Ünvan görüntüleme fonksiyonu
@@ -22793,6 +22891,8 @@ function App() {
     if (String(u?.role||"").toLowerCase() === "subcon" || String(u?.subcon_name||"").trim() !== "") return "region";
     if (u?.role === "user" && !isBolge && !isRolloutOverride) return "masraf";
     if (isBolge) return "region";
+    // Alt marka (AHY) yöneticileri kendi Finans Özeti'ne iner, ERC finansına değil
+    if (u?.hw_yukleme === false) return "marka_finans";
     return "finance";
   });
   // Platform sahibi (platform_admin) varsayılan olarak KONSOL modunda gezer:
@@ -23660,9 +23760,14 @@ function App() {
                       <span>←</span> Platform Konsolu
                     </div>
                   )}
-                  {isFinanceUser && (
+                  {isFinanceUser && !isAltMarka && (
                     <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
                       <span>📊</span> Finans Paneli
+                    </div>
+                  )}
+                  {isAltMarka && isAdmin && (
+                    <div className={`sidebar-nav-item ${page==='marka_finans'?'active':''}`} onClick={()=>setPage('marka_finans')}>
+                      <span>📊</span> Finans Özeti
                     </div>
                   )}
                   <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
@@ -23689,7 +23794,7 @@ function App() {
                       <span>👥</span> Bekleyen Kullanıcılar {pendingUsers.length > 0 && <span style={{background:'#ef4444',color:'#fff',borderRadius:'10px',padding:'1px 7px',fontSize:'11px',marginLeft:'4px'}}>{pendingUsers.length}</span>}
                     </div>
                   )}
-                  {isAdmin && (
+                  {isAdmin && !isAltMarka && (
                     <div className={`sidebar-nav-item ${page==='kirilim'?'active':''}`} onClick={()=>setPage('kirilim')}>
                       <span>🧮</span> Hakediş Kırılımı
                     </div>
@@ -23741,7 +23846,7 @@ function App() {
                   </div>
                   {openSections.muhasebe && (
                     <div>
-                      {isFinanceUser && (
+                      {isFinanceUser && !isAltMarka && (
                         <>
                           <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
                             <span>📊</span> Finans Paneli
@@ -23863,7 +23968,8 @@ function App() {
 
           {/* Main content */}
           <div className="main-content" onClick={e=>e.stopPropagation()}>
-            {page === "finance" && isFinanceUser && (
+            {page === "marka_finans" && isAltMarka && <MarkaFinansPanel currentUser={user} />}
+            {page === "finance" && isFinanceUser && !isAltMarka && (
               financeToken ? (
                 <div style={{padding:"24px 28px"}}>
                 <FinanceDashboard
