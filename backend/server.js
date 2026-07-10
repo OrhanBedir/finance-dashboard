@@ -15788,6 +15788,10 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
           AND LOWER(COALESCE(role,'user')) NOT IN ('admin','platform_admin','muhasebe','finance','direktor','genel_mudur')`);
       console.log(`[marka] Saha ekibi AHY markasına taşındı: ${mig.rowCount} kullanıcı`);
     }
+    // E-posta domain garantisi: @ahyelektrik.com uzantılı HER kullanıcı AHY
+    // markalıdır — dropdown seçimi unutulsa/karışsa bile her açılışta düzelir.
+    await pool.query(`UPDATE users SET marka='AHY'
+      WHERE LOWER(email) LIKE '%@ahyelektrik.com' AND COALESCE(marka,'ERC') <> 'AHY'`);
     // Personel de marka'ya ayrılır: İK panelleri marka-bazlı izole görünür.
     // Bir defalık: Şimşek maaşlı kadro AHY'ye (kadro AHY'ye geçti);
     // Tuğçe Yelmen (ERC'de kalan muhasebeci) ve taşeron ISG kayıtları ERC'de kalır.
