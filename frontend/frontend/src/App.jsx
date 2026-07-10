@@ -14841,7 +14841,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
       REDDEDILDI:          { bg: "#fee2e2", color: "#991b1b", label: "Reddedildi" },
     };
     const s = map[durum] || { bg: "#f3f4f6", color: "#6b7280", label: durum };
-    return <span style={{ background: s.bg, color: s.color, borderRadius: "20px", padding: "3px 12px", fontSize: 12, fontWeight: 600 }}>{s.label}</span>;
+    return <span style={{ background: s.bg, color: s.color, borderRadius: "20px", padding: "3px 9px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{s.label}</span>;
   };
 
   const cardSt = { background: "#fff", borderRadius: "16px", boxShadow: "0 4px 20px rgba(0,0,0,0.07)", border: "1px solid #f3f4f6", padding: "24px" };
@@ -15059,7 +15059,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
             <thead>
               <tr style={{ background: "#f8fafc" }}>
                 {["Tarih","Talep Eden","Gider Türü","Bölge","Proje","Personel","Tutar","Açıklama","Durum","İşlemler"].map(h => (
-                  <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#6b7280", whiteSpace: "nowrap" }}>{h}</th>
+                  <th key={h} style={{ padding: "8px 9px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#6b7280", whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -15080,17 +15080,17 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                 const rowBorder = needsMyAction ? "4px solid #f59e0b" : myPendingRequest ? "4px solid #f87171" : "4px solid transparent";
                 return (
                 <tr key={t.id} style={{ borderTop: "1px solid #f3f4f6", background: rowBg, borderLeft: rowBorder }}>
-                  <td style={{ padding: "12px 16px", fontSize: "13px", whiteSpace: "nowrap" }}>{formatDateOnly(t.tarih)}</td>
-                  <td style={{ padding: "12px 16px", fontWeight: 600, fontSize: "14px" }}>{t.talep_eden_ad}</td>
-                  <td style={{ padding: "12px 16px", fontSize: "13px" }}>
+                  <td style={{ padding: "8px 9px", fontSize: "13px", whiteSpace: "nowrap" }}>{formatDateOnly(t.tarih)}</td>
+                  <td style={{ padding: "8px 9px", fontWeight: 600, fontSize: "14px" }}>{t.talep_eden_ad}</td>
+                  <td style={{ padding: "8px 9px", fontSize: "13px" }}>
                     {t.gider_turu ? <span style={{ background:"#eff6ff", color:"#1d4ed8", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:600 }}>{t.gider_turu}</span> : "—"}
                   </td>
-                  <td style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280" }}>{t.bolge || "—"}</td>
-                  <td style={{ padding: "12px 16px", fontSize: "13px", color: "#374151", fontWeight: 600 }}>{t.proje || "—"}</td>
-                  <td style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280" }}>{t.personel_ad || "—"}</td>
-                  <td style={{ padding: "12px 16px", fontWeight: 700, fontSize: "14px", whiteSpace: "nowrap" }}>₺{Number(t.tutar).toLocaleString("tr-TR")}</td>
+                  <td style={{ padding: "8px 9px", fontSize: "13px", color: "#6b7280" }}>{t.bolge || "—"}</td>
+                  <td style={{ padding: "8px 9px", fontSize: "13px", color: "#374151", fontWeight: 600 }}>{t.proje || "—"}</td>
+                  <td style={{ padding: "8px 9px", fontSize: "13px", color: "#6b7280" }}>{t.personel_ad || "—"}</td>
+                  <td style={{ padding: "8px 9px", fontWeight: 700, fontSize: "14px", whiteSpace: "nowrap" }}>₺{Number(t.tutar).toLocaleString("tr-TR")}</td>
                   <td
-                    style={{ padding: "12px 16px", fontSize: "13px", color: "#6b7280", maxWidth: "200px", cursor: (t.aciklama || t.not_aciklama) ? "pointer" : "default" }}
+                    style={{ padding: "8px 9px", fontSize: "13px", color: "#6b7280", maxWidth: "140px", cursor: (t.aciklama || t.not_aciklama) ? "pointer" : "default" }}
                     onMouseEnter={e => { if (t.aciklama || t.not_aciklama) setNotTooltip({ visible: true, x: e.clientX, y: e.clientY, aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "" }); }}
                     onMouseLeave={() => setNotTooltip(p => ({ ...p, visible: false }))}
                   >
@@ -15104,7 +15104,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                     )}
                     {t.red_aciklama && <div style={{ color:"#dc2626", fontSize:"11px", marginTop:"2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Red: {t.red_aciklama}</div>}
                   </td>
-                  <td style={{ padding: "12px 16px" }}>
+                  <td style={{ padding: "8px 9px" }}>
                     {durumBadge(t.durum)}
                     {needsMyAction && <div style={{ fontSize:"10px", fontWeight:700, color:"#92400e", marginTop:"4px" }}>⏳ Onayınızı bekliyor</div>}
                     {myPendingRequest && !needsMyAction && (
@@ -15113,7 +15113,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                       </div>
                     )}
                   </td>
-                  <td style={{ padding: "12px 16px" }}>
+                  <td style={{ padding: "8px 9px" }}>
                     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                       {t.talep_eden_email === currentUser?.email && t.durum === "TALEP" && (
                         <button onClick={() => openEdit(t)} style={{ padding: "4px 10px", background: "#e0f2fe", color: "#0369a1", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Düzenle</button>
