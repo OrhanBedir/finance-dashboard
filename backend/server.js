@@ -243,7 +243,7 @@ function applySubconFilter(req, rows) {
 }
 
 const pool = require("./db");
-const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant, addIsolatedTenant } = pool;
+const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant, addIsolatedTenant, removeIsolatedTenant } = pool;
 const app = express();
 
 app.use(express.json());
@@ -1067,6 +1067,24 @@ app.post("/admin/users/:id/reject", authMiddleware, async (req, res) => {
 
 // GET /platform/overview — platform sahibi konsolu: tüm firmalar + bekleyen
 // kayıt sayısı + kullanıcı sayıları. Yalnızca platform_admin erişebilir.
+// İzole firmayı platformdan kaldır: registry kaydı silinir + allow-list'ten
+// çıkarılır + kullanıcıları pasife alınır. ŞEMA/VERİ SİLİNMEZ (geri dönülebilir).
+app.delete("/platform/firms/:tenant", authMiddleware, requirePlatformAdmin, async (req, res) => {
+  try {
+    const tenant = String(req.params.tenant || "").toLowerCase().trim();
+    if (!tenant || tenant === "erc" || tenant === "2kx") {
+      return res.status(400).json({ ok: false, error: "Yerleşik firmalar kaldırılamaz" });
+    }
+    const r = await pool.query("DELETE FROM tenant_registry WHERE tenant=$1 RETURNING tenant, name", [tenant]);
+    if (!r.rows.length) return res.status(404).json({ ok: false, error: "Firma bulunamadı" });
+    removeIsolatedTenant(tenant);
+    const u = await pool.query("UPDATE users SET is_active=false WHERE tenant=$1", [tenant]);
+    res.json({ ok: true, removed: r.rows[0], deactivated_users: u.rowCount });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("/platform/overview", authMiddleware, requirePlatformAdmin, async (req, res) => {
   try {
     // Kayıtlı izole firmalar
@@ -1136,7 +1154,21 @@ app.get("/platform/overview", authMiddleware, requirePlatformAdmin, async (req, 
       markalar = m.rows || [];
     } catch { markalar = []; }
 
-    res.json({ ok: true, firms, pending_count: pending, users, markalar });
+    // ERC'nin alt taşeronları (2KX, Federal, UBS...) — kullanıcı kayıtlarından
+    // otomatik: subcon_name + payment_rate (0.75 = %75 pay). Elle liste tutulmaz.
+    let taseronlar = [];
+    try {
+      const t = await pool.query(`
+        SELECT TRIM(subcon_name) AS ad,
+          ROUND(MAX(COALESCE(payment_rate,0.8))*100)::int AS pay_yuzde,
+          COUNT(*)::int AS users
+        FROM users
+        WHERE COALESCE(TRIM(subcon_name),'')<>'' AND COALESCE(is_active,false)=true
+        GROUP BY TRIM(subcon_name) ORDER BY 1`);
+      taseronlar = t.rows || [];
+    } catch { taseronlar = []; }
+
+    res.json({ ok: true, firms, pending_count: pending, users, markalar, taseronlar });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

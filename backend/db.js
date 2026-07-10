@@ -149,6 +149,13 @@ function addIsolatedTenant(tenant) {
   return true;
 }
 
+// Çalışma zamanında izole tenant'ı allow-list'ten çıkar (firma kaldırma).
+// Şema/veri silinmez — sadece yönlendirme durur.
+function removeIsolatedTenant(tenant) {
+  const t = String(tenant || "").toLowerCase().trim();
+  return ISOLATED_TENANTS.delete(t);
+}
+
 // ── Tenant şeması provizyonu ─────────────────────────────────────────────────
 // public şemasındaki tüm tabloları, yeni tenant şemasına aynı yapı ile (boş)
 // kopyalar. Veri kopyalanmaz → yeni tenant sıfırdan başlar. ERC (public) hiç
@@ -193,4 +200,5 @@ module.exports.tenantSchema = tenantSchema;
 module.exports.SHARED_PUBLIC_TABLES = SHARED_PUBLIC_TABLES;
 module.exports.isIsolatedTenant = isIsolatedTenant;
 module.exports.addIsolatedTenant = addIsolatedTenant;
+module.exports.removeIsolatedTenant = removeIsolatedTenant;
 module.exports.ISOLATED_TENANTS = ISOLATED_TENANTS;

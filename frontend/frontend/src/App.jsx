@@ -23982,7 +23982,7 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {(platformData?.firms||[]).flatMap((f,i)=>{
+                        {(platformData?.firms||[]).filter(f=>f.tenant!=='2kx').flatMap((f,i)=>{
                           const rows = [(
                           <tr key={i} style={{borderBottom:'1px solid #f1f5f9'}}>
                             <td style={{padding:'12px 16px',fontWeight:600,color:"#0f172a"}}>{f.name}<span style={{color:"#94a3b8",fontWeight:400,marginLeft:"6px",fontSize:"12px"}}>({f.tenant})</span></td>
@@ -23996,6 +23996,19 @@ function App() {
                             <td style={{padding:'12px 16px'}}>
                               {f.tenant==='erc' && (
                                 <button onClick={()=>{ setFirmaMode(true); setPage('finance'); }} style={{background:'#0f172a',color:'#fff',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>Panele Gir →</button>
+                              )}
+                              {f.isolated && !f.builtin && (
+                                <button onClick={async()=>{
+                                  if(!window.confirm(`"${f.name}" (${f.tenant}) platformdan kaldırılacak:\n• Firma listeden silinir\n• Kullanıcıları pasife alınır\n• Verisi/şeması SİLİNMEZ (geri eklenebilir)\n\nOnaylıyor musun?`)) return;
+                                  try {
+                                    const tk = localStorage.getItem('token')||'';
+                                    const r = await fetch(`${API_BASE}/platform/firms/${f.tenant}`, { method:'DELETE', headers:{ Authorization:`Bearer ${tk}` } });
+                                    const d = await r.json().catch(()=>({}));
+                                    if(!r.ok || d.ok===false) throw new Error(d.error||'Kaldırılamadı');
+                                    alert(`✅ ${f.name} kaldırıldı (${d.deactivated_users||0} kullanıcı pasife alındı)`);
+                                    fetchPlatformOverview();
+                                  } catch(e){ alert('❌ '+e.message); }
+                                }} style={{background:'#fee2e2',color:'#991b1b',border:'none',borderRadius:'7px',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:600}}>🗑 Kaldır</button>
                               )}
                             </td>
                           </tr>
@@ -24014,6 +24027,23 @@ function App() {
                                   <td style={{padding:'10px 16px',color:'#6b7280'}}>—</td>
                                   <td style={{padding:'10px 16px',color:'#374151',fontWeight:600}}>{m.users}</td>
                                   <td style={{padding:'10px 16px',fontSize:'11px',color:'#94a3b8'}}>HW yükleme kapalı · ERC panelini kendi markasıyla görür</td>
+                                </tr>
+                              );
+                            });
+                            // ERC'nin alt taşeronları (2KX, Federal, UBS...) — kullanıcı
+                            // kayıtlarından otomatik; pay yüzdesi payment_rate'ten gelir
+                            (platformData?.taseronlar||[]).forEach((t,ti)=>{
+                              rows.push(
+                                <tr key={`t-${i}-${ti}`} style={{borderBottom:'1px solid #f1f5f9',background:'#f8fafc'}}>
+                                  <td style={{padding:'10px 16px 10px 36px',fontWeight:600,color:"#475569"}}>↳ {t.ad}</td>
+                                  <td style={{padding:'10px 16px'}}>
+                                    <span style={{background:'#e2e8f0',color:'#475569',borderRadius:'6px',padding:'2px 10px',fontSize:'12px',fontWeight:600}}>
+                                      🔧 Taşeron · %{t.pay_yuzde} pay
+                                    </span>
+                                  </td>
+                                  <td style={{padding:'10px 16px',color:'#6b7280'}}>—</td>
+                                  <td style={{padding:'10px 16px',color:'#374151',fontWeight:600}}>{t.users}</td>
+                                  <td style={{padding:'10px 16px',fontSize:'11px',color:'#94a3b8'}}>Kendi sahalarını Bölge Analizi'nde görür</td>
                                 </tr>
                               );
                             });
