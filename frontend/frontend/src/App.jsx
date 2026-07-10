@@ -10490,10 +10490,12 @@ function PuantajPanel({ currentUser, onBack }) {
     const r = await fetch(`${API_BASE}/hr/personel`);
     // Tüm personeli yükle (pasif/ayrılan dahil) — arşiv/geçmiş ay Excel'i için.
     // Görünürlük ay-bazında visiblePersonel ile belirlenir.
-    // Marka izolasyonu: yalnız kullanıcının markasındaki personel görünür.
+    // Tek yönlü marka izolasyonu: ERC (ana yüklenici) herkesi görür,
+    // alt marka (AHY) yalnız kendi personelini görür.
     const _um = String(currentUser?.marka || "ERC").toUpperCase();
     const all = await r.json();
-    setPersonelList((Array.isArray(all) ? all : []).filter(p => String(p.marka || "ERC").toUpperCase() === _um));
+    const arr = Array.isArray(all) ? all : [];
+    setPersonelList(_um === "ERC" ? arr : arr.filter(p => String(p.marka || "ERC").toUpperCase() === _um));
   };
 
   // Seçili ayda ÇALIŞAN personel: işe giriş <= ay sonu VE (ayrılma yok VEYA ayrılma >= ay başı)
@@ -10872,10 +10874,15 @@ function hesaplaVergi(netBankadan) {
 function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com";
-  // İK marka izolasyonu: herkes yalnız KENDİ markasının personelini görür
-  // (ERC kullanıcısı AHY kadrosunu, AHY kullanıcısı ERC/taşeron kayıtlarını görmez)
+  // İK marka izolasyonu (TEK YÖNLÜ): ERC ana yüklenici — maaş ve kalan
+  // ödemeleri yaptığı için TÜM personeli görür. Alt marka (AHY) yalnız
+  // kendi markasının personelini görür.
   const _hrMarka = String(currentUser?.marka || "ERC").toUpperCase();
-  const _markaFiltre = (list) => (Array.isArray(list) ? list : []).filter(p => String(p.marka || "ERC").toUpperCase() === _hrMarka);
+  const _markaFiltre = (list) => {
+    const arr = Array.isArray(list) ? list : [];
+    if (_hrMarka === "ERC") return arr;
+    return arr.filter(p => String(p.marka || "ERC").toUpperCase() === _hrMarka);
+  };
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
   const _isMuhasebe = currentUser?.role === "muhasebe";
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
@@ -14810,10 +14817,11 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
-    // Marka izolasyonu: avans personel seçiminde yalnız kendi markası listelenir
+    // Tek yönlü marka izolasyonu: ERC herkesi görür, alt marka (AHY) kendi personelini
     const _um = String(currentUser?.marka || "ERC").toUpperCase();
     const all = await r.json();
-    setPersonelList((Array.isArray(all) ? all : []).filter(p => String(p.marka || "ERC").toUpperCase() === _um));
+    const arr = Array.isArray(all) ? all : [];
+    setPersonelList(_um === "ERC" ? arr : arr.filter(p => String(p.marka || "ERC").toUpperCase() === _um));
   };
 
   useEffect(() => { load(); loadPersonel(); loadBakiye(); }, []);
