@@ -10487,9 +10487,10 @@ function PuantajPanel({ currentUser, onBack }) {
   const [puantajOzet, setPuantajOzet] = useState([]);
 
   const loadPersonel = async () => {
-    const r = await fetch(`${API_BASE}/hr/personel`);
+    // Dönem parametresi: seçili ayın geçerli maaşıyla döner (maaş geçmişi).
     // Tüm personeli yükle (pasif/ayrılan dahil) — arşiv/geçmiş ay Excel'i için.
     // Görünürlük ay-bazında visiblePersonel ile belirlenir.
+    const r = await fetch(`${API_BASE}/hr/personel?donem=${puantajAy}`);
     // Tek yönlü marka izolasyonu: ERC (ana yüklenici) herkesi görür,
     // alt marka (AHY) yalnız kendi personelini görür.
     const _um = String(currentUser?.marka || "ERC").toUpperCase();
@@ -10529,7 +10530,7 @@ function PuantajPanel({ currentUser, onBack }) {
   };
 
   useEffect(() => { loadPersonel(); }, []);
-  useEffect(() => { loadPuantaj(); loadPuantajOzet(); }, [puantajAy]);
+  useEffect(() => { loadPuantaj(); loadPuantajOzet(); loadPersonel(); }, [puantajAy]);
 
   const getPuantaj = (personelId, gun) => {
     const tarih = `${puantajAy}-${String(gun).padStart(2,"0")}`;
@@ -10970,7 +10971,8 @@ function HrDashboard({ onBack, currentUser }) {
   };
 
   const loadPersonel = async () => {
-    const r = await fetch(`${API_BASE}/hr/personel`);
+    // Dönem parametresi: seçili ayın geçerli maaşıyla döner (maaş geçmişi)
+    const r = await fetch(`${API_BASE}/hr/personel?donem=${puantajAy}`);
     setPersonelList(_markaFiltre(await r.json()));
   };
   // Seçili ayda istihdamda mı? (ayrılan personel ayrıldığı aya kadar puantajda görünür)
@@ -11069,7 +11071,7 @@ function HrDashboard({ onBack, currentUser }) {
   };
 
   useEffect(() => { loadPersonel(); loadIsgTurleri(); loadIsgUyarilar(); loadIsgMatris(); }, []);
-  useEffect(() => { if (tab==="puantaj" || tab==="personel") { loadPuantaj(); loadOzet(); } }, [tab, puantajAy]);
+  useEffect(() => { if (tab==="puantaj" || tab==="personel") { loadPuantaj(); loadOzet(); loadPersonel(); } }, [tab, puantajAy]);
   useEffect(() => { if (tab==="personel") { loadAvans(); loadIsAvans(); loadAylikOdemeler(); } }, [tab, puantajAy]);
   useEffect(() => { if (tab==="maas_avans") loadAvans(); }, [tab]);
   useEffect(() => { if (tab==="is_avans") loadIsAvans(); }, [tab]);
@@ -11098,6 +11100,7 @@ function HrDashboard({ onBack, currentUser }) {
   const handleEditPersonel = (p) => {
     setEditingPersonel(p);
     setPForm({ ...p,
+      maas_donem: puantajAy, // maaş değişirse görüntülenen aydan itibaren geçerli
       dogum_tarihi: p.dogum_tarihi?.split("T")[0]||"",
       ise_giris_tarihi: p.ise_giris_tarihi?.split("T")[0]||"",
       isten_ayrilma_tarihi: p.isten_ayrilma_tarihi?.split("T")[0]||"",
@@ -11548,7 +11551,7 @@ function HrDashboard({ onBack, currentUser }) {
                   <h2 style={{ margin:0, fontSize:"20px" }}>
                     👤 Personel Listesi
                     <span style={{ marginLeft:"10px", fontSize:"13px", fontWeight:500, color:"#6b7280", background:"#f3f4f6", borderRadius:"20px", padding:"2px 10px" }}>
-                      {personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek").length} aktif
+                      {personelList.filter(p=>puantajIstihdam(p)).length} aktif
                     </span>
                   </h2>
                   {/* Tam ay tahmini bütçe + an itibariyle — alt alta, aynı format */}
@@ -11561,7 +11564,7 @@ function HrDashboard({ onBack, currentUser }) {
                         <div style={labelSt}>
                           📊 {ayAdi} {yilStr} Tahmini Maaş Bütçesi:
                           <span style={amountSt("#1e40af")}>
-                            ₺{personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek").reduce((s,p) => s + Number(p.net_maas||0), 0).toLocaleString("tr-TR")}
+                            ₺{personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0), 0).toLocaleString("tr-TR")}
                           </span>
                           <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:500 }}>(tüm personel tam çalışırsa)</span>
                         </div>
@@ -11570,7 +11573,7 @@ function HrDashboard({ onBack, currentUser }) {
                           <span style={amountSt("#15803d")}>
                             ₺{(ozet.length > 0
                               ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
-                              : personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek").reduce((s,p) => s + Number(p.net_maas||0), 0)
+                              : personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0), 0)
                             ).toLocaleString("tr-TR")}
                           </span>
                         </div>
@@ -11578,7 +11581,7 @@ function HrDashboard({ onBack, currentUser }) {
                           // Her personel için: bankadan_gosterilen üzerinden brüt (vergi var),
                           // elden_verilen doğrudan eklenir (vergi yok).
                           // ozet varsa çalışılan güne göre orantılı hesaplanır.
-                          const aktifP = personelList.filter(p => p.aktif && (p.firma_tipi||"simsek")==="simsek");
+                          const aktifP = personelList.filter(p => puantajIstihdam(p));
                           let _toplamIsverenMal = 0;
                           let _toplamSgkIsv = 0;
                           if (ozet.length > 0) {
@@ -11646,7 +11649,7 @@ function HrDashboard({ onBack, currentUser }) {
                       });
 
                     // Aktif personel + hakedişleri
-                    const aktifPer = personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek");
+                    const aktifPer = personelList.filter(p=>puantajIstihdam(p));
                     const allRows = aktifPer.map(p => {
                       const ozO    = ozet.find(o=>String(o.personel_id)===String(p.id));
                       const hakEdis  = ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0);
@@ -11710,7 +11713,7 @@ function HrDashboard({ onBack, currentUser }) {
                                     onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                                     onMouseLeave={e=>e.currentTarget.style.background=""}
                                   >👥 Tüm Personel</div>
-                                  {personelList.filter(p=>p.aktif && (p.firma_tipi||"simsek")==="simsek" && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
+                                  {personelList.filter(p=>puantajIstihdam(p) && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
                                     <div key={p.id}
                                       onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); setOdemeTabloAcik(true); }}
                                       style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
@@ -12228,6 +12231,15 @@ function HrDashboard({ onBack, currentUser }) {
                           />
                         </div>
                       ))}
+                      {editingPersonel && (
+                        <div>
+                          <label style={labelSt}>Yeni Maaş Geçerlilik Ayı</label>
+                          <input type="month" value={pForm.maas_donem || puantajAy} onChange={e=>setPForm(f=>({...f,maas_donem:e.target.value}))} style={inputSt} />
+                          <div style={{ fontSize:"11px", color:"#92400e", marginTop:"3px", lineHeight:1.4 }}>
+                            💡 Maaşı değiştirirsen bu aydan itibaren geçerli olur — önceki aylar eski maaşla hesaplanmaya devam eder.
+                          </div>
+                        </div>
+                      )}
                     </div>
                     {/* Bordro özeti — sadece bankadan gösterilen kısım üzerinden vergi hesabı */}
                     <BordroOzeti bankadan={Number(pForm.bankadan_gosterilen||0)} elden={Number(pForm.elden_verilen||0)} />

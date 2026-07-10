@@ -11376,6 +11376,24 @@ pool.query(`
 // ---- PERSONEL CRUD ----
 app.get("/hr/personel", async (req, res) => {
   try {
+    const donem = String(req.query.donem || "").trim(); // 'YYYY-MM' — o ay geçerli maaşla döner
+    if (/^\d{4}-\d{2}$/.test(donem)) {
+      const r = await pool.query(`
+        SELECT p.*,
+          COALESCE(g.net_maas, p.net_maas) AS net_maas,
+          COALESCE(g.bankadan_gosterilen, p.bankadan_gosterilen) AS bankadan_gosterilen,
+          COALESCE(g.elden_verilen, p.elden_verilen) AS elden_verilen,
+          g.donem AS maas_gecerli_donem
+        FROM personel p
+        LEFT JOIN LATERAL (
+          SELECT net_maas, bankadan_gosterilen, elden_verilen, donem
+          FROM personel_maas_gecmisi
+          WHERE personel_id = p.id AND donem <= $1
+          ORDER BY donem DESC LIMIT 1
+        ) g ON true
+        ORDER BY p.aktif DESC, p.ad_soyad ASC`, [donem]);
+      return res.json(r.rows);
+    }
     const r = await pool.query("SELECT * FROM personel ORDER BY aktif DESC, ad_soyad ASC");
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -11401,6 +11419,14 @@ app.post("/hr/personel", async (req, res) => {
        kkd_zimmet_tarihi||null,mesleki_yeterlilik_durum||null,mesleki_yeterlilik_tarihi||null,
        elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,String(marka||"ERC").toUpperCase()]
     );
+    // Taban maaş kaydı: tüm aylar için geçerli başlangıç değeri
+    try {
+      await pool.query(
+        `INSERT INTO personel_maas_gecmisi (personel_id,donem,net_maas,bankadan_gosterilen,elden_verilen)
+         VALUES ($1,'1900-01',$2,$3,$4) ON CONFLICT (personel_id,donem) DO NOTHING`,
+        [r.rows[0].id, net_maas||0, bankadan_gosterilen||0, elden_verilen||0]
+      );
+    } catch {}
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -11413,7 +11439,38 @@ app.put("/hr/personel/:id", async (req, res) => {
       banka_hesap_no, aktif,
       ekip_bilgisi, alt_yuklenici, firma_tipi, isdp_account, iresource_giris,
       kkd_zimmet_tarihi, mesleki_yeterlilik_durum, mesleki_yeterlilik_tarihi,
-      elektrik_isi, yuksekte_calisma, arac_kullanim, marka } = req.body;
+      elektrik_isi, yuksekte_calisma, arac_kullanim, marka, maas_donem } = req.body;
+    // MAAŞ VERSİYONLAMA: maaş alanları değiştiyse eski değeri taban kaydında
+    // koru, yeni değeri seçilen dönemden (maas_donem, yoksa içinde bulunulan ay)
+    // itibaren geçerli yap → geçmiş aylar eski maaşla hesaplanmaya devam eder.
+    try {
+      const oldR = await pool.query("SELECT net_maas, bankadan_gosterilen, elden_verilen FROM personel WHERE id=$1", [id]);
+      if (oldR.rows[0]) {
+        const o = oldR.rows[0];
+        const changed = Number(o.net_maas||0) !== Number(net_maas||0)
+          || Number(o.bankadan_gosterilen||0) !== Number(bankadan_gosterilen||0)
+          || Number(o.elden_verilen||0) !== Number(elden_verilen||0);
+        if (changed) {
+          const hist = await pool.query("SELECT COUNT(*)::int AS n FROM personel_maas_gecmisi WHERE personel_id=$1", [id]);
+          if (hist.rows[0].n === 0) {
+            await pool.query(
+              `INSERT INTO personel_maas_gecmisi (personel_id,donem,net_maas,bankadan_gosterilen,elden_verilen)
+               VALUES ($1,'1900-01',$2,$3,$4) ON CONFLICT (personel_id,donem) DO NOTHING`,
+              [id, o.net_maas||0, o.bankadan_gosterilen||0, o.elden_verilen||0]
+            );
+          }
+          const now = new Date();
+          const efDonem = /^\d{4}-\d{2}$/.test(String(maas_donem||"")) ? maas_donem
+            : `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+          await pool.query(
+            `INSERT INTO personel_maas_gecmisi (personel_id,donem,net_maas,bankadan_gosterilen,elden_verilen)
+             VALUES ($1,$2,$3,$4,$5)
+             ON CONFLICT (personel_id,donem) DO UPDATE SET net_maas=$3, bankadan_gosterilen=$4, elden_verilen=$5`,
+            [id, efDonem, net_maas||0, bankadan_gosterilen||0, elden_verilen||0]
+          );
+        }
+      }
+    } catch (e) { console.error("maas gecmisi:", e.message); }
     const r = await pool.query(
       `UPDATE personel SET ad_soyad=$1,tc_no=$2,dogum_tarihi=$3,telefon=$4,email=$5,unvan=$6,
         bolge=$7,ise_giris_tarihi=$8,isten_ayrilma_tarihi=$9,net_maas=$10,bankadan_gosterilen=$11,
@@ -11594,7 +11651,22 @@ app.delete("/hr/puantaj/:id/not", async (req, res) => {
 app.get("/hr/puantaj/ozet", async (req, res) => {
   try {
     const { ay, yil } = req.query;
-    const personelList = await pool.query("SELECT * FROM personel WHERE aktif=true OR isten_ayrilma_tarihi IS NOT NULL ORDER BY ad_soyad");
+    // O ayın geçerli maaşıyla hesapla (maaş geçmişi versiyonlaması)
+    const _ozetDonem = `${yil}-${String(ay).padStart(2, "0")}`;
+    const personelList = await pool.query(`
+      SELECT p.*,
+        COALESCE(g.net_maas, p.net_maas) AS net_maas,
+        COALESCE(g.bankadan_gosterilen, p.bankadan_gosterilen) AS bankadan_gosterilen,
+        COALESCE(g.elden_verilen, p.elden_verilen) AS elden_verilen
+      FROM personel p
+      LEFT JOIN LATERAL (
+        SELECT net_maas, bankadan_gosterilen, elden_verilen
+        FROM personel_maas_gecmisi
+        WHERE personel_id = p.id AND donem <= $1
+        ORDER BY donem DESC LIMIT 1
+      ) g ON true
+      WHERE p.aktif=true OR p.isten_ayrilma_tarihi IS NOT NULL
+      ORDER BY p.ad_soyad`, [_ozetDonem]);
 
     // Individual records to detect Sundays
     const puantajRows = await pool.query(
@@ -15648,6 +15720,20 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
         WHERE COALESCE(firma_tipi,'simsek')='simsek' AND ad_soyad NOT ILIKE '%YELMEN%'`);
       console.log(`[marka] Personel AHY markasına taşındı: ${pmig.rowCount} kayıt`);
     }
+    // MAAŞ GEÇMİŞİ: maaş dönem bazlı versiyonlanır. Ay M için geçerli maaş =
+    // donem <= M olan en son kayıt; hiç kayıt yoksa personel tablosundaki değer.
+    // Maaş güncellenince eski değer '1900-01' taban kaydı olarak korunur,
+    // yeni değer seçilen dönemden itibaren geçerli olur → geçmiş aylar bozulmaz.
+    await pool.query(`CREATE TABLE IF NOT EXISTS personel_maas_gecmisi (
+      id SERIAL PRIMARY KEY,
+      personel_id INTEGER NOT NULL,
+      donem TEXT NOT NULL,
+      net_maas NUMERIC DEFAULT 0,
+      bankadan_gosterilen NUMERIC DEFAULT 0,
+      elden_verilen NUMERIC DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (personel_id, donem)
+    )`);
   } catch (e) { console.error("markalar migration hatası:", e.message); }
 })();
 
