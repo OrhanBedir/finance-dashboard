@@ -1874,6 +1874,8 @@ async function requireHwYukleme(req, res, next) {
       try { decoded = jwt.verify(token, secret); break; } catch {}
     }
     if (!decoded || !decoded.email) return next();
+    // Platform sahibi her şeyi yapabilir — marka kısıtına tabi değildir
+    if (String(decoded.role || "") === "platform_admin") return next();
     const r = await pool.query(
       `SELECT COALESCE(m.hw_yukleme, true) AS hw
        FROM users u
@@ -15796,6 +15798,11 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     // markalıdır — dropdown seçimi unutulsa/karışsa bile her açılışta düzelir.
     await pool.query(`UPDATE users SET marka='AHY'
       WHERE LOWER(email) LIKE '%@ahyelektrik.com' AND COALESCE(marka,'ERC') <> 'AHY'`);
+    // Yönetim garantisi: platform sahibi + ERC yönetimi + muhasebe her açılışta
+    // ERC markasında kalır — her şeyi görebilir ve HW yüklemesi yapabilirler.
+    await pool.query(`UPDATE users SET marka='ERC'
+      WHERE LOWER(email) IN ('orhan.bedir@gmail.com','orhan.bedir@simsektel.com','orhan@simsektel.com','duzgun.simsek@simsektel.com','muhasebe@simsektel.com')
+        AND COALESCE(marka,'ERC') <> 'ERC'`);
     // AHY iş görünümü: Bölge Analizi'nde yalnız taşeronu 'AHY ELEKTRİK' olan
     // sahaları %90 kırılımla görür (UBS/Federal/2KX ile aynı mekanizma).
     await pool.query(`UPDATE users SET subcon_name='AHY ELEKTRİK', payment_rate=0.90
