@@ -1371,19 +1371,16 @@ function OrgSemasiPanel() {
       ["Team 7", "ENDER TEKE",               "Bursa Bölge",        "5442560309", "Ekip Şefi"],
       ["Team 7", "SELÇUK FIRAT",             "Bursa Bölge",        "5350770889", "Montaj personeli"],
     ];
-    const _norm = (s) => String(s || "").toLocaleUpperCase("tr-TR").replace(/\s+/g, " ").trim();
-    const tcByName = {};
-    personelList.forEach(p => { if (p.ad_soyad) tcByName[_norm(p.ad_soyad)] = p.tc_no || ""; });
-    const dHead = ["Team List", "Adı Soyadı", "Bölge", "Tel NO", "Firma Adı", "Alt Yüklenici", "Görevi", "TC Kimlik No"];
+    const dHead = ["Team List", "Adı Soyadı", "Görevi", "Bölge", "Tel NO", "Firma Adı"];
     const dData = [dHead, ...ORG_DETAILS.map(([team, ad, bolge, tel, gorev]) =>
-      [team, ad, bolge, tel, "HUAWEI", "ŞİMŞEK HABERLEŞME", gorev, tcByName[_norm(ad)] || ""])];
+      [team, ad, gorev, bolge, tel, "ŞİMŞEK HABERLEŞME"])];
     const ws2 = XLSXStyle.utils.aoa_to_sheet(dData);
-    ws2["!cols"] = [{ wch: 9 }, { wch: 30 }, { wch: 18 }, { wch: 13 }, { wch: 11 }, { wch: 22 }, { wch: 24 }, { wch: 14 }];
+    ws2["!cols"] = [{ wch: 10 }, { wch: 30 }, { wch: 26 }, { wch: 18 }, { wch: 13 }, { wch: 22 }];
     ws2["!rows"] = dData.map((_, i) => ({ hpt: i === 0 ? 24 : 18 }));
     dHead.forEach((_, ci) => { const a = XLSXStyle.utils.encode_cell({ r: 0, c: ci }); if (ws2[a]) ws2[a].s = boxS("1E3A5F", "FFFFFF", 11); });
     ORG_DETAILS.forEach((_, ri) => dHead.forEach((__, ci) => {
       const a = XLSXStyle.utils.encode_cell({ r: ri + 1, c: ci }); if (!ws2[a]) return;
-      ws2[a].s = { fill: { patternType: "solid", fgColor: { rgb: ri % 2 === 0 ? "F0F6FF" : "FFFFFF" } }, font: { sz: 10, name: "Arial" }, alignment: { horizontal: [0, 3, 4, 7].includes(ci) ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
+      ws2[a].s = { fill: { patternType: "solid", fgColor: { rgb: ri % 2 === 0 ? "F0F6FF" : "FFFFFF" } }, font: { sz: 10, name: "Arial" }, alignment: { horizontal: [0, 4].includes(ci) ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
     }));
     ws2["!freeze"] = { xSplit: 0, ySplit: 1 };
     const wb = XLSXStyle.utils.book_new();
@@ -1465,7 +1462,7 @@ function OrgSemasiPanel() {
         </svg>
       </div>
       <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
-        💡 Excel çıktısı 2 sayfadır: "Organization Chart" (şema) + "Details" (resmi eleman listesi: Team 1-7, ad soyad, bölge, telefon, görev; TC kimlik no'lar personel kayıtlarından otomatik eşlenir).
+        💡 Excel çıktısı 2 sayfadır: "Organization Chart" (şema) + "Details" (resmi eleman listesi: Team 1-7 — Adı Soyadı, Görevi, Bölge, Tel NO, Firma Adı).
       </div>
     </div>
   );
