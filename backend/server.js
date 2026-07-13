@@ -5517,6 +5517,40 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
   }
 });
 
+// MARKA GÜNLÜK NAKİT AKIŞI: alt markanın (AHY) devir tarihinden (15 Temmuz 2026)
+// itibaren günlük harcamaları — maaş ödemeleri + maaş/iş avansları.
+app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
+  try {
+    const rol = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(rol)) {
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    }
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const baslangic = "2026-07-15"; // AHY devir tarihi
+    const [maas, avanslar] = await Promise.all([
+      pool.query(`SELECT to_char(m.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
+          'MAAS_ODEME' AS tip,
+          (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
+          COALESCE(m.donem,'') AS aciklama
+        FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
+        WHERE COALESCE(p.marka,'ERC') = $1 AND m.tarih >= $2`, [marka, baslangic]),
+      pool.query(`SELECT to_char(a.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
+          CASE WHEN UPPER(COALESCE(a.avans_turu,'MAAS'))='IS' THEN 'IS_AVANSI' ELSE 'MAAS_AVANSI' END AS tip,
+          a.tutar, COALESCE(a.aciklama,'') AS aciklama
+        FROM avans a JOIN personel p ON p.id = a.personel_id
+        WHERE COALESCE(p.marka,'ERC') = $1 AND a.tarih >= $2
+          AND UPPER(COALESCE(a.avans_turu,'MAAS')) IN ('MAAS','IS')`, [marka, baslangic]),
+    ]);
+    const rows = [...maas.rows, ...avanslar.rows]
+      .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))
+      .sort((a, b) => b.tarih.localeCompare(a.tarih));
+    res.json({ ok: true, baslangic, rows });
+  } catch (e) {
+    console.error("MARKA NAKIT ERROR:", e.message);
+    res.status(500).json({ ok: false, error: "Nakit akışı alınamadı" });
+  }
+});
+
 // HAKEDİŞ KIRILIM RAPORU: HW'ye kesilen faturalar (hw_invoice_rows) üzerinden
 // aylık ana yüklenici (ERC) / alt yüklenici (AHY) payı. Yüzde markalar
 // tablosundan okunur (AHY.kirilim_yuzde = ERC payı, ör. 10).

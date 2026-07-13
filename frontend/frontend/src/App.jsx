@@ -1118,6 +1118,91 @@ function MarkaFinansPanel({ currentUser }) {
   );
 }
 
+// Alt marka (AHY) GÜNLÜK nakit akışı: devir tarihinden (15 Temmuz 2026)
+// itibaren gün gün harcamalar — maaş ödemeleri + maaş/iş avansları.
+function MarkaNakitPanel({ currentUser }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const marka = String(currentUser?.marka || "AHY").toUpperCase();
+  const markaAd = currentUser?.marka_ad || marka;
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/finance/marka-nakit?marka=${marka}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.ok === false) throw new Error(d.error || "Nakit akışı alınamadı");
+        setData(d);
+      } catch (e) { setErr(e.message); } finally { setLoading(false); }
+    })();
+  }, []);
+  const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  const fmtGun = (t) => { const d = new Date(t + "T12:00:00"); return d.toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric", weekday: "long" }); };
+  if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
+  if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+  const rows = data?.rows || [];
+  const bugun = new Date().toISOString().slice(0, 10);
+  const haftaOnce = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+  const toplam = rows.reduce((s, r) => s + r.tutar, 0);
+  const bugunT = rows.filter(r => r.tarih === bugun).reduce((s, r) => s + r.tutar, 0);
+  const haftaT = rows.filter(r => r.tarih >= haftaOnce).reduce((s, r) => s + r.tutar, 0);
+  const gunler = {};
+  rows.forEach(r => { (gunler[r.tarih] = gunler[r.tarih] || []).push(r); });
+  const TIP = {
+    MAAS_ODEME:  { ad: "Maaş Ödeme",   bg: "#dcfce7", fg: "#166534" },
+    MAAS_AVANSI: { ad: "Maaş Avansı",  bg: "#fef3c7", fg: "#92400e" },
+    IS_AVANSI:   { ad: "İş Avansı",    bg: "#dbeafe", fg: "#1e40af" },
+  };
+  return (
+    <div style={{ padding: "24px", maxWidth: "900px" }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>
+      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>
+        15 Temmuz 2026 devir tarihinden itibaren günlük harcamalar (maaş ödemeleri + avanslar)
+      </div>
+      <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
+        {[["Bugün", bugunT, "#1e3a5f"], ["Son 7 Gün", haftaT, "#b45309"], ["Toplam (15 Tem'den beri)", toplam, "#991b1b"]].map(([l, v, c]) => (
+          <div key={l} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: `5px solid ${c}`, borderRadius: "12px", padding: "14px 20px", minWidth: "180px" }}>
+            <div style={{ fontSize: "11px", color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{l}</div>
+            <div style={{ fontSize: "21px", fontWeight: 800, color: c, marginTop: "3px" }}>₺{fmt(v)}</div>
+          </div>
+        ))}
+      </div>
+      {Object.keys(gunler).length === 0 && (
+        <div style={{ background: "#fff", border: "1.5px dashed #e5e7eb", borderRadius: "14px", padding: "40px", textAlign: "center", color: "#9ca3af" }}>
+          15 Temmuz 2026 sonrası henüz harcama kaydı yok.
+        </div>
+      )}
+      {Object.keys(gunler).sort((a, b) => b.localeCompare(a)).map(gun => {
+        const items = gunler[gun];
+        const gunToplam = items.reduce((s, r) => s + r.tutar, 0);
+        return (
+          <div key={gun} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", marginBottom: "14px", overflow: "hidden" }}>
+            <div style={{ background: "#f8fafc", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e5e7eb" }}>
+              <span style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a" }}>📅 {fmtGun(gun)}</span>
+              <span style={{ fontWeight: 800, fontSize: "15px", color: "#991b1b" }}>₺{fmt(gunToplam)}</span>
+            </div>
+            {items.map((r, i) => {
+              const t = TIP[r.tip] || { ad: r.tip, bg: "#f3f4f6", fg: "#374151" };
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "9px 16px", borderBottom: i < items.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                  <span style={{ background: t.bg, color: t.fg, borderRadius: "20px", padding: "2px 10px", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>{t.ad}</span>
+                  <span style={{ flex: 1, fontSize: "13px", fontWeight: 600, color: "#1f2937" }}>{r.ad_soyad}<span style={{ color: "#9ca3af", fontWeight: 400, marginLeft: "8px", fontSize: "12px" }}>{r.aciklama}</span></span>
+                  <span style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a", whiteSpace: "nowrap" }}>₺{fmt(r.tutar)}</span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "6px" }}>
+        💡 Masraf formu harcamaları bir sonraki sürümde eklenecek. Maaş dönem yansıması: Temmuz maaşının 15 Temmuz sonrası kısmı Ağustos ortasındaki ödemeyle burada görünür.
+      </div>
+    </div>
+  );
+}
+
 function RolloutUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -10494,11 +10579,18 @@ function PuantajPanel({ currentUser, onBack }) {
     // Görünürlük ay-bazında visiblePersonel ile belirlenir.
     const r = await fetch(`${API_BASE}/hr/personel?donem=${puantajAy}`);
     // Tek yönlü marka izolasyonu: ERC (ana yüklenici) herkesi görür,
-    // alt marka (AHY) yalnız kendi personelini görür.
+    // alt marka (AHY) yalnız kendi personelini görür; devir (15.07.2026)
+    // öncesi ayrılanlar AHY'ye yansımaz.
     const _um = String(currentUser?.marka || "ERC").toUpperCase();
     const all = await r.json();
     const arr = Array.isArray(all) ? all : [];
-    setPersonelList(_um === "ERC" ? arr : arr.filter(p => String(p.marka || "ERC").toUpperCase() === _um));
+    setPersonelList(_um === "ERC" ? arr : arr.filter(p => {
+      if (String(p.marka || "ERC").toUpperCase() !== _um) return false;
+      if (p.aktif) return true;
+      const giris = (p.ise_giris_tarihi || "").split("T")[0];
+      const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
+      return giris >= "2026-07-15" || (ayrilma && ayrilma >= "2026-07-15");
+    }));
   };
 
   // Seçili ayda ÇALIŞAN personel: işe giriş <= ay sonu VE (ayrılma yok VEYA ayrılma >= ay başı)
@@ -10879,12 +10971,20 @@ function HrDashboard({ onBack, currentUser }) {
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "muhasebe@simsektel.com" || _hrEmail === "info@ahyelektrik.com";
   // İK marka izolasyonu (TEK YÖNLÜ): ERC ana yüklenici — maaş ve kalan
   // ödemeleri yaptığı için TÜM personeli görür. Alt marka (AHY) yalnız
-  // kendi markasının personelini görür.
+  // kendi markasının personelini görür; devir tarihi (15 Temmuz 2026)
+  // öncesinde ayrılmış eski personel AHY paneline yansımaz.
   const _hrMarka = String(currentUser?.marka || "ERC").toUpperCase();
+  const AHY_DEVIR = "2026-07-15";
   const _markaFiltre = (list) => {
     const arr = Array.isArray(list) ? list : [];
     if (_hrMarka === "ERC") return arr;
-    return arr.filter(p => String(p.marka || "ERC").toUpperCase() === _hrMarka);
+    return arr.filter(p => {
+      if (String(p.marka || "ERC").toUpperCase() !== _hrMarka) return false;
+      if (p.aktif) return true;
+      const giris = (p.ise_giris_tarihi || "").split("T")[0];
+      const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
+      return giris >= AHY_DEVIR || (ayrilma && ayrilma >= AHY_DEVIR);
+    });
   };
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
   const _isMuhasebe = currentUser?.role === "muhasebe";
@@ -14864,11 +14964,18 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const loadPersonel = async () => {
     const r = await fetch(`${API_BASE}/hr/personel`);
-    // Tek yönlü marka izolasyonu: ERC herkesi görür, alt marka (AHY) kendi personelini
+    // Tek yönlü marka izolasyonu: ERC herkesi görür, alt marka (AHY) kendi
+    // personelini; devir (15.07.2026) öncesi ayrılanlar AHY'ye yansımaz.
     const _um = String(currentUser?.marka || "ERC").toUpperCase();
     const all = await r.json();
     const arr = Array.isArray(all) ? all : [];
-    setPersonelList(_um === "ERC" ? arr : arr.filter(p => String(p.marka || "ERC").toUpperCase() === _um));
+    setPersonelList(_um === "ERC" ? arr : arr.filter(p => {
+      if (String(p.marka || "ERC").toUpperCase() !== _um) return false;
+      if (p.aktif) return true;
+      const giris = (p.ise_giris_tarihi || "").split("T")[0];
+      const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
+      return giris >= "2026-07-15" || (ayrilma && ayrilma >= "2026-07-15");
+    }));
   };
 
   useEffect(() => { load(); loadPersonel(); loadBakiye(); }, []);
@@ -23946,6 +24053,11 @@ function App() {
                         <span>📄</span> Masraf Formu
                         {pendingMasrafCount > 0 && <span className="sidebar-badge">{pendingMasrafCount}</span>}
                       </div>
+                      {isAltMarka && isAdmin && (
+                        <div className={`sidebar-nav-item ${page==='marka_nakit'?'active':''}`} onClick={()=>setPage('marka_nakit')}>
+                          <span>💰</span> Nakit Akışı (Günlük)
+                        </div>
+                      )}
                       {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
                         <div className={`sidebar-nav-item ${page==='cashflow'?'active':''}`} onClick={()=>setPage('cashflow')}>
                           <span>🏦</span> Nakit Akışı
@@ -24048,6 +24160,7 @@ function App() {
           {/* Main content */}
           <div className="main-content" onClick={e=>e.stopPropagation()}>
             {page === "marka_finans" && isAltMarka && <MarkaFinansPanel currentUser={user} />}
+            {page === "marka_nakit" && isAltMarka && <MarkaNakitPanel currentUser={user} />}
             {page === "finance" && isFinanceUser && !isAltMarka && (
               financeToken ? (
                 <div style={{padding:"24px 28px"}}>
