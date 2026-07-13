@@ -1218,6 +1218,7 @@ function MarkaNakitPanel({ currentUser }) {
     MAAS_ODEME:  { ad: "Maaş Ödeme",   bg: "#dcfce7", fg: "#166534" },
     MAAS_AVANSI: { ad: "Maaş Avansı",  bg: "#fef3c7", fg: "#92400e" },
     IS_AVANSI:   { ad: "İş Avansı",    bg: "#dbeafe", fg: "#1e40af" },
+    ARAC_KIRA:   { ad: "Araç Kirası",  bg: "#ede9fe", fg: "#6d28d9" },
   };
   return (
     <div style={{ padding: "24px", maxWidth: "900px" }}>
@@ -25708,9 +25709,15 @@ function AraclarPanel({ currentUser, onBack }) {
   const [belgeUpload, setBelgeUpload] = useState({ turu:null, file:null }); // {turu, file}
   const [filter, setFilter] = useState("TUMU"); // TUMU | AKTİF | PASİF
 
+  const [kiraOdemeler, setKiraOdemeler] = useState([]);
   const load = async () => {
     const r = await fetch(`${API_BASE}/hr/araclar`);
     setAraclar(await r.json());
+    try {
+      const k = await fetch(`${API_BASE}/hr/arac-kira-odemeler`);
+      const kd = await k.json();
+      setKiraOdemeler(Array.isArray(kd) ? kd : []);
+    } catch { setKiraOdemeler([]); }
   };
 
   useEffect(() => { load(); }, []);
@@ -25843,7 +25850,9 @@ function AraclarPanel({ currentUser, onBack }) {
 
       {/* Expiry warnings summary */}
       {(() => {
+        // İade edilmiş/pasif araçlar bitiş uyarısı ÜRETMEZ — sadece aktif filo izlenir
         const expiring = araclar.filter(a => {
+          if (!a.aktif) return false;
           const sd = dayDiff(a.sigorta_bitis);
           const md = dayDiff(a.muayene_bitis);
           const kd = dayDiff(a.kira_bitis);
@@ -25888,27 +25897,56 @@ function AraclarPanel({ currentUser, onBack }) {
                   {a.surucu && <div style={{ fontSize:"12px", color:"#6b7280" }}>👤 {a.surucu}</div>}
                   {a.aylik_kira && <div style={{ fontSize:"12px", color:"#6b7280" }}>💰 ₺{Number(a.aylik_kira).toLocaleString("tr-TR")}/ay</div>}
                 </div>
-                {/* Expiry badges */}
+                {/* Expiry badges — pasif (iade edilmiş) araçta nötr gri, GEÇTİ uyarısı yok */}
                 <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginBottom:"10px" }}>
                   {a.kira_bitis && (
-                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background:expiryBg(a.kira_bitis), color:expiryColor(a.kira_bitis) }}>
+                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background: a.aktif ? expiryBg(a.kira_bitis) : "#f3f4f6", color: a.aktif ? expiryColor(a.kira_bitis) : "#6b7280" }}>
                       📅 Kira: {new Date(a.kira_bitis).toLocaleDateString("tr-TR")}
-                      {kd !== null && kd <= 60 && ` (${kd < 0 ? "GEÇTİ" : kd+" gün"})`}
+                      {a.aktif ? (kd !== null && kd <= 60 ? ` (${kd < 0 ? "GEÇTİ" : kd+" gün"})` : "") : " (iade edildi)"}
                     </span>
                   )}
                   {a.sigorta_bitis && (
-                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background:expiryBg(a.sigorta_bitis), color:expiryColor(a.sigorta_bitis) }}>
+                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background: a.aktif ? expiryBg(a.sigorta_bitis) : "#f3f4f6", color: a.aktif ? expiryColor(a.sigorta_bitis) : "#6b7280" }}>
                       🛡 Sigorta: {new Date(a.sigorta_bitis).toLocaleDateString("tr-TR")}
-                      {sd !== null && sd <= 60 && ` (${sd < 0 ? "GEÇTİ" : sd+" gün"})`}
+                      {a.aktif && sd !== null && sd <= 60 && ` (${sd < 0 ? "GEÇTİ" : sd+" gün"})`}
                     </span>
                   )}
                   {a.muayene_bitis && (
-                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background:expiryBg(a.muayene_bitis), color:expiryColor(a.muayene_bitis) }}>
+                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background: a.aktif ? expiryBg(a.muayene_bitis) : "#f3f4f6", color: a.aktif ? expiryColor(a.muayene_bitis) : "#6b7280" }}>
                       🔧 Muayene: {new Date(a.muayene_bitis).toLocaleDateString("tr-TR")}
-                      {md !== null && md <= 60 && ` (${md < 0 ? "GEÇTİ" : md+" gün"})`}
+                      {a.aktif && md !== null && md <= 60 && ` (${md < 0 ? "GEÇTİ" : md+" gün"})`}
                     </span>
                   )}
                 </div>
+                {/* Kira ödeme durumu — sadece aktif kiralık araçlarda */}
+                {a.aktif && Number(a.aylik_kira || 0) > 0 && (() => {
+                  const _buAy = new Date().toISOString().slice(0, 7);
+                  const odendi = kiraOdemeler.some(o => String(o.arac_id) === String(a.id) && o.donem === _buAy);
+                  return (
+                    <div style={{ display:"flex", gap:"6px", alignItems:"center", marginBottom:"10px" }}>
+                      {odendi
+                        ? <span style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#dcfce7", color:"#166534" }}>✅ Bu ay kira ödendi</span>
+                        : <span style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#fee2e2", color:"#991b1b" }}>💳 Kira bekliyor</span>}
+                      {canEdit && !odendi && (
+                        <button onClick={async (e) => {
+                          e.stopPropagation();
+                          const donem = prompt("Hangi dönemin kirası? (YYYY-AA)", _buAy);
+                          if (!donem) return;
+                          const tutar = prompt("Ödenen tutar (₺):", String(a.aylik_kira || ""));
+                          if (!tutar) return;
+                          try {
+                            const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/kira-ode`, {
+                              method: "POST", headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ donem, tutar: Number(String(tutar).replace(/\./g, "").replace(",", ".")) || Number(tutar) }),
+                            });
+                            if (!r.ok) throw new Error("Kaydedilemedi");
+                            await load();
+                          } catch (err) { alert(err.message || "Kira ödemesi kaydedilemedi"); }
+                        }} style={{ padding:"3px 10px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>💸 Kira Öde</button>
+                      )}
+                    </div>
+                  );
+                })()}
                 {/* Belge durumu */}
                 <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
                   {BELGE_YUVALARI.map(({ turu, label }) => {

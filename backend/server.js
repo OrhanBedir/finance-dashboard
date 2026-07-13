@@ -5470,8 +5470,9 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 
 /* ================== HW PO UPLOAD ================== */
 // MARKA KAR/ZARAR ÖZETİ: alt markanın (AHY) kendi finans görünümü.
-// Gelir = HW faturaları × marka payı (%90); Gider = marka personelinin
-// maaş ödemeleri + maaş avansları + iş avansları (aylık).
+// Gelir = SADECE markanın (taşeron canon eşleşmeli) yaptığı işlerin hakedişi
+// × pay (%90), onair tarihine göre aylıklanır — Bölge Analizi ile aynı kaynak.
+// Gider = marka personelinin maaş ödemeleri + maaş/iş avansları (aylık).
 app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
   try {
     const rol = String(req.user?.role || "").toLowerCase();
@@ -5485,11 +5486,8 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       if (m.rows[0]) yuzde = Number(m.rows[0].kirilim_yuzde || 10);
     } catch {}
     const pay = (100 - yuzde) / 100;
-    const [gelir, maas, mavans, iavans] = await Promise.all([
-      pool.query(`SELECT to_char(invoice_date,'YYYY-MM') AS ay,
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))='USD' THEN invoice_amount ELSE 0 END) AS usd,
-          SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))<>'USD' THEN invoice_amount ELSE 0 END) AS tl
-        FROM hw_invoice_rows WHERE invoice_date IS NOT NULL GROUP BY 1`),
+    const [master, maas, mavans, iavans] = await Promise.all([
+      pool.query(buildMasterJoinedQuery("")),
       pool.query(`SELECT m.donem AS ay, SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS t
         FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND m.donem IS NOT NULL GROUP BY 1`, [marka]),
@@ -5502,7 +5500,18 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     ]);
     const map = {};
     const rowOf = (ay) => (map[ay] = map[ay] || { ay, gelir_try: 0, gelir_usd: 0, maas: 0, maas_avans: 0, is_avans: 0 });
-    gelir.rows.forEach(r => { if (!r.ay) return; const o = rowOf(r.ay); o.gelir_try = +(Number(r.tl || 0) * pay).toFixed(2); o.gelir_usd = +(Number(r.usd || 0) * pay).toFixed(2); });
+    // Gelir: markanın taşeron olarak yaptığı işler (canon eşleşme: AHY = AHY ELEKTRİK)
+    const cMarka = canonSub(marka);
+    for (const r of master.rows) {
+      if (canonSub(r.subcon_name) !== cMarka) continue;
+      const amt = Number(r.total_done_amount || 0);
+      if (!amt) continue;
+      let ay = "Tarihsiz";
+      if (r.onair_date) { try { ay = new Date(r.onair_date).toISOString().slice(0, 7); } catch {} }
+      const o = rowOf(ay);
+      if (String(r.currency || "TRY").toUpperCase() === "USD") o.gelir_usd = +(o.gelir_usd + amt * pay).toFixed(2);
+      else o.gelir_try = +(o.gelir_try + amt * pay).toFixed(2);
+    }
     maas.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).maas = Number(r.t || 0); });
     mavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).maas_avans = Number(r.t || 0); });
     iavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).is_avans = Number(r.t || 0); });
@@ -5527,7 +5536,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
     }
     const marka = String(req.query.marka || "AHY").toUpperCase();
     const baslangic = "2026-07-15"; // AHY devir tarihi
-    const [maas, avanslar] = await Promise.all([
+    const [maas, avanslar, kiralar] = await Promise.all([
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
           'MAAS_ODEME' AS tip,
           (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
@@ -5540,8 +5549,13 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         FROM avans a JOIN personel p ON p.id = a.personel_id
         WHERE COALESCE(p.marka,'ERC') = $1 AND a.tarih >= $2
           AND UPPER(COALESCE(a.avans_turu,'MAAS')) IN ('MAAS','IS')`, [marka, baslangic]),
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad,
+          'ARAC_KIRA' AS tip, o.tutar,
+          (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
+        FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
+        WHERE o.tarih >= $1`, [baslangic]),
     ]);
-    const rows = [...maas.rows, ...avanslar.rows]
+    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows]
       .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))
       .sort((a, b) => b.tarih.localeCompare(a.tarih));
     res.json({ ok: true, baslangic, rows });
@@ -13743,6 +13757,33 @@ app.put("/hr/araclar/:id/durum", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Araç kira ödemesi: dönem başına bir kayıt (tekrar gönderilirse günceller)
+app.post("/hr/araclar/:id/kira-ode", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { donem, tutar, tarih, aciklama } = req.body;
+    if (!/^\d{4}-\d{2}$/.test(String(donem || ""))) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
+    const r = await pool.query(
+      `INSERT INTO arac_kira_odemeler (arac_id, donem, tutar, tarih, aciklama)
+       VALUES ($1,$2,$3,COALESCE($4::date, CURRENT_DATE),$5)
+       ON CONFLICT (arac_id, donem) DO UPDATE SET tutar=$3, tarih=COALESCE($4::date, CURRENT_DATE), aciklama=$5
+       RETURNING *`,
+      [id, donem, Number(tutar || 0), tarih || null, aciklama || null],
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/hr/arac-kira-odemeler", async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT o.*, a.plaka FROM arac_kira_odemeler o
+      JOIN araclar a ON a.id = o.arac_id
+      ORDER BY o.donem DESC, a.plaka`);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.delete("/hr/araclar/:id", async (req, res) => {
   await pool.query("UPDATE araclar SET aktif=false WHERE id=$1", [req.params.id]);
   res.json({ ok: true });
@@ -15844,6 +15885,17 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     // kayıtları Şimşek'te), diğer kadro AHY'nin İK/ödeme görünümüne yansır.
     await pool.query(`UPDATE personel SET marka='ERC'
       WHERE (ad_soyad ILIKE '%ERENCAN%' OR ad_soyad ILIKE '%YELMEN%') AND COALESCE(marka,'ERC') <> 'ERC'`);
+    // ARAÇ KİRA ÖDEMELERİ: dönem bazlı 'kira ödendi' kayıtları — nakit akışına düşer
+    await pool.query(`CREATE TABLE IF NOT EXISTS arac_kira_odemeler (
+      id SERIAL PRIMARY KEY,
+      arac_id INTEGER NOT NULL,
+      donem TEXT NOT NULL,
+      tutar NUMERIC DEFAULT 0,
+      tarih DATE DEFAULT CURRENT_DATE,
+      aciklama TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (arac_id, donem)
+    )`);
     // ARAÇ DEVRİ (bir defalık, 15.07.2026): eski araçlardan yalnız sürücüsü
     // Orhan Bedir olan aktif kalır; diğerleri PASİFE alınır (silinmez —
     // kayıt/belge geçmişi durur, gerekirse panelden 'Aktif Et' ile geri döner).
