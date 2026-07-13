@@ -24282,7 +24282,7 @@ function App() {
                       <span>🧮</span> Hakediş Kırılımı
                     </div>
                   )}
-                  {isAdmin && canHwUpload && (
+                  {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && canHwUpload && (
                     <>
                       <div style={{margin:'4px 8px 2px',height:'1px',background:'#1e2a3a'}}/>
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); }}>
