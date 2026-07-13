@@ -16938,6 +16938,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         total_usd: 0,
         assigned_try: 0,
         assigned_usd: 0,
+        qc_ok_try: 0,
+        qc_ok_usd: 0,
+        qc_nok_try: 0,
+        qc_nok_usd: 0,
         po_bekler_try: 0,
         po_bekler_usd: 0,
         ok_try: 0,
@@ -16952,6 +16956,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         total_usd: 0,
         assigned_try: 0,
         assigned_usd: 0,
+        qc_ok_try: 0,
+        qc_ok_usd: 0,
+        qc_nok_try: 0,
+        qc_nok_usd: 0,
         po_bekler_try: 0,
         po_bekler_usd: 0,
         ok_try: 0,
@@ -16966,6 +16974,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         total_usd: 0,
         assigned_try: 0,
         assigned_usd: 0,
+        qc_ok_try: 0,
+        qc_ok_usd: 0,
+        qc_nok_try: 0,
+        qc_nok_usd: 0,
         po_bekler_try: 0,
         po_bekler_usd: 0,
         ok_try: 0,
@@ -16989,6 +17001,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const billedAmount = billedQty * unitPrice;
       // Atanan iş: talep edilen miktar (yapılan daha büyükse yapılan) × birim fiyat
       const assignedAmount = Math.max(Number(row.requested_qty || 0), doneQty) * unitPrice;
+      // QC ayrımı (taşeron özeti): QC OK = tamamlanan iş (yapılan bedel),
+      // QC NOK/boş = atanan/devam eden iş (atanan bedel)
+      const isQcOk = String(row.qc_durum || "").toUpperCase() === "OK";
 
       base[region].total_records += 1;
 
@@ -16996,10 +17011,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         base[region].total_usd += amount;
         base[region].billed_usd += billedAmount;
         base[region].assigned_usd += assignedAmount;
+        if (isQcOk) base[region].qc_ok_usd += amount; else base[region].qc_nok_usd += assignedAmount;
       } else {
         base[region].total_try += amount;
         base[region].billed_try += billedAmount;
         base[region].assigned_try += assignedAmount;
+        if (isQcOk) base[region].qc_ok_try += amount; else base[region].qc_nok_try += assignedAmount;
       }
 
       if (String(row.status || "").toUpperCase() === "PO_BEKLER") {
@@ -17096,6 +17113,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       return sum + Number(r.assigned_try || 0) + Number(r.assigned_usd || 0) * usdRate;
     }, 0);
 
+    // QC ayrımı: OK = tamamlanan, NOK/boş = atanan/devam eden (taşeron kartı)
+    const qcOk = regionSummary.reduce((sum, r) => {
+      return sum + Number(r.qc_ok_try || 0) + Number(r.qc_ok_usd || 0) * usdRate;
+    }, 0);
+    const qcNok = regionSummary.reduce((sum, r) => {
+      return sum + Number(r.qc_nok_try || 0) + Number(r.qc_nok_usd || 0) * usdRate;
+    }, 0);
+
     return {
       completed,
       invoiced,
@@ -17104,6 +17129,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       poOpenedNotInvoiced: Math.max(poOpened - invoiced, 0),
       noPO,
       assigned,
+      qcOk,
+      qcNok,
     };
   }, [regionSummary, usdRate]);
 
@@ -17741,14 +17768,17 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const subconRates = subconRateMap[_subconKey] || { rf: 1, gizleme: 1, genel: 1 };
   const subconRate  = subconRates.genel; // geriye dönük hesaplamalar için
 
+  // Taşeron kartı QC bazlı çalışır: QC NOK/boş = Atanan (devam eden) iş,
+  // QC OK = Tamamlanan iş. Tamamlanma oranı = OK / (OK + NOK).
+  const _qcOk = (executiveSummary.qcOk || 0);
+  const _qcNok = (executiveSummary.qcNok || 0);
   const subconSummary = {
     hakedis: executiveSummary.completed * subconRate,
     poBeklerHakedis: executiveSummary.noPO * subconRate,
     notInvoicedHakedis: executiveSummary.notInvoiced * subconRate,
-    // Atanan iş: taşerona verilen tüm kalemlerin bedeli (kırılım oranıyla)
-    atananIs: (executiveSummary.assigned || 0) * subconRate,
-    tamamlanmaPct: (executiveSummary.assigned || 0) > 0
-      ? (executiveSummary.completed / executiveSummary.assigned) * 100 : 0,
+    atananIs: _qcNok * subconRate,
+    tamamlananIs: _qcOk * subconRate,
+    tamamlanmaPct: (_qcOk + _qcNok) > 0 ? (_qcOk / (_qcOk + _qcNok)) * 100 : 0,
   };
 
   return (
@@ -17819,7 +17849,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 )}
               </div>
 
-              <Row label="Tamamlanan İş Tutarı" value={subconSummary.hakedis} />
+              <Row label="Tamamlanan İş Tutarı" value={subconSummary.tamamlananIs} />
 
               <Row label="Tamamlanma Oranı" value={subconSummary.tamamlanmaPct} isPercent />
 
