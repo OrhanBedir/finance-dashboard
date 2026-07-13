@@ -16936,6 +16936,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         total_records: 0,
         total_try: 0,
         total_usd: 0,
+        assigned_try: 0,
+        assigned_usd: 0,
         po_bekler_try: 0,
         po_bekler_usd: 0,
         ok_try: 0,
@@ -16948,6 +16950,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         total_records: 0,
         total_try: 0,
         total_usd: 0,
+        assigned_try: 0,
+        assigned_usd: 0,
         po_bekler_try: 0,
         po_bekler_usd: 0,
         ok_try: 0,
@@ -16960,6 +16964,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         total_records: 0,
         total_try: 0,
         total_usd: 0,
+        assigned_try: 0,
+        assigned_usd: 0,
         po_bekler_try: 0,
         po_bekler_usd: 0,
         ok_try: 0,
@@ -16981,15 +16987,19 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const billedQty = Number(row.billed_qty || 0);
 
       const billedAmount = billedQty * unitPrice;
+      // Atanan iş: talep edilen miktar (yapılan daha büyükse yapılan) × birim fiyat
+      const assignedAmount = Math.max(Number(row.requested_qty || 0), doneQty) * unitPrice;
 
       base[region].total_records += 1;
 
       if (currency === "USD") {
         base[region].total_usd += amount;
         base[region].billed_usd += billedAmount;
+        base[region].assigned_usd += assignedAmount;
       } else {
         base[region].total_try += amount;
         base[region].billed_try += billedAmount;
+        base[region].assigned_try += assignedAmount;
       }
 
       if (String(row.status || "").toUpperCase() === "PO_BEKLER") {
@@ -17081,6 +17091,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
     const ratio = completed > 0 ? (invoiced / completed) * 100 : 0;
 
+    // Atanan iş toplamı (talep edilen miktar bazlı) — taşeron özet kartı için
+    const assigned = regionSummary.reduce((sum, r) => {
+      return sum + Number(r.assigned_try || 0) + Number(r.assigned_usd || 0) * usdRate;
+    }, 0);
+
     return {
       completed,
       invoiced,
@@ -17088,6 +17103,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       notInvoiced,
       poOpenedNotInvoiced: Math.max(poOpened - invoiced, 0),
       noPO,
+      assigned,
     };
   }, [regionSummary, usdRate]);
 
@@ -17729,6 +17745,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     hakedis: executiveSummary.completed * subconRate,
     poBeklerHakedis: executiveSummary.noPO * subconRate,
     notInvoicedHakedis: executiveSummary.notInvoiced * subconRate,
+    // Atanan iş: taşerona verilen tüm kalemlerin bedeli (kırılım oranıyla)
+    atananIs: (executiveSummary.assigned || 0) * subconRate,
+    tamamlanmaPct: (executiveSummary.assigned || 0) > 0
+      ? (executiveSummary.completed / executiveSummary.assigned) * 100 : 0,
   };
 
   return (
@@ -17763,7 +17783,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         <div style={{ background: "#f9fafb" }}>
           {isSubconUser ? (
             <>
-              <Row label="Toplam Hakediş" value={subconSummary.hakedis} />
+              <Row label="Atanan İş Tutarı" value={subconSummary.atananIs} />
 
               {/* ── Hakediş Oranları: RF & Gizleme ── */}
               <div style={{ padding:"12px 16px", borderBottom:"1px solid #e5e7eb", background:"#fff" }}>
@@ -17799,7 +17819,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 )}
               </div>
 
-              <Row label="Hakediş Tutarı" value={subconSummary.hakedis} />
+              <Row label="Tamamlanan İş Tutarı" value={subconSummary.hakedis} />
+
+              <Row label="Tamamlanma Oranı" value={subconSummary.tamamlanmaPct} isPercent />
 
               <Row
                 label="PO Bekleyen Hakediş"
