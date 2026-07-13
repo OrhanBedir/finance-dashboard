@@ -15844,6 +15844,19 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     // kayıtları Şimşek'te), diğer kadro AHY'nin İK/ödeme görünümüne yansır.
     await pool.query(`UPDATE personel SET marka='ERC'
       WHERE (ad_soyad ILIKE '%ERENCAN%' OR ad_soyad ILIKE '%YELMEN%') AND COALESCE(marka,'ERC') <> 'ERC'`);
+    // ARAÇ DEVRİ (bir defalık, 15.07.2026): eski araçlardan yalnız sürücüsü
+    // Orhan Bedir olan aktif kalır; diğerleri PASİFE alınır (silinmez —
+    // kayıt/belge geçmişi durur, gerekirse panelden 'Aktif Et' ile geri döner).
+    // Not etiketi sayesinde migration bir daha çalışmaz; 15 Temmuz sonrası
+    // eklenen yeni araçlara dokunulmaz.
+    const aracChk = await pool.query(`SELECT COUNT(*)::int AS n FROM araclar WHERE COALESCE(notlar,'') LIKE '%[AHY devri%'`);
+    if (aracChk.rows[0].n === 0) {
+      const aracMig = await pool.query(`UPDATE araclar
+        SET aktif=false, durum='PASİF',
+            notlar = COALESCE(notlar,'') || ' [AHY devri: 15.07.2026 öncesi araç, pasife alındı]'
+        WHERE COALESCE(aktif,true)=true AND COALESCE(surucu,'') NOT ILIKE '%orhan%'`);
+      if (aracMig.rowCount > 0) console.log(`[araç devri] Pasife alınan eski araç: ${aracMig.rowCount}`);
+    }
     // Yönetim garantisi: platform sahibi + ERC yönetimi + muhasebe her açılışta
     // ERC markasında kalır — her şeyi görebilir ve HW yüklemesi yapabilirler.
     await pool.query(`UPDATE users SET marka='ERC'

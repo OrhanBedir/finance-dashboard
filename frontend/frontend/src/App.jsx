@@ -12824,7 +12824,7 @@ function HrDashboard({ onBack, currentUser }) {
                     );
                   })}
                   <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"80px" }}>Çalışılan</th>
-                  {_hrYetkili && personelUnlocked && <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"110px" }}>Hakediş</th>}
+                  {_hrYetkili && personelUnlocked && !_maasSifreli && <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"110px" }}>Hakediş</th>}
                 </tr>
               </thead>
               <tbody>
@@ -12878,7 +12878,7 @@ function HrDashboard({ onBack, currentUser }) {
                         );
                       })}
                       <td style={{ padding:"8px", textAlign:"center", fontWeight:700, color:"#1f2937", borderLeft:"2px solid #e5e7eb" }}>{calisilan}/{ayGunleri.length}</td>
-                      {_hrYetkili && personelUnlocked && <td style={{ padding:"8px", textAlign:"right", fontWeight:700, color:"#166534", fontSize:"13px" }}>₺{hakedilen.toLocaleString("tr-TR")}</td>}
+                      {_hrYetkili && personelUnlocked && !_maasSifreli && <td style={{ padding:"8px", textAlign:"right", fontWeight:700, color:"#166534", fontSize:"13px" }}>₺{hakedilen.toLocaleString("tr-TR")}</td>}
                     </tr>
                   );
                 })}
@@ -12886,8 +12886,10 @@ function HrDashboard({ onBack, currentUser }) {
             </table>
           </div>
 
-          {/* Ay Özeti — MAAŞ BİLGİSİ: yetkili + (AHY'de şifre kilidi açık) ise görünür */}
-          {ozet.length > 0 && _hrYetkili && personelUnlocked && (
+          {/* Ay Özeti — MAAŞ BİLGİSİ: sadece ERC yetkilileri görür. AHY tarafında
+              puantajdan maaş görünümü TAMAMEN kapalı (şifreli olsa bile) —
+              maaşlar yalnız şifreli Personel Maaş sekmesinden görülür. */}
+          {ozet.length > 0 && _hrYetkili && personelUnlocked && !_maasSifreli && (
             <div style={{ marginTop:"24px" }}>
               <h3 style={{ marginBottom:"12px" }}>💰 Ay Özeti</h3>
               <div style={{ display:"grid", gap:"8px" }}>
@@ -24032,9 +24034,11 @@ function App() {
                       <span>📡</span> Rollout Data
                     </div>
                   )}
-                  <div className={`sidebar-nav-item ${page==='entry'?'active':''}`} onClick={()=>setPage('entry')}>
-                    <span>✏️</span> Günlük İş Girişi
-                  </div>
+                  {!isAltMarka && (
+                    <div className={`sidebar-nav-item ${page==='entry'?'active':''}`} onClick={()=>setPage('entry')}>
+                      <span>✏️</span> Günlük İş Girişi
+                    </div>
+                  )}
                   {canSeePuantaj && (
                     <div className={`sidebar-nav-item ${page==='puantaj'?'active':''}`} onClick={()=>setPage('puantaj')}>
                       <span>⏱</span> Puantaj
@@ -24303,7 +24307,7 @@ function App() {
                 }}
               />
             )}
-            {page === "entry" && <DailyEntry />}
+            {page === "entry" && !isAltMarka && <DailyEntry />}
             {page === "platform" && isPlatformAdmin && (
               <div style={{maxWidth:'1100px',margin:'0 auto',padding:'24px 16px'}}>
                 <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 60%,#1e3a5f 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",justifyContent:"space-between",color:"#fff"}}>
