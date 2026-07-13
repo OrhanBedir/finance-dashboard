@@ -10530,7 +10530,9 @@ function formatTRY(value) {
 function PuantajPanel({ currentUser, onBack }) {
   // MAAŞ BİLGİSİ yetkisi: hakediş kartı sadece Orhan Bedir + Düzgün Şimşek
   const _pEmail = (currentUser?.email || "").toLowerCase();
-  const _pYetkili = _pEmail === "orhan.bedir@simsektel.com" || _pEmail === "duzgun.simsek@simsektel.com" || _pEmail === "muhasebe@simsektel.com" || _pEmail === "info@ahyelektrik.com";
+  // AHY (info@) burada YOK: maaş/hakediş bilgisi AHY tarafında yalnız
+  // İK Paneli'ndeki şifreli alandan (ahy2026gsm — Haşım Bey) görülür.
+  const _pYetkili = _pEmail === "orhan.bedir@simsektel.com" || _pEmail === "duzgun.simsek@simsektel.com" || _pEmail === "muhasebe@simsektel.com";
   const [puantajAy, setPuantajAy] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
@@ -10988,7 +10990,11 @@ function HrDashboard({ onBack, currentUser }) {
   };
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
   const _isMuhasebe = currentUser?.role === "muhasebe";
-  const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili);
+  // AHY tarafında maaşlar ekstra şifre korumalı: sadece Haşım Bey bilir
+  // (ahy2026gsm). ERC yetkilileri şifresiz girer, AHY yetkilisi şifreyle.
+  const _maasSifreli = _hrEmail === "info@ahyelektrik.com";
+  const _maasSifreler = _maasSifreli ? ["ahy2026gsm"] : ["Orhan2026!", "Duzgun2026!"];
+  const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili && !_maasSifreli);
   // Muhasebe → maaş sekmelerini (personel, maas_avans) gizle, is_avans'tan başla
   // Nurcan → isg'den başla  / Diğerleri → personel'den başla
   const [tab, setTab] = useState(_isMuhasebe ? "is_avans" : (_isNurcanHR ? "isg" : "personel"));
@@ -11623,7 +11629,7 @@ function HrDashboard({ onBack, currentUser }) {
           <button key={k} onClick={()=>{
             if (k === "personel" && !personelUnlocked) {
               const pwd = prompt("Personel bilgileri için şifre giriniz:");
-              if (!["Orhan2026!","Duzgun2026!"].includes(pwd)) { alert("Yetkisiz erişim!"); return; }
+              if (!_maasSifreler.includes(pwd)) { alert("Yetkisiz erişim!"); return; }
               setPersonelUnlocked(true);
             }
             setTab(k);
@@ -11639,7 +11645,7 @@ function HrDashboard({ onBack, currentUser }) {
           <div style={{ fontSize:"14px", color:"#6b7280", marginBottom:"24px" }}>Personel maaş bilgilerine erişmek için yetkili şifre gereklidir.</div>
           <button onClick={()=>{
             const pwd = prompt("Personel bilgileri için şifre giriniz:");
-            if (["Orhan2026!","Duzgun2026!"].includes(pwd)) setPersonelUnlocked(true);
+            if (_maasSifreler.includes(pwd)) setPersonelUnlocked(true);
             else if (pwd !== null) alert("Yetkisiz erişim!");
           }} style={{ padding:"12px 28px", background:"#1f2937", color:"#fff", border:"none", borderRadius:"10px", fontSize:"15px", fontWeight:700, cursor:"pointer" }}>
             Şifre Gir
@@ -12754,7 +12760,7 @@ function HrDashboard({ onBack, currentUser }) {
                     );
                   })}
                   <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"80px" }}>Çalışılan</th>
-                  {_hrYetkili && <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"110px" }}>Hakediş</th>}
+                  {_hrYetkili && personelUnlocked && <th style={{ padding:"10px 8px", fontSize:"12px", fontWeight:700, minWidth:"110px" }}>Hakediş</th>}
                 </tr>
               </thead>
               <tbody>
@@ -12808,7 +12814,7 @@ function HrDashboard({ onBack, currentUser }) {
                         );
                       })}
                       <td style={{ padding:"8px", textAlign:"center", fontWeight:700, color:"#1f2937", borderLeft:"2px solid #e5e7eb" }}>{calisilan}/{ayGunleri.length}</td>
-                      {_hrYetkili && <td style={{ padding:"8px", textAlign:"right", fontWeight:700, color:"#166534", fontSize:"13px" }}>₺{hakedilen.toLocaleString("tr-TR")}</td>}
+                      {_hrYetkili && personelUnlocked && <td style={{ padding:"8px", textAlign:"right", fontWeight:700, color:"#166534", fontSize:"13px" }}>₺{hakedilen.toLocaleString("tr-TR")}</td>}
                     </tr>
                   );
                 })}
@@ -12816,8 +12822,8 @@ function HrDashboard({ onBack, currentUser }) {
             </table>
           </div>
 
-          {/* Ay Özeti — MAAŞ BİLGİSİ: sadece yetkili (Orhan Bedir + Düzgün Şimşek) görür */}
-          {ozet.length > 0 && _hrYetkili && (
+          {/* Ay Özeti — MAAŞ BİLGİSİ: yetkili + (AHY'de şifre kilidi açık) ise görünür */}
+          {ozet.length > 0 && _hrYetkili && personelUnlocked && (
             <div style={{ marginTop:"24px" }}>
               <h3 style={{ marginBottom:"12px" }}>💰 Ay Özeti</h3>
               <div style={{ display:"grid", gap:"8px" }}>
