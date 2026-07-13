@@ -11829,10 +11829,11 @@ function HrDashboard({ onBack, currentUser }) {
                       const avans    = avansMapByPer[p.id]  || 0;
                       const isAvans  = isAvansMapByPer[p.id] || 0;
                       const banka    = bankaByPer[p.id]     || 0;
-                      const elden    = eldenByPer[p.id]     || 0;
+                      // Maaş avanslarının TAMAMI elden ödeme sayılır → 'Elden Öd.'
+                      // kolonunda görünür, ayrı M.Avans kolonu yoktur.
+                      const elden    = (eldenByPer[p.id]    || 0) + avans;
                       // İş avansı MAAŞ ödemesi değildir → maaş ödeneni/kalanı hesabına KATILMAZ.
-                      // Sadece maaş avansı (M.Avans) + banka + elden maaş ödemesidir.
-                      const odenen   = avans + banka + elden;
+                      const odenen   = banka + elden;
                       // Önceki aydan devreden fazla ödeme bu ayın alacağından düşülür
                       const devir    = getDevirFazla(p.id);
                       const gereken  = Math.max(0, hakEdis - devir);
@@ -12037,7 +12038,6 @@ function HrDashboard({ onBack, currentUser }) {
                                     { label:"Personel",    align:"left"  },
                                     { label:"Ünvan",       align:"left"  },
                                     { label:"Hakediş",     align:"right" },
-                                    { label:"M.Avans",     align:"right", color:"#92400e" },
                                     { label:"🏦 Banka Öd.", align:"right", color:"#1d4ed8" },
                                     { label:"💵 Elden Öd.", align:"right", color:"#15803d" },
                                     { label:"🏗 İş Avansı", align:"right", color:"#b45309" },
@@ -12054,9 +12054,6 @@ function HrDashboard({ onBack, currentUser }) {
                                     <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}</td>
                                     <td style={{ padding:"7px 12px", color:"#6b7280", whiteSpace:"nowrap" }}>{p.unvan||"-"}</td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:600 }}>₺{p.hakEdis.toLocaleString("tr-TR")}</td>
-                                    <td style={{ padding:"7px 12px", textAlign:"right", color: p.avans>0?"#92400e":"#9ca3af", fontWeight:600 }}>
-                                      {p.avans>0 ? `₺${p.avans.toLocaleString("tr-TR")}` : "—"}
-                                    </td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.banka>0?"#1d4ed8":"#9ca3af", fontWeight:600 }}>
                                       {p.banka>0 ? `₺${p.banka.toLocaleString("tr-TR")}` : "—"}
                                     </td>
