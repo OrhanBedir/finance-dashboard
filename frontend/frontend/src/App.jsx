@@ -1268,6 +1268,175 @@ function MarkaNakitPanel({ currentUser }) {
   );
 }
 
+// ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart
+// Web'de kurumsal SVG şema + Huawei'ye gönderilebilir 2 sayfalı Excel
+// (Sheet1: şema, Sheet2: Details — ad soyad/görev/bölge/tel/TC).
+function OrgSemasiPanel() {
+  const [personelList, setPersonelList] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/hr/personel`);
+        const d = await r.json();
+        setPersonelList(Array.isArray(d) ? d : []);
+      } catch {}
+    })();
+  }, []);
+
+  const NAVY = "#1e3a5f", BLUE = "#2563eb", IZMIR = "#0c4a6e", ANKARA = "#7c2d12";
+  const Box = ({ x, y, w, h, fill, stroke, nameText, title, sub, light, dashed }) => (
+    <g>
+      <rect x={x} y={y} width={w} height={h} rx="10" fill={light ? "#fff" : fill} stroke={stroke || fill} strokeWidth="2" strokeDasharray={dashed ? "6 4" : "0"} filter="url(#gölge)" />
+      {!light && <rect x={x} y={y} width={w} height="6" rx="3" fill="rgba(255,255,255,0.25)" />}
+      <text x={x + w / 2} y={y + (sub ? 26 : 30)} textAnchor="middle" fontSize="15" fontWeight="800" fill={light ? "#0f172a" : "#fff"} fontFamily="Arial">{nameText}</text>
+      <text x={x + w / 2} y={y + (sub ? 45 : 52)} textAnchor="middle" fontSize="11.5" fontWeight="600" fill={light ? "#475569" : "rgba(255,255,255,0.85)"} fontFamily="Arial">{title}</text>
+      {sub && <text x={x + w / 2} y={y + 61} textAnchor="middle" fontSize="10" fill={light ? "#94a3b8" : "rgba(255,255,255,0.7)"} fontFamily="Arial">{sub}</text>}
+    </g>
+  );
+  const L = ({ d }) => <path d={d} stroke="#94a3b8" strokeWidth="2" fill="none" />;
+
+  const indirExcel = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const COLS = 13, border = (c) => ({ style: "medium", color: { rgb: c } });
+    const boxS = (fillRgb, fontRgb, sz = 12) => ({
+      fill: { patternType: "solid", fgColor: { rgb: fillRgb } },
+      font: { bold: true, color: { rgb: fontRgb }, sz, name: "Arial" },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: { top: border("1E3A5F"), bottom: border("1E3A5F"), left: border("1E3A5F"), right: border("1E3A5F") },
+    });
+    const wsData = Array.from({ length: 24 }, () => Array(COLS).fill(""));
+    const merges = [];
+    const ws = {};
+    const setBox = (r1, c1, r2, c2, text, fill, font, sz) => {
+      wsData[r1][c1] = text;
+      merges.push({ s: { r: r1, c: c1 }, e: { r: r2, c: c2 } });
+      for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) {
+        const a = XLSXStyle.utils.encode_cell({ r, c });
+        ws[`__style__${a}`] = boxS(fill, font, sz);
+      }
+    };
+    // Sheet 1 — Organization Chart
+    setBox(1, 0, 1, 12, "ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart", "1E3A5F", "FFFFFF", 14);
+    setBox(3, 5, 4, 7, "DÜZGÜN ŞİMŞEK\nProject Director", "1E3A5F", "FFFFFF");
+    setBox(6, 5, 7, 7, "ORHAN BEDİR\nProject Manager", "2563EB", "FFFFFF");
+    setBox(9, 1, 10, 3, "HATİCE OMUŞ\nIFIS · Survey · BTK · Atlas", "F1F5F9", "0F172A", 11);
+    setBox(9, 5, 10, 7, "ERENCAN ŞİMŞEK\nEHS Officer", "F1F5F9", "0F172A", 11);
+    setBox(9, 9, 10, 11, "MURAT İSTEK\nWarehouse & Inventory Coordinator", "F1F5F9", "0F172A", 11);
+    setBox(12, 0, 12, 5, "İZMİR REGION", "0C4A6E", "FFFFFF");
+    setBox(12, 7, 12, 12, "ANKARA REGION", "7C2D12", "FFFFFF");
+    setBox(13, 1, 14, 4, "SERDAR ALTINOVA\nRollout Manager · İzmir Regional Manager", "0369A1", "FFFFFF", 11);
+    setBox(13, 8, 14, 11, "NURCAN KUŞ\nRollout Manager & TT Project Coordinator · Ankara Regional Manager", "B45309", "FFFFFF", 11);
+    setBox(16, 1, 17, 4, "KASIM EVİN\nSite Supervisor (İzmir · Ankara support)", "E0F2FE", "0C4A6E", 11);
+    setBox(16, 8, 17, 11, "Site Support: KASIM EVİN\n(İzmir'den destek)", "FEF3C7", "7C2D12", 10);
+    setBox(19, 0, 20, 1, "RF TEAM 1\nİzmir", "F8FAFC", "0F172A", 10);
+    setBox(19, 2, 20, 3, "RF TEAM 2\nİzmir", "F8FAFC", "0F172A", 10);
+    setBox(19, 4, 20, 5, "RF TEAM 3\nİzmir", "F8FAFC", "0F172A", 10);
+    setBox(19, 7, 20, 8, "RF TEAM 1\nAnkara", "F8FAFC", "0F172A", 10);
+    setBox(19, 9, 20, 10, "RF TEAM 2\nAnkara", "F8FAFC", "0F172A", 10);
+    setBox(19, 11, 20, 12, "RF TEAM 3\nAnkara", "F8FAFC", "0F172A", 10);
+    setBox(22, 0, 22, 12, `Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · ${today}`, "F1F5F9", "64748B", 9);
+    const ws1 = XLSXStyle.utils.aoa_to_sheet(wsData);
+    ws1["!merges"] = merges;
+    ws1["!cols"] = Array(COLS).fill({ wch: 13 });
+    ws1["!rows"] = wsData.map((_, i) => ({ hpt: [3,4,6,7,9,10,13,14,16,17,19,20].includes(i) ? 24 : (i === 1 ? 30 : 14) }));
+    Object.keys(ws).forEach(k => { const a = k.replace("__style__", ""); if (!ws1[a]) ws1[a] = { v: "", t: "s" }; ws1[a].s = ws[k]; });
+    // Sheet 2 — Details
+    const dHead = ["#", "Ad Soyad", "Görev", "Bölge", "Telefon", "TC Kimlik No"];
+    const aktifler = personelList.filter(p => p.aktif && (p.firma_tipi || "simsek") === "simsek");
+    const dData = [dHead, ...aktifler.map((p, i) => [i + 1, p.ad_soyad || "", p.unvan || "", p.bolge || "", p.telefon || "", p.tc_no || ""])];
+    const ws2 = XLSXStyle.utils.aoa_to_sheet(dData);
+    ws2["!cols"] = [{ wch: 5 }, { wch: 28 }, { wch: 30 }, { wch: 12 }, { wch: 16 }, { wch: 15 }];
+    ws2["!rows"] = dData.map((_, i) => ({ hpt: i === 0 ? 24 : 18 }));
+    dHead.forEach((_, ci) => { const a = XLSXStyle.utils.encode_cell({ r: 0, c: ci }); if (ws2[a]) ws2[a].s = boxS("1E3A5F", "FFFFFF", 11); });
+    aktifler.forEach((_, ri) => dHead.forEach((__, ci) => {
+      const a = XLSXStyle.utils.encode_cell({ r: ri + 1, c: ci }); if (!ws2[a]) return;
+      ws2[a].s = { font: { sz: 10, name: "Arial" }, alignment: { horizontal: ci === 0 ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
+    }));
+    ws2["!freeze"] = { xSplit: 0, ySplit: 1 };
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws1, "Organization Chart");
+    XLSXStyle.utils.book_append_sheet(wb, ws2, "Details");
+    const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
+    JSZip.loadAsync(buf).then(zip => {
+      const jobs = [];
+      zip.folder("xl/worksheets").forEach((name, file) => {
+        if (!/^sheet\d+\.xml$/.test(name)) return;
+        jobs.push(file.async("string").then(xml => {
+          zip.file(`xl/worksheets/${name}`, xml.replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>').replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>'));
+        }));
+      });
+      return Promise.all(jobs).then(() => zip.generateAsync({ type: "blob", compression: "STORE" }));
+    }).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `SIMSEK_TT_Wireless_Org_Chart_${today}.xlsx`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  };
+
+  return (
+    <div style={{ padding: "24px 28px", maxWidth: "1350px", margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "18px" }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🏢 Organizasyon Şeması</h2>
+          <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>ŞİMŞEK HABERLEŞME — TT Wireless Project · İzmir & Ankara</div>
+        </div>
+        <button onClick={indirExcel} style={{ padding: "10px 22px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>📋 Excel İndir</button>
+      </div>
+      <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "18px", overflowX: "auto" }}>
+        <svg viewBox="0 0 1250 910" style={{ width: "100%", minWidth: "900px", display: "block" }} xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="gölge" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#0f172a" floodOpacity="0.12" />
+            </filter>
+          </defs>
+          <text x="625" y="26" textAnchor="middle" fontSize="17" fontWeight="900" fill={NAVY} fontFamily="Arial" letterSpacing="0.5">ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart</text>
+          {/* Direktör → PM */}
+          <Box x={475} y={48} w={300} h={72} fill={NAVY} nameText="DÜZGÜN ŞİMŞEK" title="Project Director" />
+          <L d="M625 120 V156" />
+          <Box x={475} y={156} w={300} h={72} fill={BLUE} nameText="ORHAN BEDİR" title="Project Manager" />
+          {/* PM → destek fonksiyonları */}
+          <L d="M625 228 V252 M145 252 H1105 M145 252 V276 M625 252 V276 M1105 252 V276" />
+          <Box x={20} y={276} w={250} h={64} light stroke="#64748b" nameText="HATİCE OMUŞ" title="IFIS · Survey · BTK · Atlas" />
+          <Box x={500} y={276} w={250} h={64} light stroke="#64748b" nameText="ERENCAN ŞİMŞEK" title="EHS Officer" />
+          <Box x={980} y={276} w={250} h={64} light stroke="#64748b" nameText="MURAT İSTEK" title="Warehouse & Inventory Coord." />
+          {/* PM → bölgeler */}
+          <L d="M625 340 V368 M330 368 H920 M330 368 V396 M920 368 V396" />
+          {/* İZMİR bloğu */}
+          <rect x={40} y={396} width={580} height={492} rx="14" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
+          <rect x={40} y={396} width={580} height={38} rx="14" fill={IZMIR} />
+          <rect x={40} y={420} width={580} height={14} fill={IZMIR} />
+          <text x={330} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">İZMİR REGION</text>
+          <Box x={205} y={456} w={250} h={72} fill="#0369a1" nameText="SERDAR ALTINOVA" title="Rollout Manager" sub="İzmir Regional Manager" />
+          <L d="M330 528 V560" />
+          <Box x={205} y={560} w={250} h={64} light stroke="#0369a1" nameText="KASIM EVİN" title="Site Supervisor · İzmir (Ankara destek)" />
+          <L d="M330 624 V660 M150 660 H510 M150 660 V690 M330 660 V690 M510 660 V690" />
+          <Box x={70} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 1" title="RF & Gizleme Ekibi" />
+          <Box x={250} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 2" title="RF & Gizleme Ekibi" />
+          <Box x={430} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 3" title="RF & Gizleme Ekibi" />
+          {/* ANKARA bloğu */}
+          <rect x={630} y={396} width={580} height={492} rx="14" fill="#fffbf5" stroke="#e7d5c0" strokeWidth="1.5" />
+          <rect x={630} y={396} width={580} height={38} rx="14" fill={ANKARA} />
+          <rect x={630} y={420} width={580} height={14} fill={ANKARA} />
+          <text x={920} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">ANKARA REGION</text>
+          <Box x={795} y={456} w={250} h={72} fill="#b45309" nameText="NURCAN KUŞ" title="Rollout Mgr & TT Project Coordinator" sub="Ankara Regional Manager" />
+          <L d="M920 528 V560" />
+          <Box x={795} y={560} w={250} h={64} light stroke="#b45309" dashed nameText="KASIM EVİN" title="Site Support (İzmir'den destek)" />
+          <L d="M920 624 V660 M740 660 H1100 M740 660 V690 M920 660 V690 M1100 660 V690" />
+          <Box x={660} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 1" title="RF & Gizleme Ekibi" />
+          <Box x={840} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 2" title="RF & Gizleme Ekibi" />
+          <Box x={1020} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 3" title="RF & Gizleme Ekibi" />
+          <text x={625} y={905} textAnchor="middle" fontSize="10.5" fill="#94a3b8" fontFamily="Arial">Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · {new Date().toLocaleDateString("tr-TR")}</text>
+        </svg>
+      </div>
+      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
+        💡 Excel çıktısı 2 sayfadır: "Organization Chart" (şema) + "Details" (aktif personel: ad soyad, görev, bölge, telefon, TC). RF ekip detayları eleman listesi geldiğinde güncellenecek.
+      </div>
+    </div>
+  );
+}
+
 function RolloutUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -24027,6 +24196,9 @@ function App() {
                   <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
                     <span>🗺</span> Bölge Analizi
                   </div>
+                  <div className={`sidebar-nav-item ${page==='orgsema'?'active':''}`} onClick={()=>setPage('orgsema')}>
+                    <span>🏢</span> Organizasyon Şeması
+                  </div>
                   {!isAltMarka && (
                     <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
                       <span>📡</span> Rollout Data
@@ -24282,6 +24454,7 @@ function App() {
             {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
+            {page === "orgsema" && <OrgSemasiPanel />}
             {page === "kirilim" && isAdmin && <KirilimRaporuPanel />}
             {page === "executive" && !isAltMarka && <RolloutDashboard currentUser={user} />}
             {page === "region" && (
