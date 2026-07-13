@@ -1336,30 +1336,10 @@ function OrgSemasiPanel() {
     setBox(19, 9, 20, 10, "RF TEAM 5", "F8FAFC", "0F172A", 10);
     setBox(19, 11, 20, 12, "RF TEAM 6", "F8FAFC", "0F172A", 10);
     setBox(22, 0, 22, 12, `Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · ${today}`, "F1F5F9", "64748B", 9);
-    // ── Bağlantı çizgileri: boş ara hücrelerin kenarlıklarıyla çizilir ──
-    const addBorder = (r, c, side) => {
-      const a = XLSXStyle.utils.encode_cell({ r, c });
-      const k = `__style__${a}`;
-      const cur = ws[k] || {};
-      cur.border = { ...(cur.border || {}), [side]: { style: "medium", color: { rgb: "94A3B8" } } };
-      ws[k] = cur;
-    };
-    addBorder(5, 6, "right");                                   // Direktör → PM
-    for (let c = 1; c <= 11; c++) addBorder(8, c, "bottom");    // PM → destek fonksiyonları (yatay hat)
-    addBorder(8, 6, "right");                                   // PM'den hatta iniş
-    addBorder(9, 6, "right"); addBorder(10, 6, "right");        // PM hattı bölgelere doğru devam (col 6 boş)
-    for (let c = 2; c <= 9; c++) addBorder(11, c, "bottom");    // Bölgelere dağıtım hattı
-    addBorder(11, 6, "right");
-    addBorder(15, 2, "right");                                  // İzmir: Serdar → Kasım
-    addBorder(18, 2, "right");                                  // İzmir: Kasım → RF hattı
-    for (let c = 0; c <= 5; c++) addBorder(18, c, "bottom");    // İzmir RF yatay hattı
-    addBorder(15, 9, "right");                                  // Ankara: Nurcan → destek
-    addBorder(18, 9, "right");                                  // Ankara: destek → RF hattı
-    for (let c = 7; c <= 12; c++) addBorder(18, c, "bottom");   // Ankara RF yatay hattı
     const ws1 = XLSXStyle.utils.aoa_to_sheet(wsData);
     ws1["!merges"] = merges;
     ws1["!cols"] = Array(COLS).fill({ wch: 13 });
-    ws1["!rows"] = wsData.map((_, i) => ({ hpt: [3,4,6,7,9,10,13,14,16,17,19,20].includes(i) ? 24 : (i === 1 ? 30 : ([5,8,11,15,18].includes(i) ? 18 : 14)) }));
+    ws1["!rows"] = wsData.map((_, i) => ({ hpt: [3,4,6,7,9,10,13,14,16,17,19,20].includes(i) ? 24 : (i === 1 ? 30 : 14) }));
     Object.keys(ws).forEach(k => { const a = k.replace("__style__", ""); if (!ws1[a]) ws1[a] = { v: "", t: "s" }; ws1[a].s = ws[k]; });
     // Sheet 2 — Details
     const dHead = ["#", "Ad Soyad", "Görev", "Bölge", "Telefon", "TC Kimlik No"];
