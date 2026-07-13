@@ -1324,8 +1324,8 @@ function OrgSemasiPanel() {
     setBox(9, 9, 10, 11, "MURAT İSTEK\nWarehouse & Inventory Coordinator", "F1F5F9", "0F172A", 11);
     setBox(12, 0, 12, 5, "İZMİR REGION", "0C4A6E", "FFFFFF");
     setBox(12, 7, 12, 12, "ANKARA REGION", "7C2D12", "FFFFFF");
-    setBox(13, 1, 14, 4, "SERDAR ALTINOVA\nRollout Manager · İzmir Regional Manager", "0369A1", "FFFFFF", 11);
-    setBox(13, 8, 14, 11, "NURCAN KUŞ\nRollout Manager & TT Project Coordinator · Ankara Regional Manager", "B45309", "FFFFFF", 11);
+    setBox(13, 1, 14, 4, "SERDAR ALTINOVA\nİzmir Regional Manager", "0369A1", "FFFFFF", 11);
+    setBox(13, 8, 14, 11, "NURCAN KUŞ\nAnkara Regional Manager", "B45309", "FFFFFF", 11);
     setBox(16, 1, 17, 4, "KASIM EVİN\nSite Supervisor (İzmir · Ankara support)", "E0F2FE", "0C4A6E", 11);
     setBox(16, 8, 17, 11, "Site Support: KASIM EVİN\n(İzmir'den destek)", "FEF3C7", "7C2D12", 10);
     setBox(19, 0, 20, 1, "RF TEAM 1", "F8FAFC", "0F172A", 10);
@@ -1408,7 +1408,7 @@ function OrgSemasiPanel() {
           <rect x={40} y={396} width={580} height={38} rx="14" fill={IZMIR} />
           <rect x={40} y={420} width={580} height={14} fill={IZMIR} />
           <text x={330} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">İZMİR REGION</text>
-          <Box x={205} y={456} w={250} h={72} fill="#0369a1" nameText="SERDAR ALTINOVA" title="Rollout Manager" sub="İzmir Regional Manager" />
+          <Box x={205} y={456} w={250} h={72} fill="#0369a1" nameText="SERDAR ALTINOVA" title="İzmir Regional Manager" />
           <L d="M330 528 V560" />
           <Box x={205} y={560} w={250} h={64} light stroke="#0369a1" nameText="KASIM EVİN" title="Site Supervisor · İzmir (Ankara destek)" />
           <L d="M330 624 V660 M150 660 H510 M150 660 V690 M330 660 V690 M510 660 V690" />
@@ -1420,7 +1420,7 @@ function OrgSemasiPanel() {
           <rect x={630} y={396} width={580} height={38} rx="14" fill={ANKARA} />
           <rect x={630} y={420} width={580} height={14} fill={ANKARA} />
           <text x={920} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">ANKARA REGION</text>
-          <Box x={795} y={456} w={250} h={72} fill="#b45309" nameText="NURCAN KUŞ" title="Rollout Mgr & TT Project Coordinator" sub="Ankara Regional Manager" />
+          <Box x={795} y={456} w={250} h={72} fill="#b45309" nameText="NURCAN KUŞ" title="Ankara Regional Manager" />
           <L d="M920 528 V560" />
           <Box x={795} y={560} w={250} h={64} light stroke="#b45309" dashed nameText="KASIM EVİN" title="Site Support (İzmir'den destek)" />
           <L d="M920 624 V660 M740 660 H1100 M740 660 V690 M920 660 V690 M1100 660 V690" />
