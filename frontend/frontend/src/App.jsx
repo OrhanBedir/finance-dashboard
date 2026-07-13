@@ -24196,9 +24196,6 @@ function App() {
                   <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
                     <span>🗺</span> Bölge Analizi
                   </div>
-                  <div className={`sidebar-nav-item ${page==='orgsema'?'active':''}`} onClick={()=>setPage('orgsema')}>
-                    <span>🏢</span> Organizasyon Şeması
-                  </div>
                   {!isAltMarka && (
                     <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
                       <span>📡</span> Rollout Data
@@ -24264,6 +24261,9 @@ function App() {
                       <span>👥</span> İK Paneli
                     </div>
                   )}
+                  <div className={`sidebar-nav-item ${page==='orgsema'?'active':''}`} onClick={()=>setPage('orgsema')}>
+                    <span>🏢</span> Organizasyon Şeması
+                  </div>
                 </div>
               )}
 
