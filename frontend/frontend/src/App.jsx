@@ -1341,17 +1341,49 @@ function OrgSemasiPanel() {
     ws1["!cols"] = Array(COLS).fill({ wch: 13 });
     ws1["!rows"] = wsData.map((_, i) => ({ hpt: [3,4,6,7,9,10,13,14,16,17,19,20].includes(i) ? 24 : (i === 1 ? 30 : 14) }));
     Object.keys(ws).forEach(k => { const a = k.replace("__style__", ""); if (!ws1[a]) ws1[a] = { v: "", t: "s" }; ws1[a].s = ws[k]; });
-    // Sheet 2 — Details
-    const dHead = ["#", "Ad Soyad", "Görev", "Bölge", "Telefon", "TC Kimlik No"];
-    const aktifler = personelList.filter(p => p.aktif && (p.firma_tipi || "simsek") === "simsek");
-    const dData = [dHead, ...aktifler.map((p, i) => [i + 1, p.ad_soyad || "", p.unvan || "", p.bolge || "", p.telefon || "", p.tc_no || ""])];
+    // Sheet 2 — Details: Huawei'ye giden RESMİ eleman listesi (Team 7 = Bursa).
+    // TC kimlik no'ları sistemdeki personel kayıtlarından isimle eşlenir.
+    const ORG_DETAILS = [
+      ["",       "DÜZGÜN ŞİMŞEK",            "Ankara-İzmir Bölge", "5062939538", "Proje Direktörü"],
+      ["",       "ORHAN BEDİR",              "Ankara-İzmir Bölge", "5497419222", "Proje Müdürü"],
+      ["",       "NURCAN KUŞ",               "Ankara Bölge",       "5392596108", "Rollout Müdürü"],
+      ["",       "SERDAR ALTINOVA",          "İzmir Bölge",        "5321619481", "Rollout Müdürü"],
+      ["",       "HATİCE OMUŞ",              "Ankara-İzmir Bölge", "5525473667", "BTK&IFIS Birim Müdürü"],
+      ["",       "MURAT İSTEK",              "Ankara-İzmir Bölge", "5535657939", "Envanter&Depo Sorumlusu"],
+      ["",       "TUĞÇE YELMEN",             "Ankara-İzmir Bölge", "5330165678", "Muhasebe"],
+      ["Team 1", "KASIM EVİN",               "Ankara Bölge",       "5321531797", "Süpervizör"],
+      ["Team 1", "MEHMET BAĞCI",             "Ankara Bölge",       "5451445994", "Montaj personeli"],
+      ["Team 2", "FIRAT KENAN ONGUN",        "İzmir Bölge",        "5322127865", "Ekip Şefi"],
+      ["Team 2", "YİĞİT RAHMİ KARAGÖZOĞLU",  "İzmir Bölge",        "5058183583", "Montaj personeli"],
+      ["Team 2", "OĞUZHAN KÖKSAL",           "İzmir Bölge",        "5301295058", "Montaj personeli"],
+      ["Team 3", "SÜLEYMAN BALCI",           "İzmir Bölge",        "5393893166", "Ekip Şefi"],
+      ["Team 3", "MUSA GITTIK",              "İzmir Bölge",        "5433390489", "Montaj personeli"],
+      ["Team 3", "BEKİR ELELER",             "İzmir Bölge",        "5458868588", "Montaj personeli"],
+      ["Team 4", "MUSA ÇAKAR",               "İzmir Bölge",        "5062340828", "Ekip Şefi"],
+      ["Team 4", "EROL KAVLAK",              "İzmir Bölge",        "5529358896", "Montaj personeli"],
+      ["Team 4", "SEZGİN ÖZKAN",             "İzmir Bölge",        "5548860606", "Montaj personeli"],
+      ["Team 5", "İLYAS AYAN",               "Ankara Bölge",       "5510807226", "Ekip Şefi"],
+      ["Team 5", "MEHMET KİBAR",             "Ankara Bölge",       "5442756339", "Montaj personeli"],
+      ["Team 5", "BAHADIR ÇOBAN",            "Ankara Bölge",       "5300156837", "Montaj personeli"],
+      ["Team 6", "BEYAZIT BESTAMİ DEDEOĞLU", "Ankara Bölge",       "5343913924", "Ekip Şefi"],
+      ["Team 6", "AHMET METLİ",              "Ankara Bölge",       "5399211979", "Montaj personeli"],
+      ["Team 6", "YUNUS EMRE DOĞAN",         "Ankara Bölge",       "5349314257", "Montaj personeli"],
+      ["Team 7", "ENDER TEKE",               "Bursa Bölge",        "5442560309", "Ekip Şefi"],
+      ["Team 7", "SELÇUK FIRAT",             "Bursa Bölge",        "5350770889", "Montaj personeli"],
+    ];
+    const _norm = (s) => String(s || "").toLocaleUpperCase("tr-TR").replace(/\s+/g, " ").trim();
+    const tcByName = {};
+    personelList.forEach(p => { if (p.ad_soyad) tcByName[_norm(p.ad_soyad)] = p.tc_no || ""; });
+    const dHead = ["Team List", "Adı Soyadı", "Bölge", "Tel NO", "Firma Adı", "Alt Yüklenici", "Görevi", "TC Kimlik No"];
+    const dData = [dHead, ...ORG_DETAILS.map(([team, ad, bolge, tel, gorev]) =>
+      [team, ad, bolge, tel, "HUAWEI", "ŞİMŞEK HABERLEŞME", gorev, tcByName[_norm(ad)] || ""])];
     const ws2 = XLSXStyle.utils.aoa_to_sheet(dData);
-    ws2["!cols"] = [{ wch: 5 }, { wch: 28 }, { wch: 30 }, { wch: 12 }, { wch: 16 }, { wch: 15 }];
+    ws2["!cols"] = [{ wch: 9 }, { wch: 30 }, { wch: 18 }, { wch: 13 }, { wch: 11 }, { wch: 22 }, { wch: 24 }, { wch: 14 }];
     ws2["!rows"] = dData.map((_, i) => ({ hpt: i === 0 ? 24 : 18 }));
     dHead.forEach((_, ci) => { const a = XLSXStyle.utils.encode_cell({ r: 0, c: ci }); if (ws2[a]) ws2[a].s = boxS("1E3A5F", "FFFFFF", 11); });
-    aktifler.forEach((_, ri) => dHead.forEach((__, ci) => {
+    ORG_DETAILS.forEach((_, ri) => dHead.forEach((__, ci) => {
       const a = XLSXStyle.utils.encode_cell({ r: ri + 1, c: ci }); if (!ws2[a]) return;
-      ws2[a].s = { font: { sz: 10, name: "Arial" }, alignment: { horizontal: ci === 0 ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
+      ws2[a].s = { fill: { patternType: "solid", fgColor: { rgb: ri % 2 === 0 ? "F0F6FF" : "FFFFFF" } }, font: { sz: 10, name: "Arial" }, alignment: { horizontal: [0, 3, 4, 7].includes(ci) ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
     }));
     ws2["!freeze"] = { xSplit: 0, ySplit: 1 };
     const wb = XLSXStyle.utils.book_new();
@@ -1433,7 +1465,7 @@ function OrgSemasiPanel() {
         </svg>
       </div>
       <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
-        💡 Excel çıktısı 2 sayfadır: "Organization Chart" (şema) + "Details" (aktif personel: ad soyad, görev, bölge, telefon, TC). RF ekip detayları eleman listesi geldiğinde güncellenecek.
+        💡 Excel çıktısı 2 sayfadır: "Organization Chart" (şema) + "Details" (resmi eleman listesi: Team 1-7, ad soyad, bölge, telefon, görev; TC kimlik no'lar personel kayıtlarından otomatik eşlenir).
       </div>
     </div>
   );
