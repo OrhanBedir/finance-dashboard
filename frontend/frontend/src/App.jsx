@@ -1055,63 +1055,127 @@ function MarkaFinansPanel({ currentUser }) {
     })();
   }, []);
   const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  const fmtK = (n) => { n = Number(n || 0); if (n >= 1000000) return (n / 1000000).toFixed(1) + "M"; if (n >= 1000) return Math.round(n / 1000) + "K"; return String(Math.round(n)); };
   if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
   if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+  const pay = data?.pay_yuzde ?? 90;
   const aylar = data?.aylar || [];
   const tGelir = aylar.reduce((s, a) => s + a.gelir_try, 0);
   const tGelirUsd = aylar.reduce((s, a) => s + (a.gelir_usd || 0), 0);
   const tGider = aylar.reduce((s, a) => s + a.gider, 0);
   const tNet = tGelir - tGider;
-  const th = { padding: "10px 14px", fontSize: "12px", fontWeight: 700, color: "#fff", background: "#1e3a5f", textAlign: "right", whiteSpace: "nowrap" };
-  const td = { padding: "9px 14px", fontSize: "13px", textAlign: "right", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" };
+  const buAy = new Date().toISOString().slice(0, 7);
+  const buAyRow = aylar.find(a => a.ay === buAy) || { gelir_try: 0, gider: 0 };
+  const yil = buAy.slice(0, 4);
+  const AY_ADLARI = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+  const grafikAylar = AY_ADLARI.map((ad, i) => {
+    const key = `${yil}-${String(i + 1).padStart(2, "0")}`;
+    const row = aylar.find(a => a.ay === key);
+    return { ad, gelir: row ? row.gelir_try : 0, gider: row ? row.gider : 0 };
+  });
+  const maxVal = Math.max(1, ...grafikAylar.flatMap(g => [g.gelir, g.gider]));
+  const barH = (v) => (v > 0 ? Math.max(6, Math.round((v / maxVal) * 150)) : 0);
+  // ERC Finans Paneli görsel dili: beyaz kart + üstte renkli şerit
+  const kart = (strip) => ({ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "20px 24px", flex: "1 1 200px", minWidth: "200px", borderTop: `4px solid ${strip}`, textAlign: "center" });
+  const kartBaslik = { fontSize: "13px", color: "#64748b", fontWeight: 600, marginBottom: "10px" };
+  const kartDeger = { fontSize: "26px", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.5px" };
+  const kartAlt = { fontSize: "12px", color: "#94a3b8", marginTop: "8px" };
+  const th = { padding: "12px 16px", fontSize: "12px", fontWeight: 700, color: "#374151", background: "#f8fafc", textAlign: "right", whiteSpace: "nowrap", borderBottom: "1.5px solid #e5e7eb" };
+  const td = { padding: "11px 16px", fontSize: "13px", textAlign: "right", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" };
   return (
-    <div style={{ padding: "24px", maxWidth: "1150px" }}>
-      <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>📊 {markaAd} — Finans Özeti</h2>
-      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>
-        Gelir: yapılan işlerin hakedişi (%{data?.pay_yuzde ?? 90} pay) • Gider: personel maaş, maaş avansı ve iş avansları
+    <div style={{ padding: "24px 28px", maxWidth: "1250px", margin: "0 auto" }}>
+      <h2 style={{ margin: "0 0 2px", fontSize: "20px", fontWeight: 800, color: "#0f172a", textAlign: "center" }}>📊 {markaAd} — Finans Özeti</h2>
+      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "22px", textAlign: "center" }}>
+        Gelir: yapılan işlerin hakedişi (%{pay} pay) • Gider: personel maaş, maaş avansı ve iş avansları
       </div>
-      <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
-        <div style={{ background: "linear-gradient(135deg,#059669,#047857)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
-          <div style={{ fontSize: "11px", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.05em" }}>Toplam Gelir (%{data?.pay_yuzde ?? 90})</div>
-          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tGelir)}{tGelirUsd > 0 && <span style={{ fontSize: "14px", fontWeight: 600 }}> + ${fmt(tGelirUsd)}</span>}</div>
+
+      {/* Özet kartları — ERC Finans Paneli stili */}
+      <div style={{ display: "flex", gap: "16px", marginBottom: "24px", flexWrap: "wrap" }}>
+        <div style={kart("#6366f1")}>
+          <div style={kartBaslik}>{yil} Toplam Gelir (%{pay})</div>
+          <div style={kartDeger}>₺{fmt(tGelir)}</div>
+          <div style={kartAlt}>Yıllık kümülatif{tGelirUsd > 0 ? ` · +$${fmt(tGelirUsd)}` : ""}</div>
         </div>
-        <div style={{ background: "linear-gradient(135deg,#dc2626,#b91c1c)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
-          <div style={{ fontSize: "11px", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.05em" }}>Toplam Gider</div>
-          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tGider)}</div>
+        <div style={kart("#10b981")}>
+          <div style={kartBaslik}>Bu Ay Gelir</div>
+          <div style={kartDeger}>₺{fmt(buAyRow.gelir_try)}</div>
+          <div style={kartAlt}>Bu ay hakediş (%{pay})</div>
         </div>
-        <div style={{ background: tNet >= 0 ? "linear-gradient(135deg,#1e3a5f,#2d5a8f)" : "linear-gradient(135deg,#7f1d1d,#991b1b)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
-          <div style={{ fontSize: "11px", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.05em" }}>Net ({tNet >= 0 ? "Kâr" : "Zarar"})</div>
-          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tNet)}</div>
+        <div style={kart("#ef4444")}>
+          <div style={kartBaslik}>Bu Ay Gider</div>
+          <div style={kartDeger}>₺{fmt(buAyRow.gider)}</div>
+          <div style={kartAlt}>Maaş + avanslar</div>
+        </div>
+        <div style={kart(tNet >= 0 ? "#f59e0b" : "#991b1b")}>
+          <div style={kartBaslik}>Net ({tNet >= 0 ? "Kâr" : "Zarar"})</div>
+          <div style={{ ...kartDeger, color: tNet >= 0 ? "#047857" : "#b91c1c" }}>₺{fmt(tNet)}</div>
+          <div style={kartAlt}>Gelir − Gider</div>
         </div>
       </div>
-      <div style={{ background: "#fff", borderRadius: "14px", overflow: "auto", border: "1px solid #e5e7eb" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%" }}>
-          <thead><tr>
-            <th style={{ ...th, textAlign: "left" }}>Ay</th>
-            <th style={th}>Gelir ₺ (%{data?.pay_yuzde ?? 90})</th>
-            <th style={th}>Maaş Ödeme</th>
-            <th style={th}>Maaş Avansı</th>
-            <th style={th}>İş Avansı</th>
-            <th style={th}>Toplam Gider</th>
-            <th style={th}>Net</th>
-          </tr></thead>
-          <tbody>
-            {aylar.map((a) => (
-              <tr key={a.ay}>
-                <td style={{ ...td, textAlign: "left", fontWeight: 700 }}>{a.ay}</td>
-                <td style={{ ...td, color: "#047857", fontWeight: 600 }}>₺{fmt(a.gelir_try)}{(a.gelir_usd || 0) > 0 && <span style={{ fontSize: "11px", color: "#0369a1" }}> +${fmt(a.gelir_usd)}</span>}</td>
-                <td style={td}>₺{fmt(a.maas)}</td>
-                <td style={td}>₺{fmt(a.maas_avans)}</td>
-                <td style={td}>₺{fmt(a.is_avans)}</td>
-                <td style={{ ...td, color: "#b91c1c", fontWeight: 600 }}>₺{fmt(a.gider)}</td>
-                <td style={{ ...td, color: a.net >= 0 ? "#047857" : "#b91c1c", fontWeight: 700 }}>₺{fmt(a.net)}</td>
-              </tr>
-            ))}
-            {aylar.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>Henüz veri yok</td></tr>}
-          </tbody>
-        </table>
+
+      {/* Aylık Gelir/Gider grafiği — ERC 'Aylık Tahsilat Özeti' stili */}
+      <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "20px 24px", marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "8px" }}>
+          <div>
+            <div style={{ fontSize: "16px", fontWeight: 800, color: "#0f172a" }}>Aylık Gelir / Gider Özeti</div>
+            <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>Ocak — Aralık {yil}</div>
+          </div>
+          <div style={{ display: "flex", gap: "14px", fontSize: "12px", fontWeight: 600, color: "#475569" }}>
+            <span><span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "3px", background: "#10b981", marginRight: "5px" }} />Gelir</span>
+            <span><span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "3px", background: "#ef4444", marginRight: "5px" }} />Gider</span>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: "8px", height: "200px", marginTop: "18px" }}>
+          {grafikAylar.map((g) => (
+            <div key={g.ad} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: "3px", flex: 1 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end" }}>
+                  {g.gelir > 0 && <div style={{ fontSize: "10px", fontWeight: 700, color: "#047857", marginBottom: "3px" }}>{fmtK(g.gelir)}</div>}
+                  <div style={{ width: "22px", height: `${barH(g.gelir)}px`, background: "linear-gradient(180deg,#34d399,#10b981)", borderRadius: "5px 5px 0 0" }} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end" }}>
+                  {g.gider > 0 && <div style={{ fontSize: "10px", fontWeight: 700, color: "#b91c1c", marginBottom: "3px" }}>{fmtK(g.gider)}</div>}
+                  <div style={{ width: "22px", height: `${barH(g.gider)}px`, background: "linear-gradient(180deg,#f87171,#ef4444)", borderRadius: "5px 5px 0 0" }} />
+                </div>
+              </div>
+              <div style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", marginTop: "8px" }}>{g.ad}</div>
+            </div>
+          ))}
+        </div>
       </div>
-      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
+
+      {/* Aylık detay tablosu */}
+      <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", overflow: "hidden" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #f1f5f9", fontSize: "16px", fontWeight: 800, color: "#0f172a" }}>Aylık Detay</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead><tr>
+              <th style={{ ...th, textAlign: "left" }}>Ay</th>
+              <th style={th}>Gelir ₺ (%{pay})</th>
+              <th style={th}>Maaş Ödeme</th>
+              <th style={th}>Maaş Avansı</th>
+              <th style={th}>İş Avansı</th>
+              <th style={th}>Toplam Gider</th>
+              <th style={th}>Net</th>
+            </tr></thead>
+            <tbody>
+              {aylar.map((a, i) => (
+                <tr key={a.ay} style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc" }}>
+                  <td style={{ ...td, textAlign: "left", fontWeight: 700 }}>{a.ay}</td>
+                  <td style={{ ...td, color: "#047857", fontWeight: 600 }}>₺{fmt(a.gelir_try)}{(a.gelir_usd || 0) > 0 && <span style={{ fontSize: "11px", color: "#0369a1" }}> +${fmt(a.gelir_usd)}</span>}</td>
+                  <td style={td}>{a.maas > 0 ? `₺${fmt(a.maas)}` : "—"}</td>
+                  <td style={td}>{a.maas_avans > 0 ? `₺${fmt(a.maas_avans)}` : "—"}</td>
+                  <td style={td}>{a.is_avans > 0 ? `₺${fmt(a.is_avans)}` : "—"}</td>
+                  <td style={{ ...td, color: a.gider > 0 ? "#b91c1c" : "#9ca3af", fontWeight: 600 }}>{a.gider > 0 ? `₺${fmt(a.gider)}` : "—"}</td>
+                  <td style={{ ...td, color: a.net >= 0 ? "#047857" : "#b91c1c", fontWeight: 700 }}>₺{fmt(a.net)}</td>
+                </tr>
+              ))}
+              {aylar.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>Henüz veri yok</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px", textAlign: "center" }}>
         💡 Gelir HW fatura tarihine, giderler maaş dönemine/avans tarihine göre aylıklanır. Masraf formu giderleri bir sonraki sürümde eklenecek.
       </div>
     </div>
