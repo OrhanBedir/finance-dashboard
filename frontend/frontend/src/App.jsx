@@ -1319,9 +1319,10 @@ function OrgSemasiPanel() {
     setBox(1, 0, 1, 12, "ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart", "1E3A5F", "FFFFFF", 14);
     setBox(3, 5, 4, 7, "DÜZGÜN ŞİMŞEK\nProject Director", "1E3A5F", "FFFFFF");
     setBox(6, 5, 7, 7, "ORHAN BEDİR\nProject Manager", "2563EB", "FFFFFF");
-    setBox(9, 1, 10, 3, "HATİCE OMUŞ\nIFIS · Survey · BTK · Atlas", "F1F5F9", "0F172A", 11);
-    setBox(9, 5, 10, 7, "ERENCAN ŞİMŞEK\nEHS Officer", "F1F5F9", "0F172A", 11);
-    setBox(9, 9, 10, 11, "MURAT İSTEK\nWarehouse & Inventory Coordinator", "F1F5F9", "0F172A", 11);
+    setBox(9, 0, 10, 2, "HATİCE OMUŞ\nIFIS · Survey · BTK · Atlas", "F1F5F9", "0F172A", 11);
+    setBox(9, 3, 10, 5, "ERENCAN ŞİMŞEK\nEHS Officer", "F1F5F9", "0F172A", 11);
+    setBox(9, 7, 10, 9, "TUĞÇE YELMEN\nInvoicing & Acceptance Coordinator", "F1F5F9", "0F172A", 11);
+    setBox(9, 10, 10, 12, "MURAT İSTEK\nWarehouse & Inventory Coordinator", "F1F5F9", "0F172A", 11);
     setBox(12, 0, 12, 5, "İZMİR REGION", "0C4A6E", "FFFFFF");
     setBox(12, 7, 12, 12, "ANKARA REGION", "7C2D12", "FFFFFF");
     setBox(13, 1, 14, 4, "SERDAR ALTINOVA\nİzmir Regional Manager", "0369A1", "FFFFFF", 11);
@@ -1397,10 +1398,11 @@ function OrgSemasiPanel() {
           <L d="M625 120 V156" />
           <Box x={475} y={156} w={300} h={72} fill={BLUE} nameText="ORHAN BEDİR" title="Project Manager" />
           {/* PM → destek fonksiyonları */}
-          <L d="M625 228 V252 M145 252 H1105 M145 252 V276 M625 252 V276 M1105 252 V276" />
-          <Box x={20} y={276} w={250} h={64} light stroke="#64748b" nameText="HATİCE OMUŞ" title="IFIS · Survey · BTK · Atlas" />
-          <Box x={500} y={276} w={250} h={64} light stroke="#64748b" nameText="ERENCAN ŞİMŞEK" title="EHS Officer" />
-          <Box x={980} y={276} w={250} h={64} light stroke="#64748b" nameText="MURAT İSTEK" title="Warehouse & Inventory Coord." />
+          <L d="M625 228 V252 M205 252 H1045 M205 252 V276 M485 252 V276 M765 252 V276 M1045 252 V276" />
+          <Box x={80} y={276} w={250} h={64} light stroke="#64748b" nameText="HATİCE OMUŞ" title="IFIS · Survey · BTK · Atlas" />
+          <Box x={360} y={276} w={250} h={64} light stroke="#64748b" nameText="ERENCAN ŞİMŞEK" title="EHS Officer" />
+          <Box x={640} y={276} w={250} h={64} light stroke="#64748b" nameText="TUĞÇE YELMEN" title="Invoicing & Acceptance Coord." />
+          <Box x={920} y={276} w={250} h={64} light stroke="#64748b" nameText="MURAT İSTEK" title="Warehouse & Inventory Coord." />
           {/* PM → bölgeler */}
           <L d="M625 340 V368 M330 368 H920 M330 368 V396 M920 368 V396" />
           {/* İZMİR bloğu */}
