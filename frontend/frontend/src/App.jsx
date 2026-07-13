@@ -24199,6 +24199,9 @@ function App() {
               <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
                 <span>📍</span> Bölge Analizi
               </div>
+              <div className={`sidebar-nav-item ${page==='orgsema'?'active':''}`} onClick={()=>setPage('orgsema')}>
+                <span>🏢</span> Organizasyon Şeması
+              </div>
             </>
           ) : (
             <>
