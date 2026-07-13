@@ -10576,6 +10576,16 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
        FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
        WHERE EXTRACT(YEAR FROM m.tarih)=$1 AND EXTRACT(MONTH FROM m.tarih)=$2`,
       [yil, ay]).catch(() => ({ rows: [] }));
+    // Maaş avansları: avans tablosu (turu MAAS) — nakit çıkışı ÖDENDİĞİ GÜN
+    // gerçekleşir (dönem hangi ayın maaşı olursa olsun), maaş satırına eklenir
+    const mav = await pool.query(
+      `SELECT ('MA' || a.id) AS id, TO_CHAR(a.tarih,'YYYY-MM-DD') AS tarih,
+              a.tutar, COALESCE(a.donem, TO_CHAR(a.tarih,'YYYY-MM')) AS donem,
+              (p.ad_soyad || ' · maaş avansı') AS ad_soyad
+       FROM avans a JOIN personel p ON p.id = a.personel_id
+       WHERE UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS'
+         AND EXTRACT(YEAR FROM a.tarih)=$1 AND EXTRACT(MONTH FROM a.tarih)=$2`,
+      [yil, ay]).catch(() => ({ rows: [] }));
     // İş avansları: PD (Direktör) onayından geçenler — otomatik gider
     // Tarih: ödeme tarihi varsa o, yoksa direktör onay tarihi
     const av = await pool.query(
@@ -10588,7 +10598,7 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
          AND EXTRACT(YEAR FROM COALESCE(odeme_tarihi, direktor_onay_tarihi))=$1
          AND EXTRACT(MONTH FROM COALESCE(odeme_tarihi, direktor_onay_tarihi))=$2`,
       [yil, ay]).catch(() => ({ rows: [] }));
-    res.json({ ok: true, odemeler: r.rows, maaslar: m.rows, avanslar: av.rows });
+    res.json({ ok: true, odemeler: r.rows, maaslar: [...m.rows, ...mav.rows], avanslar: av.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
