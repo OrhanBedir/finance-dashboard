@@ -1288,8 +1288,8 @@ function OrgSemasiPanel() {
     <g>
       <rect x={x} y={y} width={w} height={h} rx="10" fill={light ? "#fff" : fill} stroke={stroke || fill} strokeWidth="2" strokeDasharray={dashed ? "6 4" : "0"} filter="url(#gölge)" />
       {!light && <rect x={x} y={y} width={w} height="6" rx="3" fill="rgba(255,255,255,0.25)" />}
-      <text x={x + w / 2} y={y + (sub ? 26 : 30)} textAnchor="middle" fontSize="15" fontWeight="800" fill={light ? "#0f172a" : "#fff"} fontFamily="Arial">{nameText}</text>
-      <text x={x + w / 2} y={y + (sub ? 45 : 52)} textAnchor="middle" fontSize="11.5" fontWeight="600" fill={light ? "#475569" : "rgba(255,255,255,0.85)"} fontFamily="Arial">{title}</text>
+      <text x={x + w / 2} y={title ? y + (sub ? 26 : 30) : y + h / 2 + 5} textAnchor="middle" fontSize="15" fontWeight="800" fill={light ? "#0f172a" : "#fff"} fontFamily="Arial">{nameText}</text>
+      {title && <text x={x + w / 2} y={y + (sub ? 45 : 52)} textAnchor="middle" fontSize="11.5" fontWeight="600" fill={light ? "#475569" : "rgba(255,255,255,0.85)"} fontFamily="Arial">{title}</text>}
       {sub && <text x={x + w / 2} y={y + 61} textAnchor="middle" fontSize="10" fill={light ? "#94a3b8" : "rgba(255,255,255,0.7)"} fontFamily="Arial">{sub}</text>}
     </g>
   );
@@ -1328,12 +1328,12 @@ function OrgSemasiPanel() {
     setBox(13, 8, 14, 11, "NURCAN KUŞ\nRollout Manager & TT Project Coordinator · Ankara Regional Manager", "B45309", "FFFFFF", 11);
     setBox(16, 1, 17, 4, "KASIM EVİN\nSite Supervisor (İzmir · Ankara support)", "E0F2FE", "0C4A6E", 11);
     setBox(16, 8, 17, 11, "Site Support: KASIM EVİN\n(İzmir'den destek)", "FEF3C7", "7C2D12", 10);
-    setBox(19, 0, 20, 1, "RF TEAM 1\nİzmir", "F8FAFC", "0F172A", 10);
-    setBox(19, 2, 20, 3, "RF TEAM 2\nİzmir", "F8FAFC", "0F172A", 10);
-    setBox(19, 4, 20, 5, "RF TEAM 3\nİzmir", "F8FAFC", "0F172A", 10);
-    setBox(19, 7, 20, 8, "RF TEAM 1\nAnkara", "F8FAFC", "0F172A", 10);
-    setBox(19, 9, 20, 10, "RF TEAM 2\nAnkara", "F8FAFC", "0F172A", 10);
-    setBox(19, 11, 20, 12, "RF TEAM 3\nAnkara", "F8FAFC", "0F172A", 10);
+    setBox(19, 0, 20, 1, "RF TEAM 1", "F8FAFC", "0F172A", 10);
+    setBox(19, 2, 20, 3, "RF TEAM 2", "F8FAFC", "0F172A", 10);
+    setBox(19, 4, 20, 5, "RF TEAM 3", "F8FAFC", "0F172A", 10);
+    setBox(19, 7, 20, 8, "RF TEAM 4", "F8FAFC", "0F172A", 10);
+    setBox(19, 9, 20, 10, "RF TEAM 5", "F8FAFC", "0F172A", 10);
+    setBox(19, 11, 20, 12, "RF TEAM 6", "F8FAFC", "0F172A", 10);
     setBox(22, 0, 22, 12, `Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · ${today}`, "F1F5F9", "64748B", 9);
     const ws1 = XLSXStyle.utils.aoa_to_sheet(wsData);
     ws1["!merges"] = merges;
@@ -1412,9 +1412,9 @@ function OrgSemasiPanel() {
           <L d="M330 528 V560" />
           <Box x={205} y={560} w={250} h={64} light stroke="#0369a1" nameText="KASIM EVİN" title="Site Supervisor · İzmir (Ankara destek)" />
           <L d="M330 624 V660 M150 660 H510 M150 660 V690 M330 660 V690 M510 660 V690" />
-          <Box x={70} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 1" title="RF & Gizleme Ekibi" />
-          <Box x={250} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 2" title="RF & Gizleme Ekibi" />
-          <Box x={430} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 3" title="RF & Gizleme Ekibi" />
+          <Box x={70} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 1" />
+          <Box x={250} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 2" />
+          <Box x={430} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 3" />
           {/* ANKARA bloğu */}
           <rect x={630} y={396} width={580} height={492} rx="14" fill="#fffbf5" stroke="#e7d5c0" strokeWidth="1.5" />
           <rect x={630} y={396} width={580} height={38} rx="14" fill={ANKARA} />
@@ -1424,9 +1424,9 @@ function OrgSemasiPanel() {
           <L d="M920 528 V560" />
           <Box x={795} y={560} w={250} h={64} light stroke="#b45309" dashed nameText="KASIM EVİN" title="Site Support (İzmir'den destek)" />
           <L d="M920 624 V660 M740 660 H1100 M740 660 V690 M920 660 V690 M1100 660 V690" />
-          <Box x={660} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 1" title="RF & Gizleme Ekibi" />
-          <Box x={840} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 2" title="RF & Gizleme Ekibi" />
-          <Box x={1020} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 3" title="RF & Gizleme Ekibi" />
+          <Box x={660} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 4" />
+          <Box x={840} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 5" />
+          <Box x={1020} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 6" />
           <text x={625} y={905} textAnchor="middle" fontSize="10.5" fill="#94a3b8" fontFamily="Arial">Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · {new Date().toLocaleDateString("tr-TR")}</text>
         </svg>
       </div>
