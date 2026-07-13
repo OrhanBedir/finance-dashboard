@@ -247,22 +247,32 @@ function authMiddleware(req, res, next) {
   }
 }
 
+// Taşeron adını kanonik forma indirir: 'AHY ELEKTRİK' ve 'AHY' aynı firmadır
+function canonSub(name) {
+  const n = String(name || "").toLowerCase();
+  if (n.includes("federal")) return "federal";
+  if (n.includes("ubs")) return "ubs";
+  if (n.includes("ahy")) return "ahy";
+  if (n.includes("2kx")) return "2kx";
+  return n.trim();
+}
+
+// Veri kapsamı: subcon rolü VEYA alt marka (hw_yukleme=false, ör. AHY yönetimi)
+// yalnız kendi taşeron satırlarını görür. Dönen değer kapsam adı ya da null.
+function subconScope(req) {
+  const name = String(req.user?.subcon_name || "").trim();
+  if (!name) return null;
+  const role = String(req.user?.role || "").toLowerCase();
+  if (role === "subcon") return name;
+  if (req.user?.hw_yukleme === false) return name; // alt marka tam paneli (info@ahyelektrik.com)
+  return null;
+}
+
 function applySubconFilter(req, rows) {
-  const userRole = String(req.user?.role || "").toLowerCase();
-  const userSubcon = String(req.user?.subcon_name || "")
-    .trim()
-    .toLowerCase();
-
-  if (userRole !== "subcon" || !userSubcon) {
-    return rows || [];
-  }
-
-  return (rows || []).filter(
-    (row) =>
-      String(row.subcon_name || "")
-        .trim()
-        .toLowerCase() === userSubcon,
-  );
+  const scopeName = subconScope(req);
+  if (!scopeName) return rows || [];
+  const c = canonSub(scopeName);
+  return (rows || []).filter((row) => canonSub(row.subcon_name) === c);
 }
 
 const pool = require("./db");
@@ -3793,22 +3803,20 @@ app.get("/dashboard/result", authMiddleware, async (req, res) => {
   const subconName = req.user?.subcon_name || null;
 
   try {
-    const userRole = String(req.user?.role || "").toLowerCase();
-    const userSubcon = String(req.user?.subcon_name || "").trim();
+    // Kapsam: subcon rolü VEYA alt marka (AHY yönetimi) yalnız kendi işlerini
+    // görür — 'AHY' / 'AHY ELEKTRİK' yazımları canonSub ile eşlenir.
+    const scopeName = subconScope(req);
 
-    const extraWhere =
-      userRole === "subcon" && userSubcon
-        ? "WHERE LOWER(TRIM(COALESCE(m.subcon_name, ''))) = LOWER(TRIM($1))"
-        : "";
-
-    const params = userRole === "subcon" && userSubcon ? [userSubcon] : [];
-
-    const result = await pool.query(buildMasterJoinedQuery(extraWhere), params);
+    const result = await pool.query(buildMasterJoinedQuery(""), []);
 
     let rows = (result.rows || []).map((row) => ({
       ...row,
       currency: normalizeCurrency(row.currency),
     }));
+    if (scopeName) {
+      const c = canonSub(scopeName);
+      rows = rows.filter((row) => canonSub(row.subcon_name) === c);
+    }
 
     res.json({ ok: true, rows });
   } catch (err) {
@@ -15798,6 +15806,10 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     // markalıdır — dropdown seçimi unutulsa/karışsa bile her açılışta düzelir.
     await pool.query(`UPDATE users SET marka='AHY'
       WHERE LOWER(email) LIKE '%@ahyelektrik.com' AND COALESCE(marka,'ERC') <> 'AHY'`);
+    // Personel garantisi: Erencan Şimşek + Tuğçe Yelmen ERC'de kalır (SSK ve
+    // kayıtları Şimşek'te), diğer kadro AHY'nin İK/ödeme görünümüne yansır.
+    await pool.query(`UPDATE personel SET marka='ERC'
+      WHERE (ad_soyad ILIKE '%ERENCAN%' OR ad_soyad ILIKE '%YELMEN%') AND COALESCE(marka,'ERC') <> 'ERC'`);
     // Yönetim garantisi: platform sahibi + ERC yönetimi + muhasebe her açılışta
     // ERC markasında kalır — her şeyi görebilir ve HW yüklemesi yapabilirler.
     await pool.query(`UPDATE users SET marka='ERC'

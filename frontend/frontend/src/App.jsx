@@ -10445,7 +10445,7 @@ function formatTRY(value) {
 function PuantajPanel({ currentUser, onBack }) {
   // MAAŞ BİLGİSİ yetkisi: hakediş kartı sadece Orhan Bedir + Düzgün Şimşek
   const _pEmail = (currentUser?.email || "").toLowerCase();
-  const _pYetkili = _pEmail === "orhan.bedir@simsektel.com" || _pEmail === "duzgun.simsek@simsektel.com" || _pEmail === "muhasebe@simsektel.com";
+  const _pYetkili = _pEmail === "orhan.bedir@simsektel.com" || _pEmail === "duzgun.simsek@simsektel.com" || _pEmail === "muhasebe@simsektel.com" || _pEmail === "info@ahyelektrik.com";
   const [puantajAy, setPuantajAy] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
@@ -10876,7 +10876,7 @@ function hesaplaVergi(netBankadan) {
    ============================================================ */
 function HrDashboard({ onBack, currentUser }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
-  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "muhasebe@simsektel.com";
+  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "muhasebe@simsektel.com" || _hrEmail === "info@ahyelektrik.com";
   // İK marka izolasyonu (TEK YÖNLÜ): ERC ana yüklenici — maaş ve kalan
   // ödemeleri yaptığı için TÜM personeli görür. Alt marka (AHY) yalnız
   // kendi markasının personelini görür.
