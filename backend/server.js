@@ -15919,10 +15919,11 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
         WHERE COALESCE(aktif,true)=true AND COALESCE(surucu,'') NOT ILIKE '%orhan%'`);
       if (aracMig.rowCount > 0) console.log(`[araç devri] Pasife alınan eski araç: ${aracMig.rowCount}`);
     }
-    // Yönetim garantisi: platform sahibi + ERC yönetimi + muhasebe her açılışta
-    // ERC markasında kalır — her şeyi görebilir ve HW yüklemesi yapabilirler.
+    // Yönetim garantisi: platform sahibi + ERC yönetimi + muhasebe + Nurcan
+    // (tüm günlük iş girişlerini yapan rollout müdürü) her açılışta ERC
+    // markasında kalır — eski görünümlerinin tamamını korurlar.
     await pool.query(`UPDATE users SET marka='ERC'
-      WHERE LOWER(email) IN ('orhan.bedir@gmail.com','orhan.bedir@simsektel.com','orhan@simsektel.com','duzgun.simsek@simsektel.com','muhasebe@simsektel.com')
+      WHERE LOWER(email) IN ('orhan.bedir@gmail.com','orhan.bedir@simsektel.com','orhan@simsektel.com','duzgun.simsek@simsektel.com','muhasebe@simsektel.com','nurcan.kus@simsektel.com')
         AND COALESCE(marka,'ERC') <> 'ERC'`);
     // AHY iş görünümü: Bölge Analizi'nde yalnız taşeronu 'AHY ELEKTRİK' olan
     // sahaları %90 kırılımla görür (UBS/Federal/2KX ile aynı mekanizma).
