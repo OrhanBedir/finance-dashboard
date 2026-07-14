@@ -16636,20 +16636,21 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       if (rowRegion !== String(regionName).toLowerCase()) return false;
 
-      // PAC OK: rollout_progress'te pac_actual_end_date girilmiş sahalar
-      // → done_qty > 0 olan tüm kalemler göster (PO şartı aranmaz)
+      // PAC OK: rollout_progress'te pac_actual_end_date girilmiş sahalar.
+      // Yalnız FATURASI BEKLEYEN kalemler (due_qty > 0) — tamamı
+      // faturalanmış saha/kalem (due=0) burada GÖRÜNMEZ.
       if (!!row.pac_from_rollout) {
-        return Number(row.done_qty || 0) > 0;
+        return Number(row.done_qty || 0) > 0 && Number(row.due_qty || 0) > 0;
       }
 
-      // Kabul OK: klasik PO mantığı
+      // Kabul OK: klasik PO mantığı — faturası tamamlanmış (due=0) kalem listelenmez
       const statusOk = String(row.status || "").toUpperCase() === "OK";
       const reqQty = Number(row.requested_qty || 0);
       const dueQty = Number(row.due_qty || 0);
       const progressedQty = reqQty - dueQty;
       const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
 
-      return statusOk && progressedQty > 0 && kabulOk;
+      return statusOk && progressedQty > 0 && dueQty > 0 && kabulOk;
     });
   };
 
@@ -16671,18 +16672,16 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const progressedQty = reqQty - dueQty;
       const kabulOk = String(row.kabul_durum || "").toUpperCase() === "OK";
 
-      return statusOk && progressedQty > 0 && !kabulOk;
+      // Faturası tamamlanmış (due=0) kalemler bekleyen listesine girmez
+      return statusOk && progressedQty > 0 && dueQty > 0 && !kabulOk;
     });
   };
 
   const getFacOk20TotalByRegion = (regionName) => {
     return getFacOk20RowsByRegion(regionName).reduce((sum, row) => {
-      // PAC satırları: done_qty × unit_price (tamamlanan iş değeri)
-      // Kabul satırları: due_qty × unit_price (faturalanmamış kalan)
-      const qty = !!row.pac_from_rollout
-        ? Number(row.done_qty || 0)
-        : Number(row.due_qty || 0);
-      const base = qty * Number(row.unit_price || 0);
+      // Bekleyen tutar = KALAN faturalanacak miktar × birim fiyat (PAC dahil).
+      // Tam done değeri kullanılmaz — tamamı faturalanmış iş burada şişmez.
+      const base = Number(row.due_qty || 0) * Number(row.unit_price || 0);
       const total =
         normalizeCurrency(row.currency) === "USD" ? base * usdRate : base;
 
