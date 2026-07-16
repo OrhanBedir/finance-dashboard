@@ -26600,12 +26600,17 @@ function AraclarPanel({ currentUser, onBack }) {
                           e.stopPropagation();
                           const donem = prompt("Hangi dönemin kirası? (YYYY-AA)", _buAy);
                           if (!donem) return;
-                          const tutar = prompt("Ödenen tutar (₺):", String(a.aylik_kira || ""));
+                          const tutar = prompt("Ödenen tutar (₺):", String(Math.round(Number(a.aylik_kira || 0)) || ""));
                           if (!tutar) return;
+                          // Hem "40000" / "40000.00" (makine) hem "40.000,00" (Türkçe) formatını doğru çöz
+                          const _s = String(tutar).trim();
+                          const _tutarNum = /^\d+(\.\d{1,2})?$/.test(_s)
+                            ? Number(_s)
+                            : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
                           try {
                             const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/kira-ode`, {
                               method: "POST", headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ donem, tutar: Number(String(tutar).replace(/\./g, "").replace(",", ".")) || Number(tutar) }),
+                              body: JSON.stringify({ donem, tutar: _tutarNum }),
                             });
                             if (!r.ok) throw new Error("Kaydedilemedi");
                             await load();
