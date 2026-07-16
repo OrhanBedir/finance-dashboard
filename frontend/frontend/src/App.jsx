@@ -15285,6 +15285,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [redModal, setRedModal] = useState(null);
   const [redText, setRedText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [firmaModal, setFirmaModal] = useState(null); // {id, action} — onayda AHY/ŞİMŞEK seçimi
   const [avansBakiye, setAvansBakiye] = useState(null);
   const [bakiyeler, setBakiyeler] = useState([]); // personel bazlı avans−masraf bakiyeleri (yönetici)
   const [bakiyelerAcik, setBakiyelerAcik] = useState(false);
@@ -15417,21 +15418,39 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     load();
   };
 
-  const handleOnayla = async (id) => {
-    await fetch(`${API_BASE}/hr/is-avans/${id}/onayla`, { method: "PUT" });
+  // Onayda firma seçimi: PM (Orhan) her onayında seçer; Direktör (Düzgün)
+  // yalnız firma henüz seçilmemişse sorar (Orhan'ın kendi talepleri PM adımını
+  // atladığı için seçim Düzgün'e düşer). Seçim nakit akışını yönlendirir.
+  const _firmaSecimGerekli = (id) => {
+    const t = list.find(x => String(x.id) === String(id));
+    return isPM || (isDirektor && !t?.firma);
+  };
+
+  const _approve = async (id, action, firma) => {
+    const path = action === "pm" ? "pm-onayla" : action === "direktor" ? "direktor-onayla" : "onayla";
+    await fetch(`${API_BASE}/hr/is-avans/${id}/${path}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(firma ? { firma } : {}),
+    });
     load(); loadBakiye();
+  };
+
+  const handleOnayla = async (id) => {
+    if (_firmaSecimGerekli(id)) { setFirmaModal({ id, action: "onayla" }); return; }
+    await _approve(id, "onayla");
   };
 
   // PM, TALEP veya ROLLOUT_MUDUR_ONAY durumundaki talepleri doğrudan PM_ONAY'a taşır
   const handlePmDogrudan = async (id) => {
-    await fetch(`${API_BASE}/hr/is-avans/${id}/pm-onayla`, { method: "PUT" });
-    load(); loadBakiye();
+    if (_firmaSecimGerekli(id)) { setFirmaModal({ id, action: "pm" }); return; }
+    await _approve(id, "pm");
   };
 
   // Direktör, TALEP veya PM_ONAY durumundaki talepleri doğrudan onaylar (PM adımını atlar)
   const handleDirektorDogrudan = async (id) => {
-    await fetch(`${API_BASE}/hr/is-avans/${id}/direktor-onayla`, { method: "PUT" });
-    load(); loadBakiye();
+    if (_firmaSecimGerekli(id)) { setFirmaModal({ id, action: "direktor" }); return; }
+    await _approve(id, "direktor");
   };
 
   const handleReddet = async () => {
@@ -15708,6 +15727,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   {t.bolge && <span style={{ background:"#f3f4f6", color:"#374151", padding:"2px 10px", borderRadius:"20px", fontSize:"12px" }}>{t.bolge}</span>}
                   {t.proje && <span style={{ background:"#f0fdf4", color:"#166534", padding:"2px 10px", borderRadius:"20px", fontSize:"12px" }}>{t.proje}</span>}
                   {t.plaka && <span style={{ background:"#eff6ff", color:"#1e40af", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>🚗 {t.plaka}</span>}
+                  {t.firma && <span style={{ background: t.firma==="AHY" ? "#fffbeb" : "#f0f9ff", color: t.firma==="AHY" ? "#92400e" : "#0369a1", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{t.firma==="AHY" ? "⚡ AHY" : "🏢 ŞİMŞEK"}</span>}
                 </div>
                 {t.aciklama && <div style={{ fontSize:"13px", color:"#6b7280", marginBottom:"8px" }}>{t.aciklama}</div>}
                 {t.red_aciklama && <div style={{ fontSize:"12px", color:"#dc2626", marginBottom:"8px" }}>Red: {t.red_aciklama}</div>}
@@ -15798,6 +15818,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                     onMouseLeave={() => setNotTooltip(p => ({ ...p, visible: false }))}
                   >
                     <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {t.firma && <span style={{ background: t.firma==="AHY" ? "#fffbeb" : "#f0f9ff", color: t.firma==="AHY" ? "#92400e" : "#0369a1", borderRadius:"6px", padding:"1px 6px", fontSize:"11px", fontWeight:700, marginRight:"4px" }}>{t.firma==="AHY" ? "⚡AHY" : "🏢ŞİMŞEK"}</span>}
                       {t.plaka && <span style={{ background:"#eff6ff", color:"#1e40af", borderRadius:"6px", padding:"1px 6px", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>🚗 {t.plaka}</span>}
                       {t.aciklama ? t.aciklama : <span style={{ color:"#d1d5db" }}>—</span>}
                     </div>
@@ -15956,6 +15977,34 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Firma Seçim Modalı — onaylanan avans hangi firmanın nakit akışına düşecek */}
+      {firmaModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}
+          onClick={()=>setFirmaModal(null)}>
+          <div style={{ background:"#fff", borderRadius:"16px", padding:"28px", width:"90%", maxWidth:"420px" }}
+            onClick={e=>e.stopPropagation()}>
+            <h3 style={{ margin:"0 0 6px" }}>🏢 Firma Seçimi</h3>
+            <div style={{ fontSize:"13px", color:"#6b7280", marginBottom:"18px" }}>
+              Bu iş avansı hangi firmadan ödeniyor? Seçim, avansı o firmanın nakit akışına yazar.
+            </div>
+            <div style={{ display:"grid", gap:"10px" }}>
+              <button onClick={async()=>{ const m=firmaModal; setFirmaModal(null); await _approve(m.id, m.action, "AHY"); }}
+                style={{ padding:"14px", background:"#fffbeb", border:"2px solid #f59e0b", color:"#92400e", borderRadius:"12px", fontWeight:800, fontSize:"15px", cursor:"pointer" }}>
+                ⚡ AHY Elektrik
+              </button>
+              <button onClick={async()=>{ const m=firmaModal; setFirmaModal(null); await _approve(m.id, m.action, "ERC"); }}
+                style={{ padding:"14px", background:"#eff6ff", border:"2px solid #3b82f6", color:"#1e40af", borderRadius:"12px", fontWeight:800, fontSize:"15px", cursor:"pointer" }}>
+                🏢 Şimşek (ERC)
+              </button>
+              <button onClick={()=>setFirmaModal(null)}
+                style={{ padding:"10px", background:"#f3f4f6", border:"none", color:"#374151", borderRadius:"10px", fontWeight:600, cursor:"pointer" }}>
+                İptal
+              </button>
+            </div>
           </div>
         </div>
       )}

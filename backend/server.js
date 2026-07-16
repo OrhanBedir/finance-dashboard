@@ -5470,10 +5470,11 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         FROM avans a JOIN personel p ON p.id=a.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
           AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`, [marka, DEVIR]),
-      pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
-        FROM avans a JOIN personel p ON p.id=a.personel_id
-        WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
-          AND UPPER(COALESCE(a.avans_turu,''))='IS' GROUP BY 1`, [marka, DEVIR]),
+      pool.query(`SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, SUM(t.tutar) AS t
+        FROM is_avans_talep t
+        WHERE UPPER(COALESCE(t.firma,'ERC'))=$1
+          AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
+          AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2 GROUP BY 1`, [marka, DEVIR]),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
         FROM arac_kira_odemeler o
         WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
@@ -5527,12 +5528,21 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           COALESCE(m.donem,'') AS aciklama
         FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
         WHERE COALESCE(p.marka,'ERC') = $1 AND m.tarih >= $2`, [marka, baslangic]),
+      // Maaş avansları: personel markası bazlı. İş avansları: ONAYDA SEÇİLEN
+      // firmaya göre (is_avans_talep.firma) — ödeme/direktör onay tarihiyle.
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
-          CASE WHEN UPPER(COALESCE(a.avans_turu,'MAAS'))='IS' THEN 'IS_AVANSI' ELSE 'MAAS_AVANSI' END AS tip,
-          a.tutar, COALESCE(a.aciklama,'') AS aciklama
+          'MAAS_AVANSI' AS tip, a.tutar, COALESCE(a.aciklama,'') AS aciklama
         FROM avans a JOIN personel p ON p.id = a.personel_id
         WHERE COALESCE(p.marka,'ERC') = $1 AND a.tarih >= $2
-          AND UPPER(COALESCE(a.avans_turu,'MAAS')) IN ('MAAS','IS')`, [marka, baslangic]),
+          AND UPPER(COALESCE(a.avans_turu,'MAAS')) = 'MAAS'
+        UNION ALL
+        SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM-DD') AS tarih,
+          t.talep_eden_ad AS ad_soyad, 'IS_AVANSI' AS tip, t.tutar,
+          COALESCE(t.aciklama,'') AS aciklama
+        FROM is_avans_talep t
+        WHERE UPPER(COALESCE(t.firma,'ERC')) = $1
+          AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
+          AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2`, [marka, baslangic]),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad,
           'ARAC_KIRA' AS tip, o.tutar,
           (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
@@ -10617,6 +10627,7 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
               tutar, talep_eden_ad, gider_turu, aciklama, durum
        FROM is_avans_talep
        WHERE durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
+         AND UPPER(COALESCE(firma,'ERC')) = 'ERC'
          AND COALESCE(odeme_tarihi, direktor_onay_tarihi) IS NOT NULL
          AND EXTRACT(YEAR FROM COALESCE(odeme_tarihi, direktor_onay_tarihi))=$1
          AND EXTRACT(MONTH FROM COALESCE(odeme_tarihi, direktor_onay_tarihi))=$2`,
@@ -12668,6 +12679,7 @@ pool.query(`
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS red_aciklama TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS rollout_mudur_onay_tarihi DATE;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS plaka TEXT;
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS firma TEXT;
 `).catch(e => console.error("is_avans_talep tablo hatası:", e.message));
 
 // GET iş avansı bakiye for a personel by email
@@ -12887,12 +12899,26 @@ app.delete("/hr/is-avans/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Onaylarken firma seçimi (16.07.2026 kurgusu): PM (Orhan) onaylarken —
+// talep Orhan'ınsa Direktör (Düzgün) onaylarken — AHY/ŞİMŞEK seçer.
+// firma='AHY' → AHY nakit akışına, 'ERC' → Şimşek nakit akışına düşer.
+function normalizeAvansFirma(v) {
+  const s = String(v || "").toUpperCase().trim();
+  if (s === "AHY") return "AHY";
+  if (s === "ERC" || s === "SIMSEK" || s === "ŞİMŞEK") return "ERC";
+  return null;
+}
+
 app.put("/hr/is-avans/:id/onayla", async (req, res) => {
   try {
     const { id } = req.params;
+    const firmaSecim = normalizeAvansFirma(req.body?.firma);
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
+    if (firmaSecim) {
+      await pool.query("UPDATE is_avans_talep SET firma=$1 WHERE id=$2", [firmaSecim, id]);
+    }
     const today = new Date().toISOString().split("T")[0];
     let updateSql, updateParams;
 
@@ -12940,10 +12966,11 @@ app.put("/hr/is-avans/:id/pm-onayla", async (req, res) => {
     if (!["TALEP","ROLLOUT_MUDUR_ONAY"].includes(talep.durum)) {
       return res.status(400).json({ error: "Bu durumda PM onayı yapılamaz" });
     }
+    const firmaSecim = normalizeAvansFirma(req.body?.firma);
     const today = new Date().toISOString().split("T")[0];
     const updated = await pool.query(
-      "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1 WHERE id=$2 RETURNING *",
-      [today, id]
+      "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1, firma=COALESCE($3, firma) WHERE id=$2 RETURNING *",
+      [today, id, firmaSecim]
     );
     res.json(updated.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -12959,10 +12986,11 @@ app.put("/hr/is-avans/:id/direktor-onayla", async (req, res) => {
     if (talep.durum !== "PM_ONAY") {
       return res.status(400).json({ error: "Bu durumda direktör onayı yapılamaz" });
     }
+    const firmaSecim = normalizeAvansFirma(req.body?.firma);
     const today = new Date().toISOString().split("T")[0];
     const updated = await pool.query(
-      "UPDATE is_avans_talep SET durum='DIREKTOR_ONAY', pm_onay_tarihi=$1, direktor_onay_tarihi=$1 WHERE id=$2 RETURNING *",
-      [today, id]
+      "UPDATE is_avans_talep SET durum='DIREKTOR_ONAY', pm_onay_tarihi=$1, direktor_onay_tarihi=$1, firma=COALESCE($3, firma) WHERE id=$2 RETURNING *",
+      [today, id, firmaSecim]
     );
     res.json(updated.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
