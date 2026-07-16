@@ -15814,7 +15814,8 @@ const SUBCON_USERS = [
   { name: "Zeki Sandal",     email: "zsandal@ubstasarimmakine.com.tr", subcon_name: "UBS",     payment_rate: 0.75, password: "123456" },
   { name: "Burhan Koçak",    email: "b.kocak@federalgroups.com",       subcon_name: "Federal", payment_rate: 0.80, password: "123456" },
   { name: "AHY Elektrik",    email: "ahy",                             subcon_name: "AHY",     payment_rate: 0.90, password: "ahy2026" },
-  { name: "Serdar Altınova", email: "serdar.altinova@simsektel.com",   subcon_name: "2KX HABERLEŞME SİSTEMLERİ MÜHENDİSLİK İNŞAAT LİMİTED ŞİRKETİ", payment_rate: 1.0, password: "123456" },
+  // Serdar Altınova seed'den çıkarıldı (14.07.2026): simsektel hesabı artık
+  // ERC bölge müdürü — startup migration yönetiyor, seed rol/şifre ezmesin.
 ];
 
 (async () => {
@@ -15928,12 +15929,21 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
         WHERE COALESCE(aktif,true)=true AND COALESCE(surucu,'') NOT ILIKE '%orhan%'`);
       if (aracMig.rowCount > 0) console.log(`[araç devri] Pasife alınan eski araç: ${aracMig.rowCount}`);
     }
-    // Yönetim garantisi: platform sahibi + ERC yönetimi + muhasebe + Nurcan
-    // (tüm günlük iş girişlerini yapan rollout müdürü) her açılışta ERC
-    // markasında kalır — eski görünümlerinin tamamını korurlar.
+    // Yönetim garantisi: platform sahibi + ERC yönetimi + muhasebe + bölge
+    // müdürleri (Nurcan, Serdar) her açılışta ERC markasında kalır.
     await pool.query(`UPDATE users SET marka='ERC'
-      WHERE LOWER(email) IN ('orhan.bedir@gmail.com','orhan.bedir@simsektel.com','orhan@simsektel.com','duzgun.simsek@simsektel.com','muhasebe@simsektel.com','nurcan.kus@simsektel.com')
+      WHERE LOWER(email) IN ('orhan.bedir@gmail.com','orhan.bedir@simsektel.com','orhan@simsektel.com','duzgun.simsek@simsektel.com','muhasebe@simsektel.com','nurcan.kus@simsektel.com','serdar.altinova@simsektel.com')
         AND COALESCE(marka,'ERC') <> 'ERC'`);
+    // SERDAR ALTINOVA iki kimlik kurgusu (14.07.2026):
+    // gmail → 2KX görünümü (2KX Paneli + taşeron kapsamı, izole firma kaldırıldı)
+    // simsektel → ERC bölge müdürü (2KX bağı kaldırıldı, tam ERC menüsü)
+    await pool.query(`UPDATE users SET is_active=true, status='active', tenant='2kx',
+        subcon_name='2KX HABERLEŞME SİSTEMLERİ MÜHENDİSLİK İNŞAAT LİMİTED ŞİRKETİ',
+        payment_rate=0.75, role='rollout_mudur', marka='ERC'
+      WHERE LOWER(email)='serdaraltinova@gmail.com'`);
+    await pool.query(`UPDATE users SET is_active=true, status='active', tenant='erc',
+        subcon_name=NULL, role='rollout_mudur', marka='ERC'
+      WHERE LOWER(email)='serdar.altinova@simsektel.com'`);
     // AHY iş görünümü: Bölge Analizi'nde yalnız taşeronu 'AHY ELEKTRİK' olan
     // sahaları %90 kırılımla görür (UBS/Federal/2KX ile aynı mekanizma).
     await pool.query(`UPDATE users SET subcon_name='AHY ELEKTRİK', payment_rate=0.90

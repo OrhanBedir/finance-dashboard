@@ -23393,8 +23393,9 @@ function App() {
     if (u?.role === "platform_admin") return "platform";
     // Alt marka (AHY) yöneticisi: subcon_name taşısa da kendi Finans Özeti'ne iner
     if (u?.hw_yukleme === false && ["admin","direktor","muhasebe","genel_mudur"].includes(String(u?.role||"").toLowerCase())) return "marka_finans";
-    // 2KX artık AHY gibi Bölge Analizi paneli kullanıyor (eski 2kx paneli kaldırıldı)
-    // Alt yüklenici (AHY/Federal/UBS/2KX gibi) → doğrudan Bölge Analizi kartları
+    // 2KX kullanıcısı (serdaraltinova@gmail.com) doğrudan 2KX Paneli'ne iner
+    if (String(u?.subcon_name || "").toUpperCase().includes("2KX")) return "2kx";
+    // Alt yüklenici (AHY/Federal/UBS gibi) → doğrudan Bölge Analizi kartları
     if (String(u?.role||"").toLowerCase() === "subcon" || String(u?.subcon_name||"").trim() !== "") return "region";
     if (u?.role === "user" && !isBolge && !isRolloutOverride) return "masraf";
     if (isBolge) return "region";
@@ -24249,6 +24250,11 @@ function App() {
           ) : isSubconUser ? (
             <>
               <div className="sidebar-section-title">Menü</div>
+              {is2KXUser && (
+                <div className={`sidebar-nav-item ${page==='2kx'?'active':''}`} onClick={()=>setPage('2kx')}>
+                  <span>📊</span> 2KX Paneli
+                </div>
+              )}
               <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
                 <span>📍</span> Bölge Analizi
               </div>
