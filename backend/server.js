@@ -14382,6 +14382,9 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
 
 // PUT arsivle — arsiv_tarihi nakit akışına düşme günüdür (AHY marka-nakit)
 pool.query(`ALTER TABLE masraf_form ADD COLUMN IF NOT EXISTS arsiv_tarihi TIMESTAMP`).catch(() => {});
+// tamamlanan_qty boot garantisi: /setup-db içindeki ALTER yalnız elle çağrılınca
+// çalışıyor — buildMasterJoinedQuery bu kolonu kullandığı için açılışta garanti et
+pool.query(`ALTER TABLE master_works ADD COLUMN IF NOT EXISTS tamamlanan_qty NUMERIC`).catch(() => {});
 app.put("/hr/masraf-form/:id/arsivle", async (req, res) => {
   try {
     const { rows } = await pool.query(
