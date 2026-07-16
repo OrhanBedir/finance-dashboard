@@ -13887,6 +13887,20 @@ app.post("/hr/araclar/:id/kira-ode", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Hatalı girilen kira ödemesini geri al (dönem bazlı)
+app.delete("/hr/araclar/:id/kira-ode", async (req, res) => {
+  try {
+    const donem = String(req.query.donem || "");
+    if (!/^\d{4}-\d{2}$/.test(donem)) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
+    const r = await pool.query(
+      `DELETE FROM arac_kira_odemeler WHERE arac_id=$1 AND donem=$2 RETURNING *`,
+      [req.params.id, donem],
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Bu dönem için ödeme kaydı yok" });
+    res.json({ ok: true, silinen: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/hr/arac-kira-odemeler", async (req, res) => {
   try {
     const r = await pool.query(`

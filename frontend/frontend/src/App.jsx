@@ -26463,6 +26463,23 @@ function AraclarPanel({ currentUser, onBack }) {
   const today = new Date();
   const dayDiff = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
 
+  // Borç takibi: devir ayından (2026-07, kira başlangıcı daha yeniyse o) bu aya
+  // kadar ödenmeyen aylar × aylık kira. Pasif (iade edilmiş) araç borç üretmez.
+  const borcHesap = (a) => {
+    if (!a.aktif || Number(a.aylik_kira || 0) <= 0) return { aylar: [], tutar: 0 };
+    const simdi = new Date().toISOString().slice(0, 7);
+    let bas = "2026-07";
+    if (a.kira_baslangic) { const kb = String(a.kira_baslangic).slice(0, 7); if (kb > bas) bas = kb; }
+    const aylar = [];
+    let [y, m] = bas.split("-").map(Number);
+    while (`${y}-${String(m).padStart(2, "0")}` <= simdi) {
+      const ay = `${y}-${String(m).padStart(2, "0")}`;
+      if (!kiraOdemeler.some(o => String(o.arac_id) === String(a.id) && o.donem === ay)) aylar.push(ay);
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    return { aylar, tutar: aylar.length * Number(a.aylik_kira || 0) };
+  };
+
   const expiryColor = (d) => {
     const diff = dayDiff(d);
     if (diff === null) return "#9ca3af";
@@ -26561,11 +26578,23 @@ function AraclarPanel({ currentUser, onBack }) {
           <div>
             <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>🚗 Araç Filosu</h2>
             <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>{araclar.filter(a=>a.durum==="AKTİF").length} aktif araç</p>
-            <div style={{ marginTop:"5px", display:"flex", alignItems:"center", gap:"8px" }}>
+            <div style={{ marginTop:"5px", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
               <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💰 Aylık Toplam Kira:</span>
               <span style={{ fontSize:"16px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 12px" }}>
                 ₺{araclar.filter(a=>a.durum==="AKTİF").reduce((s,a)=>s+Number(a.aylik_kira||0),0).toLocaleString("tr-TR")}
               </span>
+              {(() => {
+                const toplamBorc = araclar.reduce((s, a) => s + borcHesap(a).tutar, 0);
+                return (
+                  <>
+                    <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💳 Toplam Borç:</span>
+                    <span title="Aktif araçlarda ödenmemiş kira ayları toplamı (Temmuz 2026'dan itibaren)"
+                      style={{ fontSize:"16px", fontWeight:800, color: toplamBorc > 0 ? "#b91c1c" : "#166534", background: toplamBorc > 0 ? "#fee2e2" : "#dcfce7", borderRadius:"8px", padding:"2px 12px" }}>
+                      ₺{toplamBorc.toLocaleString("tr-TR")}
+                    </span>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -26617,8 +26646,16 @@ function AraclarPanel({ currentUser, onBack }) {
           const sd = dayDiff(a.sigorta_bitis);
           const md = dayDiff(a.muayene_bitis);
           const kd = dayDiff(a.kira_bitis);
+          const borc = borcHesap(a);
+          const borcTitle = !a.aktif
+            ? undefined
+            : borc.tutar > 0
+              ? `💳 Kira borcu: ₺${borc.tutar.toLocaleString("tr-TR")} — ödenmeyen aylar: ${borc.aylar.join(", ")}`
+              : Number(a.aylik_kira || 0) > 0
+                ? "✅ Kira borcu yok — tüm aylar ödendi"
+                : undefined;
           return (
-            <div key={a.id} style={{ background:"#fff", borderRadius:"14px", boxShadow:"0 1px 6px rgba(0,0,0,0.08)", overflow:"hidden" }}>
+            <div key={a.id} title={borcTitle} style={{ background:"#fff", borderRadius:"14px", boxShadow:"0 1px 6px rgba(0,0,0,0.08)", overflow:"hidden" }}>
               {/* Card header */}
               <div style={{ background: a.durum==="AKTİF" ? "#1e3a5f" : a.durum==="SERVİSTE" ? "#92400e" : "#6b7280", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <div>
@@ -26659,12 +26696,48 @@ function AraclarPanel({ currentUser, onBack }) {
                 {/* Kira ödeme durumu — sadece aktif kiralık araçlarda */}
                 {a.aktif && Number(a.aylik_kira || 0) > 0 && (() => {
                   const _buAy = new Date().toISOString().slice(0, 7);
-                  const odendi = kiraOdemeler.some(o => String(o.arac_id) === String(a.id) && o.donem === _buAy);
+                  const odeme = kiraOdemeler.find(o => String(o.arac_id) === String(a.id) && o.donem === _buAy);
+                  const odendi = !!odeme;
                   return (
-                    <div style={{ display:"flex", gap:"6px", alignItems:"center", marginBottom:"10px" }}>
+                    <div style={{ display:"flex", gap:"6px", alignItems:"center", marginBottom:"10px", flexWrap:"wrap" }}>
                       {odendi
-                        ? <span style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#dcfce7", color:"#166534" }}>✅ Bu ay kira ödendi</span>
+                        ? <span style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#dcfce7", color:"#166534" }}>✅ Bu ay kira ödendi (₺{Number(odeme.tutar || 0).toLocaleString("tr-TR")})</span>
                         : <span style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#fee2e2", color:"#991b1b" }}>💳 Kira bekliyor</span>}
+                      {canEdit && odendi && (
+                        <>
+                          <button title="Ödeme tutarını düzelt" onClick={async (e) => {
+                            e.stopPropagation();
+                            const t = prompt(`${_buAy} kirası için doğru tutarı yazın (₺):`, String(Math.round(Number(odeme.tutar || 0))));
+                            if (!t) return;
+                            const _s = String(t).trim();
+                            const _num = /^\d+(\.\d{1,2})?$/.test(_s) ? Number(_s) : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
+                            if (_num <= 0) { alert("Geçerli tutar giriniz"); return; }
+                            try {
+                              const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/kira-ode`, {
+                                method: "POST", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ donem: _buAy, tutar: _num }),
+                              });
+                              if (!r.ok) throw new Error("Güncellenemedi");
+                              await load();
+                            } catch (err) { alert(err.message || "Ödeme güncellenemedi"); }
+                          }} style={{ padding:"3px 8px", background:"#eff6ff", color:"#1e40af", border:"1px solid #bfdbfe", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>✏️ Düzelt</button>
+                          <button title="Ödemeyi geri al (kira bekliyor durumuna döner)" onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!window.confirm(`${a.plaka} — ${_buAy} kira ödemesi (₺${Number(odeme.tutar || 0).toLocaleString("tr-TR")}) geri alınsın mı?\n\nKayıt silinir, araç yeniden "Kira bekliyor" olur.`)) return;
+                            try {
+                              const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/kira-ode?donem=${_buAy}`, { method: "DELETE" });
+                              if (!r.ok) throw new Error("Geri alınamadı");
+                              await load();
+                            } catch (err) { alert(err.message || "Ödeme geri alınamadı"); }
+                          }} style={{ padding:"3px 8px", background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>↩︎ Geri Al</button>
+                        </>
+                      )}
+                      {borc.tutar > 0 && (
+                        <span title={`Ödenmeyen aylar: ${borc.aylar.join(", ")}`}
+                          style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#fee2e2", color:"#b91c1c" }}>
+                          💳 Borç: ₺{borc.tutar.toLocaleString("tr-TR")} ({borc.aylar.length} ay)
+                        </span>
+                      )}
                       {canEdit && !odendi && (
                         <button onClick={async (e) => {
                           e.stopPropagation();
