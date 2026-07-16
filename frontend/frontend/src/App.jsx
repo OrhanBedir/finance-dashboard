@@ -1236,21 +1236,23 @@ function MarkaNakitPanel({ currentUser }) {
   const ayBaslik = new Date(yy, mm - 1, 1).toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
   const ayKaydir = (delta) => { const d = new Date(yy, mm - 1 + delta, 1); setAy(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`); };
   const KATEGORILER = [
-    ["MAAS_ODEME",  "👥 Maaş Ödemeleri",  "Ödendikçe görünür (İK → Öde)"],
-    ["MAAS_AVANSI", "💰 Maaş Avansları",  "Ödendiği gün görünür"],
-    ["IS_AVANSI",   "🏗 İş Avansları",    "Onaylanıp ödendiği gün"],
-    ["ARAC_KIRA",   "🚗 Araç Kiraları",   "Kira Öde + manuel girişler"],
-    ["TICKET",      "🎫 Ticket / Yemek",  "Manuel girişler"],
-    ["DIGER",       "📋 Diğer Ödemeler",  "Depo-ofis kirası, yemek vb."],
+    ["MAAS_ODEME",   "👥 Maaş Ödemeleri",  "Ödendikçe görünür (İK → Öde)"],
+    ["MAAS_AVANSI",  "💰 Maaş Avansları",  "Ödendiği gün görünür"],
+    ["IS_AVANSI",    "🏗 İş Avansları",    "Onaylanıp ödendiği gün"],
+    ["MASRAF_FORMU", "🧾 Masraf Formları", "Muhasebe arşivlediği gün"],
+    ["ARAC_KIRA",    "🚗 Araç Kiraları",   "Kira Öde + manuel girişler"],
+    ["TICKET",       "🎫 Ticket / Yemek",  "Manuel girişler"],
+    ["DIGER",        "📋 Diğer Ödemeler",  "AHY seçilen manuel girişler"],
   ];
   const fk = (n) => Math.round(Number(n || 0)).toLocaleString("tr-TR");
   const TIP = {
-    MAAS_ODEME:  { ad: "Maaş Ödeme",       bg: "#dcfce7", fg: "#166534" },
-    MAAS_AVANSI: { ad: "Maaş Avansı",      bg: "#fef3c7", fg: "#92400e" },
-    IS_AVANSI:   { ad: "İş Avansı",        bg: "#dbeafe", fg: "#1e40af" },
-    ARAC_KIRA:   { ad: "Araç Kirası",      bg: "#ede9fe", fg: "#6d28d9" },
-    TICKET:      { ad: "Ticket/Yemek",     bg: "#ffedd5", fg: "#9a3412" },
-    DIGER:       { ad: "Diğer Ödeme",      bg: "#f3f4f6", fg: "#374151" },
+    MAAS_ODEME:   { ad: "Maaş Ödeme",       bg: "#dcfce7", fg: "#166534" },
+    MAAS_AVANSI:  { ad: "Maaş Avansı",      bg: "#fef3c7", fg: "#92400e" },
+    IS_AVANSI:    { ad: "İş Avansı",        bg: "#dbeafe", fg: "#1e40af" },
+    MASRAF_FORMU: { ad: "Masraf Formu",     bg: "#fce7f3", fg: "#9d174d" },
+    ARAC_KIRA:    { ad: "Araç Kirası",      bg: "#ede9fe", fg: "#6d28d9" },
+    TICKET:       { ad: "Ticket/Yemek",     bg: "#ffedd5", fg: "#9a3412" },
+    DIGER:        { ad: "Diğer Ödeme",      bg: "#f3f4f6", fg: "#374151" },
   };
   return (
     <div style={{ padding: "24px", maxWidth: "1500px" }}>
@@ -1258,7 +1260,7 @@ function MarkaNakitPanel({ currentUser }) {
         <div>
           <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>
           <div style={{ fontSize: "13px", color: "#64748b" }}>
-            15 Temmuz 2026 devrinden itibaren — kira/diğer ödemeler devirden sonra girilen kayıtlardır, ödeme tarihleriyle gösterilir
+            15 Temmuz 2026 devrinden itibaren — manuel ödemelerde yalnız AHY seçilen girişler, masraf formları arşivlendiği gün görünür
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -19702,7 +19704,7 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [maasOdemeler,setMaasOdemeler]= useState([]); // İK maas_odeme (bu ay yapılan)
   const [isAvanslar,  setIsAvanslar]  = useState([]); // PD onaylı iş avansları (otomatik)
   const [showOdemeModal, setShowOdemeModal] = useState(false);
-  const [odemeForm,   setOdemeForm]   = useState({ kategori:"ARAC", tarih:"", tutar:"", donem:"", aciklama:"" });
+  const [odemeForm,   setOdemeForm]   = useState({ kategori:"ARAC", tarih:"", tutar:"", donem:"", aciklama:"", marka:"ERC" });
   const [odemeSaving, setOdemeSaving] = useState(false);
   const [loading,     setLoading]     = useState(false);
 
@@ -20041,13 +20043,23 @@ function CashFlowPanel({ currentUser, onBack }) {
           <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"440px", padding:"22px 24px", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
             <h3 style={{ margin:"0 0 14px", fontSize:"17px" }}>＋ Ödeme Ekle (gerçekleşen)</h3>
             <div style={{ display:"grid", gap:"12px" }}>
-              <div>
-                <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Kategori</label>
-                <select value={odemeForm.kategori} onChange={e=>setOdemeForm(f=>({...f, kategori:e.target.value}))} style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box" }}>
-                  <option value="ARAC">🚗 Araç Kirası</option>
-                  <option value="TICKET">🎫 Ticket / Yemek</option>
-                  <option value="DIGER">📋 Diğer (yemek, konaklama vb.)</option>
-                </select>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+                <div>
+                  <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Kategori</label>
+                  <select value={odemeForm.kategori} onChange={e=>setOdemeForm(f=>({...f, kategori:e.target.value}))} style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box" }}>
+                    <option value="ARAC">🚗 Araç Kirası</option>
+                    <option value="TICKET">🎫 Ticket / Yemek</option>
+                    <option value="DIGER">📋 Diğer (yemek, konaklama vb.)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Firma</label>
+                  <select value={odemeForm.marka} onChange={e=>setOdemeForm(f=>({...f, marka:e.target.value}))} style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box", background: odemeForm.marka==="AHY" ? "#fffbeb" : "#fff" }}>
+                    <option value="ERC">🏢 Şimşek (ERC)</option>
+                    <option value="AHY">⚡ AHY Elektrik</option>
+                  </select>
+                  <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Şimşek girişlerini AHY göremez</div>
+                </div>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
                 <div>

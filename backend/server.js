@@ -5479,7 +5479,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
         FROM cashflow_odeme
-        WHERE created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
+        WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const map = {};
     const rowOf = (ay) => (map[ay] = map[ay] || { ay, gelir_try: 0, gelir_usd: 0, maas: 0, maas_avans: 0, is_avans: 0, diger: 0 });
@@ -5520,7 +5520,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
     // Kira/manuel ödemeler: devirden SONRA sisteme girilen kayıtlar görünür
     // (ödeme tarihi ayın 1'i olabilir — ERC'nin devir öncesi eski girişleri sızmaz)
     const girisBaslangic = "2026-07-15";
-    const [maas, avanslar, kiralar, manuel] = await Promise.all([
+    const [maas, avanslar, kiralar, manuel, masraflar] = await Promise.all([
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
           'MAAS_ODEME' AS tip,
           (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
@@ -5538,16 +5538,29 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
         FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
         WHERE o.created_at >= $1::date`, [girisBaslangic]),
-      // ERC Nakit Akışı'na DEVİRDEN SONRA girilen manuel ödemeler
+      // Manuel ödemeler: yalnız bu MARKAYA girilenler (firma seçimi 16.07.2026,
+      // eski/etiketsiz kayıtlar ERC sayılır — AHY görmez)
       pool.query(`SELECT to_char(tarih,'YYYY-MM-DD') AS tarih,
           COALESCE(NULLIF(aciklama,''),
             CASE kategori WHEN 'ARAC' THEN 'Araç kirası' WHEN 'TICKET' THEN 'Ticket/Yemek' ELSE 'Diğer ödeme' END) AS ad_soyad,
           CASE kategori WHEN 'ARAC' THEN 'ARAC_KIRA' WHEN 'TICKET' THEN 'TICKET' ELSE 'DIGER' END AS tip,
           tutar, COALESCE(donem,'') AS aciklama
         FROM cashflow_odeme
-        WHERE created_at >= $1::date`, [girisBaslangic]).catch(() => ({ rows: [] })),
+        WHERE UPPER(COALESCE(marka,'ERC')) = $1`, [marka]).catch(() => ({ rows: [] })),
+      // Masraf formları: muhasebe ARŞİVLEDİĞİ gün nakit akışına düşer
+      // (devirden sonra arşivlenenler, marka personeli)
+      pool.query(`SELECT to_char(mf.arsiv_tarihi,'YYYY-MM-DD') AS tarih,
+          mf.talep_eden_ad AS ad_soyad, 'MASRAF_FORMU' AS tip,
+          COALESCE(k.toplam,0) AS tutar,
+          ('Form #' || mf.form_no) AS aciklama
+        FROM masraf_form mf
+        JOIN personel p ON LOWER(COALESCE(p.email,'')) = LOWER(mf.talep_eden_email)
+        LEFT JOIN (SELECT form_id, SUM(tutar) AS toplam FROM masraf_kalem GROUP BY form_id) k ON k.form_id = mf.id
+        WHERE mf.durum='ARSIVLENDI' AND mf.arsiv_tarihi IS NOT NULL
+          AND mf.arsiv_tarihi >= $2::date
+          AND COALESCE(p.marka,'ERC') = $1`, [marka, baslangic]).catch(() => ({ rows: [] })),
     ]);
-    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...manuel.rows]
+    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...manuel.rows, ...masraflar.rows]
       .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))
       .sort((a, b) => b.tarih.localeCompare(a.tarih));
     res.json({ ok: true, baslangic, rows });
@@ -10562,6 +10575,9 @@ async function ensureCashflowOdemeTable() {
       aciklama TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+  // Firma ayrımı (16.07.2026): ERC (Şimşek) girişlerini AHY görmez. Eski
+  // kayıtların tümü (bugünküler dahil) ERC sayılır.
+  await pool.query(`ALTER TABLE cashflow_odeme ADD COLUMN IF NOT EXISTS marka TEXT DEFAULT 'ERC'`);
 }
 
 app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
@@ -10570,7 +10586,8 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
     const { yil, ay } = req.query;
     if (!yil || !ay) return res.status(400).json({ ok: false, error: "yil ve ay gerekli" });
     const r = await pool.query(
-      `SELECT id, kategori, TO_CHAR(tarih,'YYYY-MM-DD') AS tarih, tutar, donem, aciklama
+      `SELECT id, kategori, TO_CHAR(tarih,'YYYY-MM-DD') AS tarih, tutar, donem, aciklama,
+              UPPER(COALESCE(marka,'ERC')) AS marka
        FROM cashflow_odeme
        WHERE EXTRACT(YEAR FROM tarih)=$1 AND EXTRACT(MONTH FROM tarih)=$2
        ORDER BY tarih, id`, [yil, ay]);
@@ -10611,13 +10628,14 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
 app.post("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
   try {
     await ensureCashflowOdemeTable();
-    const { kategori, tarih, tutar, donem, aciklama } = req.body;
+    const { kategori, tarih, tutar, donem, aciklama, marka } = req.body;
     if (!kategori || !tarih || !tutar)
       return res.status(400).json({ ok: false, error: "kategori, tarih, tutar zorunlu" });
+    const markaVal = String(marka || "ERC").toUpperCase() === "AHY" ? "AHY" : "ERC";
     const r = await pool.query(
-      `INSERT INTO cashflow_odeme (kategori,tarih,tutar,donem,aciklama)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [kategori, tarih, parseFinanceNumber(tutar), donem || null, aciklama || null]);
+      `INSERT INTO cashflow_odeme (kategori,tarih,tutar,donem,aciklama,marka)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [kategori, tarih, parseFinanceNumber(tutar), donem || null, aciklama || null, markaVal]);
     res.json({ ok: true, row: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -14362,11 +14380,12 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT arsivle
+// PUT arsivle — arsiv_tarihi nakit akışına düşme günüdür (AHY marka-nakit)
+pool.query(`ALTER TABLE masraf_form ADD COLUMN IF NOT EXISTS arsiv_tarihi TIMESTAMP`).catch(() => {});
 app.put("/hr/masraf-form/:id/arsivle", async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `UPDATE masraf_form SET durum='ARSIVLENDI' WHERE id=$1 AND durum='TAMAMLANDI' RETURNING *`,
+      `UPDATE masraf_form SET durum='ARSIVLENDI', arsiv_tarihi=NOW() WHERE id=$1 AND durum='TAMAMLANDI' RETURNING *`,
       [req.params.id]
     );
     res.json(rows[0] || { error: "Güncellenemedi" });
