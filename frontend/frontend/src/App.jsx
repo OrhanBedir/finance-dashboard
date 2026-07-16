@@ -1215,19 +1215,21 @@ function MarkaNakitPanel({ currentUser }) {
   const gunler = {};
   rows.forEach(r => { (gunler[r.tarih] = gunler[r.tarih] || []).push(r); });
   const TIP = {
-    MAAS_ODEME:  { ad: "Maaş Ödeme",   bg: "#dcfce7", fg: "#166534" },
-    MAAS_AVANSI: { ad: "Maaş Avansı",  bg: "#fef3c7", fg: "#92400e" },
-    IS_AVANSI:   { ad: "İş Avansı",    bg: "#dbeafe", fg: "#1e40af" },
-    ARAC_KIRA:   { ad: "Araç Kirası",  bg: "#ede9fe", fg: "#6d28d9" },
+    MAAS_ODEME:  { ad: "Maaş Ödeme",       bg: "#dcfce7", fg: "#166534" },
+    MAAS_AVANSI: { ad: "Maaş Avansı",      bg: "#fef3c7", fg: "#92400e" },
+    IS_AVANSI:   { ad: "İş Avansı",        bg: "#dbeafe", fg: "#1e40af" },
+    ARAC_KIRA:   { ad: "Araç Kirası",      bg: "#ede9fe", fg: "#6d28d9" },
+    TICKET:      { ad: "Ticket/Yemek",     bg: "#ffedd5", fg: "#9a3412" },
+    DIGER:       { ad: "Diğer Ödeme",      bg: "#f3f4f6", fg: "#374151" },
   };
   return (
     <div style={{ padding: "24px", maxWidth: "900px" }}>
       <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>
       <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>
-        15 Temmuz 2026 devir tarihinden itibaren günlük harcamalar (maaş ödemeleri + avanslar)
+        Günlük harcamalar — maaş ve avanslar 15 Temmuz'dan, kira ve diğer ödemeler 1 Temmuz 2026'dan itibaren
       </div>
       <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
-        {[["Bugün", bugunT, "#1e3a5f"], ["Son 7 Gün", haftaT, "#b45309"], ["Toplam (15 Tem'den beri)", toplam, "#991b1b"]].map(([l, v, c]) => (
+        {[["Bugün", bugunT, "#1e3a5f"], ["Son 7 Gün", haftaT, "#b45309"], ["Toplam (Temmuz'dan beri)", toplam, "#991b1b"]].map(([l, v, c]) => (
           <div key={l} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: `5px solid ${c}`, borderRadius: "12px", padding: "14px 20px", minWidth: "180px" }}>
             <div style={{ fontSize: "11px", color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{l}</div>
             <div style={{ fontSize: "21px", fontWeight: 800, color: c, marginTop: "3px" }}>₺{fmt(v)}</div>

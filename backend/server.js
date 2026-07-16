@@ -5535,8 +5535,9 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     }
     const marka = String(req.query.marka || "AHY").toUpperCase();
-    const baslangic = "2026-07-15"; // AHY devir tarihi
-    const [maas, avanslar, kiralar] = await Promise.all([
+    const baslangic = "2026-07-15";     // maaş/avans devri: 15 Temmuz 2026
+    const kiraBaslangic = "2026-07-01"; // kira ve diğer ödemeler: ay başından (AHY finansı üstlendi)
+    const [maas, avanslar, kiralar, manuel] = await Promise.all([
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
           'MAAS_ODEME' AS tip,
           (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
@@ -5553,9 +5554,17 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           'ARAC_KIRA' AS tip, o.tutar,
           (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
         FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
-        WHERE o.tarih >= $1`, [baslangic]),
+        WHERE o.tarih >= $1`, [kiraBaslangic]),
+      // ERC Nakit Akışı'na girilen manuel ödemeler (araç/ticket/depo-kira vb.)
+      pool.query(`SELECT to_char(tarih,'YYYY-MM-DD') AS tarih,
+          COALESCE(NULLIF(aciklama,''),
+            CASE kategori WHEN 'ARAC' THEN 'Araç kirası' WHEN 'TICKET' THEN 'Ticket/Yemek' ELSE 'Diğer ödeme' END) AS ad_soyad,
+          CASE kategori WHEN 'ARAC' THEN 'ARAC_KIRA' WHEN 'TICKET' THEN 'TICKET' ELSE 'DIGER' END AS tip,
+          tutar, COALESCE(donem,'') AS aciklama
+        FROM cashflow_odeme
+        WHERE tarih >= $1`, [kiraBaslangic]).catch(() => ({ rows: [] })),
     ]);
-    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows]
+    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...manuel.rows]
       .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))
       .sort((a, b) => b.tarih.localeCompare(a.tarih));
     res.json({ ok: true, baslangic, rows });
