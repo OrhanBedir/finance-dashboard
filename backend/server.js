@@ -2771,6 +2771,7 @@ function buildMasterJoinedQuery(
       m.item_code,
       COALESCE(NULLIF(TRIM(m.item_description), ''), best_boq.boq_items_en, '') AS item_description,
       COALESCE(m.done_qty, 0) AS done_qty,
+      m.tamamlanan_qty,
       COALESCE(m.subcon_name, '') AS subcon_name,
       m.onair_date,
       COALESCE(m.note, '') AS note,
@@ -3228,6 +3229,14 @@ app.get("/setup-db", async (req, res) => {
     await pool.query(`
       ALTER TABLE master_works
       ADD COLUMN IF NOT EXISTS kabul_not TEXT
+    `);
+
+    // Fiziki tamamlanan miktar (16.07.2026): done_qty PO talebine esas iş
+    // miktarıdır; tamamlanan_qty sahada gerçekten biten miktar. NULL = done
+    // ile aynı kabul edilir (eski kayıtlar için geriye dönük uyum).
+    await pool.query(`
+      ALTER TABLE master_works
+      ADD COLUMN IF NOT EXISTS tamamlanan_qty NUMERIC
     `);
 
     await pool.query(`
@@ -7903,25 +7912,33 @@ app.post("/master/add", async (req, res) => {
 
     console.log("DUPLICATE CHECK BITTI:", duplicateCheck.rows.length);
 
+    // Tamamlanan (fiziki) miktar: boş gönderildiyse NULL kalır (= done kabul edilir)
+    const tamamlananQty =
+      m.tamamlanan_qty === undefined || m.tamamlanan_qty === null || m.tamamlanan_qty === ""
+        ? null
+        : parseNumber(m.tamamlanan_qty);
+
     if (duplicateCheck.rows.length > 0) {
       await pool.query(
         `
         UPDATE master_works
         SET
           done_qty = $1,
-          subcon_name = $2,
-          onair_date = $3,
-          qc_durum = $4,
-          kabul_durum = $5,
-          kabul_not = $6,
-          note = $7
+          tamamlanan_qty = $2,
+          subcon_name = $3,
+          onair_date = $4,
+          qc_durum = $5,
+          kabul_durum = $6,
+          kabul_not = $7,
+          note = $8
         WHERE
-          project_code = $8
-          AND site_code = $9
-          AND item_code = $10
+          project_code = $9
+          AND site_code = $10
+          AND item_code = $11
         `,
         [
           parseNumber(m.done_qty),
+          tamamlananQty,
           m.subcon_name ? String(m.subcon_name).trim() : null,
           parseExcelDate(m.onair_date),
           m.qc_durum || "NOK",
@@ -7950,6 +7967,7 @@ app.post("/master/add", async (req, res) => {
         item_code,
         item_description,
         done_qty,
+        tamamlanan_qty,
         subcon_name,
         onair_date,
         note,
@@ -7957,7 +7975,7 @@ app.post("/master/add", async (req, res) => {
         kabul_durum,
         kabul_not
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
       RETURNING *
       `,
       [
@@ -7967,6 +7985,7 @@ app.post("/master/add", async (req, res) => {
         itemCode,
         m.item_description ? String(m.item_description).trim() : null,
         parseNumber(m.done_qty),
+        tamamlananQty,
         m.subcon_name ? String(m.subcon_name).trim() : null,
         parseExcelDate(m.onair_date),
         m.note ? String(m.note).trim() : null,
@@ -8106,13 +8125,14 @@ app.put("/master/:id", async (req, res) => {
         item_code = $4,
         item_description = $5,
         done_qty = $6,
-        subcon_name = $7,
-        onair_date = $8,
-        note = $9,
-        qc_durum = $10,
-        kabul_durum = $11,
-        kabul_not = $12
-      WHERE id = $13
+        tamamlanan_qty = $7,
+        subcon_name = $8,
+        onair_date = $9,
+        note = $10,
+        qc_durum = $11,
+        kabul_durum = $12,
+        kabul_not = $13
+      WHERE id = $14
       RETURNING *
       `,
       [
@@ -8122,6 +8142,9 @@ app.put("/master/:id", async (req, res) => {
         m.item_code ? String(m.item_code).trim() : null,
         m.item_description ? String(m.item_description).trim() : null,
         parseNumber(m.done_qty),
+        m.tamamlanan_qty === undefined || m.tamamlanan_qty === null || m.tamamlanan_qty === ""
+          ? null
+          : parseNumber(m.tamamlanan_qty),
         m.subcon_name ? String(m.subcon_name).trim() : null,
         parseExcelDate(m.onair_date),
         m.note ? String(m.note).trim() : null,

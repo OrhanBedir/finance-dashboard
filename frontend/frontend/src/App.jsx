@@ -2531,6 +2531,7 @@ function DailyEntry() {
     item_code: "",
     item_description: "",
     done_qty: "",
+    tamamlanan_qty: "",
     subcon_name: "",
     onair_date: "",
     note: "",
@@ -2975,6 +2976,7 @@ function DailyEntry() {
       item_code: row.item_code || "",
       item_description: row.item_description || "",
       done_qty: row.done_qty ?? "",
+      tamamlanan_qty: row.tamamlanan_qty ?? "",
       subcon_name: row.subcon_name || "",
       onair_date: row.onair_date ? String(row.onair_date).slice(0, 10) : "",
       note: row.note || "",
@@ -3072,6 +3074,7 @@ function DailyEntry() {
         item_code: form.item_code,
         item_description: form.item_description,
         done_qty: Number(form.done_qty || 0),
+        tamamlanan_qty: form.tamamlanan_qty === "" ? null : Number(form.tamamlanan_qty),
         subcon_name: normalizedSubcon,
         onair_date: form.onair_date || null,
         note: form.note,
@@ -3370,14 +3373,14 @@ function DailyEntry() {
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
               <tr>
-                {["Saha Türü","Project","Site","Item Code","Item Description","Done Qty","Req. Qty","Fark","Analiz","Taşeron","OnAir","RF Not","İşlem","QC","Kabul","Kabul Not"].map(h => (
+                {["Saha Türü","Project","Site","Item Code","Item Description","Done Qty","Tamamlanan","Req. Qty","Fark","Analiz","Taşeron","OnAir","RF Not","İşlem","QC","Kabul","Kabul Not"].map(h => (
                   <th key={h} style={thStLight()}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {siteEntries.length === 0 ? (
-                <EmptyRow colSpan={16} text="Bu saha için giriş yapılmamış" />
+                <EmptyRow colSpan={17} text="Bu saha için giriş yapılmamış" />
               ) : (
                 siteEntries.map((row, index) => {
                   const analysis = getQtyAnalysis(row.done_qty, row.requested_qty);
@@ -3396,6 +3399,10 @@ function DailyEntry() {
                         <div style={{ display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden", lineHeight:1.35, whiteSpace:"normal", wordBreak:"break-word" }}>{row.item_description}</div>
                       </td>
                       <td style={{ ...tdSt, fontWeight:800, fontSize:14, textAlign:"center", color:"#1d4ed8" }}>{row.done_qty}</td>
+                      <td style={{ ...tdSt, fontWeight:800, fontSize:14, textAlign:"center", color: row.tamamlanan_qty === null || row.tamamlanan_qty === undefined ? "#9ca3af" : Number(row.tamamlanan_qty) >= Number(row.done_qty || 0) ? "#15803d" : "#d97706" }}
+                        title={row.tamamlanan_qty === null || row.tamamlanan_qty === undefined ? "Ayrı girilmedi — Done ile aynı kabul edilir" : "Fiziki tamamlanan miktar"}>
+                        {row.tamamlanan_qty === null || row.tamamlanan_qty === undefined ? `(${row.done_qty})` : Number(row.tamamlanan_qty)}
+                      </td>
                       <td style={{ ...tdSt, textAlign:"center" }}>{row.requested_qty ?? "-"}</td>
                       <td style={{ ...tdSt, textAlign:"center", fontWeight:700, color: analysis.diff > 0 ? "#dc2626" : "#16a34a" }}>{analysis.diff}</td>
                       <td style={tdSt}>
@@ -3586,6 +3593,13 @@ function DailyEntry() {
                     <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Done Qty <span style={{ color: "#dc2626" }}>*</span></label>
                     <input type="number" step="0.01" min="0" name="done_qty" value={form.done_qty} onChange={handleChange} placeholder="0" required
                       style={{ width: "100%", height: 40, padding: "0 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 15, fontWeight: 700, boxSizing: "border-box", background: "#fafafa", outline: "none", textAlign: "center", marginTop: 0 }} />
+                    <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3 }}>PO talebine esas iş miktarı</div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tamamlanan</label>
+                    <input type="number" step="0.01" min="0" name="tamamlanan_qty" value={form.tamamlanan_qty} onChange={handleChange} placeholder="= Done"
+                      style={{ width: "100%", height: 40, padding: "0 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 15, fontWeight: 700, boxSizing: "border-box", background: "#fafafa", outline: "none", textAlign: "center", marginTop: 0 }} />
+                    <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3 }}>Fiziki biten. Boş = Done ile aynı, başlanmadıysa 0 yazın</div>
                   </div>
                 </div>
               </div>
@@ -17094,6 +17108,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         qc_ok_usd: 0,
         qc_nok_try: 0,
         qc_nok_usd: 0,
+        fiziki_try: 0,
+        fiziki_usd: 0,
         po_bekler_try: 0,
         po_bekler_usd: 0,
         ok_try: 0,
@@ -17112,6 +17128,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         qc_ok_usd: 0,
         qc_nok_try: 0,
         qc_nok_usd: 0,
+        fiziki_try: 0,
+        fiziki_usd: 0,
         po_bekler_try: 0,
         po_bekler_usd: 0,
         ok_try: 0,
@@ -17130,6 +17148,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         qc_ok_usd: 0,
         qc_nok_try: 0,
         qc_nok_usd: 0,
+        fiziki_try: 0,
+        fiziki_usd: 0,
         po_bekler_try: 0,
         po_bekler_usd: 0,
         ok_try: 0,
@@ -17153,6 +17173,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const billedAmount = billedQty * unitPrice;
       // Atanan iş: talep edilen miktar (yapılan daha büyükse yapılan) × birim fiyat
       const assignedAmount = Math.max(Number(row.requested_qty || 0), doneQty) * unitPrice;
+      // Fiziki tamamlanan: tamamlanan_qty girildiyse o, girilmediyse done kabul edilir
+      const fizikiQty = row.tamamlanan_qty === null || row.tamamlanan_qty === undefined
+        ? doneQty
+        : Number(row.tamamlanan_qty || 0);
+      const fizikiAmount = fizikiQty * unitPrice;
       // QC ayrımı (taşeron özeti): QC OK = tamamlanan iş (yapılan bedel),
       // QC NOK/boş = atanan/devam eden iş (atanan bedel)
       const isQcOk = String(row.qc_durum || "").toUpperCase() === "OK";
@@ -17163,11 +17188,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         base[region].total_usd += amount;
         base[region].billed_usd += billedAmount;
         base[region].assigned_usd += assignedAmount;
+        base[region].fiziki_usd += fizikiAmount;
         if (isQcOk) base[region].qc_ok_usd += amount; else base[region].qc_nok_usd += assignedAmount;
       } else {
         base[region].total_try += amount;
         base[region].billed_try += billedAmount;
         base[region].assigned_try += assignedAmount;
+        base[region].fiziki_try += fizikiAmount;
         if (isQcOk) base[region].qc_ok_try += amount; else base[region].qc_nok_try += assignedAmount;
       }
 
@@ -17273,6 +17300,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       return sum + Number(r.qc_nok_try || 0) + Number(r.qc_nok_usd || 0) * usdRate;
     }, 0);
 
+    // Fiziki tamamlanan (tamamlanan_qty bazlı; girilmemişse done kabul)
+    const fiziki = regionSummary.reduce((sum, r) => {
+      return sum + Number(r.fiziki_try || 0) + Number(r.fiziki_usd || 0) * usdRate;
+    }, 0);
+
     return {
       completed,
       invoiced,
@@ -17283,6 +17315,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       assigned,
       qcOk,
       qcNok,
+      fiziki,
     };
   }, [regionSummary, usdRate]);
 
@@ -17978,7 +18011,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // Fiziki Tamamlanan (günlük iş girişindeki done) → QC Onaylı → HW'ye Faturalanan.
   // Her aşama bir öncekinin içinden ilerler; yüzdeler aşamalar arası makası gösterir.
   const _atanan  = (executiveSummary.assigned  || 0);
-  const _fiziki  = (executiveSummary.completed || 0);
+  const _fiziki  = (executiveSummary.fiziki    || 0);
   const _qcOk    = (executiveSummary.qcOk      || 0);
   const _fatura  = (executiveSummary.invoiced  || 0);
   const subconSummary = {
