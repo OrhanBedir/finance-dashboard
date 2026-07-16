@@ -20078,7 +20078,24 @@ function CashFlowPanel({ currentUser, onBack }) {
             <div style={{ display:"flex", flexDirection:"column", gap:"6px", maxHeight:"220px", overflowY:"auto" }}>
               {taseronModal.items.map((it, i) => (
                 <div key={i} style={{ background:"#fdf4ff", borderRadius:"10px", padding:"8px 12px", border:"1px solid #e9d5ff" }}>
-                  <div style={{ fontWeight:700, fontSize:"13px", color:"#6b21a8" }}>{it.firma || "—"}</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"8px" }}>
+                    <div style={{ fontWeight:700, fontSize:"13px", color:"#6b21a8" }}>{it.firma || "—"}</div>
+                    {it.id && (
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`Bu ödeme nakit akışından silinsin mi?\n\n${it.firma || "—"}${it.fatura_no ? "\nFatura: " + it.fatura_no : ""}\nTutar: ₺${Number(it.tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})}\n\nNot: Fatura kaydı silinmez, sadece ödeme bilgisi kaldırılır.`)) return;
+                          try {
+                            const r = await fetch(`${API_BASE}/finance/invoice-entries/${it.id}/odeme-sil`, { method: "PUT", headers });
+                            const j = await r.json();
+                            if (!r.ok || !j.ok) { alert("Silinemedi: " + (j.error || r.status)); return; }
+                            setTaseronModal(null);
+                            loadData();
+                          } catch (err) { alert("Silinemedi: " + err.message); }
+                        }}
+                        style={{ background:"#fef2f2", border:"1px solid #fecaca", color:"#dc2626", borderRadius:"8px", padding:"3px 8px", fontSize:"11px", fontWeight:700, cursor:"pointer", flexShrink:0 }}
+                      >🗑 Sil</button>
+                    )}
+                  </div>
                   {it.fatura_no && <div style={{ fontSize:"11px", color:"#9ca3af" }}>Fatura: {it.fatura_no}</div>}
                   {it.note && <div style={{ fontSize:"11px", color:"#78716c", fontStyle:"italic" }}>{it.note}</div>}
                   <div style={{ fontWeight:800, fontSize:"14px", color:"#7e22ce", marginTop:"4px" }}>

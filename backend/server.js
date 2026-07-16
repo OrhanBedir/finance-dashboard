@@ -12042,6 +12042,7 @@ app.get("/finance/taseron-cashflow", requireFinanceAuth, async (req, res) => {
     // Sadece odeme_tarihi o ay olan, odenen_tutar > 0 kayıtlar
     const result = await pool.query(`
       SELECT
+        id,
         EXTRACT(DAY FROM odeme_tarihi)::int AS gun,
         TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
         COALESCE(odenen_tutar, 0) AS tutar,
@@ -12063,11 +12064,26 @@ app.get("/finance/taseron-cashflow", requireFinanceAuth, async (req, res) => {
       const g = r.gun;
       byDay[g] = (byDay[g] || 0) + Number(r.tutar);
       if (!details[g]) details[g] = [];
-      details[g].push({ firma: r.firma, tutar: Number(r.tutar), fatura_no: r.fatura_no, note: r.note });
+      details[g].push({ id: r.id, firma: r.firma, tutar: Number(r.tutar), fatura_no: r.fatura_no, note: r.note });
     });
 
     res.json({ byDay, details });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Taşeron ödemesini nakit akışından kaldır: FATURA SİLİNMEZ, sadece ödeme
+// bilgisi sıfırlanır (odenen_tutar=0, odeme_tarihi=NULL) — yanlış giriş
+// Fatura Girişi'nden yeniden yazılabilir.
+app.put("/finance/invoice-entries/:id/odeme-sil", requireFinanceAuth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `UPDATE invoice_entries SET odenen_tutar=0, odeme_tarihi=NULL
+       WHERE id=$1 RETURNING id, fatura_no`,
+      [req.params.id],
+    );
+    if (!r.rows.length) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    res.json({ ok: true, kayit: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // Sarkan ödemeler: önceki aylarda eksik kalan maaş ödemeleri
