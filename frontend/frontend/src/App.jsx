@@ -14233,6 +14233,15 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     : isMuhasebe ? list.filter(f=>f.durum==="TAMAMLANDI").length : 0;
 
   const visibleList = list.filter(f => {
+    // Proje Müdürü'nün (Orhan Bedir) formlarını yalnız ÜSTÜ görür:
+    // Direktör her aşamada; Muhasebe sadece direktör onayı sonrası
+    // (TAMAMLANDI → ödeme için). Alt kademeler hiç görmez.
+    const PM_EMAIL = "orhan.bedir@simsektel.com";
+    if (f.talep_eden_email === PM_EMAIL && currentUser?.email !== PM_EMAIL) {
+      const direktorGorur = isDirektor;
+      const muhasebeGorur = isMuhasebe && f.durum === "TAMAMLANDI";
+      if (!direktorGorur && !muhasebeGorur) return false;
+    }
     // Personel sadece kendi formlarını görür
     if (!isApprover && f.talep_eden_email !== currentUser?.email) return false;
     // Onaylayıcılar başkasının TASLAK'larını görmez ama KENDİ TASLAK'larını görebilir
