@@ -258,13 +258,15 @@ function canonSub(name) {
 }
 
 // Veri kapsamı: subcon rolü VEYA alt marka (hw_yukleme=false, ör. AHY yönetimi)
-// yalnız kendi taşeron satırlarını görür. Dönen değer kapsam adı ya da null.
+// VEYA yönetici olmayan taşeron-adlı kullanıcı (ör. 2KX Serdar gmail) yalnız
+// kendi taşeron satırlarını görür. Dönen değer kapsam adı ya da null.
 function subconScope(req) {
   const name = String(req.user?.subcon_name || "").trim();
   if (!name) return null;
   const role = String(req.user?.role || "").toLowerCase();
   if (role === "subcon") return name;
   if (req.user?.hw_yukleme === false) return name; // alt marka tam paneli (info@ahyelektrik.com)
+  if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(role)) return name;
   return null;
 }
 
