@@ -1488,196 +1488,146 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       return "NOK";
     }
 
-    function getSiteTypeFromCode(siteCode) {
-      const code = normalizeText(siteCode);
+    // Şablon/saha-tipi kuralı yok: Excel'deki her saha doğrudan sistemdeki
+    // site_code ile (rollout_progress + master_works) çarpıştırılır.
+    // Özel şablonlar ayrı işlenir:
+    //   "TRS QUALITY CHECK LIST" → sadece 8818274546 kalemi
+    //   "AG OG ENERJI"           → sadece enh_qc_closed_date
+    // Aynı sahada birden çok ana QC satırı varsa OK öncelikli birleştirilir.
 
-      if (code.includes("_NS_")) return "STANDALONE";
-      if (code.includes("_DSS_") || code.includes("_GPS_")) return "DSS";
-      if (code.includes("_TRP_") || code.includes("_NR700_")) return "TRP";
-      if (code.includes("_NR3500_") || code.includes("_5G_")) return "5G";
-      if (
-        code.includes("_L1800_") ||
-        code.includes("_L2600_") ||
-        code.includes("_L2100_") ||
-        code.includes("_L800_") ||
-        code.includes("_LC1800_") ||
-        code.includes("_L900_") ||
-        code.includes("_LTE_") ||
-        code.includes("_W2100_") ||
-        code.includes("_W900_") ||
-        code.includes("_W1900_")
-      ) {
-        return "LTE";
-      }
-
-      return "OTHER";
-    }
-
-    function getRuleByTemplate(siteCode, templateName) {
-      const siteType = getSiteTypeFromCode(siteCode);
-      const template = normalizeText(templateName);
-
-      if (siteType === "STANDALONE") {
-        if (template.includes("STANDALONE AI")) {
-          return { type: "ALL_EXCEPT_SPECIAL" };
-        }
-
-        if (template.includes("TRS QUALITY CHECK LIST")) {
-          return { type: "ONLY_8818274546" };
-        }
-      }
-
-      if (siteType === "DSS") {
-        if (
-          template.includes("DSS-GPS READINESS TASK") ||
-          template.includes("DSS READINESS TASK")
-        ) {
-          return { type: "ALL_EXCEPT_SPECIAL" };
-        }
-      }
-
-      if (siteType === "LTE") {
-        if (template.includes("KONTROL CHECKLIST")) {
-          return { type: "ALL_EXCEPT_SPECIAL" };
-        }
-      }
-
-      if (siteType === "5G") {
-        if (
-          template.includes("5G READINESS QC CHECKLIST") ||
-          template.includes("5G READINESS YENI POLE")
-        ) {
-          return { type: "ALL_EXCEPT_SPECIAL" };
-        }
-      }
-
-      if (siteType === "TRP") {
-        if (template.includes("MODERNIZASYON LOWCOST TASK")) {
-          return { type: "ALL_EXCEPT_SPECIAL" };
-        }
-      }
-
-      return null;
-    }
-
-    let updatedCount = 0;
+    const mainBySite = new Map();
+    const trsBySite = new Map();
+    const enerjiBySite = new Map();
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i] || [];
 
-      const siteId = row[COL_SITE_ID];
-      const statusRaw = row[COL_STATUS];
-      const templateName = row[COL_TEMPLATE];
-
-      const firstSubmitRaw = row[COL_FIRST_SUBMIT];
-      const qcCloseTimeRaw = row[COL_CLOSE_TIME];
-
-      const siteCode = String(siteId || "")
+      const siteCode = String(row[COL_SITE_ID] || "")
         .trim()
         .toUpperCase();
-      const qcDurum = normalizeStatus(statusRaw);
+      const qcDurum = normalizeStatus(row[COL_STATUS]);
 
-      const firstSubmitDateOnly = toDateOnly(firstSubmitRaw);
-      const qcClosedDateOnly = toDateOnly(qcCloseTimeRaw);
+      if (!siteCode || !qcDurum) continue;
 
-      if (!siteCode || !qcDurum || !templateName) {
+      const templateNorm = normalizeText(row[COL_TEMPLATE]);
+      const firstSubmitDateOnly = toDateOnly(row[COL_FIRST_SUBMIT]);
+      const qcClosedDateOnly = toDateOnly(row[COL_CLOSE_TIME]);
+
+      if (templateNorm.includes("AG OG ENERJI")) {
+        if (qcDurum === "OK") {
+          enerjiBySite.set(
+            siteCode,
+            qcClosedDateOnly || firstSubmitDateOnly || enerjiBySite.get(siteCode) || null,
+          );
+        }
         continue;
       }
 
-      const templateNorm = normalizeText(templateName);
-      const siteType = getSiteTypeFromCode(siteCode);
+      if (templateNorm.includes("TRS QUALITY CHECK LIST")) {
+        if (trsBySite.get(siteCode) !== "OK") trsBySite.set(siteCode, qcDurum);
+        continue;
+      }
 
-      // ── RF QC Kuralı: doğru template eşleşince rollout_progress + master_works güncelle ──
-      const rule = getRuleByTemplate(siteCode, templateName);
+      const prev = mainBySite.get(siteCode);
+      if (!prev || (prev.qcDurum !== "OK" && qcDurum === "OK")) {
+        mainBySite.set(siteCode, { qcDurum, firstSubmitDateOnly, qcClosedDateOnly });
+      } else if (prev.qcDurum === "OK" && qcDurum === "OK") {
+        prev.firstSubmitDateOnly = prev.firstSubmitDateOnly || firstSubmitDateOnly;
+        prev.qcClosedDateOnly = prev.qcClosedDateOnly || qcClosedDateOnly;
+      }
+    }
 
-      if (rule) {
-        /* 🔥 Rollout Data RF QC — SADECE doğru template eşleşince güncellenir */
-        await pool.query(
-          `
-          UPDATE rollout_progress
-          SET
-            qc_durum = $2,
+    let updatedCount = 0;
+    let matchedSites = 0;
+    const missingSites = [];
 
-            plan_start_date = COALESCE(plan_start_date, $3),
-            installation_actual_start_date = COALESCE(installation_actual_start_date, $3),
+    for (const [siteCode, m] of mainBySite) {
+      const ro = await pool.query(
+        `
+        UPDATE rollout_progress
+        SET
+          qc_durum = $2,
 
-            installation_actual_end_date = CASE
-              WHEN $2 = 'OK' THEN COALESCE(installation_actual_end_date, $4)
-              ELSE installation_actual_end_date
-            END,
+          plan_start_date = COALESCE(plan_start_date, $3),
+          installation_actual_start_date = COALESCE(installation_actual_start_date, $3),
 
-            onair_date = CASE
-              WHEN $2 = 'OK' THEN COALESCE(onair_date, $4)
-              ELSE onair_date
-            END,
+          installation_actual_end_date = CASE
+            WHEN $2 = 'OK' THEN COALESCE(installation_actual_end_date, $4)
+            ELSE installation_actual_end_date
+          END,
 
-            -- NOK gelince tarih temizlenir: QC "open" ise closed_date olmamalı
-            qc_closed_date = CASE
-              WHEN $2 = 'OK' THEN COALESCE(qc_closed_date, $4)
-              ELSE NULL
-            END,
+          onair_date = CASE
+            WHEN $2 = 'OK' THEN COALESCE(onair_date, $4)
+            ELSE onair_date
+          END,
 
-            malzeme_status = CASE
-              WHEN $2 = 'OK' AND COALESCE(malzeme_status, '') = ''
-              THEN 'OK'
-              ELSE malzeme_status
-            END,
+          -- NOK gelince tarih temizlenir: QC "open" ise closed_date olmamalı
+          qc_closed_date = CASE
+            WHEN $2 = 'OK' THEN COALESCE(qc_closed_date, $4)
+            ELSE NULL
+          END,
 
-            updated_at = NOW()
-          WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1
+          malzeme_status = CASE
+            WHEN $2 = 'OK' AND COALESCE(malzeme_status, '') = ''
+            THEN 'OK'
+            ELSE malzeme_status
+          END,
+
+          updated_at = NOW()
+        WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1
+        `,
+        [siteCode, m.qcDurum, m.firstSubmitDateOnly, m.qcClosedDateOnly],
+      );
+
+      const mw = await pool.query(
+        `
+          UPDATE master_works
+          SET qc_durum = $1
+          WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
+            AND TRIM(COALESCE(item_code, '')) <> ALL($3::text[])
           `,
-          [siteCode, qcDurum, firstSubmitDateOnly, qcClosedDateOnly],
-        );
+        [m.qcDurum, siteCode, EXCLUDED_ITEMS],
+      );
+      updatedCount += mw.rowCount || 0;
 
-        if (rule.type === "ONLY_8818274546") {
-          const result = await pool.query(
-            `
-              UPDATE master_works
-              SET qc_durum = $1
-              WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
-                AND TRIM(COALESCE(item_code, '')) = '8818274546'
-              `,
-            [qcDurum, siteCode],
-          );
-          updatedCount += result.rowCount || 0;
-        }
+      if ((ro.rowCount || 0) + (mw.rowCount || 0) > 0) matchedSites++;
+      else missingSites.push(siteCode);
+    }
 
-        if (rule.type === "ALL_EXCEPT_SPECIAL") {
-          const result = await pool.query(
-            `
-              UPDATE master_works
-              SET qc_durum = $1
-              WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
-                AND TRIM(COALESCE(item_code, '')) <> ALL($3::text[])
-              `,
-            [qcDurum, siteCode, EXCLUDED_ITEMS],
-          );
-          updatedCount += result.rowCount || 0;
-        }
-      }
+    for (const [siteCode, qcDurum] of trsBySite) {
+      const result = await pool.query(
+        `
+          UPDATE master_works
+          SET qc_durum = $1
+          WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
+            AND TRIM(COALESCE(item_code, '')) = '8818274546'
+          `,
+        [qcDurum, siteCode],
+      );
+      updatedCount += result.rowCount || 0;
+    }
 
-      // ── ENH / Enerji QC Kuralı ────────────────────────────────────────────────
-      // Standalone (NS) + "AG OG Enerji Template" → enh_qc_closed_date
-      if (
-        siteType === "STANDALONE" &&
-        templateNorm.includes("AG OG ENERJI")
-      ) {
-        if (qcDurum === "OK") {
-          await pool.query(
-            `UPDATE rollout_progress
-               SET enh_qc_closed_date = COALESCE(enh_qc_closed_date, $2),
-                   updated_at = NOW()
-             WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1`,
-            [siteCode, qcClosedDateOnly || firstSubmitDateOnly],
-          );
-        }
-      }
+    for (const [siteCode, tarih] of enerjiBySite) {
+      if (!tarih) continue;
+      await pool.query(
+        `UPDATE rollout_progress
+           SET enh_qc_closed_date = COALESCE(enh_qc_closed_date, $2),
+               updated_at = NOW()
+         WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1`,
+        [siteCode, tarih],
+      );
     }
 
     return res.json({
       ok: true,
       updatedCount,
-      message: "QC verileri master kayıtlara işlendi",
+      matchedSites,
+      missingSites,
+      message:
+        `QC işlendi: ${matchedSites} saha eşleşti` +
+        (missingSites.length
+          ? ` — ${missingSites.length} saha sistemde bulunamadı: ${missingSites.slice(0, 10).join(", ")}${missingSites.length > 10 ? "…" : ""}`
+          : ""),
     });
   } catch (err) {
     console.error("QC UPLOAD ERROR:", err.message);

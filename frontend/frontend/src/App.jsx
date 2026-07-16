@@ -25034,7 +25034,7 @@ function QCUploadInline({ onClose, onUploaded }) {
         throw new Error(data.error || "Upload hatası");
       }
 
-      alert(`✅ ${data.updatedCount} kayıt güncellendi`);
+      alert(`✅ ${data.updatedCount} kayıt güncellendi${data.message ? `\n\n${data.message}` : ""}`);
 
       if (onUploaded) onUploaded();
       onClose();
