@@ -1232,14 +1232,106 @@ function MarkaPLPanel({ currentUser }) {
     { key: "netNakit", label: "💰 Net Nakit", bold: true, sonuc: true },
     { key: "alacak", label: "Tahsil Edilmemiş Fatura (alacak)", color: "#b45309" },
   ];
-  const indirExcel = () => {
-    const header = ["Kalem", ...aylar.map(a => ayAd(a.ay))];
-    const rows = SATIRLAR.map(s => s.tip === "baslik" ? [s.label] : [s.label, ...aylar.map(a => Number(a[s.key] || 0))]);
-    const ws = XLSX.utils.aoa_to_sheet([[`${markaAd} — Kâr / Zarar (P&L)`], header, ...rows]);
-    ws["!cols"] = [{ wch: 34 }, ...aylar.map(() => ({ wch: 14 }))];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "P&L");
-    XLSX.writeFile(wb, `${marka}_kar_zarar_PL.xlsx`);
+  const indirExcel = async () => {
+    // Kurumsal P&L düzeni: Kalem | aylar | TOPLAM | % — bölüm başlıkları,
+    // para/yüzde formatları, sonuç satırları vurgulu, gridsiz + dondurulmuş başlık
+    const top = (k) => aylar.reduce((s, a) => s + Number(a[k] || 0), 0);
+    const topGider = top("gider");
+    const topFatura = top("fatura");
+    const nCols = 1 + aylar.length + 2;
+    const PARA = '#,##0 "₺";[Red]-#,##0 "₺"';
+    const thin = { style: "thin", color: { rgb: "CBD5E1" } };
+    const border = { top: thin, bottom: thin, left: thin, right: thin };
+    const F = (extra) => ({ font: { name: "Arial", sz: 10, ...(extra || {}) } });
+
+    // Satır tanımı → excel satırı + stil
+    const yuzdeOf = (s) => {
+      if (["maas", "maas_avans", "is_avans", "masraf", "kira", "diger"].includes(s.key) && !s.key2)
+        return topGider > 0 ? top(s.key) / topGider : null;              // gider dağılımı
+      if (s.key === "gider" && !s.key2) return topGider > 0 ? 1 : null;  // %100
+      if (s.key === "kar") return topFatura > 0 ? top("kar") / topFatura : null;       // kâr marjı
+      if (s.key === "tahsilat") return topFatura > 0 ? top("tahsilat") / topFatura : null; // tahsilat oranı
+      return null;
+    };
+
+    const aoa = [];
+    const styles = []; // paralel stil matrisi
+    const pushRow = (cells, cellStyles) => { aoa.push(cells); styles.push(cellStyles); };
+
+    // Başlık + alt bilgi
+    pushRow([`${markaAd.toUpperCase()} — KÂR / ZARAR TABLOSU (P&L)`], [{ ...F({ sz: 15, bold: true, color: { rgb: "FFFFFF" } }), fill: { fgColor: { rgb: "1E3A5F" } }, alignment: { horizontal: "center", vertical: "center" } }]);
+    pushRow([`Dönem: ${aylar.length ? `${ayAd(aylar[0].ay)} — ${ayAd(aylar[aylar.length - 1].ay)}` : "-"}   ·   Oluşturma: ${new Date().toLocaleDateString("tr-TR")}   ·   Tutarlar TL'dir`], [{ ...F({ sz: 9, italic: true, color: { rgb: "64748B" } }), alignment: { horizontal: "center" } }]);
+    pushRow([], []);
+
+    // Kolon başlıkları
+    const headStyle = { ...F({ bold: true, color: { rgb: "FFFFFF" } }), fill: { fgColor: { rgb: "334155" } }, alignment: { horizontal: "center", vertical: "center" }, border };
+    pushRow(["KALEM", ...aylar.map(a => ayAd(a.ay)), "TOPLAM", "%"], Array.from({ length: nCols }, () => headStyle));
+
+    for (const s of SATIRLAR) {
+      if (s.tip === "baslik") {
+        pushRow([s.label, ...Array(nCols - 1).fill("")],
+          Array.from({ length: nCols }, () => ({ ...F({ sz: 9, bold: true, color: { rgb: "1E3A5F" } }), fill: { fgColor: { rgb: "E2E8F0" } }, alignment: { vertical: "center" } })));
+        continue;
+      }
+      const sonuc = !!s.sonuc;
+      const rowBg = sonuc ? "FEF9C3" : undefined;
+      const renk = sonuc ? undefined : (s.color ? s.color.replace("#", "").toUpperCase() : "374151");
+      const labelStyle = { ...F({ bold: s.bold, color: { rgb: sonuc ? "1E3A5F" : "111827" } }), ...(rowBg ? { fill: { fgColor: { rgb: rowBg } } } : {}), border, alignment: { vertical: "center" } };
+      const numStyle = (v) => ({
+        ...F({ bold: s.bold, color: { rgb: sonuc ? (v >= 0 ? "047857" : "B91C1C") : renk } }),
+        ...(rowBg ? { fill: { fgColor: { rgb: rowBg } } } : {}),
+        border, numFmt: PARA, alignment: { horizontal: "right", vertical: "center" },
+      });
+      const pct = yuzdeOf(s);
+      const toplamV = top(s.key);
+      pushRow(
+        [s.label, ...aylar.map(a => Number(a[s.key] || 0)), toplamV, pct === null ? "" : pct],
+        [labelStyle, ...aylar.map(a => numStyle(Number(a[s.key] || 0))),
+          { ...numStyle(toplamV), font: { name: "Arial", sz: 10, bold: true, color: { rgb: sonuc ? (toplamV >= 0 ? "047857" : "B91C1C") : "111827" } } },
+          { ...F({ bold: s.bold, color: { rgb: "64748B" } }), ...(rowBg ? { fill: { fgColor: { rgb: rowBg } } } : {}), border, numFmt: "0.0%", alignment: { horizontal: "right", vertical: "center" } }],
+      );
+    }
+    pushRow([], []);
+    pushRow(["Not: Kâr/Zarar tahakkuk bazlıdır (kesilen fatura − gider). Net Nakit kasa bazlıdır (tahsilat − harcama). % kolonu: gider kalemlerinde gider dağılımı, KÂR/ZARAR'da kâr marjı, tahsilatta tahsilat oranıdır."],
+      [{ ...F({ sz: 8, italic: true, color: { rgb: "92400E" } }) }]);
+
+    const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
+    // Stilleri hücrelere uygula
+    styles.forEach((rowSt, r) => rowSt.forEach((st, c) => {
+      const addr = XLSXStyle.utils.encode_cell({ r, c });
+      if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+      const { numFmt, ...rest } = st || {};
+      ws[addr].s = rest;
+      if (numFmt) ws[addr].z = numFmt;
+    }));
+    ws["!cols"] = [{ wch: 32 }, ...aylar.map(() => ({ wch: 13 })), { wch: 14 }, { wch: 9 }];
+    ws["!rows"] = aoa.map((_, i) => (i === 0 ? { hpt: 30 } : i === 3 ? { hpt: 20 } : { hpt: 17 }));
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: nCols - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: nCols - 1 } },
+      { s: { r: aoa.length - 1, c: 0 }, e: { r: aoa.length - 1, c: nCols - 1 } },
+    ];
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws, "P&L");
+
+    // Gridleri gizle + başlığı dondur (org şeması export deseni)
+    try {
+      const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
+      const zip = await JSZip.loadAsync(buf);
+      let xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
+      const pane = `<pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
+      xml = xml
+        .replace('<sheetView workbookViewId="0"/>', `<sheetView showGridLines="0" workbookViewId="0">${pane}</sheetView>`)
+        .replace('<sheetView tabSelected="1" workbookViewId="0"/>', `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${pane}</sheetView>`);
+      zip.file("xl/worksheets/sheet1.xml", xml);
+      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `${marka}_kar_zarar_PL.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      XLSXStyle.writeFile(wb, `${marka}_kar_zarar_PL.xlsx`);
+    }
   };
   const kart = (strip) => ({ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "20px 24px", flex: "1 1 200px", minWidth: "200px", borderTop: `4px solid ${strip}`, textAlign: "center" });
   const kartBaslik = { fontSize: "13px", color: "#64748b", fontWeight: 600, marginBottom: "10px" };
