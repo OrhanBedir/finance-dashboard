@@ -12660,6 +12660,37 @@ app.get("/hr/is-avans/bakiye", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Personel bazlı iş avansı bakiyeleri (yönetici görünümü):
+// bakiye = TAMAMLANDI iş avansları − ARŞİVLENDİ masraf formları.
+// Muhasebe formu arşivleyince tutar avanstan otomatik düşer; personelin
+// avansı yoksa bakiye eksiye iner (şirket personele borçlu).
+app.get("/hr/is-avans/bakiyeler", async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT p.id, p.ad_soyad, p.aktif,
+        COALESCE(av.toplam,0) AS avans,
+        COALESCE(ms.toplam,0) AS masraf,
+        COALESCE(av.toplam,0) - COALESCE(ms.toplam,0) AS bakiye
+      FROM personel p
+      LEFT JOIN (
+        SELECT personel_id, SUM(tutar) AS toplam
+        FROM is_avans_talep
+        WHERE durum='TAMAMLANDI' AND personel_id IS NOT NULL
+        GROUP BY personel_id
+      ) av ON av.personel_id = p.id
+      LEFT JOIN (
+        SELECT LOWER(mf.talep_eden_email) AS email, SUM(mk.tutar) AS toplam
+        FROM masraf_kalem mk JOIN masraf_form mf ON mf.id = mk.form_id
+        WHERE mf.durum='ARSIVLENDI'
+        GROUP BY 1
+      ) ms ON ms.email = LOWER(COALESCE(p.email,''))
+      WHERE COALESCE(av.toplam,0) <> 0 OR COALESCE(ms.toplam,0) <> 0
+      ORDER BY bakiye ASC, p.ad_soyad ASC
+    `);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/hr/is-avans", async (req, res) => {
   try {
     const { email, name } = req.query;

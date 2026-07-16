@@ -15270,6 +15270,8 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [redText, setRedText] = useState("");
   const [saving, setSaving] = useState(false);
   const [avansBakiye, setAvansBakiye] = useState(null);
+  const [bakiyeler, setBakiyeler] = useState([]); // personel bazlı avans−masraf bakiyeleri (yönetici)
+  const [bakiyelerAcik, setBakiyelerAcik] = useState(false);
   const [notTooltip, setNotTooltip] = useState({ visible: false, x: 0, y: 0, aciklama: "", not_aciklama: "" });
   const [editAvansModal, setEditAvansModal] = useState(null); // { id, tutar, orijinalTutar }
 
@@ -15290,6 +15292,14 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     if (!currentUser?.email) return;
     const r = await fetch(`${API_BASE}/hr/is-avans/bakiye?email=${encodeURIComponent(currentUser.email)}`);
     if (r.ok) setAvansBakiye(await r.json());
+    // Yönetici görünümü: personel bazlı bakiyeler (avans − arşivlenen masraf)
+    if (!isRequester) {
+      try {
+        const rb = await fetch(`${API_BASE}/hr/is-avans/bakiyeler`);
+        const db = await rb.json().catch(() => ({}));
+        if (rb.ok) setBakiyeler(db.rows || []);
+      } catch {}
+    }
   };
 
   const load = async () => {
@@ -15503,6 +15513,69 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
               Toplam avans: ₺{Number(avansBakiye.avans).toLocaleString("tr-TR")} · Arşivlenen masraf: ₺{Number(avansBakiye.masraf).toLocaleString("tr-TR")}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Personel bazlı avans bakiyeleri (yönetici): arşivlenen masraf formu
+          avanstan düşer; avans yoksa bakiye eksiye iner (şirket personele borçlu) */}
+      {!isRequester && bakiyeler.length > 0 && (
+        <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:"14px", marginBottom:"16px", overflow:"hidden" }}>
+          <div
+            onClick={() => setBakiyelerAcik(v => !v)}
+            style={{ padding:"13px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", background:"#f8fafc", borderBottom: bakiyelerAcik ? "1px solid #e5e7eb" : "none" }}
+          >
+            <div>
+              <span style={{ fontWeight:800, fontSize:"14px", color:"#111827" }}>👥 Personel Avans Bakiyeleri</span>
+              <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"10px" }}>
+                Arşivlenen masraf formları iş avansından düşülür
+              </span>
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+              {bakiyeler.some(b => Number(b.bakiye) < 0) && (
+                <span style={{ background:"#fef2f2", color:"#b91c1c", border:"1px solid #fecaca", borderRadius:"8px", padding:"2px 8px", fontSize:"11px", fontWeight:700 }}>
+                  {bakiyeler.filter(b => Number(b.bakiye) < 0).length} personel alacaklı
+                </span>
+              )}
+              <span style={{ fontSize:"13px", color:"#6b7280" }}>{bakiyelerAcik ? "▲" : "▼"}</span>
+            </div>
+          </div>
+          {bakiyelerAcik && (
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px" }}>
+                <thead>
+                  <tr style={{ background:"#f8fafc" }}>
+                    <th style={{ padding:"8px 14px", textAlign:"left", fontWeight:700, color:"#374151", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>Personel</th>
+                    <th style={{ padding:"8px 14px", textAlign:"right", fontWeight:700, color:"#b45309", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>🏗 Toplam İş Avansı</th>
+                    <th style={{ padding:"8px 14px", textAlign:"right", fontWeight:700, color:"#7c3aed", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>🗂 Arşivlenen Masraf</th>
+                    <th style={{ padding:"8px 14px", textAlign:"right", fontWeight:700, color:"#374151", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>Kalan Bakiye</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bakiyeler.map((b, i) => {
+                    const bk = Number(b.bakiye || 0);
+                    return (
+                      <tr key={b.id} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                        <td style={{ padding:"7px 14px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>
+                          {b.ad_soyad}{b.aktif === false && <span style={{ fontSize:"10px", color:"#9ca3af", marginLeft:"6px" }}>(ayrıldı)</span>}
+                        </td>
+                        <td style={{ padding:"7px 14px", textAlign:"right", color: Number(b.avans) > 0 ? "#b45309" : "#9ca3af", fontWeight:600 }}>
+                          {Number(b.avans) > 0 ? `₺${Number(b.avans).toLocaleString("tr-TR")}` : "—"}
+                        </td>
+                        <td style={{ padding:"7px 14px", textAlign:"right", color: Number(b.masraf) > 0 ? "#7c3aed" : "#9ca3af", fontWeight:600 }}>
+                          {Number(b.masraf) > 0 ? `₺${Number(b.masraf).toLocaleString("tr-TR")}` : "—"}
+                        </td>
+                        <td style={{ padding:"7px 14px", textAlign:"right", fontWeight:800, color: bk < 0 ? "#b91c1c" : bk > 0 ? "#15803d" : "#6b7280" }}>
+                          {bk < 0 ? "-" : ""}₺{Math.abs(bk).toLocaleString("tr-TR")}
+                          {bk < 0 && <span style={{ marginLeft:"6px", background:"#fef2f2", color:"#b91c1c", border:"1px solid #fecaca", borderRadius:"6px", padding:"1px 6px", fontSize:"10px", fontWeight:700 }}>personel alacaklı</span>}
+                          {bk > 0 && <span style={{ marginLeft:"6px", background:"#f0fdf4", color:"#15803d", border:"1px solid #bbf7d0", borderRadius:"6px", padding:"1px 6px", fontSize:"10px", fontWeight:700 }}>avans açık</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
