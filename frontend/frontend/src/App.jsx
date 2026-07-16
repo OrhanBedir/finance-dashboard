@@ -1188,6 +1188,7 @@ function MarkaNakitPanel({ currentUser }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
+  const [ay, setAy] = useState(() => new Date().toISOString().slice(0, 7)); // görüntülenen ay (YYYY-MM)
   const marka = String(currentUser?.marka || "AHY").toUpperCase();
   const markaAd = currentUser?.marka_ad || marka;
   useEffect(() => {
@@ -1208,12 +1209,39 @@ function MarkaNakitPanel({ currentUser }) {
   if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
   const rows = data?.rows || [];
   const bugun = new Date().toISOString().slice(0, 10);
-  const haftaOnce = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
-  const toplam = rows.reduce((s, r) => s + r.tutar, 0);
-  const bugunT = rows.filter(r => r.tarih === bugun).reduce((s, r) => s + r.tutar, 0);
-  const haftaT = rows.filter(r => r.tarih >= haftaOnce).reduce((s, r) => s + r.tutar, 0);
-  const gunler = {};
-  rows.forEach(r => { (gunler[r.tarih] = gunler[r.tarih] || []).push(r); });
+  const toplamGenel = rows.reduce((s, r) => s + r.tutar, 0);
+  // ── Ay bazlı takvim grid'i (ERC Nakit Akışı düzeni) ──
+  const [yy, mm] = ay.split("-").map(Number);
+  const gunSay = new Date(yy, mm, 0).getDate();
+  const gunListesi = Array.from({ length: gunSay }, (_, i) => i + 1);
+  const GUN_AD = ["Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"];
+  const haftaSonu = (g) => { const d = new Date(yy, mm - 1, g).getDay(); return d === 0 || d === 6; };
+  const ayRows = rows.filter(r => (r.tarih || "").startsWith(ay));
+  const hucre = {}; // tip → gün → { t, items }
+  ayRows.forEach(r => {
+    const g = Number((r.tarih || "").slice(8, 10));
+    if (!g) return;
+    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","ARAC_KIRA","TICKET"].includes(r.tip) ? r.tip : "DIGER";
+    const m = (hucre[key] = hucre[key] || {});
+    const c = (m[g] = m[g] || { t: 0, items: [] });
+    c.t += r.tutar; c.items.push(r);
+  });
+  const gunToplamlar = gunListesi.map(g => Object.values(hucre).reduce((s, m) => s + (m[g] ? m[g].t : 0), 0));
+  let _kum = 0;
+  const kumulatif = gunToplamlar.map(t => (_kum += t));
+  const ayToplam = gunToplamlar.reduce((a, b) => a + b, 0);
+  const bugunT = ayRows.filter(r => r.tarih === bugun).reduce((s, r) => s + r.tutar, 0);
+  const ayBaslik = new Date(yy, mm - 1, 1).toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
+  const ayKaydir = (delta) => { const d = new Date(yy, mm - 1 + delta, 1); setAy(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`); };
+  const KATEGORILER = [
+    ["MAAS_ODEME",  "👥 Maaş Ödemeleri",  "Ödendikçe görünür (İK → Öde)"],
+    ["MAAS_AVANSI", "💰 Maaş Avansları",  "Ödendiği gün görünür"],
+    ["IS_AVANSI",   "🏗 İş Avansları",    "Onaylanıp ödendiği gün"],
+    ["ARAC_KIRA",   "🚗 Araç Kiraları",   "Kira Öde + manuel girişler"],
+    ["TICKET",      "🎫 Ticket / Yemek",  "Manuel girişler"],
+    ["DIGER",       "📋 Diğer Ödemeler",  "Depo-ofis kirası, yemek vb."],
+  ];
+  const fk = (n) => Math.round(Number(n || 0)).toLocaleString("tr-TR");
   const TIP = {
     MAAS_ODEME:  { ad: "Maaş Ödeme",       bg: "#dcfce7", fg: "#166534" },
     MAAS_AVANSI: { ad: "Maaş Avansı",      bg: "#fef3c7", fg: "#92400e" },
@@ -1223,48 +1251,79 @@ function MarkaNakitPanel({ currentUser }) {
     DIGER:       { ad: "Diğer Ödeme",      bg: "#f3f4f6", fg: "#374151" },
   };
   return (
-    <div style={{ padding: "24px", maxWidth: "900px" }}>
-      <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>
-      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>
-        Günlük harcamalar — maaş ve avanslar 15 Temmuz'dan, kira ve diğer ödemeler 1 Temmuz 2026'dan itibaren
+    <div style={{ padding: "24px", maxWidth: "1500px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
+        <div>
+          <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>
+          <div style={{ fontSize: "13px", color: "#64748b" }}>
+            Maaş ve avanslar 15 Temmuz'dan, kira ve diğer ödemeler 1 Temmuz 2026'dan itibaren
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button onClick={() => ayKaydir(-1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>‹</button>
+          <div style={{ fontSize: "15px", fontWeight: 800, color: "#1e3a5f", minWidth: "130px", textAlign: "center" }}>{ayBaslik}</div>
+          <button onClick={() => ayKaydir(1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>›</button>
+        </div>
       </div>
-      <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
-        {[["Bugün", bugunT, "#1e3a5f"], ["Son 7 Gün", haftaT, "#b45309"], ["Toplam (Temmuz'dan beri)", toplam, "#991b1b"]].map(([l, v, c]) => (
-          <div key={l} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: `5px solid ${c}`, borderRadius: "12px", padding: "14px 20px", minWidth: "180px" }}>
+      <div style={{ display: "flex", gap: "12px", marginBottom: "18px", flexWrap: "wrap" }}>
+        {[[`${ayBaslik} Toplam`, ayToplam, "#991b1b"], ["Bugün", bugunT, "#1e3a5f"], ["Genel Toplam (Tem'26'dan beri)", toplamGenel, "#b45309"]].map(([l, v, c]) => (
+          <div key={l} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: `5px solid ${c}`, borderRadius: "12px", padding: "12px 20px", minWidth: "180px" }}>
             <div style={{ fontSize: "11px", color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{l}</div>
-            <div style={{ fontSize: "21px", fontWeight: 800, color: c, marginTop: "3px" }}>₺{fmt(v)}</div>
+            <div style={{ fontSize: "20px", fontWeight: 800, color: c, marginTop: "3px" }}>₺{fk(v)}</div>
           </div>
         ))}
       </div>
-      {Object.keys(gunler).length === 0 && (
-        <div style={{ background: "#fff", border: "1.5px dashed #e5e7eb", borderRadius: "14px", padding: "40px", textAlign: "center", color: "#9ca3af" }}>
-          15 Temmuz 2026 sonrası henüz harcama kaydı yok.
-        </div>
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "14px", overflowX: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.05)" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px" }}>
+          <thead>
+            <tr>
+              <th style={{ position: "sticky", left: 0, zIndex: 3, background: "#1e3a5f", color: "#fff", textAlign: "left", padding: "10px 14px", minWidth: "225px", fontSize: "13px" }}>Kategori</th>
+              {gunListesi.map(g => (
+                <th key={g} style={{ background: haftaSonu(g) ? "#2d5a8f" : "#1e3a5f", color: "#fff", padding: "6px 4px", minWidth: "56px", textAlign: "center" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 800 }}>{g}</div>
+                  <div style={{ fontSize: "10px", opacity: 0.75 }}>{GUN_AD[new Date(yy, mm - 1, g).getDay()]}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {KATEGORILER.map(([tip, ad, aciklamaNot]) => (
+              <tr key={tip} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#fff", padding: "9px 14px", borderRight: "1px solid #e5e7eb" }}>
+                  <div style={{ fontWeight: 700, color: TIP[tip].fg, fontSize: "13px", whiteSpace: "nowrap" }}>{ad}</div>
+                  <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "2px", whiteSpace: "nowrap" }}>{aciklamaNot}</div>
+                </td>
+                {gunListesi.map(g => {
+                  const c = hucre[tip] && hucre[tip][g];
+                  return (
+                    <td key={g} title={c ? c.items.map(i => `${i.ad_soyad}${i.aciklama ? " (" + i.aciklama + ")" : ""}: ₺${fk(i.tutar)}`).join("\n") : ""}
+                      style={{ textAlign: "center", padding: "8px 3px", background: c ? TIP[tip].bg : (haftaSonu(g) ? "#f8fafc" : "#fff"), color: TIP[tip].fg, fontWeight: 700, fontSize: "11.5px", cursor: c ? "help" : "default", borderLeft: "1px solid #f8fafc", whiteSpace: "nowrap" }}>
+                      {c ? `-${fk(c.t)}` : ""}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+            <tr style={{ borderTop: "2px solid #bfdbfe", background: "#eff6ff" }}>
+              <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#eff6ff", padding: "9px 14px", fontWeight: 800, color: "#1e40af", fontSize: "13px", borderRight: "1px solid #e5e7eb" }}>📊 Günlük Toplam</td>
+              {gunToplamlar.map((t, i) => (
+                <td key={i} style={{ textAlign: "center", padding: "8px 3px", fontWeight: 800, fontSize: "11.5px", color: t > 0 ? "#dc2626" : "#cbd5e1", whiteSpace: "nowrap" }}>{t > 0 ? `-${fk(t)}` : ""}</td>
+              ))}
+            </tr>
+            <tr style={{ background: "#14532d" }}>
+              <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#14532d", padding: "9px 14px", fontWeight: 800, color: "#fff", fontSize: "13px" }}>💰 Kümülatif Harcama</td>
+              {kumulatif.map((t, i) => (
+                <td key={i} style={{ textAlign: "center", padding: "8px 3px", fontWeight: 700, fontSize: "11px", color: "#bbf7d0", whiteSpace: "nowrap" }}>{t > 0 ? fk(t) : ""}</td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {ayToplam === 0 && (
+        <div style={{ marginTop: "10px", fontSize: "12px", color: "#9ca3af" }}>Bu ay için henüz harcama kaydı yok.</div>
       )}
-      {Object.keys(gunler).sort((a, b) => b.localeCompare(a)).map(gun => {
-        const items = gunler[gun];
-        const gunToplam = items.reduce((s, r) => s + r.tutar, 0);
-        return (
-          <div key={gun} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", marginBottom: "14px", overflow: "hidden" }}>
-            <div style={{ background: "#f8fafc", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e5e7eb" }}>
-              <span style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a" }}>📅 {fmtGun(gun)}</span>
-              <span style={{ fontWeight: 800, fontSize: "15px", color: "#991b1b" }}>₺{fmt(gunToplam)}</span>
-            </div>
-            {items.map((r, i) => {
-              const t = TIP[r.tip] || { ad: r.tip, bg: "#f3f4f6", fg: "#374151" };
-              return (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "9px 16px", borderBottom: i < items.length - 1 ? "1px solid #f3f4f6" : "none" }}>
-                  <span style={{ background: t.bg, color: t.fg, borderRadius: "20px", padding: "2px 10px", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>{t.ad}</span>
-                  <span style={{ flex: 1, fontSize: "13px", fontWeight: 600, color: "#1f2937" }}>{r.ad_soyad}<span style={{ color: "#9ca3af", fontWeight: 400, marginLeft: "8px", fontSize: "12px" }}>{r.aciklama}</span></span>
-                  <span style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a", whiteSpace: "nowrap" }}>₺{fmt(r.tutar)}</span>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
-      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "6px" }}>
-        💡 Masraf formu harcamaları bir sonraki sürümde eklenecek. Maaş dönem yansıması: Temmuz maaşının 15 Temmuz sonrası kısmı Ağustos ortasındaki ödemeyle burada görünür.
+      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
+        💡 Hücrelerin üzerine gelince kalem detayları görünür. Masraf formu harcamaları bir sonraki sürümde eklenecek; Temmuz maaşının 15 Temmuz sonrası kısmı Ağustos ortasındaki ödemeyle düşer.
       </div>
     </div>
   );
