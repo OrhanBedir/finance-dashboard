@@ -25259,7 +25259,7 @@ function App() {
                     ) : (
                       <div>
                         {adminUsers.map((u,i) => (
-                          <div key={u.id} style={{display:"grid",gridTemplateColumns:"48px 1fr 180px auto",alignItems:"center",gap:"20px",padding:"16px 28px",borderBottom:i<adminUsers.length-1?"1px solid #f3f4f6":"none",background:"#fff",transition:"background 0.15s"}}
+                          <div key={u.id} style={{display:"grid",gridTemplateColumns:"48px minmax(170px,1fr) 150px minmax(0,auto)",alignItems:"center",gap:"16px",padding:"16px 28px",borderBottom:i<adminUsers.length-1?"1px solid #f3f4f6":"none",background:"#fff",transition:"background 0.15s"}}
                             onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                             onMouseLeave={e=>e.currentTarget.style.background="#fff"}
                           >
@@ -25281,8 +25281,8 @@ function App() {
                                 {u.is_active?"✓ Aktif":"Pasif"}
                               </span>
                             </div>
-                            {/* Aksiyonlar */}
-                            <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"nowrap"}}>
+                            {/* Aksiyonlar — dar ekranda sarar, isim sütununu ezmez */}
+                            <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
                               <button onClick={()=>handleToggleActive(u.id)} style={{padding:"7px 14px",background:u.is_active?"#fef3c7":"#f0fdf4",color:u.is_active?"#92400e":"#166534",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
                                 {u.is_active?"Pasife Al":"Aktif Et"}
                               </button>
