@@ -14198,7 +14198,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const handleSubmit = async () => {
     if (!activeForm) return;
     if (kalemler.length === 0) return alert("En az bir masraf kalemi ekleyin");
-    if (!window.confirm("Masraf formunu PM onayına göndermek istediğinize emin misiniz?")) return;
+    // PM'in kendi formu PM adımını atlar, doğrudan PD (Proje Direktörü) onayına gider
+    const _benPM = (currentUser?.email || "").toLowerCase() === "orhan.bedir@simsektel.com";
+    if (!window.confirm(`Masraf formunu ${_benPM ? "PD (Proje Direktörü)" : "PM"} onayına göndermek istediğinize emin misiniz?`)) return;
     await fetch(`${API_BASE}/hr/masraf-form/${activeForm.id}/submit`, { method:"PUT" });
     setActiveForm(null);
     setKalemler([]);

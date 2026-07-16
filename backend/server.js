@@ -14048,8 +14048,14 @@ app.get("/hr/ofis-belge/file/:filename", async (req, res) => {
 // PUT submit for approval (TASLAK → PM_BEKLE)
 app.put("/hr/masraf-form/:id/submit", async (req, res) => {
   try {
+    // PM'in (Orhan Bedir) kendi formu kendi onayına düşmesin: PM adımı
+    // otomatik geçilir, form doğrudan Proje Direktörü (Düzgün Şimşek) onayına gider.
+    const f = await pool.query("SELECT talep_eden_email FROM masraf_form WHERE id=$1", [req.params.id]);
+    const isPM = String(f.rows[0]?.talep_eden_email || "").toLowerCase() === "orhan.bedir@simsektel.com";
     const { rows } = await pool.query(
-      `UPDATE masraf_form SET durum='PM_BEKLE' WHERE id=$1 AND durum='TASLAK' RETURNING *`,
+      isPM
+        ? `UPDATE masraf_form SET durum='DIREKTOR_BEKLE', pm_onay_tarihi=NOW(), pm_not='PM formu — PM adımı otomatik geçildi' WHERE id=$1 AND durum='TASLAK' RETURNING *`
+        : `UPDATE masraf_form SET durum='PM_BEKLE' WHERE id=$1 AND durum='TASLAK' RETURNING *`,
       [req.params.id]
     );
     if (!rows[0]) return res.status(422).json({ error: "Form taslak durumunda değil veya bulunamadı" });
