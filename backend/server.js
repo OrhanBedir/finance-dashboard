@@ -13051,7 +13051,7 @@ app.get("/hr/is-avans/excel", async (req, res) => {
     `, params);
 
     // Title row
-    ws.mergeCells("A1:M1");
+    ws.mergeCells("A1:O1");
     const titleCell = ws.getCell("A1");
     titleCell.value = "İŞ AVANSI TALEP RAPORU";
     titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" }, name: "Arial" };
@@ -13068,6 +13068,8 @@ app.get("/hr/is-avans/excel", async (req, res) => {
       { header: "Gider Türü",       key: "gider",       width: 16 },
       { header: "Bölge",            key: "bolge",       width: 13 },
       { header: "Proje",            key: "proje",       width: 18 },
+      { header: "Firma",            key: "firma",       width: 11 },
+      { header: "Plaka",            key: "plaka",       width: 12 },
       { header: "Tutar (₺)",        key: "tutar",       width: 13 },
       { header: "Açıklama",         key: "aciklama",    width: 28 },
       { header: "Not",              key: "not",         width: 22 },
@@ -13112,6 +13114,8 @@ app.get("/hr/is-avans/excel", async (req, res) => {
         t.gider_turu || "",
         t.bolge || "",
         t.proje || "",
+        t.firma === "AHY" ? "AHY" : t.firma ? "ŞİMŞEK" : "",
+        t.plaka || "",
         Number(t.tutar),
         t.aciklama || "",
         t.not_aciklama || "",
@@ -13124,7 +13128,7 @@ app.get("/hr/is-avans/excel", async (req, res) => {
         const cell = row.getCell(ci + 1);
         cell.value = val;
         cell.font = { name: "Arial", size: 10 };
-        cell.alignment = { vertical: "middle", wrapText: ci === 8 || ci === 9 };
+        cell.alignment = { vertical: "middle", wrapText: ci === 10 || ci === 11 };
 
         // Row background
         let bg = isEven ? "FFFFFFFF" : "FFF0F4FF";
@@ -13135,12 +13139,18 @@ app.get("/hr/is-avans/excel", async (req, res) => {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
         cell.border = { bottom: { style: "hair", color: { argb: "FFE2E8F0" } } };
 
-        if (ci === 7) { // Tutar column
+        if (ci === 9) { // Tutar column
           cell.numFmt = '#,##0.00 ₺';
           cell.alignment = { horizontal: "right", vertical: "middle" };
           cell.font = { name: "Arial", size: 10, bold: true };
         }
-        if (ci === 10) cell.alignment = { horizontal: "center", vertical: "middle" }; // Durum
+        if (ci === 7 && val === "AHY") { // Firma: AHY vurgusu
+          cell.font = { name: "Arial", size: 10, bold: true, color: { argb: "FF92400E" } };
+          cell.alignment = { horizontal: "center", vertical: "middle" };
+        }
+        if (ci === 7 && val === "ŞİMŞEK") cell.alignment = { horizontal: "center", vertical: "middle" };
+        if (ci === 8) cell.alignment = { horizontal: "center", vertical: "middle" };  // Plaka
+        if (ci === 12) cell.alignment = { horizontal: "center", vertical: "middle" }; // Durum
         if (ci === 0) cell.alignment = { horizontal: "center", vertical: "middle" };  // ID
       });
 
@@ -13149,13 +13159,13 @@ app.get("/hr/is-avans/excel", async (req, res) => {
 
     // Totals row
     const totRow = ws.getRow(list.rows.length + 3);
-    totRow.getCell(7).value = "TOPLAM:";
-    totRow.getCell(7).font = { bold: true, name: "Arial" };
-    totRow.getCell(7).alignment = { horizontal: "right" };
-    totRow.getCell(8).value = { formula: `SUM(H3:H${list.rows.length + 2})` };
-    totRow.getCell(8).numFmt = '#,##0.00 ₺';
-    totRow.getCell(8).font = { bold: true, name: "Arial", color: { argb: "FF166534" } };
-    totRow.getCell(8).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } };
+    totRow.getCell(9).value = "TOPLAM:";
+    totRow.getCell(9).font = { bold: true, name: "Arial" };
+    totRow.getCell(9).alignment = { horizontal: "right" };
+    totRow.getCell(10).value = { formula: `SUM(J3:J${list.rows.length + 2})` };
+    totRow.getCell(10).numFmt = '#,##0.00 ₺';
+    totRow.getCell(10).font = { bold: true, name: "Arial", color: { argb: "FF166534" } };
+    totRow.getCell(10).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } };
     totRow.height = 20;
 
     // Freeze panes: freeze title + header
