@@ -24709,7 +24709,7 @@ function App() {
                       <span>⏱</span> Puantaj
                     </div>
                   )}
-                  {isAdmin && (
+                  {isAdmin && !isAltMarka && (
                     <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
                       <span>👑</span> Admin Panel
                     </div>
