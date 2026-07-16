@@ -24181,16 +24181,16 @@ function App() {
     const isRolloutOverride = rolloutOverrideEmails.includes(_ue);
     const is2KX = String(u?.subcon_name || "").toUpperCase().includes("2KX");
     if (u?.role === "platform_admin") return "platform";
-    // Alt marka (AHY) yöneticisi: subcon_name taşısa da kendi Finans Özeti'ne iner
-    if (u?.hw_yukleme === false && ["admin","direktor","muhasebe","genel_mudur"].includes(String(u?.role||"").toLowerCase())) return "marka_finans";
+    // Alt marka (AHY) yöneticisi: subcon_name taşısa da kendi Kâr/Zarar'ına iner
+    if (u?.hw_yukleme === false && ["admin","direktor","muhasebe","genel_mudur"].includes(String(u?.role||"").toLowerCase())) return "marka_pl";
     // 2KX kullanıcısı (serdaraltinova@gmail.com) doğrudan 2KX Paneli'ne iner
     if (String(u?.subcon_name || "").toUpperCase().includes("2KX")) return "2kx";
     // Alt yüklenici (AHY/Federal/UBS gibi) → doğrudan Bölge Analizi kartları
     if (String(u?.role||"").toLowerCase() === "subcon" || String(u?.subcon_name||"").trim() !== "") return "region";
     if (u?.role === "user" && !isBolge && !isRolloutOverride) return "masraf";
     if (isBolge) return "region";
-    // Alt marka (AHY) yöneticileri kendi Finans Özeti'ne iner, ERC finansına değil
-    if (u?.hw_yukleme === false) return "marka_finans";
+    // Alt marka (AHY) yöneticileri kendi Kâr/Zarar'ına iner, ERC finansına değil
+    if (u?.hw_yukleme === false) return "marka_pl";
     return "finance";
   });
   // Platform sahibi (platform_admin) varsayılan olarak KONSOL modunda gezer:
@@ -25072,11 +25072,6 @@ function App() {
                   {isFinanceUser && !isAltMarka && (
                     <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
                       <span>📊</span> Finans Paneli
-                    </div>
-                  )}
-                  {isAltMarka && isAdmin && (
-                    <div className={`sidebar-nav-item ${page==='marka_finans'?'active':''}`} onClick={()=>setPage('marka_finans')}>
-                      <span>📊</span> Finans Özeti
                     </div>
                   )}
                   {isAltMarka && isAdmin && (
