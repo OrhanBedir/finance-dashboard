@@ -17974,17 +17974,24 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const subconRates = subconRateMap[_subconKey] || { rf: 1, gizleme: 1, genel: 1 };
   const subconRate  = subconRates.genel; // geriye dönük hesaplamalar için
 
-  // Taşeron kartı QC bazlı çalışır: QC NOK/boş = Atanan (devam eden) iş,
-  // QC OK = Tamamlanan iş. Tamamlanma oranı = OK / (OK + NOK).
-  const _qcOk = (executiveSummary.qcOk || 0);
-  const _qcNok = (executiveSummary.qcNok || 0);
+  // Taşeron kartı HUNİ kurgusu (16.07.2026): Atanan (PO talebi) →
+  // Fiziki Tamamlanan (günlük iş girişindeki done) → QC Onaylı → HW'ye Faturalanan.
+  // Her aşama bir öncekinin içinden ilerler; yüzdeler aşamalar arası makası gösterir.
+  const _atanan  = (executiveSummary.assigned  || 0);
+  const _fiziki  = (executiveSummary.completed || 0);
+  const _qcOk    = (executiveSummary.qcOk      || 0);
+  const _fatura  = (executiveSummary.invoiced  || 0);
   const subconSummary = {
-    hakedis: executiveSummary.completed * subconRate,
+    hakedis: _fiziki * subconRate,
     poBeklerHakedis: executiveSummary.noPO * subconRate,
     notInvoicedHakedis: executiveSummary.notInvoiced * subconRate,
-    atananIs: _qcNok * subconRate,
-    tamamlananIs: _qcOk * subconRate,
-    tamamlanmaPct: (_qcOk + _qcNok) > 0 ? (_qcOk / (_qcOk + _qcNok)) * 100 : 0,
+    atananIs:    _atanan * subconRate,
+    fizikiIs:    _fiziki * subconRate,
+    qcOnayliIs:  _qcOk   * subconRate,
+    faturalanan: _fatura * subconRate,
+    fizikiPct:  _atanan > 0 ? (_fiziki / _atanan) * 100 : 0,
+    qcPct:      _fiziki > 0 ? (_qcOk   / _fiziki) * 100 : 0,
+    faturaPct:  _fiziki > 0 ? (_fatura / _fiziki) * 100 : 0,
   };
 
   return (
@@ -18019,7 +18026,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         <div style={{ background: "#f9fafb" }}>
           {isSubconUser ? (
             <>
-              <Row label="Atanan İş Tutarı" value={subconSummary.atananIs} />
+              <Row label="Atanan İş Tutarı (PO talebi)" value={subconSummary.atananIs} />
 
               {/* ── Hakediş Oranları: RF & Gizleme ── */}
               <div style={{ padding:"12px 16px", borderBottom:"1px solid #e5e7eb", background:"#fff" }}>
@@ -18055,9 +18062,26 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 )}
               </div>
 
-              <Row label="Tamamlanan İş Tutarı" value={subconSummary.tamamlananIs} />
-
-              <Row label="Tamamlanma Oranı" value={subconSummary.tamamlanmaPct} isPercent />
+              {/* Huni: Fiziki → QC Onaylı → Faturalanan (yüzde = bir önceki aşamaya göre) */}
+              {[
+                { label: "Fiziki Tamamlanan", sub: "saha girişi bazlı", value: subconSummary.fizikiIs, pct: subconSummary.fizikiPct, pctLabel: "atananın", color: "#1d4ed8" },
+                { label: "QC Onaylı İş", sub: "Huawei QC kapalı", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857" },
+                { label: "HW'ye Faturalanan", sub: "fatura kesilen", value: subconSummary.faturalanan, pct: subconSummary.faturaPct, pctLabel: "fizikinin", color: "#7c3aed" },
+              ].map((h) => (
+                <div key={h.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff" }}>
+                  <div style={{ color: "#374151" }}>
+                    {h.label}
+                    <div style={{ fontSize: "10px", color: "#9ca3af" }}>{h.sub}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontWeight: 600, color: h.color }}>{formatMoneyByCurrency(h.value || 0, "TRY")}</span>
+                    <span style={{ marginLeft: "8px", background: "#f3f4f6", color: "#4b5563", borderRadius: "6px", padding: "1px 7px", fontSize: "11px", fontWeight: 700 }}>
+                      %{Number(h.pct || 0).toFixed(1)}
+                      <span style={{ fontWeight: 500, color: "#9ca3af" }}> {h.pctLabel}</span>
+                    </span>
+                  </div>
+                </div>
+              ))}
 
               <Row
                 label="PO Bekleyen Hakediş"
