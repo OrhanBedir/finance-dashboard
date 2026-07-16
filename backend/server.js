@@ -12667,6 +12667,7 @@ pool.query(`
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS reddeden_email TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS red_aciklama TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS rollout_mudur_onay_tarihi DATE;
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS plaka TEXT;
 `).catch(e => console.error("is_avans_talep tablo hatası:", e.message));
 
 // GET iş avansı bakiye for a personel by email
@@ -12807,6 +12808,7 @@ app.post("/hr/is-avans", async (req, res) => {
       proje, proje_kodu,                  // mobil "proje_kodu" gönderebilir
       banka_adi,
       iban,
+      plaka,
     } = req.body;
 
     const adFinal    = talep_eden_ad || talep_eden || "";
@@ -12836,8 +12838,8 @@ app.post("/hr/is-avans", async (req, res) => {
 
     const r = await pool.query(
       `INSERT INTO is_avans_talep
-         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi,plaka)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [
         personel_id || null,
         talep_eden_email,
@@ -12853,6 +12855,7 @@ app.post("/hr/is-avans", async (req, res) => {
         iban || null,
         durumFinal,
         pmOnayTarihi,
+        plaka ? String(plaka).trim().toUpperCase().replace(/\s+/g, " ") : null,
       ]
     );
     res.json(r.rows[0]);
@@ -12862,14 +12865,15 @@ app.post("/hr/is-avans", async (req, res) => {
 app.put("/hr/is-avans/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { personel_id, tutar, aciklama, not_aciklama, tarih, gider_turu, bolge, proje } = req.body;
+    const { personel_id, tutar, aciklama, not_aciklama, tarih, gider_turu, bolge, proje, plaka } = req.body;
     const check = await pool.query("SELECT durum FROM is_avans_talep WHERE id=$1", [id]);
     if (!check.rows[0] || check.rows[0].durum !== "TALEP") {
       return res.status(400).json({ error: "Sadece TALEP durumundaki kayıtlar düzenlenebilir" });
     }
     const r = await pool.query(
-      `UPDATE is_avans_talep SET personel_id=$1,tutar=$2,aciklama=$3,not_aciklama=$4,tarih=$5,gider_turu=$6,bolge=$7,proje=$8 WHERE id=$9 RETURNING *`,
-      [personel_id || null, tutar, aciklama, not_aciklama, tarih, gider_turu || null, bolge || null, proje || null, id]
+      `UPDATE is_avans_talep SET personel_id=$1,tutar=$2,aciklama=$3,not_aciklama=$4,tarih=$5,gider_turu=$6,bolge=$7,proje=$8,plaka=$9 WHERE id=$10 RETURNING *`,
+      [personel_id || null, tutar, aciklama, not_aciklama, tarih, gider_turu || null, bolge || null, proje || null,
+       plaka ? String(plaka).trim().toUpperCase().replace(/\s+/g, " ") : null, id]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }

@@ -15288,6 +15288,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [avansBakiye, setAvansBakiye] = useState(null);
   const [bakiyeler, setBakiyeler] = useState([]); // personel bazlı avans−masraf bakiyeleri (yönetici)
   const [bakiyelerAcik, setBakiyelerAcik] = useState(false);
+  const [aracPlakalari, setAracPlakalari] = useState([]); // plaka alanı için öneri listesi
   const [notTooltip, setNotTooltip] = useState({ visible: false, x: 0, y: 0, aciklama: "", not_aciklama: "" });
   const [editAvansModal, setEditAvansModal] = useState(null); // { id, tutar, orijinalTutar }
 
@@ -15350,7 +15351,16 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     }));
   };
 
-  useEffect(() => { load(); loadPersonel(); loadBakiye(); }, []);
+  useEffect(() => {
+    load(); loadPersonel(); loadBakiye();
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/hr/araclar`);
+        const d = await r.json();
+        setAracPlakalari([...new Set((Array.isArray(d) ? d : []).map(a => String(a.plaka || "").toUpperCase()).filter(Boolean))]);
+      } catch {}
+    })();
+  }, []);
 
   const visibleList = list.filter(t => {
     // Backend zaten email filtreliyor; burada ekstra kısıtlama yok
@@ -15371,13 +15381,13 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const openNew = () => {
     setEditingId(null);
-    setForm({ personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0], aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: "" });
+    setForm({ personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0], aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: "", plaka: "" });
     setShowModal(true);
   };
 
   const openEdit = (t) => {
     setEditingId(t.id);
-    setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "" });
+    setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "", plaka: t.plaka || "" });
     setShowModal(true);
   };
 
@@ -15697,6 +15707,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   {t.gider_turu && <span style={{ background:"#eff6ff", color:"#1d4ed8", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:600 }}>{t.gider_turu}</span>}
                   {t.bolge && <span style={{ background:"#f3f4f6", color:"#374151", padding:"2px 10px", borderRadius:"20px", fontSize:"12px" }}>{t.bolge}</span>}
                   {t.proje && <span style={{ background:"#f0fdf4", color:"#166534", padding:"2px 10px", borderRadius:"20px", fontSize:"12px" }}>{t.proje}</span>}
+                  {t.plaka && <span style={{ background:"#eff6ff", color:"#1e40af", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>🚗 {t.plaka}</span>}
                 </div>
                 {t.aciklama && <div style={{ fontSize:"13px", color:"#6b7280", marginBottom:"8px" }}>{t.aciklama}</div>}
                 {t.red_aciklama && <div style={{ fontSize:"12px", color:"#dc2626", marginBottom:"8px" }}>Red: {t.red_aciklama}</div>}
@@ -15787,6 +15798,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                     onMouseLeave={() => setNotTooltip(p => ({ ...p, visible: false }))}
                   >
                     <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {t.plaka && <span style={{ background:"#eff6ff", color:"#1e40af", borderRadius:"6px", padding:"1px 6px", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>🚗 {t.plaka}</span>}
                       {t.aciklama ? t.aciklama : <span style={{ color:"#d1d5db" }}>—</span>}
                     </div>
                     {t.not_aciklama && (
@@ -15912,6 +15924,15 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   Tarih <span style={{ color: "#dc2626" }}>*</span>
                   <input type="date" required value={form.tarih} onChange={e => setForm(f => ({...f, tarih: e.target.value}))}
                     style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", background: "#fff", color: "#1f2937" }} />
+                </label>
+                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                  Araç Plakası (opsiyonel)
+                  <input value={form.plaka} onChange={e => setForm(f => ({...f, plaka: e.target.value.toUpperCase()}))}
+                    list="isavans-plaka-list" placeholder="Örn. 16GB307"
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", background: "#fff", color: "#1f2937", textTransform: "uppercase" }} />
+                  <datalist id="isavans-plaka-list">
+                    {aracPlakalari.map(p => <option key={p} value={p} />)}
+                  </datalist>
                 </label>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Açıklama
