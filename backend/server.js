@@ -1492,14 +1492,20 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       const code = normalizeText(siteCode);
 
       if (code.includes("_NS_")) return "STANDALONE";
-      if (code.includes("_DSS_")) return "DSS";
+      if (code.includes("_DSS_") || code.includes("_GPS_")) return "DSS";
       if (code.includes("_TRP_") || code.includes("_NR700_")) return "TRP";
       if (code.includes("_NR3500_") || code.includes("_5G_")) return "5G";
       if (
         code.includes("_L1800_") ||
         code.includes("_L2600_") ||
+        code.includes("_L2100_") ||
+        code.includes("_L800_") ||
+        code.includes("_LC1800_") ||
         code.includes("_L900_") ||
-        code.includes("_LTE_")
+        code.includes("_LTE_") ||
+        code.includes("_W2100_") ||
+        code.includes("_W900_") ||
+        code.includes("_W1900_")
       ) {
         return "LTE";
       }
