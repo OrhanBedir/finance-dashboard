@@ -267,7 +267,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.htitle}>ERC Operasyon</Text>
+            <Text style={styles.htitle}>AHY Elektrik</Text>
             <Text style={styles.hsub}>Hakedis Takip</Text>
           </View>
           <View style={styles.avatar}><Text style={styles.avatarTxt}>{initial}</Text></View>
@@ -282,7 +282,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
       {/* HEADER */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.htitle}>ERC Operasyon</Text>
+          <Text style={styles.htitle}>AHY Elektrik</Text>
           <Text style={styles.hsub}>Hakedis Takip</Text>
         </View>
         <TouchableOpacity onPress={handleLogout}>

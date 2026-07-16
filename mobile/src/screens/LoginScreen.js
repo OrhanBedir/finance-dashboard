@@ -60,7 +60,7 @@ export default function LoginScreen({ onLoginSuccess }) {
           <View style={styles.logoCircle}>
             <Text style={styles.logoText}>⚡</Text>
           </View>
-          <Text style={styles.appName}>ERC Operasyon</Text>
+          <Text style={styles.appName}>AHY Elektrik</Text>
           <Text style={styles.appSub}>Hakediş Takip Sistemi</Text>
         </View>
 
