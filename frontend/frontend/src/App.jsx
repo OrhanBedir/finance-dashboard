@@ -1333,43 +1333,126 @@ function MarkaPLPanel({ currentUser }) {
       XLSXStyle.writeFile(wb, `${marka}_kar_zarar_PL.xlsx`);
     }
   };
-  const kart = (strip) => ({ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "20px 24px", flex: "1 1 200px", minWidth: "200px", borderTop: `4px solid ${strip}`, textAlign: "center" });
-  const kartBaslik = { fontSize: "13px", color: "#64748b", fontWeight: 600, marginBottom: "10px" };
-  const kartDeger = { fontSize: "26px", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.5px" };
-  const kartAlt = { fontSize: "12px", color: "#94a3b8", marginTop: "8px" };
+  const fmtK = (n) => { n = Number(n || 0); const abs = Math.abs(n); const s = n < 0 ? "-" : ""; if (abs >= 1000000) return s + (abs / 1000000).toFixed(1) + "M"; if (abs >= 1000) return s + Math.round(abs / 1000) + "K"; return s + String(Math.round(abs)); };
+  // Dönem toplamları + gider dağılımı (yüzdeli çubuklar için)
+  const top = (k) => aylar.reduce((s, a) => s + Number(a[k] || 0), 0);
+  const tFatura = top("fatura"), tTahsilat = top("tahsilat"), tGider = top("gider"), tKar = top("kar");
+  const GIDER_KALEMLER = [
+    { key: "maas",       label: "👥 Personel Maaşları", renk: "#3b82f6" },
+    { key: "maas_avans", label: "💰 Maaş Avansları",    renk: "#f59e0b" },
+    { key: "is_avans",   label: "🏗 İş Avansları",      renk: "#8b5cf6" },
+    { key: "masraf",     label: "🧾 Masraf Formları",   renk: "#ec4899" },
+    { key: "kira",       label: "🚗 Araç Kiraları",     renk: "#14b8a6" },
+    { key: "diger",      label: "📋 Diğer Ödemeler",    renk: "#64748b" },
+  ].map(g => ({ ...g, tutar: top(g.key), pct: tGider > 0 ? (top(g.key) / tGider) * 100 : 0 }))
+   .sort((a, b) => b.tutar - a.tutar);
+  const karMarj = cur.fatura > 0 ? (cur.kar / cur.fatura) * 100 : null;
+  const tahsOran = cur.fatura > 0 ? (cur.tahsilat / cur.fatura) * 100 : null;
+  const grafMax = Math.max(1, ...aylar.flatMap(a => [a.fatura, a.tahsilat, a.gider]));
+  const barH = (v) => (v > 0 ? Math.max(5, Math.round((v / grafMax) * 130)) : 0);
+  const kpi = ({ ikon, ikonBg, baslik, deger, renk, alt, rozet, rozetRenk }) => (
+    <div key={baslik} style={{ background: "#fff", borderRadius: "18px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "18px 22px", flex: "1 1 210px", minWidth: "210px", display: "flex", gap: "14px", alignItems: "center" }}>
+      <div style={{ width: "46px", height: "46px", borderRadius: "14px", background: ikonBg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px", flexShrink: 0 }}>{ikon}</div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>{baslik}</div>
+        <div style={{ fontSize: "23px", fontWeight: 800, color: renk || "#0f172a", letterSpacing: "-0.5px", whiteSpace: "nowrap" }}>{deger}</div>
+        <div style={{ fontSize: "11px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
+          {alt}
+          {rozet !== null && rozet !== undefined && (
+            <span style={{ background: rozetRenk === "kirmizi" ? "#fee2e2" : "#dcfce7", color: rozetRenk === "kirmizi" ? "#b91c1c" : "#15803d", borderRadius: "6px", padding: "1px 6px", fontWeight: 800 }}>%{rozet.toFixed(1)}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
   return (
     <div style={{ padding: "24px 28px", maxWidth: "1250px", margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px" }}>
-        <div>
-          <h2 style={{ margin: "0 0 2px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>📊 {markaAd} — Kâr / Zarar (P&L)</h2>
-          <div style={{ fontSize: "13px", color: "#64748b" }}>
-            Gelir: kesilen fatura (fatura tarihi) · Tahsilat: fatura ödemesi (ödeme tarihi) · Gider: nakit akışı kalemleri
+      {/* Hero başlık — degrade bant */}
+      <div style={{ background: "linear-gradient(120deg, #1e3a5f 0%, #1e40af 55%, #3730a3 100%)", borderRadius: "20px", padding: "26px 30px", marginBottom: "20px", position: "relative", overflow: "hidden", boxShadow: "0 12px 34px rgba(30,58,95,0.35)" }}>
+        <div style={{ position: "absolute", right: "-40px", top: "-40px", width: "220px", height: "220px", borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
+        <div style={{ position: "absolute", right: "90px", bottom: "-70px", width: "160px", height: "160px", borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", position: "relative" }}>
+          <div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "#93c5fd", letterSpacing: "0.14em", marginBottom: "4px" }}>FİNANSAL PERFORMANS RAPORU</div>
+            <h2 style={{ margin: 0, fontSize: "24px", fontWeight: 900, color: "#fff", letterSpacing: "-0.5px" }}>📈 {markaAd} — Kâr / Zarar (P&L)</h2>
+            <div style={{ fontSize: "12.5px", color: "#bfdbfe", marginTop: "6px" }}>
+              Gelir: kesilen fatura · Tahsilat: fatura ödemesi · Gider: nakit akışı kalemleri
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <div style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: "12px", padding: "8px 16px", textAlign: "center" }}>
+              <div style={{ fontSize: "10px", color: "#bfdbfe", fontWeight: 700 }}>DÖNEM NET</div>
+              <div style={{ fontSize: "18px", fontWeight: 900, color: tKar >= 0 ? "#6ee7b7" : "#fca5a5" }}>{tKar < 0 ? "-" : ""}₺{fmt(Math.abs(tKar))}</div>
+            </div>
+            <button onClick={indirExcel} style={{ padding: "10px 20px", background: "#fff", color: "#1e3a5f", border: "none", borderRadius: "12px", fontSize: "13px", fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.2)" }}>📥 Excel İndir</button>
           </div>
         </div>
-        <button onClick={indirExcel} style={{ padding: "9px 18px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "10px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>📥 Excel İndir</button>
       </div>
 
-      {/* Bu ay özet kartları */}
-      <div style={{ display: "flex", gap: "16px", margin: "20px 0 24px", flexWrap: "wrap" }}>
-        <div style={kart("#6366f1")}>
-          <div style={kartBaslik}>Bu Ay Kesilen Fatura</div>
-          <div style={kartDeger}>₺{fmt(cur.fatura)}</div>
-          <div style={kartAlt}>Şimşek Haberleşme'ye</div>
+      {/* KPI kartları (bu ay) */}
+      <div style={{ display: "flex", gap: "16px", marginBottom: "20px", flexWrap: "wrap" }}>
+        {kpi({ ikon: "🧾", ikonBg: "#eef2ff", baslik: "Bu Ay Kesilen Fatura", deger: `₺${fmt(cur.fatura)}`, alt: "Şimşek Haberleşme'ye" })}
+        {kpi({ ikon: "💵", ikonBg: "#ecfdf5", baslik: "Bu Ay Tahsilat", deger: `₺${fmt(cur.tahsilat)}`, renk: "#047857", alt: "Kasaya giren", rozet: tahsOran, rozetRenk: "yesil" })}
+        {kpi({ ikon: "💸", ikonBg: "#fef2f2", baslik: "Bu Ay Harcama", deger: `₺${fmt(cur.gider)}`, renk: "#b91c1c", alt: "Kasadan çıkan" })}
+        {kpi({ ikon: (cur.kar || 0) >= 0 ? "📈" : "📉", ikonBg: (cur.kar || 0) >= 0 ? "#fffbeb" : "#fef2f2", baslik: "Bu Ay Kâr / Zarar", deger: `${(cur.kar || 0) < 0 ? "-" : ""}₺${fmt(Math.abs(cur.kar || 0))}`, renk: (cur.kar || 0) >= 0 ? "#047857" : "#b91c1c", alt: "Fatura − Gider", rozet: karMarj, rozetRenk: (cur.kar || 0) >= 0 ? "yesil" : "kirmizi" })}
+      </div>
+
+      {/* Grafik + Gider Dağılımı yan yana */}
+      <div style={{ display: "flex", gap: "16px", marginBottom: "20px", flexWrap: "wrap" }}>
+        {/* Aylık performans grafiği */}
+        <div style={{ flex: "2 1 480px", background: "#fff", borderRadius: "18px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "20px 24px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "8px" }}>
+            <div>
+              <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>Aylık Performans</div>
+              <div style={{ fontSize: "11.5px", color: "#94a3b8", marginTop: "2px" }}>Fatura · Tahsilat · Harcama</div>
+            </div>
+            <div style={{ display: "flex", gap: "12px", fontSize: "11.5px", fontWeight: 600, color: "#475569" }}>
+              {[["#6366f1", "Fatura"], ["#10b981", "Tahsilat"], ["#ef4444", "Harcama"]].map(([c, l]) => (
+                <span key={l}><span style={{ display: "inline-block", width: "9px", height: "9px", borderRadius: "3px", background: c, marginRight: "4px" }} />{l}</span>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: "14px", height: "185px", marginTop: "16px" }}>
+            {aylar.map(a => (
+              <div key={a.ay} style={{ flex: 1, maxWidth: "120px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                <div style={{ fontSize: "10.5px", fontWeight: 800, color: a.kar >= 0 ? "#047857" : "#b91c1c", marginBottom: "5px", background: a.kar >= 0 ? "#ecfdf5" : "#fef2f2", borderRadius: "6px", padding: "1px 7px", whiteSpace: "nowrap" }}>
+                  {a.kar >= 0 ? "▲" : "▼"} {fmtK(a.kar)}
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: "4px" }}>
+                  {[["fatura", "linear-gradient(180deg,#818cf8,#6366f1)"], ["tahsilat", "linear-gradient(180deg,#34d399,#10b981)"], ["gider", "linear-gradient(180deg,#f87171,#ef4444)"]].map(([k, g]) => (
+                    <div key={k} title={`${ayAd(a.ay)} — ${k}: ₺${fmt(a[k])}`} style={{ width: "18px", height: `${barH(a[k])}px`, background: g, borderRadius: "5px 5px 0 0", transition: "height 0.4s" }} />
+                  ))}
+                </div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: a.ay === buAy ? "#1e40af" : "#64748b", marginTop: "7px", whiteSpace: "nowrap" }}>{ayAd(a.ay)}</div>
+              </div>
+            ))}
+            {aylar.length === 0 && <div style={{ margin: "auto", color: "#9ca3af", fontSize: "13px" }}>Henüz veri yok</div>}
+          </div>
         </div>
-        <div style={kart("#10b981")}>
-          <div style={kartBaslik}>Bu Ay Tahsilat</div>
-          <div style={kartDeger}>₺{fmt(cur.tahsilat)}</div>
-          <div style={kartAlt}>Kasaya giren</div>
-        </div>
-        <div style={kart("#ef4444")}>
-          <div style={kartBaslik}>Bu Ay Harcama</div>
-          <div style={kartDeger}>₺{fmt(cur.gider)}</div>
-          <div style={kartAlt}>Kasadan çıkan</div>
-        </div>
-        <div style={kart((cur.kar || 0) >= 0 ? "#f59e0b" : "#991b1b")}>
-          <div style={kartBaslik}>Bu Ay Kâr / Zarar</div>
-          <div style={{ ...kartDeger, color: (cur.kar || 0) >= 0 ? "#047857" : "#b91c1c" }}>₺{fmt(cur.kar)}</div>
-          <div style={kartAlt}>Fatura − Gider</div>
+
+        {/* Gider dağılımı — alt alta yüzdeli çubuklar */}
+        <div style={{ flex: "1 1 320px", background: "#fff", borderRadius: "18px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "20px 24px" }}>
+          <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>Gider Dağılımı</div>
+          <div style={{ fontSize: "11.5px", color: "#94a3b8", marginTop: "2px", marginBottom: "16px" }}>Devirden bu yana · Toplam ₺{fmt(tGider)}</div>
+          {GIDER_KALEMLER.map(g => (
+            <div key={g.key} style={{ marginBottom: "13px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                <span style={{ color: "#374151", fontWeight: 600 }}>{g.label}</span>
+                <span style={{ whiteSpace: "nowrap" }}>
+                  <span style={{ fontWeight: 800, color: g.tutar > 0 ? "#111827" : "#cbd5e1" }}>₺{fmt(g.tutar)}</span>
+                  <span style={{ marginLeft: "6px", fontSize: "11px", fontWeight: 800, color: g.tutar > 0 ? g.renk : "#cbd5e1" }}>%{g.pct.toFixed(1)}</span>
+                </span>
+              </div>
+              <div style={{ height: "8px", background: "#f1f5f9", borderRadius: "6px", overflow: "hidden" }}>
+                <div style={{ width: `${Math.max(g.pct, g.tutar > 0 ? 2 : 0)}%`, height: "100%", background: `linear-gradient(90deg, ${g.renk}99, ${g.renk})`, borderRadius: "6px", transition: "width 0.5s" }} />
+              </div>
+            </div>
+          ))}
+          <div style={{ marginTop: "16px", paddingTop: "12px", borderTop: "1px dashed #e5e7eb", display: "grid", gap: "6px", fontSize: "12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Dönem Fatura</span><b style={{ color: "#4338ca" }}>₺{fmt(tFatura)}</b></div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Dönem Tahsilat</span><b style={{ color: "#047857" }}>₺{fmt(tTahsilat)}</b></div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Tahsil Edilmemiş (alacak)</span><b style={{ color: "#b45309" }}>₺{fmt(Math.max(tFatura - tTahsilat, 0))}</b></div>
+          </div>
         </div>
       </div>
 
