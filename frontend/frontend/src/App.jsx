@@ -1186,6 +1186,146 @@ function MarkaFinansPanel({ currentUser }) {
 
 // Alt marka (AHY) GÜNLÜK nakit akışı: devir tarihinden (15 Temmuz 2026)
 // itibaren gün gün harcamalar — maaş ödemeleri + maaş/iş avansları.
+// Kâr/Zarar (P&L): alt markanın aylık gelir tablosu + nakit özeti.
+// GELİR = kesilen fatura (tahakkuk), NAKİT = tahsilat/harcama (kasa).
+function MarkaPLPanel({ currentUser }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const marka = String(currentUser?.marka || "AHY").toUpperCase();
+  const markaAd = currentUser?.marka_ad || marka;
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/finance/marka-pl?marka=${marka}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.ok === false) throw new Error(d.error || "Kâr/Zarar raporu alınamadı");
+        setData(d);
+      } catch (e) { setErr(e.message); } finally { setLoading(false); }
+    })();
+  }, []);
+  const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  const AY_ADLARI = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+  const ayAd = (ym) => { const [y, m] = String(ym).split("-"); return `${AY_ADLARI[Number(m) - 1]} ${y}`; };
+  if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
+  if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+  const aylar = data?.aylar || [];
+  const buAy = new Date().toISOString().slice(0, 7);
+  const cur = aylar.find(a => a.ay === buAy) || { fatura: 0, tahsilat: 0, gider: 0, kar: 0 };
+  const SATIRLAR = [
+    { tip: "baslik", label: "GELİR" },
+    { key: "fatura", label: "Kesilen Fatura (Şimşek'e)", color: "#047857" },
+    { tip: "baslik", label: "GİDER" },
+    { key: "maas", label: "Personel Maaşları" },
+    { key: "maas_avans", label: "Maaş Avansları" },
+    { key: "is_avans", label: "İş Avansları" },
+    { key: "masraf", label: "Masraf Formları" },
+    { key: "kira", label: "Araç Kiraları" },
+    { key: "diger", label: "Diğer Ödemeler" },
+    { key: "gider", label: "Toplam Gider", bold: true, color: "#b91c1c" },
+    { key: "kar", label: "📈 KÂR / ZARAR", bold: true, sonuc: true },
+    { tip: "baslik", label: "NAKİT (KASA)" },
+    { key: "tahsilat", label: "Kasa Girişi — Tahsilat", color: "#047857" },
+    { key: "gider", label: "Kasa Çıkışı — Harcama", color: "#b91c1c", key2: "cikis" },
+    { key: "netNakit", label: "💰 Net Nakit", bold: true, sonuc: true },
+    { key: "alacak", label: "Tahsil Edilmemiş Fatura (alacak)", color: "#b45309" },
+  ];
+  const indirExcel = () => {
+    const header = ["Kalem", ...aylar.map(a => ayAd(a.ay))];
+    const rows = SATIRLAR.map(s => s.tip === "baslik" ? [s.label] : [s.label, ...aylar.map(a => Number(a[s.key] || 0))]);
+    const ws = XLSX.utils.aoa_to_sheet([[`${markaAd} — Kâr / Zarar (P&L)`], header, ...rows]);
+    ws["!cols"] = [{ wch: 34 }, ...aylar.map(() => ({ wch: 14 }))];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "P&L");
+    XLSX.writeFile(wb, `${marka}_kar_zarar_PL.xlsx`);
+  };
+  const kart = (strip) => ({ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "20px 24px", flex: "1 1 200px", minWidth: "200px", borderTop: `4px solid ${strip}`, textAlign: "center" });
+  const kartBaslik = { fontSize: "13px", color: "#64748b", fontWeight: 600, marginBottom: "10px" };
+  const kartDeger = { fontSize: "26px", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.5px" };
+  const kartAlt = { fontSize: "12px", color: "#94a3b8", marginTop: "8px" };
+  return (
+    <div style={{ padding: "24px 28px", maxWidth: "1250px", margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px" }}>
+        <div>
+          <h2 style={{ margin: "0 0 2px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>📊 {markaAd} — Kâr / Zarar (P&L)</h2>
+          <div style={{ fontSize: "13px", color: "#64748b" }}>
+            Gelir: kesilen fatura (fatura tarihi) · Tahsilat: fatura ödemesi (ödeme tarihi) · Gider: nakit akışı kalemleri
+          </div>
+        </div>
+        <button onClick={indirExcel} style={{ padding: "9px 18px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "10px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>📥 Excel İndir</button>
+      </div>
+
+      {/* Bu ay özet kartları */}
+      <div style={{ display: "flex", gap: "16px", margin: "20px 0 24px", flexWrap: "wrap" }}>
+        <div style={kart("#6366f1")}>
+          <div style={kartBaslik}>Bu Ay Kesilen Fatura</div>
+          <div style={kartDeger}>₺{fmt(cur.fatura)}</div>
+          <div style={kartAlt}>Şimşek Haberleşme'ye</div>
+        </div>
+        <div style={kart("#10b981")}>
+          <div style={kartBaslik}>Bu Ay Tahsilat</div>
+          <div style={kartDeger}>₺{fmt(cur.tahsilat)}</div>
+          <div style={kartAlt}>Kasaya giren</div>
+        </div>
+        <div style={kart("#ef4444")}>
+          <div style={kartBaslik}>Bu Ay Harcama</div>
+          <div style={kartDeger}>₺{fmt(cur.gider)}</div>
+          <div style={kartAlt}>Kasadan çıkan</div>
+        </div>
+        <div style={kart((cur.kar || 0) >= 0 ? "#f59e0b" : "#991b1b")}>
+          <div style={kartBaslik}>Bu Ay Kâr / Zarar</div>
+          <div style={{ ...kartDeger, color: (cur.kar || 0) >= 0 ? "#047857" : "#b91c1c" }}>₺{fmt(cur.kar)}</div>
+          <div style={kartAlt}>Fatura − Gider</div>
+        </div>
+      </div>
+
+      {/* Aylık P&L tablosu — kolonlar aylar */}
+      <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: `${280 + aylar.length * 130}px` }}>
+            <thead>
+              <tr>
+                <th style={{ position: "sticky", left: 0, zIndex: 3, background: "#1f2937", color: "#fff", padding: "12px 16px", fontSize: "12px", textAlign: "left", minWidth: "250px" }}>Kalem</th>
+                {aylar.map(a => (
+                  <th key={a.ay} style={{ background: "#1f2937", color: a.ay === buAy ? "#fbbf24" : "#fff", padding: "12px 16px", fontSize: "12px", textAlign: "right", whiteSpace: "nowrap" }}>{ayAd(a.ay)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {SATIRLAR.map((s, i) => s.tip === "baslik" ? (
+                <tr key={`b${i}`}>
+                  <td colSpan={aylar.length + 1} style={{ position: "sticky", left: 0, background: "#f1f5f9", padding: "8px 16px", fontSize: "11px", fontWeight: 800, color: "#475569", letterSpacing: "0.06em" }}>{s.label}</td>
+                </tr>
+              ) : (
+                <tr key={`${s.key}-${s.key2 || i}`} style={{ background: s.sonuc ? "#fefce8" : "#fff" }}>
+                  <td style={{ position: "sticky", left: 0, zIndex: 2, background: s.sonuc ? "#fefce8" : "#fff", padding: "10px 16px", fontSize: "13px", fontWeight: s.bold ? 800 : 500, color: "#111827", whiteSpace: "nowrap", borderBottom: "1px solid #f1f5f9" }}>{s.label}</td>
+                  {aylar.map(a => {
+                    const v = Number(a[s.key] || 0);
+                    const renk = s.sonuc ? (v >= 0 ? "#047857" : "#b91c1c") : (v ? (s.color || "#374151") : "#cbd5e1");
+                    return (
+                      <td key={a.ay} style={{ padding: "10px 16px", fontSize: "13px", textAlign: "right", whiteSpace: "nowrap", fontWeight: s.bold ? 800 : 500, color: renk, borderBottom: "1px solid #f1f5f9", background: a.ay === buAy ? (s.sonuc ? "#fef9c3" : "#fffbeb") : undefined }}>
+                        {v ? `${v < 0 ? "-" : ""}₺${fmt(Math.abs(v))}` : "—"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              {aylar.length === 0 && (
+                <tr><td colSpan={2} style={{ padding: "26px", textAlign: "center", color: "#9ca3af" }}>Henüz veri yok</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px", textAlign: "center" }}>
+        💡 Kâr/Zarar tahakkuk bazlıdır (kesilen fatura − gider). Net Nakit kasa bazlıdır (tahsilat − harcama). "Tahsil Edilmemiş Fatura" kesilen ama henüz ödenmeyen faturaların kümülatif toplamıdır.
+      </div>
+    </div>
+  );
+}
+
 function MarkaNakitPanel({ currentUser }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -24656,6 +24796,7 @@ function App() {
       case "araclar": return "Araç Yönetimi";
       case "ofis": return "Ofis & Depo";
       case "cashflow": return "Nakit Akışı";
+      case "marka_pl": return "Kâr / Zarar (P&L)";
       case "admin": return "Admin Panel";
       case "twokx-prices": return "2KX Özel Item Fiyatları";
       case "platform": return "Omnix — Platform Yönetimi";
@@ -24761,6 +24902,11 @@ function App() {
                   {isAltMarka && isAdmin && (
                     <div className={`sidebar-nav-item ${page==='marka_finans'?'active':''}`} onClick={()=>setPage('marka_finans')}>
                       <span>📊</span> Finans Özeti
+                    </div>
+                  )}
+                  {isAltMarka && isAdmin && (
+                    <div className={`sidebar-nav-item ${page==='marka_pl'?'active':''}`} onClick={()=>setPage('marka_pl')}>
+                      <span>📈</span> Kâr / Zarar (P&L)
                     </div>
                   )}
                   <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
@@ -24974,6 +25120,7 @@ function App() {
           {/* Main content */}
           <div className="main-content" onClick={e=>e.stopPropagation()}>
             {page === "marka_finans" && isAltMarka && <MarkaFinansPanel currentUser={user} />}
+            {page === "marka_pl" && isAltMarka && <MarkaPLPanel currentUser={user} />}
             {page === "marka_nakit" && isAltMarka && <MarkaNakitPanel currentUser={user} />}
             {page === "finance" && isFinanceUser && !isAltMarka && (
               financeToken ? (

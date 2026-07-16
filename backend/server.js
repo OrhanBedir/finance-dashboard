@@ -5580,6 +5580,93 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
   }
 });
 
+// KÂR/ZARAR (P&L): alt markanın aylık gelir tablosu + nakit özeti.
+// GELİR: Şimşek'e kesilen faturalar (fatura tarihi) · TAHSİLAT: aynı
+// faturaların ödemesi (ödeme tarihi) · GİDER: nakit akışı kalemleri
+// (maaş/avans/masraf/kira/diğer, devir kuralları marka-nakit ile aynı).
+app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
+  try {
+    const rol = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(rol)) {
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    }
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const DEVIR = "2026-07-15";
+    const cMarka = canonSub(marka);
+    const [fatura, tahsilat, maas, mavans, iavans, masraf, kiralar, manuel] = await Promise.all([
+      pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
+          TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
+          COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
+        FROM invoice_entries WHERE fatura_tarihi IS NOT NULL`),
+      pool.query(`SELECT to_char(odeme_tarihi,'YYYY-MM') AS ay,
+          TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
+          COALESCE(odenen_tutar, 0) AS t
+        FROM invoice_entries
+        WHERE odeme_tarihi IS NOT NULL AND COALESCE(odenen_tutar,0) > 0`),
+      pool.query(`SELECT to_char(m.tarih,'YYYY-MM') AS ay, SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS t
+        FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
+        WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2 GROUP BY 1`, [marka, DEVIR]),
+      pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
+        FROM avans a JOIN personel p ON p.id=a.personel_id
+        WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
+          AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`, [marka, DEVIR]),
+      pool.query(`SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, SUM(t.tutar) AS t
+        FROM is_avans_talep t
+        WHERE UPPER(COALESCE(t.firma,'ERC'))=$1
+          AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
+          AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2 GROUP BY 1`, [marka, DEVIR]),
+      pool.query(`SELECT to_char(mf.arsiv_tarihi,'YYYY-MM') AS ay, SUM(mk.tutar) AS t
+        FROM masraf_kalem mk
+        JOIN masraf_form mf ON mf.id = mk.form_id
+        JOIN personel p ON LOWER(COALESCE(p.email,'')) = LOWER(mf.talep_eden_email)
+        WHERE mf.durum='ARSIVLENDI' AND mf.arsiv_tarihi >= $2::date
+          AND COALESCE(p.marka,'ERC')=$1 GROUP BY 1`, [marka, DEVIR]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
+        FROM arac_kira_odemeler o
+        WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, kategori, SUM(tutar) AS t
+        FROM cashflow_odeme
+        WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1,2`, [marka]).catch(() => ({ rows: [] })),
+    ]);
+    const map = {};
+    const rowOf = (ay) => (map[ay] = map[ay] || {
+      ay, fatura: 0, tahsilat: 0,
+      maas: 0, maas_avans: 0, is_avans: 0, masraf: 0, kira: 0, diger: 0,
+    });
+    for (const r of fatura.rows) {
+      if (canonSub(r.firma) !== cMarka || !r.ay) continue;
+      rowOf(r.ay).fatura += Number(r.t || 0);
+    }
+    for (const r of tahsilat.rows) {
+      if (canonSub(r.firma) !== cMarka || !r.ay) continue;
+      rowOf(r.ay).tahsilat += Number(r.t || 0);
+    }
+    maas.rows.forEach(r => { if (r.ay) rowOf(r.ay).maas += Number(r.t || 0); });
+    mavans.rows.forEach(r => { if (r.ay) rowOf(r.ay).maas_avans += Number(r.t || 0); });
+    iavans.rows.forEach(r => { if (r.ay) rowOf(r.ay).is_avans += Number(r.t || 0); });
+    masraf.rows.forEach(r => { if (r.ay) rowOf(r.ay).masraf += Number(r.t || 0); });
+    kiralar.rows.forEach(r => { if (r.ay) rowOf(r.ay).kira += Number(r.t || 0); });
+    manuel.rows.forEach(r => {
+      if (!r.ay) return;
+      if (String(r.kategori).toUpperCase() === "ARAC") rowOf(r.ay).kira += Number(r.t || 0);
+      else rowOf(r.ay).diger += Number(r.t || 0);
+    });
+    // Aylar artan sırada; kümülatif alacak = Σ(fatura − tahsilat)
+    let alacak = 0;
+    const aylar = Object.values(map).sort((a, b) => a.ay.localeCompare(b.ay)).map(o => {
+      const gider = o.maas + o.maas_avans + o.is_avans + o.masraf + o.kira + o.diger;
+      const kar = +(o.fatura - gider).toFixed(2);
+      const netNakit = +(o.tahsilat - gider).toFixed(2);
+      alacak = +(alacak + o.fatura - o.tahsilat).toFixed(2);
+      return { ...o, gider: +gider.toFixed(2), kar, netNakit, alacak };
+    });
+    res.json({ ok: true, marka, aylar });
+  } catch (e) {
+    console.error("MARKA PL ERROR:", e.message);
+    res.status(500).json({ ok: false, error: "Kâr/Zarar raporu alınamadı" });
+  }
+});
+
 // HAKEDİŞ KIRILIM RAPORU: HW'ye kesilen faturalar (hw_invoice_rows) üzerinden
 // aylık ana yüklenici (ERC) / alt yüklenici (AHY) payı. Yüzde markalar
 // tablosundan okunur (AHY.kirilim_yuzde = ERC payı, ör. 10).
