@@ -1086,25 +1086,25 @@ function MarkaFinansPanel({ currentUser }) {
     <div style={{ padding: "24px 28px", maxWidth: "1250px", margin: "0 auto" }}>
       <h2 style={{ margin: "0 0 2px", fontSize: "20px", fontWeight: 800, color: "#0f172a", textAlign: "center" }}>📊 {markaAd} — Finans Özeti</h2>
       <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "22px", textAlign: "center" }}>
-        Gelir: yapılan işlerin hakedişi (%{pay} pay) • Gider: personel maaş, maaş avansı ve iş avansları
+        Gelir: Şimşek Haberleşme'ye kesilen faturalar • Gider: 15 Temmuz 2026 sonrası nakit akışı (maaş, avans, kira ve diğer)
       </div>
 
       {/* Özet kartları — ERC Finans Paneli stili */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "24px", flexWrap: "wrap" }}>
         <div style={kart("#6366f1")}>
-          <div style={kartBaslik}>{yil} Toplam Gelir (%{pay})</div>
+          <div style={kartBaslik}>{yil} Toplam Gelir</div>
           <div style={kartDeger}>₺{fmt(tGelir)}</div>
-          <div style={kartAlt}>Yıllık kümülatif{tGelirUsd > 0 ? ` · +$${fmt(tGelirUsd)}` : ""}</div>
+          <div style={kartAlt}>Kesilen faturalar (yıllık){tGelirUsd > 0 ? ` · +$${fmt(tGelirUsd)}` : ""}</div>
         </div>
         <div style={kart("#10b981")}>
           <div style={kartBaslik}>Bu Ay Gelir</div>
           <div style={kartDeger}>₺{fmt(buAyRow.gelir_try)}</div>
-          <div style={kartAlt}>Bu ay hakediş (%{pay})</div>
+          <div style={kartAlt}>Bu ay kesilen fatura</div>
         </div>
         <div style={kart("#ef4444")}>
           <div style={kartBaslik}>Bu Ay Gider</div>
           <div style={kartDeger}>₺{fmt(buAyRow.gider)}</div>
-          <div style={kartAlt}>Maaş + avanslar</div>
+          <div style={kartAlt}>Maaş + avans + kira/diğer</div>
         </div>
         <div style={kart(tNet >= 0 ? "#f59e0b" : "#991b1b")}>
           <div style={kartBaslik}>Net ({tNet >= 0 ? "Kâr" : "Zarar"})</div>
@@ -1151,10 +1151,11 @@ function MarkaFinansPanel({ currentUser }) {
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead><tr>
               <th style={{ ...th, textAlign: "left" }}>Ay</th>
-              <th style={th}>Gelir ₺ (%{pay})</th>
+              <th style={th}>Gelir ₺ (Fatura)</th>
               <th style={th}>Maaş Ödeme</th>
               <th style={th}>Maaş Avansı</th>
               <th style={th}>İş Avansı</th>
+              <th style={th}>Kira & Diğer</th>
               <th style={th}>Toplam Gider</th>
               <th style={th}>Net</th>
             </tr></thead>
@@ -1166,17 +1167,18 @@ function MarkaFinansPanel({ currentUser }) {
                   <td style={td}>{a.maas > 0 ? `₺${fmt(a.maas)}` : "—"}</td>
                   <td style={td}>{a.maas_avans > 0 ? `₺${fmt(a.maas_avans)}` : "—"}</td>
                   <td style={td}>{a.is_avans > 0 ? `₺${fmt(a.is_avans)}` : "—"}</td>
+                  <td style={td}>{(a.diger || 0) > 0 ? `₺${fmt(a.diger)}` : "—"}</td>
                   <td style={{ ...td, color: a.gider > 0 ? "#b91c1c" : "#9ca3af", fontWeight: 600 }}>{a.gider > 0 ? `₺${fmt(a.gider)}` : "—"}</td>
                   <td style={{ ...td, color: a.net >= 0 ? "#047857" : "#b91c1c", fontWeight: 700 }}>₺{fmt(a.net)}</td>
                 </tr>
               ))}
-              {aylar.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>Henüz veri yok</td></tr>}
+              {aylar.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>Henüz veri yok</td></tr>}
             </tbody>
           </table>
         </div>
       </div>
       <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px", textAlign: "center" }}>
-        💡 Gelir HW fatura tarihine, giderler maaş dönemine/avans tarihine göre aylıklanır. Masraf formu giderleri bir sonraki sürümde eklenecek.
+        💡 Gelir: Fatura Girişi'ne {markaAd} adına girilen faturalar (fatura tarihi bazlı). Gider: 15 Temmuz 2026 devri sonrası nakit akışı — maaş/avans ödeme tarihine, kira ve diğer ödemeler giriş zamanına göre. Masraf formu giderleri bir sonraki sürümde eklenecek.
       </div>
     </div>
   );
@@ -16639,6 +16641,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const [billableRows, setBillableRows] = useState([]);
   const [billableLoading, setBillableLoading] = useState(false);
 
+  // QC Tamamlanma + Huawei Fatura Onay Bekler (taşeron özet kartı satırları)
+  const [hwBekleyen, setHwBekleyen] = useState([]);
+  const [ozetModal, setOzetModal] = useState(null); // {title, cols, rows}
+
   // 2KX özel kurgu: %75 kırılım + 5 özel item manuel fiyat + sadece 2026 sahaları
   const is2KXRegion =
     isSubconUser &&
@@ -17206,6 +17212,60 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       qcNok,
     };
   }, [regionSummary, usdRate]);
+
+  // HW'de onay bekleyen acceptance satırları (backend site→taşeron eşleşmesi yapar)
+  useEffect(() => {
+    if (!isSubconUser) return;
+    (async () => {
+      try {
+        const d = await fetchJson(`${API_BASE}/hw-acceptance/onay-bekleyen`, { withAuth: true });
+        setHwBekleyen(d.rows || []);
+      } catch { setHwBekleyen([]); }
+    })();
+  }, [isSubconUser]);
+
+  // Saha bazlı QC özeti: bir sahanın herhangi bir kalemi OK ise saha OK sayılır
+  const qcSiteOzet = useMemo(() => {
+    const bySite = new Map();
+    for (const row of rows) {
+      const site = String(row.site_code || "").trim().toUpperCase();
+      if (!site) continue;
+      const cur = bySite.get(site) || { site, bolge: "", qc: "NOK" };
+      if (String(row.qc_durum || "").toUpperCase() === "OK") cur.qc = "OK";
+      if (!cur.bolge) cur.bolge = row.bolge || row.region || "";
+      bySite.set(site, cur);
+    }
+    const list = [...bySite.values()].sort((a, b) =>
+      a.qc === b.qc ? a.site.localeCompare(b.site) : a.qc === "OK" ? -1 : 1,
+    );
+    const ok = list.filter((s) => s.qc === "OK").length;
+    return { list, ok, toplam: list.length };
+  }, [rows]);
+
+  // HW onay bekleyen özet: saha adedi + para birimi bazlı toplam
+  const hwOzet = useMemo(() => {
+    const sites = new Set();
+    let usd = 0, tl = 0;
+    for (const r of hwBekleyen) {
+      if (r.site_code) sites.add(String(r.site_code).toUpperCase());
+      const t = Number(r.tutar || 0);
+      if (String(r.currency || "").toUpperCase() === "USD") usd += t;
+      else tl += t;
+    }
+    return { saha: sites.size, usd, tl };
+  }, [hwBekleyen]);
+
+  const indirOzetModalExcel = () => {
+    if (!ozetModal || !ozetModal.rows.length) return;
+    const data = ozetModal.rows.map((r) =>
+      Object.fromEntries(ozetModal.cols.map((c) => [c.l, r[c.k] ?? ""])),
+    );
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws["!cols"] = ozetModal.cols.map((c) => ({ wch: Math.max(16, c.l.length + 6) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Detay");
+    XLSX.writeFile(wb, `${ozetModal.title.replace(/[^\wçğıöşüÇĞİÖŞÜ0-9 ]/g, "").trim().replace(/\s+/g, "_")}.xlsx`);
+  };
 
   const exportDetailRowsToExcel = async () => {
     if (!detailRows.length) {
@@ -17935,6 +17995,62 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 label="Faturalanmamış Hakediş"
                 value={subconSummary.notInvoicedHakedis}
               />
+
+              {/* QC Tamamlanma — saha bazlı, tıklayınca excel görünümlü detay */}
+              <div
+                onClick={() =>
+                  setOzetModal({
+                    title: "✅ QC Tamamlanma — Saha Listesi",
+                    cols: [
+                      { k: "site", l: "Site ID" },
+                      { k: "bolge", l: "Bölge" },
+                      { k: "qc", l: "QC Durum" },
+                    ],
+                    rows: qcSiteOzet.list,
+                  })
+                }
+                style={{ display: "flex", justifyContent: "space-between", padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff", cursor: "pointer" }}
+                title="Saha listesi için tıklayın"
+              >
+                <div style={{ color: "#374151" }}>QC Tamamlanma <span style={{ fontSize: "11px", color: "#9ca3af" }}>🔍</span></div>
+                <div style={{ fontWeight: 600 }}>
+                  <span style={{ color: "#047857" }}>{qcSiteOzet.ok}</span>
+                  <span style={{ color: "#9ca3af" }}> / {qcSiteOzet.toplam} saha</span>
+                  <span style={{ fontSize: "11px", color: "#6b7280" }}> (%{qcSiteOzet.toplam > 0 ? Math.round((qcSiteOzet.ok / qcSiteOzet.toplam) * 100) : 0})</span>
+                </div>
+              </div>
+
+              {/* Huawei Fatura Onay Bekler — acceptance excel'inden, site→taşeron eşleşmeli */}
+              <div
+                onClick={() =>
+                  setOzetModal({
+                    title: "⏳ Huawei Fatura Onay Bekler",
+                    cols: [
+                      { k: "site_code", l: "Site ID" },
+                      { k: "acceptance_no", l: "Acceptance No" },
+                      { k: "po_no", l: "PO No" },
+                      { k: "status", l: "Durum" },
+                      { k: "acceptance_milestone", l: "Milestone" },
+                      { k: "tutar_fmt", l: "Tutar" },
+                    ],
+                    rows: hwBekleyen.map((r) => ({
+                      ...r,
+                      tutar_fmt:
+                        (String(r.currency || "").toUpperCase() === "USD" ? "$" : "₺") +
+                        Number(r.tutar || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 }),
+                    })),
+                  })
+                }
+                style={{ display: "flex", justifyContent: "space-between", padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff", cursor: "pointer" }}
+                title="Onay bekleyen kalemler için tıklayın"
+              >
+                <div style={{ color: "#374151" }}>Huawei Fatura Onay Bekler <span style={{ fontSize: "11px", color: "#9ca3af" }}>🔍</span></div>
+                <div style={{ fontWeight: 600, color: "#b45309" }}>
+                  {hwOzet.saha} saha
+                  {hwOzet.usd > 0 && <span> · ${hwOzet.usd.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}</span>}
+                  {hwOzet.tl > 0 && <span> · ₺{hwOzet.tl.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}</span>}
+                </div>
+              </div>
             </>
           ) : (
             <>
@@ -18747,6 +18863,62 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Excel görünümlü özet detay modalı (QC Tamamlanma / HW Fatura Onay Bekler) */}
+      {ozetModal && (
+        <div
+          onClick={() => setOzetModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: "14px", width: "min(880px, 96vw)", maxHeight: "84vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>
+              <div style={{ fontWeight: 800, fontSize: "15px", color: "#111827" }}>
+                {ozetModal.title}{" "}
+                <span style={{ fontWeight: 600, fontSize: "12px", color: "#6b7280" }}>({ozetModal.rows.length} kayıt)</span>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button onClick={indirOzetModalExcel} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", padding: "7px 14px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>📥 Excel İndir</button>
+                <button onClick={() => setOzetModal(null)} style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "7px 12px", cursor: "pointer", fontWeight: 700 }}>✕</button>
+              </div>
+            </div>
+            <div style={{ overflow: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead>
+                  <tr>
+                    {ozetModal.cols.map((c) => (
+                      <th key={c.k} style={{ position: "sticky", top: 0, zIndex: 2, background: "#1f2937", color: "#fff", padding: "10px 14px", fontSize: "12px", textAlign: "left", whiteSpace: "nowrap" }}>{c.l}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ozetModal.rows.map((r, i) => (
+                    <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                      {ozetModal.cols.map((c) => (
+                        <td
+                          key={c.k}
+                          style={{
+                            padding: "9px 14px", fontSize: "12.5px", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap",
+                            color: c.k === "qc" ? (r[c.k] === "OK" ? "#047857" : "#b91c1c") : "#374151",
+                            fontWeight: c.k === "qc" || c.k === "site" || c.k === "site_code" || c.k === "tutar_fmt" ? 700 : 400,
+                          }}
+                        >
+                          {r[c.k] ?? "—"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {ozetModal.rows.length === 0 && (
+                    <tr><td colSpan={ozetModal.cols.length} style={{ padding: "26px", textAlign: "center", color: "#9ca3af" }}>Kayıt yok</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

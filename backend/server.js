@@ -5443,41 +5443,55 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       const m = await pool.query("SELECT kirilim_yuzde FROM markalar WHERE kod=$1 LIMIT 1", [marka]);
       if (m.rows[0]) yuzde = Number(m.rows[0].kirilim_yuzde || 10);
     } catch {}
-    const pay = (100 - yuzde) / 100;
-    const [master, maas, mavans, iavans] = await Promise.all([
-      pool.query(buildMasterJoinedQuery("")),
-      pool.query(`SELECT m.donem AS ay, SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS t
+    // Devir kurgusu (16.07.2026): Gelir = markanın Şimşek Haberleşme'ye
+    // KESTİĞİ faturalar (invoice_entries, firma canon eşleşme, fatura tarihi
+    // bazlı) — hakediş tahmini değil. Gider = devirden (15 Temmuz 2026) sonraki
+    // nakit akışı: maaş + avanslar (ödeme tarihi) + kira/manuel (giriş zamanı).
+    const DEVIR = "2026-07-15";
+    const [fatura, maas, mavans, iavans, kiralar, manuel] = await Promise.all([
+      pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
+          TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
+          COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
+        FROM invoice_entries
+        WHERE fatura_tarihi IS NOT NULL`),
+      pool.query(`SELECT to_char(m.tarih,'YYYY-MM') AS ay, SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS t
         FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
-        WHERE COALESCE(p.marka,'ERC')=$1 AND m.donem IS NOT NULL GROUP BY 1`, [marka]),
-      pool.query(`SELECT COALESCE(a.donem, to_char(a.tarih,'YYYY-MM')) AS ay, SUM(a.tutar) AS t
-        FROM avans a JOIN personel p ON p.id=a.personel_id
-        WHERE COALESCE(p.marka,'ERC')=$1 AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`, [marka]),
+        WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2 GROUP BY 1`, [marka, DEVIR]),
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
         FROM avans a JOIN personel p ON p.id=a.personel_id
-        WHERE COALESCE(p.marka,'ERC')=$1 AND UPPER(COALESCE(a.avans_turu,''))='IS' GROUP BY 1`, [marka]),
+        WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
+          AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`, [marka, DEVIR]),
+      pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
+        FROM avans a JOIN personel p ON p.id=a.personel_id
+        WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
+          AND UPPER(COALESCE(a.avans_turu,''))='IS' GROUP BY 1`, [marka, DEVIR]),
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
+        FROM arac_kira_odemeler o
+        WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
+        FROM cashflow_odeme
+        WHERE created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
     ]);
     const map = {};
-    const rowOf = (ay) => (map[ay] = map[ay] || { ay, gelir_try: 0, gelir_usd: 0, maas: 0, maas_avans: 0, is_avans: 0 });
-    // Gelir: markanın taşeron olarak yaptığı işler (canon eşleşme: AHY = AHY ELEKTRİK)
+    const rowOf = (ay) => (map[ay] = map[ay] || { ay, gelir_try: 0, gelir_usd: 0, maas: 0, maas_avans: 0, is_avans: 0, diger: 0 });
     const cMarka = canonSub(marka);
-    for (const r of master.rows) {
-      if (canonSub(r.subcon_name) !== cMarka) continue;
-      const amt = Number(r.total_done_amount || 0);
-      if (!amt) continue;
-      let ay = "Tarihsiz";
-      if (r.onair_date) { try { ay = new Date(r.onair_date).toISOString().slice(0, 7); } catch {} }
-      const o = rowOf(ay);
-      if (String(r.currency || "TRY").toUpperCase() === "USD") o.gelir_usd = +(o.gelir_usd + amt * pay).toFixed(2);
-      else o.gelir_try = +(o.gelir_try + amt * pay).toFixed(2);
+    for (const r of fatura.rows) {
+      if (canonSub(r.firma) !== cMarka) continue;
+      const amt = Number(r.t || 0);
+      if (!amt || !r.ay) continue;
+      const o = rowOf(r.ay);
+      o.gelir_try = +(o.gelir_try + amt).toFixed(2);
     }
     maas.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).maas = Number(r.t || 0); });
     mavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).maas_avans = Number(r.t || 0); });
     iavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).is_avans = Number(r.t || 0); });
+    kiralar.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
+    manuel.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
     const aylar = Object.values(map).sort((a, b) => b.ay.localeCompare(a.ay)).map(o => {
-      const gider = o.maas + o.maas_avans + o.is_avans;
+      const gider = o.maas + o.maas_avans + o.is_avans + o.diger;
       return { ...o, gider, net: +(o.gelir_try - gider).toFixed(2) };
     });
-    res.json({ ok: true, marka, pay_yuzde: 100 - yuzde, aylar });
+    res.json({ ok: true, marka, pay_yuzde: 100 - yuzde, gelir_kaynak: "fatura", aylar });
   } catch (e) {
     console.error("MARKA OZET ERROR:", e.message);
     res.status(500).json({ ok: false, error: "Marka özeti alınamadı" });
@@ -15789,7 +15803,8 @@ const AUTO_MIGRATIONS = [
 const SUBCON_USERS = [
   { name: "Zeki Sandal",     email: "zsandal@ubstasarimmakine.com.tr", subcon_name: "UBS",     payment_rate: 0.75, password: "123456" },
   { name: "Burhan Koçak",    email: "b.kocak@federalgroups.com",       subcon_name: "Federal", payment_rate: 0.80, password: "123456" },
-  { name: "AHY Elektrik",    email: "ahy",                             subcon_name: "AHY",     payment_rate: 0.90, password: "ahy2026" },
+  // AHY teknik kullanıcısı ("ahy") kaldırıldı (16.07.2026): giriş artık
+  // yalnız info@ahyelektrik.com ile — aşağıdaki cleanup eski kaydı siler.
   // Serdar Altınova seed'den çıkarıldı (14.07.2026): simsektel hesabı artık
   // ERC bölge müdürü — startup migration yönetiyor, seed rol/şifre ezmesin.
 ];
@@ -15814,6 +15829,12 @@ const SUBCON_USERS = [
     } catch (e) {
       console.error(`${u.subcon_name} seed hatası:`, e.message);
     }
+  }
+  try {
+    const del = await pool.query(`DELETE FROM users WHERE LOWER(email)='ahy'`);
+    if (del.rowCount) console.log("🗑 'ahy' teknik kullanıcısı silindi (giriş: info@ahyelektrik.com)");
+  } catch (e) {
+    console.error("ahy cleanup hatası:", e.message);
   }
 })();
 
@@ -17082,6 +17103,40 @@ app.delete("/admin/clear-qc/:siteCode", authMiddleware, async (req, res) => {
     if (result.rowCount === 0) return res.status(404).json({ ok: false, error: "Saha bulunamadı: " + siteCode });
     res.json({ ok: true, cleared: result.rowCount, rows: result.rows });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+/* ============ HW ACCEPTANCE — ONAY BEKLEYENLER (taşeron bazlı) ============
+   Acceptance Excel'inde taşeron adı yok; eşleşme sistem üzerinden yapılır:
+   satırın site_code'u master_works'te hangi taşerona atanmışsa o taşeronundur.
+   Alt marka / subcon kullanıcıları yalnız kendi sahalarını görür. */
+app.get("/hw-acceptance/onay-bekleyen", authMiddleware, async (req, res) => {
+  try {
+    await ensureHwAcceptanceTable();
+    const r = await pool.query(`
+      SELECT a.site_code, a.acceptance_no, a.po_no, a.status,
+        a.milestone_type, a.acceptance_milestone,
+        COALESCE(a.acceptance_qty,0) AS qty,
+        COALESCE(a.unit_price,0) AS unit_price,
+        COALESCE(a.acceptance_qty,0)*COALESCE(a.unit_price,0) AS tutar,
+        UPPER(COALESCE(a.currency,'USD')) AS currency,
+        (SELECT m.subcon_name FROM master_works m
+          WHERE UPPER(TRIM(COALESCE(m.site_code,''))) = UPPER(TRIM(COALESCE(a.site_code,'')))
+            AND COALESCE(m.subcon_name,'') <> '' LIMIT 1) AS subcon_name
+      FROM hw_acceptance_rows a
+      WHERE UPPER(COALESCE(a.status,'')) LIKE '%PENDING%'
+      ORDER BY a.site_code
+    `);
+    let rows = r.rows;
+    const scopeName = subconScope(req) || String(req.query.sub || "").trim();
+    if (scopeName) {
+      const c = canonSub(scopeName);
+      rows = rows.filter((row) => canonSub(row.subcon_name) === c);
+    }
+    res.json({ ok: true, rows });
+  } catch (e) {
+    console.error("HW ONAY BEKLEYEN ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 /* ================== HW ACCEPTANCE UPLOAD ================== */
