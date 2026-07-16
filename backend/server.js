@@ -5537,8 +5537,10 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     }
     const marka = String(req.query.marka || "AHY").toUpperCase();
-    const baslangic = "2026-07-15";     // maaş/avans devri: 15 Temmuz 2026
-    const kiraBaslangic = "2026-07-01"; // kira ve diğer ödemeler: ay başından (AHY finansı üstlendi)
+    const baslangic = "2026-07-15";     // maaş/avans devri: 15 Temmuz 2026 (ödeme tarihi bazlı)
+    // Kira/manuel ödemeler: devirden SONRA sisteme girilen kayıtlar görünür
+    // (ödeme tarihi ayın 1'i olabilir — ERC'nin devir öncesi eski girişleri sızmaz)
+    const girisBaslangic = "2026-07-15";
     const [maas, avanslar, kiralar, manuel] = await Promise.all([
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
           'MAAS_ODEME' AS tip,
@@ -5556,15 +5558,15 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           'ARAC_KIRA' AS tip, o.tutar,
           (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
         FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
-        WHERE o.tarih >= $1`, [kiraBaslangic]),
-      // ERC Nakit Akışı'na girilen manuel ödemeler (araç/ticket/depo-kira vb.)
+        WHERE o.created_at >= $1::date`, [girisBaslangic]),
+      // ERC Nakit Akışı'na DEVİRDEN SONRA girilen manuel ödemeler
       pool.query(`SELECT to_char(tarih,'YYYY-MM-DD') AS tarih,
           COALESCE(NULLIF(aciklama,''),
             CASE kategori WHEN 'ARAC' THEN 'Araç kirası' WHEN 'TICKET' THEN 'Ticket/Yemek' ELSE 'Diğer ödeme' END) AS ad_soyad,
           CASE kategori WHEN 'ARAC' THEN 'ARAC_KIRA' WHEN 'TICKET' THEN 'TICKET' ELSE 'DIGER' END AS tip,
           tutar, COALESCE(donem,'') AS aciklama
         FROM cashflow_odeme
-        WHERE tarih >= $1`, [kiraBaslangic]).catch(() => ({ rows: [] })),
+        WHERE created_at >= $1::date`, [girisBaslangic]).catch(() => ({ rows: [] })),
     ]);
     const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...manuel.rows]
       .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))

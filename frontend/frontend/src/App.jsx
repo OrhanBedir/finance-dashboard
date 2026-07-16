@@ -1256,7 +1256,7 @@ function MarkaNakitPanel({ currentUser }) {
         <div>
           <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>
           <div style={{ fontSize: "13px", color: "#64748b" }}>
-            Maaş ve avanslar 15 Temmuz'dan, kira ve diğer ödemeler 1 Temmuz 2026'dan itibaren
+            15 Temmuz 2026 devrinden itibaren — kira/diğer ödemeler devirden sonra girilen kayıtlardır, ödeme tarihleriyle gösterilir
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
