@@ -11488,7 +11488,11 @@ function HrDashboard({ onBack, currentUser }) {
   };
   const loadAvans = async () => {
     const r = await fetch(`${API_BASE}/hr/avans?turu=MAAS`);
-    setAvansList(await r.json());
+    // Alt marka (AHY) devir tarihinden (15.07.2026) önceki maaş avanslarını
+    // görmez — o kayıtlar ERC dönemine aittir. ERC tarafı her şeyi görür.
+    const all = await r.json();
+    const arr = Array.isArray(all) ? all : [];
+    setAvansList(_hrMarka === "ERC" ? arr : arr.filter(a => ((a.tarih || "").split("T")[0]) >= "2026-07-15"));
   };
   const loadIsAvans = async () => {
     const r = await fetch(`${API_BASE}/hr/avans?turu=IS`);
@@ -11953,8 +11957,8 @@ function HrDashboard({ onBack, currentUser }) {
         .filter(([k]) => _hrYetkili || !_isMuhasebe || !["personel","maas_avans"].includes(k))
         .map(([k,l]) => (
           <button key={k} onClick={()=>{
-            if (k === "personel" && !personelUnlocked) {
-              const pwd = prompt("Personel bilgileri için şifre giriniz:");
+            if ((k === "personel" || k === "maas_avans") && !personelUnlocked) {
+              const pwd = prompt("Maaş bilgileri için şifre giriniz:");
               if (!_maasSifreler.includes(pwd)) { alert("Yetkisiz erişim!"); return; }
               setPersonelUnlocked(true);
             }
@@ -11964,11 +11968,11 @@ function HrDashboard({ onBack, currentUser }) {
       </div>
 
       {/* ===== PERSONEL SEKMESİ ===== */}
-      {tab==="personel" && !personelUnlocked && (
+      {(tab==="personel" || tab==="maas_avans") && !personelUnlocked && (
         <div style={{ textAlign:"center", padding:"60px 20px" }}>
           <div style={{ fontSize:"48px", marginBottom:"16px" }}>🔒</div>
           <div style={{ fontSize:"18px", fontWeight:700, color:"#1f2937", marginBottom:"8px" }}>Bu alan şifre korumalıdır</div>
-          <div style={{ fontSize:"14px", color:"#6b7280", marginBottom:"24px" }}>Personel maaş bilgilerine erişmek için yetkili şifre gereklidir.</div>
+          <div style={{ fontSize:"14px", color:"#6b7280", marginBottom:"24px" }}>Maaş ve maaş avansı bilgilerine erişmek için yetkili şifre gereklidir.</div>
           <button onClick={()=>{
             const pwd = prompt("Personel bilgileri için şifre giriniz:");
             if (_maasSifreler.includes(pwd)) setPersonelUnlocked(true);
@@ -13688,7 +13692,7 @@ function HrDashboard({ onBack, currentUser }) {
       )}
 
       {/* ===== AVANS SEKMESİ ===== */}
-      {(tab==="maas_avans") && (() => {
+      {(tab==="maas_avans") && personelUnlocked && (() => {
         const isMaas = tab === "maas_avans";
         const list = isMaas ? avansList : isAvansList;
         const form = isMaas ? avansForm : isAvansForm;
