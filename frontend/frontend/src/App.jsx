@@ -25304,7 +25304,9 @@ function App() {
                       <span>✏️</span> Günlük İş Girişi
                     </div>
                   )}
-                  {canSeePuantaj && (
+                  {/* Puantaj İK Paneli altında mevcut — ana menüde yalnız İK'ya
+                      erişimi OLMAYAN puantaj kullanıcılarına gösterilir (bölge müdürleri) */}
+                  {canSeePuantaj && !(isAdmin || user?.role === "muhasebe" || _userEmail === "nurcan.kus@simsektel.com") && (
                     <div className={`sidebar-nav-item ${page==='puantaj'?'active':''}`} onClick={()=>setPage('puantaj')}>
                       <span>⏱</span> Puantaj
                     </div>
