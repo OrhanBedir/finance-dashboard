@@ -5457,7 +5457,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     // bazlı) — hakediş tahmini değil. Gider = devirden (15 Temmuz 2026) sonraki
     // nakit akışı: maaş + avanslar (ödeme tarihi) + kira/manuel (giriş zamanı).
     const DEVIR = "2026-07-15";
-    const [fatura, maas, mavans, iavans, kiralar, manuel] = await Promise.all([
+    const [fatura, maas, mavans, iavans, kiralar, ofisk, manuel] = await Promise.all([
       pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
           TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
           COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
@@ -5478,6 +5478,9 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
         FROM arac_kira_odemeler o
         WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
+        FROM ofis_kira_odemeler o
+        WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
         FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
@@ -5496,6 +5499,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     mavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).maas_avans = Number(r.t || 0); });
     iavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).is_avans = Number(r.t || 0); });
     kiralar.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
+    ofisk.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
     manuel.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
     const aylar = Object.values(map).sort((a, b) => b.ay.localeCompare(a.ay)).map(o => {
       const gider = o.maas + o.maas_avans + o.is_avans + o.diger;
@@ -5521,7 +5525,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
     // Kira/manuel ödemeler: devirden SONRA sisteme girilen kayıtlar görünür
     // (ödeme tarihi ayın 1'i olabilir — ERC'nin devir öncesi eski girişleri sızmaz)
     const girisBaslangic = "2026-07-15";
-    const [maas, avanslar, kiralar, manuel, masraflar] = await Promise.all([
+    const [maas, avanslar, kiralar, ofisKiralar, manuel, masraflar] = await Promise.all([
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
           'MAAS_ODEME' AS tip,
           (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
@@ -5548,6 +5552,12 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
         FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
         WHERE o.created_at >= $1::date`, [girisBaslangic]),
+      // Ofis/Depo kiraları: devirden sonra girilen ödemeler (araç kira kuralıyla aynı)
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, d.ad AS ad_soyad,
+          'OFIS_KIRA' AS tip, o.tutar,
+          (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
+        FROM ofis_kira_odemeler o JOIN ofis_depo d ON d.id = o.ofis_id
+        WHERE o.created_at >= $1::date`, [girisBaslangic]).catch(() => ({ rows: [] })),
       // Manuel ödemeler: yalnız bu MARKAYA girilenler (firma seçimi 16.07.2026,
       // eski/etiketsiz kayıtlar ERC sayılır — AHY görmez)
       pool.query(`SELECT to_char(tarih,'YYYY-MM-DD') AS tarih,
@@ -5570,7 +5580,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           AND mf.arsiv_tarihi >= $2::date
           AND COALESCE(p.marka,'ERC') = $1`, [marka, baslangic]).catch(() => ({ rows: [] })),
     ]);
-    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...manuel.rows, ...masraflar.rows]
+    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...ofisKiralar.rows, ...manuel.rows, ...masraflar.rows]
       .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))
       .sort((a, b) => b.tarih.localeCompare(a.tarih));
     res.json({ ok: true, baslangic, rows });
@@ -5644,7 +5654,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
     const marka = String(req.query.marka || "AHY").toUpperCase();
     const DEVIR = "2026-07-15";
     const cMarka = canonSub(marka);
-    const [fatura, tahsilat, maas, mavans, iavans, masraf, kiralar, manuel] = await Promise.all([
+    const [fatura, tahsilat, maas, mavans, iavans, masraf, kiralar, ofisKira, manuel] = await Promise.all([
       pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
           TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
           COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
@@ -5675,6 +5685,9 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
         FROM arac_kira_odemeler o
         WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
+        FROM ofis_kira_odemeler o
+        WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, kategori, SUM(tutar) AS t
         FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1,2`, [marka]).catch(() => ({ rows: [] })),
@@ -5697,6 +5710,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
     iavans.rows.forEach(r => { if (r.ay) rowOf(r.ay).is_avans += Number(r.t || 0); });
     masraf.rows.forEach(r => { if (r.ay) rowOf(r.ay).masraf += Number(r.t || 0); });
     kiralar.rows.forEach(r => { if (r.ay) rowOf(r.ay).kira += Number(r.t || 0); });
+    ofisKira.rows.forEach(r => { if (r.ay) rowOf(r.ay).kira += Number(r.t || 0); });
     manuel.rows.forEach(r => {
       if (!r.ay) return;
       if (String(r.kategori).toUpperCase() === "ARAC") rowOf(r.ay).kira += Number(r.t || 0);
@@ -14102,6 +14116,57 @@ app.get("/hr/arac-belge/file/:filename", async (req, res) => {
 });
 
 // ─── OFİS & DEPO ─────────────────────────────────────────────────────────────
+// Kira ödemeleri: araç kira sistemiyle aynı kurgu (dönem bazlı upsert + geri al)
+pool.query(`
+  CREATE TABLE IF NOT EXISTS ofis_kira_odemeler (
+    id SERIAL PRIMARY KEY,
+    ofis_id INTEGER NOT NULL,
+    donem TEXT NOT NULL,
+    tutar NUMERIC NOT NULL DEFAULT 0,
+    tarih DATE NOT NULL DEFAULT CURRENT_DATE,
+    aciklama TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (ofis_id, donem)
+  )`).catch(() => {});
+
+app.post("/hr/ofis/:id/kira-ode", async (req, res) => {
+  try {
+    const { donem, tutar, tarih, aciklama } = req.body;
+    if (!/^\d{4}-\d{2}$/.test(String(donem || ""))) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
+    const r = await pool.query(
+      `INSERT INTO ofis_kira_odemeler (ofis_id, donem, tutar, tarih, aciklama)
+       VALUES ($1,$2,$3,COALESCE($4::date, CURRENT_DATE),$5)
+       ON CONFLICT (ofis_id, donem) DO UPDATE SET tutar=$3, tarih=COALESCE($4::date, CURRENT_DATE), aciklama=$5
+       RETURNING *`,
+      [req.params.id, donem, Number(tutar || 0), tarih || null, aciklama || null],
+    );
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/ofis/:id/kira-ode", async (req, res) => {
+  try {
+    const donem = String(req.query.donem || "");
+    if (!/^\d{4}-\d{2}$/.test(donem)) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
+    const r = await pool.query(
+      `DELETE FROM ofis_kira_odemeler WHERE ofis_id=$1 AND donem=$2 RETURNING *`,
+      [req.params.id, donem],
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Bu dönem için ödeme kaydı yok" });
+    res.json({ ok: true, silinen: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/hr/ofis-kira-odemeler", async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT o.*, d.ad FROM ofis_kira_odemeler o
+      JOIN ofis_depo d ON d.id = o.ofis_id
+      ORDER BY o.donem DESC, d.ad`);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/hr/ofis", async (req, res) => {
   const { rows } = await pool.query(`
     SELECT o.*, json_agg(b ORDER BY b.created_at) FILTER (WHERE b.id IS NOT NULL) as belgeler

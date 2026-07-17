@@ -1222,7 +1222,7 @@ function MarkaPLPanel({ currentUser }) {
     { key: "maas_avans", label: "Maaş Avansları" },
     { key: "is_avans", label: "İş Avansları" },
     { key: "masraf", label: "Masraf Formları" },
-    { key: "kira", label: "Araç Kiraları" },
+    { key: "kira", label: "Kiralar (Araç + Ofis/Depo)" },
     { key: "diger", label: "Diğer Ödemeler" },
     { key: "gider", label: "Toplam Gider", bold: true, color: "#b91c1c" },
     { key: "kar", label: "📈 KÂR / ZARAR", bold: true, sonuc: true },
@@ -1342,7 +1342,7 @@ function MarkaPLPanel({ currentUser }) {
     { key: "maas_avans", label: "💰 Maaş Avansları",    renk: "#f59e0b" },
     { key: "is_avans",   label: "🏗 İş Avansları",      renk: "#8b5cf6" },
     { key: "masraf",     label: "🧾 Masraf Formları",   renk: "#ec4899" },
-    { key: "kira",       label: "🚗 Araç Kiraları",     renk: "#14b8a6" },
+    { key: "kira",       label: "🚗 Kiralar (Araç + Ofis)", renk: "#14b8a6" },
     { key: "diger",      label: "📋 Diğer Ödemeler",    renk: "#64748b" },
   ].map(g => ({ ...g, tutar: top(g.key), pct: tGider > 0 ? (top(g.key) / tGider) * 100 : 0 }))
    .sort((a, b) => b.tutar - a.tutar);
@@ -1556,7 +1556,7 @@ function MarkaNakitPanel({ currentUser }) {
   ayRows.forEach(r => {
     const g = Number((r.tarih || "").slice(8, 10));
     if (!g) return;
-    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","MASRAF_FORMU","ARAC_KIRA","TICKET"].includes(r.tip) ? r.tip : "DIGER";
+    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","MASRAF_FORMU","ARAC_KIRA","OFIS_KIRA","TICKET"].includes(r.tip) ? r.tip : "DIGER";
     const m = (hucre[key] = hucre[key] || {});
     const c = (m[g] = m[g] || { t: 0, items: [] });
     c.t += r.tutar; c.items.push(r);
@@ -1574,6 +1574,7 @@ function MarkaNakitPanel({ currentUser }) {
     ["IS_AVANSI",    "🏗 İş Avansları",    "Onaylanıp ödendiği gün"],
     ["MASRAF_FORMU", "🧾 Masraf Formları", "Muhasebe arşivlediği gün"],
     ["ARAC_KIRA",    "🚗 Araç Kiraları",   "Kira Öde + manuel girişler"],
+    ["OFIS_KIRA",    "🏭 Depo/Ofis Kiraları", "Ofis & Depo → Kira Öde"],
     ["TICKET",       "🎫 Ticket / Yemek",  "Manuel girişler"],
     ["DIGER",        "📋 Diğer Ödemeler",  "AHY seçilen manuel girişler"],
   ];
@@ -1584,6 +1585,7 @@ function MarkaNakitPanel({ currentUser }) {
     IS_AVANSI:    { ad: "İş Avansı",        bg: "#dbeafe", fg: "#1e40af" },
     MASRAF_FORMU: { ad: "Masraf Formu",     bg: "#fce7f3", fg: "#9d174d" },
     ARAC_KIRA:    { ad: "Araç Kirası",      bg: "#ede9fe", fg: "#6d28d9" },
+    OFIS_KIRA:    { ad: "Depo/Ofis Kirası", bg: "#e0f2fe", fg: "#0369a1" },
     TICKET:       { ad: "Ticket/Yemek",     bg: "#ffedd5", fg: "#9a3412" },
     DIGER:        { ad: "Diğer Ödeme",      bg: "#f3f4f6", fg: "#374151" },
   };
@@ -27466,9 +27468,15 @@ function OfisDepoPanel({ currentUser, onBack }) {
   });
   const [filter, setFilter] = useState("TUMU");
 
+  const [kiraOdemeler, setKiraOdemeler] = useState([]);
   const load = async () => {
     const r = await fetch(`${API_BASE}/hr/ofis`);
     setListe(await r.json());
+    try {
+      const k = await fetch(`${API_BASE}/hr/ofis-kira-odemeler`);
+      const kd = await k.json();
+      setKiraOdemeler(Array.isArray(kd) ? kd : []);
+    } catch { setKiraOdemeler([]); }
   };
   useEffect(() => { load(); }, []);
 
@@ -27476,6 +27484,27 @@ function OfisDepoPanel({ currentUser, onBack }) {
   const dayDiff = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
   const expiryColor = (d) => { const n=dayDiff(d); if(n===null)return"#9ca3af"; if(n<0)return"#dc2626"; if(n<=30)return"#f59e0b"; return"#166534"; };
   const expiryBg = (d) => { const n=dayDiff(d); if(n===null)return"#f3f4f6"; if(n<0)return"#fee2e2"; if(n<=30)return"#fef9c3"; return"#dcfce7"; };
+
+  // Borç takibi: devir ayından (2026-07, kira başlangıcı daha yeniyse o) bu aya
+  // kadar ödenmeyen aylar × aylık kira. Pasif konum borç üretmez. (Araçlarla aynı kurgu)
+  const borcHesap = (o) => {
+    if (o.durum !== "AKTİF" || Number(o.aylik_kira || 0) <= 0) return { aylar: [], tutar: 0 };
+    const simdi = new Date().toISOString().slice(0, 7);
+    let bas = "2026-07";
+    if (o.kira_baslangic) { const kb = String(o.kira_baslangic).slice(0, 7); if (kb > bas) bas = kb; }
+    const aylar = [];
+    let [y, m] = bas.split("-").map(Number);
+    while (`${y}-${String(m).padStart(2, "0")}` <= simdi) {
+      const ayStr = `${y}-${String(m).padStart(2, "0")}`;
+      if (!kiraOdemeler.some(x => String(x.ofis_id) === String(o.id) && x.donem === ayStr)) aylar.push(ayStr);
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    return { aylar, tutar: aylar.length * Number(o.aylik_kira || 0) };
+  };
+  const _parseTutar = (t) => {
+    const s = String(t).trim();
+    return /^\d+(\.\d{1,2})?$/.test(s) ? Number(s) : Number(s.replace(/\./g, "").replace(",", ".")) || 0;
+  };
 
   const openNew = () => {
     setForm({ tur:"OFİS", ad:"", bolge:"", adres:"", kiraya_veren:"", sozlesme_no:"",
@@ -27533,6 +27562,24 @@ function OfisDepoPanel({ currentUser, onBack }) {
           <div>
             <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>🏢 Ofis & Depo</h2>
             <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>{liste.filter(o=>o.durum==="AKTİF").length} aktif konum</p>
+            <div style={{ marginTop:"5px", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+              <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💰 Aylık Toplam Kira:</span>
+              <span style={{ fontSize:"16px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 12px" }}>
+                ₺{liste.filter(o=>o.durum==="AKTİF").reduce((s,o)=>s+Number(o.aylik_kira||0),0).toLocaleString("tr-TR")}
+              </span>
+              {(() => {
+                const toplamBorc = liste.reduce((s, o) => s + borcHesap(o).tutar, 0);
+                return (
+                  <>
+                    <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💳 Toplam Borç:</span>
+                    <span title="Aktif konumlarda ödenmemiş kira ayları toplamı (Temmuz 2026'dan itibaren)"
+                      style={{ fontSize:"16px", fontWeight:800, color: toplamBorc > 0 ? "#b91c1c" : "#166534", background: toplamBorc > 0 ? "#fee2e2" : "#dcfce7", borderRadius:"8px", padding:"2px 12px" }}>
+                      ₺{toplamBorc.toLocaleString("tr-TR")}
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
           </div>
         </div>
         <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
@@ -27612,6 +27659,74 @@ function OfisDepoPanel({ currentUser, onBack }) {
                   </span>
                 )}
               </div>
+              {/* Kira ödeme durumu — aktif kiralık konumlarda (araç kartıyla aynı kurgu) */}
+              {o.durum === "AKTİF" && Number(o.aylik_kira || 0) > 0 && (() => {
+                const _buAy = new Date().toISOString().slice(0, 7);
+                const odemeler = kiraOdemeler.filter(x => String(x.ofis_id) === String(o.id));
+                const odeme = odemeler.find(x => x.donem === _buAy);
+                const odendi = !!odeme;
+                const borc = borcHesap(o);
+                const gecmisTitle = odemeler.length
+                  ? "Ödeme geçmişi:\n" + odemeler.map(x => `${x.donem}: ₺${Math.round(Number(x.tutar || 0)).toLocaleString("tr-TR")}${x.tarih ? " (" + String(x.tarih).slice(0, 10) + ")" : ""}`).join("\n")
+                  : "Henüz ödeme kaydı yok";
+                return (
+                  <div style={{ display:"flex", gap:"6px", alignItems:"center", marginTop:"10px", flexWrap:"wrap" }}>
+                    {odendi
+                      ? <span title={gecmisTitle} style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#dcfce7", color:"#166534", cursor:"help" }}>✅ Bu ay kira ödendi (₺{Math.round(Number(odeme.tutar || 0)).toLocaleString("tr-TR")})</span>
+                      : <span title={gecmisTitle} style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#fee2e2", color:"#991b1b", cursor:"help" }}>💳 Kira bekliyor</span>}
+                    {canEdit && !odendi && (
+                      <button title={gecmisTitle} onClick={async () => {
+                        const donem = prompt("Hangi dönemin kirası? (YYYY-AA)", _buAy);
+                        if (!donem) return;
+                        const t = prompt("Ödenen tutar (₺):", String(Math.round(Number(o.aylik_kira || 0)) || ""));
+                        if (!t) return;
+                        const tutarN = _parseTutar(t);
+                        if (tutarN <= 0) { alert("Geçerli tutar giriniz"); return; }
+                        try {
+                          const r = await fetch(`${API_BASE}/hr/ofis/${o.id}/kira-ode`, {
+                            method: "POST", headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ donem, tutar: tutarN }),
+                          });
+                          if (!r.ok) throw new Error("Kaydedilemedi");
+                          await load();
+                        } catch (err) { alert(err.message || "Kira ödemesi kaydedilemedi"); }
+                      }} style={{ padding:"3px 10px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>💸 Kira Öde</button>
+                    )}
+                    {canEdit && odendi && (
+                      <>
+                        <button title="Ödeme tutarını düzelt" onClick={async () => {
+                          const t = prompt(`${_buAy} kirası için doğru tutarı yazın (₺):`, String(Math.round(Number(odeme.tutar || 0))));
+                          if (!t) return;
+                          const tutarN = _parseTutar(t);
+                          if (tutarN <= 0) { alert("Geçerli tutar giriniz"); return; }
+                          try {
+                            const r = await fetch(`${API_BASE}/hr/ofis/${o.id}/kira-ode`, {
+                              method: "POST", headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ donem: _buAy, tutar: tutarN }),
+                            });
+                            if (!r.ok) throw new Error("Güncellenemedi");
+                            await load();
+                          } catch (err) { alert(err.message || "Ödeme güncellenemedi"); }
+                        }} style={{ padding:"3px 8px", background:"#eff6ff", color:"#1e40af", border:"1px solid #bfdbfe", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>✏️ Düzelt</button>
+                        <button title="Ödemeyi geri al (kira bekliyor durumuna döner)" onClick={async () => {
+                          if (!window.confirm(`${o.ad} — ${_buAy} kira ödemesi (₺${Math.round(Number(odeme.tutar || 0)).toLocaleString("tr-TR")}) geri alınsın mı?\n\nKayıt silinir, konum yeniden "Kira bekliyor" olur.`)) return;
+                          try {
+                            const r = await fetch(`${API_BASE}/hr/ofis/${o.id}/kira-ode?donem=${_buAy}`, { method: "DELETE" });
+                            if (!r.ok) throw new Error("Geri alınamadı");
+                            await load();
+                          } catch (err) { alert(err.message || "Ödeme geri alınamadı"); }
+                        }} style={{ padding:"3px 8px", background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>↩︎ Geri Al</button>
+                      </>
+                    )}
+                    {borc.tutar > 0 && (
+                      <span title={`Ödenmeyen aylar: ${borc.aylar.join(", ")}`}
+                        style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#fee2e2", color:"#b91c1c", cursor:"help" }}>
+                        💳 Borç: ₺{borc.tutar.toLocaleString("tr-TR")} ({borc.aylar.length} ay)
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
               {canEdit && (
                 <button onClick={()=>openEdit(o)}
                   style={{ marginTop:"12px", width:"100%", padding:"8px", background:"#f3f4f6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer", color:"#374151" }}>
