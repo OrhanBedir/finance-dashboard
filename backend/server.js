@@ -14061,7 +14061,8 @@ app.post("/hr/araclar", async (req, res) => {
          kira_baslangic=$8,kira_bitis=$9,aylik_kira=$10,bolge=$11,surucu=$12,
          sigorta_bitis=$13,muayene_bitis=$14,durum=$15,notlar=$16,aktif=true
        RETURNING *`,
-      [norm,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
+      // yil integer kolonu: boş string "" gelirse null'a çevrilir (form "Seçin" kalabilir)
+      [norm,marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
        sigorta_bitis||null,muayene_bitis||null,durum||'AKTİF',notlar]
     );
@@ -14080,7 +14081,7 @@ app.put("/hr/araclar/:id", async (req, res) => {
         aylik_kira=$11,bolge=$12,surucu=$13,sigorta_bitis=$14,muayene_bitis=$15,
         durum=$16,notlar=$17,aktif=COALESCE($18,aktif) WHERE id=$1 RETURNING *`,
       [req.params.id,plaka?plaka.replace(/\s+/g,"").toUpperCase():null,
-       marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
+       marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
        sigorta_bitis||null,muayene_bitis||null,durum,notlar,aktif??null]
     );
