@@ -12334,9 +12334,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     loadIsAvans();
   };
 
-  // Puantaj yardımcıları
+  // Puantaj yardımcıları — AHY görünümünde devir (15 Temmuz 2026) öncesi günler gösterilmez
   const [yilStr, ayStr] = puantajAy.split("-");
-  const ayGunleri = Array.from({ length: new Date(Number(yilStr), Number(ayStr), 0).getDate() }, (_, i) => i+1);
+  const ayGunleri = Array.from({ length: new Date(Number(yilStr), Number(ayStr), 0).getDate() }, (_, i) => i+1)
+    .filter(g => _hrMarka === "ERC" || `${yilStr}-${ayStr}-${String(g).padStart(2, "0")}` >= AHY_DEVIR);
 
   const TR_RESMI_TATIL_HR = [
     "2024-01-01","2024-04-10","2024-04-11","2024-04-12","2024-04-23","2024-05-01","2024-05-19","2024-06-15","2024-06-16","2024-06-17","2024-06-18","2024-07-15","2024-08-30","2024-10-29",
