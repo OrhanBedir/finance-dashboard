@@ -1545,6 +1545,9 @@ function MarkaNakitPanel({ currentUser }) {
   const rows = data?.rows || [];
   const bugun = new Date().toISOString().slice(0, 10);
   const toplamGenel = rows.reduce((s, r) => s + r.tutar, 0);
+  // Kasa hesabı: AHY'nin kendi cebinden ödedikleri (kasadan_dus=false) hariç
+  const kasaHarcama = rows.filter(r => r.kasadan_dus !== false).reduce((s, r) => s + r.tutar, 0);
+  const kasaDisi = toplamGenel - kasaHarcama;
   // ── Ay bazlı takvim grid'i (ERC Nakit Akışı düzeni) ──
   const [yy, mm] = ay.split("-").map(Number);
   const gunSay = new Date(yy, mm, 0).getDate();
@@ -1604,9 +1607,10 @@ function MarkaNakitPanel({ currentUser }) {
             <div style={{ fontSize: "15px", fontWeight: 800, color: "#1e3a5f", minWidth: "130px", textAlign: "center" }}>{ayBaslik}</div>
             <button onClick={() => ayKaydir(1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>›</button>
           </div>
-          {/* Kasa kartı: manuel nakit girişleri − tüm harcamalar = bakiye */}
+          {/* Kasa kartı: manuel nakit girişleri − kasadan yapılan harcamalar = bakiye
+              (AHY'nin kendi cebinden ödedikleri hariç tutulur) */}
           {(() => {
-            const bakiye = kasa.toplam - toplamGenel;
+            const bakiye = kasa.toplam - kasaHarcama;
             const eksi = bakiye < 0;
             return (
               <div style={{ background: eksi ? "#fef2f2" : "#f0fdf4", border: `2px solid ${eksi ? "#fca5a5" : "#86efac"}`, borderRadius: "14px", padding: "10px 16px", minWidth: "250px" }}>
@@ -1643,8 +1647,10 @@ function MarkaNakitPanel({ currentUser }) {
                 <div style={{ fontSize: "24px", fontWeight: 900, color: eksi ? "#b91c1c" : "#15803d", marginTop: "4px", textAlign: "right" }}>
                   {eksi ? "-" : ""}₺{fk(Math.abs(bakiye))}
                 </div>
-                <div style={{ fontSize: "11px", color: "#6b7280", textAlign: "right" }}>
-                  Giren ₺{fk(kasa.toplam)} − Harcanan ₺{fk(toplamGenel)}
+                <div style={{ fontSize: "11px", color: "#6b7280", textAlign: "right" }}
+                  title={kasaDisi > 0 ? `AHY'nin kendi ödediği ₺${fk(kasaDisi)} kasa hesabına dahil değildir (nakit akışında görünür)` : undefined}>
+                  Giren ₺{fk(kasa.toplam)} − Kasadan harcanan ₺{fk(kasaHarcama)}
+                  {kasaDisi > 0 && <span style={{ color: "#b45309", fontWeight: 700 }}> · AHY ödedi: ₺{fk(kasaDisi)}</span>}
                 </div>
               </div>
             );

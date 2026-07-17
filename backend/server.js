@@ -5552,10 +5552,12 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
         FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
         WHERE o.created_at >= $1::date`, [girisBaslangic]),
-      // Ofis/Depo kiraları: devirden sonra girilen ödemeler (araç kira kuralıyla aynı)
+      // Ofis/Depo kiraları: devirden sonra girilen ödemeler (araç kira kuralıyla aynı).
+      // kasadan_dus=false → AHY kendi ödedi: nakit akışında görünür ama kasa bakiyesinden düşmez
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, d.ad AS ad_soyad,
           'OFIS_KIRA' AS tip, o.tutar,
-          (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
+          (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama,
+          COALESCE(o.kasadan_dus, true) AS kasadan_dus
         FROM ofis_kira_odemeler o JOIN ofis_depo d ON d.id = o.ofis_id
         WHERE o.created_at >= $1::date`, [girisBaslangic]).catch(() => ({ rows: [] })),
       // Manuel ödemeler: yalnız bu MARKAYA girilenler (firma seçimi 16.07.2026,
@@ -14127,7 +14129,11 @@ pool.query(`
     aciklama TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (ofis_id, donem)
-  )`).catch(() => {});
+  )`).then(() =>
+  // kasadan_dus=false → kirayı AHY kendi ödedi: nakit akışında görünür,
+  // kasa bakiyesinden düşmez (İzmir depo Temmuz 2026 istisnası gibi)
+  pool.query(`ALTER TABLE ofis_kira_odemeler ADD COLUMN IF NOT EXISTS kasadan_dus BOOLEAN DEFAULT true`)
+).catch(() => {});
 
 app.post("/hr/ofis/:id/kira-ode", async (req, res) => {
   try {
