@@ -12376,7 +12376,7 @@ app.get("/hr/isg/matris", async (req, res) => {
 app.get("/hr/isg/uyarilar", async (req, res) => {
   try {
     const r = await pool.query(`
-      SELECT i.*, p.ad_soyad, p.unvan,
+      SELECT i.*, p.ad_soyad, p.unvan, COALESCE(p.marka,'ERC') AS marka,
         CASE WHEN i.bitis_tarihi < NOW() THEN 'SURESI_DOLDU'
              WHEN i.bitis_tarihi < NOW() + INTERVAL '30 days' THEN 'YAKLASAN'
              ELSE 'GECERLI' END AS durum

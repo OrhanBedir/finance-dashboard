@@ -11939,7 +11939,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   };
   const loadIsgUyarilar = async () => {
     const r = await fetch(`${API_BASE}/hr/isg/uyarilar`);
-    setIsgUyarilar(await r.json());
+    const d = await r.json();
+    // Marka izolasyonu: AHY yalnız kendi personelinin ISG uyarılarını görür
+    const arr = Array.isArray(d) ? d : [];
+    setIsgUyarilar(_hrMarka === "ERC" ? arr : arr.filter(u => String(u.marka || "ERC").toUpperCase() === _hrMarka));
   };
   const loadIsgTurleri = async () => {
     const r = await fetch(`${API_BASE}/hr/isg-egitim-turleri`);
