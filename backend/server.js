@@ -260,6 +260,16 @@ function canonSub(name) {
 // Veri kapsamı: subcon rolü VEYA alt marka (hw_yukleme=false, ör. AHY yönetimi)
 // VEYA yönetici olmayan taşeron-adlı kullanıcı (ör. 2KX Serdar gmail) yalnız
 // kendi taşeron satırlarını görür. Dönen değer kapsam adı ya da null.
+// Multer, dosya adını latin1 olarak çözer — Türkçe karakterli adlar
+// "Ä°zmir SÃ¶zleÅŸme" gibi bozulur. UTF-8'e geri çevir (ASCII adlarda no-op).
+function utf8Name(name) {
+  const s = String(name || "");
+  try {
+    const fixed = Buffer.from(s, "latin1").toString("utf8");
+    return fixed.includes("�") ? s : fixed;
+  } catch { return s; }
+}
+
 function subconScope(req) {
   const name = String(req.user?.subcon_name || "").trim();
   if (!name) return null;
@@ -7184,7 +7194,7 @@ app.delete("/rollout/cleanup/:id", authMiddleware, async (req, res) => {
 app.post("/rollout/cleanup/:id/screenshot", authMiddleware, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
-    const fileName = `cleanup_${req.params.id}_${Date.now()}.${req.file.originalname.split('.').pop()}`;
+    const fileName = `cleanup_${req.params.id}_${Date.now()}.${utf8Name(req.file.originalname).split('.').pop()}`;
     const { url } = await uploadToStorage("cleanup-screenshots", fileName, req.file.buffer, req.file.mimetype);
     await pool.query("UPDATE rollout_cleanup SET screenshot_url=$1, updated_at=NOW() WHERE id=$2", [url, req.params.id]);
     res.json({ ok: true, url });
@@ -10191,7 +10201,7 @@ app.post(
           txt("payment_terms"),
           itemCode,
           txt("project_code"),
-          req.file.filename || req.file.originalname || null,
+          req.file.filename || utf8Name(req.file.originalname) || null,
         ];
 
         if (existing.rows.length > 0) {
@@ -11481,7 +11491,7 @@ async function extractPdfText(pdfBuffer, isPDF) {
 const uploadInvoiceParse = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 app.post("/invoice-parse", authMiddleware, uploadInvoiceParse.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
-  const ext = path.extname(req.file.originalname).toLowerCase();
+  const ext = path.extname(utf8Name(req.file.originalname)).toLowerCase();
   const isPDF = ext === ".pdf" || req.file.mimetype === "application/pdf";
 
   let pdfBuffer = req.file.buffer;
@@ -11847,7 +11857,7 @@ app.post("/hr/personel/:id/belge/:tur", uploadPersonelBelge.single("dosya"), asy
       await deleteFromStorage(old.rows[0].dosya_yolu);
       await pool.query("DELETE FROM personel_belgeler WHERE personel_id=$1 AND belge_turu=$2", [id, tur]);
     }
-    const fname = `personel-${id}-${tur}-${Date.now()}${path.extname(req.file.originalname).toLowerCase()}`;
+    const fname = `personel-${id}-${tur}-${Date.now()}${path.extname(utf8Name(req.file.originalname)).toLowerCase()}`;
     const { url } = await uploadToStorage("personel-belgeler", fname, req.file.buffer, req.file.mimetype);
     await pool.query("INSERT INTO personel_belgeler (personel_id,belge_turu,dosya_yolu) VALUES ($1,$2,$3)",
       [id, tur, url]);
@@ -11895,7 +11905,7 @@ app.delete("/hr/personel/:id/isg/:isgId", async (req, res) => {
 app.post("/hr/personel/:id/isg/:isgId/belge", uploadPersonelBelge.single("dosya"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
-    const fname = `isg-${req.params.isgId}-${Date.now()}${path.extname(req.file.originalname).toLowerCase()}`;
+    const fname = `isg-${req.params.isgId}-${Date.now()}${path.extname(utf8Name(req.file.originalname)).toLowerCase()}`;
     const { url } = await uploadToStorage("isg-belgeler", fname, req.file.buffer, req.file.mimetype);
     await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
     res.json({ ok: true, dosya: url });
@@ -11963,7 +11973,7 @@ app.put("/hr/puantaj/:id/not", uploadPuantajBelge.single("belge"), async (req, r
     const { id } = req.params;
     const { not_aciklama } = req.body;
     if (req.file) {
-      const fname = `puantaj_${Date.now()}${path.extname(req.file.originalname)}`;
+      const fname = `puantaj_${Date.now()}${path.extname(utf8Name(req.file.originalname))}`;
       const { url } = await uploadToStorage("puantaj-belgeler", fname, req.file.buffer, req.file.mimetype);
       await pool.query("UPDATE puantaj SET not_aciklama=$1, belge_yolu=$2 WHERE id=$3", [not_aciklama||"", url, id]);
     } else {
@@ -13808,12 +13818,12 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
     const { form_id, kategori, aciklama: kalemAciklama } = kalem.rows[0];
 
     // 1. Upload first — guaranteed regardless of OCR
-    const fname = `${Date.now()}-${req.file.originalname}`;
+    const fname = `${Date.now()}-${utf8Name(req.file.originalname)}`;
     const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype);
     const { rows } = await pool.query(
       `INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu)
        VALUES ($1,$2,$3,$4) RETURNING *`,
-      [kalemId, form_id, req.file.originalname, url]
+      [kalemId, form_id, utf8Name(req.file.originalname), url]
     );
     const belgeId = rows[0].id;
 
@@ -13871,7 +13881,7 @@ app.post("/hr/masraf-kalem/:id/ceza-belge", authMiddleware, masrafUpload.single(
   try {
     const { id } = req.params;
     if (!req.file) return res.status(400).json({ error: "Dosya gerekli" });
-    const fname = `${Date.now()}-${req.file.originalname}`;
+    const fname = `${Date.now()}-${utf8Name(req.file.originalname)}`;
     const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype);
     await pool.query("UPDATE masraf_kalem SET ceza_belge_url=$1 WHERE id=$2", [url, id]);
     res.json({ ok: true, url });
@@ -13883,7 +13893,7 @@ app.post("/hr/masraf-kalem/:id/odeme-belge", authMiddleware, masrafUpload.single
   try {
     const { id } = req.params;
     if (!req.file) return res.status(400).json({ error: "Dosya gerekli" });
-    const fname = `${Date.now()}-${req.file.originalname}`;
+    const fname = `${Date.now()}-${utf8Name(req.file.originalname)}`;
     const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype);
     await pool.query("UPDATE masraf_kalem SET odeme_belge_url=$1 WHERE id=$2", [url, id]);
     res.json({ ok: true, url });
@@ -14090,11 +14100,11 @@ app.post("/hr/araclar/:id/belge", aracUpload.single("dosya"), async (req, res) =
       for (const r of old.rows) await deleteFromStorage(r.dosya_yolu);
       await pool.query("DELETE FROM arac_belgeler WHERE arac_id=$1 AND belge_turu=$2", [req.params.id, belge_turu]);
     }
-    const fname = `${Date.now()}-${req.file.originalname}`;
+    const fname = `${Date.now()}-${utf8Name(req.file.originalname)}`;
     const { url } = await uploadToStorage("arac-belgeler", fname, req.file.buffer, req.file.mimetype);
     const { rows } = await pool.query(
       "INSERT INTO arac_belgeler (arac_id,belge_turu,dosya_adi,dosya_yolu,aciklama) VALUES ($1,$2,$3,$4,$5) RETURNING *",
-      [req.params.id, belge_turu, req.file.originalname, url, aciklama||null]
+      [req.params.id, belge_turu, utf8Name(req.file.originalname), url, aciklama||null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -14227,11 +14237,11 @@ app.post("/hr/ofis/:id/belge", ofisUpload.single("dosya"), async (req, res) => {
       for (const r of old.rows) await deleteFromStorage(r.dosya_yolu);
       await pool.query("DELETE FROM ofis_belgeler WHERE ofis_id=$1 AND belge_turu='SOZLESME'", [req.params.id]);
     }
-    const fname = `${Date.now()}-${req.file.originalname}`;
+    const fname = `${Date.now()}-${utf8Name(req.file.originalname)}`;
     const { url } = await uploadToStorage("ofis-belgeler", fname, req.file.buffer, req.file.mimetype);
     const { rows } = await pool.query(
       "INSERT INTO ofis_belgeler (ofis_id,belge_turu,dosya_adi,dosya_yolu,aciklama) VALUES ($1,$2,$3,$4,$5) RETURNING *",
-      [req.params.id, belge_turu||'DIGER', req.file.originalname, url, aciklama||null]
+      [req.params.id, belge_turu||'DIGER', utf8Name(req.file.originalname), url, aciklama||null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -16477,7 +16487,7 @@ app.post("/finance/odeme-dekont/:id", requireFinanceAuth, upload.single("file"),
   try {
     const { id } = req.params;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
-    const ext = (req.file.originalname || "").split(".").pop() || "pdf";
+    const ext = (utf8Name(req.file.originalname) || "").split(".").pop() || "pdf";
     const filename = `odeme-dekont/${id}_${Date.now()}.${ext}`;
     const { url } = await uploadToStorage("odeme-dekontlar", filename, req.file.buffer, req.file.mimetype);
     await pool.query(`UPDATE taseron_odeme_log SET dekont_url=$1 WHERE id=$2`, [url, id]);
@@ -16994,11 +17004,11 @@ function parseTaseronFaturaText(text, filenameHint) {
 const uploadTaseronFaturaParse = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 app.post("/taseron/fatura/pdf-parse", authMiddleware, uploadTaseronFaturaParse.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ ok: false, error: "Dosya gelmedi" });
-  const isPDF = req.file.originalname.toLowerCase().endsWith(".pdf") || req.file.mimetype === "application/pdf";
+  const isPDF = utf8Name(req.file.originalname).toLowerCase().endsWith(".pdf") || req.file.mimetype === "application/pdf";
   try {
     const rawText = await extractPdfText(req.file.buffer, isPDF);
     // Dosya adını fatura no fallback olarak gönder (ETS2026000000007.pdf gibi)
-    const result = parseTaseronFaturaText(rawText, req.file.originalname);
+    const result = parseTaseronFaturaText(rawText, utf8Name(req.file.originalname));
     res.json({ ok: true, ...result, raw_snippet: rawText.slice(0, 500) });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
