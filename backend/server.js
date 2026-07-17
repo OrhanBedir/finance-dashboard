@@ -1437,6 +1437,9 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     const COL_SITE_ID = findColIndex(["DU ID", "SITE ID", "Site ID"], 2);
     const COL_STATUS = findColIndex(["Status", "Task Status"], 7);
     const COL_TEMPLATE = findColIndex(["Template Name"], 15);
+    // ISDP export'unda görev tipi: QC-TE = saha QC'si, QA = EHS/denetim.
+    // Kolon eski excellerde yoksa -1 kalır ve tip filtresi uygulanmaz.
+    const COL_BUSINESS = findColIndex(["Business Type", "BusinessType"], -1);
     const COL_FIRST_SUBMIT = findColIndex(
       ["First Submit to Approval Time", "First Submit Time"],
       26,
@@ -1536,6 +1539,13 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       if (templateNorm.includes("TRS QUALITY CHECK LIST")) {
         if (trsBySite.get(siteCode) !== "OK") trsBySite.set(siteCode, qcDurum);
         continue;
+      }
+
+      // Ana QC yalnız QC-TE görevlerinden belirlenir: QA (EHS Audit vb.)
+      // "Closed" olsa bile sahayı OK yapamaz (örn. GAHST_5GEXP_ANK vakası).
+      if (COL_BUSINESS >= 0) {
+        const bt = normalizeText(row[COL_BUSINESS]);
+        if (bt && bt !== "QC-TE") continue;
       }
 
       const prev = mainBySite.get(siteCode);
