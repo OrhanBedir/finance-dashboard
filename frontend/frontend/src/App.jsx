@@ -18046,7 +18046,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const matched = baseRows
         .filter((row) => {
           const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
-          return Number(row.done_qty || 0) > 0 && keySet.has(key);
+          // HW'ye faturalanmış sayılır: fatura item yüklemesinde eşleşme VARSA
+          // veya PO verisinde faturalanmış miktar (billed_qty) varsa —
+          // "HW'ye Faturalanan" satırıyla tutarlı olsun
+          const hwFaturali = keySet.has(key) || Number(row.billed_qty || 0) > 0;
+          return Number(row.done_qty || 0) > 0 && hwFaturali;
         })
         .map((row) => {
           const totalTRY = getSubconAmountTRY(row);
@@ -18062,7 +18066,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             requested_qty: Number(row.requested_qty || 0),
             unit_price: taseronUnit,
             total_price: totalTRY,
-            invoice_nos: invMap[key] || "",
+            invoice_nos: invMap[key] || (Number(row.billed_qty || 0) > 0 ? (row.po_no ? `PO: ${row.po_no}` : "PO kaydı") : ""),
             // Mutabakat: taşeronun kestiği fatura + vade
             durum: inv ? "Faturalandı" : "Kesilebilir",
             fatura_no: inv ? inv.fatura_no || "" : "",
