@@ -9,6 +9,25 @@ import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
+// Kenar menü alt kalemi — İK Paneli alt menüsüyle aynı görsel dil
+// (küçük font, sağa girintili, aktifken mavi ray + vurgu)
+function AltNavItem({ aktif, onClick, ikon, label, badge }) {
+  return (
+    <div onClick={onClick}
+      style={{ padding: "7px 10px 7px 16px", cursor: "pointer", fontSize: "12.5px", display: "flex", alignItems: "center", gap: "7px",
+        color: aktif ? "#fff" : "#94a3b8", fontWeight: aktif ? 700 : 500,
+        background: aktif ? "rgba(59,130,246,0.22)" : "transparent",
+        borderLeft: aktif ? "3px solid #3b82f6" : "3px solid transparent",
+        borderRadius: "0 8px 8px 0", transition: "background 0.15s" }}>
+      <span style={{ fontSize: "13px" }}>{ikon}</span> {label}
+      {badge > 0 && <span className="sidebar-badge" style={{ marginLeft: "auto" }}>{badge}</span>}
+    </div>
+  );
+}
+
+// AltNavItem grubu sarmalayıcısı: soldaki ince ray + girinti
+const altNavGrup = { margin: "2px 0 6px", borderLeft: "1px solid rgba(148,163,184,0.15)", marginLeft: "22px" };
+
 function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
   return (
     <div
@@ -25375,37 +25394,21 @@ function App() {
                     <span className={`sidebar-section-chevron ${openSections.muhasebe?'open':'closed'}`}>▾</span>
                   </div>
                   {openSections.muhasebe && (
-                    <div>
+                    <div style={altNavGrup}>
                       {isFinanceUser && !isAltMarka && (
                         <>
-                          <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
-                            <span>📊</span> Finans Paneli
-                          </div>
-                          <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); }}>
-                            <span>🧾</span> Fatura Girişi
-                          </div>
-                          <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('taseron_hakedis'); }}>
-                            <span>🏗️</span> Taşeron Hakediş
-                          </div>
+                          <AltNavItem aktif={page==='finance'} onClick={()=>setPage('finance')} ikon="📊" label="Finans Paneli" />
+                          <AltNavItem onClick={()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); }} ikon="🧾" label="Fatura Girişi" />
+                          <AltNavItem onClick={()=>{ setPage('finance'); setFinanceActionTrigger('taseron_hakedis'); }} ikon="🏗️" label="Taşeron Hakediş" />
                         </>
                       )}
-                      <div className={`sidebar-nav-item ${page==='is_avans'?'active':''}`} onClick={()=>setPage('is_avans')}>
-                        <span>💳</span> İş Avansı
-                        {pendingAvansCount > 0 && <span className="sidebar-badge">{pendingAvansCount}</span>}
-                      </div>
-                      <div className={`sidebar-nav-item ${page==='masraf'?'active':''}`} onClick={()=>setPage('masraf')}>
-                        <span>📄</span> Masraf Formu
-                        {pendingMasrafCount > 0 && <span className="sidebar-badge">{pendingMasrafCount}</span>}
-                      </div>
+                      <AltNavItem aktif={page==='is_avans'} onClick={()=>setPage('is_avans')} ikon="💳" label="İş Avansı" badge={pendingAvansCount} />
+                      <AltNavItem aktif={page==='masraf'} onClick={()=>setPage('masraf')} ikon="📄" label="Masraf Formu" badge={pendingMasrafCount} />
                       {isAltMarka && isAdmin && (
-                        <div className={`sidebar-nav-item ${page==='marka_nakit'?'active':''}`} onClick={()=>setPage('marka_nakit')}>
-                          <span>💰</span> Nakit Akışı (Günlük)
-                        </div>
+                        <AltNavItem aktif={page==='marka_nakit'} onClick={()=>setPage('marka_nakit')} ikon="💰" label="Nakit Akışı (Günlük)" />
                       )}
                       {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
-                        <div className={`sidebar-nav-item ${page==='cashflow'?'active':''}`} onClick={()=>setPage('cashflow')}>
-                          <span>🏦</span> Nakit Akışı
-                        </div>
+                        <AltNavItem aktif={page==='cashflow'} onClick={()=>setPage('cashflow')} ikon="🏦" label="Nakit Akışı" />
                       )}
                     </div>
                   )}
@@ -25420,19 +25423,12 @@ function App() {
                     <span className={`sidebar-section-chevron ${openSections.depo?'open':'closed'}`}>▾</span>
                   </div>
                   {openSections.depo && (
-                    <div>
-                      <div className={`sidebar-nav-item ${page==='malzeme'?'active':''}`} onClick={()=>setPage('malzeme')}>
-                        <span>📦</span> Malzeme Yönetimi
-                        {pendingMalzemeCount > 0 && <span className="sidebar-badge">{pendingMalzemeCount}</span>}
-                      </div>
+                    <div style={altNavGrup}>
+                      <AltNavItem aktif={page==='malzeme'} onClick={()=>setPage('malzeme')} ikon="📦" label="Malzeme Yönetimi" badge={pendingMalzemeCount} />
                       {isAdmin && (
                         <>
-                          <div className={`sidebar-nav-item ${page==='araclar'?'active':''}`} onClick={()=>setPage('araclar')}>
-                            <span>🚗</span> Araç Yönetimi
-                          </div>
-                          <div className={`sidebar-nav-item ${page==='ofis'?'active':''}`} onClick={()=>setPage('ofis')}>
-                            <span>🏢</span> Ofis & Depo
-                          </div>
+                          <AltNavItem aktif={page==='araclar'} onClick={()=>setPage('araclar')} ikon="🚗" label="Araç Yönetimi" />
+                          <AltNavItem aktif={page==='ofis'} onClick={()=>setPage('ofis')} ikon="🏢" label="Ofis & Depo" />
                         </>
                       )}
                     </div>
