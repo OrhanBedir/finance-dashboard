@@ -1473,34 +1473,36 @@ function MarkaPLPanel({ currentUser }) {
             <div style={{ fontSize: "22px", fontWeight: 900 }}>₺{fmt(sabit?.toplam)}</div>
           </div>
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", padding: "16px 20px" }}>
           {[
-            { baslik: "🏭 DEPO & OFİS KİRALARI", rows: sabit?.ofisler || [] },
-            { baslik: "🚗 ARAÇ KİRALARI", rows: sabit?.araclar || [] },
+            { baslik: "🏭 DEPO & OFİS KİRALARI", rows: sabit?.ofisler || [], bg: "#fffbeb", cerceve: "#fde68a", ana: "#b45309", serit: "linear-gradient(90deg,#f59e0b,#d97706)" },
+            { baslik: "🚗 ARAÇ KİRALARI", rows: sabit?.araclar || [], bg: "#eff6ff", cerceve: "#bfdbfe", ana: "#1d4ed8", serit: "linear-gradient(90deg,#3b82f6,#6366f1)" },
           ].map(b => (
-            <div key={b.baslik} style={{ flex: "1 1 280px", padding: "16px 24px", borderRight: "1px solid #f8fafc", minWidth: 0 }}>
-              <div style={{ fontSize: "12px", fontWeight: 800, color: "#475569", letterSpacing: "0.05em", marginBottom: "10px" }}>{b.baslik}</div>
+            <div key={b.baslik} style={{ flex: "1 1 280px", minWidth: 0, background: b.bg, border: `1.5px solid ${b.cerceve}`, borderRadius: "14px", padding: "14px 18px", position: "relative", overflow: "hidden" }}>
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "4px", background: b.serit }} />
+              <div style={{ fontSize: "12px", fontWeight: 800, color: b.ana, letterSpacing: "0.05em", marginBottom: "10px", marginTop: "3px" }}>{b.baslik}</div>
               {b.rows.map((r, i) => (
-                <div key={`${r.ad}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: "8px", fontSize: "13px", padding: "5px 0", borderBottom: "1px dashed #f1f5f9" }}>
+                <div key={`${r.ad}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: "8px", fontSize: "13px", padding: "5px 0", borderBottom: `1px dashed ${b.cerceve}` }}>
                   <span style={{ color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ad}</span>
-                  <b style={{ whiteSpace: "nowrap" }}>₺{fmt(r.tutar)}</b>
+                  <b style={{ whiteSpace: "nowrap", color: "#1f2937" }}>₺{fmt(r.tutar)}</b>
                 </div>
               ))}
               {b.rows.length === 0 && <div style={{ fontSize: "12px", color: "#cbd5e1", padding: "5px 0" }}>Kayıt yok</div>}
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "9px", fontSize: "13px", fontWeight: 800, color: "#1e3a5f" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px", fontSize: "13.5px", fontWeight: 900, color: b.ana }}>
                 <span>Ara Toplam</span>
                 <span>₺{fmt(b.rows.reduce((s, r) => s + Number(r.tutar || 0), 0))}</span>
               </div>
             </div>
           ))}
           {/* Maaşlar: yalnız toplam — kişi bazlı maaş şifreli İK alanında */}
-          <div style={{ flex: "1 1 280px", padding: "16px 24px", minWidth: 0 }}>
-            <div style={{ fontSize: "12px", fontWeight: 800, color: "#475569", letterSpacing: "0.05em", marginBottom: "10px" }}>👥 PERSONEL MAAŞLARI</div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", padding: "5px 0", borderBottom: "1px dashed #f1f5f9" }}>
+          <div style={{ flex: "1 1 280px", minWidth: 0, background: "#f0fdf4", border: "1.5px solid #bbf7d0", borderRadius: "14px", padding: "14px 18px", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "4px", background: "linear-gradient(90deg,#10b981,#059669)" }} />
+            <div style={{ fontSize: "12px", fontWeight: 800, color: "#047857", letterSpacing: "0.05em", marginBottom: "10px", marginTop: "3px" }}>👥 PERSONEL MAAŞLARI</div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", padding: "5px 0", borderBottom: "1px dashed #bbf7d0" }}>
               <span style={{ color: "#374151" }}>Aktif personel</span>
-              <b>{sabit?.maas?.kisi || 0} kişi</b>
+              <b style={{ color: "#1f2937" }}>{sabit?.maas?.kisi || 0} kişi</b>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "9px", fontSize: "13px", fontWeight: 800, color: "#1e3a5f" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "10px", fontSize: "13.5px", fontWeight: 900, color: "#047857" }}>
               <span>Ara Toplam</span>
               <span>₺{fmt(sabit?.maas?.toplam)}</span>
             </div>
