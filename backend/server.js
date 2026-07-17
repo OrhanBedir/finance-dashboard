@@ -14185,6 +14185,60 @@ app.get("/hr/arac-belge/file/:filename", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── EKİP YÖNETİMİ (Organizasyon Şeması) ────────────────────────────────────
+// Ekip = numara + araç plakası (+ bölge). Personel ataması personel.ekip_bilgisi
+// alanında tutulur; org şeması Excel'i bu verilerden canlı "Ekipler" sayfası üretir.
+pool.query(`CREATE TABLE IF NOT EXISTS ekipler (
+  ekip_no INTEGER PRIMARY KEY,
+  plaka TEXT,
+  bolge TEXT,
+  aciklama TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`).catch(() => {});
+
+app.get("/hr/ekipler", async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT * FROM ekipler ORDER BY ekip_no`);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/hr/ekipler", async (req, res) => {
+  try {
+    const no = Number(req.body.ekip_no || 0);
+    if (!no || no < 1) return res.status(400).json({ error: "Geçerli ekip no gerekli" });
+    const r = await pool.query(
+      `INSERT INTO ekipler (ekip_no, plaka, bolge, aciklama)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (ekip_no) DO UPDATE SET plaka=$2, bolge=$3, aciklama=$4, updated_at=NOW()
+       RETURNING *`,
+      [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null]);
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/ekipler/:no", async (req, res) => {
+  try {
+    const no = Number(req.params.no);
+    await pool.query(`DELETE FROM ekipler WHERE ekip_no=$1`, [no]);
+    // Silinen ekibe atanmış personelin ataması temizlenir
+    await pool.query(`UPDATE personel SET ekip_bilgisi=NULL WHERE ekip_bilgisi=$1`, [String(no)]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Personel → ekip ataması (yalnız ekip_bilgisi alanını günceller)
+app.put("/hr/personel/:id/ekip", async (req, res) => {
+  try {
+    const v = req.body.ekip_bilgisi;
+    const r = await pool.query(
+      `UPDATE personel SET ekip_bilgisi=$2 WHERE id=$1 RETURNING id, ad_soyad, ekip_bilgisi`,
+      [req.params.id, v === null || v === undefined || v === "" ? null : String(v)]);
+    if (!r.rows.length) return res.status(404).json({ error: "Personel bulunamadı" });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── OFİS & DEPO ─────────────────────────────────────────────────────────────
 // Kira ödemeleri: araç kira sistemiyle aynı kurgu (dönem bazlı upsert + geri al)
 pool.query(`
