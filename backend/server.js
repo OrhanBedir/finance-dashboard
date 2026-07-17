@@ -5580,6 +5580,57 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
   }
 });
 
+// MARKA KASA: kasaya manuel girilen nakit (elden/bankadan konan para).
+// Kasa bakiyesi = girişler − nakit akışı harcamaları (frontend hesaplar).
+async function ensureMarkaKasaTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marka_kasa (
+      id SERIAL PRIMARY KEY,
+      marka TEXT NOT NULL,
+      tarih DATE NOT NULL,
+      tutar NUMERIC NOT NULL,
+      aciklama TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+}
+const MARKA_KASA_ROLLER = ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"];
+app.get("/finance/marka-kasa", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureMarkaKasaTable();
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const r = await pool.query(
+      `SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama
+       FROM marka_kasa WHERE UPPER(marka)=$1 ORDER BY tarih DESC, id DESC`, [marka]);
+    const toplam = r.rows.reduce((s, x) => s + Number(x.tutar || 0), 0);
+    res.json({ ok: true, rows: r.rows, toplam });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/finance/marka-kasa", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureMarkaKasaTable();
+    const marka = String(req.body.marka || "AHY").toUpperCase();
+    const { tarih, tutar, aciklama } = req.body;
+    const t = Number(tutar || 0);
+    if (!tarih || !t) return res.status(400).json({ ok: false, error: "tarih ve tutar zorunlu" });
+    const r = await pool.query(
+      `INSERT INTO marka_kasa (marka, tarih, tutar, aciklama) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [marka, tarih, t, aciklama || null]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/marka-kasa/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`DELETE FROM marka_kasa WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // KÂR/ZARAR (P&L): alt markanın aylık gelir tablosu + nakit özeti.
 // GELİR: Şimşek'e kesilen faturalar (fatura tarihi) · TAHSİLAT: aynı
 // faturaların ödemesi (ödeme tarihi) · GİDER: nakit akışı kalemleri

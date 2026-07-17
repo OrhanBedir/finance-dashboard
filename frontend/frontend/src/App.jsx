@@ -1506,20 +1506,38 @@ function MarkaNakitPanel({ currentUser }) {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
   const [ay, setAy] = useState(() => new Date().toISOString().slice(0, 7)); // görüntülenen ay (YYYY-MM)
+  const [kasa, setKasa] = useState({ rows: [], toplam: 0 }); // manuel nakit girişleri
+  const [kasaModal, setKasaModal] = useState(false);
+  const gridRef = useRef(null);
   const marka = String(currentUser?.marka || "AHY").toUpperCase();
   const markaAd = currentUser?.marka_ad || marka;
+  const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const loadKasa = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-kasa?marka=${marka}`, { headers: _auth });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) setKasa({ rows: d.rows || [], toplam: Number(d.toplam || 0) });
+    } catch {}
+  };
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BASE}/finance/marka-nakit?marka=${marka}`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
-        });
+        const r = await fetch(`${API_BASE}/finance/marka-nakit?marka=${marka}`, { headers: _auth });
         const d = await r.json().catch(() => ({}));
         if (!r.ok || d.ok === false) throw new Error(d.error || "Nakit akışı alınamadı");
         setData(d);
+        loadKasa();
       } catch (e) { setErr(e.message); } finally { setLoading(false); }
     })();
   }, []);
+  // Açılışta (ve ay değişince) bugünün kolonunu tablonun ortasına getir
+  useEffect(() => {
+    if (loading) return;
+    const cont = gridRef.current;
+    if (!cont) return;
+    const el = cont.querySelector('[data-bugun="1"]');
+    if (el) cont.scrollLeft = Math.max(0, el.offsetLeft - cont.clientWidth / 2 + el.clientWidth / 2);
+  }, [loading, ay]);
   const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
   const fmtGun = (t) => { const d = new Date(t + "T12:00:00"); return d.toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric", weekday: "long" }); };
   if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
@@ -1538,7 +1556,7 @@ function MarkaNakitPanel({ currentUser }) {
   ayRows.forEach(r => {
     const g = Number((r.tarih || "").slice(8, 10));
     if (!g) return;
-    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","ARAC_KIRA","TICKET"].includes(r.tip) ? r.tip : "DIGER";
+    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","MASRAF_FORMU","ARAC_KIRA","TICKET"].includes(r.tip) ? r.tip : "DIGER";
     const m = (hucre[key] = hucre[key] || {});
     const c = (m[g] = m[g] || { t: 0, items: [] });
     c.t += r.tutar; c.items.push(r);
@@ -1578,10 +1596,57 @@ function MarkaNakitPanel({ currentUser }) {
             15 Temmuz 2026 devrinden itibaren — manuel ödemelerde yalnız AHY seçilen girişler, masraf formları arşivlendiği gün görünür
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <button onClick={() => ayKaydir(-1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>‹</button>
-          <div style={{ fontSize: "15px", fontWeight: 800, color: "#1e3a5f", minWidth: "130px", textAlign: "center" }}>{ayBaslik}</div>
-          <button onClick={() => ayKaydir(1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>›</button>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <button onClick={() => ayKaydir(-1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>‹</button>
+            <div style={{ fontSize: "15px", fontWeight: 800, color: "#1e3a5f", minWidth: "130px", textAlign: "center" }}>{ayBaslik}</div>
+            <button onClick={() => ayKaydir(1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>›</button>
+          </div>
+          {/* Kasa kartı: manuel nakit girişleri − tüm harcamalar = bakiye */}
+          {(() => {
+            const bakiye = kasa.toplam - toplamGenel;
+            const eksi = bakiye < 0;
+            return (
+              <div style={{ background: eksi ? "#fef2f2" : "#f0fdf4", border: `2px solid ${eksi ? "#fca5a5" : "#86efac"}`, borderRadius: "14px", padding: "10px 16px", minWidth: "250px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 800, color: eksi ? "#b91c1c" : "#15803d", letterSpacing: "0.04em" }}>💰 KASAYA NAKİT GELEN</div>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button
+                      onClick={async () => {
+                        const t = prompt("Kasaya giren tutar (₺):");
+                        if (!t) return;
+                        const _s = String(t).trim();
+                        const tutarN = /^\d+(\.\d{1,2})?$/.test(_s) ? Number(_s) : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
+                        if (tutarN <= 0) { alert("Geçerli tutar giriniz"); return; }
+                        const tarih = prompt("Tarih (YYYY-AA-GG):", bugun) || bugun;
+                        const acikl = prompt("Açıklama (opsiyonel):", "") || "";
+                        try {
+                          const r = await fetch(`${API_BASE}/finance/marka-kasa`, {
+                            method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
+                            body: JSON.stringify({ marka, tarih, tutar: tutarN, aciklama: acikl }),
+                          });
+                          const d = await r.json();
+                          if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
+                          loadKasa();
+                        } catch (e2) { alert(e2.message); }
+                      }}
+                      style={{ padding: "3px 10px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                    >＋ Nakit Ekle</button>
+                    {kasa.rows.length > 0 && (
+                      <button onClick={() => setKasaModal(true)} title="Girişleri gör / sil"
+                        style={{ padding: "3px 8px", background: "#fff", color: "#374151", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>🧾 {kasa.rows.length}</button>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: "24px", fontWeight: 900, color: eksi ? "#b91c1c" : "#15803d", marginTop: "4px", textAlign: "right" }}>
+                  {eksi ? "-" : ""}₺{fk(Math.abs(bakiye))}
+                </div>
+                <div style={{ fontSize: "11px", color: "#6b7280", textAlign: "right" }}>
+                  Giren ₺{fk(kasa.toplam)} − Harcanan ₺{fk(toplamGenel)}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
       <div style={{ display: "flex", gap: "12px", marginBottom: "18px", flexWrap: "wrap" }}>
@@ -1592,17 +1657,21 @@ function MarkaNakitPanel({ currentUser }) {
           </div>
         ))}
       </div>
-      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "14px", overflowX: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.05)" }}>
+      <div ref={gridRef} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "14px", overflowX: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.05)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px" }}>
           <thead>
             <tr>
               <th style={{ position: "sticky", left: 0, zIndex: 3, background: "#1e3a5f", color: "#fff", textAlign: "left", padding: "10px 14px", minWidth: "225px", fontSize: "13px" }}>Kategori</th>
-              {gunListesi.map(g => (
-                <th key={g} style={{ background: haftaSonu(g) ? "#2d5a8f" : "#1e3a5f", color: "#fff", padding: "6px 4px", minWidth: "56px", textAlign: "center" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 800 }}>{g}</div>
-                  <div style={{ fontSize: "10px", opacity: 0.75 }}>{GUN_AD[new Date(yy, mm - 1, g).getDay()]}</div>
-                </th>
-              ))}
+              {gunListesi.map(g => {
+                const buGun = ay === bugun.slice(0, 7) && g === Number(bugun.slice(8, 10));
+                return (
+                  <th key={g} data-bugun={buGun ? "1" : undefined}
+                    style={{ background: buGun ? "#b45309" : haftaSonu(g) ? "#2d5a8f" : "#1e3a5f", color: "#fff", padding: "6px 4px", minWidth: "56px", textAlign: "center" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 800 }}>{g}</div>
+                    <div style={{ fontSize: "10px", opacity: 0.75 }}>{buGun ? "Bugün" : GUN_AD[new Date(yy, mm - 1, g).getDay()]}</div>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -1642,8 +1711,43 @@ function MarkaNakitPanel({ currentUser }) {
         <div style={{ marginTop: "10px", fontSize: "12px", color: "#9ca3af" }}>Bu ay için henüz harcama kaydı yok.</div>
       )}
       <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
-        💡 Hücrelerin üzerine gelince kalem detayları görünür. Masraf formu harcamaları bir sonraki sürümde eklenecek; Temmuz maaşının 15 Temmuz sonrası kısmı Ağustos ortasındaki ödemeyle düşer.
+        💡 Hücrelerin üzerine gelince kalem detayları görünür. Kasa bakiyesi = manuel nakit girişleri − tüm harcamalar; Temmuz maaşının 15 Temmuz sonrası kısmı Ağustos ortasındaki ödemeyle düşer.
       </div>
+
+      {/* Kasa girişleri modalı */}
+      {kasaModal && (
+        <div onClick={() => setKasaModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(480px, 94vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>
+              <div style={{ fontWeight: 800, fontSize: "15px", color: "#111827" }}>💰 Kasa Nakit Girişleri <span style={{ fontWeight: 600, fontSize: "12px", color: "#6b7280" }}>(toplam ₺{fk(kasa.toplam)})</span></div>
+              <button onClick={() => setKasaModal(false)} style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "6px 11px", cursor: "pointer", fontWeight: 700 }}>✕</button>
+            </div>
+            <div style={{ overflowY: "auto", padding: "10px 14px" }}>
+              {kasa.rows.map(r => (
+                <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "9px 10px", borderBottom: "1px solid #f1f5f9" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: "14px", color: "#15803d" }}>+₺{fk(r.tutar)}</div>
+                    <div style={{ fontSize: "11.5px", color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.tarih}{r.aciklama ? ` · ${r.aciklama}` : ""}</div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`₺${fk(r.tutar)} tutarındaki kasa girişi silinsin mi?`)) return;
+                      try {
+                        const rr = await fetch(`${API_BASE}/finance/marka-kasa/${r.id}`, { method: "DELETE", headers: _auth });
+                        const dd = await rr.json();
+                        if (!rr.ok || !dd.ok) throw new Error(dd.error || "Silinemedi");
+                        loadKasa();
+                      } catch (e2) { alert(e2.message); }
+                    }}
+                    style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", padding: "4px 10px", fontSize: "11px", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
+                  >🗑 Sil</button>
+                </div>
+              ))}
+              {kasa.rows.length === 0 && <div style={{ padding: "20px", textAlign: "center", color: "#9ca3af" }}>Henüz nakit girişi yok</div>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
