@@ -5744,6 +5744,39 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
   }
 });
 
+// AYLIK SABİT GİDERLER: P&L panelinin alt bölümü — depo/ofis kiraları,
+// araç kiraları (aktif olanlar) ve personel maaş toplamı (yalnız toplam;
+// kişi bazlı maaş şifreli İK alanında kalır).
+app.get("/finance/marka-sabit-giderler", authMiddleware, async (req, res) => {
+  try {
+    const rol = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(rol)) {
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    }
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const [ofisler, araclar, maas] = await Promise.all([
+      pool.query(`SELECT ad, COALESCE(aylik_kira,0) AS tutar FROM ofis_depo
+        WHERE durum='AKTİF' AND COALESCE(aylik_kira,0) > 0 ORDER BY tutar DESC`).catch(() => ({ rows: [] })),
+      pool.query(`SELECT plaka AS ad, COALESCE(aylik_kira,0) AS tutar FROM araclar
+        WHERE durum='AKTİF' AND COALESCE(aylik_kira,0) > 0 ORDER BY tutar DESC`).catch(() => ({ rows: [] })),
+      pool.query(`SELECT COUNT(*)::int AS kisi, COALESCE(SUM(net_maas),0) AS toplam FROM personel
+        WHERE COALESCE(marka,'ERC')=$1 AND aktif = true`, [marka]).catch(() => ({ rows: [{ kisi: 0, toplam: 0 }] })),
+    ]);
+    const t = (rows) => rows.reduce((s, r) => s + Number(r.tutar || 0), 0);
+    const maasToplam = Number(maas.rows[0]?.toplam || 0);
+    res.json({
+      ok: true,
+      ofisler: ofisler.rows,
+      araclar: araclar.rows,
+      maas: { kisi: Number(maas.rows[0]?.kisi || 0), toplam: maasToplam },
+      toplam: t(ofisler.rows) + t(araclar.rows) + maasToplam,
+    });
+  } catch (e) {
+    console.error("SABIT GIDER ERROR:", e.message);
+    res.status(500).json({ ok: false, error: "Sabit giderler alınamadı" });
+  }
+});
+
 // HAKEDİŞ KIRILIM RAPORU: HW'ye kesilen faturalar (hw_invoice_rows) üzerinden
 // aylık ana yüklenici (ERC) / alt yüklenici (AHY) payı. Yüzde markalar
 // tablosundan okunur (AHY.kirilim_yuzde = ERC payı, ör. 10).

@@ -1190,19 +1190,24 @@ function MarkaFinansPanel({ currentUser }) {
 // GELİR = kesilen fatura (tahakkuk), NAKİT = tahsilat/harcama (kasa).
 function MarkaPLPanel({ currentUser }) {
   const [data, setData] = useState(null);
+  const [sabit, setSabit] = useState(null); // aylık sabit giderler (ofis+araç+maaş)
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
   const marka = String(currentUser?.marka || "AHY").toUpperCase();
   const markaAd = currentUser?.marka_ad || marka;
   useEffect(() => {
     (async () => {
+      const hdr = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
       try {
-        const r = await fetch(`${API_BASE}/finance/marka-pl?marka=${marka}`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
-        });
+        const r = await fetch(`${API_BASE}/finance/marka-pl?marka=${marka}`, { headers: hdr });
         const d = await r.json().catch(() => ({}));
         if (!r.ok || d.ok === false) throw new Error(d.error || "Kâr/Zarar raporu alınamadı");
         setData(d);
+        try {
+          const rs = await fetch(`${API_BASE}/finance/marka-sabit-giderler?marka=${marka}`, { headers: hdr });
+          const ds = await rs.json().catch(() => ({}));
+          if (rs.ok && ds.ok) setSabit(ds);
+        } catch {}
       } catch (e) { setErr(e.message); } finally { setLoading(false); }
     })();
   }, []);
@@ -1456,46 +1461,55 @@ function MarkaPLPanel({ currentUser }) {
         </div>
       </div>
 
-      {/* Aylık P&L tablosu — kolonlar aylar */}
-      <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: `${280 + aylar.length * 130}px` }}>
-            <thead>
-              <tr>
-                <th style={{ position: "sticky", left: 0, zIndex: 3, background: "#1f2937", color: "#fff", padding: "12px 16px", fontSize: "12px", textAlign: "left", minWidth: "250px" }}>Kalem</th>
-                {aylar.map(a => (
-                  <th key={a.ay} style={{ background: "#1f2937", color: a.ay === buAy ? "#fbbf24" : "#fff", padding: "12px 16px", fontSize: "12px", textAlign: "right", whiteSpace: "nowrap" }}>{ayAd(a.ay)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {SATIRLAR.map((s, i) => s.tip === "baslik" ? (
-                <tr key={`b${i}`}>
-                  <td colSpan={aylar.length + 1} style={{ position: "sticky", left: 0, background: "#f1f5f9", padding: "8px 16px", fontSize: "11px", fontWeight: 800, color: "#475569", letterSpacing: "0.06em" }}>{s.label}</td>
-                </tr>
-              ) : (
-                <tr key={`${s.key}-${s.key2 || i}`} style={{ background: s.sonuc ? "#fefce8" : "#fff" }}>
-                  <td style={{ position: "sticky", left: 0, zIndex: 2, background: s.sonuc ? "#fefce8" : "#fff", padding: "10px 16px", fontSize: "13px", fontWeight: s.bold ? 800 : 500, color: "#111827", whiteSpace: "nowrap", borderBottom: "1px solid #f1f5f9" }}>{s.label}</td>
-                  {aylar.map(a => {
-                    const v = Number(a[s.key] || 0);
-                    const renk = s.sonuc ? (v >= 0 ? "#047857" : "#b91c1c") : (v ? (s.color || "#374151") : "#cbd5e1");
-                    return (
-                      <td key={a.ay} style={{ padding: "10px 16px", fontSize: "13px", textAlign: "right", whiteSpace: "nowrap", fontWeight: s.bold ? 800 : 500, color: renk, borderBottom: "1px solid #f1f5f9", background: a.ay === buAy ? (s.sonuc ? "#fef9c3" : "#fffbeb") : undefined }}>
-                        {v ? `${v < 0 ? "-" : ""}₺${fmt(Math.abs(v))}` : "—"}
-                      </td>
-                    );
-                  })}
-                </tr>
+      {/* Aylık Sabit Giderler — Ofis&Depo, Araç ve İK kayıtlarından otomatik */}
+      <div style={{ background: "#fff", borderRadius: "18px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", overflow: "hidden" }}>
+        <div style={{ padding: "18px 24px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+          <div>
+            <div style={{ fontSize: "16px", fontWeight: 800, color: "#0f172a" }}>📌 Aylık Sabit Giderler</div>
+            <div style={{ fontSize: "11.5px", color: "#94a3b8", marginTop: "2px" }}>Ofis & Depo, Araç Yönetimi ve İK kayıtlarından otomatik hesaplanır</div>
+          </div>
+          <div style={{ background: "linear-gradient(120deg, #1e3a5f, #1e40af)", color: "#fff", borderRadius: "14px", padding: "10px 22px", textAlign: "center" }}>
+            <div style={{ fontSize: "10px", color: "#93c5fd", fontWeight: 800, letterSpacing: "0.08em" }}>TOPLAM SABİT GİDER / AY</div>
+            <div style={{ fontSize: "22px", fontWeight: 900 }}>₺{fmt(sabit?.toplam)}</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap" }}>
+          {[
+            { baslik: "🏭 DEPO & OFİS KİRALARI", rows: sabit?.ofisler || [] },
+            { baslik: "🚗 ARAÇ KİRALARI", rows: sabit?.araclar || [] },
+          ].map(b => (
+            <div key={b.baslik} style={{ flex: "1 1 280px", padding: "16px 24px", borderRight: "1px solid #f8fafc", minWidth: 0 }}>
+              <div style={{ fontSize: "12px", fontWeight: 800, color: "#475569", letterSpacing: "0.05em", marginBottom: "10px" }}>{b.baslik}</div>
+              {b.rows.map((r, i) => (
+                <div key={`${r.ad}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: "8px", fontSize: "13px", padding: "5px 0", borderBottom: "1px dashed #f1f5f9" }}>
+                  <span style={{ color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ad}</span>
+                  <b style={{ whiteSpace: "nowrap" }}>₺{fmt(r.tutar)}</b>
+                </div>
               ))}
-              {aylar.length === 0 && (
-                <tr><td colSpan={2} style={{ padding: "26px", textAlign: "center", color: "#9ca3af" }}>Henüz veri yok</td></tr>
-              )}
-            </tbody>
-          </table>
+              {b.rows.length === 0 && <div style={{ fontSize: "12px", color: "#cbd5e1", padding: "5px 0" }}>Kayıt yok</div>}
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "9px", fontSize: "13px", fontWeight: 800, color: "#1e3a5f" }}>
+                <span>Ara Toplam</span>
+                <span>₺{fmt(b.rows.reduce((s, r) => s + Number(r.tutar || 0), 0))}</span>
+              </div>
+            </div>
+          ))}
+          {/* Maaşlar: yalnız toplam — kişi bazlı maaş şifreli İK alanında */}
+          <div style={{ flex: "1 1 280px", padding: "16px 24px", minWidth: 0 }}>
+            <div style={{ fontSize: "12px", fontWeight: 800, color: "#475569", letterSpacing: "0.05em", marginBottom: "10px" }}>👥 PERSONEL MAAŞLARI</div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", padding: "5px 0", borderBottom: "1px dashed #f1f5f9" }}>
+              <span style={{ color: "#374151" }}>Aktif personel</span>
+              <b>{sabit?.maas?.kisi || 0} kişi</b>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "9px", fontSize: "13px", fontWeight: 800, color: "#1e3a5f" }}>
+              <span>Ara Toplam</span>
+              <span>₺{fmt(sabit?.maas?.toplam)}</span>
+            </div>
+            <div style={{ fontSize: "10.5px", color: "#9ca3af", marginTop: "8px" }}>Kişi bazlı maaşlar şifreli İK alanındadır</div>
+          </div>
         </div>
       </div>
       <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px", textAlign: "center" }}>
-        💡 Kâr/Zarar tahakkuk bazlıdır (kesilen fatura − gider). Net Nakit kasa bazlıdır (tahsilat − harcama). "Tahsil Edilmemiş Fatura" kesilen ama henüz ödenmeyen faturaların kümülatif toplamıdır.
+        💡 Kâr/Zarar tahakkuk bazlıdır (kesilen fatura − gider), Net Nakit kasa bazlıdır (tahsilat − harcama). Ay-ay kalem dökümü 📥 Excel İndir'de; sabit giderler ilgili panellerde güncellenince burada otomatik yenilenir.
       </div>
     </div>
   );
@@ -27026,7 +27040,10 @@ function AraclarPanel({ currentUser, onBack }) {
 
   const getBelge = (arac, turu) => (arac.belgeler||[]).find(b => b.belge_turu === turu);
 
-  const filtered = araclar.filter(a => filter === "TUMU" ? true : a.durum === filter);
+  // AHY görünümü (alt marka): yalnız aktif araçlar — iade edilmiş/pasif filo görünmez
+  const _altMarkaGorunum = currentUser?.hw_yukleme === false;
+  const _aracBaz = _altMarkaGorunum ? araclar.filter(a => a.durum === "AKTİF") : araclar;
+  const filtered = _aracBaz.filter(a => filter === "TUMU" ? true : a.durum === filter);
 
   const TIPLER = ["Binek","Pickup","Minibüs","Panelvan","Kamyon","Motosiklet","Diğer"];
   const DURUMLAR = ["AKTİF","PASİF","SERVİSTE"];
