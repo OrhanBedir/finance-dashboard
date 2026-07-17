@@ -11950,7 +11950,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   };
   const loadIsgMatris = async () => {
     const r = await fetch(`${API_BASE}/hr/isg/matris`);
-    setIsgMatris(await r.json());
+    const d = await r.json();
+    const arr = Array.isArray(d) ? d : [];
+    // AHY görünümü: yalnız kendi markasının AKTİF personeli — işten
+    // çıkarılanların ISG durumları panele yansımaz. ERC tümünü görür.
+    setIsgMatris(_hrMarka === "ERC" ? arr : arr.filter(p => String(p.marka || "ERC").toUpperCase() === _hrMarka && p.aktif));
   };
   const loadIsgUyarilar = async () => {
     const r = await fetch(`${API_BASE}/hr/isg/uyarilar`);
@@ -15787,8 +15791,12 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const isNurcan       = _email === "nurcan.kus@simsektel.com";
   // Rollout Manager: rollout_mudur veya bolge_mudur rolüne sahip kullanıcılar
   const isRolloutMudur = _role === "rollout_mudur" || _role === "bolge_mudur";
+  // Alt marka (AHY) tam paneli: firma=AHY işaretli TÜM avansları görür
+  // (nakit akışına yansıyanlarla aynı küme — onay firması seçilenler)
+  const _altMarka = currentUser?.hw_yukleme === false;
+  const _marka = String(currentUser?.marka || "AHY").toUpperCase();
   // isRequester: sadece kendi avanslarını görür
-  const isRequester = !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
+  const isRequester = !_altMarka && !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const loadBakiye = async () => {
@@ -15800,7 +15808,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
       try {
         const rb = await fetch(`${API_BASE}/hr/is-avans/bakiyeler`);
         const db = await rb.json().catch(() => ({}));
-        if (rb.ok) setBakiyeler(db.rows || []);
+        const rows = db.rows || [];
+        // Alt marka yalnız kendi personelinin bakiyelerini görür
+        if (rb.ok) setBakiyeler(_altMarka ? rows.filter(b => String(b.marka || "ERC").toUpperCase() === _marka) : rows);
       } catch {}
     }
   };
@@ -15809,7 +15819,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     // Requester kendi avanslarını + kendisi için açılanları görsün; admin tümünü görsün
     const qs = isRequester && currentUser?.email ? `?email=${encodeURIComponent(currentUser.email)}` : "";
     const r = await fetch(`${API_BASE}/hr/is-avans${qs}`);
-    const data = await r.json();
+    let data = await r.json();
+    // Alt marka: yalnız onayda kendi firması seçilen avanslar (nakit akışıyla aynı küme)
+    if (_altMarka) data = (Array.isArray(data) ? data : []).filter(t => String(t.firma || "").toUpperCase() === _marka);
     setList(data);
     if (onPendingCount) {
       const email = currentUser?.email;
@@ -16115,6 +16127,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
           {!isMobile && (() => {
             const p = new URLSearchParams();
             if (isRequester) p.set("email", currentUser?.email || "");
+            if (_altMarka) p.set("firma", _marka);
             if (filterDurum) p.set("durum", filterDurum);
             if (filterGider) p.set("gider_turu", filterGider);
             if (filterBolge) p.set("bolge", filterBolge);

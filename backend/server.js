@@ -12349,7 +12349,7 @@ app.get("/finance/sarkan-odemeler", requireFinanceAuth, async (req, res) => {
 app.get("/hr/isg/matris", async (req, res) => {
   try {
     const personelRows = await pool.query(
-      "SELECT id,ad_soyad,unvan,aktif,firma_tipi,elektrik_isi,yuksekte_calisma,arac_kullanim,ekip_bilgisi,alt_yuklenici FROM personel ORDER BY aktif DESC, ad_soyad ASC"
+      "SELECT id,ad_soyad,unvan,aktif,firma_tipi,elektrik_isi,yuksekte_calisma,arac_kullanim,ekip_bilgisi,alt_yuklenici,COALESCE(marka,'ERC') AS marka FROM personel ORDER BY aktif DESC, ad_soyad ASC"
     );
     const isgRows = await pool.query(
       "SELECT * FROM personel_isg ORDER BY personel_id, egitim_turu, bitis_tarihi DESC"
@@ -12913,7 +12913,7 @@ app.get("/hr/is-avans/bakiye", async (req, res) => {
 app.get("/hr/is-avans/bakiyeler", async (req, res) => {
   try {
     const r = await pool.query(`
-      SELECT p.id, p.ad_soyad, p.aktif,
+      SELECT p.id, p.ad_soyad, p.aktif, COALESCE(p.marka,'ERC') AS marka,
         COALESCE(av.toplam,0) AS avans,
         COALESCE(ms.toplam,0) AS masraf,
         COALESCE(av.toplam,0) - COALESCE(ms.toplam,0) AS bakiye
@@ -13223,10 +13223,11 @@ app.get("/hr/is-avans/excel", async (req, res) => {
 
     const ws = wb.addWorksheet("İş Avansı Talepleri");
 
-    const { email, durum, gider_turu, bolge, proje, baslangic, bitis } = req.query;
+    const { email, durum, gider_turu, bolge, proje, baslangic, bitis, firma } = req.query;
     const conditions = [];
     const params = [];
     if (email) { conditions.push(`t.talep_eden_email = $${params.length+1}`); params.push(email); }
+    if (firma) { conditions.push(`UPPER(COALESCE(t.firma,'')) = $${params.length+1}`); params.push(String(firma).toUpperCase()); }
     if (durum) { conditions.push(`t.durum = $${params.length+1}`); params.push(durum); }
     if (gider_turu) { conditions.push(`t.gider_turu = $${params.length+1}`); params.push(gider_turu); }
     if (bolge) { conditions.push(`t.bolge = $${params.length+1}`); params.push(bolge); }
