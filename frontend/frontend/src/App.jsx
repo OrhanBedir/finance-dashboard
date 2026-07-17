@@ -18263,14 +18263,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const headers = [
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
-        "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
+        "Done Qty", "Requested Qty", "QC Durum", "Billed Qty", "Due Qty",
         "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", _hakHdr, _hakKdvHdr,
         "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
         "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
         "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 20, 30, 16, 18];
-      const NCOLS = headers.length; // 24
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 11, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 20, 30, 16, 18];
+      const NCOLS = headers.length;
 
       const titleStyle = {
         fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
@@ -18324,6 +18324,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const colors = { OK: "15803D", PO_BEKLER: "D97706", CANCEL: "B91C1C", PARTIAL: "2563EB" };
         if (colors[s]) return { ...base, font: { ...base.font, bold: true, color: { rgb: colors[s] } } };
         return base;
+      };
+      // QC Durum hücresi: OK yeşil, NOK kırmızı — fatura kesilebilirlik göstergesi
+      const qcStyle = (v, isEven) => {
+        const base = cellStyle(isEven, false);
+        const ok = String(v || "").toUpperCase() === "OK";
+        return { ...base, alignment: { ...base.alignment, horizontal: "center" }, font: { ...base.font, bold: true, color: { rgb: ok ? "15803D" : "B91C1C" } } };
       };
 
       const aoa = [];
@@ -18395,6 +18401,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             _siteAgg.set(key, a);
           }
           a.kalem += 1;
+          if (String(row.qc_durum || "").toUpperCase() === "OK") a.qcOk = true;
           a.doneQty += doneQty; a.reqQty += Number(row.requested_qty || 0); a.billedQty += billedQty;
           a.usdToplam += usdToplamFiyat;
           a.toplamHakedis += toplamHakedis; a.federalHakedis += federalHakedis;
@@ -18417,6 +18424,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           { v: row.onair_date || "",                              s: cellStyle(isEven, false) },
           { v: doneQty,                                           s: cellStyle(isEven, true) },
           { v: Number(row.requested_qty || 0),                    s: cellStyle(isEven, true) },
+          { v: String(row.qc_durum || "").toUpperCase() === "OK" ? "OK" : "NOK", s: qcStyle(row.qc_durum, isEven) },
           { v: billedQty,                                         s: cellStyle(isEven, true) },
           { v: dueQty,                                            s: cellStyle(isEven, true) },
           { v: row.currency || "",                                s: cellStyle(isEven, false) },
@@ -18453,6 +18461,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             { v: a.onair,                               s: cellStyle(isEven, false) },
             { v: a.doneQty,                             s: cellStyle(isEven, true) },
             { v: a.reqQty,                              s: cellStyle(isEven, true) },
+            { v: a.qcOk ? "OK" : "NOK",                 s: qcStyle(a.qcOk ? "OK" : "NOK", isEven) },
             { v: a.billedQty,                           s: cellStyle(isEven, true) },
             { v: a.doneQty - a.billedQty,               s: cellStyle(isEven, true) },
             { v: curr,                                  s: cellStyle(isEven, false) },
@@ -18475,7 +18484,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       }
 
       // Saha bazında: gereksiz kalem-detay kolonlarını çıkar (USD Birim Fiyat, USD Toplam Fiyat, Unit Price TRY)
-      const _dropIdx = aggregateBySite ? new Set([13, 14, 15]) : null;
+      // (QC Durum kolonu eklendiği için indeksler 1 kaydı)
+      const _dropIdx = aggregateBySite ? new Set([14, 15, 16]) : null;
       if (_dropIdx) {
         for (let i = 0; i < aoa.length; i++) aoa[i] = aoa[i].filter((_, ci) => !_dropIdx.has(ci));
       }
