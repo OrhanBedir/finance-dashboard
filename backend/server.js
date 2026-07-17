@@ -1477,12 +1477,13 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
         .json({ ok: false, error: "Excel içinde veri bulunamadı" });
     }
 
+    // 2KX manuel takip kalemleri — blanket QC güncellemesine girmez.
+    // (8818274546 mikrodalga çıkarıldı: artık ANA şablon kapsamında güncellenir)
     const EXCLUDED_ITEMS = [
       "8812184870",
       "8812184927",
       "8812184930",
       "8812184919",
-      "8818274546",
     ];
 
     function normalizeText(value) {
@@ -1501,16 +1502,27 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       return "NOK";
     }
 
-    // Şablon/saha-tipi kuralı yok: Excel'deki her saha doğrudan sistemdeki
-    // site_code ile (rollout_progress + master_works) çarpıştırılır.
-    // Özel şablonlar ayrı işlenir:
-    //   "TRS QUALITY CHECK LIST" → sadece 8818274546 kalemi
-    //   "AG OG ENERJI"           → sadece enh_qc_closed_date
-    // Aynı sahada birden çok ana QC satırı varsa OK öncelikli birleştirilir.
+    // ── ŞABLON → KALEM KAPSAMI KURGUSU (17.07.2026, DE0334_NS_AE örneği) ──
+    // Bir sahada birden çok QC görevi açılır; her şablon FARKLI kalemleri kapatır:
+    //   TRS Quality CheckList   → yalnız 8812184600 (outdoor kabin)
+    //   AG OG Enerji Template   → yalnız enerji kalemleri (+ enh kapanış tarihi)
+    //   5G Readiness Yeni Pole  → yalnız LPRT kalemleri (8818278108, 8818278098)
+    //   STANDALONE AI / diğer ana şablonlar → yukarıdakiler DIŞINDA kalan kalemler
+    // Saha (rollout) QC durumunu YALNIZ ana şablon belirler. QA görevleri
+    // (EHS Audit vb.) hiçbir kapsamda QC belirleyemez; QC-CW/QC-TE geçerlidir.
+    // Aynı saha+kapsamda birden çok satır varsa OK öncelikli birleştirilir.
+    const ITEM_TRS = ["8812184600"];
+    const ITEM_LPRT = ["8818278108", "8818278098"];
+    const ITEM_ENERJI = ["8812184681", "8812184682", "8812184684", "8812184690", "8812184851", "8818278116"];
+    const OZEL_ITEMLER = [...ITEM_TRS, ...ITEM_LPRT, ...ITEM_ENERJI];
+    const scopeOf = (t) => {
+      if (t.includes("TRS QUALITY CHECK")) return "TRS";
+      if (t.includes("AG OG ENERJI")) return "ENERJI";
+      if (t.includes("5G READINESS YENI POLE")) return "LPRT";
+      return "ANA";
+    };
 
-    const mainBySite = new Map();
-    const trsBySite = new Map();
-    const enerjiBySite = new Map();
+    const bySiteScope = new Map(); // "SITE|SCOPE" → {siteCode, scope, qcDurum, tarih...}
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i] || [];
@@ -1522,35 +1534,22 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
 
       if (!siteCode || !qcDurum) continue;
 
+      // QA görevleri atlanır (EHS Audit "Closed" olsa bile QC sayılmaz —
+      // GAHST_5GEXP_ANK vakası). QC-TE, QC-CW, QC-EHS geçerli.
+      if (COL_BUSINESS >= 0) {
+        const bt = normalizeText(row[COL_BUSINESS]);
+        if (bt && !bt.startsWith("QC")) continue;
+      }
+
       const templateNorm = normalizeText(row[COL_TEMPLATE]);
       const firstSubmitDateOnly = toDateOnly(row[COL_FIRST_SUBMIT]);
       const qcClosedDateOnly = toDateOnly(row[COL_CLOSE_TIME]);
 
-      if (templateNorm.includes("AG OG ENERJI")) {
-        if (qcDurum === "OK") {
-          enerjiBySite.set(
-            siteCode,
-            qcClosedDateOnly || firstSubmitDateOnly || enerjiBySite.get(siteCode) || null,
-          );
-        }
-        continue;
-      }
-
-      if (templateNorm.includes("TRS QUALITY CHECK LIST")) {
-        if (trsBySite.get(siteCode) !== "OK") trsBySite.set(siteCode, qcDurum);
-        continue;
-      }
-
-      // Ana QC yalnız QC-TE görevlerinden belirlenir: QA (EHS Audit vb.)
-      // "Closed" olsa bile sahayı OK yapamaz (örn. GAHST_5GEXP_ANK vakası).
-      if (COL_BUSINESS >= 0) {
-        const bt = normalizeText(row[COL_BUSINESS]);
-        if (bt && bt !== "QC-TE") continue;
-      }
-
-      const prev = mainBySite.get(siteCode);
+      const scope = scopeOf(templateNorm);
+      const key = `${siteCode}|${scope}`;
+      const prev = bySiteScope.get(key);
       if (!prev || (prev.qcDurum !== "OK" && qcDurum === "OK")) {
-        mainBySite.set(siteCode, { qcDurum, firstSubmitDateOnly, qcClosedDateOnly });
+        bySiteScope.set(key, { siteCode, scope, qcDurum, firstSubmitDateOnly, qcClosedDateOnly });
       } else if (prev.qcDurum === "OK" && qcDurum === "OK") {
         prev.firstSubmitDateOnly = prev.firstSubmitDateOnly || firstSubmitDateOnly;
         prev.qcClosedDateOnly = prev.qcClosedDateOnly || qcClosedDateOnly;
@@ -1561,7 +1560,34 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     let matchedSites = 0;
     const missingSites = [];
 
-    for (const [siteCode, m] of mainBySite) {
+    // Özel kapsamlar: yalnız kendi kalemlerinin QC durumunu yazar
+    for (const m of bySiteScope.values()) {
+      if (m.scope === "ANA") continue;
+      const items = m.scope === "TRS" ? ITEM_TRS : m.scope === "LPRT" ? ITEM_LPRT : ITEM_ENERJI;
+      const r = await pool.query(
+        `UPDATE master_works
+           SET qc_durum = $1
+         WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
+           AND TRIM(COALESCE(item_code, '')) = ANY($3::text[])`,
+        [m.qcDurum, m.siteCode, items],
+      );
+      updatedCount += r.rowCount || 0;
+      // Enerji QC OK → rollout enerji kapanış tarihi
+      if (m.scope === "ENERJI" && m.qcDurum === "OK") {
+        await pool.query(
+          `UPDATE rollout_progress
+             SET enh_qc_closed_date = COALESCE(enh_qc_closed_date, $2),
+                 updated_at = NOW()
+           WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1`,
+          [m.siteCode, m.qcClosedDateOnly || m.firstSubmitDateOnly],
+        );
+      }
+    }
+
+    // Ana kapsam: saha QC'si (rollout) + özel kalemler dışındaki tüm kalemler
+    const anaList = [...bySiteScope.values()].filter(m => m.scope === "ANA");
+    for (const m of anaList) {
+      const siteCode = m.siteCode;
       const ro = await pool.query(
         `
         UPDATE rollout_progress
@@ -1606,36 +1632,14 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
           WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
             AND TRIM(COALESCE(item_code, '')) <> ALL($3::text[])
           `,
-        [m.qcDurum, siteCode, EXCLUDED_ITEMS],
+        // Özel kapsam kalemleri (TRS/LPRT/enerji) kendi şablonlarından güncellenir;
+        // 2KX manuel takip kalemleri de blanket güncellemenin dışındadır
+        [m.qcDurum, siteCode, [...EXCLUDED_ITEMS, ...OZEL_ITEMLER]],
       );
       updatedCount += mw.rowCount || 0;
 
       if ((ro.rowCount || 0) + (mw.rowCount || 0) > 0) matchedSites++;
       else missingSites.push(siteCode);
-    }
-
-    for (const [siteCode, qcDurum] of trsBySite) {
-      const result = await pool.query(
-        `
-          UPDATE master_works
-          SET qc_durum = $1
-          WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $2
-            AND TRIM(COALESCE(item_code, '')) = '8818274546'
-          `,
-        [qcDurum, siteCode],
-      );
-      updatedCount += result.rowCount || 0;
-    }
-
-    for (const [siteCode, tarih] of enerjiBySite) {
-      if (!tarih) continue;
-      await pool.query(
-        `UPDATE rollout_progress
-           SET enh_qc_closed_date = COALESCE(enh_qc_closed_date, $2),
-               updated_at = NOW()
-         WHERE UPPER(TRIM(COALESCE(site_code, ''))) = $1`,
-        [siteCode, tarih],
-      );
     }
 
     return res.json({
