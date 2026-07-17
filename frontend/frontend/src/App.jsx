@@ -11755,7 +11755,7 @@ function hesaplaVergi(netBankadan) {
 /* ============================================================
    HR DASHBOARD - Personel / Puantaj / Avans / ISG
    ============================================================ */
-function HrDashboard({ onBack, currentUser }) {
+function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "muhasebe@simsektel.com" || _hrEmail === "info@ahyelektrik.com";
   // İK marka izolasyonu (TEK YÖNLÜ): ERC ana yüklenici — maaş ve kalan
@@ -11782,9 +11782,17 @@ function HrDashboard({ onBack, currentUser }) {
   const _maasSifreli = _hrEmail === "info@ahyelektrik.com";
   const _maasSifreler = _maasSifreli ? ["ahy2026gsm"] : ["Orhan2026!", "Duzgun2026!"];
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili && !_maasSifreli);
-  // Muhasebe → maaş sekmelerini (personel, maas_avans) gizle, is_avans'tan başla
-  // Nurcan → isg'den başla  / Diğerleri → personel'den başla
-  const [tab, setTab] = useState(_isMuhasebe ? "is_avans" : (_isNurcanHR ? "isg" : "personel"));
+  // İş Avansı İK'dan kaldırıldı (Muhasebe menüsünde) — Muhasebe puantajdan,
+  // Nurcan ISG'den, diğerleri personelden başlar
+  const [tab, _setTab] = useState(_isMuhasebe ? "puantaj" : (_isNurcanHR ? "isg" : "personel"));
+  const setTab = (k) => { _setTab(k); if (onTabChange) onTabChange(k); };
+  // Kenar menüdeki İK alt sekmeleriyle senkron: ilk açılışta modülün kendi
+  // varsayılanı yukarı bildirilir, sonrasında kenar menü seçimi aşağı iner
+  const _tabSyncInit = useRef(false);
+  useEffect(() => {
+    if (!_tabSyncInit.current) { _tabSyncInit.current = true; if (onTabChange) onTabChange(tab); return; }
+    if (initialTab && initialTab !== tab) _setTab(initialTab);
+  }, [initialTab]);
   const [personelList, setPersonelList] = useState([]);
   const [isgTurleri, setIsgTurleri] = useState([]);
   const [isgUyarilar, setIsgUyarilar] = useState([]);
@@ -12353,12 +12361,16 @@ function HrDashboard({ onBack, currentUser }) {
 
   return (
     <div style={{ maxWidth:"1400px", margin:"0 auto" }}>
-      {/* Başlık + Geri */}
-      <div style={{ display:"flex", alignItems:"center", gap:"16px", marginBottom:"20px" }}>
+      {/* Başlık — ERP modül bandı */}
+      <div style={{ background:"linear-gradient(120deg, #1e3a5f 0%, #1e40af 60%, #3730a3 100%)", borderRadius:"18px", padding:"20px 26px", marginBottom:"18px", position:"relative", overflow:"hidden", boxShadow:"0 10px 28px rgba(30,58,95,0.3)", display:"flex", alignItems:"center", gap:"16px", flexWrap:"wrap" }}>
+        <div style={{ position:"absolute", right:"-30px", top:"-50px", width:"190px", height:"190px", borderRadius:"50%", background:"rgba(255,255,255,0.07)" }} />
         {onBack && (
-          <button className="tab" onClick={onBack} style={{ fontSize:"13px" }}>← Finance</button>
+          <button onClick={onBack} style={{ background:"rgba(255,255,255,0.14)", border:"1px solid rgba(255,255,255,0.25)", color:"#fff", borderRadius:"10px", padding:"7px 14px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", position:"relative" }}>←</button>
         )}
-        <h2 style={{ margin:0, fontSize:"22px", fontWeight:700, color:"#1f2937" }}>👤 İnsan Kaynakları Modülü</h2>
+        <div style={{ position:"relative" }}>
+          <div style={{ fontSize:"10.5px", fontWeight:800, color:"#93c5fd", letterSpacing:"0.14em", marginBottom:"3px" }}>HUMAN RESOURCES</div>
+          <h2 style={{ margin:0, fontSize:"22px", fontWeight:900, color:"#fff", letterSpacing:"-0.4px" }}>👥 İnsan Kaynakları Modülü</h2>
+        </div>
       </div>
       {/* ISG Uyarı Bandı */}
       {isgUyarilar.length > 0 && (() => {
@@ -12412,11 +12424,11 @@ function HrDashboard({ onBack, currentUser }) {
         </div>
       )}
 
-      {/* Sekmeler */}
-      <div style={{ display:"flex", gap:"8px", marginBottom:"20px" }}>
-        {[["personel","👤 Personel Maaş"],["maas_avans","💰 Maaş Avansı"],["is_avans","🏗 İş Avansı"],["puantaj","📋 Puantaj"],["isg","🎓 ISG / Belgeler"]]
+      {/* Modül sekmeleri — ERP tarzı segment (İş Avansı Muhasebe menüsündedir) */}
+      <div style={{ display:"inline-flex", gap:"4px", marginBottom:"22px", background:"#f1f5f9", borderRadius:"14px", padding:"5px", flexWrap:"wrap" }}>
+        {[["personel","👤","Personel Maaş","Kadro & maaş yönetimi"],["maas_avans","💰","Maaş Avansı","Avans kayıtları"],["puantaj","📋","Puantaj","Devam & hakediş"],["isg","🎓","ISG / Belgeler","Eğitim & sertifika"]]
         .filter(([k]) => _hrYetkili || !_isMuhasebe || !["personel","maas_avans"].includes(k))
-        .map(([k,l]) => (
+        .map(([k, ic, l, alt]) => (
           <button key={k} onClick={()=>{
             if ((k === "personel" || k === "maas_avans") && !personelUnlocked) {
               const pwd = prompt("Maaş bilgileri için şifre giriniz:");
@@ -12424,7 +12436,16 @@ function HrDashboard({ onBack, currentUser }) {
               setPersonelUnlocked(true);
             }
             setTab(k);
-          }} className={tab===k?"tab activeTab":"tab"} style={{ fontSize:"14px" }}>{l}</button>
+          }}
+            style={{ display:"flex", alignItems:"center", gap:"9px", padding:"9px 18px", border:"none", borderRadius:"10px", cursor:"pointer", textAlign:"left",
+              background: tab===k ? "linear-gradient(120deg,#1e3a5f,#1e40af)" : "transparent",
+              boxShadow: tab===k ? "0 4px 12px rgba(30,58,95,0.3)" : "none", transition:"all 0.15s" }}>
+            <span style={{ fontSize:"17px" }}>{ic}</span>
+            <span>
+              <span style={{ display:"block", fontSize:"13.5px", fontWeight:700, color: tab===k ? "#fff" : "#374151", whiteSpace:"nowrap" }}>{l}</span>
+              <span style={{ display:"block", fontSize:"10px", color: tab===k ? "#bfdbfe" : "#9ca3af", whiteSpace:"nowrap" }}>{alt}</span>
+            </span>
+          </button>
         ))}
       </div>
 
@@ -24343,6 +24364,7 @@ function App() {
   const [supplierAdvances, setSupplierAdvances] = useState([]);
   const [supplierAdvanceTotal, setSupplierAdvanceTotal] = useState(0);
 
+  const [hrTab, setHrTab] = useState("personel"); // İK modülü alt sekmesi (kenar menüden yönetilir)
   const [page, setPage] = useState(() => {
     const u = (() => { try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; } })();
     const _ue = (u?.email||"").toLowerCase().trim();
@@ -25314,9 +25336,27 @@ function App() {
               {openSections.ik && (
                 <div>
                   {(isAdmin || user?.role === "muhasebe" || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
-                    <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
-                      <span>👥</span> İK Paneli
-                    </div>
+                    <>
+                      <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
+                        <span>👥</span> İK Paneli
+                        <span style={{ marginLeft:"auto", fontSize:"10px", opacity:0.6 }}>{page==='hr' ? "▾" : "▸"}</span>
+                      </div>
+                      {/* ERP tarzı alt menü: İK açıkken modül sekmeleri kenar menüde */}
+                      {page==='hr' && (
+                        <div style={{ margin:"2px 0 6px", borderLeft:"1px solid rgba(148,163,184,0.15)", marginLeft:"22px" }}>
+                          {[["personel","👤","Personel Maaş"],["maas_avans","💰","Maaş Avansı"],["puantaj","📋","Puantaj"],["isg","🎓","ISG / Belgeler"]].map(([k, ic, l]) => (
+                            <div key={k} onClick={()=>{ setPage('hr'); setHrTab(k); }}
+                              style={{ padding:"7px 10px 7px 16px", cursor:"pointer", fontSize:"12.5px", display:"flex", alignItems:"center", gap:"7px",
+                                color: hrTab===k ? "#fff" : "#94a3b8", fontWeight: hrTab===k ? 700 : 500,
+                                background: hrTab===k ? "rgba(59,130,246,0.22)" : "transparent",
+                                borderLeft: hrTab===k ? "3px solid #3b82f6" : "3px solid transparent",
+                                borderRadius:"0 8px 8px 0", transition:"background 0.15s" }}>
+                              <span style={{ fontSize:"13px" }}>{ic}</span> {l}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                   <div className={`sidebar-nav-item ${page==='orgsema'?'active':''}`} onClick={()=>setPage('orgsema')}>
                     <span>🏢</span> Organizasyon Şeması
@@ -25504,7 +25544,7 @@ function App() {
               )
             )}
 
-            {page === "hr" && <HrDashboard onBack={()=>setPage("finance")} currentUser={user} />}
+            {page === "hr" && <HrDashboard onBack={()=>setPage("finance")} currentUser={user} initialTab={hrTab} onTabChange={setHrTab} />}
             {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
             {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
             {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
