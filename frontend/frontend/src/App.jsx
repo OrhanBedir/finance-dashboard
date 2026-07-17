@@ -12494,7 +12494,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   <h2 style={{ margin:0, fontSize:"20px" }}>
                     👤 Personel Listesi
                     <span style={{ marginLeft:"10px", fontSize:"13px", fontWeight:500, color:"#6b7280", background:"#f3f4f6", borderRadius:"20px", padding:"2px 10px" }}>
-                      {personelList.filter(p=>puantajIstihdam(p)).length} aktif
+                      {/* Alttaki kart listesiyle aynı küme: aktif Şimşek kadrosu */}
+                      {personelList.filter(p=>(p.firma_tipi||"simsek")==="simsek" && p.aktif).length} aktif
                     </span>
                   </h2>
                   {/* Tam ay tahmini bütçe + an itibariyle — alt alta, aynı format */}

@@ -5487,9 +5487,16 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
         FROM invoice_entries
         WHERE fatura_tarihi IS NOT NULL`),
-      pool.query(`SELECT to_char(m.tarih,'YYYY-MM') AS ay, SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS t
+      // Temmuz 2026 dönem maaşı: devir öncesi girenlerde %50 AHY payı,
+      // 15.07+ girenlerde tamamı; Temmuz öncesi dönemler yansımaz.
+      pool.query(`SELECT to_char(m.tarih,'YYYY-MM') AS ay,
+          SUM((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
+            CASE WHEN COALESCE(m.donem,'') = '2026-07'
+                      AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
+                 THEN 0.5 ELSE 1 END) AS t
         FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
-        WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2 GROUP BY 1`, [marka, DEVIR]),
+        WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2
+          AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07' GROUP BY 1`, [marka, DEVIR]),
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
         FROM avans a JOIN personel p ON p.id=a.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
@@ -5552,12 +5559,22 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
     // NOT: Masraf formları nakit çıkışı DEĞİLDİR — iş avansını kapatırlar
     // (para avans ödendiğinde çıkmıştı; çifte sayım olmasın diye listelenmez).
     const [maas, avanslar, kiralar, ofisKiralar, manuel] = await Promise.all([
+      // Maaş devri kuralı: Temmuz 2026 dönem maaşı, devir öncesi (15.07) işe
+      // girmiş personelde %50 AHY'ye yansır (ilk yarı Şimşek'in). 15.07 ve
+      // sonrası girenlerde tamamı; Temmuz öncesi dönem maaşları hiç yansımaz.
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
           'MAAS_ODEME' AS tip,
-          (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
-          COALESCE(m.donem,'') AS aciklama
+          ROUND((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
+            CASE WHEN COALESCE(m.donem,'') = '2026-07'
+                      AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
+                 THEN 0.5 ELSE 1 END, 2) AS tutar,
+          (COALESCE(m.donem,'') ||
+            CASE WHEN COALESCE(m.donem,'') = '2026-07'
+                      AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
+                 THEN ' · %50 devir payı' ELSE '' END) AS aciklama
         FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
-        WHERE COALESCE(p.marka,'ERC') = $1 AND m.tarih >= $2`, [marka, baslangic]),
+        WHERE COALESCE(p.marka,'ERC') = $1 AND m.tarih >= $2
+          AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07'`, [marka, baslangic]),
       // Maaş avansları: personel markası bazlı. İş avansları: ONAYDA SEÇİLEN
       // firmaya göre (is_avans_talep.firma) — ödeme/direktör onay tarihiyle.
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
@@ -5682,9 +5699,16 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
           COALESCE(odenen_tutar, 0) AS t
         FROM invoice_entries
         WHERE odeme_tarihi IS NOT NULL AND COALESCE(odenen_tutar,0) > 0`),
-      pool.query(`SELECT to_char(m.tarih,'YYYY-MM') AS ay, SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS t
+      // Temmuz 2026 dönem maaşı: devir öncesi girenlerde %50 AHY payı,
+      // 15.07+ girenlerde tamamı; Temmuz öncesi dönemler yansımaz.
+      pool.query(`SELECT to_char(m.tarih,'YYYY-MM') AS ay,
+          SUM((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
+            CASE WHEN COALESCE(m.donem,'') = '2026-07'
+                      AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
+                 THEN 0.5 ELSE 1 END) AS t
         FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
-        WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2 GROUP BY 1`, [marka, DEVIR]),
+        WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2
+          AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07' GROUP BY 1`, [marka, DEVIR]),
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
         FROM avans a JOIN personel p ON p.id=a.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
