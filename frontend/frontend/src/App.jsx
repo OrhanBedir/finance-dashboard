@@ -24387,6 +24387,7 @@ function App() {
   const [supplierAdvanceTotal, setSupplierAdvanceTotal] = useState(0);
 
   const [hrTab, setHrTab] = useState("personel"); // İK modülü alt sekmesi (kenar menüden yönetilir)
+  const [hrMenuAcik, setHrMenuAcik] = useState(true); // İK alt menüsü açık/kapalı
   const [page, setPage] = useState(() => {
     const u = (() => { try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; } })();
     const _ue = (u?.email||"").toLowerCase().trim();
@@ -25359,12 +25360,13 @@ function App() {
                 <div>
                   {(isAdmin || user?.role === "muhasebe" || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
                     <>
-                      <div className={`sidebar-nav-item ${page==='hr'?'active':''}`} onClick={()=>setPage('hr')}>
+                      <div className={`sidebar-nav-item ${page==='hr'?'active':''}`}
+                        onClick={()=>{ if (page !== 'hr') { setPage('hr'); setHrMenuAcik(true); } else setHrMenuAcik(v => !v); }}>
                         <span>👥</span> İK Paneli
-                        <span style={{ marginLeft:"auto", fontSize:"10px", opacity:0.6 }}>{page==='hr' ? "▾" : "▸"}</span>
+                        <span style={{ marginLeft:"auto", fontSize:"10px", opacity:0.6 }}>{page==='hr' && hrMenuAcik ? "▾" : "▸"}</span>
                       </div>
-                      {/* ERP tarzı alt menü: İK açıkken modül sekmeleri kenar menüde */}
-                      {page==='hr' && (
+                      {/* ERP tarzı alt menü: İK açıkken modül sekmeleri kenar menüde (tekrar tıklayınca kapanır) */}
+                      {page==='hr' && hrMenuAcik && (
                         <div style={{ margin:"2px 0 6px", borderLeft:"1px solid rgba(148,163,184,0.15)", marginLeft:"22px" }}>
                           {[["personel","👤","Personel Maaş"],["maas_avans","💰","Maaş Avansı"],["puantaj","📋","Puantaj"],["isg","🎓","ISG / Belgeler"]].map(([k, ic, l]) => (
                             <div key={k} onClick={()=>{ setPage('hr'); setHrTab(k); }}
