@@ -18592,11 +18592,49 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               {[
                 { label: "Fiziki Tamamlanan", sub: "saha girişi bazlı", value: subconSummary.fizikiIs, pct: subconSummary.fizikiPct, pctLabel: "atananın", color: "#1d4ed8" },
                 { label: "QC Onaylı İş", sub: "Huawei QC kapalı", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857" },
-                { label: "HW'ye Faturalanan", sub: "fatura kesilen", value: subconSummary.faturalanan, pct: subconSummary.faturaPct, pctLabel: "fizikinin", color: "#7c3aed" },
+                {
+                  label: "HW'ye Faturalanan", sub: "fatura kesilen · saha listesi için tıkla", value: subconSummary.faturalanan, pct: subconSummary.faturaPct, pctLabel: "fizikinin", color: "#7c3aed",
+                  tik: () => {
+                    // Saha bazlı faturalanan tutarlar (billed_qty > 0 olan kalemlerden)
+                    const bySite = new Map();
+                    for (const row of rows) {
+                      const b = Number(row.billed_qty || 0);
+                      if (b <= 0) continue;
+                      const site = String(row.site_code || "").trim().toUpperCase();
+                      if (!site) continue;
+                      const amt = b * Number(row.unit_price || 0);
+                      const o = bySite.get(site) || { site, bolge: "", tl: 0, usd: 0, kalem: 0 };
+                      if (normalizeCurrency(row.currency) === "USD") o.usd += amt; else o.tl += amt;
+                      o.kalem += 1;
+                      if (!o.bolge) o.bolge = row.bolge || row.region || "";
+                      bySite.set(site, o);
+                    }
+                    const fmtTl = (n) => `₺${Number(n).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`;
+                    const list = [...bySite.values()]
+                      .sort((a, b) => (b.tl + b.usd * usdRate) - (a.tl + a.usd * usdRate))
+                      .map(o => ({
+                        site: o.site, bolge: o.bolge, kalem: o.kalem,
+                        faturalanan: [o.tl > 0 ? fmtTl(o.tl) : null, o.usd > 0 ? `$${o.usd.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}` : null].filter(Boolean).join(" + ") || "—",
+                        pay: fmtTl((o.tl + o.usd * usdRate) * subconRate),
+                      }));
+                    setOzetModal({
+                      title: "🧾 HW'ye Faturalanan — Saha Listesi",
+                      cols: [
+                        { k: "site", l: "Site ID" },
+                        { k: "bolge", l: "Bölge" },
+                        { k: "kalem", l: "Kalem Adedi" },
+                        { k: "faturalanan", l: "Faturalanan (HW)" },
+                        { k: "pay", l: `Hakediş Payı (%${Math.round(subconRate * 100)})` },
+                      ],
+                      rows: list,
+                    });
+                  },
+                },
               ].map((h) => (
-                <div key={h.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff" }}>
+                <div key={h.label} onClick={h.tik} title={h.tik ? "Saha listesi için tıklayın" : undefined}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff", cursor: h.tik ? "pointer" : "default" }}>
                   <div style={{ color: "#374151" }}>
-                    {h.label}
+                    {h.label} {h.tik && <span style={{ fontSize: "11px", color: "#9ca3af" }}>🔍</span>}
                     <div style={{ fontSize: "10px", color: "#9ca3af" }}>{h.sub}</div>
                   </div>
                   <div style={{ textAlign: "right" }}>
