@@ -1245,7 +1245,6 @@ function MarkaPLPanel({ currentUser }) {
     { key: "maas", label: "Personel Maaşları" },
     { key: "maas_avans", label: "Maaş Avansları" },
     { key: "is_avans", label: "İş Avansları" },
-    { key: "masraf", label: "Masraf Formları" },
     { key: "kira", label: "Kiralar (Araç + Ofis/Depo)" },
     { key: "diger", label: "Diğer Ödemeler" },
     { key: "gider", label: "Toplam Gider", bold: true, color: "#b91c1c" },
@@ -1365,7 +1364,6 @@ function MarkaPLPanel({ currentUser }) {
     { key: "maas",       label: "👥 Personel Maaşları", renk: "#3b82f6" },
     { key: "maas_avans", label: "💰 Maaş Avansları",    renk: "#f59e0b" },
     { key: "is_avans",   label: "🏗 İş Avansları",      renk: "#8b5cf6" },
-    { key: "masraf",     label: "🧾 Masraf Formları",   renk: "#ec4899" },
     { key: "kira",       label: "🚗 Kiralar (Araç + Ofis)", renk: "#14b8a6" },
     { key: "diger",      label: "📋 Diğer Ödemeler",    renk: "#64748b" },
   ].map(g => ({ ...g, tutar: top(g.key), pct: tGider > 0 ? (top(g.key) / tGider) * 100 : 0 }))
@@ -1594,7 +1592,7 @@ function MarkaNakitPanel({ currentUser }) {
   ayRows.forEach(r => {
     const g = Number((r.tarih || "").slice(8, 10));
     if (!g) return;
-    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","MASRAF_FORMU","ARAC_KIRA","OFIS_KIRA","TICKET"].includes(r.tip) ? r.tip : "DIGER";
+    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","ARAC_KIRA","OFIS_KIRA","TICKET"].includes(r.tip) ? r.tip : "DIGER";
     const m = (hucre[key] = hucre[key] || {});
     const c = (m[g] = m[g] || { t: 0, items: [] });
     c.t += r.tutar; c.items.push(r);
@@ -1610,7 +1608,6 @@ function MarkaNakitPanel({ currentUser }) {
     ["MAAS_ODEME",   "👥 Maaş Ödemeleri",  "Ödendikçe görünür (İK → Öde)"],
     ["MAAS_AVANSI",  "💰 Maaş Avansları",  "Ödendiği gün görünür"],
     ["IS_AVANSI",    "🏗 İş Avansları",    "Onaylanıp ödendiği gün"],
-    ["MASRAF_FORMU", "🧾 Masraf Formları", "Muhasebe arşivlediği gün"],
     ["ARAC_KIRA",    "🚗 Araç Kiraları",   "Kira Öde + manuel girişler"],
     ["OFIS_KIRA",    "🏭 Depo/Ofis Kiraları", "Ofis & Depo → Kira Öde"],
     ["TICKET",       "🎫 Ticket / Yemek",  "Manuel girişler"],
@@ -1621,7 +1618,6 @@ function MarkaNakitPanel({ currentUser }) {
     MAAS_ODEME:   { ad: "Maaş Ödeme",       bg: "#dcfce7", fg: "#166534" },
     MAAS_AVANSI:  { ad: "Maaş Avansı",      bg: "#fef3c7", fg: "#92400e" },
     IS_AVANSI:    { ad: "İş Avansı",        bg: "#dbeafe", fg: "#1e40af" },
-    MASRAF_FORMU: { ad: "Masraf Formu",     bg: "#fce7f3", fg: "#9d174d" },
     ARAC_KIRA:    { ad: "Araç Kirası",      bg: "#ede9fe", fg: "#6d28d9" },
     OFIS_KIRA:    { ad: "Depo/Ofis Kirası", bg: "#e0f2fe", fg: "#0369a1" },
     TICKET:       { ad: "Ticket/Yemek",     bg: "#ffedd5", fg: "#9a3412" },
@@ -1633,7 +1629,7 @@ function MarkaNakitPanel({ currentUser }) {
         <div>
           <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>
           <div style={{ fontSize: "13px", color: "#64748b" }}>
-            15 Temmuz 2026 devrinden itibaren — manuel ödemelerde yalnız AHY seçilen girişler, masraf formları arşivlendiği gün görünür
+            15 Temmuz 2026 devrinden itibaren — masraf formları burada listelenmez (iş avansını kapatır, para avansta çıkmıştır)
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "10px" }}>

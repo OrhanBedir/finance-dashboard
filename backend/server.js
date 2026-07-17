@@ -5535,7 +5535,9 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
     // Kira/manuel ödemeler: devirden SONRA sisteme girilen kayıtlar görünür
     // (ödeme tarihi ayın 1'i olabilir — ERC'nin devir öncesi eski girişleri sızmaz)
     const girisBaslangic = "2026-07-15";
-    const [maas, avanslar, kiralar, ofisKiralar, manuel, masraflar] = await Promise.all([
+    // NOT: Masraf formları nakit çıkışı DEĞİLDİR — iş avansını kapatırlar
+    // (para avans ödendiğinde çıkmıştı; çifte sayım olmasın diye listelenmez).
+    const [maas, avanslar, kiralar, ofisKiralar, manuel] = await Promise.all([
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
           'MAAS_ODEME' AS tip,
           (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
@@ -5579,20 +5581,8 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           tutar, COALESCE(donem,'') AS aciklama
         FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1`, [marka]).catch(() => ({ rows: [] })),
-      // Masraf formları: muhasebe ARŞİVLEDİĞİ gün nakit akışına düşer
-      // (devirden sonra arşivlenenler, marka personeli)
-      pool.query(`SELECT to_char(mf.arsiv_tarihi,'YYYY-MM-DD') AS tarih,
-          mf.talep_eden_ad AS ad_soyad, 'MASRAF_FORMU' AS tip,
-          COALESCE(k.toplam,0) AS tutar,
-          ('Form #' || mf.form_no) AS aciklama
-        FROM masraf_form mf
-        JOIN personel p ON LOWER(COALESCE(p.email,'')) = LOWER(mf.talep_eden_email)
-        LEFT JOIN (SELECT form_id, SUM(tutar) AS toplam FROM masraf_kalem GROUP BY form_id) k ON k.form_id = mf.id
-        WHERE mf.durum='ARSIVLENDI' AND mf.arsiv_tarihi IS NOT NULL
-          AND mf.arsiv_tarihi >= $2::date
-          AND COALESCE(p.marka,'ERC') = $1`, [marka, baslangic]).catch(() => ({ rows: [] })),
     ]);
-    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...ofisKiralar.rows, ...manuel.rows, ...masraflar.rows]
+    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...ofisKiralar.rows, ...manuel.rows]
       .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))
       .sort((a, b) => b.tarih.localeCompare(a.tarih));
     res.json({ ok: true, baslangic, rows });
@@ -5666,7 +5656,9 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
     const marka = String(req.query.marka || "AHY").toUpperCase();
     const DEVIR = "2026-07-15";
     const cMarka = canonSub(marka);
-    const [fatura, tahsilat, maas, mavans, iavans, masraf, kiralar, ofisKira, manuel] = await Promise.all([
+    // NOT: Masraf formları gider DEĞİLDİR — iş avansını kapatırlar (çifte sayım
+    // olmasın diye P&L ve nakit toplamlarına girmez; takibi avans bakiyesinde).
+    const [fatura, tahsilat, maas, mavans, iavans, kiralar, ofisKira, manuel] = await Promise.all([
       pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
           TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
           COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
@@ -5688,12 +5680,6 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
         WHERE UPPER(COALESCE(t.firma,'ERC'))=$1
           AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
           AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2 GROUP BY 1`, [marka, DEVIR]),
-      pool.query(`SELECT to_char(mf.arsiv_tarihi,'YYYY-MM') AS ay, SUM(mk.tutar) AS t
-        FROM masraf_kalem mk
-        JOIN masraf_form mf ON mf.id = mk.form_id
-        JOIN personel p ON LOWER(COALESCE(p.email,'')) = LOWER(mf.talep_eden_email)
-        WHERE mf.durum='ARSIVLENDI' AND mf.arsiv_tarihi >= $2::date
-          AND COALESCE(p.marka,'ERC')=$1 GROUP BY 1`, [marka, DEVIR]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
         FROM arac_kira_odemeler o
         WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
@@ -5707,7 +5693,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
     const map = {};
     const rowOf = (ay) => (map[ay] = map[ay] || {
       ay, fatura: 0, tahsilat: 0,
-      maas: 0, maas_avans: 0, is_avans: 0, masraf: 0, kira: 0, diger: 0,
+      maas: 0, maas_avans: 0, is_avans: 0, kira: 0, diger: 0,
     });
     for (const r of fatura.rows) {
       if (canonSub(r.firma) !== cMarka || !r.ay) continue;
@@ -5720,7 +5706,6 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
     maas.rows.forEach(r => { if (r.ay) rowOf(r.ay).maas += Number(r.t || 0); });
     mavans.rows.forEach(r => { if (r.ay) rowOf(r.ay).maas_avans += Number(r.t || 0); });
     iavans.rows.forEach(r => { if (r.ay) rowOf(r.ay).is_avans += Number(r.t || 0); });
-    masraf.rows.forEach(r => { if (r.ay) rowOf(r.ay).masraf += Number(r.t || 0); });
     kiralar.rows.forEach(r => { if (r.ay) rowOf(r.ay).kira += Number(r.t || 0); });
     ofisKira.rows.forEach(r => { if (r.ay) rowOf(r.ay).kira += Number(r.t || 0); });
     manuel.rows.forEach(r => {
@@ -5731,7 +5716,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
     // Aylar artan sırada; kümülatif alacak = Σ(fatura − tahsilat)
     let alacak = 0;
     const aylar = Object.values(map).sort((a, b) => a.ay.localeCompare(b.ay)).map(o => {
-      const gider = o.maas + o.maas_avans + o.is_avans + o.masraf + o.kira + o.diger;
+      const gider = o.maas + o.maas_avans + o.is_avans + o.kira + o.diger;
       const kar = +(o.fatura - gider).toFixed(2);
       const netNakit = +(o.tahsilat - gider).toFixed(2);
       alacak = +(alacak + o.fatura - o.tahsilat).toFixed(2);
