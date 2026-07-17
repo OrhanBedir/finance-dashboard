@@ -18595,36 +18595,37 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 {
                   label: "HW'ye Faturalanan", sub: "fatura kesilen · saha listesi için tıkla", value: subconSummary.faturalanan, pct: subconSummary.faturaPct, pctLabel: "fizikinin", color: "#7c3aed",
                   tik: () => {
-                    // Saha bazlı faturalanan tutarlar (billed_qty > 0 olan kalemlerden)
-                    const bySite = new Map();
-                    for (const row of rows) {
-                      const b = Number(row.billed_qty || 0);
-                      if (b <= 0) continue;
-                      const site = String(row.site_code || "").trim().toUpperCase();
-                      if (!site) continue;
-                      const amt = b * Number(row.unit_price || 0);
-                      const o = bySite.get(site) || { site, bolge: "", tl: 0, usd: 0, kalem: 0 };
-                      if (normalizeCurrency(row.currency) === "USD") o.usd += amt; else o.tl += amt;
-                      o.kalem += 1;
-                      if (!o.bolge) o.bolge = row.bolge || row.region || "";
-                      bySite.set(site, o);
-                    }
-                    const fmtTl = (n) => `₺${Number(n).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`;
-                    const list = [...bySite.values()]
-                      .sort((a, b) => (b.tl + b.usd * usdRate) - (a.tl + a.usd * usdRate))
-                      .map(o => ({
-                        site: o.site, bolge: o.bolge, kalem: o.kalem,
-                        faturalanan: [o.tl > 0 ? fmtTl(o.tl) : null, o.usd > 0 ? `$${o.usd.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}` : null].filter(Boolean).join(" + ") || "—",
-                        pay: fmtTl((o.tl + o.usd * usdRate) * subconRate),
-                      }));
+                    // Kalem bazlı faturalanan liste (billed_qty > 0): item + miktar + tutar
+                    const list = rows
+                      .filter(row => Number(row.billed_qty || 0) > 0 && String(row.site_code || "").trim())
+                      .map(row => {
+                        const b = Number(row.billed_qty || 0);
+                        const fiyat = Number(row.unit_price || 0);
+                        const usd = normalizeCurrency(row.currency) === "USD";
+                        const p = usd ? "$" : "₺";
+                        const amt = b * fiyat;
+                        return {
+                          site: String(row.site_code).trim().toUpperCase(),
+                          item_code: row.item_code || "",
+                          kalem: row.item_description || "",
+                          miktar: b,
+                          birim: `${p}${fiyat.toLocaleString("tr-TR", { maximumFractionDigits: 2 })}`,
+                          tutar_fmt: `${p}${amt.toLocaleString("tr-TR", { maximumFractionDigits: 2 })}`,
+                          pay: `₺${((usd ? amt * usdRate : amt) * subconRate).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`,
+                          _sira: usd ? amt * usdRate : amt,
+                        };
+                      })
+                      .sort((a, b) => a.site.localeCompare(b.site) || b._sira - a._sira);
                     setOzetModal({
-                      title: "🧾 HW'ye Faturalanan — Saha Listesi",
+                      title: "🧾 HW'ye Faturalanan — Kalem Listesi",
                       cols: [
                         { k: "site", l: "Site ID" },
-                        { k: "bolge", l: "Bölge" },
-                        { k: "kalem", l: "Kalem Adedi" },
-                        { k: "faturalanan", l: "Faturalanan (HW)" },
-                        { k: "pay", l: `Hakediş Payı (%${Math.round(subconRate * 100)})` },
+                        { k: "item_code", l: "Item Code" },
+                        { k: "kalem", l: "Kalem Adı" },
+                        { k: "miktar", l: "Fatura Miktarı" },
+                        { k: "birim", l: "Birim Fiyat" },
+                        { k: "tutar_fmt", l: "Tutar (HW)" },
+                        { k: "pay", l: `Pay (%${Math.round(subconRate * 100)})` },
                       ],
                       rows: list,
                     });
