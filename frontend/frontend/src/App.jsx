@@ -27535,7 +27535,11 @@ function OfisDepoPanel({ currentUser, onBack }) {
   const handleBelgeUpload = async (ofisId, turu, file) => {
     if (!file) return;
     const fd = new FormData(); fd.append("dosya", file); fd.append("belge_turu", turu);
-    await fetch(`${API_BASE}/hr/ofis/${ofisId}/belge`, { method:"POST", body:fd });
+    try {
+      const r = await fetch(`${API_BASE}/hr/ofis/${ofisId}/belge`, { method:"POST", body:fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Yükleme başarısız (${r.status})`);
+    } catch (e) { alert("Belge yüklenemedi: " + e.message); }
     load();
   };
   const handleBelgeSil = async (id) => {

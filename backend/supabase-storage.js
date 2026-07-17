@@ -7,8 +7,17 @@ const supabase = createClient(
 
 const BUCKET = "erc-uploads";
 
+// Supabase storage anahtarı Türkçe karakter/boşluk kabul etmez ("Invalid key").
+// Görünen ad DB'de orijinal kalır; yalnız depolama yolu güvenli hale getirilir.
+function safeStorageName(name) {
+  const map = { ç: "c", Ç: "C", ğ: "g", Ğ: "G", ı: "i", İ: "I", ö: "o", Ö: "O", ş: "s", Ş: "S", ü: "u", Ü: "U" };
+  return String(name || "dosya")
+    .replace(/[çÇğĞıİöÖşŞüÜ]/g, (ch) => map[ch] || ch)
+    .replace(/[^\w.\-]+/g, "_");
+}
+
 async function uploadToStorage(folder, filename, buffer, mimetype) {
-  const filePath = `${folder}/${Date.now()}-${filename}`;
+  const filePath = `${folder}/${Date.now()}-${safeStorageName(filename)}`;
   const { error } = await supabase.storage
     .from(BUCKET)
     .upload(filePath, buffer, { contentType: mimetype, upsert: true });
