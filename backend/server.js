@@ -5782,8 +5782,11 @@ app.get("/finance/marka-sabit-giderler", authMiddleware, async (req, res) => {
         WHERE durum='AKTİF' AND COALESCE(aylik_kira,0) > 0 ORDER BY tutar DESC`).catch(() => ({ rows: [] })),
       pool.query(`SELECT plaka AS ad, COALESCE(aylik_kira,0) AS tutar FROM araclar
         WHERE durum='AKTİF' AND COALESCE(aylik_kira,0) > 0 ORDER BY tutar DESC`).catch(() => ({ rows: [] })),
+      // Yalnız kadrolu (Şimşek tipi) personel — ISG için kayıtlı taşeron
+      // ekipleri maaşlı kadro değildir, kişi sayısına girmez
       pool.query(`SELECT COUNT(*)::int AS kisi, COALESCE(SUM(net_maas),0) AS toplam FROM personel
-        WHERE COALESCE(marka,'ERC')=$1 AND aktif = true`, [marka]).catch(() => ({ rows: [{ kisi: 0, toplam: 0 }] })),
+        WHERE COALESCE(marka,'ERC')=$1 AND aktif = true
+          AND COALESCE(firma_tipi,'simsek') = 'simsek'`, [marka]).catch(() => ({ rows: [{ kisi: 0, toplam: 0 }] })),
     ]);
     const t = (rows) => rows.reduce((s, r) => s + Number(r.tutar || 0), 0);
     const maasToplam = Number(maas.rows[0]?.toplam || 0);
