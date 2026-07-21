@@ -17526,6 +17526,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       if (rowRegion !== String(regionName).toLowerCase()) return false;
 
+      // QC OK şartı: kalemin QC'si kapanmadan fatura kesilemez
+      // (IZ2683 vakası: PAC/kabul OK diye QC'siz kalemler listeleniyordu)
+      if (String(row.qc_durum || "").toUpperCase() !== "OK") return false;
+
       // PAC OK: rollout_progress'te pac_actual_end_date girilmiş sahalar.
       // Yalnız FATURASI BEKLEYEN kalemler (due_qty > 0) — tamamı
       // faturalanmış saha/kalem (due=0) burada GÖRÜNMEZ.

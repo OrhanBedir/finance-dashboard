@@ -8043,10 +8043,11 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       }
 
       if (type === "20_fac_ok") {
-        // PAC OK sahaları (rollout'tan pac_actual_end_date girilmiş): done_qty>0 olan
-        // tüm kalemler dahil (PO/kabul şartı aranmaz) — frontend ile birebir.
-        if (row.pac_from_rollout) return Number(row.done_qty || 0) > 0;
-        return statusOk && progressedQty > 0 && kabulOk;
+        // QC OK şartı: QC kapanmadan fatura kesilemez (IZ2683 vakası).
+        // due_qty>0: faturası tamamlanmış kalem listelenmez — frontend ile birebir.
+        if (!qcOk) return false;
+        if (row.pac_from_rollout) return Number(row.done_qty || 0) > 0 && dueQty > 0;
+        return statusOk && progressedQty > 0 && dueQty > 0 && kabulOk;
       }
 
       if (type === "20_fac_nok") {
