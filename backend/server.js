@@ -1519,11 +1519,15 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     const ITEM_TRS = ["8812184600"];
     const ITEM_LPRT = ["8818278108", "8818278098"];
     const ITEM_ENERJI = ["8812184681", "8812184682", "8812184684", "8812184690", "8812184851", "8818278116"];
-    const OZEL_ITEMLER = [...ITEM_TRS, ...ITEM_LPRT, ...ITEM_ENERJI];
+    // Gizleme QC'si (QC-CW "Gizleme" şablonu) yalnız gizleme kalemlerini kapatır —
+    // IZ2683 vakası: Gizleme Closed iken sahanın tamamı OK'lanmıştı
+    const ITEM_GIZLEME = ["8812184642", "8818274259"];
+    const OZEL_ITEMLER = [...ITEM_TRS, ...ITEM_LPRT, ...ITEM_ENERJI, ...ITEM_GIZLEME];
     const scopeOf = (t) => {
       if (t.includes("TRS QUALITY CHECK")) return "TRS";
       if (t.includes("AG OG ENERJI")) return "ENERJI";
       if (t.includes("5G READINESS YENI POLE")) return "LPRT";
+      if (t.includes("GIZLEME") || t.includes("CAMOUFLAGE")) return "GIZLEME";
       return "ANA";
     };
 
@@ -1568,7 +1572,10 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     // Özel kapsamlar: yalnız kendi kalemlerinin QC durumunu yazar
     for (const m of bySiteScope.values()) {
       if (m.scope === "ANA") continue;
-      const items = m.scope === "TRS" ? ITEM_TRS : m.scope === "LPRT" ? ITEM_LPRT : ITEM_ENERJI;
+      const items = m.scope === "TRS" ? ITEM_TRS
+        : m.scope === "LPRT" ? ITEM_LPRT
+        : m.scope === "GIZLEME" ? ITEM_GIZLEME
+        : ITEM_ENERJI;
       const r = await pool.query(
         `UPDATE master_works
            SET qc_durum = $1
