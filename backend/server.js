@@ -1492,14 +1492,19 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
         .toUpperCase();
     }
 
+    // GÜVENLİ durum çözümü (20.07.2026 vakası): tanınmayan değer NOK DEĞİL,
+    // null döner ve satır ATLANIR. Eski kural yanlış kolon/format okunduğunda
+    // tüm sistemi NOK'a çeviriyordu (662 saha ezilmişti).
     function normalizeStatus(value) {
       const v = normalizeText(value);
-
       if (!v) return null;
       if (v === "CLOSED" || v === "OK") return "OK";
-      if (v === "EXECUTING" || v === "NOK") return "NOK";
-
-      return "NOK";
+      const NOK_DURUMLAR = [
+        "EXECUTING", "NOK", "REVIEWING", "REJECTED",
+        "TO BE EXECUTED", "TO BE REVIEWED", "PASS WITH ISSUES",
+      ];
+      if (NOK_DURUMLAR.includes(v)) return "NOK";
+      return null; // Deleted / bilinmeyen / yanlış kolon → dokunma
     }
 
     // ── ŞABLON → KALEM KAPSAMI KURGUSU (17.07.2026, DE0334_NS_AE örneği) ──
@@ -1642,13 +1647,29 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       else missingSites.push(siteCode);
     }
 
+    // Teşhis: ana kapsamda kaç saha OK/NOK okundu — "0 OK + çok NOK" ya da
+    // "hiç durum okunamadı" tablosu, Excel format/kolon sorununun işaretidir.
+    const anaOk = anaList.filter(m => m.qcDurum === "OK").length;
+    const anaNok = anaList.filter(m => m.qcDurum === "NOK").length;
+    if (bySiteScope.size === 0) {
+      return res.json({
+        ok: true,
+        updatedCount: 0,
+        matchedSites: 0,
+        missingSites: [],
+        message: "⚠️ Hiçbir satırda tanınan QC durumu okunamadı — Excel formatı/Status kolonu beklenenden farklı olabilir. HİÇBİR kayıt değiştirilmedi. ISDP Task Explorer → Export Search Result çıktısını yükleyin.",
+      });
+    }
     return res.json({
       ok: true,
       updatedCount,
       matchedSites,
       missingSites,
       message:
-        `QC işlendi: ${matchedSites} saha eşleşti` +
+        `QC işlendi: ${matchedSites} saha eşleşti (ana QC: ${anaOk} OK, ${anaNok} NOK)` +
+        (anaOk === 0 && anaNok > 0
+          ? " ⚠️ Hiç OK okunmadı — dosya doğru mu kontrol edin"
+          : "") +
         (missingSites.length
           ? ` — ${missingSites.length} saha sistemde bulunamadı: ${missingSites.slice(0, 10).join(", ")}${missingSites.length > 10 ? "…" : ""}`
           : ""),
