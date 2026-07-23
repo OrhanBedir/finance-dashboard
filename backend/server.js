@@ -473,6 +473,40 @@ app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
       );
     }
 
+    // Personel rolündeki kullanıcı için İK personel kaydını da aç/güncelle —
+    // İş Avansı ve diğer İK listeleri users değil personel tablosundan beslenir.
+    // Kayıt açılmazsa yeni eklenen kullanıcı avans formlarında görünmez.
+    if (String(role).toLowerCase() === "user") {
+      try {
+        const normName = String(name).trim().toLowerCase()
+          .replace(/ı/g, "i").replace(/İ/g, "i").replace(/ğ/g, "g")
+          .replace(/ü/g, "u").replace(/ş/g, "s").replace(/ö/g, "o").replace(/ç/g, "c");
+        const pr = await pool.query(
+          `SELECT id FROM personel
+           WHERE LOWER(TRIM(email)) = $1
+              OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                   TRIM(ad_soyad),'İ','I'),'Ş','S'),'Ğ','G'),'Ü','U'),'Ö','O'),'Ç','C'))
+                 = REPLACE($2,'ı','i')
+           LIMIT 1`,
+          [email, normName]
+        );
+        if (pr.rows.length > 0) {
+          await pool.query(
+            `UPDATE personel SET email=$1, marka=$2, aktif=true WHERE id=$3`,
+            [email, marka, pr.rows[0].id]
+          );
+        } else {
+          await pool.query(
+            `INSERT INTO personel (ad_soyad, email, marka, aktif, ise_giris_tarihi)
+             VALUES ($1, $2, $3, true, CURRENT_DATE)`,
+            [name, email, marka]
+          );
+        }
+      } catch (e) {
+        console.error("ADMIN USER PERSONEL SYNC ERROR:", e.message);
+      }
+    }
+
     res.json({ ok: true, user: result.rows[0] });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -8170,6 +8204,11 @@ app.post("/master/add", async (req, res) => {
       .trim()
       .toUpperCase();
     const itemCode = String(m.item_code || "").trim();
+
+    // Item Code zorunlu — kodsuz kayıt fiyat/PO/QC eşleşmesine giremez
+    if (!itemCode) {
+      return res.status(400).json({ ok: false, error: "Item Code zorunludur — listeden bir kalem seçin" });
+    }
 
     console.log("DUPLICATE CHECK BASLIYOR");
 

@@ -3654,6 +3654,14 @@ function DailyEntry() {
     setShowItemCodeList(false);
     setShowItemDescriptionList(false);
 
+    // Item Code zorunlu: kodsuz kayıt fiyat/PO/QC eşleşmesine giremez
+    // (MN1060 vakası: item boş kaydedilmiş, listede kod/açıklama boş çıkmıştı)
+    if (!String(form.item_code || "").trim()) {
+      alert("⚠️ Item Code seçilmeden kayıt yapılamaz.\n\nItem Code alanına kodu yazıp listeden seçin — fiyat, PO ve QC eşleşmeleri bu koda bağlıdır.");
+      setSaving(false);
+      return;
+    }
+
     // Double önleme: yeni girişte aynı saha + item_code daha önce girilmişse uyar
     if (!editingId) {
       const dup = siteEntries.find(
