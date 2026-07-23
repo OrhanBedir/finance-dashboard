@@ -11923,7 +11923,10 @@ function hesaplaVergi(netBankadan) {
    ============================================================ */
 function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
-  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "muhasebe@simsektel.com" || _hrEmail === "info@ahyelektrik.com";
+  // Maaş görünürlüğü (21.07.2026): ERC'de YALNIZ Orhan Bedir + Düzgün Şimşek.
+  // Muhasebe maaş bilgilerini GÖREMEZ (puantaj/ISG erişimi devam eder).
+  // info@ahyelektrik.com kendi markasını ek şifreyle (ahy2026gsm) görür.
+  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "info@ahyelektrik.com";
   // İK marka izolasyonu (TEK YÖNLÜ): ERC ana yüklenici — maaş ve kalan
   // ödemeleri yaptığı için TÜM personeli görür. Alt marka (AHY) yalnız
   // kendi markasının personelini görür; devir tarihi (15 Temmuz 2026)
@@ -25547,7 +25550,9 @@ function App() {
                       {/* ERP tarzı alt menü: İK açıkken modül sekmeleri kenar menüde (tekrar tıklayınca kapanır) */}
                       {page==='hr' && hrMenuAcik && (
                         <div style={{ margin:"2px 0 6px", borderLeft:"1px solid rgba(148,163,184,0.15)", marginLeft:"22px" }}>
-                          {[["personel","👤","Personel Maaş"],["maas_avans","💰","Maaş Avansı"],["puantaj","📋","Puantaj"],["isg","🎓","ISG / Belgeler"]].map(([k, ic, l]) => (
+                          {[["personel","👤","Personel Maaş"],["maas_avans","💰","Maaş Avansı"],["puantaj","📋","Puantaj"],["isg","🎓","ISG / Belgeler"]]
+                            .filter(([k]) => !(user?.role === "muhasebe" && ["personel","maas_avans"].includes(k)))
+                            .map(([k, ic, l]) => (
                             <div key={k} onClick={()=>{ setPage('hr'); setHrTab(k); }}
                               style={{ padding:"7px 10px 7px 16px", cursor:"pointer", fontSize:"12.5px", display:"flex", alignItems:"center", gap:"7px",
                                 color: hrTab===k ? "#fff" : "#94a3b8", fontWeight: hrTab===k ? 700 : 500,
