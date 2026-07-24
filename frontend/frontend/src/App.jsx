@@ -16353,6 +16353,44 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
         )}
       </div>
 
+      {/* Personel arama özeti: ada eşleşen personelin üzerindeki toplam avans/bakiye
+          (yönetici görünümü — bakiyeler verisinden; kayıt kime istendiyse ona işlenir) */}
+      {!isRequester && searchText.trim().length >= 3 && (() => {
+        const s = searchText.trim().toLowerCase();
+        const esler = bakiyeler.filter(b => (b.ad_soyad || "").toLowerCase().includes(s)).slice(0, 3);
+        if (!esler.length) return null;
+        return (
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "14px" }}>
+            {esler.map(b => {
+              const bk = Number(b.bakiye || 0);
+              return (
+                <div key={b.id} style={{ background: "#fff", border: `2px solid ${bk < 0 ? "#fecaca" : "#bfdbfe"}`, borderRadius: "14px", padding: "10px 18px", display: "flex", gap: "18px", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: "14px", color: "#111827" }}>👤 {b.ad_soyad}</div>
+                    <div style={{ fontSize: "11px", color: "#9ca3af" }}>üzerine çıkan para (tamamlanan avanslar)</div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: "10.5px", fontWeight: 700, color: "#b45309" }}>TOPLAM AVANS</div>
+                    <div style={{ fontSize: "17px", fontWeight: 800, color: "#b45309" }}>₺{Number(b.avans || 0).toLocaleString("tr-TR")}</div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: "10.5px", fontWeight: 700, color: "#7c3aed" }}>ARŞİVLENEN MASRAF</div>
+                    <div style={{ fontSize: "17px", fontWeight: 800, color: "#7c3aed" }}>₺{Number(b.masraf || 0).toLocaleString("tr-TR")}</div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: "10.5px", fontWeight: 700, color: bk < 0 ? "#b91c1c" : "#15803d" }}>KALAN BAKİYE</div>
+                    <div style={{ fontSize: "17px", fontWeight: 800, color: bk < 0 ? "#b91c1c" : "#15803d" }}>
+                      {bk < 0 ? "-" : ""}₺{Math.abs(bk).toLocaleString("tr-TR")}
+                      <span style={{ fontSize: "10px", marginLeft: "5px", background: bk < 0 ? "#fef2f2" : "#f0fdf4", color: bk < 0 ? "#b91c1c" : "#15803d", borderRadius: "6px", padding: "1px 6px" }}>{bk < 0 ? "personel alacaklı" : "avans açık"}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {/* List — kart (mobile) veya tablo (desktop) */}
       {isMobile ? (
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
