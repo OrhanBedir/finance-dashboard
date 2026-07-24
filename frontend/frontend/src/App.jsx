@@ -7207,6 +7207,10 @@ function FinanceDashboard({
   const handleTaseronOdemeSubmit = async (e) => {
     e.preventDefault();
     if (!odemeModalFirma || !odemeModalTutar || !odemeModalTarih) return;
+    // Firma sorusu: AHY seçilirse ödeme AHY Taşeron Faturaları + AHY nakit akışına da düşer
+    const firmaMarka = window.confirm(
+      "Bu taşeron ödemesi hangi firmaya ait?\n\n✔ Tamam = AHY ELEKTRİK (AHY paneline yansır)\n✘ İptal = ŞİMŞEK HABERLEŞME"
+    ) ? "AHY" : "SIMSEK";
     setOdemeModalLoading(true);
     setOdemeModalSonuc(null);
     try {
@@ -7218,6 +7222,7 @@ function FinanceDashboard({
           tutar: Number(odemeModalTutar),
           tarih: odemeModalTarih,
           aciklama: odemeModalAciklama,
+          firma_marka: firmaMarka,
         }),
       });
       setOdemeModalSonuc(result);

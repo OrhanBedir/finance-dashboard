@@ -17104,11 +17104,13 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const { firma, tutar, tarih, aciklama } = req.body;
+    const { firma, tutar, tarih, aciklama, firma_marka } = req.body;
     if (!firma || !tutar || !tarih) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "firma, tutar ve tarih zorunlu" });
     }
+    // AHY seçildiyse ödeme AHY Taşeron Faturaları paneline + AHY nakit akışına da düşer
+    const isAhyOdeme = String(firma_marka || "").toUpperCase() === "AHY";
 
     const odemeAmount = Number(tutar);
     if (odemeAmount <= 0) {
@@ -17168,6 +17170,24 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
       INSERT INTO taseron_odeme_log (firma, tutar, tarih, aciklama, dagilim, avans_tutar)
       VALUES ($1, $2, $3, $4, $5, $6)
     `, [firma, odemeAmount, tarih, aciklama || null, JSON.stringify(dagilim), kalan > 0 ? kalan : 0]);
+
+    // AHY ödemesi: AHY Taşeron Faturaları paneli + AHY nakit akışına da yaz
+    // (avans kısmı AVANS, faturaya mahsup kısmı FATURA_ODEME olarak ayrı satır)
+    if (isAhyOdeme) {
+      const mahsup = odemeAmount - kalan;
+      if (mahsup > 0) {
+        await client.query(`INSERT INTO marka_taseron_odeme
+            (marka, taseron_adi, tip, tutar, tarih, aciklama)
+          VALUES ('AHY', $1, 'FATURA_ODEME', $2, $3, $4)`,
+          [firma, mahsup, tarih, aciklama || "ERC ödeme girişinden"]);
+      }
+      if (kalan > 0) {
+        await client.query(`INSERT INTO marka_taseron_odeme
+            (marka, taseron_adi, tip, tutar, tarih, aciklama)
+          VALUES ('AHY', $1, 'AVANS', $2, $3, $4)`,
+          [firma, kalan, tarih, aciklama || "ERC ödeme girişinden"]);
+      }
+    }
 
     await client.query("COMMIT");
 
