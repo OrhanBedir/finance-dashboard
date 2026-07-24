@@ -5857,6 +5857,7 @@ app.delete("/finance/marka-taseron-fatura/:id", authMiddleware, async (req, res)
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 app.post("/finance/marka-taseron-odeme", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
@@ -5864,15 +5865,38 @@ app.post("/finance/marka-taseron-odeme", authMiddleware, async (req, res) => {
     if (!taseron_adi || !Number(tutar || 0) || !tarih)
       return res.status(400).json({ ok: false, error: "Taşeron adı, tutar ve tarih zorunlu" });
     const tipNorm = String(tip || "AVANS").toUpperCase() === "FATURA_ODEME" ? "FATURA_ODEME" : "AVANS";
-    const r = await pool.query(`INSERT INTO marka_taseron_odeme
-        (marka, taseron_adi, tip, tutar, tarih, aciklama, fatura_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [String(marka || "AHY").toUpperCase(), String(taseron_adi).trim(), tipNorm,
-       Number(tutar), tarih, aciklama || null, fatura_id ? Number(fatura_id) : null]);
+    const adi = String(taseron_adi).trim();
+    const tutarN = Number(tutar);
+    await client.query("BEGIN");
+    // ERC senkronu: FATURA_ODEME → açık faturaları FIFO kapat; AVANS → avans logu.
+    // Her iki tipte de taseron_odeme_log'a yazılır (ERC ödeme geçmişi + nakit akışı)
+    let dagilim, kalan;
+    if (tipNorm === "FATURA_ODEME") {
+      ({ dagilim, kalan } = await fifoTaseronMahsup(client, adi, tutarN, tarih));
+    } else {
+      dagilim = [{ fatura_no: "AVANS (fatura bekleniyor)", odeme: tutarN, avans: true }];
+      kalan = tutarN;
+    }
+    const logIns = await client.query(`INSERT INTO taseron_odeme_log
+        (firma, tutar, tarih, aciklama, dagilim, avans_tutar)
+      VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [adi, tutarN, tarih, aciklama || "AHY panelinden", JSON.stringify(dagilim), kalan > 0 ? kalan : 0]);
+    const r = await client.query(`INSERT INTO marka_taseron_odeme
+        (marka, taseron_adi, tip, tutar, tarih, aciklama, fatura_id, odeme_log_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [String(marka || "AHY").toUpperCase(), adi, tipNorm,
+       tutarN, tarih, aciklama || null, fatura_id ? Number(fatura_id) : null, logIns.rows[0].id]);
+    await client.query("COMMIT");
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch (e) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    client.release();
+  }
 });
 app.put("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
@@ -5880,20 +5904,72 @@ app.put("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => 
     if (!taseron_adi || !Number(tutar || 0) || !tarih)
       return res.status(400).json({ ok: false, error: "Taşeron adı, tutar ve tarih zorunlu" });
     const tipNorm = String(tip || "AVANS").toUpperCase() === "FATURA_ODEME" ? "FATURA_ODEME" : "AVANS";
-    await pool.query(`UPDATE marka_taseron_odeme SET
-        taseron_adi=$1, tip=$2, tutar=$3, tarih=$4, aciklama=$5
-      WHERE id=$6`,
-      [String(taseron_adi).trim(), tipNorm, Number(tutar), tarih, aciklama || null, req.params.id]);
+    const adi = String(taseron_adi).trim();
+    const tutarN = Number(tutar);
+    await client.query("BEGIN");
+    const curR = await client.query(`SELECT * FROM marka_taseron_odeme WHERE id=$1 FOR UPDATE`, [req.params.id]);
+    const cur = curR.rows[0];
+    if (!cur) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    }
+    // ERC senkronu: eski log geri alınır (mahsuplar açılır), yeni değerlerle yeniden uygulanır
+    if (cur.odeme_log_id) {
+      const oldLogR = await client.query(`SELECT * FROM taseron_odeme_log WHERE id=$1 FOR UPDATE`, [cur.odeme_log_id]);
+      if (oldLogR.rows[0]) {
+        await revertTaseronLog(client, oldLogR.rows[0]);
+        await client.query(`DELETE FROM taseron_odeme_log WHERE id=$1`, [cur.odeme_log_id]);
+      }
+    }
+    let dagilim, kalan;
+    if (tipNorm === "FATURA_ODEME") {
+      ({ dagilim, kalan } = await fifoTaseronMahsup(client, adi, tutarN, tarih));
+    } else {
+      dagilim = [{ fatura_no: "AVANS (fatura bekleniyor)", odeme: tutarN, avans: true }];
+      kalan = tutarN;
+    }
+    const logIns = await client.query(`INSERT INTO taseron_odeme_log
+        (firma, tutar, tarih, aciklama, dagilim, avans_tutar)
+      VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [adi, tutarN, tarih, aciklama || "AHY panelinden", JSON.stringify(dagilim), kalan > 0 ? kalan : 0]);
+    await client.query(`UPDATE marka_taseron_odeme SET
+        taseron_adi=$1, tip=$2, tutar=$3, tarih=$4, aciklama=$5, odeme_log_id=$6
+      WHERE id=$7`,
+      [adi, tipNorm, tutarN, tarih, aciklama || null, logIns.rows[0].id, req.params.id]);
+    await client.query("COMMIT");
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch (e) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    client.release();
+  }
 });
 app.delete("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-    await pool.query(`DELETE FROM marka_taseron_odeme WHERE id=$1`, [req.params.id]);
+    await client.query("BEGIN");
+    const curR = await client.query(`SELECT * FROM marka_taseron_odeme WHERE id=$1 FOR UPDATE`, [req.params.id]);
+    const cur = curR.rows[0];
+    if (cur && cur.odeme_log_id) {
+      // ERC senkronu: bağlı log geri alınır ve silinir (mahsuplar açılır)
+      const logR = await client.query(`SELECT * FROM taseron_odeme_log WHERE id=$1 FOR UPDATE`, [cur.odeme_log_id]);
+      if (logR.rows[0]) {
+        await revertTaseronLog(client, logR.rows[0]);
+        await client.query(`DELETE FROM taseron_odeme_log WHERE id=$1`, [cur.odeme_log_id]);
+      }
+    }
+    await client.query(`DELETE FROM marka_taseron_odeme WHERE id=$1`, [req.params.id]);
+    await client.query("COMMIT");
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch (e) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 // KÂR/ZARAR (P&L): alt markanın aylık gelir tablosu + nakit özeti.
@@ -17110,6 +17186,51 @@ app.get("/finance/taseron-odeme-excel", requireFinanceAuth, async (req, res) => 
   }
 });
 
+// ── Taşeron ödeme senkron yardımcıları ──────────────────────────────
+// FIFO mahsup: firmanın açık faturalarını eskiden yeniye kapatır.
+// Transaction client'ı ile çağrılır; { dagilim, kalan } döner
+// (kalan > 0 → faturaya mahsup edilemeyen kısım = AVANS).
+async function fifoTaseronMahsup(client, firma, odemeAmount, tarih) {
+  const faturalar = await client.query(`
+    SELECT id, fatura_no, toplam_tutar, odenen_tutar,
+           COALESCE(kalan_borc, 0) AS kalan_borc
+    FROM invoice_entries
+    WHERE TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) = $1
+      AND COALESCE(kalan_borc, 0) > 0
+    ORDER BY COALESCE(fatura_tarihi, created_at) ASC
+    FOR UPDATE
+  `, [firma]);
+  let kalan = odemeAmount;
+  const dagilim = [];
+  for (const fatura of faturalar.rows) {
+    if (kalan <= 0) break;
+    const faturaBorcu = Number(fatura.kalan_borc);
+    const buFaturaOdeme = Math.min(kalan, faturaBorcu);
+    const yeniOdenen = Number(fatura.odenen_tutar || 0) + buFaturaOdeme;
+    const yeniKalan  = faturaBorcu - buFaturaOdeme;
+    await client.query(`UPDATE invoice_entries
+      SET odenen_tutar=$1, kalan_borc=$2, odeme_tarihi=$3 WHERE id=$4`,
+      [yeniOdenen, yeniKalan, tarih, fatura.id]);
+    dagilim.push({ fatura_id: fatura.id, fatura_no: fatura.fatura_no, odeme: buFaturaOdeme, kalan_sonra: yeniKalan });
+    kalan -= buFaturaOdeme;
+  }
+  if (kalan > 0) dagilim.push({ fatura_no: "AVANS (fatura bekleniyor)", odeme: kalan, avans: true });
+  return { dagilim, kalan };
+}
+// Ödeme logunu geri al: dagilim'deki fatura mahsuplarını açar
+async function revertTaseronLog(client, log) {
+  let dagilim = [];
+  try { dagilim = Array.isArray(log.dagilim) ? log.dagilim : JSON.parse(log.dagilim || "[]"); } catch { dagilim = []; }
+  for (const d of dagilim) {
+    if (!d.fatura_id || !Number(d.odeme || 0)) continue;
+    await client.query(`UPDATE invoice_entries SET
+        odenen_tutar = GREATEST(0, COALESCE(odenen_tutar,0) - $1),
+        kalan_borc   = COALESCE(kalan_borc,0) + $1
+      WHERE id = $2`, [Number(d.odeme), d.fatura_id]);
+  }
+}
+pool.query(`ALTER TABLE marka_taseron_odeme ADD COLUMN IF NOT EXISTS odeme_log_id INTEGER`).catch(() => {});
+
 // FIFO ödeme dağıtım motoru
 app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
   const client = await pool.connect();
@@ -17130,74 +17251,32 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
       return res.status(400).json({ error: "Ödeme tutarı sıfırdan büyük olmalı" });
     }
 
-    // Ödenmemiş faturalar: FIFO (fatura tarihine göre eskiden yeniye)
-    const faturalar = await client.query(`
-      SELECT id, fatura_no, toplam_tutar, odenen_tutar,
-             COALESCE(kalan_borc, 0) AS kalan_borc
-      FROM invoice_entries
-      WHERE TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) = $1
-        AND COALESCE(kalan_borc, 0) > 0
-      ORDER BY COALESCE(fatura_tarihi, created_at) ASC
-      FOR UPDATE
-    `, [firma]);
-
-    // Açık fatura yoksa ödeme AVANS olarak kaydedilir (fatura kesilince mahsup edilir)
-    let kalan = odemeAmount;
-    const dagilim = [];
-
-    for (const fatura of faturalar.rows) {
-      if (kalan <= 0) break;
-
-      const faturaBorcu = Number(fatura.kalan_borc);
-      const buFaturaOdeme = Math.min(kalan, faturaBorcu);
-      const yeniOdenen = Number(fatura.odenen_tutar || 0) + buFaturaOdeme;
-      const yeniKalan  = faturaBorcu - buFaturaOdeme;
-
-      await client.query(`
-        UPDATE invoice_entries
-        SET odenen_tutar = $1,
-            kalan_borc   = $2,
-            odeme_tarihi = $3
-        WHERE id = $4
-      `, [yeniOdenen, yeniKalan, tarih, fatura.id]);
-
-      dagilim.push({
-        fatura_id: fatura.id,
-        fatura_no: fatura.fatura_no,
-        odeme: buFaturaOdeme,
-        kalan_sonra: yeniKalan,
-      });
-
-      kalan -= buFaturaOdeme;
-    }
-
-    // Faturaya mahsup edilemeyen kısım = AVANS (nakit akışında görünür,
-    // fatura kesilince manuel mahsup edilir)
-    if (kalan > 0) {
-      dagilim.push({ fatura_no: "AVANS (fatura bekleniyor)", odeme: kalan, avans: true });
-    }
+    // Açık faturalar FIFO kapatılır; kalan kısım AVANS olur
+    const { dagilim, kalan } = await fifoTaseronMahsup(client, firma, odemeAmount, tarih);
 
     // Ödeme logu kaydet
-    await client.query(`
+    const logIns = await client.query(`
       INSERT INTO taseron_odeme_log (firma, tutar, tarih, aciklama, dagilim, avans_tutar)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
     `, [firma, odemeAmount, tarih, aciklama || null, JSON.stringify(dagilim), kalan > 0 ? kalan : 0]);
+    const logId = logIns.rows[0].id;
 
     // AHY ödemesi: AHY Taşeron Faturaları paneli + AHY nakit akışına da yaz
-    // (avans kısmı AVANS, faturaya mahsup kısmı FATURA_ODEME olarak ayrı satır)
+    // (avans kısmı AVANS, faturaya mahsup kısmı FATURA_ODEME olarak ayrı satır;
+    // odeme_log_id bağıyla iki taraf senkron kalır)
     if (isAhyOdeme) {
       const mahsup = odemeAmount - kalan;
       if (mahsup > 0) {
         await client.query(`INSERT INTO marka_taseron_odeme
-            (marka, taseron_adi, tip, tutar, tarih, aciklama)
-          VALUES ('AHY', $1, 'FATURA_ODEME', $2, $3, $4)`,
-          [firma, mahsup, tarih, aciklama || "ERC ödeme girişinden"]);
+            (marka, taseron_adi, tip, tutar, tarih, aciklama, odeme_log_id)
+          VALUES ('AHY', $1, 'FATURA_ODEME', $2, $3, $4, $5)`,
+          [firma, mahsup, tarih, aciklama || "ERC ödeme girişinden", logId]);
       }
       if (kalan > 0) {
         await client.query(`INSERT INTO marka_taseron_odeme
-            (marka, taseron_adi, tip, tutar, tarih, aciklama)
-          VALUES ('AHY', $1, 'AVANS', $2, $3, $4)`,
-          [firma, kalan, tarih, aciklama || "ERC ödeme girişinden"]);
+            (marka, taseron_adi, tip, tutar, tarih, aciklama, odeme_log_id)
+          VALUES ('AHY', $1, 'AVANS', $2, $3, $4, $5)`,
+          [firma, kalan, tarih, aciklama || "ERC ödeme girişinden", logId]);
       }
     }
 
@@ -17231,28 +17310,24 @@ app.delete("/finance/taseron-odeme/:id", requireFinanceAuth, async (req, res) =>
       return res.status(404).json({ error: "Ödeme kaydı bulunamadı" });
     }
     // Fatura mahsuplarını geri aç
-    let dagilim = [];
-    try { dagilim = Array.isArray(log.dagilim) ? log.dagilim : JSON.parse(log.dagilim || "[]"); } catch { dagilim = []; }
-    for (const d of dagilim) {
-      if (!d.fatura_id || !Number(d.odeme || 0)) continue;
-      await client.query(`UPDATE invoice_entries SET
-          odenen_tutar = GREATEST(0, COALESCE(odenen_tutar,0) - $1),
-          kalan_borc   = COALESCE(kalan_borc,0) + $1
-        WHERE id = $2`, [Number(d.odeme), d.fatura_id]);
+    await revertTaseronLog(client, log);
+    // AHY kopyasını sil: önce odeme_log_id bağıyla; eski kayıtlar için
+    // (bağ yoksa) taşeron+tarih+tip+tutar eşleşmesiyle en yeni kayıt
+    const linked = await client.query(`DELETE FROM marka_taseron_odeme WHERE odeme_log_id=$1`, [req.params.id]);
+    if (linked.rowCount === 0) {
+      const avans = Number(log.avans_tutar || 0);
+      const mahsup = Number(log.tutar || 0) - avans;
+      const silAhy = async (tip, tutar) => {
+        if (tutar <= 0) return;
+        await client.query(`DELETE FROM marka_taseron_odeme WHERE id IN (
+            SELECT id FROM marka_taseron_odeme
+            WHERE marka='AHY' AND taseron_adi=$1 AND tarih=$2::date AND UPPER(COALESCE(tip,'AVANS'))=$3 AND tutar=$4
+            ORDER BY id DESC LIMIT 1)`,
+          [log.firma, log.tarih, tip, tutar]);
+      };
+      await silAhy("AVANS", avans);
+      await silAhy("FATURA_ODEME", mahsup);
     }
-    // AHY kopyasını sil (aynı taşeron+tarih+tip+tutar, en yeni kayıt)
-    const avans = Number(log.avans_tutar || 0);
-    const mahsup = Number(log.tutar || 0) - avans;
-    const silAhy = async (tip, tutar) => {
-      if (tutar <= 0) return;
-      await client.query(`DELETE FROM marka_taseron_odeme WHERE id IN (
-          SELECT id FROM marka_taseron_odeme
-          WHERE marka='AHY' AND taseron_adi=$1 AND tarih=$2::date AND UPPER(COALESCE(tip,'AVANS'))=$3 AND tutar=$4
-          ORDER BY id DESC LIMIT 1)`,
-        [log.firma, log.tarih, tip, tutar]);
-    };
-    await silAhy("AVANS", avans);
-    await silAhy("FATURA_ODEME", mahsup);
     await client.query(`DELETE FROM taseron_odeme_log WHERE id=$1`, [req.params.id]);
     await client.query("COMMIT");
     res.json({ ok: true });
