@@ -5967,7 +5967,7 @@ function FinanceDashboard({
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
         "Done Qty", "Requested Qty", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", _hakHdr, _hakKdvHdr,
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş (TL)", _hakHdr, _hakKdvHdr,
         "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
         "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
         "Taşeron",
@@ -18470,7 +18470,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
         "Done Qty", "Requested Qty", "QC Durum", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş", _hakHdr, _hakKdvHdr,
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş (TL)", _hakHdr, _hakKdvHdr,
         "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
         "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
         "Taşeron",
@@ -18578,7 +18578,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const dueQty = doneQty - billedQty;
         const usdBirimFiyat = isUSD ? unitPrice : 0;
         const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
-        const toplamHakedis = Number(row.total_done_amount || 0);
+        // USD kalemler TL'ye çevrilir — Toplam Hakediş ve türev kolonlar hep TL cinsinden
+        const _usdK = Number(usdRate || 0) || 1;
+        const toplamHakedis = Number(row.total_done_amount || 0) * (isUSD ? _usdK : 1);
         // Taşerona göre kırılım oranı (Federal/AHY %80, UBS %75-90, 2KX %75)
         const _rowRate = getSubconRateByRow(row);
         const federalHakedis = toplamHakedis * _rowRate;
@@ -18586,7 +18588,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         // Fatura kesilecek: FEDERAL/UBS/AHY/2KX, Billed Qty > 0 ise
         const subconLower = String(row.subcon_name || "").toLowerCase().trim();
         const isFaturaTaseron = FATURA_TASERONLAR.some(t => subconLower.includes(t));
-        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * _rowRate : 0;
+        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * (isUSD ? _usdK : 1) * _rowRate : 0;
 
         // Girilmiş fatura verisi (canon taşeron adıyla eşle — "2KX" kısa adı da yakalar)
         const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${canonTaseron(row.subcon_name)}`;
@@ -18887,7 +18889,49 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
               {/* Huni: Fiziki → QC Onaylı → Faturalanan (yüzde = bir önceki aşamaya göre) */}
               {[
-                { label: "Fiziki Tamamlanan", sub: "saha girişi bazlı", value: subconSummary.fizikiIs, pct: subconSummary.fizikiPct, pctLabel: "atananın", color: "#1d4ed8" },
+                {
+                  label: "Fiziki Tamamlanan", sub: "saha girişi bazlı · kalem listesi için tıkla", value: subconSummary.fizikiIs, pct: subconSummary.fizikiPct, pctLabel: "atananın", color: "#1d4ed8",
+                  tik: () => {
+                    // Kalem bazlı fiziki tamamlanan liste: tamamlanan_qty girildiyse o, yoksa done
+                    const list = rows
+                      .map(row => {
+                        const done = Number(row.done_qty || 0);
+                        const fiz = row.tamamlanan_qty === null || row.tamamlanan_qty === undefined ? done : Number(row.tamamlanan_qty || 0);
+                        return { row, done, fiz };
+                      })
+                      .filter(x => x.fiz > 0 && String(x.row.site_code || "").trim())
+                      .map(({ row, done, fiz }) => {
+                        const billed = Number(row.billed_qty || 0);
+                        return {
+                          site: String(row.site_code).trim().toUpperCase(),
+                          item_code: row.item_code || "",
+                          kalem: row.item_description || "",
+                          done_q: done,
+                          fiz_q: fiz,
+                          req_q: Number(row.requested_qty || 0),
+                          billed_q: billed,
+                          due_q: Math.max(0, done - billed),
+                          qc: String(row.qc_durum || "").toUpperCase() === "OK" ? "OK" : "NOK",
+                        };
+                      })
+                      .sort((a, b) => a.site.localeCompare(b.site) || String(a.item_code).localeCompare(String(b.item_code)));
+                    setOzetModal({
+                      title: "🏗️ Fiziki Tamamlanan — Kalem Listesi",
+                      cols: [
+                        { k: "site", l: "Site ID" },
+                        { k: "item_code", l: "Item Code" },
+                        { k: "kalem", l: "Kalem Adı" },
+                        { k: "done_q", l: "Done Qty" },
+                        { k: "fiz_q", l: "Tamamlanan Qty" },
+                        { k: "req_q", l: "Requested Qty" },
+                        { k: "billed_q", l: "Billed Qty" },
+                        { k: "due_q", l: "Due Qty" },
+                        { k: "qc", l: "QC Durum" },
+                      ],
+                      rows: list,
+                    });
+                  },
+                },
                 { label: "QC Onaylı İş", sub: "Huawei QC kapalı", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857" },
                 {
                   label: "HW'ye Faturalanan", sub: "fatura kesilen · saha listesi için tıkla", value: subconSummary.faturalanan, pct: subconSummary.faturaPct, pctLabel: "fizikinin", color: "#7c3aed",
