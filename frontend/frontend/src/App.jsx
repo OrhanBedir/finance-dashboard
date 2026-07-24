@@ -5922,6 +5922,7 @@ function FinanceDashboard({
   // ── Taşeron Ödeme Motoru ──────────────────────────────────────
   const [showOdemeModal,    setShowOdemeModal]    = useState(false);
   const [odemeModalFirma,   setOdemeModalFirma]   = useState("");
+  const [odemeModalFirmaMarka, setOdemeModalFirmaMarka] = useState("SIMSEK"); // ŞİMŞEK/AHY seçimi
   const [odemeModalTutar,   setOdemeModalTutar]   = useState("");
   const [odemeModalTarih,   setOdemeModalTarih]   = useState(() => new Date().toISOString().slice(0,10));
   const [odemeModalAciklama,setOdemeModalAciklama]= useState("");
@@ -7198,6 +7199,7 @@ function FinanceDashboard({
 
   const handleOdemeModalFirmaChange = async (firma) => {
     setOdemeModalFirma(firma);
+    setOdemeModalFirmaMarka("SIMSEK");
     setOdemeModalSonuc(null);
     setShowBankaCard(false);
     setBankaEditMode(false);
@@ -7207,10 +7209,8 @@ function FinanceDashboard({
   const handleTaseronOdemeSubmit = async (e) => {
     e.preventDefault();
     if (!odemeModalFirma || !odemeModalTutar || !odemeModalTarih) return;
-    // Firma sorusu: AHY seçilirse ödeme AHY Taşeron Faturaları + AHY nakit akışına da düşer
-    const firmaMarka = window.confirm(
-      "Bu taşeron ödemesi hangi firmaya ait?\n\n✔ Tamam = AHY ELEKTRİK (AHY paneline yansır)\n✘ İptal = ŞİMŞEK HABERLEŞME"
-    ) ? "AHY" : "SIMSEK";
+    // Firma seçimi (modaldeki ŞİMŞEK/AHY toggle): AHY ise ödeme AHY paneline de düşer
+    const firmaMarka = odemeModalFirmaMarka === "AHY" ? "AHY" : "SIMSEK";
     setOdemeModalLoading(true);
     setOdemeModalSonuc(null);
     try {
@@ -9475,6 +9475,29 @@ function FinanceDashboard({
                 <div style={{ background:"#fff", border:"1.5px solid #e9d5ff", borderRadius:"14px", padding:"20px" }}>
                   <div style={{ fontWeight:800, fontSize:"15px", color:"#6b21a8", marginBottom:"16px" }}>💳 Ödeme Kaydı</div>
                   <form onSubmit={handleTaseronOdemeSubmit}>
+                    {/* Firma seçimi: AHY ise ödeme AHY Taşeron Faturaları + AHY nakit akışına da düşer */}
+                    <div style={{ marginBottom:"12px" }}>
+                      <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"5px" }}>Bu ödeme hangi firmaya ait? *</label>
+                      <div style={{ display:"flex", gap:"8px" }}>
+                        <button type="button" onClick={() => setOdemeModalFirmaMarka("SIMSEK")}
+                          style={{ flex:1, padding:"10px", borderRadius:"10px", fontSize:"13px", fontWeight:800, cursor:"pointer",
+                            border: odemeModalFirmaMarka==="SIMSEK" ? "2px solid #1e3a5f" : "1.5px solid #e5e7eb",
+                            background: odemeModalFirmaMarka==="SIMSEK" ? "#1e3a5f" : "#fff",
+                            color: odemeModalFirmaMarka==="SIMSEK" ? "#fff" : "#6b7280" }}>
+                          ⚡ ŞİMŞEK
+                        </button>
+                        <button type="button" onClick={() => setOdemeModalFirmaMarka("AHY")}
+                          style={{ flex:1, padding:"10px", borderRadius:"10px", fontSize:"13px", fontWeight:800, cursor:"pointer",
+                            border: odemeModalFirmaMarka==="AHY" ? "2px solid #1d4ed8" : "1.5px solid #e5e7eb",
+                            background: odemeModalFirmaMarka==="AHY" ? "#1d4ed8" : "#fff",
+                            color: odemeModalFirmaMarka==="AHY" ? "#fff" : "#6b7280" }}>
+                          🔌 AHY ELEKTRİK
+                        </button>
+                      </div>
+                      {odemeModalFirmaMarka==="AHY" && (
+                        <div style={{ fontSize:"11px", color:"#1d4ed8", marginTop:"4px" }}>💡 Ödeme AHY Taşeron Faturaları paneline ve AHY nakit akışına da yansıyacak</div>
+                      )}
+                    </div>
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"12px" }}>
                       <div>
                         <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"5px" }}>Ödeme Tutarı (₺) *</label>
@@ -9587,6 +9610,18 @@ function FinanceDashboard({
                             </div>
                             <div style={{ textAlign:"right", flexShrink:0, marginLeft:"10px" }}>
                               <div style={{ fontSize:"12px", fontWeight:600, color:"#374151" }}>{log.tarih ? String(log.tarih).slice(0,10) : "—"}</div>
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm(`₺${Number(log.tutar).toLocaleString("tr-TR",{maximumFractionDigits:0})} tutarındaki ödeme silinsin mi?\n\nFaturaya mahsup edildiyse fatura borcu geri açılır; AHY'ye yansıdıysa oradan da kalkar.`)) return;
+                                  try {
+                                    await fetchJson(`${API_BASE}/finance/taseron-odeme/${log.id}`, { method:"DELETE", withAuth:true });
+                                    await loadOdemeModalCari(odemeModalFirma);
+                                    await loadFinance();
+                                  } catch(err) { alert(err.message || "Silinemedi"); }
+                                }}
+                                style={{ marginTop:"6px", padding:"4px 10px", background:"#fef2f2", border:"1px solid #fca5a5", borderRadius:"7px", fontSize:"11px", fontWeight:700, color:"#dc2626", cursor:"pointer" }}>
+                                🗑 Sil
+                              </button>
                             </div>
                           </div>
                           {/* Dekont satırı */}

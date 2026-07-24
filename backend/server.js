@@ -17207,6 +17207,52 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
   }
 });
 
+// Taşeron ödemesini sil: fatura mahsupları geri açılır, varsa AHY kopyası da silinir
+app.delete("/finance/taseron-odeme/:id", requireFinanceAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const logR = await client.query(`SELECT * FROM taseron_odeme_log WHERE id=$1 FOR UPDATE`, [req.params.id]);
+    const log = logR.rows[0];
+    if (!log) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Ödeme kaydı bulunamadı" });
+    }
+    // Fatura mahsuplarını geri aç
+    let dagilim = [];
+    try { dagilim = Array.isArray(log.dagilim) ? log.dagilim : JSON.parse(log.dagilim || "[]"); } catch { dagilim = []; }
+    for (const d of dagilim) {
+      if (!d.fatura_id || !Number(d.odeme || 0)) continue;
+      await client.query(`UPDATE invoice_entries SET
+          odenen_tutar = GREATEST(0, COALESCE(odenen_tutar,0) - $1),
+          kalan_borc   = COALESCE(kalan_borc,0) + $1
+        WHERE id = $2`, [Number(d.odeme), d.fatura_id]);
+    }
+    // AHY kopyasını sil (aynı taşeron+tarih+tip+tutar, en yeni kayıt)
+    const avans = Number(log.avans_tutar || 0);
+    const mahsup = Number(log.tutar || 0) - avans;
+    const silAhy = async (tip, tutar) => {
+      if (tutar <= 0) return;
+      await client.query(`DELETE FROM marka_taseron_odeme WHERE id IN (
+          SELECT id FROM marka_taseron_odeme
+          WHERE marka='AHY' AND taseron_adi=$1 AND tarih=$2::date AND UPPER(COALESCE(tip,'AVANS'))=$3 AND tutar=$4
+          ORDER BY id DESC LIMIT 1)`,
+        [log.firma, log.tarih, tip, tutar]);
+    };
+    await silAhy("AVANS", avans);
+    await silAhy("FATURA_ODEME", mahsup);
+    await client.query(`DELETE FROM taseron_odeme_log WHERE id=$1`, [req.params.id]);
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    console.error("TASERON ODEME SIL ERROR:", e.message);
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.get("/", (req, res) => {
   res.json({ ok: true, service: "erc-backend" });
 });
