@@ -12493,6 +12493,23 @@ app.get("/finance/taseron-cashflow", requireFinanceAuth, async (req, res) => {
         AND EXTRACT(MONTH FROM odeme_tarihi) = $2
         AND COALESCE(odenen_tutar, 0) > 0
         AND odeme_tarihi IS NOT NULL
+
+      UNION ALL
+
+      -- Faturasız avans ödemeleri (taseron_odeme_log.avans_tutar > 0)
+      SELECT
+        (l.id + 90000000) AS id,
+        EXTRACT(DAY FROM l.tarih)::int AS gun,
+        l.firma,
+        COALESCE(l.avans_tutar, 0) AS tutar,
+        'AVANS' AS fatura_no,
+        l.tarih AS fatura_tarihi,
+        COALESCE(l.aciklama, 'Avans — fatura bekleniyor') AS note
+      FROM taseron_odeme_log l
+      WHERE EXTRACT(YEAR FROM l.tarih) = $1
+        AND EXTRACT(MONTH FROM l.tarih) = $2
+        AND COALESCE(l.avans_tutar, 0) > 0
+
       ORDER BY gun ASC, firma ASC
     `, [Number(yil), Number(ay)]);
 
@@ -16536,6 +16553,8 @@ pool.query(`
 `).catch(e => console.error("taseron_odeme_log tablo hatası:", e.message));
 
 // dekont_url kolonu ekle
+pool.query(`ALTER TABLE taseron_odeme_log ADD COLUMN IF NOT EXISTS avans_tutar NUMERIC DEFAULT 0;`)
+  .catch(e => console.error("taseron_odeme_log avans_tutar hatası:", e.message));
 pool.query(`ALTER TABLE taseron_odeme_log ADD COLUMN IF NOT EXISTS dekont_url TEXT;`)
   .catch(e => console.error("dekont_url kolonu:", e.message));
 
@@ -17074,11 +17093,7 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
       FOR UPDATE
     `, [firma]);
 
-    if (faturalar.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Bu firmaya ait açık fatura bulunamadı" });
-    }
-
+    // Açık fatura yoksa ödeme AVANS olarak kaydedilir (fatura kesilince mahsup edilir)
     let kalan = odemeAmount;
     const dagilim = [];
 
@@ -17108,18 +17123,25 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
       kalan -= buFaturaOdeme;
     }
 
+    // Faturaya mahsup edilemeyen kısım = AVANS (nakit akışında görünür,
+    // fatura kesilince manuel mahsup edilir)
+    if (kalan > 0) {
+      dagilim.push({ fatura_no: "AVANS (fatura bekleniyor)", odeme: kalan, avans: true });
+    }
+
     // Ödeme logu kaydet
     await client.query(`
-      INSERT INTO taseron_odeme_log (firma, tutar, tarih, aciklama, dagilim)
-      VALUES ($1, $2, $3, $4, $5)
-    `, [firma, odemeAmount, tarih, aciklama || null, JSON.stringify(dagilim)]);
+      INSERT INTO taseron_odeme_log (firma, tutar, tarih, aciklama, dagilim, avans_tutar)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `, [firma, odemeAmount, tarih, aciklama || null, JSON.stringify(dagilim), kalan > 0 ? kalan : 0]);
 
     await client.query("COMMIT");
 
     res.json({
       ok: true,
       odenen: odemeAmount - kalan,
-      fazla: kalan > 0 ? kalan : 0,
+      avans: kalan > 0 ? kalan : 0,
+      fazla: 0,
       dagilim,
     });
   } catch(e) {

@@ -9496,14 +9496,18 @@ function FinanceDashboard({
                       <div style={{ fontWeight:800, color:"#166534", marginBottom:"8px" }}>✅ Ödeme kaydedildi!</div>
                       {odemeModalSonuc.dagilim?.map((d,i) => (
                         <div key={i} style={{ fontSize:"12px", color:"#374151", padding:"4px 0", borderBottom:"1px solid #dcfce7" }}>
-                          <b>{d.fatura_no}</b> → <span style={{ color:"#7e22ce" }}>₺{Number(d.odeme).toLocaleString("tr-TR",{maximumFractionDigits:0})} ödendi</span>
-                          <span style={{ color:d.kalan_sonra>0?"#dc2626":"#16a34a", marginLeft:"8px" }}>
-                            {d.kalan_sonra > 0 ? `(Kalan: ₺${Number(d.kalan_sonra).toLocaleString("tr-TR",{maximumFractionDigits:0})})` : "(✓ Kapatıldı)"}
-                          </span>
+                          <b>{d.fatura_no}</b> → <span style={{ color:"#7e22ce" }}>₺{Number(d.odeme).toLocaleString("tr-TR",{maximumFractionDigits:0})} {d.avans ? "avans" : "ödendi"}</span>
+                          {!d.avans && (
+                            <span style={{ color:d.kalan_sonra>0?"#dc2626":"#16a34a", marginLeft:"8px" }}>
+                              {d.kalan_sonra > 0 ? `(Kalan: ₺${Number(d.kalan_sonra).toLocaleString("tr-TR",{maximumFractionDigits:0})})` : "(✓ Kapatıldı)"}
+                            </span>
+                          )}
                         </div>
                       ))}
-                      {odemeModalSonuc.fazla > 0 && (
-                        <div style={{ fontSize:"11px", color:"#dc2626", marginTop:"6px" }}>⚠️ ₺{Number(odemeModalSonuc.fazla).toLocaleString("tr-TR",{maximumFractionDigits:0})} fazla ödeme — fatura yok</div>
+                      {odemeModalSonuc.avans > 0 && (
+                        <div style={{ fontSize:"11px", color:"#92400e", marginTop:"6px", background:"#fef3c7", borderRadius:"7px", padding:"6px 10px" }}>
+                          💰 ₺{Number(odemeModalSonuc.avans).toLocaleString("tr-TR",{maximumFractionDigits:0})} <b>avans</b> olarak kaydedildi (açık fatura yok) — nakit akışında görünür, fatura kesilince mahsup edilir
+                        </div>
                       )}
                     </div>
                   )}
