@@ -1802,6 +1802,8 @@ function MarkaTaseronPanel({ currentUser }) {
   const [err, setErr] = useState("");
   const [faturaModal, setFaturaModal] = useState(false);
   const [odemeModal, setOdemeModal] = useState(false);
+  const [fEditId, setFEditId] = useState(null); // düzenlenen fatura id
+  const [oEditId, setOEditId] = useState(null); // düzenlenen ödeme id
   const bugun = new Date().toISOString().slice(0, 10);
   const [fForm, setFForm] = useState({ taseron_adi: "", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" });
   const [oForm, setOForm] = useState({ taseron_adi: "", tip: "AVANS", tutar: "", tarih: bugun, aciklama: "" });
@@ -1837,30 +1839,42 @@ function MarkaTaseronPanel({ currentUser }) {
   const kaydetFatura = async () => {
     if (!fForm.taseron_adi.trim() || !fForm.fatura_no.trim() || !_num(fForm.toplam_tutar)) { alert("Taşeron adı, fatura no ve toplam tutar (KDV dahil) zorunlu"); return; }
     try {
-      const r = await fetch(`${API_BASE}/finance/marka-taseron-fatura`, {
-        method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
+      const url = fEditId ? `${API_BASE}/finance/marka-taseron-fatura/${fEditId}` : `${API_BASE}/finance/marka-taseron-fatura`;
+      const r = await fetch(url, {
+        method: fEditId ? "PUT" : "POST", headers: { ..._auth, "Content-Type": "application/json" },
         body: JSON.stringify({ marka, taseron_adi: fForm.taseron_adi, fatura_no: fForm.fatura_no, fatura_tarihi: fForm.fatura_tarihi || null, tutar: _num(fForm.tutar), kdv: _num(fForm.kdv), toplam_tutar: _num(fForm.toplam_tutar), note: fForm.note }),
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
-      setFaturaModal(false);
+      setFaturaModal(false); setFEditId(null);
       setFForm({ taseron_adi: "", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" });
       load();
     } catch (e) { alert(e.message); }
   };
+  const duzeltFatura = (f) => {
+    setFEditId(f.id);
+    setFForm({ taseron_adi: f.taseron_adi || "", fatura_no: f.fatura_no || "", fatura_tarihi: f.fatura_tarihi || bugun, tutar: String(f.tutar || ""), kdv: String(f.kdv || ""), toplam_tutar: String(f.toplam_tutar || ""), note: f.note || "" });
+    setFaturaModal(true);
+  };
   const kaydetOdeme = async () => {
     if (!oForm.taseron_adi.trim() || !_num(oForm.tutar) || !oForm.tarih) { alert("Taşeron adı, tutar ve tarih zorunlu"); return; }
     try {
-      const r = await fetch(`${API_BASE}/finance/marka-taseron-odeme`, {
-        method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
+      const url = oEditId ? `${API_BASE}/finance/marka-taseron-odeme/${oEditId}` : `${API_BASE}/finance/marka-taseron-odeme`;
+      const r = await fetch(url, {
+        method: oEditId ? "PUT" : "POST", headers: { ..._auth, "Content-Type": "application/json" },
         body: JSON.stringify({ marka, taseron_adi: oForm.taseron_adi, tip: oForm.tip, tutar: _num(oForm.tutar), tarih: oForm.tarih, aciklama: oForm.aciklama }),
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
-      setOdemeModal(false);
+      setOdemeModal(false); setOEditId(null);
       setOForm({ taseron_adi: "", tip: "AVANS", tutar: "", tarih: bugun, aciklama: "" });
       load();
     } catch (e) { alert(e.message); }
+  };
+  const duzeltOdeme = (o) => {
+    setOEditId(o.id);
+    setOForm({ taseron_adi: o.taseron_adi || "", tip: o.tip || "AVANS", tutar: String(o.tutar || ""), tarih: o.tarih || bugun, aciklama: o.aciklama || "" });
+    setOdemeModal(true);
   };
   const silFatura = async (id) => {
     if (!window.confirm("Bu fatura kaydı silinsin mi?")) return;
@@ -1884,8 +1898,8 @@ function MarkaTaseronPanel({ currentUser }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={() => setFaturaModal(true)} style={{ padding: "9px 16px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Fatura Girişi</button>
-          <button onClick={() => setOdemeModal(true)} style={{ padding: "9px 16px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Avans / Ödeme</button>
+          <button onClick={() => { setFEditId(null); setFForm({ taseron_adi: "", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" }); setFaturaModal(true); }} style={{ padding: "9px 16px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Fatura Girişi</button>
+          <button onClick={() => { setOEditId(null); setOForm({ taseron_adi: "", tip: "AVANS", tutar: "", tarih: bugun, aciklama: "" }); setOdemeModal(true); }} style={{ padding: "9px 16px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Avans / Ödeme</button>
         </div>
       </div>
 
@@ -1940,7 +1954,10 @@ function MarkaTaseronPanel({ currentUser }) {
                   <td style={{ ...tdS, textAlign: "right" }}>₺{fmt(f.kdv)}</td>
                   <td style={{ ...tdS, textAlign: "right", fontWeight: 800, color: "#1e3a5f" }}>₺{fmt(f.toplam_tutar || f.tutar)}</td>
                   <td style={{ ...tdS, fontSize: "12px", color: "#6b7280" }}>{f.note || ""}</td>
-                  <td style={tdS}><button onClick={() => silFatura(f.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button></td>
+                  <td style={{ ...tdS, whiteSpace: "nowrap" }}>
+                    <button onClick={() => duzeltFatura(f)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", marginRight: "4px" }} title="Düzelt">✏️</button>
+                    <button onClick={() => silFatura(f.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1971,7 +1988,10 @@ function MarkaTaseronPanel({ currentUser }) {
                   </td>
                   <td style={{ ...tdS, textAlign: "right", fontWeight: 800, color: "#9d174d" }}>₺{fmt(o.tutar)}</td>
                   <td style={{ ...tdS, fontSize: "12px", color: "#6b7280" }}>{o.aciklama || ""}</td>
-                  <td style={tdS}><button onClick={() => silOdeme(o.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button></td>
+                  <td style={{ ...tdS, whiteSpace: "nowrap" }}>
+                    <button onClick={() => duzeltOdeme(o)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", marginRight: "4px" }} title="Düzelt">✏️</button>
+                    <button onClick={() => silOdeme(o.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1981,9 +2001,9 @@ function MarkaTaseronPanel({ currentUser }) {
 
       {/* Fatura giriş modalı */}
       {faturaModal && (
-        <div onClick={() => setFaturaModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+        <div onClick={() => { setFaturaModal(false); setFEditId(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(460px, 94vw)", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "14px" }}>🧾 Taşeron Faturası Girişi</div>
+            <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "14px" }}>{fEditId ? "✏️ Taşeron Faturası Düzelt" : "🧾 Taşeron Faturası Girişi"}</div>
             <div style={{ display: "grid", gap: "10px" }}>
               <div><span style={lbl}>Taşeron Adı *</span>
                 <input list="mtTaseronList" style={inp} value={fForm.taseron_adi} onChange={e => setFForm(p => ({ ...p, taseron_adi: e.target.value }))} placeholder={`${marka}_OLCAY gibi`} />
@@ -2001,8 +2021,8 @@ function MarkaTaseronPanel({ currentUser }) {
               <div><span style={lbl}>Not</span><input style={inp} value={fForm.note} onChange={e => setFForm(p => ({ ...p, note: e.target.value }))} /></div>
             </div>
             <div style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "flex-end" }}>
-              <button onClick={() => setFaturaModal(false)} style={{ padding: "9px 16px", background: "#f3f4f6", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}>Vazgeç</button>
-              <button onClick={kaydetFatura} style={{ padding: "9px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>Kaydet</button>
+              <button onClick={() => { setFaturaModal(false); setFEditId(null); }} style={{ padding: "9px 16px", background: "#f3f4f6", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}>Vazgeç</button>
+              <button onClick={kaydetFatura} style={{ padding: "9px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>{fEditId ? "Güncelle" : "Kaydet"}</button>
             </div>
           </div>
         </div>
@@ -2010,9 +2030,9 @@ function MarkaTaseronPanel({ currentUser }) {
 
       {/* Avans/Ödeme modalı */}
       {odemeModal && (
-        <div onClick={() => setOdemeModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+        <div onClick={() => { setOdemeModal(false); setOEditId(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(420px, 94vw)", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "14px" }}>💸 Taşerona Avans / Ödeme</div>
+            <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "14px" }}>{oEditId ? "✏️ Avans / Ödeme Düzelt" : "💸 Taşerona Avans / Ödeme"}</div>
             <div style={{ display: "grid", gap: "10px" }}>
               <div><span style={lbl}>Taşeron Adı *</span>
                 <input list="mtTaseronList2" style={inp} value={oForm.taseron_adi} onChange={e => setOForm(p => ({ ...p, taseron_adi: e.target.value }))} placeholder={`${marka}_OLCAY gibi`} />
@@ -2033,8 +2053,8 @@ function MarkaTaseronPanel({ currentUser }) {
             </div>
             <div style={{ fontSize: "11px", color: "#9d174d", marginTop: "10px" }}>💡 Kaydedilen ödeme, Nakit Akışı'nda "Taşeron Ödemeleri" satırına otomatik düşer.</div>
             <div style={{ display: "flex", gap: "8px", marginTop: "14px", justifyContent: "flex-end" }}>
-              <button onClick={() => setOdemeModal(false)} style={{ padding: "9px 16px", background: "#f3f4f6", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}>Vazgeç</button>
-              <button onClick={kaydetOdeme} style={{ padding: "9px 18px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>Kaydet</button>
+              <button onClick={() => { setOdemeModal(false); setOEditId(null); }} style={{ padding: "9px 16px", background: "#f3f4f6", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}>Vazgeç</button>
+              <button onClick={kaydetOdeme} style={{ padding: "9px 18px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>{oEditId ? "Güncelle" : "Kaydet"}</button>
             </div>
           </div>
         </div>

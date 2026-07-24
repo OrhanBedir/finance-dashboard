@@ -5826,6 +5826,25 @@ app.post("/finance/marka-taseron-fatura", authMiddleware, async (req, res) => {
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+app.put("/finance/marka-taseron-fatura/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const { marka, taseron_adi, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note } = req.body;
+    const m = String(marka || "AHY").toUpperCase();
+    if (!taseron_adi || !fatura_no || !Number(toplam_tutar || 0))
+      return res.status(400).json({ ok: false, error: "Taşeron adı, fatura no ve toplam tutar zorunlu" });
+    // Yalnız kendi markasının faturası güncellenebilir
+    await pool.query(`UPDATE invoice_entries SET
+        tedarikci=$1, rf_montaj_firma=$1, fatura_no=$2, fatura_tarihi=$3,
+        tutar=$4, kdv=$5, toplam_tutar=$6, note=$7
+      WHERE id=$8 AND UPPER(COALESCE(firma,''))=$9`,
+      [String(taseron_adi).trim(), fatura_no, fatura_tarihi || null,
+       Number(tutar || 0), Number(kdv || 0), Number(toplam_tutar || 0), note || null,
+       req.params.id, m]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 app.delete("/finance/marka-taseron-fatura/:id", authMiddleware, async (req, res) => {
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
@@ -5851,6 +5870,21 @@ app.post("/finance/marka-taseron-odeme", authMiddleware, async (req, res) => {
       [String(marka || "AHY").toUpperCase(), String(taseron_adi).trim(), tipNorm,
        Number(tutar), tarih, aciklama || null, fatura_id ? Number(fatura_id) : null]);
     res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.put("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const { taseron_adi, tip, tutar, tarih, aciklama } = req.body;
+    if (!taseron_adi || !Number(tutar || 0) || !tarih)
+      return res.status(400).json({ ok: false, error: "Taşeron adı, tutar ve tarih zorunlu" });
+    const tipNorm = String(tip || "AVANS").toUpperCase() === "FATURA_ODEME" ? "FATURA_ODEME" : "AVANS";
+    await pool.query(`UPDATE marka_taseron_odeme SET
+        taseron_adi=$1, tip=$2, tutar=$3, tarih=$4, aciklama=$5
+      WHERE id=$6`,
+      [String(taseron_adi).trim(), tipNorm, Number(tutar), tarih, aciklama || null, req.params.id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 app.delete("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => {
