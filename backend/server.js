@@ -5687,9 +5687,19 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           AND UPPER(COALESCE(a.avans_turu,'MAAS')) = 'MAAS'
         UNION ALL
         SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM-DD') AS tarih,
-          t.talep_eden_ad AS ad_soyad, 'IS_AVANSI' AS tip, t.tutar,
-          COALESCE(t.aciklama,'') AS aciklama
+          COALESCE(NULLIF(hp.ad_soyad,''), t.talep_eden_ad) AS ad_soyad,
+          'IS_AVANSI' AS tip, t.tutar,
+          -- Amaç odaklı açıklama: gider türü + açıklama (⚡AHY işareti temizlenir)
+          -- + not; avans başka personel adınaysa talep eden parantezle eklenir
+          CONCAT_WS(' · ',
+            NULLIF(t.gider_turu,''),
+            NULLIF(BTRIM(REGEXP_REPLACE(COALESCE(t.aciklama,''), '⚡\\s*AHY', '', 'g')),''),
+            NULLIF(t.not_aciklama,''),
+            CASE WHEN NULLIF(hp.ad_soyad,'') IS NOT NULL AND hp.ad_soyad <> t.talep_eden_ad
+                 THEN 'talep: ' || t.talep_eden_ad END
+          ) AS aciklama
         FROM is_avans_talep t
+        LEFT JOIN personel hp ON hp.id = t.personel_id
         WHERE UPPER(COALESCE(t.firma,'ERC')) = $1
           AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
           AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2`, [marka, baslangic]),
