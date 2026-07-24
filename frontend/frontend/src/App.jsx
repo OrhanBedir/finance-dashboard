@@ -1246,6 +1246,7 @@ function MarkaPLPanel({ currentUser }) {
     { key: "maas_avans", label: "Maaş Avansları" },
     { key: "is_avans", label: "İş Avansları" },
     { key: "kira", label: "Kiralar (Araç + Ofis/Depo)" },
+    { key: "taseron", label: "Taşeron Ödemeleri" },
     { key: "diger", label: "Diğer Ödemeler" },
     { key: "gider", label: "Toplam Gider", bold: true, color: "#b91c1c" },
     { key: "kar", label: "📈 KÂR / ZARAR", bold: true, sonuc: true },
@@ -1269,7 +1270,7 @@ function MarkaPLPanel({ currentUser }) {
 
     // Satır tanımı → excel satırı + stil
     const yuzdeOf = (s) => {
-      if (["maas", "maas_avans", "is_avans", "masraf", "kira", "diger"].includes(s.key) && !s.key2)
+      if (["maas", "maas_avans", "is_avans", "masraf", "kira", "taseron", "diger"].includes(s.key) && !s.key2)
         return topGider > 0 ? top(s.key) / topGider : null;              // gider dağılımı
       if (s.key === "gider" && !s.key2) return topGider > 0 ? 1 : null;  // %100
       if (s.key === "kar") return topFatura > 0 ? top("kar") / topFatura : null;       // kâr marjı
@@ -1365,6 +1366,7 @@ function MarkaPLPanel({ currentUser }) {
     { key: "maas_avans", label: "💰 Maaş Avansları",    renk: "#f59e0b" },
     { key: "is_avans",   label: "🏗 İş Avansları",      renk: "#8b5cf6" },
     { key: "kira",       label: "🚗 Kiralar (Araç + Ofis)", renk: "#14b8a6" },
+    { key: "taseron",    label: "🔧 Taşeron Ödemeleri", renk: "#9d174d" },
     { key: "diger",      label: "📋 Diğer Ödemeler",    renk: "#64748b" },
   ].map(g => ({ ...g, tutar: top(g.key), pct: tGider > 0 ? (top(g.key) / tGider) * 100 : 0 }))
    .sort((a, b) => b.tutar - a.tutar);

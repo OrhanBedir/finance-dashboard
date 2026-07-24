@@ -5584,7 +5584,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     // bazlı) — hakediş tahmini değil. Gider = devirden (15 Temmuz 2026) sonraki
     // nakit akışı: maaş + avanslar (ödeme tarihi) + kira/manuel (giriş zamanı).
     const DEVIR = "2026-07-15";
-    const [fatura, maas, mavans, iavans, kiralar, ofisk, manuel] = await Promise.all([
+    const [fatura, maas, mavans, iavans, kiralar, ofisk, manuel, taseronOd] = await Promise.all([
       pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
           TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
           COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
@@ -5618,6 +5618,10 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
         FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
+      // Taşeron ödemeleri (avans + fatura ödemesi) — nakit akışıyla tutarlı
+      pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
+        FROM marka_taseron_odeme
+        WHERE UPPER(marka) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const map = {};
     const rowOf = (ay) => (map[ay] = map[ay] || { ay, gelir_try: 0, gelir_usd: 0, maas: 0, maas_avans: 0, is_avans: 0, diger: 0 });
@@ -5635,6 +5639,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     kiralar.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
     ofisk.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
     manuel.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
+    taseronOd.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
     const aylar = Object.values(map).sort((a, b) => b.ay.localeCompare(a.ay)).map(o => {
       const gider = o.maas + o.maas_avans + o.is_avans + o.diger;
       return { ...o, gider, net: +(o.gelir_try - gider).toFixed(2) };
@@ -5997,7 +6002,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
     const cMarka = canonSub(marka);
     // NOT: Masraf formları gider DEĞİLDİR — iş avansını kapatırlar (çifte sayım
     // olmasın diye P&L ve nakit toplamlarına girmez; takibi avans bakiyesinde).
-    const [fatura, tahsilat, maas, mavans, iavans, kiralar, ofisKira, manuel] = await Promise.all([
+    const [fatura, tahsilat, maas, mavans, iavans, kiralar, ofisKira, manuel, taseronOd] = await Promise.all([
       pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
           TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
           COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
@@ -6035,11 +6040,15 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, kategori, SUM(tutar) AS t
         FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1,2`, [marka]).catch(() => ({ rows: [] })),
+      // Taşeron ödemeleri (avans + fatura ödemesi) — nakit akışıyla tutarlı
+      pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
+        FROM marka_taseron_odeme
+        WHERE UPPER(marka) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const map = {};
     const rowOf = (ay) => (map[ay] = map[ay] || {
       ay, fatura: 0, tahsilat: 0,
-      maas: 0, maas_avans: 0, is_avans: 0, kira: 0, diger: 0,
+      maas: 0, maas_avans: 0, is_avans: 0, kira: 0, taseron: 0, diger: 0,
     });
     for (const r of fatura.rows) {
       if (canonSub(r.firma) !== cMarka || !r.ay) continue;
@@ -6059,10 +6068,11 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
       if (String(r.kategori).toUpperCase() === "ARAC") rowOf(r.ay).kira += Number(r.t || 0);
       else rowOf(r.ay).diger += Number(r.t || 0);
     });
+    taseronOd.rows.forEach(r => { if (r.ay) rowOf(r.ay).taseron += Number(r.t || 0); });
     // Aylar artan sırada; kümülatif alacak = Σ(fatura − tahsilat)
     let alacak = 0;
     const aylar = Object.values(map).sort((a, b) => a.ay.localeCompare(b.ay)).map(o => {
-      const gider = o.maas + o.maas_avans + o.is_avans + o.kira + o.diger;
+      const gider = o.maas + o.maas_avans + o.is_avans + o.kira + o.taseron + o.diger;
       const kar = +(o.fatura - gider).toFixed(2);
       const netNakit = +(o.tahsilat - gider).toFixed(2);
       alacak = +(alacak + o.fatura - o.tahsilat).toFixed(2);
