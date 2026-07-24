@@ -4980,8 +4980,10 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       bagli_fatura_id,
       currency,
       usd_kur,
+      firma, // ŞİMŞEK (boş/SIMSEK) veya AHY — AHY seçilirse AHY taşeron panelinde görünür
       temp_belge_key, // PDF önceden yüklendiyse geçici dosya yolu
     } = req.body;
+    const firmaNorm = String(firma || "").toUpperCase() === "AHY" ? "AHY" : "SIMSEK";
 
     const result = await pool.query(
       `
@@ -5008,11 +5010,12 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         fatura_turu,
         bagli_fatura_id,
         currency,
-        usd_kur
+        usd_kur,
+        firma
       )
       VALUES
       (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
       )
       RETURNING *
       `,
@@ -5039,6 +5042,7 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
         bagli_fatura_id ? Number(bagli_fatura_id) : null,
         currency || 'TRY',
         Number(usd_kur || 1),
+        firmaNorm,
       ],
     );
 
@@ -5657,7 +5661,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
     const girisBaslangic = "2026-07-15";
     // NOT: Masraf formları nakit çıkışı DEĞİLDİR — iş avansını kapatırlar
     // (para avans ödendiğinde çıkmıştı; çifte sayım olmasın diye listelenmez).
-    const [maas, avanslar, kiralar, ofisKiralar, manuel] = await Promise.all([
+    const [maas, avanslar, kiralar, ofisKiralar, manuel, taseronOdeme] = await Promise.all([
       // Maaş devri kuralı: Temmuz 2026 dönem maaşı, devir öncesi (15.07) işe
       // girmiş personelde %50 AHY'ye yansır (ilk yarı Şimşek'in). 15.07 ve
       // sonrası girenlerde tamamı; Temmuz öncesi dönem maaşları hiç yansımaz.
@@ -5711,8 +5715,15 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           tutar, COALESCE(donem,'') AS aciklama
         FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1`, [marka]).catch(() => ({ rows: [] })),
+      // Taşeron ödemeleri (AHY_taşeronlara avans + fatura ödemesi) — ödeme tarihiyle düşer
+      pool.query(`SELECT to_char(tarih,'YYYY-MM-DD') AS tarih, taseron_adi AS ad_soyad,
+          'TASERON' AS tip, tutar,
+          ((CASE UPPER(COALESCE(tip,'AVANS')) WHEN 'AVANS' THEN 'Avans' ELSE 'Fatura ödemesi' END)
+            || COALESCE(' · '||NULLIF(aciklama,''),'')) AS aciklama
+        FROM marka_taseron_odeme
+        WHERE UPPER(marka) = $1`, [marka]).catch(() => ({ rows: [] })),
     ]);
-    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...ofisKiralar.rows, ...manuel.rows]
+    const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...ofisKiralar.rows, ...manuel.rows, ...taseronOdeme.rows]
       .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))
       .sort((a, b) => b.tarih.localeCompare(a.tarih));
     res.json({ ok: true, baslangic, rows });
@@ -5769,6 +5780,84 @@ app.delete("/finance/marka-kasa/:id", authMiddleware, async (req, res) => {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     await pool.query(`DELETE FROM marka_kasa WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// MARKA TAŞERON: AHY'nin taşeronlarının (AHY_OLCAY vb.) kestiği faturalar
+// (invoice_entries.firma='AHY') + bu taşeronlara yapılan avans/fatura ödemeleri.
+app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const [faturalar, odemeler] = await Promise.all([
+      pool.query(`SELECT id, COALESCE(tedarikci,'') AS taseron_adi, fatura_no,
+          to_char(fatura_tarihi,'YYYY-MM-DD') AS fatura_tarihi,
+          COALESCE(tutar,0) AS tutar, COALESCE(kdv,0) AS kdv,
+          COALESCE(toplam_tutar,0) AS toplam_tutar, COALESCE(note,'') AS note
+        FROM invoice_entries
+        WHERE UPPER(COALESCE(firma,'')) = $1
+        ORDER BY fatura_tarihi DESC NULLS LAST, id DESC`, [marka]),
+      pool.query(`SELECT id, taseron_adi, UPPER(COALESCE(tip,'AVANS')) AS tip,
+          COALESCE(tutar,0) AS tutar, to_char(tarih,'YYYY-MM-DD') AS tarih,
+          COALESCE(aciklama,'') AS aciklama, fatura_id
+        FROM marka_taseron_odeme
+        WHERE UPPER(marka) = $1
+        ORDER BY tarih DESC, id DESC`, [marka]).catch(() => ({ rows: [] })),
+    ]);
+    res.json({ ok: true, faturalar: faturalar.rows, odemeler: odemeler.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// AHY panelinden taşeron faturası girişi (invoice_entries'e firma etiketiyle yazar)
+app.post("/finance/marka-taseron-fatura", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const { marka, taseron_adi, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note } = req.body;
+    const m = String(marka || "AHY").toUpperCase();
+    if (!taseron_adi || !fatura_no || !Number(toplam_tutar || 0))
+      return res.status(400).json({ ok: false, error: "Taşeron adı, fatura no ve toplam tutar zorunlu" });
+    const r = await pool.query(`INSERT INTO invoice_entries
+        (tedarikci, rf_montaj_firma, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note, fatura_turu, firma)
+      VALUES ($1,$1,$2,$3,$4,$5,$6,$7,'GELEN',$8) RETURNING id`,
+      [String(taseron_adi).trim(), fatura_no, fatura_tarihi || null,
+       Number(tutar || 0), Number(kdv || 0), Number(toplam_tutar || 0), note || null, m]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/marka-taseron-fatura/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    // Yalnız kendi markasının faturasını silebilir
+    await pool.query(`DELETE FROM invoice_entries WHERE id=$1 AND UPPER(COALESCE(firma,''))=$2`,
+      [req.params.id, marka]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/finance/marka-taseron-odeme", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const { marka, taseron_adi, tip, tutar, tarih, aciklama, fatura_id } = req.body;
+    if (!taseron_adi || !Number(tutar || 0) || !tarih)
+      return res.status(400).json({ ok: false, error: "Taşeron adı, tutar ve tarih zorunlu" });
+    const tipNorm = String(tip || "AVANS").toUpperCase() === "FATURA_ODEME" ? "FATURA_ODEME" : "AVANS";
+    const r = await pool.query(`INSERT INTO marka_taseron_odeme
+        (marka, taseron_adi, tip, tutar, tarih, aciklama, fatura_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [String(marka || "AHY").toUpperCase(), String(taseron_adi).trim(), tipNorm,
+       Number(tutar), tarih, aciklama || null, fatura_id ? Number(fatura_id) : null]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`DELETE FROM marka_taseron_odeme WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -14883,6 +14972,20 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
 
 // PUT arsivle — arsiv_tarihi nakit akışına düşme günüdür (AHY marka-nakit)
 pool.query(`ALTER TABLE masraf_form ADD COLUMN IF NOT EXISTS arsiv_tarihi TIMESTAMP`).catch(() => {});
+// Fatura firması: ŞİMŞEK (varsayılan/boş) veya AHY — AHY taşeron faturaları paneli
+pool.query(`ALTER TABLE invoice_entries ADD COLUMN IF NOT EXISTS firma TEXT`).catch(() => {});
+// Marka (AHY) taşeronlarına yapılan avans/fatura ödemeleri — nakit akışına düşer
+pool.query(`CREATE TABLE IF NOT EXISTS marka_taseron_odeme (
+  id SERIAL PRIMARY KEY,
+  marka TEXT NOT NULL,
+  taseron_adi TEXT NOT NULL,
+  tip TEXT DEFAULT 'AVANS',
+  tutar NUMERIC NOT NULL,
+  tarih DATE NOT NULL,
+  aciklama TEXT,
+  fatura_id INTEGER,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`).catch(() => {});
 // tamamlanan_qty boot garantisi: /setup-db içindeki ALTER yalnız elle çağrılınca
 // çalışıyor — buildMasterJoinedQuery bu kolonu kullandığı için açılışta garanti et
 pool.query(`ALTER TABLE master_works ADD COLUMN IF NOT EXISTS tamamlanan_qty NUMERIC`).catch(() => {});

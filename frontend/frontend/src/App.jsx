@@ -1592,7 +1592,7 @@ function MarkaNakitPanel({ currentUser }) {
   ayRows.forEach(r => {
     const g = Number((r.tarih || "").slice(8, 10));
     if (!g) return;
-    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","ARAC_KIRA","OFIS_KIRA","TICKET"].includes(r.tip) ? r.tip : "DIGER";
+    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","ARAC_KIRA","OFIS_KIRA","TICKET","TASERON"].includes(r.tip) ? r.tip : "DIGER";
     const m = (hucre[key] = hucre[key] || {});
     const c = (m[g] = m[g] || { t: 0, items: [] });
     c.t += r.tutar; c.items.push(r);
@@ -1611,6 +1611,7 @@ function MarkaNakitPanel({ currentUser }) {
     ["ARAC_KIRA",    "🚗 Araç Kiraları",   "Kira Öde + manuel girişler"],
     ["OFIS_KIRA",    "🏭 Depo/Ofis Kiraları", "Ofis & Depo → Kira Öde"],
     ["TICKET",       "🎫 Ticket / Yemek",  "Manuel girişler"],
+    ["TASERON",      "🔧 Taşeron Ödemeleri", "Avans + fatura ödemeleri"],
     ["DIGER",        "📋 Diğer Ödemeler",  "AHY seçilen manuel girişler"],
   ];
   const fk = (n) => Math.round(Number(n || 0)).toLocaleString("tr-TR");
@@ -1621,6 +1622,7 @@ function MarkaNakitPanel({ currentUser }) {
     ARAC_KIRA:    { ad: "Araç Kirası",      bg: "#ede9fe", fg: "#6d28d9" },
     OFIS_KIRA:    { ad: "Depo/Ofis Kirası", bg: "#e0f2fe", fg: "#0369a1" },
     TICKET:       { ad: "Ticket/Yemek",     bg: "#ffedd5", fg: "#9a3412" },
+    TASERON:      { ad: "Taşeron Ödemesi",  bg: "#fce7f3", fg: "#9d174d" },
     DIGER:        { ad: "Diğer Ödeme",      bg: "#f3f4f6", fg: "#374151" },
   };
   return (
@@ -1783,6 +1785,256 @@ function MarkaNakitPanel({ currentUser }) {
                 </div>
               ))}
               {kasa.rows.length === 0 && <div style={{ padding: "20px", textAlign: "center", color: "#9ca3af" }}>Henüz nakit girişi yok</div>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// MARKA TAŞERON FATURALARI (AHY): AHY_taşeronların kestiği faturalar
+// (invoice_entries.firma='AHY' — ERC fatura girişinde AHY seçilenler + burada
+// girilenler) ve taşeronlara yapılan avans/fatura ödemeleri (nakit akışına düşer).
+function MarkaTaseronPanel({ currentUser }) {
+  const [data, setData] = useState({ faturalar: [], odemeler: [] });
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [faturaModal, setFaturaModal] = useState(false);
+  const [odemeModal, setOdemeModal] = useState(false);
+  const bugun = new Date().toISOString().slice(0, 10);
+  const [fForm, setFForm] = useState({ taseron_adi: "", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" });
+  const [oForm, setOForm] = useState({ taseron_adi: "", tip: "AVANS", tutar: "", tarih: bugun, aciklama: "" });
+  const marka = String(currentUser?.marka || "AHY").toUpperCase();
+  const markaAd = currentUser?.marka_ad || marka;
+  const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-taseron?marka=${marka}`, { headers: _auth });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Liste alınamadı");
+      setData({ faturalar: d.faturalar || [], odemeler: d.odemeler || [] });
+      setErr("");
+    } catch (e) { setErr(e.message); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+  const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  const _num = (s) => { const t = String(s ?? "").trim(); if (!t) return 0; return /^\d+(\.\d{1,2})?$/.test(t) ? Number(t) : Number(t.replace(/\./g, "").replace(",", ".")) || 0; };
+  // Taşeron adları (datalist): faturalardan + ödemelerden
+  const taseronlar = [...new Set([...data.faturalar.map(f => f.taseron_adi), ...data.odemeler.map(o => o.taseron_adi)].filter(Boolean))].sort();
+  const topFatura = data.faturalar.reduce((s, f) => s + Number(f.toplam_tutar || f.tutar || 0), 0);
+  const topOdenen = data.odemeler.reduce((s, o) => s + Number(o.tutar || 0), 0);
+  const kalan = topFatura - topOdenen;
+  // Taşeron bazında bakiye: fatura (KDV dahil) − ödenen (avans+ödeme)
+  const bakiyeler = taseronlar.map(t => {
+    const f = data.faturalar.filter(x => x.taseron_adi === t).reduce((s, x) => s + Number(x.toplam_tutar || x.tutar || 0), 0);
+    const o = data.odemeler.filter(x => x.taseron_adi === t).reduce((s, x) => s + Number(x.tutar || 0), 0);
+    return { taseron: t, fatura: f, odenen: o, kalan: f - o };
+  });
+  const inp = { width: "100%", padding: "9px 11px", border: "1.5px solid #e5e7eb", borderRadius: "9px", fontSize: "13.5px", boxSizing: "border-box" };
+  const lbl = { fontSize: "11.5px", fontWeight: 700, color: "#475569", marginBottom: "4px", display: "block" };
+  const kaydetFatura = async () => {
+    if (!fForm.taseron_adi.trim() || !fForm.fatura_no.trim() || !_num(fForm.toplam_tutar)) { alert("Taşeron adı, fatura no ve toplam tutar (KDV dahil) zorunlu"); return; }
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-taseron-fatura`, {
+        method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ marka, taseron_adi: fForm.taseron_adi, fatura_no: fForm.fatura_no, fatura_tarihi: fForm.fatura_tarihi || null, tutar: _num(fForm.tutar), kdv: _num(fForm.kdv), toplam_tutar: _num(fForm.toplam_tutar), note: fForm.note }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
+      setFaturaModal(false);
+      setFForm({ taseron_adi: "", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" });
+      load();
+    } catch (e) { alert(e.message); }
+  };
+  const kaydetOdeme = async () => {
+    if (!oForm.taseron_adi.trim() || !_num(oForm.tutar) || !oForm.tarih) { alert("Taşeron adı, tutar ve tarih zorunlu"); return; }
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-taseron-odeme`, {
+        method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ marka, taseron_adi: oForm.taseron_adi, tip: oForm.tip, tutar: _num(oForm.tutar), tarih: oForm.tarih, aciklama: oForm.aciklama }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
+      setOdemeModal(false);
+      setOForm({ taseron_adi: "", tip: "AVANS", tutar: "", tarih: bugun, aciklama: "" });
+      load();
+    } catch (e) { alert(e.message); }
+  };
+  const silFatura = async (id) => {
+    if (!window.confirm("Bu fatura kaydı silinsin mi?")) return;
+    try { await fetch(`${API_BASE}/finance/marka-taseron-fatura/${id}?marka=${marka}`, { method: "DELETE", headers: _auth }); load(); } catch {}
+  };
+  const silOdeme = async (id) => {
+    if (!window.confirm("Bu ödeme kaydı silinsin mi? (Nakit akışından da kalkar)")) return;
+    try { await fetch(`${API_BASE}/finance/marka-taseron-odeme/${id}`, { method: "DELETE", headers: _auth }); load(); } catch {}
+  };
+  if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
+  if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+  const thS = { padding: "9px 12px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" };
+  const tdS = { padding: "10px 12px", fontSize: "13px", color: "#374151", borderBottom: "1px solid #f1f5f9" };
+  return (
+    <div style={{ padding: "24px", maxWidth: "1200px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
+        <div>
+          <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🔧 {markaAd} — Taşeron Faturaları</h2>
+          <div style={{ fontSize: "13px", color: "#64748b" }}>
+            {markaAd} taşeronlarının kestiği faturalar + onlara ödenen avans/ödemeler (ödemeler nakit akışına düşer)
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={() => setFaturaModal(true)} style={{ padding: "9px 16px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Fatura Girişi</button>
+          <button onClick={() => setOdemeModal(true)} style={{ padding: "9px 16px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Avans / Ödeme</button>
+        </div>
+      </div>
+
+      {/* Özet kartlar */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "18px" }}>
+        <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: "4px solid #1e3a5f", borderRadius: "12px", padding: "14px 16px" }}>
+          <div style={{ fontSize: "11px", fontWeight: 800, color: "#64748b", letterSpacing: "0.04em" }}>TOPLAM FATURA (KDV DAHİL)</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e3a5f", marginTop: "4px" }}>₺{fmt(topFatura)}</div>
+        </div>
+        <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: "4px solid #9d174d", borderRadius: "12px", padding: "14px 16px" }}>
+          <div style={{ fontSize: "11px", fontWeight: 800, color: "#64748b", letterSpacing: "0.04em" }}>ÖDENEN (AVANS + ÖDEME)</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: "#9d174d", marginTop: "4px" }}>₺{fmt(topOdenen)}</div>
+        </div>
+        <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: `4px solid ${kalan > 0 ? "#b45309" : "#15803d"}`, borderRadius: "12px", padding: "14px 16px" }}>
+          <div style={{ fontSize: "11px", fontWeight: 800, color: "#64748b", letterSpacing: "0.04em" }}>KALAN BORÇ</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: kalan > 0 ? "#b45309" : "#15803d", marginTop: "4px" }}>₺{fmt(kalan)}</div>
+        </div>
+      </div>
+
+      {/* Taşeron bazında bakiyeler */}
+      {bakiyeler.length > 0 && (
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "18px" }}>
+          {bakiyeler.map(b => (
+            <div key={b.taseron} style={{ background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: "10px", padding: "10px 14px", minWidth: "190px" }}>
+              <div style={{ fontSize: "12.5px", fontWeight: 800, color: "#0f172a" }}>{b.taseron}</div>
+              <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>Fatura ₺{fmt(b.fatura)} · Ödenen ₺{fmt(b.odenen)}</div>
+              <div style={{ fontSize: "13px", fontWeight: 800, marginTop: "2px", color: b.kalan > 0 ? "#b45309" : "#15803d" }}>Kalan ₺{fmt(b.kalan)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Fatura listesi */}
+      <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
+        <div style={{ padding: "12px 16px", background: "#1e3a5f", color: "#fff", fontSize: "14px", fontWeight: 700 }}>🧾 Taşeron Faturaları ({data.faturalar.length})</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ background: "#f8fafc" }}>
+              <th style={thS}>Taşeron</th><th style={thS}>Fatura No</th><th style={thS}>Tarih</th>
+              <th style={{ ...thS, textAlign: "right" }}>Tutar</th><th style={{ ...thS, textAlign: "right" }}>KDV</th>
+              <th style={{ ...thS, textAlign: "right" }}>Toplam (KDV Dahil)</th><th style={thS}>Not</th><th style={thS}></th>
+            </tr></thead>
+            <tbody>
+              {data.faturalar.length === 0 ? (
+                <tr><td colSpan={8} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz fatura girilmemiş — ERC fatura girişinde {markaAd} seçilenler de burada görünür</td></tr>
+              ) : data.faturalar.map(f => (
+                <tr key={f.id}>
+                  <td style={{ ...tdS, fontWeight: 700 }}>{f.taseron_adi}</td>
+                  <td style={tdS}>{f.fatura_no}</td>
+                  <td style={tdS}>{f.fatura_tarihi || "—"}</td>
+                  <td style={{ ...tdS, textAlign: "right" }}>₺{fmt(f.tutar)}</td>
+                  <td style={{ ...tdS, textAlign: "right" }}>₺{fmt(f.kdv)}</td>
+                  <td style={{ ...tdS, textAlign: "right", fontWeight: 800, color: "#1e3a5f" }}>₺{fmt(f.toplam_tutar || f.tutar)}</td>
+                  <td style={{ ...tdS, fontSize: "12px", color: "#6b7280" }}>{f.note || ""}</td>
+                  <td style={tdS}><button onClick={() => silFatura(f.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Ödeme listesi */}
+      <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", background: "#9d174d", color: "#fff", fontSize: "14px", fontWeight: 700 }}>💸 Avans & Ödemeler ({data.odemeler.length}) — nakit akışına düşer</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ background: "#f8fafc" }}>
+              <th style={thS}>Tarih</th><th style={thS}>Taşeron</th><th style={thS}>Tip</th>
+              <th style={{ ...thS, textAlign: "right" }}>Tutar</th><th style={thS}>Açıklama</th><th style={thS}></th>
+            </tr></thead>
+            <tbody>
+              {data.odemeler.length === 0 ? (
+                <tr><td colSpan={6} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz ödeme girilmemiş</td></tr>
+              ) : data.odemeler.map(o => (
+                <tr key={o.id}>
+                  <td style={tdS}>{o.tarih}</td>
+                  <td style={{ ...tdS, fontWeight: 700 }}>{o.taseron_adi}</td>
+                  <td style={tdS}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px", background: o.tip === "AVANS" ? "#fef3c7" : "#dcfce7", color: o.tip === "AVANS" ? "#92400e" : "#166534" }}>
+                      {o.tip === "AVANS" ? "Avans" : "Fatura Ödemesi"}
+                    </span>
+                  </td>
+                  <td style={{ ...tdS, textAlign: "right", fontWeight: 800, color: "#9d174d" }}>₺{fmt(o.tutar)}</td>
+                  <td style={{ ...tdS, fontSize: "12px", color: "#6b7280" }}>{o.aciklama || ""}</td>
+                  <td style={tdS}><button onClick={() => silOdeme(o.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Fatura giriş modalı */}
+      {faturaModal && (
+        <div onClick={() => setFaturaModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(460px, 94vw)", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "14px" }}>🧾 Taşeron Faturası Girişi</div>
+            <div style={{ display: "grid", gap: "10px" }}>
+              <div><span style={lbl}>Taşeron Adı *</span>
+                <input list="mtTaseronList" style={inp} value={fForm.taseron_adi} onChange={e => setFForm(p => ({ ...p, taseron_adi: e.target.value }))} placeholder={`${marka}_OLCAY gibi`} />
+                <datalist id="mtTaseronList">{taseronlar.map(t => <option key={t} value={t} />)}</datalist>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div><span style={lbl}>Fatura No *</span><input style={inp} value={fForm.fatura_no} onChange={e => setFForm(p => ({ ...p, fatura_no: e.target.value }))} /></div>
+                <div><span style={lbl}>Fatura Tarihi</span><input type="date" style={inp} value={fForm.fatura_tarihi} onChange={e => setFForm(p => ({ ...p, fatura_tarihi: e.target.value }))} /></div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+                <div><span style={lbl}>Tutar (KDV Hariç)</span><input style={inp} value={fForm.tutar} onChange={e => setFForm(p => ({ ...p, tutar: e.target.value }))} placeholder="0" /></div>
+                <div><span style={lbl}>KDV</span><input style={inp} value={fForm.kdv} onChange={e => setFForm(p => ({ ...p, kdv: e.target.value }))} placeholder="0" /></div>
+                <div><span style={lbl}>Toplam (Dahil) *</span><input style={inp} value={fForm.toplam_tutar} onChange={e => setFForm(p => ({ ...p, toplam_tutar: e.target.value }))} placeholder="0" /></div>
+              </div>
+              <div><span style={lbl}>Not</span><input style={inp} value={fForm.note} onChange={e => setFForm(p => ({ ...p, note: e.target.value }))} /></div>
+            </div>
+            <div style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "flex-end" }}>
+              <button onClick={() => setFaturaModal(false)} style={{ padding: "9px 16px", background: "#f3f4f6", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}>Vazgeç</button>
+              <button onClick={kaydetFatura} style={{ padding: "9px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>Kaydet</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Avans/Ödeme modalı */}
+      {odemeModal && (
+        <div onClick={() => setOdemeModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(420px, 94vw)", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "14px" }}>💸 Taşerona Avans / Ödeme</div>
+            <div style={{ display: "grid", gap: "10px" }}>
+              <div><span style={lbl}>Taşeron Adı *</span>
+                <input list="mtTaseronList2" style={inp} value={oForm.taseron_adi} onChange={e => setOForm(p => ({ ...p, taseron_adi: e.target.value }))} placeholder={`${marka}_OLCAY gibi`} />
+                <datalist id="mtTaseronList2">{taseronlar.map(t => <option key={t} value={t} />)}</datalist>
+              </div>
+              <div>
+                <span style={lbl}>Tip</span>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button onClick={() => setOForm(p => ({ ...p, tip: "AVANS" }))} style={{ flex: 1, padding: "9px", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", border: oForm.tip === "AVANS" ? "2px solid #92400e" : "1.5px solid #e5e7eb", background: oForm.tip === "AVANS" ? "#fef3c7" : "#fff", color: oForm.tip === "AVANS" ? "#92400e" : "#6b7280" }}>💰 Avans</button>
+                  <button onClick={() => setOForm(p => ({ ...p, tip: "FATURA_ODEME" }))} style={{ flex: 1, padding: "9px", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", border: oForm.tip === "FATURA_ODEME" ? "2px solid #166534" : "1.5px solid #e5e7eb", background: oForm.tip === "FATURA_ODEME" ? "#dcfce7" : "#fff", color: oForm.tip === "FATURA_ODEME" ? "#166534" : "#6b7280" }}>🧾 Fatura Ödemesi</button>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div><span style={lbl}>Tutar (₺) *</span><input style={inp} value={oForm.tutar} onChange={e => setOForm(p => ({ ...p, tutar: e.target.value }))} placeholder="0" /></div>
+                <div><span style={lbl}>Tarih *</span><input type="date" style={inp} value={oForm.tarih} onChange={e => setOForm(p => ({ ...p, tarih: e.target.value }))} /></div>
+              </div>
+              <div><span style={lbl}>Açıklama</span><input style={inp} value={oForm.aciklama} onChange={e => setOForm(p => ({ ...p, aciklama: e.target.value }))} /></div>
+            </div>
+            <div style={{ fontSize: "11px", color: "#9d174d", marginTop: "10px" }}>💡 Kaydedilen ödeme, Nakit Akışı'nda "Taşeron Ödemeleri" satırına otomatik düşer.</div>
+            <div style={{ display: "flex", gap: "8px", marginTop: "14px", justifyContent: "flex-end" }}>
+              <button onClick={() => setOdemeModal(false)} style={{ padding: "9px 16px", background: "#f3f4f6", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}>Vazgeç</button>
+              <button onClick={kaydetOdeme} style={{ padding: "9px 18px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>Kaydet</button>
             </div>
           </div>
         </div>
@@ -7057,6 +7309,13 @@ function FinanceDashboard({
         note: invoiceForm.note,
         ...(pdfTempKey && !editingInvoiceId ? { temp_belge_key: pdfTempKey } : {}),
       };
+
+      // Yeni faturada firma sorusu: AHY seçilirse AHY Taşeron Faturaları panelinde görünür
+      if (!editingInvoiceId) {
+        payload.firma = window.confirm(
+          "Bu fatura hangi firmaya ait?\n\n✔ Tamam = AHY ELEKTRİK (AHY paneline yansır)\n✘ İptal = ŞİMŞEK HABERLEŞME"
+        ) ? "AHY" : "SIMSEK";
+      }
       console.log("MANUAL INVOICE PAYLOAD:", payload);
 
       if (editingInvoiceId) {
@@ -25606,6 +25865,7 @@ function App() {
       case "ofis": return "Ofis & Depo";
       case "cashflow": return "Nakit Akışı";
       case "marka_pl": return "Kâr / Zarar (P&L)";
+      case "marka_taseron": return "Taşeron Faturaları";
       case "admin": return "Admin Panel";
       case "twokx-prices": return "2KX Özel Item Fiyatları";
       case "platform": return "Omnix — Platform Yönetimi";
@@ -25829,7 +26089,10 @@ function App() {
                       <AltNavItem aktif={page==='is_avans'} onClick={()=>setPage('is_avans')} ikon="💳" label="İş Avansı" badge={pendingAvansCount} />
                       <AltNavItem aktif={page==='masraf'} onClick={()=>setPage('masraf')} ikon="📄" label="Masraf Formu" badge={pendingMasrafCount} />
                       {isAltMarka && isAdmin && (
-                        <AltNavItem aktif={page==='marka_nakit'} onClick={()=>setPage('marka_nakit')} ikon="💰" label="Nakit Akışı (Günlük)" />
+                        <>
+                          <AltNavItem aktif={page==='marka_nakit'} onClick={()=>setPage('marka_nakit')} ikon="💰" label="Nakit Akışı (Günlük)" />
+                          <AltNavItem aktif={page==='marka_taseron'} onClick={()=>setPage('marka_taseron')} ikon="🔧" label="Taşeron Faturaları" />
+                        </>
                       )}
                       {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
                         <AltNavItem aktif={page==='cashflow'} onClick={()=>setPage('cashflow')} ikon="🏦" label="Nakit Akışı" />
@@ -25926,6 +26189,7 @@ function App() {
             {page === "marka_finans" && isAltMarka && <MarkaFinansPanel currentUser={user} />}
             {page === "marka_pl" && isAltMarka && <MarkaPLPanel currentUser={user} />}
             {page === "marka_nakit" && isAltMarka && <MarkaNakitPanel currentUser={user} />}
+            {page === "marka_taseron" && isAltMarka && <MarkaTaseronPanel currentUser={user} />}
             {page === "finance" && isFinanceUser && !isAltMarka && (
               financeToken ? (
                 <div style={{padding:"24px 28px"}}>
