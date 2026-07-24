@@ -8068,6 +8068,20 @@ function FinanceDashboard({
                             &nbsp;|&nbsp;Kesinti: {formatMoneyByCurrency(row.deduction_amount||0, row.currency||"TRY")}
                           </div>
                         )}
+                        {((row.subcon_2kx||0) > 0 || (row.subcon_ahy||0) > 0) && (
+                          <div style={{ display:"flex", gap:"6px", justifyContent:"flex-end", marginTop:4, flexWrap:"wrap" }}>
+                            {(row.subcon_2kx||0) > 0 && (
+                              <span style={{ fontSize:11, fontWeight:700, color:"#7c3aed", background:"#f3e8ff", borderRadius:6, padding:"1px 7px" }}>
+                                2KX: {formatMoneyByCurrency(row.subcon_2kx||0, "TRY")}
+                              </span>
+                            )}
+                            {(row.subcon_ahy||0) > 0 && (
+                              <span style={{ fontSize:11, fontWeight:700, color:"#1d4ed8", background:"#dbeafe", borderRadius:6, padding:"1px 7px" }}>
+                                AHY: {formatMoneyByCurrency(row.subcon_ahy||0, "TRY")}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))

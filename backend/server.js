@@ -2143,6 +2143,34 @@ async function buildUpcomingCollectionsData() {
     ORDER BY p.due_date ASC
   `);
 
+  // Fatura → taşeron payı (yalnız 2KX / AHY ayrımı; gerisi Şimşek/diğer).
+  // Her fatura satırı: saha+item → master_works taşeronu; ağırlık = po_rows birim fiyat.
+  // Aynı fatura birden çok taşerona yayılıyorsa birim fiyat oranıyla bölünür.
+  const invAgg = new Map(); // invoice_no → { total, k2kx, kahy }
+  try {
+    const subRes = await pool.query(`
+      SELECT h.invoice_no,
+             COALESCE(p.unit_price, 0) AS w,
+             (SELECT m.subcon_name FROM master_works m
+                WHERE m.site_code = h.site_id AND m.item_code = h.item_code
+                ORDER BY m.done_qty DESC NULLS LAST LIMIT 1) AS subcon
+      FROM hw_invoice_items h
+      LEFT JOIN po_rows p ON p.po_no = h.po_no AND p.po_line_no = h.line_no
+      WHERE h.invoice_no IS NOT NULL AND h.invoice_no <> ''
+    `);
+    for (const r of subRes.rows) {
+      const w = Number(r.w || 0);
+      const c = canonSub(r.subcon);
+      const a = invAgg.get(r.invoice_no) || { total: 0, k2kx: 0, kahy: 0 };
+      a.total += w;
+      if (c === "2kx") a.k2kx += w;
+      else if (c === "ahy") a.kahy += w;
+      invAgg.set(r.invoice_no, a);
+    }
+  } catch (e) {
+    console.error("upcoming taşeron payı hesaplanamadı:", e.message);
+  }
+
   // Türkiye saati (UTC+3) baz alınarak "bugün" hesaplanır
   const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
   const nowTR = new Date(Date.now() + TR_OFFSET_MS);
@@ -2226,6 +2254,8 @@ async function buildUpcomingCollectionsData() {
         amount: 0,
         gross_amount: 0,
         deduction_amount: 0,
+        subcon_2kx: 0,
+        subcon_ahy: 0,
         currency: "TRY" /* USD tutarlar TL'ye çevrildi */,
       });
     }
@@ -2236,6 +2266,13 @@ async function buildUpcomingCollectionsData() {
       entry.gross_amount += amount;
     } else {
       entry.deduction_amount += amount;  // negatif → H01 kesintisi
+    }
+
+    // Taşeron payı: bu faturanın 2KX / AHY oranınca tutarı dağıt
+    const ia = invAgg.get(row.invoice_no);
+    if (ia && ia.total > 0) {
+      entry.subcon_2kx += amount * (ia.k2kx / ia.total);
+      entry.subcon_ahy += amount * (ia.kahy / ia.total);
     }
   }
 
