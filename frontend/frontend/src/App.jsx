@@ -17503,6 +17503,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // QC Tamamlanma + Huawei Fatura Onay Bekler (taşeron özet kartı satırları)
   const [hwBekleyen, setHwBekleyen] = useState([]);
   const [ozetModal, setOzetModal] = useState(null); // {title, cols, rows}
+  const [fizikiSoru, setFizikiSoru] = useState(false); // Fiziki Tamamlanan: saha/kalem bazlı seçimi
 
   // 2KX özel kurgu: %75 kırılım + 5 özel item manuel fiyat + sadece 2026 sahaları
   const is2KXRegion =
@@ -18890,47 +18891,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               {/* Huni: Fiziki → QC Onaylı → Faturalanan (yüzde = bir önceki aşamaya göre) */}
               {[
                 {
-                  label: "Fiziki Tamamlanan", sub: "saha girişi bazlı · kalem listesi için tıkla", value: subconSummary.fizikiIs, pct: subconSummary.fizikiPct, pctLabel: "atananın", color: "#1d4ed8",
-                  tik: () => {
-                    // Kalem bazlı fiziki tamamlanan liste: tamamlanan_qty girildiyse o, yoksa done
-                    const list = rows
-                      .map(row => {
-                        const done = Number(row.done_qty || 0);
-                        const fiz = row.tamamlanan_qty === null || row.tamamlanan_qty === undefined ? done : Number(row.tamamlanan_qty || 0);
-                        return { row, done, fiz };
-                      })
-                      .filter(x => x.fiz > 0 && String(x.row.site_code || "").trim())
-                      .map(({ row, done, fiz }) => {
-                        const billed = Number(row.billed_qty || 0);
-                        return {
-                          site: String(row.site_code).trim().toUpperCase(),
-                          item_code: row.item_code || "",
-                          kalem: row.item_description || "",
-                          done_q: done,
-                          fiz_q: fiz,
-                          req_q: Number(row.requested_qty || 0),
-                          billed_q: billed,
-                          due_q: Math.max(0, done - billed),
-                          qc: String(row.qc_durum || "").toUpperCase() === "OK" ? "OK" : "NOK",
-                        };
-                      })
-                      .sort((a, b) => a.site.localeCompare(b.site) || String(a.item_code).localeCompare(String(b.item_code)));
-                    setOzetModal({
-                      title: "🏗️ Fiziki Tamamlanan — Kalem Listesi",
-                      cols: [
-                        { k: "site", l: "Site ID" },
-                        { k: "item_code", l: "Item Code" },
-                        { k: "kalem", l: "Kalem Adı" },
-                        { k: "done_q", l: "Done Qty" },
-                        { k: "fiz_q", l: "Tamamlanan Qty" },
-                        { k: "req_q", l: "Requested Qty" },
-                        { k: "billed_q", l: "Billed Qty" },
-                        { k: "due_q", l: "Due Qty" },
-                        { k: "qc", l: "QC Durum" },
-                      ],
-                      rows: list,
-                    });
-                  },
+                  label: "Fiziki Tamamlanan", sub: "saha girişi bazlı · liste için tıkla", value: subconSummary.fizikiIs, pct: subconSummary.fizikiPct, pctLabel: "atananın", color: "#1d4ed8",
+                  tik: () => setFizikiSoru(true),
                 },
                 { label: "QC Onaylı İş", sub: "Huawei QC kapalı", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857" },
                 {
@@ -19869,6 +19831,97 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           </div>
         </div>
       )}
+
+      {/* Fiziki Tamamlanan: saha bazlı mı kalem bazlı mı seçimi */}
+      {fizikiSoru && (() => {
+        // Ortak taban: fiziki tamamlanmış (tamamlanan_qty ?? done > 0) satırlar
+        const _fizRows = rows
+          .map(row => {
+            const done = Number(row.done_qty || 0);
+            const fiz = row.tamamlanan_qty === null || row.tamamlanan_qty === undefined ? done : Number(row.tamamlanan_qty || 0);
+            return { row, done, fiz };
+          })
+          .filter(x => x.fiz > 0 && String(x.row.site_code || "").trim());
+        const acSahaBazli = () => {
+          const siteler = [...new Set(_fizRows.map(x => String(x.row.site_code).trim().toUpperCase()))].sort();
+          setFizikiSoru(false);
+          setOzetModal({
+            title: "🏗️ Fiziki Tamamlanan — Saha Listesi",
+            cols: [{ k: "site", l: "Site ID" }],
+            rows: siteler.map(s => ({ site: s })),
+          });
+        };
+        const acKalemBazli = () => {
+          const list = _fizRows
+            .map(({ row, done, fiz }) => {
+              const billed = Number(row.billed_qty || 0);
+              return {
+                site: String(row.site_code).trim().toUpperCase(),
+                item_code: row.item_code || "",
+                kalem: row.item_description || "",
+                done_q: done,
+                fiz_q: fiz,
+                req_q: Number(row.requested_qty || 0),
+                billed_q: billed,
+                due_q: Math.max(0, done - billed),
+                qc: String(row.qc_durum || "").toUpperCase() === "OK" ? "OK" : "NOK",
+              };
+            })
+            .sort((a, b) => a.site.localeCompare(b.site) || String(a.item_code).localeCompare(String(b.item_code)));
+          setFizikiSoru(false);
+          setOzetModal({
+            title: "🏗️ Fiziki Tamamlanan — Kalem Listesi",
+            cols: [
+              { k: "site", l: "Site ID" },
+              { k: "item_code", l: "Item Code" },
+              { k: "kalem", l: "Kalem Adı" },
+              { k: "done_q", l: "Done Qty" },
+              { k: "fiz_q", l: "Tamamlanan Qty" },
+              { k: "req_q", l: "Requested Qty" },
+              { k: "billed_q", l: "Billed Qty" },
+              { k: "due_q", l: "Due Qty" },
+              { k: "qc", l: "QC Durum" },
+            ],
+            rows: list,
+          });
+        };
+        return (
+          <div
+            onClick={() => setFizikiSoru(false)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ background: "#fff", borderRadius: "14px", width: "min(420px, 94vw)", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)", textAlign: "center" }}
+            >
+              <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "6px" }}>🏗️ Fiziki Tamamlanan</div>
+              <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>Listeyi nasıl görmek istersiniz?</div>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button
+                  onClick={acSahaBazli}
+                  style={{ flex: 1, background: "#1d4ed8", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}
+                >
+                  🏢 Saha Bazlı
+                  <div style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginTop: "3px" }}>sadece Site ID listesi</div>
+                </button>
+                <button
+                  onClick={acKalemBazli}
+                  style={{ flex: 1, background: "#047857", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}
+                >
+                  📋 Kalem Bazlı
+                  <div style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginTop: "3px" }}>done · tamamlanan · QC detayı</div>
+                </button>
+              </div>
+              <button
+                onClick={() => setFizikiSoru(false)}
+                style={{ marginTop: "12px", background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "8px 18px", fontSize: "12px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}
+              >
+                Vazgeç
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Excel görünümlü özet detay modalı (QC Tamamlanma / HW Fatura Onay Bekler) */}
       {ozetModal && (
