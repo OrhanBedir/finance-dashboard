@@ -19843,12 +19843,85 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           })
           .filter(x => x.fiz > 0 && String(x.row.site_code || "").trim());
         const acSahaBazli = () => {
-          const siteler = [...new Set(_fizRows.map(x => String(x.row.site_code).trim().toUpperCase()))].sort();
+          // Saha bazında fiziki tamamlanan tutarı (TRY) — USD kalemler kurla çevrilir
+          const perSite = new Map();
+          _fizRows.forEach(({ row, fiz }) => {
+            const s = String(row.site_code).trim().toUpperCase();
+            const fiyat = Number(row.unit_price || 0);
+            const usd = normalizeCurrency(row.currency) === "USD";
+            const tl = fiz * fiyat * (usd ? usdRate : 1);
+            const a = perSite.get(s) || { site: s, bolge: getRegion(row.site_code, row.project_code) || "", _t: 0 };
+            a._t += tl;
+            perSite.set(s, a);
+          });
+          const list = [...perSite.values()]
+            .sort((a, b) => a.site.localeCompare(b.site))
+            .map(a => ({ site: a.site, bolge: a.bolge, toplam: `₺${a._t.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`, _t: a._t }));
           setFizikiSoru(false);
           setOzetModal({
             title: "🏗️ Fiziki Tamamlanan — Saha Listesi",
-            cols: [{ k: "site", l: "Site ID" }],
-            rows: siteler.map(s => ({ site: s })),
+            cols: [
+              { k: "site", l: "Site ID" },
+              { k: "bolge", l: "Bölge" },
+              { k: "toplam", l: "Toplam Tutar (TL)" },
+            ],
+            rows: list,
+          });
+        };
+        const acTipOrtalama = () => {
+          // Saha tipi (kod içinden) × bölge ortalama saha tutarı (TRY)
+          const siteType = (code) => {
+            const c = String(code || "").toUpperCase();
+            if (c.includes("NR3500")) return "NR3500";
+            if (c.includes("NR700")) return "NR700";
+            if (c.includes("TRP")) return "TRP";
+            if (c.includes("L2100")) return "L2100";
+            if (c.includes("_NS_") || c.includes("_NS")) return "Standalone";
+            return "Diğer";
+          };
+          // Her saha için toplam tutar (tüm kalemlerin done×fiyat TRY)
+          const perSite = new Map();
+          rows.forEach(row => {
+            const s = String(row.site_code || "").trim().toUpperCase();
+            if (!s) return;
+            const done = Number(row.done_qty || 0);
+            if (done <= 0) return;
+            const fiyat = Number(row.unit_price || 0);
+            const usd = normalizeCurrency(row.currency) === "USD";
+            const tl = done * fiyat * (usd ? usdRate : 1);
+            const a = perSite.get(s) || { bolge: getRegion(row.site_code, row.project_code) || "", tip: siteType(s), _t: 0 };
+            a._t += tl;
+            perSite.set(s, a);
+          });
+          // Bölge+tip grupla, ortalama al
+          const grp = new Map(); // "Bölge|Tip" → {sum, n}
+          perSite.forEach(a => {
+            if (a.bolge !== "İzmir" && a.bolge !== "Ankara") return;
+            const k = `${a.bolge}|${a.tip}`;
+            const g = grp.get(k) || { bolge: a.bolge, tip: a.tip, sum: 0, n: 0 };
+            g.sum += a._t; g.n += 1;
+            grp.set(k, g);
+          });
+          const TIP_SIRA = { Standalone: 1, NR700: 2, NR3500: 3, TRP: 4, L2100: 5, "Diğer": 9 };
+          const list = [...grp.values()]
+            .map(g => ({
+              tip: g.tip,
+              bolge: g.bolge,
+              adet: g.n,
+              ortalama: `₺${(g.sum / g.n).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`,
+              _s: (TIP_SIRA[g.tip] || 8) * 10 + (g.bolge === "İzmir" ? 0 : 1),
+            }))
+            .sort((a, b) => a._s - b._s);
+          setFizikiSoru(false);
+          setOzetModal({
+            title: "📊 Ortalama Saha Tipi Fiyatları (Bölge Bazında)",
+            cols: [
+              { k: "tip", l: "Saha Tipi" },
+              { k: "bolge", l: "Bölge" },
+              { k: "adet", l: "Saha Adedi" },
+              { k: "ortalama", l: "Ortalama Saha Tutarı (TL)" },
+            ],
+            rows: list,
           });
         };
         const acKalemBazli = () => {
@@ -19902,7 +19975,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   style={{ flex: 1, background: "#1d4ed8", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}
                 >
                   🏢 Saha Bazlı
-                  <div style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginTop: "3px" }}>sadece Site ID listesi</div>
+                  <div style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginTop: "3px" }}>site ID + toplam tutar</div>
                 </button>
                 <button
                   onClick={acKalemBazli}
@@ -19912,6 +19985,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   <div style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginTop: "3px" }}>done · tamamlanan · QC detayı</div>
                 </button>
               </div>
+              <button
+                onClick={acTipOrtalama}
+                style={{ width: "100%", marginTop: "10px", background: "linear-gradient(135deg,#7c3aed,#6d28d9)", color: "#fff", border: "none", borderRadius: "10px", padding: "13px 10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}
+              >
+                📊 Ortalama Saha Tipi Fiyatları
+                <div style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginTop: "3px" }}>İzmir & Ankara · Standalone · NR700 · NR3500 · TRP ortalaması</div>
+              </button>
               <button
                 onClick={() => setFizikiSoru(false)}
                 style={{ marginTop: "12px", background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "8px 18px", fontSize: "12px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}
@@ -19960,8 +20040,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                           key={c.k}
                           style={{
                             padding: "9px 14px", fontSize: "12.5px", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap",
-                            color: c.k === "qc" ? (r[c.k] === "OK" ? "#047857" : "#b91c1c") : "#374151",
-                            fontWeight: c.k === "qc" || c.k === "site" || c.k === "site_code" || c.k === "tutar_fmt" ? 700 : 400,
+                            color: c.k === "qc" ? (r[c.k] === "OK" ? "#047857" : "#b91c1c") : (c.k === "toplam" || c.k === "ortalama") ? "#1d4ed8" : "#374151",
+                            fontWeight: c.k === "qc" || c.k === "site" || c.k === "site_code" || c.k === "tutar_fmt" || c.k === "toplam" || c.k === "ortalama" ? 700 : 400,
+                            textAlign: c.k === "toplam" || c.k === "ortalama" || c.k === "adet" ? "right" : "left",
                           }}
                         >
                           {r[c.k] ?? "—"}
