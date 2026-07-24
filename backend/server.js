@@ -16842,16 +16842,28 @@ app.get("/finance/taseron-firmalar", requireFinanceAuth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Tüm firmalar listesi (arama/datalist için — kalan borç 0 olanlar dahil)
+// Tüm firmalar listesi (arama/datalist için — kalan borç 0 olanlar dahil).
+// Fatura firmalarına ek olarak ödeme loglarında geçen firmalar da listelenir:
+// elle yazılan yeni taşeron, ilk ödeme kaydından sonra öneri listesine girer.
 app.get("/finance/taseron-firmalar-all", requireFinanceAuth, async (req, res) => {
   try {
     const r = await pool.query(`
-      SELECT
-        TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
-        COALESCE(SUM(kalan_borc),0) AS toplam_kalan
-      FROM invoice_entries
-      WHERE COALESCE(TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')), '') <> ''
-      GROUP BY TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, ''))
+      SELECT firma, SUM(toplam_kalan) AS toplam_kalan FROM (
+        SELECT
+          TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
+          COALESCE(SUM(kalan_borc),0) AS toplam_kalan
+        FROM invoice_entries
+        WHERE COALESCE(TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')), '') <> ''
+        GROUP BY TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, ''))
+
+        UNION ALL
+
+        SELECT TRIM(firma) AS firma, 0 AS toplam_kalan
+        FROM taseron_odeme_log
+        WHERE COALESCE(TRIM(firma),'') <> ''
+        GROUP BY TRIM(firma)
+      ) t
+      GROUP BY firma
       ORDER BY toplam_kalan DESC, firma ASC
     `);
     res.json(r.rows);
