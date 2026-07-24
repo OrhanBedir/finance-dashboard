@@ -20145,13 +20145,16 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           })
           .filter(x => x.fiz > 0 && String(x.row.site_code || "").trim());
         const acSahaBazli = () => {
-          // Saha bazında fiziki tamamlanan tutarı (TRY) — USD kalemler kurla çevrilir
+          // Saha bazında toplam tutar (TL) — Bölge Analizi exportuyla aynı kaynak:
+          // total_done_amount (done×fiyat), USD kalemler kurla çevrilir. Fiziki
+          // listeye giren sahaların (fiz>0) TÜM kalemleri toplanır.
+          const fizSiteler = new Set(_fizRows.map(x => String(x.row.site_code).trim().toUpperCase()));
           const perSite = new Map();
-          _fizRows.forEach(({ row, fiz }) => {
-            const s = String(row.site_code).trim().toUpperCase();
-            const fiyat = Number(row.unit_price || 0);
+          rows.forEach(row => {
+            const s = String(row.site_code || "").trim().toUpperCase();
+            if (!s || !fizSiteler.has(s)) return;
             const usd = normalizeCurrency(row.currency) === "USD";
-            const tl = fiz * fiyat * (usd ? usdRate : 1);
+            const tl = Number(row.total_done_amount || 0) * (usd ? usdRate : 1);
             const a = perSite.get(s) || { site: s, bolge: getRegion(row.site_code, row.project_code) || "", _t: 0 };
             a._t += tl;
             perSite.set(s, a);
@@ -20181,16 +20184,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             if (c.includes("_NS_") || c.includes("_NS")) return "Standalone";
             return "Diğer";
           };
-          // Her saha için toplam tutar (tüm kalemlerin done×fiyat TRY)
+          // Her saha için toplam tutar — exportla aynı kaynak: total_done_amount
+          // (done×fiyat), USD kalemler kurla TL'ye çevrilir
           const perSite = new Map();
           rows.forEach(row => {
             const s = String(row.site_code || "").trim().toUpperCase();
             if (!s) return;
-            const done = Number(row.done_qty || 0);
-            if (done <= 0) return;
-            const fiyat = Number(row.unit_price || 0);
+            if (Number(row.done_qty || 0) <= 0) return;
             const usd = normalizeCurrency(row.currency) === "USD";
-            const tl = done * fiyat * (usd ? usdRate : 1);
+            const tl = Number(row.total_done_amount || 0) * (usd ? usdRate : 1);
             const a = perSite.get(s) || { bolge: getRegion(row.site_code, row.project_code) || "", tip: siteType(s), _t: 0 };
             a._t += tl;
             perSite.set(s, a);
@@ -20330,7 +20332,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 <thead>
                   <tr>
                     {ozetModal.cols.map((c) => (
-                      <th key={c.k} style={{ position: "sticky", top: 0, zIndex: 2, background: "#1f2937", color: "#fff", padding: "10px 14px", fontSize: "12px", textAlign: "left", whiteSpace: "nowrap" }}>{c.l}</th>
+                      <th key={c.k} style={{ position: "sticky", top: 0, zIndex: 2, background: "#1f2937", color: "#fff", padding: "10px 14px", fontSize: "12px", textAlign: ["toplam", "ortalama", "adet"].includes(c.k) ? "center" : "left", whiteSpace: "nowrap" }}>{c.l}</th>
                     ))}
                   </tr>
                 </thead>
@@ -20344,7 +20346,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                             padding: "9px 14px", fontSize: "12.5px", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap",
                             color: c.k === "qc" ? (r[c.k] === "OK" ? "#047857" : "#b91c1c") : (c.k === "toplam" || c.k === "ortalama") ? "#1d4ed8" : "#374151",
                             fontWeight: c.k === "qc" || c.k === "site" || c.k === "site_code" || c.k === "tutar_fmt" || c.k === "toplam" || c.k === "ortalama" ? 700 : 400,
-                            textAlign: c.k === "toplam" || c.k === "ortalama" || c.k === "adet" ? "right" : "left",
+                            textAlign: c.k === "toplam" || c.k === "ortalama" || c.k === "adet" ? "center" : "left",
                           }}
                         >
                           {r[c.k] ?? "—"}
