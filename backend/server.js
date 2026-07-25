@@ -2639,14 +2639,22 @@ function normalizeCurrency(value) {
 
   return raw || "TRY";
 }
+// BOQ'da USD tanımlı kalemler — HW PO exportu bu kalemleri bazen "TRY"
+// etiketler ama fiyat USD'dir (örn. 6m pole 931, bakır elektrot 7,31).
+// Boot'ta boq_items'tan yüklenir; BOQ güncellenince deploy/restart yeniler.
+let USD_BOQ_SET = new Set();
+pool.query(`SELECT s_bom_code FROM boq_items WHERE UPPER(COALESCE(currency,''))='USD'`)
+  .then(r => { USD_BOQ_SET = new Set(r.rows.map(x => String(x.s_bom_code || "").trim())); })
+  .catch(() => {});
+
 function inferCurrencyByItemAndPrice(itemCode, currency, unitPrice) {
   const code = String(itemCode || "").trim();
   const curr = normalizeCurrency(currency);
   const price = Number(unitPrice || 0);
 
-  // 7,2m LPRT pole özel kuralı:
-  // Eski PO'larda 42.379 TL, yeni PO'larda 947/986 USD geliyor.
-  if (code === "8818278098") {
+  // BOQ'sunda USD olan kalem: fiyat >= 10.000 ise gerçek TL PO'dur
+  // (kurdan çevrilerek açılmış, örn. 8818278098 → 42.379 TL); değilse USD.
+  if (USD_BOQ_SET.has(code) || code === "8818278098") {
     if (price >= 10000) return "TRY";
     if (price > 0) return "USD";
   }
