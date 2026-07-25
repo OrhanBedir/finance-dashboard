@@ -18026,6 +18026,8 @@ app.get("/hw-acceptance/onay-bekleyen", authMiddleware, async (req, res) => {
     const r = await pool.query(`
       SELECT a.site_code, a.acceptance_no, a.po_no, a.status,
         a.milestone_type, a.acceptance_milestone,
+        COALESCE(a.approval_progress,'') AS approval_progress,
+        COALESCE(a.current_handler,'') AS current_handler,
         COALESCE(a.acceptance_qty,0) AS qty,
         COALESCE(a.unit_price,0) AS unit_price,
         COALESCE(a.acceptance_qty,0)*COALESCE(a.unit_price,0) AS tutar,

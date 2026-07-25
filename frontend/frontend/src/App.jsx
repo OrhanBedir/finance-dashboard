@@ -19334,11 +19334,17 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                       { k: "acceptance_no", l: "Acceptance No" },
                       { k: "po_no", l: "PO No" },
                       { k: "status", l: "Durum" },
+                      { k: "onay_asama", l: "Onay Aşaması" },
                       { k: "acceptance_milestone", l: "Milestone" },
                       { k: "tutar_fmt", l: "Tutar" },
                     ],
                     rows: hwBekleyen.map((r) => ({
                       ...r,
+                      // "2/4 · Ahmet Afaraci" — handler adındaki personel no temizlenir
+                      onay_asama: [
+                        r.approval_progress,
+                        String(r.current_handler || "").replace(/\s*(WX)?\d{5,}\s*$/i, "").trim(),
+                      ].filter(Boolean).join(" · ") || "—",
                       tutar_fmt:
                         (String(r.currency || "").toUpperCase() === "USD" ? "$" : "₺") +
                         Number(r.tutar || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 }),
