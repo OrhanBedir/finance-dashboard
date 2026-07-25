@@ -25047,7 +25047,7 @@ function App() {
   // Alt marka (AHY Elektrik gibi): ERC'nin finans ekranları gizli —
   // kendi Kar/Zarar özetini (marka_finans) ve kendi İK'sını görür.
   const isAltMarka = !isPlatformAdmin && user?.hw_yukleme === false;
-  const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role) || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com";
+  const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role) || ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"].includes((user?.email || "").toLowerCase());
 
   // Ünvan görüntüleme fonksiyonu
   const getUserTitle = (u) => {

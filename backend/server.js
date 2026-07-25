@@ -1965,6 +1965,7 @@ function requireFinanceAuth(req, res, next) {
     // Finans yetkisi: scope=finance VEYA hardcoded finans e-postaları
     const FINANCE_EMAILS_HARDCODED = [
       "nurcan.kus@simsektel.com",
+      "serdar.altinova@simsektel.com", // İzmir bölge müdürü (25.07.2026)
       "orhan@simsektel.com",
       "orhan.bedir@simsektel.com",
       "duzgun.simsek@simsektel.com",
