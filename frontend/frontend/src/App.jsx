@@ -17909,13 +17909,19 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
   const filteredRowCount = filteredRows.length;
 
+  // PO Açılmamış listesinde tutar = PO'suz kalan kısım (kart rakamıyla tutarlı):
+  // status PO_BEKLER → done×fiyat; eksik açılan → (done−requested)×fiyat.
+  const _isPoBeklerDetail = String(detailTitle || "").includes("PO Açılmamış");
   const filteredRowTotal = filteredRows.reduce((sum, row) => {
     const currency = normalizeCurrency(row.currency);
     const unitPrice = Number(row.unit_price || 0);
     const doneQty = Number(row.done_qty || 0);
-    const billedQty = Number(row.billed_qty || 0);
 
-    const rawTotal = doneQty * unitPrice;
+    let qty = doneQty;
+    if (_isPoBeklerDetail && String(row.status || "").toUpperCase() !== "PO_BEKLER") {
+      qty = Math.max(0, doneQty - Number(row.requested_qty || 0));
+    }
+    const rawTotal = qty * unitPrice;
 
     return sum + (currency === "USD" ? rawTotal * usdRate : rawTotal);
   }, 0);
