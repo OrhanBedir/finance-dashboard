@@ -2710,6 +2710,7 @@ function getRegion(siteCode, projectCode = "") {
     code.startsWith("KA") ||
     code.startsWith("DU") ||
     code.includes("_ANK") ||
+    code.includes("_KON") || // Konya sahaları Ankara bölgesine bağlı
     code.startsWith("AN")
   ) {
     return "Ankara";

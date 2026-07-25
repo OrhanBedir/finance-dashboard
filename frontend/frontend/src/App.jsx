@@ -570,7 +570,8 @@ function getRegion(siteCode = "", projectCode = "") {
     code.startsWith("AN") ||
     code.startsWith("CN") ||
     code.startsWith("DU") ||
-    code.includes("_ANK")
+    code.includes("_ANK") ||
+    code.includes("_KON") // Konya sahaları (5GEXP vb.) Ankara bölgesine bağlı
   ) {
     return "Ankara";
   }
