@@ -9424,9 +9424,13 @@ app.get("/export/detail-excel", authMiddleware, async (req, res) => {
     }
 
     if (type === "PO_BEKLER") {
-      rows = rows.filter(
-        (row) => String(row.status || "").toUpperCase() === "PO_BEKLER",
-      );
+      // Hiç PO açılmamış (PO_BEKLER) + eksik açılmış (done > requested > 0)
+      rows = rows.filter((row) => {
+        if (String(row.status || "").toUpperCase() === "PO_BEKLER") return true;
+        const done = Number(row.done_qty || 0);
+        const req = Number(row.requested_qty || 0);
+        return req > 0 && done > req;
+      });
     }
 
     if (type === "PO_IPTAL") {
@@ -9465,10 +9469,14 @@ app.get("/export/detail-excel", authMiddleware, async (req, res) => {
       { header: "Requested Qty", key: "requested_qty", width: 14 },
       { header: "Billed Qty", key: "billed_qty", width: 12 },
       { header: "Subcon", key: "subcon_name", width: 20 },
+      // PO listesinde: açılması gereken ek PO miktarı (done − requested)
+      ...(type === "PO_BEKLER"
+        ? [{ header: "Açılması Gereken PO Qty", key: "eksik_po", width: 20 }]
+        : []),
     ];
 
     worksheet.spliceRows(1, 0, []);
-    worksheet.mergeCells("A1:L1");
+    worksheet.mergeCells(1, 1, 1, worksheet.columnCount);
     const titleCell = worksheet.getCell("A1");
 
     titleCell.value = `DETAY RAPORU - ${region || "Tümü"} (${new Date().toLocaleDateString("tr-TR")})`;
@@ -9499,6 +9507,9 @@ app.get("/export/detail-excel", authMiddleware, async (req, res) => {
         requested_qty: row.requested_qty ?? "",
         billed_qty: row.billed_qty ?? "",
         subcon_name: row.subcon_name || "",
+        ...(type === "PO_BEKLER"
+          ? { eksik_po: Math.max(0, Number(row.done_qty || 0) - Number(row.requested_qty || 0)) }
+          : {}),
       });
     });
 

@@ -18010,7 +18010,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       }
 
       if (type === "PO_BEKLER") {
-        return String(row.status || "").toUpperCase() === "PO_BEKLER";
+        // Hiç PO açılmamış + eksik açılmış (done > requested > 0)
+        if (String(row.status || "").toUpperCase() === "PO_BEKLER") return true;
+        const reqQty = Number(row.requested_qty || 0);
+        return reqQty > 0 && doneQty > reqQty;
       }
 
       return false;
@@ -18019,7 +18022,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     setDetailTitle(
       type === "NOT_INVOICED"
         ? `${regionName} - Faturalanmamış İşler`
-        : `${regionName} - PO Açılmamış İşler`,
+        : `${regionName} - PO Açılmamış / Eksik Açılan İşler`,
     );
     setDetailRows(filtered);
     setDetailModalOpen(true);
@@ -18319,6 +18322,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           base[region].po_bekler_usd += amount;
         } else {
           base[region].po_bekler_try += amount;
+        }
+      } else {
+        // Eksik açılan PO: yapılan iş açılan PO'yu aşıyorsa aşan kısım da PO bekler
+        const reqQ = Number(row.requested_qty || 0);
+        if (reqQ > 0 && doneQty > reqQ) {
+          const eksikAmount = (doneQty - reqQ) * unitPrice;
+          if (currency === "USD") base[region].po_bekler_usd += eksikAmount;
+          else base[region].po_bekler_try += eksikAmount;
         }
       }
 
