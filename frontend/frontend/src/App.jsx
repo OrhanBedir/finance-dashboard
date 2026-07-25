@@ -17885,6 +17885,20 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     setDetailModalOpen(true);
   };
 
+  // Genel Özet: tüm bölgelerin PO açılmamış + eksik açılan (done>req>0) listesi
+  const openPoBeklerAll = () => {
+    const filtered = rows.filter((row) => {
+      if (String(row.status || "").toUpperCase() === "PO_BEKLER") return true;
+      const done = Number(row.done_qty || 0);
+      const req = Number(row.requested_qty || 0);
+      return req > 0 && done > req;
+    });
+    setDetailTitle("Tüm Bölgeler - PO Açılmamış / Eksik Açılan İşler");
+    setDetailRows(filtered);
+    setFilterText("");
+    setDetailModalOpen(true);
+  };
+
   const filteredRows = detailRows.filter((row) =>
     Object.values(row).some((val) =>
       String(val || "")
@@ -19434,7 +19448,25 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 label="PO Açılmış Ama Faturalanmamış"
                 value={executiveSummary.poOpenedNotInvoiced}
               />
-              <Row label="PO Açılmamış İş" value={executiveSummary.noPO} />
+              <div
+                onClick={openPoBeklerAll}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "12px 16px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontSize: "15px",
+                  background: "#fff",
+                  cursor: "pointer",
+                }}
+                title="Tüm bölgelerin PO açılmamış / eksik açılan listesi için tıklayın"
+              >
+                <span style={{ color: "#374151" }}>
+                  PO Açılmamış İş <span style={{ fontSize: "11px", color: "#9ca3af" }}>🔍</span>
+                </span>
+                <strong style={{ textAlign: "right" }}>{formatTRY(executiveSummary.noPO)}</strong>
+              </div>
               <div
                 onClick={openPoIptalModal}
                 style={{
