@@ -19233,7 +19233,45 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   label: "Fiziki Tamamlanan", sub: "saha girişi bazlı · liste için tıkla", value: subconSummary.fizikiIs, pct: subconSummary.fizikiPct, pctLabel: "atananın", color: "#1d4ed8",
                   tik: () => setFizikiSoru(true),
                 },
-                { label: "QC Onaylı İş", sub: "Huawei QC kapalı", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857" },
+                {
+                  label: "QC Onaylı İş", sub: "Huawei QC kapalı · saha listesi için tıkla", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857",
+                  tik: () => {
+                    // QC OK kalemler: fatura ilerletilmiş mi görünsün (billed/due)
+                    const list = rows
+                      .filter(row => String(row.qc_durum || "").toUpperCase() === "OK" && Number(row.done_qty || 0) > 0 && String(row.site_code || "").trim())
+                      .map(row => {
+                        const done = Number(row.done_qty || 0);
+                        const billed = Number(row.billed_qty || 0);
+                        const due = Math.max(0, done - billed);
+                        return {
+                          site: String(row.site_code).trim().toUpperCase(),
+                          item_code: row.item_code || "",
+                          kalem: row.item_description || "",
+                          done_q: done,
+                          req_q: Number(row.requested_qty || 0),
+                          billed_q: billed,
+                          due_q: due,
+                          qc: due <= 0 ? "OK" : "NOK",
+                          fat_durum: due <= 0 ? "✓ Faturalandı" : (billed > 0 ? `Kısmi — ${due} kalan` : "İlerletilmeli"),
+                        };
+                      })
+                      .sort((a, b) => (a.due_q > 0 ? 0 : 1) - (b.due_q > 0 ? 0 : 1) || a.site.localeCompare(b.site));
+                    setOzetModal({
+                      title: "✅ QC Onaylı İş — Hakediş İlerleme Listesi",
+                      cols: [
+                        { k: "site", l: "Site ID" },
+                        { k: "item_code", l: "Item Code" },
+                        { k: "kalem", l: "Kalem Adı" },
+                        { k: "done_q", l: "Done Qty" },
+                        { k: "req_q", l: "Requested Qty" },
+                        { k: "billed_q", l: "Billed Qty" },
+                        { k: "due_q", l: "Due Qty" },
+                        { k: "fat_durum", l: "Hakediş Durumu" },
+                      ],
+                      rows: list,
+                    });
+                  },
+                },
                 {
                   label: "HW'ye Faturalanan", sub: "fatura kesilen · saha listesi için tıkla", value: subconSummary.faturalanan, pct: subconSummary.faturaPct, pctLabel: "fizikinin", color: "#7c3aed",
                   tik: () => {
@@ -20387,8 +20425,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                           key={c.k}
                           style={{
                             padding: "9px 14px", fontSize: "12.5px", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap",
-                            color: c.k === "qc" ? (r[c.k] === "OK" ? "#047857" : "#b91c1c") : (c.k === "toplam" || c.k === "ortalama") ? "#1d4ed8" : "#374151",
-                            fontWeight: c.k === "qc" || c.k === "site" || c.k === "site_code" || c.k === "tutar_fmt" || c.k === "toplam" || c.k === "ortalama" ? 700 : 400,
+                            color: c.k === "qc" ? (r[c.k] === "OK" ? "#047857" : "#b91c1c")
+                              : c.k === "fat_durum" ? (String(r[c.k] || "").startsWith("✓") ? "#047857" : String(r[c.k] || "").startsWith("Kısmi") ? "#b45309" : "#b91c1c")
+                              : (c.k === "toplam" || c.k === "ortalama") ? "#1d4ed8" : "#374151",
+                            fontWeight: c.k === "qc" || c.k === "fat_durum" || c.k === "site" || c.k === "site_code" || c.k === "tutar_fmt" || c.k === "toplam" || c.k === "ortalama" ? 700 : 400,
                             textAlign: c.k === "toplam" || c.k === "ortalama" || c.k === "adet" ? "center" : "left",
                           }}
                         >
