@@ -18021,13 +18021,21 @@ app.delete("/admin/clear-qc/:siteCode", authMiddleware, async (req, res) => {
 app.get("/hw-acceptance/onay-bekleyen", authMiddleware, async (req, res) => {
   try {
     await ensureHwAcceptanceTable();
+    // Para birimi: acceptance excel'inde currency kolonu yok (tabloda 'USD'
+    // default'u basılıyordu) — gerçek birim PO satırından (po_no+line) türetilir
     const r = await pool.query(`
       SELECT a.site_code, a.acceptance_no, a.po_no, a.status,
         a.milestone_type, a.acceptance_milestone,
         COALESCE(a.acceptance_qty,0) AS qty,
         COALESCE(a.unit_price,0) AS unit_price,
         COALESCE(a.acceptance_qty,0)*COALESCE(a.unit_price,0) AS tutar,
-        UPPER(COALESCE(a.currency,'USD')) AS currency,
+        UPPER(COALESCE(
+          (SELECT p.currency FROM po_rows p
+            WHERE p.po_no = a.po_no
+              AND (a.po_line_no IS NULL OR a.po_line_no = '' OR p.po_line_no = a.po_line_no)
+            ORDER BY CASE WHEN p.po_line_no = a.po_line_no THEN 0 ELSE 1 END
+            LIMIT 1),
+          'TRY')) AS currency,
         (SELECT m.subcon_name FROM master_works m
           WHERE UPPER(TRIM(COALESCE(m.site_code,''))) = UPPER(TRIM(COALESCE(a.site_code,'')))
             AND COALESCE(m.subcon_name,'') <> '' LIMIT 1) AS subcon_name
