@@ -5280,143 +5280,29 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
             lineHeight: 1.5,
           }}
         >
-          İki adım: <b>(1)</b> Huawei poCreateExp Excel'ini yükle (kalem master:
-          site_id, item code, qty, birim fiyat). <b>(2)</b> Huawei'ye kesilen
-          fatura PDF'lerini (toplu) yükle — sistem her PDF'ten Fatura No +
-          PO/Line/Shipment + tutarı okuyup kalemlere otomatik eşler.
+          Muhasebenin Huawei'ye kestiği <b>e-Fatura PDF'lerini</b> topluca seçip
+          yüklemeniz yeterli — sistem her PDF'ten Fatura No, Not satırındaki
+          PO/Line/Shipment ve tutarı okur; kalem bilgilerini (saha, item, fiyat)
+          sistemdeki PO listesinden otomatik tamamlar.
         </p>
 
-        {/* ── ADIM 1: Kalem Master (Excel) ── */}
+        {/* ── ANA ADIM: Kesilen Fatura PDF'leri ── */}
         <div
           style={{
-            border: "1px solid #e2e8f0",
-            borderRadius: "12px",
-            padding: "14px 16px",
+            border: "2px solid #c7d2fe",
+            borderRadius: "14px",
+            padding: "18px 20px",
             marginBottom: "14px",
-            background: "#f8fafc",
+            background: "linear-gradient(135deg, #eef2ff 0%, #f8fafc 60%)",
           }}
         >
-          <h4 style={{ margin: "0 0 10px", fontSize: "14px" }}>
-            1️⃣ Kalem Master — poCreateExp Excel
+          <h4 style={{ margin: "0 0 4px", fontSize: "16px", color: "#1e3a5f" }}>
+            📎 Kesilen Fatura PDF'lerini Yükle
           </h4>
-          <div className="formGrid">
-            <div className="formGroup formGroupWide">
-              <label>Huawei PO Excel (poCreateExp .xlsm/.xlsx)</label>
-              <input
-                id="finance-hw-invoice-items-input"
-                type="file"
-                accept=".xlsm,.xlsx,.xls"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-              />
-            </div>
+          <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>
+            Muhasebeden gelen SIM… numaralı e-Fatura PDF'lerini topluca seç —
+            kalemler PO listesinden otomatik tamamlanır, başka yükleme gerekmez.
           </div>
-          <div
-            className="entryActions"
-            style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}
-          >
-            <button
-              type="button"
-              className="saveButton"
-              onClick={handleUpload}
-              disabled={uploading}
-            >
-              {uploading ? "Yükleniyor..." : "Kalem Master'ı Yükle"}
-            </button>
-            <button
-              type="button"
-              className="tab"
-              onClick={handleClearMaster}
-              disabled={clearing}
-              style={{
-                padding: "10px 14px",
-                color: "#dc2626",
-                borderColor: "#fecaca",
-              }}
-            >
-              {clearing ? "Siliniyor..." : "🗑 Tümünü Temizle"}
-            </button>
-          </div>
-          {message && <div className="entryMessage">{message}</div>}
-
-          {batches.length > 0 && (
-            <div style={{ marginTop: "12px" }}>
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "#64748b",
-                  marginBottom: "6px",
-                }}
-              >
-                Yüklenen partiler (yanlış yüklediğini tek tek silebilirsin):
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                {batches.map((b) => (
-                  <div
-                    key={b.batch_id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "10px",
-                      fontSize: "12.5px",
-                      background: "#fff",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "8px",
-                      padding: "6px 10px",
-                    }}
-                  >
-                    <span>
-                      📅{" "}
-                      {b.upload_date
-                        ? new Date(b.upload_date).toLocaleDateString("tr-TR")
-                        : "-"}{" "}
-                      · <b>{b.item_count}</b> kalem
-                      {b.invoiced_count > 0 && (
-                        <span style={{ color: "#16a34a" }}>
-                          {" "}
-                          ({b.invoiced_count} faturalı)
-                        </span>
-                      )}
-                      {b.file_name && (
-                        <span style={{ color: "#94a3b8" }}>
-                          {" "}
-                          · {b.file_name}
-                        </span>
-                      )}
-                    </span>
-                    <button
-                      type="button"
-                      className="tab"
-                      onClick={() => handleDeleteBatch(b)}
-                      style={{
-                        padding: "4px 10px",
-                        fontSize: "12px",
-                        color: "#dc2626",
-                        borderColor: "#fecaca",
-                      }}
-                    >
-                      Sil
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── ADIM 2: Kesilen Fatura PDF'leri ── */}
-        <div
-          style={{
-            border: "1px solid #e2e8f0",
-            borderRadius: "12px",
-            padding: "14px 16px",
-            marginBottom: "14px",
-            background: "#f8fafc",
-          }}
-        >
-          <h4 style={{ margin: "0 0 10px", fontSize: "14px" }}>
-            2️⃣ Kesilen Fatura PDF'leri (toplu seç)
-          </h4>
           <div className="formGrid">
             <div className="formGroup formGroupWide">
               <label>e-Fatura PDF'leri (birden çok seçebilirsin)</label>
@@ -5503,6 +5389,126 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
             </div>
           )}
         </div>
+
+        {/* ── Gelişmiş: Kalem Master Excel (opsiyonel) ── */}
+        <details
+          style={{
+            border: "1px solid #e2e8f0",
+            borderRadius: "12px",
+            padding: "12px 16px",
+            marginBottom: "14px",
+            background: "#f8fafc",
+          }}
+        >
+          <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "#64748b" }}>
+            ⚙️ Gelişmiş — Kalem Master Excel (opsiyonel; PDF'ler PO listesinden otomatik tamamlandığı için genelde gerekmez)
+          </summary>
+          <div style={{ marginTop: "12px" }}>
+            <div className="formGrid">
+              <div className="formGroup formGroupWide">
+                <label>Huawei PO Excel (poCreateExp .xlsm/.xlsx)</label>
+                <input
+                  id="finance-hw-invoice-items-input"
+                  type="file"
+                  accept=".xlsm,.xlsx,.xls"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                />
+              </div>
+            </div>
+            <div
+              className="entryActions"
+              style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}
+            >
+              <button
+                type="button"
+                className="saveButton"
+                onClick={handleUpload}
+                disabled={uploading}
+              >
+                {uploading ? "Yükleniyor..." : "Kalem Master'ı Yükle"}
+              </button>
+              <button
+                type="button"
+                className="tab"
+                onClick={handleClearMaster}
+                disabled={clearing}
+                style={{
+                  padding: "10px 14px",
+                  color: "#dc2626",
+                  borderColor: "#fecaca",
+                }}
+              >
+                {clearing ? "Siliniyor..." : "🗑 Tümünü Temizle"}
+              </button>
+            </div>
+            {message && <div className="entryMessage">{message}</div>}
+
+            {batches.length > 0 && (
+              <div style={{ marginTop: "12px" }}>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "#64748b",
+                    marginBottom: "6px",
+                  }}
+                >
+                  Yüklenen partiler (yanlış yüklediğini tek tek silebilirsin):
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {batches.map((b) => (
+                    <div
+                      key={b.batch_id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "10px",
+                        fontSize: "12.5px",
+                        background: "#fff",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "8px",
+                        padding: "6px 10px",
+                      }}
+                    >
+                      <span>
+                        📅{" "}
+                        {b.upload_date
+                          ? new Date(b.upload_date).toLocaleDateString("tr-TR")
+                          : "-"}{" "}
+                        · <b>{b.item_count}</b> kalem
+                        {b.invoiced_count > 0 && (
+                          <span style={{ color: "#16a34a" }}>
+                            {" "}
+                            ({b.invoiced_count} faturalı)
+                          </span>
+                        )}
+                        {b.file_name && (
+                          <span style={{ color: "#94a3b8" }}>
+                            {" "}
+                            · {b.file_name}
+                          </span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        className="tab"
+                        onClick={() => handleDeleteBatch(b)}
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          color: "#dc2626",
+                          borderColor: "#fecaca",
+                        }}
+                      >
+                        Sil
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </details>
 
         {/* ── Manuel Fatura Ekle (okunamayan/eşleşmeyen için) ── */}
         <div

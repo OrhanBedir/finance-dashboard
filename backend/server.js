@@ -11009,6 +11009,7 @@ app.post(
 
           // Faturadaki TÜM Not satırlarını (PO+Line+Shipment) eşle
           let fileMatched = 0;
+          let autoCreated = 0;
           const missedNotes = [];
           for (const n of parsed.notes) {
             const upd = await pool.query(
@@ -11030,8 +11031,45 @@ app.post(
                 n.shipmentNo,
               ],
             );
-            if (upd.rows.length === 0) missedNotes.push(`${n.poNo}/${n.lineNo}/${n.shipmentNo}`);
-            else fileMatched += upd.rows.length;
+            if (upd.rows.length > 0) {
+              fileMatched += upd.rows.length;
+              continue;
+            }
+            // Kalem master'da yok → PO listesinden otomatik tamamla
+            // (PDF-only akış: kullanıcı yalnız fatura PDF'lerini yükler)
+            const po = await pool.query(
+              `SELECT project_code, site_code, item_code, item_description,
+                      unit_price, currency, requested_qty
+                 FROM po_rows
+                WHERE po_no = $1
+                  AND (COALESCE($2,'') = '' OR COALESCE(po_line_no,'') = COALESCE($2,''))
+                ORDER BY CASE WHEN COALESCE(shipment_no,'') = COALESCE($3,'') THEN 0 ELSE 1 END,
+                         id DESC
+                LIMIT 1`,
+              [n.poNo, n.lineNo, n.shipmentNo],
+            );
+            if (po.rows[0]) {
+              const p = po.rows[0];
+              await pool.query(
+                `INSERT INTO hw_invoice_items
+                   (invoice_no, site_id, po_no, line_no, shipment_no,
+                    po_qty, unit_price, currency, item_code, project_code, description,
+                    upload_batch, batch_id, upload_date,
+                    invoiced_amount_incl, invoiced_amount_excl, invoice_matched_at)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+                         'PDF-otomatik','PDF-otomatik',CURRENT_DATE,$12,$13,CURRENT_TIMESTAMP)`,
+                [
+                  parsed.invoiceNo, p.site_code, n.poNo, n.lineNo, n.shipmentNo,
+                  Number(p.requested_qty || 0), Number(p.unit_price || 0),
+                  p.currency || "TRY", p.item_code, p.project_code, p.item_description,
+                  parsed.amountIncl, parsed.amountExcl,
+                ],
+              );
+              fileMatched += 1;
+              autoCreated += 1;
+            } else {
+              missedNotes.push(`${n.poNo}/${n.lineNo}/${n.shipmentNo}`);
+            }
           }
 
           matchedCount += fileMatched;
@@ -11045,10 +11083,10 @@ app.post(
             amount_incl: parsed.amountIncl,
             status:
               fileMatched === 0
-                ? "Eşleşen kalem yok (önce Excel master yükle?)"
+                ? "Eşleşen kalem yok — PO/Line sistemdeki PO listesinde de bulunamadı"
                 : missedNotes.length
-                  ? `OK · ${fileMatched} eşleşti, ${missedNotes.length} eşleşmedi: ${missedNotes.slice(0, 3).join(", ")}${missedNotes.length > 3 ? "…" : ""}`
-                  : `OK · ${fileMatched} kalem`,
+                  ? `OK · ${fileMatched} eşleşti${autoCreated ? ` (${autoCreated} PO listesinden tamamlandı)` : ""}, ${missedNotes.length} eşleşmedi: ${missedNotes.slice(0, 3).join(", ")}${missedNotes.length > 3 ? "…" : ""}`
+                  : `OK · ${fileMatched} kalem${autoCreated ? ` (${autoCreated} PO listesinden tamamlandı)` : ""}`,
           });
         } catch (e) {
           results.push({
