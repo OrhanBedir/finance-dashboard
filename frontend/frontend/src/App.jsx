@@ -5102,6 +5102,7 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
     amount_incl: "",
   };
   const [showManual, setShowManual] = useState(false);
+  const [showInvList, setShowInvList] = useState(false); // Eşleşmiş faturalar listesi (varsayılan kapalı)
   const [manualForm, setManualForm] = useState(emptyManual);
   const [manualSaving, setManualSaving] = useState(false);
   const [manualMsg, setManualMsg] = useState("");
@@ -5665,16 +5666,23 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
 
         <div style={{ marginTop: "18px" }}>
           <div
+            onClick={() => setShowInvList((s) => !s)}
+            title={showInvList ? "Listeyi gizle" : "Listeyi göster"}
             style={{
               display: "flex",
               alignItems: "center",
               gap: "16px",
               flexWrap: "wrap",
               marginBottom: "10px",
+              cursor: "pointer",
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: "12px",
+              padding: "10px 16px",
             }}
           >
             <h4 style={{ margin: 0, fontSize: "14px" }}>
-              Eşleşmiş Faturalar
+              🧾 Eşleşmiş Faturalar
             </h4>
             <span style={{ fontSize: "12px", color: "#64748b" }}>
               {totals.total_invoices || 0} fatura ·{" "}
@@ -5690,7 +5698,7 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
             <button
               type="button"
               className="tab"
-              onClick={loadList}
+              onClick={(e) => { e.stopPropagation(); loadList(); }}
               style={{ padding: "6px 12px", fontSize: "12px" }}
             >
               {loadingList ? "..." : "Yenile"}
@@ -5698,19 +5706,22 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
             <button
               type="button"
               className="saveButton"
-              onClick={handleExportItemData}
+              onClick={(e) => { e.stopPropagation(); handleExportItemData(); }}
               disabled={exporting}
               style={{ padding: "6px 14px", fontSize: "12px" }}
             >
               {exporting ? "İndiriliyor..." : "⬇ Huawei Fatura Item Data"}
             </button>
+            <span style={{ marginLeft: "auto", fontSize: "13px", color: "#64748b" }}>
+              {showInvList ? "▲" : "▼"}
+            </span>
           </div>
-          {invoices.length === 0 ? (
+          {!showInvList ? null : invoices.length === 0 ? (
             <div style={{ fontSize: "13px", color: "#94a3b8" }}>
               Henüz kalem yüklenmedi.
             </div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
+            <div style={{ overflowX: "auto", maxHeight: "400px", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "10px" }}>
               <table
                 style={{
                   width: "100%",
@@ -5720,17 +5731,11 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
               >
                 <thead>
                   <tr style={{ textAlign: "left", color: "#64748b" }}>
-                    <th style={{ padding: "6px 8px" }}>Fatura No</th>
-                    <th style={{ padding: "6px 8px" }}>Kalem</th>
-                    <th style={{ padding: "6px 8px" }}>Site</th>
-                    <th style={{ padding: "6px 8px" }}>Para</th>
-                    <th style={{ padding: "6px 8px", textAlign: "right" }}>
-                      Kalem Toplamı
-                    </th>
-                    <th style={{ padding: "6px 8px", textAlign: "right" }}>
-                      Faturalanan (PDF)
-                    </th>
-                    <th style={{ padding: "6px 8px" }}>Eşleşme</th>
+                    {["Fatura No","Kalem","Site","Para","Kalem Toplamı","Faturalanan (PDF)","Eşleşme"].map((h, i) => (
+                      <th key={h} style={{ padding: "8px", position: "sticky", top: 0, background: "#f1f5f9", zIndex: 1, textAlign: i === 4 || i === 5 ? "right" : "left" }}>
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
