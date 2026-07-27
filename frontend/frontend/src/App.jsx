@@ -4814,8 +4814,9 @@ function FinanceInvoiceUploadInline({ onClose, onUploaded }) {
   const [message, setMessage] = useState("");
 
   const handleUpload = async () => {
-    if (!file) {
-      setMessage("❌ Lütfen bir Excel dosyası seç");
+    const dosyalar = Array.isArray(file) ? file : (file ? [file] : []);
+    if (!dosyalar.length) {
+      setMessage("❌ Lütfen Excel dosyalarını seç (birden çok seçebilirsin)");
       return;
     }
 
@@ -4824,7 +4825,7 @@ function FinanceInvoiceUploadInline({ onClose, onUploaded }) {
       setMessage("");
 
       const formData = new FormData();
-      formData.append("file", file);
+      dosyalar.forEach((f) => formData.append("files", f));
 
       const response = await fetch(`${API_BASE}/finance/hw-invoice/upload`, {
         method: "POST",
@@ -4888,13 +4889,17 @@ function FinanceInvoiceUploadInline({ onClose, onUploaded }) {
 
         <div className="formGrid">
           <div className="formGroup formGroupWide">
-            <label>HW Fatura Excel Dosyası</label>
+            <label>HW Fatura Excel Dosyaları (500'lük sayfa exportlarını birlikte seçebilirsin)</label>
             <input
               id="finance-hw-invoice-upload-input"
               type="file"
               accept=".xlsx,.xls"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              multiple
+              onChange={(e) => setFile(Array.from(e.target.files || []))}
             />
+            {Array.isArray(file) && file.length > 1 && (
+              <span style={{ fontSize: "12px", color: "#0e7490", fontWeight: 700 }}>{file.length} dosya seçildi</span>
+            )}
           </div>
         </div>
 

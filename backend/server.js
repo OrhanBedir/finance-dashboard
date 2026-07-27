@@ -10317,31 +10317,29 @@ app.get("/finance/payments/list", requireFinanceAuth, async (req, res) => {
 app.post(
   "/finance/hw-invoice/upload",
   requireHwYukleme,
-  upload.single("file"),
+  upload.array("files"),
   async (req, res) => {
     try {
-      if (!req.file) {
+      const files = req.files && req.files.length ? req.files : (req.file ? [req.file] : []);
+      if (!files.length) {
         return res.status(400).json({ ok: false, error: "Dosya yok" });
       }
 
-      const workbook = XLSX.read(req.file.buffer);
-      const firstSheetName = workbook.SheetNames[0];
-
-      if (!firstSheetName) {
-        return res
-          .status(400)
-          .json({ ok: false, error: "Excel içinde sheet bulunamadı" });
+      // Birden çok dosyanın (500'lük sayfa exportları) satırlarını birleştir;
+      // her dosyada ilk 2 başlık satırı atlanır
+      const dataRows = [];
+      for (const f of files) {
+        const workbook = XLSX.read(f.buffer);
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) continue;
+        const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+          header: 1,
+          defval: null,
+        });
+        if (rawRows && rawRows.length >= 3) dataRows.push(...rawRows.slice(2));
       }
 
-      const sheet = workbook.Sheets[firstSheetName];
-
-      // Excel'i düz satır-satır oku
-      const rawRows = XLSX.utils.sheet_to_json(sheet, {
-        header: 1,
-        defval: null,
-      });
-
-      if (!rawRows || rawRows.length < 3) {
+      if (!dataRows.length) {
         return res.status(400).json({
           ok: false,
           error: "Excel içinde yeterli veri bulunamadı",
@@ -10352,9 +10350,6 @@ app.post(
       await pool.query(`DELETE FROM hw_invoice_rows`);
 
       let inserted = 0;
-
-      // İlk 2 satırı geçiyoruz, veri 3. satırdan itibaren başlıyor
-      const dataRows = rawRows.slice(2);
 
       for (const rowArr of dataRows) {
         if (!rowArr || rowArr.length === 0) continue;
