@@ -8142,6 +8142,12 @@ function FinanceDashboard({
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
                 <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>HW Fatura Onay Bekler</div>
                 <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
+                  <button
+                    onClick={openRejectedModal}
+                    title="Reddedilen kalemler (dün/bugün)"
+                    style={{ padding:"3px 7px", fontSize:"10px", fontWeight:700, background:"#fef2f2", color:"#dc2626", border:"1px solid #fca5a5", borderRadius:"6px", cursor:"pointer", display:"flex", alignItems:"center", gap:"3px" }}>
+                    ❌ Reddedilenler
+                  </button>
                   {count > 0 && (
                     <button
                       onClick={downloadHwAcceptanceExcel}
@@ -8674,16 +8680,27 @@ function FinanceDashboard({
           onClick={() => setRejectedModal(false)}>
           <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"1150px", maxHeight:"85vh", overflow:"hidden", display:"flex", flexDirection:"column" }}
             onClick={e => e.stopPropagation()}>
-            <div style={{ padding:"18px 24px 14px", borderBottom:"1px solid #e5e7eb", display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fef2f2" }}>
-              <div>
-                <div style={{ fontSize:"17px", fontWeight:800, color:"#b91c1c" }}>❌ Reddedilen Acceptance Kalemleri</div>
-                <div style={{ fontSize:"12px", color:"#991b1b", marginTop:"2px" }}>
-                  Son 60 gün · {rejectedRows.length} kalem · en yeni üstte — ACCEPTANCE (Processed) excel'i yüklendikçe güncellenir
+            {(() => {
+              const _fmt = (d) => d.toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric" });
+              const _bugun = _fmt(new Date());
+              const _dun = _fmt(new Date(Date.now() - 86400000));
+              const _nBugun = rejectedRows.filter(r => r.islem_tarihi === _bugun).length;
+              const _nDun = rejectedRows.filter(r => r.islem_tarihi === _dun).length;
+              return (
+                <div style={{ padding:"18px 24px 14px", borderBottom:"1px solid #e5e7eb", display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fef2f2" }}>
+                  <div>
+                    <div style={{ fontSize:"17px", fontWeight:800, color:"#b91c1c" }}>❌ Reddedilen Acceptance Kalemleri</div>
+                    <div style={{ fontSize:"12px", color:"#991b1b", marginTop:"4px", display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+                      <span style={{ background:"#dc2626", color:"#fff", borderRadius:"6px", padding:"1px 8px", fontWeight:700 }}>Bugün: {_nBugun}</span>
+                      <span style={{ background:"#f59e0b", color:"#fff", borderRadius:"6px", padding:"1px 8px", fontWeight:700 }}>Dün: {_nDun}</span>
+                      <span>Son 60 gün: {rejectedRows.length} kalem · en yeni üstte</span>
+                    </div>
+                  </div>
+                  <button onClick={() => setRejectedModal(false)}
+                    style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#991b1b", padding:"4px 8px" }}>✕</button>
                 </div>
-              </div>
-              <button onClick={() => setRejectedModal(false)}
-                style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#991b1b", padding:"4px 8px" }}>✕</button>
-            </div>
+              );
+            })()}
             <div style={{ overflowY:"auto", padding:"0" }}>
               {rejectedLoading ? (
                 <div style={{ textAlign:"center", color:"#9ca3af", padding:"40px 0" }}>Yükleniyor…</div>
@@ -8701,16 +8718,25 @@ function FinanceDashboard({
                     </tr>
                   </thead>
                   <tbody>
-                    {rejectedRows.map((r, i) => (
-                      <tr key={i} style={{ borderBottom:"1px solid #f1f5f9", background: i%2 ? "#fafafa" : "#fff" }}>
-                        <td style={{ padding:"8px 12px", whiteSpace:"nowrap", fontWeight:600 }}>{r.islem_tarihi || "—"}</td>
+                    {rejectedRows.map((r, i) => {
+                      const _f = (d) => d.toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric" });
+                      const isBugun = r.islem_tarihi === _f(new Date());
+                      const isDun = r.islem_tarihi === _f(new Date(Date.now() - 86400000));
+                      return (
+                      <tr key={i} style={{ borderBottom:"1px solid #f1f5f9", background: isBugun ? "#fef2f2" : isDun ? "#fffbeb" : i%2 ? "#fafafa" : "#fff" }}>
+                        <td style={{ padding:"8px 12px", whiteSpace:"nowrap", fontWeight:600 }}>
+                          {r.islem_tarihi || "—"}
+                          {isBugun && <span style={{ marginLeft:6, background:"#dc2626", color:"#fff", borderRadius:5, padding:"0 6px", fontSize:"10px", fontWeight:800 }}>BUGÜN</span>}
+                          {isDun && <span style={{ marginLeft:6, background:"#f59e0b", color:"#fff", borderRadius:5, padding:"0 6px", fontSize:"10px", fontWeight:800 }}>DÜN</span>}
+                        </td>
                         <td style={{ padding:"8px 12px", whiteSpace:"nowrap" }}>{r.project_code || "—"}</td>
                         <td style={{ padding:"8px 12px", whiteSpace:"nowrap", fontWeight:700, color:"#1e3a5f" }}>{r.site_code || "—"}</td>
                         <td style={{ padding:"8px 12px", maxWidth:280, wordBreak:"break-word" }}>{r.item_description}</td>
                         <td style={{ padding:"8px 12px", maxWidth:360, wordBreak:"break-word", color:"#b91c1c" }}>{r.rejected_reason}</td>
                         <td style={{ padding:"8px 12px", whiteSpace:"nowrap" }}>{String(r.approver||"—").replace(/\s*(WX)?\d{5,}\s*$/i,"").trim() || "—"}</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
