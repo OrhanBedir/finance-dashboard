@@ -11129,7 +11129,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS zirve_taseron_vkn (
 )`).catch(() => {});
 
 const ZIRVE_TASERON_KEYS = ["FEDERAL", "UBS", "2KX", "NETELCOM", "NETELKOM", "FERRUM", "ETAS", "ETAŞ", "SURVEY", "AHY"];
-const SIMSEK_VKN = "3552230000"; // Şimşek Haberleşme — giden (iade) satır ayrımı için
+const SIMSEK_VKN = "8110536413"; // Şimşek Haberleşme VKN — giden (iade) satır ayrımı için
 
 app.post("/finance/zirve-import", requireFinanceAuth, upload.array("files"), async (req, res) => {
   try {
@@ -11173,8 +11173,12 @@ app.post("/finance/zirve-import", requireFinanceAuth, upload.array("files"), asy
       const pb = String(r["Para Birimi"] || "TRY").trim().toUpperCase() || "TRY";
       const fatTuru = String(r["Fatura Türü"] || "").toUpperCase();
 
-      // Satır yönü: gönderen biz isek GİDEN (iade adayı), değilse GELEN
-      const giden = gonderenVkn === SIMSEK_VKN;
+      // Satır yönü: gönderen biz isek GİDEN (iade adayı), değilse GELEN.
+      // VKN + unvan çifte kontrol (Zirve hesap no'su VKN sanılmasın diye)
+      const gonderenUnvanUp = String(r["Gönderen Unvanı"] || "").toUpperCase();
+      const giden = gonderenVkn === SIMSEK_VKN ||
+        gonderenUnvanUp.includes("ŞİMŞEK HABERLEŞME") ||
+        gonderenUnvanUp.includes("SIMSEK HABERLESME");
       const vkn = giden
         ? (String(r["Alıcı"] || "").trim() || vknFromUrn(r["Alıcı URN"]))
         : gonderenVkn;
