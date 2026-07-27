@@ -10350,6 +10350,7 @@ app.post(
       await pool.query(`DELETE FROM hw_invoice_rows`);
 
       let inserted = 0;
+      const seenInvoiceNos = new Set(); // dosyalar üst üste binerse tekilleştir
 
       for (const rowArr of dataRows) {
         if (!rowArr || rowArr.length === 0) continue;
@@ -10386,6 +10387,12 @@ app.post(
           finalAmount = invoiceAmountInclTax * (referenceRate || 0);
         }
 
+        // Dosyalar üst üste biniyorsa aynı fatura ikinci kez eklenmesin
+        if (invoiceNo) {
+          if (seenInvoiceNos.has(invoiceNo)) continue;
+          seenInvoiceNos.add(invoiceNo);
+        }
+
         await pool.query(
           `
          INSERT INTO hw_invoice_rows
@@ -10409,7 +10416,7 @@ app.post(
             currency,
             terms,
             invoiceStatus,
-            req.file.filename,
+            files.map((f) => f.originalname).join(" + ").slice(0, 250),
           ],
         );
 
@@ -10420,7 +10427,7 @@ app.post(
         ok: true,
         inserted,
         message: "HW Fatura raporu yüklendi",
-        sheet_name: firstSheetName,
+        file_count: files.length,
       });
     } catch (err) {
       console.error("FINANCE HW INVOICE UPLOAD ERROR:", err);
