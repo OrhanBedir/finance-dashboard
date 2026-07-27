@@ -2295,6 +2295,8 @@ async function buildUpcomingCollectionsData() {
       overdue_payment_total: overduePaymentTotal,
     },
     monthlyUpcoming,
+    invAgg,   // fatura → 2KX/AHY pay oranları (bugün tahsil edilen dağılımı için)
+    usdRate,
   };
 }
 
@@ -11368,12 +11370,28 @@ app.get("/finance/upcoming-payments", async (req, res) => {
     const upcomingData = await buildUpcomingCollectionsData();
     const overdueData = await buildOverdueInvoicesData();
 
+    // Bugün tahsil edilenler satır bazında: fatura → 2KX/AHY payı dağıtılır
     const todayReceivedResult = await pool.query(`
-      SELECT COALESCE(SUM(COALESCE(payment_amount, 0)), 0) AS today_received_total
+      SELECT invoice_no,
+             COALESCE(payment_amount, 0) AS amt,
+             UPPER(COALESCE(currency, 'TRY')) AS currency
       FROM hw_payment_rows
       WHERE payment_date IS NOT NULL
         AND payment_date::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Istanbul')::date
+        AND COALESCE(payment_amount, 0) <> 0
     `);
+    let todayReceived = 0, todayR2kx = 0, todayRAhy = 0;
+    for (const r of todayReceivedResult.rows) {
+      const amt = r.currency === "USD"
+        ? Number(r.amt) * Number(upcomingData.usdRate || 0)
+        : Number(r.amt);
+      todayReceived += amt;
+      const ia = upcomingData.invAgg?.get?.(r.invoice_no);
+      if (ia && ia.total > 0) {
+        todayR2kx += amt * (ia.k2kx / ia.total);
+        todayRAhy += amt * (ia.kahy / ia.total);
+      }
+    }
 
     res.json({
       ok: true,
@@ -11384,9 +11402,9 @@ app.get("/finance/upcoming-payments", async (req, res) => {
         today_total: upcomingData.summary.today_total,
         week_total: upcomingData.summary.week_total,
         overdue_payment_total: upcomingData.summary.overdue_payment_total,
-        today_received_total: Number(
-          todayReceivedResult.rows[0]?.today_received_total || 0,
-        ),
+        today_received_total: todayReceived,
+        today_received_2kx: todayR2kx,
+        today_received_ahy: todayRAhy,
         overdue_total: overdueData.total,
       },
     });

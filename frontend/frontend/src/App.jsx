@@ -8287,6 +8287,20 @@ function FinanceDashboard({
           <div style={{ padding:"16px 20px", borderRight:"1px solid #f1f5f9", textAlign:"center" }}>
             <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"4px", fontWeight:500 }}>✅ Bugün Tahsil Edilen</div>
             <div style={{ fontSize:"20px", fontWeight:800, color:"#10b981" }}>{formatMoneyByCurrency(upcomingSummary.today_received_total||0,"TRY")}</div>
+            {((upcomingSummary.today_received_2kx||0) > 0 || (upcomingSummary.today_received_ahy||0) > 0) && (
+              <div style={{ display:"flex", gap:"6px", justifyContent:"center", marginTop:"5px", flexWrap:"wrap" }}>
+                {(upcomingSummary.today_received_2kx||0) > 0 && (
+                  <span style={{ fontSize:"11px", fontWeight:700, color:"#7c3aed", background:"#f3e8ff", borderRadius:6, padding:"1px 7px" }}>
+                    2KX: {formatMoneyByCurrency(upcomingSummary.today_received_2kx||0, "TRY")}
+                  </span>
+                )}
+                {(upcomingSummary.today_received_ahy||0) > 0 && (
+                  <span style={{ fontSize:"11px", fontWeight:700, color:"#1d4ed8", background:"#dbeafe", borderRadius:6, padding:"1px 7px" }}>
+                    AHY: {formatMoneyByCurrency(upcomingSummary.today_received_ahy||0, "TRY")}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div style={{ padding:"16px 20px", borderRight:"1px solid #f1f5f9", textAlign:"center" }}>
             <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"4px", fontWeight:500 }}>📅 Bu Hafta Gelecek</div>
