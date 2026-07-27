@@ -11128,7 +11128,8 @@ pool.query(`CREATE TABLE IF NOT EXISTS zirve_taseron_vkn (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`).catch(() => {});
 
-const ZIRVE_TASERON_KEYS = ["FEDERAL", "UBS", "2KX", "NETELCOM", "FERRUM", "ETAS", "SURVEY", "AHY"];
+const ZIRVE_TASERON_KEYS = ["FEDERAL", "UBS", "2KX", "NETELCOM", "NETELKOM", "FERRUM", "ETAS", "ETAŞ", "SURVEY", "AHY"];
+const SIMSEK_VKN = "3552230000"; // Şimşek Haberleşme — giden (iade) satır ayrımı için
 
 app.post("/finance/zirve-import", requireFinanceAuth, upload.single("file"), async (req, res) => {
   try {
@@ -11152,49 +11153,78 @@ app.post("/finance/zirve-import", requireFinanceAuth, upload.single("file"), asy
       return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
     };
 
+    const vknFromUrn = (s) => {
+      const m = String(s || "").match(/(\d{10,11})/);
+      return m ? m[1] : "";
+    };
+
     const items = [];
     for (const r of rows) {
-      const vkn = String(r["Gönderen"] || "").trim();
-      const unvan = String(r["Gönderen Unvanı"] || "").trim();
+      const gonderenVkn = String(r["Gönderen"] || "").trim() || vknFromUrn(r["Gönderen URN"]);
       const faturaNo = String(r["Fatura No"] || "").trim();
       const tarih = parseTarih(r["Fatura Tarihi"]);
       const dahil = Number(r["Vergiler Dahil Tutar"] || r["Fatura Toplamı"] || 0);
       const haric = Number(r["Vergiler Hariç Tutar"] || r["Mal Hizmet Tutarı"] || 0);
       const pb = String(r["Para Birimi"] || "TRY").trim().toUpperCase() || "TRY";
+      const fatTuru = String(r["Fatura Türü"] || "").toUpperCase();
+
+      // Satır yönü: gönderen biz isek GİDEN (iade adayı), değilse GELEN
+      const giden = gonderenVkn === SIMSEK_VKN;
+      const vkn = giden
+        ? (String(r["Alıcı"] || "").trim() || vknFromUrn(r["Alıcı URN"]))
+        : gonderenVkn;
+      const unvan = giden
+        ? String(r["Alıcı Unvanı"] || "").trim()
+        : String(r["Gönderen Unvanı"] || "").trim();
       if (!faturaNo || !unvan) continue;
-      if (tarih && tarih < "2026-07-01") { // Temmuz öncesi kapsam dışı
-        items.push({ vkn, unvan, fatura_no: faturaNo, tarih, dahil, haric, pb, durum: "eski", taseron: null });
+
+      // Giden dosyada yalnız İADE'ler taşeron carisini ilgilendirir;
+      // satış faturaları (HW/müşteri) kapsam dışıdır
+      if (giden && !fatTuru.includes("IADE")) {
+        items.push({ vkn, unvan, fatura_no: faturaNo, tarih, dahil, haric, pb, durum: "giden", taseron: null });
         continue;
       }
+
       let taseron = vknMap.get(vkn) || null;
       if (!taseron && ZIRVE_TASERON_KEYS.some((k) => unvan.toUpperCase().includes(k))) taseron = unvan;
       if (!taseron && acceptSet.has(vkn)) taseron = unvan;
-      items.push({ vkn, unvan, fatura_no: faturaNo, tarih, dahil, haric, pb, durum: taseron ? "eslesen" : "atlanan", taseron });
+      const iade = giden || fatTuru.includes("IADE");
+      items.push({
+        vkn, unvan, fatura_no: faturaNo, tarih, dahil, haric, pb,
+        durum: taseron ? (iade ? "iade" : "eslesen") : "atlanan",
+        taseron, iade,
+      });
     }
 
     if (mode !== "commit") {
       return res.json({ ok: true, mode: "preview", items });
     }
 
-    // COMMIT: eşleşenleri upsert et, işaretlenen yeni VKN'leri öğren
+    // COMMIT: eşleşenleri upsert et, işaretlenen yeni VKN'leri öğren.
+    // İade: kalan_borc = -toplam → taşeron carisinden otomatik düşer
+    // (FIFO ödeme motoru kalan_borc>0 baktığı için iadeye ödeme dağıtmaz).
     let inserted = 0, updated = 0;
     for (const it of items) {
-      if (it.durum !== "eslesen") continue;
+      if (it.durum !== "eslesen" && it.durum !== "iade") continue;
       const firma = it.taseron.toUpperCase().includes("AHY") ? "AHY" : "SIMSEK";
       const mevcut = await pool.query(
         `SELECT id, COALESCE(odenen_tutar,0) AS odenen FROM invoice_entries WHERE fatura_no = $1 LIMIT 1`,
         [it.fatura_no],
       );
       const kdv = +(it.dahil - it.haric).toFixed(2);
+      const turu = it.iade ? "IADE" : "GELEN";
+      const notu = it.iade ? "Zirve içe aktarım (iade)" : "Zirve içe aktarım";
       if (mevcut.rows[0]) {
         const odenen = Number(mevcut.rows[0].odenen || 0);
         await pool.query(
           `UPDATE invoice_entries SET
              tedarikci=$1, rf_montaj_firma=$1, fatura_tarihi=$2,
              tutar=$3, kdv=$4, toplam_tutar=$5,
-             kalan_borc=GREATEST(0, $5 - $6), currency=$7
-           WHERE id=$8`,
-          [it.taseron, it.tarih, it.haric, kdv, it.dahil, odenen, it.pb, mevcut.rows[0].id],
+             kalan_borc=$6, fatura_turu=$7, currency=$8
+           WHERE id=$9`,
+          [it.taseron, it.tarih, it.haric, kdv, it.dahil,
+           it.iade ? -it.dahil : Math.max(0, it.dahil - odenen),
+           turu, it.pb, mevcut.rows[0].id],
         );
         updated++;
       } else {
@@ -11203,8 +11233,9 @@ app.post("/finance/zirve-import", requireFinanceAuth, upload.single("file"), asy
              (tedarikci, rf_montaj_firma, fatura_no, fatura_tarihi,
               tutar, kdv, toplam_tutar, odenen_tutar, kalan_borc,
               note, fatura_turu, currency, firma)
-           VALUES ($1,$1,$2,$3,$4,$5,$6,0,$6,'Zirve içe aktarım','GELEN',$7,$8)`,
-          [it.taseron, it.fatura_no, it.tarih, it.haric, kdv, it.dahil, it.pb, firma],
+           VALUES ($1,$1,$2,$3,$4,$5,$6,0,$7,$8,$9,$10,$11)`,
+          [it.taseron, it.fatura_no, it.tarih, it.haric, kdv, it.dahil,
+           it.iade ? -it.dahil : it.dahil, notu, turu, it.pb, firma],
         );
         inserted++;
       }

@@ -5990,8 +5990,9 @@ function FinanceDashboard({
         await loadFinance();
       } else {
         const es = (d.items || []).filter(i => i.durum === "eslesen").length;
+        const ia = (d.items || []).filter(i => i.durum === "iade").length;
         const at = (d.items || []).filter(i => i.durum === "atlanan").length;
-        setZirveMsg(`Analiz: ${es} taşeron faturası eşleşti · ${at} satır eşleşmedi (taşeron olanları işaretleyin) — içe aktarmak için onaylayın`);
+        setZirveMsg(`Analiz: ${es} taşeron faturası${ia ? ` + ${ia} iade` : ""} eşleşti · ${at} satır eşleşmedi (taşeron olanları işaretleyin) — içe aktarmak için onaylayın`);
       }
     } catch (e) { setZirveMsg(`❌ ${e.message}`); }
     setZirveLoading(false);
@@ -8733,7 +8734,7 @@ function FinanceDashboard({
               {zirveItems.length > 0 && (
                 <button onClick={() => zirveCall("commit")} disabled={zirveLoading}
                   style={{ padding:"8px 16px", background:"#16a34a", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>
-                  {zirveLoading ? "..." : `✅ İçe Aktar (${zirveItems.filter(i => i.durum === "eslesen").length + Object.values(zirveSecili).filter(Boolean).length} fatura)`}
+                  {zirveLoading ? "..." : `✅ İçe Aktar (${zirveItems.filter(i => i.durum === "eslesen" || i.durum === "iade").length + Object.values(zirveSecili).filter(Boolean).length} fatura)`}
                 </button>
               )}
               {zirveMsg && <div style={{ fontSize:"12.5px", fontWeight:600, color: zirveMsg.startsWith("❌") ? "#dc2626" : "#0e7490", flexBasis:"100%" }}>{zirveMsg}</div>}
@@ -8757,12 +8758,14 @@ function FinanceDashboard({
                     </tr>
                   </thead>
                   <tbody>
-                    {[...zirveItems].sort((a,b) => (a.durum === "eslesen" ? 0 : a.durum === "atlanan" ? 1 : 2) - (b.durum === "eslesen" ? 0 : b.durum === "atlanan" ? 1 : 2)).map((it, i) => (
+                    {(() => {
+                      const sira = { eslesen: 0, iade: 1, atlanan: 2, giden: 3, eski: 4 };
+                      return [...zirveItems].sort((a,b) => (sira[a.durum] ?? 9) - (sira[b.durum] ?? 9)).map((it, i) => (
                       <tr key={i} style={{ borderBottom:"1px solid #f1f5f9",
-                        background: it.durum === "eslesen" ? "#f0fdf4" : it.durum === "eski" ? "#f8fafc" : zirveSecili[it.vkn] ? "#ecfeff" : "#fff",
-                        opacity: it.durum === "eski" ? 0.55 : 1 }}>
+                        background: it.durum === "eslesen" ? "#f0fdf4" : it.durum === "iade" ? "#faf5ff" : (it.durum === "giden" || it.durum === "eski") ? "#f8fafc" : zirveSecili[it.vkn] ? "#ecfeff" : "#fff",
+                        opacity: (it.durum === "giden" || it.durum === "eski") ? 0.55 : 1 }}>
                         <td style={{ padding:"6px 10px", textAlign:"center" }}>
-                          {it.durum === "eslesen" ? "✅" : it.durum === "atlanan" ? (
+                          {(it.durum === "eslesen" || it.durum === "iade") ? "✅" : it.durum === "atlanan" ? (
                             <input type="checkbox" checked={!!zirveSecili[it.vkn]}
                               onChange={e => setZirveSecili(p => ({ ...p, [it.vkn]: e.target.checked }))} />
                           ) : "—"}
@@ -8770,15 +8773,16 @@ function FinanceDashboard({
                         <td style={{ padding:"6px 10px", whiteSpace:"normal" }}>{it.tarih || "—"}</td>
                         <td style={{ padding:"6px 10px", whiteSpace:"normal", overflowWrap:"break-word", fontWeight:600 }}>{it.fatura_no}</td>
                         <td style={{ padding:"6px 10px", whiteSpace:"normal", overflowWrap:"break-word" }}>{it.unvan}</td>
-                        <td style={{ padding:"6px 10px", textAlign:"right", fontWeight:700 }}>
-                          {Number(it.dahil || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 })} {it.pb !== "TRY" ? it.pb : "₺"}
+                        <td style={{ padding:"6px 10px", textAlign:"right", fontWeight:700, color: it.durum === "iade" ? "#7c3aed" : "#111827" }}>
+                          {it.durum === "iade" ? "−" : ""}{Number(it.dahil || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 })} {it.pb !== "TRY" ? it.pb : "₺"}
                         </td>
                         <td style={{ padding:"6px 10px", whiteSpace:"normal", fontWeight:600,
-                          color: it.durum === "eslesen" ? "#166534" : it.durum === "eski" ? "#94a3b8" : "#b45309" }}>
-                          {it.durum === "eslesen" ? "Taşeron" : it.durum === "eski" ? "Temmuz öncesi" : "Eşleşmedi"}
+                          color: it.durum === "eslesen" ? "#166534" : it.durum === "iade" ? "#7c3aed" : (it.durum === "giden" || it.durum === "eski") ? "#94a3b8" : "#b45309" }}>
+                          {it.durum === "eslesen" ? "Taşeron" : it.durum === "iade" ? "İade (borçtan düşer)" : it.durum === "giden" ? "Satış (kapsam dışı)" : it.durum === "eski" ? "Eski" : "Eşleşmedi"}
                         </td>
                       </tr>
-                    ))}
+                      ));
+                    })()}
                   </tbody>
                 </table>
               )}
