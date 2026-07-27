@@ -18102,10 +18102,11 @@ pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS approver TEX
 pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS application_processed TIMESTAMP`).catch(() => {});
 pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS item_description TEXT`).catch(() => {});
 
-// Reddedilen acceptance kalemleri (son 60 gün, yeni → eski)
+// Reddedilen acceptance kalemleri (varsayılan son 4 gün, yeni → eski)
 app.get("/hw-acceptance/rejected", authMiddleware, async (req, res) => {
   try {
     await ensureHwAcceptanceTable();
+    const days = Math.min(60, Math.max(1, parseInt(req.query.days, 10) || 4));
     const r = await pool.query(`
       SELECT a.site_code, a.project_code, a.acceptance_no, a.po_no,
         COALESCE(NULLIF(a.rejected_reason,''),'—') AS rejected_reason,
@@ -18122,9 +18123,9 @@ app.get("/hw-acceptance/rejected", authMiddleware, async (req, res) => {
             AND COALESCE(m.subcon_name,'') <> '' LIMIT 1) AS subcon_name
       FROM hw_acceptance_rows a
       WHERE UPPER(COALESCE(a.status,'')) LIKE '%REJECT%'
-        AND (a.application_processed IS NULL OR a.application_processed >= NOW() - INTERVAL '60 days')
+        AND a.application_processed >= NOW() - make_interval(days => $1)
       ORDER BY a.application_processed DESC NULLS LAST, a.site_code
-    `);
+    `, [days]);
     let rows = r.rows;
     const scopeName = subconScope(req) || String(req.query.sub || "").trim();
     if (scopeName) {

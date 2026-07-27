@@ -5970,7 +5970,7 @@ function FinanceDashboard({
     setRejectedLoading(true);
     setRejectedModal(true);
     try {
-      const d = await fetchJson(`${API_BASE}/hw-acceptance/rejected`, { withAuth: true });
+      const d = await fetchJson(`${API_BASE}/hw-acceptance/rejected?days=4`, { withAuth: true });
       setRejectedRows(d.rows || []);
     } catch { setRejectedRows([]); }
     setRejectedLoading(false);
@@ -8693,7 +8693,7 @@ function FinanceDashboard({
                     <div style={{ fontSize:"12px", color:"#991b1b", marginTop:"4px", display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
                       <span style={{ background:"#dc2626", color:"#fff", borderRadius:"6px", padding:"1px 8px", fontWeight:700 }}>Bugün: {_nBugun}</span>
                       <span style={{ background:"#f59e0b", color:"#fff", borderRadius:"6px", padding:"1px 8px", fontWeight:700 }}>Dün: {_nDun}</span>
-                      <span>Son 60 gün: {rejectedRows.length} kalem · en yeni üstte</span>
+                      <span>Son 4 gün: {rejectedRows.length} kalem · en yeni üstte</span>
                     </div>
                   </div>
                   <button onClick={() => setRejectedModal(false)}
@@ -8706,10 +8706,18 @@ function FinanceDashboard({
                 <div style={{ textAlign:"center", color:"#9ca3af", padding:"40px 0" }}>Yükleniyor…</div>
               ) : rejectedRows.length === 0 ? (
                 <div style={{ textAlign:"center", color:"#9ca3af", padding:"40px 0" }}>
-                  Son 60 günde reddedilen kalem yok — ACCEPTANCE (Processed) excel'ini "HW Acceptance Yükle"den yükleyin.
+                  Son 4 günde reddedilen kalem yok — ACCEPTANCE (Processed) excel'ini "HW Acceptance Yükle"den yükleyin.
                 </div>
               ) : (
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px", tableLayout:"fixed" }}>
+                  <colgroup>
+                    <col style={{ width:"130px" }} />
+                    <col style={{ width:"78px" }} />
+                    <col style={{ width:"165px" }} />
+                    <col style={{ width:"27%" }} />
+                    <col style={{ width:"38%" }} />
+                    <col style={{ width:"110px" }} />
+                  </colgroup>
                   <thead>
                     <tr>
                       {["Tarih","Proje","Site ID","Item Description","Red Sebebi","Reddeden"].map(h => (
@@ -8729,11 +8737,13 @@ function FinanceDashboard({
                           {isBugun && <span style={{ marginLeft:6, background:"#dc2626", color:"#fff", borderRadius:5, padding:"0 6px", fontSize:"10px", fontWeight:800 }}>BUGÜN</span>}
                           {isDun && <span style={{ marginLeft:6, background:"#f59e0b", color:"#fff", borderRadius:5, padding:"0 6px", fontSize:"10px", fontWeight:800 }}>DÜN</span>}
                         </td>
-                        <td style={{ padding:"8px 12px", whiteSpace:"nowrap" }}>{r.project_code || "—"}</td>
-                        <td style={{ padding:"8px 12px", whiteSpace:"nowrap", fontWeight:700, color:"#1e3a5f" }}>{r.site_code || "—"}</td>
-                        <td style={{ padding:"8px 12px", maxWidth:280, wordBreak:"break-word" }}>{r.item_description}</td>
-                        <td style={{ padding:"8px 12px", maxWidth:360, wordBreak:"break-word", color:"#b91c1c" }}>{r.rejected_reason}</td>
-                        <td style={{ padding:"8px 12px", whiteSpace:"nowrap" }}>{String(r.approver||"—").replace(/\s*(WX)?\d{5,}\s*$/i,"").trim() || "—"}</td>
+                        <td style={{ padding:"8px 12px" }}>{r.project_code || "—"}</td>
+                        <td style={{ padding:"8px 12px", fontWeight:700, color:"#1e3a5f", overflowWrap:"break-word" }}>{r.site_code || "—"}</td>
+                        <td style={{ padding:"8px 12px", overflowWrap:"break-word", lineHeight:1.4 }}>{r.item_description}</td>
+                        <td style={{ padding:"8px 12px", overflowWrap:"break-word", lineHeight:1.4, color:"#b91c1c" }}>
+                          {String(r.rejected_reason || "—").replace(/^\s*[0-9A-Z]{6,}[-0-9]*\s*,\s*/i, "")}
+                        </td>
+                        <td style={{ padding:"8px 12px", overflowWrap:"break-word" }}>{String(r.approver||"—").replace(/\s*(WX)?\d{5,}\s*$/i,"").trim() || "—"}</td>
                       </tr>
                       );
                     })}
