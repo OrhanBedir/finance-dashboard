@@ -8737,13 +8737,13 @@ function FinanceDashboard({
                           {isBugun && <span style={{ marginLeft:6, background:"#dc2626", color:"#fff", borderRadius:5, padding:"0 6px", fontSize:"10px", fontWeight:800 }}>BUGÜN</span>}
                           {isDun && <span style={{ marginLeft:6, background:"#f59e0b", color:"#fff", borderRadius:5, padding:"0 6px", fontSize:"10px", fontWeight:800 }}>DÜN</span>}
                         </td>
-                        <td style={{ padding:"8px 12px" }}>{r.project_code || "—"}</td>
-                        <td style={{ padding:"8px 12px", fontWeight:700, color:"#1e3a5f", overflowWrap:"break-word" }}>{r.site_code || "—"}</td>
-                        <td style={{ padding:"8px 12px", overflowWrap:"break-word", lineHeight:1.4 }}>{r.item_description}</td>
-                        <td style={{ padding:"8px 12px", overflowWrap:"break-word", lineHeight:1.4, color:"#b91c1c" }}>
+                        <td style={{ padding:"8px 12px", whiteSpace:"normal" }}>{r.project_code || "—"}</td>
+                        <td style={{ padding:"8px 12px", fontWeight:700, color:"#1e3a5f", whiteSpace:"normal", overflowWrap:"break-word" }}>{r.site_code || "—"}</td>
+                        <td style={{ padding:"8px 12px", whiteSpace:"normal", overflowWrap:"break-word", wordBreak:"break-word", lineHeight:1.4, overflow:"hidden" }}>{r.item_description}</td>
+                        <td style={{ padding:"8px 12px", whiteSpace:"normal", overflowWrap:"break-word", wordBreak:"break-word", lineHeight:1.4, color:"#b91c1c", overflow:"hidden" }}>
                           {String(r.rejected_reason || "—").replace(/^\s*[0-9A-Z]{6,}[-0-9]*\s*,\s*/i, "")}
                         </td>
-                        <td style={{ padding:"8px 12px", overflowWrap:"break-word" }}>{String(r.approver||"—").replace(/\s*(WX)?\d{5,}\s*$/i,"").trim() || "—"}</td>
+                        <td style={{ padding:"8px 12px", whiteSpace:"normal", overflowWrap:"break-word" }}>{String(r.approver||"—").replace(/\s*(WX)?\d{5,}\s*$/i,"").trim() || "—"}</td>
                       </tr>
                       );
                     })}
