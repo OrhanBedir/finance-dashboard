@@ -11131,17 +11131,22 @@ pool.query(`CREATE TABLE IF NOT EXISTS zirve_taseron_vkn (
 const ZIRVE_TASERON_KEYS = ["FEDERAL", "UBS", "2KX", "NETELCOM", "NETELKOM", "FERRUM", "ETAS", "ETAŞ", "SURVEY", "AHY"];
 const SIMSEK_VKN = "3552230000"; // Şimşek Haberleşme — giden (iade) satır ayrımı için
 
-app.post("/finance/zirve-import", requireFinanceAuth, upload.single("file"), async (req, res) => {
+app.post("/finance/zirve-import", requireFinanceAuth, upload.array("files"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
+    const files = req.files && req.files.length ? req.files : (req.file ? [req.file] : []);
+    if (!files.length) return res.status(400).json({ ok: false, error: "Dosya yok" });
     const mode = String(req.body.mode || "preview");
     let acceptVkns = [];
     try { acceptVkns = JSON.parse(req.body.accept_vkns || "[]"); } catch { acceptVkns = []; }
     const acceptSet = new Set(acceptVkns.map(String));
 
-    const workbook = XLSX.read(req.file.buffer);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+    // Tüm dosyaların satırlarını birleştir (fatura no bazlı tekilleştirilir)
+    const rows = [];
+    for (const f of files) {
+      const workbook = XLSX.read(f.buffer);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      rows.push(...XLSX.utils.sheet_to_json(sheet, { defval: null }));
+    }
     if (!rows.length) return res.status(400).json({ ok: false, error: "Excel boş" });
 
     const bilinen = await pool.query(`SELECT vkn, taseron_adi FROM zirve_taseron_vkn`);
@@ -11196,15 +11201,20 @@ app.post("/finance/zirve-import", requireFinanceAuth, upload.single("file"), asy
       });
     }
 
+    // Fatura no bazlı tekilleştir (aynı fatura birden çok dosyada/sayfada olabilir)
+    const tekil = new Map();
+    for (const it of items) tekil.set(`${it.fatura_no}|${it.iade ? "I" : "G"}`, it);
+    const itemsTekil = [...tekil.values()];
+
     if (mode !== "commit") {
-      return res.json({ ok: true, mode: "preview", items });
+      return res.json({ ok: true, mode: "preview", items: itemsTekil });
     }
 
     // COMMIT: eşleşenleri upsert et, işaretlenen yeni VKN'leri öğren.
     // İade: kalan_borc = -toplam → taşeron carisinden otomatik düşer
     // (FIFO ödeme motoru kalan_borc>0 baktığı için iadeye ödeme dağıtmaz).
     let inserted = 0, updated = 0;
-    for (const it of items) {
+    for (const it of itemsTekil) {
       if (it.durum !== "eslesen" && it.durum !== "iade") continue;
       const firma = it.taseron.toUpperCase().includes("AHY") ? "AHY" : "SIMSEK";
       const mevcut = await pool.query(
@@ -11249,8 +11259,8 @@ app.post("/finance/zirve-import", requireFinanceAuth, upload.single("file"), asy
         vknMap.set(it.vkn, it.taseron);
       }
     }
-    const atlanan = items.filter((i) => i.durum === "atlanan").length;
-    res.json({ ok: true, mode: "commit", inserted, updated, atlanan, items });
+    const atlanan = itemsTekil.filter((i) => i.durum === "atlanan").length;
+    res.json({ ok: true, mode: "commit", inserted, updated, atlanan, items: itemsTekil });
   } catch (e) {
     console.error("ZIRVE IMPORT ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });

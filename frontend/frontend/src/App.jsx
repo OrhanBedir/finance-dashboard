@@ -5970,11 +5970,12 @@ function FinanceDashboard({
   const [zirveLoading, setZirveLoading] = useState(false);
   const [zirveMsg, setZirveMsg] = useState("");
   const zirveCall = async (mode) => {
-    if (!zirveFile) { setZirveMsg("Önce Zirve 'Gelen Faturalar' Excel dosyasını seçin"); return; }
+    const dosyalar = Array.isArray(zirveFile) ? zirveFile : (zirveFile ? [zirveFile] : []);
+    if (!dosyalar.length) { setZirveMsg("Önce Zirve Excel dosyalarını seçin (birden çok seçebilirsiniz)"); return; }
     setZirveLoading(true); setZirveMsg("");
     try {
       const fd = new FormData();
-      fd.append("file", zirveFile);
+      dosyalar.forEach(f => fd.append("files", f));
       fd.append("mode", mode);
       fd.append("accept_vkns", JSON.stringify(Object.keys(zirveSecili).filter(v => zirveSecili[v])));
       const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
@@ -8719,14 +8720,17 @@ function FinanceDashboard({
               <div>
                 <div style={{ fontSize:"17px", fontWeight:800, color:"#0e7490" }}>⬆ Zirve e-Fatura İçe Aktar</div>
                 <div style={{ fontSize:"12px", color:"#155e75", marginTop:"2px" }}>
-                  Zirve e-Dönüşüm → Gelen Faturalar → Excel'e Aktar dosyasını seçin · taşeron faturaları Fatura Girişi'ne işlenir, masraf faturaları atlanır
+                  Zirve Excel dosyalarını seçin (Gelen + Giden, birden çok dosya tek seferde) · taşeron faturaları işlenir, iadeler borçtan düşer, masraf/satış faturaları atlanır
                 </div>
               </div>
               <button onClick={() => setZirveModal(false)}
                 style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#155e75", padding:"4px 8px" }}>✕</button>
             </div>
             <div style={{ padding:"14px 24px", borderBottom:"1px solid #e5e7eb", display:"flex", gap:"10px", alignItems:"center", flexWrap:"wrap" }}>
-              <input type="file" accept=".xlsx,.xls" onChange={e => { setZirveFile(e.target.files?.[0] || null); setZirveItems([]); setZirveMsg(""); }} />
+              <input type="file" accept=".xlsx,.xls" multiple onChange={e => { setZirveFile(Array.from(e.target.files || [])); setZirveItems([]); setZirveMsg(""); }} />
+              {Array.isArray(zirveFile) && zirveFile.length > 1 && (
+                <span style={{ fontSize:"12px", color:"#0e7490", fontWeight:700 }}>{zirveFile.length} dosya seçildi</span>
+              )}
               <button onClick={() => zirveCall("preview")} disabled={zirveLoading}
                 style={{ padding:"8px 16px", background:"#0e7490", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>
                 {zirveLoading ? "..." : "🔍 Analiz Et"}
