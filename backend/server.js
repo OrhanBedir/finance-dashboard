@@ -18338,6 +18338,7 @@ app.get("/hw-acceptance/onay-bekleyen", authMiddleware, async (req, res) => {
 
 /* ================== HW ACCEPTANCE UPLOAD ================== */
 app.post("/hw-acceptance/upload", requireHwYukleme, upload.single("file"), async (req, res) => {
+  const client = await pool.connect();
   try {
     await ensureHwAcceptanceTable();
     if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
@@ -18360,10 +18361,13 @@ app.post("/hw-acceptance/upload", requireHwYukleme, upload.single("file"), async
     const statusSets = new Set(
       rows.map((r) => String(r["Status"] || "").trim().toUpperCase()).filter(Boolean),
     );
+    // Tek transaction: yükleme bitene kadar eski veri görünür, yarı boş
+    // anlık görüntü oluşmaz; hata olursa eski veri korunur
+    await client.query("BEGIN");
     if (statusSets.size === 0) {
-      await pool.query(`DELETE FROM hw_acceptance_rows`);
+      await client.query(`DELETE FROM hw_acceptance_rows`);
     } else {
-      await pool.query(
+      await client.query(
         `DELETE FROM hw_acceptance_rows WHERE UPPER(COALESCE(status,'')) = ANY($1)`,
         [[...statusSets]],
       );
@@ -18413,7 +18417,7 @@ app.post("/hw-acceptance/upload", requireHwYukleme, upload.single("file"), async
 
       if (!poNo && !acceptanceNo) continue;
 
-      await pool.query(`
+      await client.query(`
         INSERT INTO hw_acceptance_rows (
           acceptance_no, po_no, po_line_no, shipment_no,
           status, current_handler, site_code, approval_progress,
@@ -18434,10 +18438,14 @@ app.post("/hw-acceptance/upload", requireHwYukleme, upload.single("file"), async
       inserted++;
     }
 
+    await client.query("COMMIT");
     res.json({ ok: true, message: "HW Acceptance listesi yüklendi", inserted, detectedColumns });
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     console.error("HW ACCEPTANCE UPLOAD ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
   }
 });
 
