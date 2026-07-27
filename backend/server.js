@@ -18095,6 +18095,49 @@ app.delete("/admin/clear-qc/:siteCode", authMiddleware, async (req, res) => {
    Acceptance Excel'inde taşeron adı yok; eşleşme sistem üzerinden yapılır:
    satırın site_code'u master_works'te hangi taşerona atanmışsa o taşeronundur.
    Alt marka / subcon kullanıcıları yalnız kendi sahalarını görür. */
+// Processed export kolonları (red takibi) — boot garantisi
+pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS project_code TEXT`).catch(() => {});
+pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS rejected_reason TEXT`).catch(() => {});
+pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS approver TEXT`).catch(() => {});
+pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS application_processed TIMESTAMP`).catch(() => {});
+pool.query(`ALTER TABLE hw_acceptance_rows ADD COLUMN IF NOT EXISTS item_description TEXT`).catch(() => {});
+
+// Reddedilen acceptance kalemleri (son 60 gün, yeni → eski)
+app.get("/hw-acceptance/rejected", authMiddleware, async (req, res) => {
+  try {
+    await ensureHwAcceptanceTable();
+    const r = await pool.query(`
+      SELECT a.site_code, a.project_code, a.acceptance_no, a.po_no,
+        COALESCE(NULLIF(a.rejected_reason,''),'—') AS rejected_reason,
+        COALESCE(NULLIF(a.approver,''),'—') AS approver,
+        to_char(a.application_processed,'DD.MM.YYYY') AS islem_tarihi,
+        a.application_processed,
+        COALESCE(NULLIF(a.item_description,''),
+          (SELECT p.item_description FROM po_rows p
+            WHERE p.po_no = a.po_no
+              AND (COALESCE(a.po_line_no,'')='' OR COALESCE(p.po_line_no,'')=COALESCE(a.po_line_no,''))
+            LIMIT 1), '—') AS item_description,
+        (SELECT m.subcon_name FROM master_works m
+          WHERE UPPER(TRIM(COALESCE(m.site_code,''))) = UPPER(TRIM(COALESCE(a.site_code,'')))
+            AND COALESCE(m.subcon_name,'') <> '' LIMIT 1) AS subcon_name
+      FROM hw_acceptance_rows a
+      WHERE UPPER(COALESCE(a.status,'')) LIKE '%REJECT%'
+        AND (a.application_processed IS NULL OR a.application_processed >= NOW() - INTERVAL '60 days')
+      ORDER BY a.application_processed DESC NULLS LAST, a.site_code
+    `);
+    let rows = r.rows;
+    const scopeName = subconScope(req) || String(req.query.sub || "").trim();
+    if (scopeName) {
+      const c = canonSub(scopeName);
+      rows = rows.filter((row) => canonSub(row.subcon_name) === c);
+    }
+    res.json({ ok: true, rows });
+  } catch (e) {
+    console.error("HW REJECTED ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("/hw-acceptance/onay-bekleyen", authMiddleware, async (req, res) => {
   try {
     await ensureHwAcceptanceTable();
@@ -18153,7 +18196,20 @@ app.post("/hw-acceptance/upload", requireHwYukleme, upload.single("file"), async
     const detectedColumns = rows[0] ? Object.keys(rows[0]) : [];
     console.log("HW ACCEPTANCE EXCEL KOLONLARI:", detectedColumns);
 
-    await pool.query(`DELETE FROM hw_acceptance_rows`);
+    // Statü-segment bazlı sil-yaz: Pending export'u pending'leri, Processed
+    // (ACCEPTANCE_*) export'u rejected/approved satırları yeniler — iki dosya
+    // akışı birbirini silmez.
+    const statusSets = new Set(
+      rows.map((r) => String(r["Status"] || "").trim().toUpperCase()).filter(Boolean),
+    );
+    if (statusSets.size === 0) {
+      await pool.query(`DELETE FROM hw_acceptance_rows`);
+    } else {
+      await pool.query(
+        `DELETE FROM hw_acceptance_rows WHERE UPPER(COALESCE(status,'')) = ANY($1)`,
+        [[...statusSets]],
+      );
+    }
 
     const batchName = new Date().toISOString();
     let inserted = 0;
@@ -18185,6 +18241,17 @@ app.post("/hw-acceptance/upload", requireHwYukleme, upload.single("file"), async
       const milestoneType  = String(r["MilestoneType"] || "").trim();
       const acceptanceMilestone = String(r["AcceptanceMilestone"] || "").trim();
       const paymentPct     = String(r["Payment Percentage"] || "").trim();
+      // Processed (ACCEPTANCE_*) export alanları — red takibi için
+      const itemDescription = String(r["Item Description"] || r["ItemDescription"] || "").trim();
+      const projectCode    = String(r["ProjectCode"] || r["Project Code"] || "").trim();
+      const rejectedReason = String(r["Rejected reason"] || r["RejectedReason"] || "").trim();
+      const approver       = String(r["Approver"] || "").trim();
+      const appProcessedRaw = r["ApplicationProcessed"] || r["Application Processed"] || null;
+      let appProcessed = null;
+      if (appProcessedRaw) {
+        const d = new Date(appProcessedRaw);
+        if (!isNaN(d.getTime())) appProcessed = d.toISOString();
+      }
 
       if (!poNo && !acceptanceNo) continue;
 
@@ -18194,14 +18261,17 @@ app.post("/hw-acceptance/upload", requireHwYukleme, upload.single("file"), async
           status, current_handler, site_code, approval_progress,
           unit_price, requested_qty, acceptance_qty,
           site_name, project_name, engineering_code, item_code,
-          milestone_type, acceptance_milestone, payment_pct, upload_batch
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+          milestone_type, acceptance_milestone, payment_pct, upload_batch,
+          project_code, rejected_reason, approver, application_processed, item_description
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
       `, [
         acceptanceNo || null, poNo || null, poLineNo || null, shipmentNo || null,
         status || null, currentHandler || null, siteCode || null, approvalProgress || null,
         unitPrice, requestedQty, acceptanceQty,
         siteName || null, projectName || null, engineeringCode || null, itemCode || null,
-        milestoneType || null, acceptanceMilestone || null, paymentPct || null, batchName
+        milestoneType || null, acceptanceMilestone || null, paymentPct || null, batchName,
+        projectCode || null, rejectedReason || null, approver || null, appProcessed,
+        itemDescription || null
       ]);
       inserted++;
     }

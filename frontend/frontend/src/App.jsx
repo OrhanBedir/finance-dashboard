@@ -5962,6 +5962,19 @@ function FinanceDashboard({
   const [showUpload, setShowUpload] = useState(false);
   const [hwAcceptanceSummary, setHwAcceptanceSummary] = useState(null);
   const [showHwAcceptanceModal, setShowHwAcceptanceModal] = useState(false);
+  // Reddedilen acceptance kalemleri modalı (ACCEPTANCE_* processed export'undan)
+  const [rejectedModal, setRejectedModal] = useState(false);
+  const [rejectedRows, setRejectedRows] = useState([]);
+  const [rejectedLoading, setRejectedLoading] = useState(false);
+  const openRejectedModal = async () => {
+    setRejectedLoading(true);
+    setRejectedModal(true);
+    try {
+      const d = await fetchJson(`${API_BASE}/hw-acceptance/rejected`, { withAuth: true });
+      setRejectedRows(d.rows || []);
+    } catch { setRejectedRows([]); }
+    setRejectedLoading(false);
+  };
   const [hwCardExpanded, setHwCardExpanded] = useState(false);
   const [showInvoiceUpload, setShowInvoiceUpload] = useState(false);
   const [showHwInvoiceItemsUpload, setShowHwInvoiceItemsUpload] = useState(false);
@@ -8585,8 +8598,14 @@ function FinanceDashboard({
                   {hwAcceptanceSummary?.total_try > 0 && <strong> + ₺{Number(hwAcceptanceSummary.total_try).toLocaleString("tr-TR", {maximumFractionDigits:0})}</strong>}
                 </div>
               </div>
-              <button onClick={() => setShowHwAcceptanceModal(false)}
-                style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#6b7280", padding:"4px 8px" }}>✕</button>
+              <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                <button onClick={openRejectedModal}
+                  style={{ background:"#fef2f2", border:"1.5px solid #fca5a5", borderRadius:"8px", padding:"6px 14px", cursor:"pointer", fontWeight:700, fontSize:"12.5px", color:"#dc2626" }}>
+                  ❌ Reddedilenler
+                </button>
+                <button onClick={() => setShowHwAcceptanceModal(false)}
+                  style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#6b7280", padding:"4px 8px" }}>✕</button>
+              </div>
             </div>
             {/* Body */}
             <div style={{ overflowY:"auto", padding:"16px 24px 24px" }}>
@@ -8644,6 +8663,57 @@ function FinanceDashboard({
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reddedilen Acceptance Kalemleri Modal */}
+      {rejectedModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}
+          onClick={() => setRejectedModal(false)}>
+          <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"1150px", maxHeight:"85vh", overflow:"hidden", display:"flex", flexDirection:"column" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding:"18px 24px 14px", borderBottom:"1px solid #e5e7eb", display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fef2f2" }}>
+              <div>
+                <div style={{ fontSize:"17px", fontWeight:800, color:"#b91c1c" }}>❌ Reddedilen Acceptance Kalemleri</div>
+                <div style={{ fontSize:"12px", color:"#991b1b", marginTop:"2px" }}>
+                  Son 60 gün · {rejectedRows.length} kalem · en yeni üstte — ACCEPTANCE (Processed) excel'i yüklendikçe güncellenir
+                </div>
+              </div>
+              <button onClick={() => setRejectedModal(false)}
+                style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#991b1b", padding:"4px 8px" }}>✕</button>
+            </div>
+            <div style={{ overflowY:"auto", padding:"0" }}>
+              {rejectedLoading ? (
+                <div style={{ textAlign:"center", color:"#9ca3af", padding:"40px 0" }}>Yükleniyor…</div>
+              ) : rejectedRows.length === 0 ? (
+                <div style={{ textAlign:"center", color:"#9ca3af", padding:"40px 0" }}>
+                  Son 60 günde reddedilen kalem yok — ACCEPTANCE (Processed) excel'ini "HW Acceptance Yükle"den yükleyin.
+                </div>
+              ) : (
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px" }}>
+                  <thead>
+                    <tr>
+                      {["Tarih","Proje","Site ID","Item Description","Red Sebebi","Reddeden"].map(h => (
+                        <th key={h} style={{ position:"sticky", top:0, background:"#1f2937", color:"#fff", padding:"9px 12px", textAlign:"left", fontSize:"11.5px", whiteSpace:"nowrap", zIndex:1 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rejectedRows.map((r, i) => (
+                      <tr key={i} style={{ borderBottom:"1px solid #f1f5f9", background: i%2 ? "#fafafa" : "#fff" }}>
+                        <td style={{ padding:"8px 12px", whiteSpace:"nowrap", fontWeight:600 }}>{r.islem_tarihi || "—"}</td>
+                        <td style={{ padding:"8px 12px", whiteSpace:"nowrap" }}>{r.project_code || "—"}</td>
+                        <td style={{ padding:"8px 12px", whiteSpace:"nowrap", fontWeight:700, color:"#1e3a5f" }}>{r.site_code || "—"}</td>
+                        <td style={{ padding:"8px 12px", maxWidth:280, wordBreak:"break-word" }}>{r.item_description}</td>
+                        <td style={{ padding:"8px 12px", maxWidth:360, wordBreak:"break-word", color:"#b91c1c" }}>{r.rejected_reason}</td>
+                        <td style={{ padding:"8px 12px", whiteSpace:"nowrap" }}>{String(r.approver||"—").replace(/\s*(WX)?\d{5,}\s*$/i,"").trim() || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>
