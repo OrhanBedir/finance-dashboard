@@ -5962,6 +5962,40 @@ function FinanceDashboard({
   const [showUpload, setShowUpload] = useState(false);
   const [hwAcceptanceSummary, setHwAcceptanceSummary] = useState(null);
   const [showHwAcceptanceModal, setShowHwAcceptanceModal] = useState(false);
+  // Zirve e-fatura içe aktarım modalı
+  const [zirveModal, setZirveModal] = useState(false);
+  const [zirveFile, setZirveFile] = useState(null);
+  const [zirveItems, setZirveItems] = useState([]);
+  const [zirveSecili, setZirveSecili] = useState({}); // vkn → true (atlananlardan taşeron kabul edilenler)
+  const [zirveLoading, setZirveLoading] = useState(false);
+  const [zirveMsg, setZirveMsg] = useState("");
+  const zirveCall = async (mode) => {
+    if (!zirveFile) { setZirveMsg("Önce Zirve 'Gelen Faturalar' Excel dosyasını seçin"); return; }
+    setZirveLoading(true); setZirveMsg("");
+    try {
+      const fd = new FormData();
+      fd.append("file", zirveFile);
+      fd.append("mode", mode);
+      fd.append("accept_vkns", JSON.stringify(Object.keys(zirveSecili).filter(v => zirveSecili[v])));
+      const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+      const r = await fetch(`${API_BASE}/finance/zirve-import`, {
+        method: "POST", headers: { Authorization: `Bearer ${tkn}` }, body: fd,
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "İşlem başarısız");
+      setZirveItems(d.items || []);
+      if (mode === "commit") {
+        setZirveMsg(`✅ ${d.inserted} fatura eklendi, ${d.updated} güncellendi · ${d.atlanan} satır taşeron dışı (atlandı)`);
+        setZirveSecili({});
+        await loadFinance();
+      } else {
+        const es = (d.items || []).filter(i => i.durum === "eslesen").length;
+        const at = (d.items || []).filter(i => i.durum === "atlanan").length;
+        setZirveMsg(`Analiz: ${es} taşeron faturası eşleşti · ${at} satır eşleşmedi (taşeron olanları işaretleyin) — içe aktarmak için onaylayın`);
+      }
+    } catch (e) { setZirveMsg(`❌ ${e.message}`); }
+    setZirveLoading(false);
+  };
   // Reddedilen acceptance kalemleri modalı (ACCEPTANCE_* processed export'undan)
   const [rejectedModal, setRejectedModal] = useState(false);
   const [rejectedRows, setRejectedRows] = useState([]);
@@ -8674,6 +8708,85 @@ function FinanceDashboard({
         </div>
       )}
 
+      {/* Zirve e-Fatura İçe Aktar Modal */}
+      {zirveModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}
+          onClick={() => setZirveModal(false)}>
+          <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"1050px", maxHeight:"88vh", overflow:"hidden", display:"flex", flexDirection:"column" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding:"18px 24px 14px", borderBottom:"1px solid #e5e7eb", display:"flex", justifyContent:"space-between", alignItems:"center", background:"#ecfeff" }}>
+              <div>
+                <div style={{ fontSize:"17px", fontWeight:800, color:"#0e7490" }}>⬆ Zirve e-Fatura İçe Aktar</div>
+                <div style={{ fontSize:"12px", color:"#155e75", marginTop:"2px" }}>
+                  Zirve e-Dönüşüm → Gelen Faturalar → Excel'e Aktar dosyasını seçin · taşeron faturaları Fatura Girişi'ne işlenir, masraf faturaları atlanır
+                </div>
+              </div>
+              <button onClick={() => setZirveModal(false)}
+                style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#155e75", padding:"4px 8px" }}>✕</button>
+            </div>
+            <div style={{ padding:"14px 24px", borderBottom:"1px solid #e5e7eb", display:"flex", gap:"10px", alignItems:"center", flexWrap:"wrap" }}>
+              <input type="file" accept=".xlsx,.xls" onChange={e => { setZirveFile(e.target.files?.[0] || null); setZirveItems([]); setZirveMsg(""); }} />
+              <button onClick={() => zirveCall("preview")} disabled={zirveLoading}
+                style={{ padding:"8px 16px", background:"#0e7490", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>
+                {zirveLoading ? "..." : "🔍 Analiz Et"}
+              </button>
+              {zirveItems.length > 0 && (
+                <button onClick={() => zirveCall("commit")} disabled={zirveLoading}
+                  style={{ padding:"8px 16px", background:"#16a34a", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>
+                  {zirveLoading ? "..." : `✅ İçe Aktar (${zirveItems.filter(i => i.durum === "eslesen").length + Object.values(zirveSecili).filter(Boolean).length} fatura)`}
+                </button>
+              )}
+              {zirveMsg && <div style={{ fontSize:"12.5px", fontWeight:600, color: zirveMsg.startsWith("❌") ? "#dc2626" : "#0e7490", flexBasis:"100%" }}>{zirveMsg}</div>}
+            </div>
+            <div style={{ overflowY:"auto", padding:"0 0 10px" }}>
+              {zirveItems.length > 0 && (
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px", tableLayout:"fixed" }}>
+                  <colgroup>
+                    <col style={{ width:"46px" }} />
+                    <col style={{ width:"92px" }} />
+                    <col style={{ width:"150px" }} />
+                    <col style={{ width:"40%" }} />
+                    <col style={{ width:"110px" }} />
+                    <col style={{ width:"120px" }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      {["Al","Tarih","Fatura No","Gönderen Unvanı","Tutar (Dahil)","Durum"].map(h => (
+                        <th key={h} style={{ position:"sticky", top:0, background:"#164e63", color:"#fff", padding:"8px 10px", textAlign:"left", fontSize:"11.5px", zIndex:1 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...zirveItems].sort((a,b) => (a.durum === "eslesen" ? 0 : a.durum === "atlanan" ? 1 : 2) - (b.durum === "eslesen" ? 0 : b.durum === "atlanan" ? 1 : 2)).map((it, i) => (
+                      <tr key={i} style={{ borderBottom:"1px solid #f1f5f9",
+                        background: it.durum === "eslesen" ? "#f0fdf4" : it.durum === "eski" ? "#f8fafc" : zirveSecili[it.vkn] ? "#ecfeff" : "#fff",
+                        opacity: it.durum === "eski" ? 0.55 : 1 }}>
+                        <td style={{ padding:"6px 10px", textAlign:"center" }}>
+                          {it.durum === "eslesen" ? "✅" : it.durum === "atlanan" ? (
+                            <input type="checkbox" checked={!!zirveSecili[it.vkn]}
+                              onChange={e => setZirveSecili(p => ({ ...p, [it.vkn]: e.target.checked }))} />
+                          ) : "—"}
+                        </td>
+                        <td style={{ padding:"6px 10px", whiteSpace:"normal" }}>{it.tarih || "—"}</td>
+                        <td style={{ padding:"6px 10px", whiteSpace:"normal", overflowWrap:"break-word", fontWeight:600 }}>{it.fatura_no}</td>
+                        <td style={{ padding:"6px 10px", whiteSpace:"normal", overflowWrap:"break-word" }}>{it.unvan}</td>
+                        <td style={{ padding:"6px 10px", textAlign:"right", fontWeight:700 }}>
+                          {Number(it.dahil || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 })} {it.pb !== "TRY" ? it.pb : "₺"}
+                        </td>
+                        <td style={{ padding:"6px 10px", whiteSpace:"normal", fontWeight:600,
+                          color: it.durum === "eslesen" ? "#166534" : it.durum === "eski" ? "#94a3b8" : "#b45309" }}>
+                          {it.durum === "eslesen" ? "Taşeron" : it.durum === "eski" ? "Temmuz öncesi" : "Eşleşmedi"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Reddedilen Acceptance Kalemleri Modal */}
       {rejectedModal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}
@@ -9021,6 +9134,14 @@ function FinanceDashboard({
                 style={{ padding:"9px 18px", background:"#7e22ce", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:"6px", whiteSpace:"nowrap" }}
               >
                 💳 Ödeme Gir
+              </button>
+              <button
+                type="button"
+                onClick={() => { setZirveModal(true); setZirveItems([]); setZirveFile(null); setZirveMsg(""); setZirveSecili({}); }}
+                title="Zirve e-Dönüşüm Gelen Faturalar Excel'ini içe aktar"
+                style={{ padding:"9px 18px", background:"#0e7490", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:"6px", whiteSpace:"nowrap" }}
+              >
+                ⬆ Zirve İçe Aktar
               </button>
             </div>
 

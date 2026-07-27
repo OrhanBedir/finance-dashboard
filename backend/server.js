@@ -11116,6 +11116,116 @@ app.post(
   },
 );
 
+/* ================== ZIRVE E-FATURA İÇE AKTAR ================== */
+// Zirve e-Dönüşüm "Gelen Faturalar" Excel'i → invoice_entries senkronu.
+// mode=preview: satırları analiz eder (DB'ye yazmaz); mode=commit:
+// eşleşen + kullanıcının işaretlediği (accept_vkns) satırları upsert eder.
+// Bir kez işaretlenen VKN zirve_taseron_vkn'e öğretilir, sonraki yüklemede
+// otomatik eşleşir. Fatura no bazlı upsert — çift kayıt oluşmaz.
+pool.query(`CREATE TABLE IF NOT EXISTS zirve_taseron_vkn (
+  vkn TEXT PRIMARY KEY,
+  taseron_adi TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`).catch(() => {});
+
+const ZIRVE_TASERON_KEYS = ["FEDERAL", "UBS", "2KX", "NETELCOM", "FERRUM", "ETAS", "SURVEY", "AHY"];
+
+app.post("/finance/zirve-import", requireFinanceAuth, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
+    const mode = String(req.body.mode || "preview");
+    let acceptVkns = [];
+    try { acceptVkns = JSON.parse(req.body.accept_vkns || "[]"); } catch { acceptVkns = []; }
+    const acceptSet = new Set(acceptVkns.map(String));
+
+    const workbook = XLSX.read(req.file.buffer);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+    if (!rows.length) return res.status(400).json({ ok: false, error: "Excel boş" });
+
+    const bilinen = await pool.query(`SELECT vkn, taseron_adi FROM zirve_taseron_vkn`);
+    const vknMap = new Map(bilinen.rows.map((r) => [String(r.vkn), r.taseron_adi]));
+
+    const parseTarih = (s) => {
+      const t = String(s || "").trim();          // DD-MM-YYYY
+      const m = t.match(/^(\d{2})-(\d{2})-(\d{4})/);
+      return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+    };
+
+    const items = [];
+    for (const r of rows) {
+      const vkn = String(r["Gönderen"] || "").trim();
+      const unvan = String(r["Gönderen Unvanı"] || "").trim();
+      const faturaNo = String(r["Fatura No"] || "").trim();
+      const tarih = parseTarih(r["Fatura Tarihi"]);
+      const dahil = Number(r["Vergiler Dahil Tutar"] || r["Fatura Toplamı"] || 0);
+      const haric = Number(r["Vergiler Hariç Tutar"] || r["Mal Hizmet Tutarı"] || 0);
+      const pb = String(r["Para Birimi"] || "TRY").trim().toUpperCase() || "TRY";
+      if (!faturaNo || !unvan) continue;
+      if (tarih && tarih < "2026-07-01") { // Temmuz öncesi kapsam dışı
+        items.push({ vkn, unvan, fatura_no: faturaNo, tarih, dahil, haric, pb, durum: "eski", taseron: null });
+        continue;
+      }
+      let taseron = vknMap.get(vkn) || null;
+      if (!taseron && ZIRVE_TASERON_KEYS.some((k) => unvan.toUpperCase().includes(k))) taseron = unvan;
+      if (!taseron && acceptSet.has(vkn)) taseron = unvan;
+      items.push({ vkn, unvan, fatura_no: faturaNo, tarih, dahil, haric, pb, durum: taseron ? "eslesen" : "atlanan", taseron });
+    }
+
+    if (mode !== "commit") {
+      return res.json({ ok: true, mode: "preview", items });
+    }
+
+    // COMMIT: eşleşenleri upsert et, işaretlenen yeni VKN'leri öğren
+    let inserted = 0, updated = 0;
+    for (const it of items) {
+      if (it.durum !== "eslesen") continue;
+      const firma = it.taseron.toUpperCase().includes("AHY") ? "AHY" : "SIMSEK";
+      const mevcut = await pool.query(
+        `SELECT id, COALESCE(odenen_tutar,0) AS odenen FROM invoice_entries WHERE fatura_no = $1 LIMIT 1`,
+        [it.fatura_no],
+      );
+      const kdv = +(it.dahil - it.haric).toFixed(2);
+      if (mevcut.rows[0]) {
+        const odenen = Number(mevcut.rows[0].odenen || 0);
+        await pool.query(
+          `UPDATE invoice_entries SET
+             tedarikci=$1, rf_montaj_firma=$1, fatura_tarihi=$2,
+             tutar=$3, kdv=$4, toplam_tutar=$5,
+             kalan_borc=GREATEST(0, $5 - $6), currency=$7
+           WHERE id=$8`,
+          [it.taseron, it.tarih, it.haric, kdv, it.dahil, odenen, it.pb, mevcut.rows[0].id],
+        );
+        updated++;
+      } else {
+        await pool.query(
+          `INSERT INTO invoice_entries
+             (tedarikci, rf_montaj_firma, fatura_no, fatura_tarihi,
+              tutar, kdv, toplam_tutar, odenen_tutar, kalan_borc,
+              note, fatura_turu, currency, firma)
+           VALUES ($1,$1,$2,$3,$4,$5,$6,0,$6,'Zirve içe aktarım','GELEN',$7,$8)`,
+          [it.taseron, it.fatura_no, it.tarih, it.haric, kdv, it.dahil, it.pb, firma],
+        );
+        inserted++;
+      }
+      // Yeni işaretlenen VKN'yi öğren
+      if (it.vkn && !vknMap.has(it.vkn)) {
+        await pool.query(
+          `INSERT INTO zirve_taseron_vkn (vkn, taseron_adi) VALUES ($1,$2)
+           ON CONFLICT (vkn) DO NOTHING`,
+          [it.vkn, it.taseron],
+        );
+        vknMap.set(it.vkn, it.taseron);
+      }
+    }
+    const atlanan = items.filter((i) => i.durum === "atlanan").length;
+    res.json({ ok: true, mode: "commit", inserted, updated, atlanan, items });
+  } catch (e) {
+    console.error("ZIRVE IMPORT ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 /* ================== FINANCE EXPENSE ADD ================== */
 app.post("/finance/expense/add", async (req, res) => {
   try {
