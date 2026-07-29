@@ -13375,6 +13375,17 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [yilStr, ayStr] = puantajAy.split("-");
   const ayGunleri = Array.from({ length: new Date(Number(yilStr), Number(ayStr), 0).getDate() }, (_, i) => i+1)
     .filter(g => _hrMarka === "ERC" || `${yilStr}-${ayStr}-${String(g).padStart(2, "0")}` >= AHY_DEVIR);
+  // AHY maaş sorumluluğu devirle (15.07.2026) başlar: devir öncesi aylar ERC'nin
+  // (AHY görmez/ödemez), Temmuz 2026'da 15 öncesi girişlilerde pay %50 (backend
+  // marka-pl ile aynı kural), 15.07+ girişlilerde ve sonraki aylarda tam.
+  const ahyMaasOran = (p) => {
+    if (_hrMarka === "ERC") return 1;
+    const ayKey = `${yilStr}-${ayStr}`;
+    if (ayKey < "2026-07") return 0;
+    if (ayKey > "2026-07") return 1;
+    const giris = String(p?.ise_giris_tarihi || "").split("T")[0];
+    return giris && giris >= AHY_DEVIR ? 1 : 0.5;
+  };
 
   const TR_RESMI_TATIL_HR = [
     "2024-01-01","2024-04-10","2024-04-11","2024-04-12","2024-04-23","2024-05-01","2024-05-19","2024-06-15","2024-06-16","2024-06-17","2024-06-18","2024-07-15","2024-08-30","2024-10-29",
@@ -13541,16 +13552,18 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         <div style={labelSt}>
                           📊 {ayAdi} {yilStr} Tahmini Maaş Bütçesi:
                           <span style={amountSt("#1e40af")}>
-                            ₺{personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0), 0).toLocaleString("tr-TR")}
+                            ₺{Math.round(personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)).toLocaleString("tr-TR")}
                           </span>
-                          <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:500 }}>(tüm personel tam çalışırsa)</span>
+                          <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:500 }}>
+                            {_hrMarka === "ERC" ? "(tüm personel tam çalışırsa)" : "(AHY payı — 15 Temmuz devri sonrası dönem)"}
+                          </span>
                         </div>
                         <div style={labelSt}>
                           💰 An İtibariyle {ayAdi} {yilStr} Ayı Maaş Ödemesi Yapılacak:
                           <span style={amountSt("#15803d")}>
-                            ₺{(ozet.length > 0
-                              ? ozet.reduce((s,p) => s + Number(p.hakedilen_maas||0), 0)
-                              : personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0), 0)
+                            ₺{Math.round(ozet.length > 0
+                              ? ozet.reduce((s,o) => s + Number(o.hakedilen_maas||0) * ahyMaasOran(personelList.find(x=>String(x.id)===String(o.personel_id))), 0)
+                              : personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)
                             ).toLocaleString("tr-TR")}
                           </span>
                         </div>
@@ -13564,9 +13577,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           if (ozet.length > 0) {
                             ozet.forEach(o => {
                               const p = aktifP.find(x => String(x.id) === String(o.personel_id));
+                              const oran      = ahyMaasOran(p);
                               const netMaas   = Number(p?.net_maas || 0);
                               const hakedilen = Number(o.hakedilen_maas || 0);
-                              const ratio     = netMaas > 0 ? hakedilen / netMaas : 1;
+                              const ratio     = (netMaas > 0 ? hakedilen / netMaas : 1) * oran;
                               const bankadan  = Math.round(Number(p?.bankadan_gosterilen || 0) * ratio);
                               const elden     = Math.round(Number(p?.elden_verilen || 0) * ratio);
                               const bm        = calcBrutMaas(bankadan);
@@ -13575,8 +13589,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                             });
                           } else {
                             aktifP.forEach(p => {
-                              const bankadan = Number(p.bankadan_gosterilen || 0);
-                              const elden    = Number(p.elden_verilen || 0);
+                              const oran     = ahyMaasOran(p);
+                              const bankadan = Math.round(Number(p.bankadan_gosterilen || 0) * oran);
+                              const elden    = Math.round(Number(p.elden_verilen || 0) * oran);
                               const bm       = calcBrutMaas(bankadan);
                               _toplamIsverenMal += bm.isverenMaliyet + elden;
                               _toplamSgkIsv     += bm.sgkIssizlikIsv;
@@ -13598,6 +13613,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   {/* ── Maaş Ödeme Takip Paneli ── */}
                   {(() => {
                     const ayAdi = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1];
+                    // AHY devir öncesi dönemleri görmez — o maaşlar ERC sorumluluğunda
+                    if (_hrMarka !== "ERC" && puantajAy < "2026-07") {
+                      return (
+                        <div style={{ marginTop:"14px", background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:"12px", padding:"16px 20px", fontSize:"13.5px", color:"#92400e", fontWeight:600 }}>
+                          🔒 {ayAdi} {yilStr} — devir (15 Temmuz 2026) öncesi dönem. Bu dönemin maaş ödemeleri ERC sorumluluğundadır; AHY panelinde gösterilmez.
+                        </div>
+                      );
+                    }
 
                     // Maaş ödemeleri — banka / elden ayrımı
                     const bankaByPer = {}, eldenByPer = {};
@@ -13629,7 +13652,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     const aktifPer = personelList.filter(p=>puantajIstihdam(p));
                     const allRows = aktifPer.map(p => {
                       const ozO    = ozet.find(o=>String(o.personel_id)===String(p.id));
-                      const hakEdis  = ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0);
+                      const hakEdis  = Math.round((ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0)) * ahyMaasOran(p));
                       const avans    = avansMapByPer[p.id]  || 0;
                       const isAvans  = isAvansMapByPer[p.id] || 0;
                       const banka    = bankaByPer[p.id]     || 0;
@@ -13952,9 +13975,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 const odenenBuAy = maasOdeList
                   .filter(o => o.donem === puantajAy)
                   .reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0), 0);
-                // Hakedilen: ozet'ten (backend prorated) veya gelmedi kesintisi ile hesaplanan
+                // Hakedilen: ozet'ten (backend prorated) veya gelmedi kesintisi ile hesaplanan;
+                // AHY görünümünde devir payı (ahyMaasOran) uygulanır
                 const netBase    = Math.round((sp.net_maas||0) - gelmediKesinti);
-                const hakedilen  = ozetRowHR ? Math.round(Number(ozetRowHR.hakedilen_maas||0)) : netBase;
+                const hakedilen  = Math.round((ozetRowHR ? Number(ozetRowHR.hakedilen_maas||0) : netBase) * ahyMaasOran(sp));
                 // Banka/elden prorated (hakedilen oranı)
                 const hakRatio   = Number(sp.net_maas||0) > 0 ? hakedilen / Number(sp.net_maas) : 1;
                 const proratedBanka = Math.round(Number(sp.bankadan_gosterilen||0) * hakRatio);
@@ -14312,7 +14336,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <span style={{ background:p.aktif?"#dcfce7":"#f3f4f6", color:p.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{p.aktif?"Aktif":"Pasif"}</span>
                     <div style={{ display:"flex", gap:"6px" }}>
                       <button onClick={()=>handleEditPersonel(p)} style={{ padding:"6px 12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
-                      <button onClick={()=>{ const now=new Date(); const pOzet=ozet.find(o=>String(o.personel_id)===String(p.id)); const hakVal=pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0); setMaasOdeModal(p); setMaasOdeHak(hakVal); setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih:now.toISOString().split("T")[0], aciklama:"" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>
+                      <button onClick={()=>{ const now=new Date(); const pOzet=ozet.find(o=>String(o.personel_id)===String(p.id)); const hakVal=Math.round((pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0)) * ahyMaasOran(p)); setMaasOdeModal(p); setMaasOdeHak(hakVal); setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih:now.toISOString().split("T")[0], aciklama:"" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>
                       <button onClick={()=>handleToggleAktif(p)} style={{ padding:"6px 12px", background:p.aktif?"#fef3c7":"#f0fdf4", color:p.aktif?"#92400e":"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
                         {p.aktif?"Pasife Al":"Aktif Et"}
                       </button>
