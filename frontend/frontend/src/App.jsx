@@ -16693,11 +16693,18 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const _approve = async (id, action, firma) => {
     const path = action === "pm" ? "pm-onayla" : action === "direktor" ? "direktor-onayla" : "onayla";
-    await fetch(`${API_BASE}/hr/is-avans/${id}/${path}`, {
+    const r = await fetch(`${API_BASE}/hr/is-avans/${id}/${path}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
+      },
       body: JSON.stringify(firma ? { firma } : {}),
     });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      alert(d.error || "Onay yapılamadı");
+    }
     load(); loadBakiye();
   };
 

@@ -13707,13 +13707,32 @@ function normalizeAvansFirma(v) {
   return null;
 }
 
-app.put("/hr/is-avans/:id/onayla", async (req, res) => {
+// İş avansı onay yetkileri — adım bazlı (28.07 olayı: muhasebe/yetkisiz
+// çağrılar zinciri tek başına tamamlayabiliyordu; artık her adım kilitli)
+const AVANS_YETKI = {
+  RM:  ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com","orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
+  PM:  ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
+  PD:  ["duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
+  ODE: ["muhasebe@simsektel.com","orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
+};
+function avansYetkili(req, adim) {
+  const email = String(req.user?.email || "").toLowerCase().trim();
+  const rol = String(req.user?.role || "").toLowerCase();
+  if (adim === "ODE" && rol === "muhasebe") return true;
+  return (AVANS_YETKI[adim] || []).includes(email);
+}
+
+app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const firmaSecim = normalizeAvansFirma(req.body?.firma);
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
+    const ADIM = { TALEP: "RM", ROLLOUT_MUDUR_ONAY: "PM", PM_ONAY: "PD", DIREKTOR_ONAY: "ODE" }[talep.durum];
+    if (ADIM && !avansYetkili(req, ADIM)) {
+      return res.status(403).json({ error: "Bu onay adımı için yetkiniz yok" });
+    }
     if (firmaSecim) {
       await pool.query("UPDATE is_avans_talep SET firma=$1 WHERE id=$2", [firmaSecim, id]);
     }
@@ -13755,9 +13774,12 @@ app.put("/hr/is-avans/:id/onayla", async (req, res) => {
 });
 
 // PM — TALEP veya ROLLOUT_MUDUR_ONAY'ı doğrudan PM_ONAY'a taşır
-app.put("/hr/is-avans/:id/pm-onayla", async (req, res) => {
+app.put("/hr/is-avans/:id/pm-onayla", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
+    if (!avansYetkili(req, "PM")) {
+      return res.status(403).json({ error: "PM onayı için yetkiniz yok" });
+    }
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
@@ -13775,9 +13797,12 @@ app.put("/hr/is-avans/:id/pm-onayla", async (req, res) => {
 });
 
 // Direktör — yalnızca PM_ONAY aşamasındaki talebi DIREKTOR_ONAY'a taşır
-app.put("/hr/is-avans/:id/direktor-onayla", async (req, res) => {
+app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
+    if (!avansYetkili(req, "PD")) {
+      return res.status(403).json({ error: "Direktör onayı için yetkiniz yok" });
+    }
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
