@@ -2066,6 +2066,243 @@ function MarkaTaseronPanel({ currentUser }) {
   );
 }
 
+// ÇEK & SENET TAKİBİ — kısıtlı erişim (Orhan, Düzgün, Muhasebe, Erencan).
+// Firmanın verdiği çek/senetlerin vade takibi; icra/bloke riskine karşı
+// vadesi geçen ve yaklaşan belgeler renk kodlu öne çıkar.
+function CekSenetPanel({ currentUser }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [modal, setModal] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const bugun = new Date().toISOString().slice(0, 10);
+  const bosForm = { tip: "CEK", karsi_taraf: "", tutar: "", banka: "", belge_no: "", duzenleme_tarihi: bugun, vade_tarihi: "", aciklama: "" };
+  const [form, setForm] = useState(bosForm);
+  const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const _num = (s) => { const t = String(s ?? "").trim(); if (!t) return 0; return /^\d+(\.\d{1,2})?$/.test(t) ? Number(t) : Number(t.replace(/\./g, "").replace(",", ".")) || 0; };
+  const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/finance/cek-senet`, { headers: _auth });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Liste alınamadı");
+      setRows(d.rows || []); setErr("");
+    } catch (e) { setErr(e.message); }
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const gunFarki = (vade) => Math.floor((new Date(vade + "T12:00:00") - new Date(bugun + "T12:00:00")) / 86400000);
+  const bekleyen = rows.filter(r => r.durum === "BEKLIYOR");
+  const odenen = rows.filter(r => r.durum === "ODENDI");
+  const gecikmis = bekleyen.filter(r => gunFarki(r.vade_tarihi) < 0);
+  const buHafta = bekleyen.filter(r => { const g = gunFarki(r.vade_tarihi); return g >= 0 && g <= 7; });
+  const otuzGun = bekleyen.filter(r => { const g = gunFarki(r.vade_tarihi); return g > 7 && g <= 30; });
+  const topla = (l) => l.reduce((s, r) => s + Number(r.tutar || 0), 0);
+
+  const kaydet = async () => {
+    if (!form.karsi_taraf.trim() || !_num(form.tutar) || !form.vade_tarihi) { alert("Karşı taraf, tutar ve vade tarihi zorunlu"); return; }
+    try {
+      const url = editId ? `${API_BASE}/finance/cek-senet/${editId}` : `${API_BASE}/finance/cek-senet`;
+      const r = await fetch(url, {
+        method: editId ? "PUT" : "POST",
+        headers: { ..._auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, tutar: _num(form.tutar) }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
+      setModal(false); setEditId(null); setForm(bosForm); load();
+    } catch (e) { alert(e.message); }
+  };
+  const odendiYap = async (r0) => {
+    const t = prompt("Ödeme tarihi (YYYY-AA-GG):", bugun);
+    if (!t) return;
+    try { await fetch(`${API_BASE}/finance/cek-senet/${r0.id}/odendi`, { method: "PUT", headers: { ..._auth, "Content-Type": "application/json" }, body: JSON.stringify({ odeme_tarihi: t }) }); load(); } catch {}
+  };
+  const geriAl = async (id) => { try { await fetch(`${API_BASE}/finance/cek-senet/${id}/geri-al`, { method: "PUT", headers: _auth }); load(); } catch {} };
+  const sil = async (id) => {
+    if (!window.confirm("Bu kayıt silinsin mi?")) return;
+    try { await fetch(`${API_BASE}/finance/cek-senet/${id}`, { method: "DELETE", headers: _auth }); load(); } catch {}
+  };
+  const duzelt = (r0) => {
+    setEditId(r0.id);
+    setForm({ tip: r0.tip, karsi_taraf: r0.karsi_taraf, tutar: String(r0.tutar), banka: r0.banka || "", belge_no: r0.belge_no || "", duzenleme_tarihi: r0.duzenleme_tarihi || bugun, vade_tarihi: r0.vade_tarihi, aciklama: r0.aciklama || "" });
+    setModal(true);
+  };
+
+  const vadeRozet = (vade) => {
+    const g = gunFarki(vade);
+    if (g < 0) return <span style={{ background:"#dc2626", color:"#fff", borderRadius:6, padding:"2px 8px", fontSize:"10.5px", fontWeight:800 }}>GECİKTİ · {-g} gün</span>;
+    if (g === 0) return <span style={{ background:"#dc2626", color:"#fff", borderRadius:6, padding:"2px 8px", fontSize:"10.5px", fontWeight:800 }}>BUGÜN</span>;
+    if (g <= 7) return <span style={{ background:"#f59e0b", color:"#fff", borderRadius:6, padding:"2px 8px", fontSize:"10.5px", fontWeight:800 }}>{g} gün kaldı</span>;
+    if (g <= 30) return <span style={{ background:"#fef3c7", color:"#92400e", borderRadius:6, padding:"2px 8px", fontSize:"10.5px", fontWeight:700 }}>{g} gün</span>;
+    return <span style={{ background:"#f3f4f6", color:"#6b7280", borderRadius:6, padding:"2px 8px", fontSize:"10.5px", fontWeight:600 }}>{g} gün</span>;
+  };
+  const tipRozet = (tip) => tip === "SENET"
+    ? <span style={{ background:"#ede9fe", color:"#6d28d9", borderRadius:6, padding:"2px 8px", fontSize:"11px", fontWeight:800 }}>SENET</span>
+    : <span style={{ background:"#dbeafe", color:"#1d4ed8", borderRadius:6, padding:"2px 8px", fontSize:"11px", fontWeight:800 }}>ÇEK</span>;
+
+  const inp = { width: "100%", padding: "9px 11px", border: "1.5px solid #e5e7eb", borderRadius: "9px", fontSize: "13.5px", boxSizing: "border-box" };
+  const lbl = { fontSize: "11.5px", fontWeight: 700, color: "#475569", marginBottom: "4px", display: "block" };
+  const thS = { padding: "9px 12px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" };
+  const tdS = { padding: "10px 12px", fontSize: "13px", color: "#374151", borderBottom: "1px solid #f1f5f9" };
+
+  if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
+  if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+
+  return (
+    <div style={{ padding: "24px", maxWidth: "1250px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
+        <div>
+          <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>📝 Çek & Senet Takibi</h2>
+          <div style={{ fontSize: "13px", color: "#64748b" }}>
+            🔒 Kısıtlı erişim — yalnız Orhan Bedir, Düzgün Şimşek, Muhasebe ve Erencan Şimşek görebilir
+          </div>
+        </div>
+        <button onClick={() => { setEditId(null); setForm(bosForm); setModal(true); }}
+          style={{ padding: "10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>
+          + Çek / Senet Ekle
+        </button>
+      </div>
+
+      {/* Özet kartlar */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(185px, 1fr))", gap: "12px", marginBottom: "18px" }}>
+        {[
+          ["⛔ VADESİ GEÇEN", gecikmis, "#dc2626", "#fef2f2"],
+          ["🔥 BU HAFTA (0-7 GÜN)", buHafta, "#d97706", "#fffbeb"],
+          ["📅 30 GÜN İÇİNDE", otuzGun, "#b45309", "#fefce8"],
+          ["⏳ TOPLAM BEKLEYEN", bekleyen, "#1e3a5f", "#f8fafc"],
+          ["✅ ÖDENEN", odenen, "#15803d", "#f0fdf4"],
+        ].map(([ad, liste, renk, bg]) => (
+          <div key={ad} style={{ background: bg, border: "1.5px solid #e5e7eb", borderLeft: `4px solid ${renk}`, borderRadius: "12px", padding: "12px 14px" }}>
+            <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#64748b", letterSpacing: "0.03em" }}>{ad}</div>
+            <div style={{ fontSize: "20px", fontWeight: 800, color: renk, marginTop: "3px" }}>₺{fmt(topla(liste))}</div>
+            <div style={{ fontSize: "11px", color: "#94a3b8" }}>{liste.length} belge</div>
+          </div>
+        ))}
+      </div>
+
+      {gecikmis.length > 0 && (
+        <div style={{ background: "#fef2f2", border: "1.5px solid #fca5a5", borderRadius: "12px", padding: "10px 16px", marginBottom: "14px", fontSize: "13px", fontWeight: 700, color: "#b91c1c" }}>
+          ⚠️ {gecikmis.length} belgenin vadesi geçti (₺{fmt(topla(gecikmis))}) — icra/bloke riskine karşı öncelikle bunları kapatın.
+        </div>
+      )}
+
+      {/* Bekleyenler */}
+      <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
+        <div style={{ padding: "12px 16px", background: "#1e3a5f", color: "#fff", fontSize: "14px", fontWeight: 700 }}>
+          ⏳ Bekleyen Çek & Senetler ({bekleyen.length}) — vadesi yakın olan üstte
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ background: "#f8fafc" }}>
+              <th style={thS}>Vade</th><th style={thS}>Durum</th><th style={thS}>Tip</th>
+              <th style={thS}>Karşı Taraf</th><th style={thS}>Belge No</th><th style={thS}>Banka</th>
+              <th style={{ ...thS, textAlign: "right" }}>Tutar</th><th style={thS}>Açıklama</th><th style={thS}></th>
+            </tr></thead>
+            <tbody>
+              {bekleyen.length === 0 ? (
+                <tr><td colSpan={9} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Bekleyen çek/senet yok</td></tr>
+              ) : bekleyen.map(r0 => (
+                <tr key={r0.id} style={{ background: gunFarki(r0.vade_tarihi) < 0 ? "#fef2f2" : gunFarki(r0.vade_tarihi) <= 7 ? "#fffbeb" : "#fff" }}>
+                  <td style={{ ...tdS, fontWeight: 700, whiteSpace: "nowrap" }}>{r0.vade_tarihi.split("-").reverse().join(".")}</td>
+                  <td style={tdS}>{vadeRozet(r0.vade_tarihi)}</td>
+                  <td style={tdS}>{tipRozet(r0.tip)}</td>
+                  <td style={{ ...tdS, fontWeight: 700 }}>{r0.karsi_taraf}</td>
+                  <td style={tdS}>{r0.belge_no || "—"}</td>
+                  <td style={tdS}>{r0.banka || "—"}</td>
+                  <td style={{ ...tdS, textAlign: "right", fontWeight: 800, color: "#1e3a5f" }}>₺{fmt(r0.tutar)}</td>
+                  <td style={{ ...tdS, fontSize: "12px", color: "#6b7280" }}>{r0.aciklama || ""}</td>
+                  <td style={{ ...tdS, whiteSpace: "nowrap" }}>
+                    <button onClick={() => odendiYap(r0)} title="Ödendi işaretle"
+                      style={{ background: "#f0fdf4", border: "1px solid #86efac", color: "#166534", borderRadius: "7px", padding: "3px 9px", fontSize: "11px", fontWeight: 700, cursor: "pointer", marginRight: "4px" }}>✓ Ödendi</button>
+                    <button onClick={() => duzelt(r0)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", marginRight: "2px" }} title="Düzelt">✏️</button>
+                    <button onClick={() => sil(r0.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Ödenenler */}
+      <details style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", padding: "12px 16px" }}>
+        <summary style={{ cursor: "pointer", fontSize: "13.5px", fontWeight: 700, color: "#15803d" }}>
+          ✅ Ödenen Çek & Senetler ({odenen.length} belge · ₺{fmt(topla(odenen))})
+        </summary>
+        <div style={{ overflowX: "auto", marginTop: "10px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ background: "#f8fafc" }}>
+              <th style={thS}>Vade</th><th style={thS}>Ödeme Tarihi</th><th style={thS}>Tip</th>
+              <th style={thS}>Karşı Taraf</th><th style={thS}>Belge No</th>
+              <th style={{ ...thS, textAlign: "right" }}>Tutar</th><th style={thS}></th>
+            </tr></thead>
+            <tbody>
+              {odenen.map(r0 => (
+                <tr key={r0.id}>
+                  <td style={tdS}>{r0.vade_tarihi.split("-").reverse().join(".")}</td>
+                  <td style={{ ...tdS, color: "#15803d", fontWeight: 700 }}>{(r0.odeme_tarihi || "").split("-").reverse().join(".")}</td>
+                  <td style={tdS}>{tipRozet(r0.tip)}</td>
+                  <td style={{ ...tdS, fontWeight: 700 }}>{r0.karsi_taraf}</td>
+                  <td style={tdS}>{r0.belge_no || "—"}</td>
+                  <td style={{ ...tdS, textAlign: "right", fontWeight: 700 }}>₺{fmt(r0.tutar)}</td>
+                  <td style={{ ...tdS, whiteSpace: "nowrap" }}>
+                    <button onClick={() => geriAl(r0.id)} style={{ background: "#f3f4f6", border: "none", borderRadius: "7px", padding: "3px 9px", fontSize: "11px", cursor: "pointer", color: "#4b5563" }}>↩︎ Geri Al</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+
+      {/* Ekle/Düzelt modalı */}
+      {modal && (
+        <div onClick={() => { setModal(false); setEditId(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(480px, 94vw)", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "14px" }}>{editId ? "✏️ Çek / Senet Düzelt" : "📝 Yeni Çek / Senet"}</div>
+            <div style={{ display: "grid", gap: "10px" }}>
+              <div>
+                <span style={lbl}>Tip</span>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  {["CEK", "SENET"].map(t => (
+                    <button key={t} onClick={() => setForm(p => ({ ...p, tip: t }))}
+                      style={{ flex: 1, padding: "9px", borderRadius: "9px", fontSize: "13px", fontWeight: 800, cursor: "pointer",
+                        border: form.tip === t ? "2px solid #1e3a5f" : "1.5px solid #e5e7eb",
+                        background: form.tip === t ? (t === "CEK" ? "#dbeafe" : "#ede9fe") : "#fff",
+                        color: form.tip === t ? (t === "CEK" ? "#1d4ed8" : "#6d28d9") : "#6b7280" }}>
+                      {t === "CEK" ? "🏦 Çek" : "📜 Senet"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div><span style={lbl}>Karşı Taraf (kime verildi) *</span>
+                <input style={inp} value={form.karsi_taraf} onChange={e => setForm(p => ({ ...p, karsi_taraf: e.target.value }))} placeholder="Taşeron / tedarikçi ünvanı" /></div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div><span style={lbl}>Tutar (₺) *</span><input style={inp} value={form.tutar} onChange={e => setForm(p => ({ ...p, tutar: e.target.value }))} placeholder="0" /></div>
+                <div><span style={lbl}>Belge / Çek No</span><input style={inp} value={form.belge_no} onChange={e => setForm(p => ({ ...p, belge_no: e.target.value }))} /></div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div><span style={lbl}>Düzenleme Tarihi</span><input type="date" style={inp} value={form.duzenleme_tarihi} onChange={e => setForm(p => ({ ...p, duzenleme_tarihi: e.target.value }))} /></div>
+                <div><span style={lbl}>Vade Tarihi *</span><input type="date" style={inp} value={form.vade_tarihi} onChange={e => setForm(p => ({ ...p, vade_tarihi: e.target.value }))} /></div>
+              </div>
+              <div><span style={lbl}>Banka</span><input style={inp} value={form.banka} onChange={e => setForm(p => ({ ...p, banka: e.target.value }))} placeholder="Çek için banka adı" /></div>
+              <div><span style={lbl}>Açıklama</span><input style={inp} value={form.aciklama} onChange={e => setForm(p => ({ ...p, aciklama: e.target.value }))} /></div>
+            </div>
+            <div style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "flex-end" }}>
+              <button onClick={() => { setModal(false); setEditId(null); }} style={{ padding: "9px 16px", background: "#f3f4f6", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}>Vazgeç</button>
+              <button onClick={kaydet} style={{ padding: "9px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>{editId ? "Güncelle" : "Kaydet"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart
 // Web'de kurumsal SVG şema + Huawei'ye gönderilebilir 2 sayfalı Excel
 // (Sheet1: şema, Sheet2: Details — ad soyad/görev/bölge/tel/TC).
@@ -26302,6 +26539,7 @@ function App() {
       case "cashflow": return "Nakit Akışı";
       case "marka_pl": return "Kâr / Zarar (P&L)";
       case "marka_taseron": return "Taşeron Faturaları";
+      case "cek_senet": return "Çek & Senet";
       case "admin": return "Admin Panel";
       case "twokx-prices": return "2KX Özel Item Fiyatları";
       case "platform": return "Omnix — Platform Yönetimi";
@@ -26533,6 +26771,10 @@ function App() {
                       {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
                         <AltNavItem aktif={page==='cashflow'} onClick={()=>setPage('cashflow')} ikon="🏦" label="Nakit Akışı" />
                       )}
+                      {/* Çek & Senet — kısıtlı: yalnız bu 4 kişiye görünür, diğerleri menüde hiç görmez */}
+                      {!isAltMarka && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","muhasebe@simsektel.com","erencan.simsek@simsektel.com"].includes(_userEmail) && (
+                        <AltNavItem aktif={page==='cek_senet'} onClick={()=>setPage('cek_senet')} ikon="📝" label="Çek & Senet" />
+                      )}
                     </div>
                   )}
                 </>
@@ -26626,6 +26868,7 @@ function App() {
             {page === "marka_pl" && isAltMarka && <MarkaPLPanel currentUser={user} />}
             {page === "marka_nakit" && isAltMarka && <MarkaNakitPanel currentUser={user} />}
             {page === "marka_taseron" && isAltMarka && <MarkaTaseronPanel currentUser={user} />}
+            {page === "cek_senet" && !isAltMarka && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","muhasebe@simsektel.com","erencan.simsek@simsektel.com"].includes(_userEmail) && <CekSenetPanel currentUser={user} />}
             {page === "finance" && isFinanceUser && !isAltMarka && (
               financeToken ? (
                 <div style={{padding:"24px 28px"}}>

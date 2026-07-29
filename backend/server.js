@@ -11118,6 +11118,105 @@ app.post(
   },
 );
 
+/* ================== ÇEK & SENET (KISITLI ERİŞİM) ================== */
+// Firmanın verdiği çek/senetlerin vade takibi — icra/bloke riskine karşı.
+// YALNIZ aşağıdaki kişiler erişebilir; menüde başkasına hiç görünmez.
+pool.query(`CREATE TABLE IF NOT EXISTS cek_senet (
+  id SERIAL PRIMARY KEY,
+  tip TEXT NOT NULL DEFAULT 'CEK',
+  karsi_taraf TEXT NOT NULL,
+  tutar NUMERIC NOT NULL,
+  banka TEXT,
+  belge_no TEXT,
+  duzenleme_tarihi DATE,
+  vade_tarihi DATE NOT NULL,
+  aciklama TEXT,
+  durum TEXT DEFAULT 'BEKLIYOR',
+  odeme_tarihi DATE,
+  created_by TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`).catch(() => {});
+
+const CEKSENET_YETKI = [
+  "orhan.bedir@simsektel.com",
+  "duzgun.simsek@simsektel.com",
+  "muhasebe@simsektel.com",
+  "erencan.simsek@simsektel.com",
+];
+function cekSenetYetkili(req) {
+  return CEKSENET_YETKI.includes(String(req.user?.email || "").toLowerCase().trim());
+}
+
+app.get("/finance/cek-senet", authMiddleware, async (req, res) => {
+  try {
+    if (!cekSenetYetkili(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const r = await pool.query(`
+      SELECT id, tip, karsi_taraf, tutar, banka, belge_no,
+        to_char(duzenleme_tarihi,'YYYY-MM-DD') AS duzenleme_tarihi,
+        to_char(vade_tarihi,'YYYY-MM-DD') AS vade_tarihi,
+        COALESCE(aciklama,'') AS aciklama, durum,
+        to_char(odeme_tarihi,'YYYY-MM-DD') AS odeme_tarihi, created_by
+      FROM cek_senet
+      ORDER BY CASE durum WHEN 'BEKLIYOR' THEN 0 ELSE 1 END, vade_tarihi ASC, id
+    `);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/finance/cek-senet", authMiddleware, async (req, res) => {
+  try {
+    if (!cekSenetYetkili(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const { tip, karsi_taraf, tutar, banka, belge_no, duzenleme_tarihi, vade_tarihi, aciklama } = req.body;
+    if (!karsi_taraf || !Number(tutar || 0) || !vade_tarihi)
+      return res.status(400).json({ ok: false, error: "Karşı taraf, tutar ve vade tarihi zorunlu" });
+    const r = await pool.query(`INSERT INTO cek_senet
+        (tip, karsi_taraf, tutar, banka, belge_no, duzenleme_tarihi, vade_tarihi, aciklama, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [String(tip || "CEK").toUpperCase() === "SENET" ? "SENET" : "CEK",
+       String(karsi_taraf).trim(), Number(tutar), banka || null, belge_no || null,
+       duzenleme_tarihi || null, vade_tarihi, aciklama || null,
+       String(req.user?.email || "")]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.put("/finance/cek-senet/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!cekSenetYetkili(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const { tip, karsi_taraf, tutar, banka, belge_no, duzenleme_tarihi, vade_tarihi, aciklama } = req.body;
+    if (!karsi_taraf || !Number(tutar || 0) || !vade_tarihi)
+      return res.status(400).json({ ok: false, error: "Karşı taraf, tutar ve vade tarihi zorunlu" });
+    await pool.query(`UPDATE cek_senet SET
+        tip=$1, karsi_taraf=$2, tutar=$3, banka=$4, belge_no=$5,
+        duzenleme_tarihi=$6, vade_tarihi=$7, aciklama=$8
+      WHERE id=$9`,
+      [String(tip || "CEK").toUpperCase() === "SENET" ? "SENET" : "CEK",
+       String(karsi_taraf).trim(), Number(tutar), banka || null, belge_no || null,
+       duzenleme_tarihi || null, vade_tarihi, aciklama || null, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.put("/finance/cek-senet/:id/odendi", authMiddleware, async (req, res) => {
+  try {
+    if (!cekSenetYetkili(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`UPDATE cek_senet SET durum='ODENDI', odeme_tarihi=$1 WHERE id=$2`,
+      [req.body?.odeme_tarihi || new Date().toISOString().slice(0, 10), req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.put("/finance/cek-senet/:id/geri-al", authMiddleware, async (req, res) => {
+  try {
+    if (!cekSenetYetkili(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`UPDATE cek_senet SET durum='BEKLIYOR', odeme_tarihi=NULL WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/cek-senet/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!cekSenetYetkili(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`DELETE FROM cek_senet WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 /* ================== ZIRVE E-FATURA İÇE AKTAR ================== */
 // Zirve e-Dönüşüm "Gelen Faturalar" Excel'i → invoice_entries senkronu.
 // mode=preview: satırları analiz eder (DB'ye yazmaz); mode=commit:
