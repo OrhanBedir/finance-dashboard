@@ -13386,6 +13386,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     const giris = String(p?.ise_giris_tarihi || "").split("T")[0];
     return giris && giris >= AHY_DEVIR ? 1 : 0.5;
   };
+  // AHY görünümünde yalnız devir sonrası yapılan maaş ödemeleri sayılır;
+  // 15.07 öncesi ödemeler ERC'nindir (fazla ödeme hesabını bozmasın).
+  const ahyOdemeGor = (o) => _hrMarka === "ERC" || String(o.tarih || "").slice(0, 10) >= AHY_DEVIR;
 
   const TR_RESMI_TATIL_HR = [
     "2024-01-01","2024-04-10","2024-04-11","2024-04-12","2024-04-23","2024-05-01","2024-05-19","2024-06-15","2024-06-16","2024-06-17","2024-06-18","2024-07-15","2024-08-30","2024-10-29",
@@ -13624,7 +13627,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
 
                     // Maaş ödemeleri — banka / elden ayrımı
                     const bankaByPer = {}, eldenByPer = {};
-                    aylikOdemeler.forEach(o => {
+                    aylikOdemeler.filter(ahyOdemeGor).forEach(o => {
                       bankaByPer[o.personel_id] = (bankaByPer[o.personel_id]||0) + Number(o.bankadan||0);
                       eldenByPer[o.personel_id] = (eldenByPer[o.personel_id]||0) + Number(o.elden||0);
                     });
@@ -13739,7 +13742,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                 const numKeys  = ["net_maas","bankadan_gosterilen","elden_verilen"];
                                 const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","_banka_odenen","_elden_odenen","iban","banka_adi","banka_hesap_no","aktif"];
                                 const odenenByPerId = {};
-                                aylikOdemeler.forEach(o => {
+                                aylikOdemeler.filter(ahyOdemeGor).forEach(o => {
                                   if (!odenenByPerId[o.personel_id]) odenenByPerId[o.personel_id] = { banka:0, elden:0 };
                                   odenenByPerId[o.personel_id].banka  += Number(o.bankadan||0);
                                   odenenByPerId[o.personel_id].elden  += Number(o.elden||0);
@@ -13973,7 +13976,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 // trafikCezaList is already filtered by personel_id from the API
                 const trafikCezaToplam = trafikCezaList.reduce((s,a)=>s+Number(a.tutar||0), 0);
                 const odenenBuAy = maasOdeList
-                  .filter(o => o.donem === puantajAy)
+                  .filter(o => o.donem === puantajAy && ahyOdemeGor(o))
                   .reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0), 0);
                 // Hakedilen: ozet'ten (backend prorated) veya gelmedi kesintisi ile hesaplanan;
                 // AHY görünümünde devir payı (ahyMaasOran) uygulanır
@@ -14019,7 +14022,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       const bankadan_gosterilen = Number(sp.bankadan_gosterilen||0);
                       const elden_verilen       = Number(sp.elden_verilen||0);
                       // Bu ay maas_odeme kayıtlarından banka / elden ayrımı
-                      const buAyOdeme = maasOdeList.filter(o => o.donem === puantajAy);
+                      const buAyOdeme = maasOdeList.filter(o => o.donem === puantajAy && ahyOdemeGor(o));
                       const bankaOdenen = buAyOdeme.reduce((s,o)=>s+Number(o.bankadan||0), 0);
                       const eldenOdenen = buAyOdeme.reduce((s,o)=>s+Number(o.elden||0),    0);
                       // Prorated kalan (puantaj + iş avansı düşülmüş)
@@ -14366,7 +14369,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               // Trafik cezası yalnız aynı personel seçiliyken güvenli
               const modalTrafik = String(hrPersonelFilter)===String(maasOdeModal.id)
                 ? trafikCezaList.reduce((s,a)=>s+Number(a.tutar||0),0) : 0;
-              const modalOdenen = maasOdeList.filter(o => o.donem===puantajAy).reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0),0);
+              const modalOdenen = maasOdeList.filter(o => o.donem===puantajAy && ahyOdemeGor(o)).reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0),0);
               const modalDevir = getDevirFazla(maasOdeModal.id); // geçen ay fazla ödeme devri
               const modalKalan = maasOdeHak - modalMaasAvans - modalIsAvans - modalTrafik - modalOdenen - modalDevir;
               return (
