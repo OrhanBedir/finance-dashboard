@@ -2117,11 +2117,19 @@ function CekSenetPanel({ currentUser }) {
     } catch (e) { alert(e.message); }
   };
   const odendiYap = async (r0) => {
-    const t = prompt("Ödeme tarihi (YYYY-AA-GG):", bugun);
+    const t = prompt(`${r0.karsi_taraf} — ₺${fmt(r0.tutar)}\nÖdeme tarihi (YYYY-AA-GG):\n(Kaydedilince Nakit Akışı'na gider olarak otomatik düşer)`, bugun);
     if (!t) return;
-    try { await fetch(`${API_BASE}/finance/cek-senet/${r0.id}/odendi`, { method: "PUT", headers: { ..._auth, "Content-Type": "application/json" }, body: JSON.stringify({ odeme_tarihi: t }) }); load(); } catch {}
+    try {
+      const r = await fetch(`${API_BASE}/finance/cek-senet/${r0.id}/odendi`, { method: "PUT", headers: { ..._auth, "Content-Type": "application/json" }, body: JSON.stringify({ odeme_tarihi: t }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || "İşaretlenemedi");
+      load();
+    } catch (e) { alert(e.message); }
   };
-  const geriAl = async (id) => { try { await fetch(`${API_BASE}/finance/cek-senet/${id}/geri-al`, { method: "PUT", headers: _auth }); load(); } catch {} };
+  const geriAl = async (id) => {
+    if (!window.confirm("Ödendi işareti geri alınsın mı? Nakit Akışı'ndaki gider kaydı da silinecek.")) return;
+    try { await fetch(`${API_BASE}/finance/cek-senet/${id}/geri-al`, { method: "PUT", headers: _auth }); load(); } catch {}
+  };
   const sil = async (id) => {
     if (!window.confirm("Bu kayıt silinsin mi?")) return;
     try { await fetch(`${API_BASE}/finance/cek-senet/${id}`, { method: "DELETE", headers: _auth }); load(); } catch {}
@@ -21779,6 +21787,7 @@ function CashFlowPanel({ currentUser, onBack }) {
   const aracByDay = {}, aracTips = {};
   const ticketByDay = {}, ticketTips = {};
   const digerByDay = {}, digerTips = {};
+  const cekSenetByDay = {}, cekSenetTips = {};
   const AY_KISA = (dn) => {
     const m = String(dn || "").match(/^(\d{4})-(\d{2})$/);
     return m ? `${AY_ADLARI[Number(m[2]) - 1]} ${m[1]}` : dn || "";
@@ -21802,6 +21811,7 @@ function CashFlowPanel({ currentUser, onBack }) {
     const eskiDonem = o.donem && o.donem !== expDonem;
     if (o.kategori === "ARAC" && !eskiDonem) addTo(aracByDay, aracTips, d, t, tip);
     else if (o.kategori === "TICKET" && !eskiDonem) addTo(ticketByDay, ticketTips, d, t, tip);
+    else if (o.kategori === "CEKSENET") addTo(cekSenetByDay, cekSenetTips, d, t, tip);
     else addTo(digerByDay, digerTips, d, t, eskiDonem ? `⏰ Geciken ${tip}` : tip);
   });
   // İş avansları (PD onaylı — otomatik) → Diğer Ödemeler, tooltip'te kırılım
@@ -21822,6 +21832,7 @@ function CashFlowPanel({ currentUser, onBack }) {
     { key:"ticket",      label:"🎫 Ticket'lar",                 type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: ticketByDay, tips: ticketTips, note: "Ödendikçe görünür (+ Ödeme Ekle)" },
     { key:"ofis",        label:`🏢 ${prevAyAdi} Depo & Ofis Kirası`, type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0 ? {5: totalOfis} : {}, note: `${prevAyAdi} kirası · Ödeme: 5. gün` },
     { key:"taseron",     label:"🔧 Taşeron Ödemeleri",          type:"expense", color:"#fdf4ff", textColor:"#7e22ce", byDay: taseronByDay, isTaseron: true },
+    { key:"cek_senet",   label:"📝 Çek & Senet Ödemeleri",      type:"expense", color:"#fef2f2", textColor:"#991b1b", byDay: cekSenetByDay, tips: cekSenetTips, note: "Çek & Senet panelinde ✓ Ödendi işaretlenince otomatik düşer" },
     { key:"diger",       label:"📋 Diğer Ödemeler",             type:"expense", color:"#f1f5f9", textColor:"#475569", byDay: digerByDay,  tips: digerTips,  note: "İş avansı (otomatik) + geciken maaş/kira + yemek vb. · üzerine gel" },
   ];
 
@@ -22271,7 +22282,8 @@ function CashFlowPanel({ currentUser, onBack }) {
 
       {/* Taşeron Detay Modal */}
       {manualDelModal && (() => {
-        const gunOdemeler = odemeler.filter(o => dayOf(o.tarih) === manualDelModal.gun);
+        // CEKSENET otomatik kayıttır — buradan silinmez (Çek & Senet panelinden Geri Al)
+        const gunOdemeler = odemeler.filter(o => dayOf(o.tarih) === manualDelModal.gun && o.kategori !== "CEKSENET");
         const KAT_LBL = { ARAC:"🚗 Araç kirası", TICKET:"🎫 Ticket/Yemek", DIGER:"📋 Diğer" };
         return (
           <div onClick={() => setManualDelModal(null)} style={{ position:"fixed", inset:0, zIndex:12500, background:"rgba(0,0,0,0.4)", display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
@@ -22281,7 +22293,7 @@ function CashFlowPanel({ currentUser, onBack }) {
                 <button onClick={()=>setManualDelModal(null)} style={{ border:"1px solid #e5e7eb", background:"#fff", borderRadius:"8px", padding:"5px 10px", cursor:"pointer", fontWeight:700 }}>Kapat</button>
               </div>
               <div style={{ fontSize:"11px", color:"#92400e", background:"#fffbeb", padding:"6px 10px", borderRadius:"8px", marginBottom:"12px" }}>
-                ℹ️ Yalnız elle girdiğin ödemeler silinebilir. İş avansları ve maaş ödemeleri buradan silinmez (kaynak: İş Avansı / İK panelleri).
+                ℹ️ Yalnız elle girdiğin ödemeler silinebilir. İş avansları, maaş ve çek/senet ödemeleri buradan silinmez (kaynak: İş Avansı / İK / Çek & Senet panelleri).
               </div>
               {gunOdemeler.length === 0 ? (
                 <div style={{ fontSize:"13px", color:"#9ca3af" }}>Bu güne ait elle girilmiş ödeme yok.</div>

@@ -11136,6 +11136,9 @@ pool.query(`CREATE TABLE IF NOT EXISTS cek_senet (
   created_by TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`).catch(() => {});
+// Ödendi işaretlenince Nakit Akışı'na (cashflow_odeme) düşen gider kaydının
+// bağı — geri alınırsa oradaki satır da otomatik silinir.
+pool.query(`ALTER TABLE cek_senet ADD COLUMN IF NOT EXISTS cashflow_id INTEGER`).catch(() => {});
 
 const CEKSENET_YETKI = [
   "orhan.bedir@simsektel.com",
@@ -11195,26 +11198,56 @@ app.put("/finance/cek-senet/:id", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 app.put("/finance/cek-senet/:id/odendi", authMiddleware, async (req, res) => {
+  // Ödendi = nakit çıkışı gerçekleşti → Nakit Akışı'na otomatik gider satırı
+  // (kategori CEKSENET, ödeme tarihiyle). Bağ cashflow_id'de tutulur.
+  const client = await pool.connect();
   try {
     if (!cekSenetYetkili(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-    await pool.query(`UPDATE cek_senet SET durum='ODENDI', odeme_tarihi=$1 WHERE id=$2`,
-      [req.body?.odeme_tarihi || new Date().toISOString().slice(0, 10), req.params.id]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+    const odemeTarihi = req.body?.odeme_tarihi || new Date().toISOString().slice(0, 10);
+    await client.query("BEGIN");
+    const cur = await client.query(`SELECT * FROM cek_senet WHERE id=$1 FOR UPDATE`, [req.params.id]);
+    if (!cur.rows.length) { await client.query("ROLLBACK"); return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" }); }
+    const cs = cur.rows[0];
+    if (cs.durum === "ODENDI") { await client.query("ROLLBACK"); return res.json({ ok: true }); }
+    const acik = `${cs.tip === "SENET" ? "Senet" : "Çek"} ödemesi — ${cs.karsi_taraf}${cs.belge_no ? ` (${cs.belge_no})` : ""}${cs.banka ? ` · ${cs.banka}` : ""}`;
+    const cf = await client.query(
+      `INSERT INTO cashflow_odeme (kategori, tarih, tutar, donem, aciklama, marka)
+       VALUES ('CEKSENET', $1, $2, to_char($1::date,'YYYY-MM'), $3, 'ERC') RETURNING id`,
+      [odemeTarihi, cs.tutar, acik]);
+    await client.query(`UPDATE cek_senet SET durum='ODENDI', odeme_tarihi=$1, cashflow_id=$2 WHERE id=$3`,
+      [odemeTarihi, cf.rows[0].id, req.params.id]);
+    await client.query("COMMIT");
+    res.json({ ok: true, cashflow_id: cf.rows[0].id });
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); res.status(500).json({ ok: false, error: e.message }); }
+  finally { client.release(); }
 });
 app.put("/finance/cek-senet/:id/geri-al", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     if (!cekSenetYetkili(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-    await pool.query(`UPDATE cek_senet SET durum='BEKLIYOR', odeme_tarihi=NULL WHERE id=$1`, [req.params.id]);
+    await client.query("BEGIN");
+    const cur = await client.query(`SELECT cashflow_id FROM cek_senet WHERE id=$1 FOR UPDATE`, [req.params.id]);
+    if (cur.rows[0]?.cashflow_id)
+      await client.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [cur.rows[0].cashflow_id]);
+    await client.query(`UPDATE cek_senet SET durum='BEKLIYOR', odeme_tarihi=NULL, cashflow_id=NULL WHERE id=$1`, [req.params.id]);
+    await client.query("COMMIT");
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); res.status(500).json({ ok: false, error: e.message }); }
+  finally { client.release(); }
 });
 app.delete("/finance/cek-senet/:id", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     if (!cekSenetYetkili(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-    await pool.query(`DELETE FROM cek_senet WHERE id=$1`, [req.params.id]);
+    await client.query("BEGIN");
+    const cur = await client.query(`SELECT cashflow_id FROM cek_senet WHERE id=$1 FOR UPDATE`, [req.params.id]);
+    if (cur.rows[0]?.cashflow_id)
+      await client.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [cur.rows[0].cashflow_id]);
+    await client.query(`DELETE FROM cek_senet WHERE id=$1`, [req.params.id]);
+    await client.query("COMMIT");
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); res.status(500).json({ ok: false, error: e.message }); }
+  finally { client.release(); }
 });
 
 /* ================== ZIRVE E-FATURA İÇE AKTAR ================== */
@@ -11517,6 +11550,11 @@ app.post("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
 
 app.delete("/finance/cashflow-odeme/:id", requireFinanceAuth, async (req, res) => {
   try {
+    // Çek/senet ödemeleri otomatik kayıttır — buradan silinemez; Çek & Senet
+    // panelinden "Geri Al" ile kaldırılır (aynı anda belge de BEKLIYOR'a döner).
+    const k = await pool.query(`SELECT kategori FROM cashflow_odeme WHERE id=$1`, [req.params.id]);
+    if (k.rows[0]?.kategori === "CEKSENET")
+      return res.status(400).json({ ok: false, error: "Çek/Senet ödemesi buradan silinemez — Çek & Senet panelinden Geri Al kullanın" });
     await pool.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
