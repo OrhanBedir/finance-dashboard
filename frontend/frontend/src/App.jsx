@@ -17214,28 +17214,47 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
           ödeme gününe göre gruplanır. Filtre yokken yalnız son ödeme günü gösterilir. */}
       {!isRequester && (() => {
         const filtreAktif = !!(searchText || filterDurum || filterGider || filterBolge || filterProje || filterBaslangic || filterBitis);
-        const odenmis = visibleList.filter(t => (t.durum === "DIREKTOR_ONAY" || t.durum === "TAMAMLANDI") && (t.odeme_tarihi || t.direktor_onay_tarihi));
-        if (!odenmis.length) return null;
+        const odenmis = visibleList.filter(t => t.durum === "TAMAMLANDI" && (t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi));
+        // Ödeme bekleyen = PD onaylı, muhasebe henüz ödemedi → bugün gereken nakit.
+        // Filtreden bağımsız tüm listeden hesaplanır ki ihtiyaç hiç gizlenmesin.
+        const bekleyenOdeme = list.filter(t => t.durum === "DIREKTOR_ONAY");
+        const bekleyenToplam = bekleyenOdeme.reduce((s, t) => s + Number(t.tutar || 0), 0);
+        const surecteHepsi = list.filter(t => ["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY"].includes(t.durum));
+        const surecteToplam = surecteHepsi.reduce((s, t) => s + Number(t.tutar || 0), 0);
+        if (!odenmis.length && !bekleyenOdeme.length && !surecteHepsi.length) return null;
         const gunler = {};
         odenmis.forEach(t => {
-          const g = String(t.odeme_tarihi || t.direktor_onay_tarihi).split("T")[0];
+          const g = String(t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi).split("T")[0];
           (gunler[g] = gunler[g] || { toplam: 0, adet: 0 }).toplam += Number(t.tutar || 0);
           gunler[g].adet += 1;
         });
         const sirali = Object.entries(gunler).sort((a, b) => b[0].localeCompare(a[0]));
         const gosterilen = filtreAktif ? sirali.slice(0, 8) : sirali.slice(0, 1);
         const toplam = odenmis.reduce((s, t) => s + Number(t.tutar || 0), 0);
-        const surecte = visibleList.filter(t => !["DIREKTOR_ONAY", "TAMAMLANDI", "REDDEDILDI"].includes(t.durum));
         const gunFmt = (g) => { const [y, m, d] = g.split("-"); return `${d}.${m}.${y}`; };
         const AYLAR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
         const gunUzun = (g) => { const [y, m, d] = g.split("-"); return `${Number(d)} ${AYLAR[Number(m) - 1]}`; };
         return (
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "stretch", marginBottom: "16px" }}>
-            {filtreAktif && (
+            {bekleyenOdeme.length > 0 && (
+              <div style={{ background: "linear-gradient(135deg, #b45309, #d97706)", borderRadius: "14px", padding: "12px 20px", color: "#fff", minWidth: "180px", boxShadow: "0 4px 14px rgba(180,83,9,0.3)" }}>
+                <div style={{ fontSize: "10.5px", fontWeight: 700, opacity: 0.8, letterSpacing: "0.05em" }}>💰 ÖDEME BEKLEYEN — BUGÜN GEREKEN</div>
+                <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "2px" }}>₺{bekleyenToplam.toLocaleString("tr-TR")}</div>
+                <div style={{ fontSize: "11px", opacity: 0.8 }}>{bekleyenOdeme.length} onaylı talep muhasebede{surecteHepsi.length ? ` · onay sürecinde ₺${surecteToplam.toLocaleString("tr-TR")} (${surecteHepsi.length})` : ""}</div>
+              </div>
+            )}
+            {bekleyenOdeme.length === 0 && surecteHepsi.length > 0 && (
+              <div style={{ background: "#fffbeb", border: "1.5px solid #fcd34d", borderRadius: "14px", padding: "12px 18px", minWidth: "160px" }}>
+                <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#92400e" }}>⏳ ONAY SÜRECİNDE</div>
+                <div style={{ fontSize: "19px", fontWeight: 800, color: "#b45309", marginTop: "2px" }}>₺{surecteToplam.toLocaleString("tr-TR")}</div>
+                <div style={{ fontSize: "11px", color: "#b45309", opacity: 0.8 }}>{surecteHepsi.length} talep · onaylanınca ödemeye düşer</div>
+              </div>
+            )}
+            {filtreAktif && odenmis.length > 0 && (
               <div style={{ background: "linear-gradient(135deg, #1e3a5f, #2d5a8f)", borderRadius: "14px", padding: "12px 20px", color: "#fff", minWidth: "170px", boxShadow: "0 4px 14px rgba(30,58,95,0.25)" }}>
                 <div style={{ fontSize: "10.5px", fontWeight: 700, opacity: 0.75, letterSpacing: "0.05em" }}>💸 FİLTREDE ÖDENEN TOPLAM</div>
                 <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "2px" }}>₺{toplam.toLocaleString("tr-TR")}</div>
-                <div style={{ fontSize: "11px", opacity: 0.7 }}>{odenmis.length} kayıt · {sirali.length} gün{surecte.length ? ` · ${surecte.length} talep süreçte` : ""}</div>
+                <div style={{ fontSize: "11px", opacity: 0.7 }}>{odenmis.length} kayıt · {sirali.length} gün</div>
               </div>
             )}
             {gosterilen.map(([g, v]) => (
