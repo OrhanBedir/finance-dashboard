@@ -13355,6 +13355,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     // Dönem boşsa varsayılan bir önceki ay (henüz kapatılmamış maaş dönemi)
     let donem = avansForm.donem;
     if (!donem) { const d = new Date(); d.setMonth(d.getMonth()-1); donem = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
+    // İşe giriş emniyeti: personel o dönemde henüz çalışmıyorduysa avans
+    // en erken işe giriş ayının maaşından kesilir (elle seçilse bile).
+    const _sp = personelList.find(p => String(p.id) === String(avansForm.personel_id));
+    const _girisAy = _sp?.ise_giris_tarihi ? String(_sp.ise_giris_tarihi).slice(0, 7) : null;
+    if (_girisAy && donem < _girisAy) donem = _girisAy;
     await fetch(`${API_BASE}/hr/avans`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ...avansForm, avans_turu:"MAAS", donem }) });
     setAvansForm({ personel_id:"", tarih: new Date().toISOString().split("T")[0], tutar:"", aciklama:"", donem:"" });
     loadAvans();
@@ -15261,13 +15266,21 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   </div>
                   {isMaas && (() => {
                     const _d = new Date(); _d.setMonth(_d.getMonth()-1);
-                    const defDonem = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,"0")}`;
+                    let defDonem = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,"0")}`;
+                    // İşe giriş kontrolü: personel önceki ay çalışmadıysa (giriş ayı
+                    // daha yeni) avans en erken giriş ayının maaşından kesilebilir.
+                    const _p = personelList.find(p => String(p.id) === String(form.personel_id));
+                    const _giris = _p?.ise_giris_tarihi ? String(_p.ise_giris_tarihi).slice(0, 7) : null;
+                    const yeniGiris = _giris && _giris > defDonem;
+                    if (yeniGiris) defDonem = _giris;
                     return (
                       <div>
                         <label style={labelSt}>Hangi ay maaşından kesilecek? (Dönem)</label>
                         <input type="month" value={form.donem || defDonem} onChange={e=>setForm(f=>({...f,donem:e.target.value}))} style={inputSt} />
                         <div style={{ fontSize:"11px", color:"#92400e", marginTop:"3px", lineHeight:1.4 }}>
-                          💡 Avansı bugün versen de, seçtiğin ayın maaşından kesilir. Varsayılan: bir önceki (henüz kapatılmamış) ay.
+                          {yeniGiris
+                            ? <>💡 {_p.ad_soyad} {_giris.split("-").reverse().join("/")} ayında işe girdi — avans giriş ayının maaşından kesilir.</>
+                            : <>💡 Avansı bugün versen de, seçtiğin ayın maaşından kesilir. Varsayılan: bir önceki (henüz kapatılmamış) ay.</>}
                         </div>
                       </div>
                     );
