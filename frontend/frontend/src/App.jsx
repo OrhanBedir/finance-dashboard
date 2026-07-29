@@ -13628,11 +13628,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       const avans    = avansMapByPer[p.id]  || 0;
                       const isAvans  = isAvansMapByPer[p.id] || 0;
                       const banka    = bankaByPer[p.id]     || 0;
-                      // Maaş avanslarının TAMAMI elden ödeme sayılır → 'Elden Öd.'
-                      // kolonunda görünür, ayrı M.Avans kolonu yoktur.
-                      const elden    = (eldenByPer[p.id]    || 0) + avans;
+                      // Maaş avansı ayrı 'M.Avansı' kolonunda gösterilir; ödenen
+                      // toplamına dahildir (nakit personele çıkmıştır).
+                      const elden    = eldenByPer[p.id]    || 0;
                       // İş avansı MAAŞ ödemesi değildir → maaş ödeneni/kalanı hesabına KATILMAZ.
-                      const odenen   = banka + elden;
+                      const odenen   = banka + elden + avans;
                       // Önceki aydan devreden fazla ödeme bu ayın alacağından düşülür
                       const devir    = getDevirFazla(p.id);
                       const gereken  = Math.max(0, hakEdis - devir);
@@ -13839,6 +13839,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     { label:"Hakediş",     align:"right" },
                                     { label:"🏦 Banka Öd.", align:"right", color:"#1d4ed8" },
                                     { label:"💵 Elden Öd.", align:"right", color:"#15803d" },
+                                    { label:"💰 M.Avansı",  align:"right", color:"#9d174d" },
                                     { label:"🏗 İş Avansı", align:"right", color:"#b45309" },
                                     { label:"Toplam Öd.",  align:"right" },
                                     { label:"Kalan",       align:"right" },
@@ -13858,6 +13859,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     </td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.elden>0?"#15803d":"#9ca3af", fontWeight:600 }}>
                                       {p.elden>0 ? `₺${p.elden.toLocaleString("tr-TR")}` : "—"}
+                                    </td>
+                                    <td style={{ padding:"7px 12px", textAlign:"right", color: p.avans>0?"#9d174d":"#9ca3af", fontWeight:600 }}
+                                      title={p.avans>0 ? "Maaş avansı — bu ayın maaşından kesilir, ödenen toplamına dahildir" : undefined}>
+                                      {p.avans>0 ? `₺${p.avans.toLocaleString("tr-TR")}` : "—"}
                                     </td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.isAvans>0?"#b45309":"#9ca3af", fontWeight:600 }}>
                                       {p.isAvans>0 ? `₺${p.isAvans.toLocaleString("tr-TR")}` : "—"}
