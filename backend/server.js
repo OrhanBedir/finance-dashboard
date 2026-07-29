@@ -11492,11 +11492,15 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
     await ensureCashflowOdemeTable();
     const { yil, ay } = req.query;
     if (!yil || !ay) return res.status(400).json({ ok: false, error: "yil ve ay gerekli" });
+    // ERC Nakit Akışı YALNIZ ERC'yi gösterir: AHY işaretli manuel girişler
+    // AHY panelinde; AHY personelinin devir (15.07.2026) sonrası maaş/avans
+    // ödemeleri de AHY sorumluluğundadır, buraya yansımaz.
     const r = await pool.query(
       `SELECT id, kategori, TO_CHAR(tarih,'YYYY-MM-DD') AS tarih, tutar, donem, aciklama,
               UPPER(COALESCE(marka,'ERC')) AS marka
        FROM cashflow_odeme
        WHERE EXTRACT(YEAR FROM tarih)=$1 AND EXTRACT(MONTH FROM tarih)=$2
+         AND UPPER(COALESCE(marka,'ERC'))='ERC'
        ORDER BY tarih, id`, [yil, ay]);
     // Maaş ödemeleri: İK'daki maas_odeme kayıtları (bu ay yapılan ödemeler)
     const m = await pool.query(
@@ -11504,7 +11508,8 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
               (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
               m.donem, p.ad_soyad
        FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
-       WHERE EXTRACT(YEAR FROM m.tarih)=$1 AND EXTRACT(MONTH FROM m.tarih)=$2`,
+       WHERE EXTRACT(YEAR FROM m.tarih)=$1 AND EXTRACT(MONTH FROM m.tarih)=$2
+         AND (COALESCE(p.marka,'ERC')='ERC' OR m.tarih < DATE '2026-07-15')`,
       [yil, ay]).catch(() => ({ rows: [] }));
     // Maaş avansları: avans tablosu (turu MAAS) — nakit çıkışı ÖDENDİĞİ GÜN
     // gerçekleşir (dönem hangi ayın maaşı olursa olsun), maaş satırına eklenir
@@ -11514,7 +11519,8 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
               (p.ad_soyad || ' · maaş avansı') AS ad_soyad
        FROM avans a JOIN personel p ON p.id = a.personel_id
        WHERE UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS'
-         AND EXTRACT(YEAR FROM a.tarih)=$1 AND EXTRACT(MONTH FROM a.tarih)=$2`,
+         AND EXTRACT(YEAR FROM a.tarih)=$1 AND EXTRACT(MONTH FROM a.tarih)=$2
+         AND (COALESCE(p.marka,'ERC')='ERC' OR a.tarih < DATE '2026-07-15')`,
       [yil, ay]).catch(() => ({ rows: [] }));
     // İş avansları: PD (Direktör) onayından geçenler — otomatik gider
     // Tarih: ödeme tarihi varsa o, yoksa direktör onay tarihi
