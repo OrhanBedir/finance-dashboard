@@ -1716,10 +1716,16 @@ function MarkaNakitPanel({ currentUser }) {
                   </th>
                 );
               })}
+              <th style={{ position: "sticky", right: 0, zIndex: 3, background: "#0f2744", color: "#fff", padding: "6px 8px", minWidth: "78px", textAlign: "center", borderLeft: "2px solid #3b6ea5" }}>
+                <div style={{ fontSize: "12px", fontWeight: 800 }}>Σ Toplam</div>
+                <div style={{ fontSize: "10px", opacity: 0.75 }}>bu ay</div>
+              </th>
             </tr>
           </thead>
           <tbody>
-            {KATEGORILER.map(([tip, ad, aciklamaNot]) => (
+            {KATEGORILER.map(([tip, ad, aciklamaNot]) => {
+              const satirToplam = Object.values(hucre[tip] || {}).reduce((s, m) => s + m.t, 0);
+              return (
               <tr key={tip} style={{ borderBottom: "1px solid #f1f5f9" }}>
                 <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#fff", padding: "9px 14px", borderRight: "1px solid #e5e7eb" }}>
                   <div style={{ fontWeight: 700, color: TIP[tip].fg, fontSize: "13px", whiteSpace: "nowrap" }}>{ad}</div>
@@ -1734,19 +1740,29 @@ function MarkaNakitPanel({ currentUser }) {
                     </td>
                   );
                 })}
+                <td style={{ position: "sticky", right: 0, zIndex: 2, textAlign: "center", padding: "8px 6px", background: satirToplam > 0 ? TIP[tip].bg : "#f8fafc", color: TIP[tip].fg, fontWeight: 800, fontSize: "12px", whiteSpace: "nowrap", borderLeft: "2px solid #cbd5e1" }}>
+                  {satirToplam > 0 ? `-${fk(satirToplam)}` : ""}
+                </td>
               </tr>
-            ))}
+              );
+            })}
             <tr style={{ borderTop: "2px solid #bfdbfe", background: "#eff6ff" }}>
               <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#eff6ff", padding: "9px 14px", fontWeight: 800, color: "#1e40af", fontSize: "13px", borderRight: "1px solid #e5e7eb" }}>📊 Günlük Toplam</td>
               {gunToplamlar.map((t, i) => (
                 <td key={i} style={{ textAlign: "center", padding: "8px 3px", fontWeight: 800, fontSize: "11.5px", color: t > 0 ? "#dc2626" : "#cbd5e1", whiteSpace: "nowrap" }}>{t > 0 ? `-${fk(t)}` : ""}</td>
               ))}
+              <td style={{ position: "sticky", right: 0, zIndex: 2, background: "#dbeafe", textAlign: "center", padding: "8px 6px", fontWeight: 900, fontSize: "12.5px", color: "#dc2626", whiteSpace: "nowrap", borderLeft: "2px solid #cbd5e1" }}>
+                {ayToplam > 0 ? `-${fk(ayToplam)}` : ""}
+              </td>
             </tr>
             <tr style={{ background: "#14532d" }}>
               <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#14532d", padding: "9px 14px", fontWeight: 800, color: "#fff", fontSize: "13px" }}>💰 Kümülatif Harcama</td>
               {kumulatif.map((t, i) => (
                 <td key={i} style={{ textAlign: "center", padding: "8px 3px", fontWeight: 700, fontSize: "11px", color: "#bbf7d0", whiteSpace: "nowrap" }}>{t > 0 ? fk(t) : ""}</td>
               ))}
+              <td style={{ position: "sticky", right: 0, zIndex: 2, background: "#14532d", textAlign: "center", padding: "8px 6px", fontWeight: 900, fontSize: "12px", color: "#bbf7d0", whiteSpace: "nowrap", borderLeft: "2px solid #166534" }}>
+                {ayToplam > 0 ? fk(ayToplam) : ""}
+              </td>
             </tr>
           </tbody>
         </table>
