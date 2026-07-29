@@ -17210,6 +17210,48 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
         )}
       </div>
 
+      {/* Ödeme özeti kartları: filtreye uyan kayıtlardan fiilen ÖDENEN avanslar,
+          ödeme gününe göre gruplanır. Filtre yokken yalnız son ödeme günü gösterilir. */}
+      {!isRequester && (() => {
+        const filtreAktif = !!(searchText || filterDurum || filterGider || filterBolge || filterProje || filterBaslangic || filterBitis);
+        const odenmis = visibleList.filter(t => (t.durum === "DIREKTOR_ONAY" || t.durum === "TAMAMLANDI") && (t.odeme_tarihi || t.direktor_onay_tarihi));
+        if (!odenmis.length) return null;
+        const gunler = {};
+        odenmis.forEach(t => {
+          const g = String(t.odeme_tarihi || t.direktor_onay_tarihi).split("T")[0];
+          (gunler[g] = gunler[g] || { toplam: 0, adet: 0 }).toplam += Number(t.tutar || 0);
+          gunler[g].adet += 1;
+        });
+        const sirali = Object.entries(gunler).sort((a, b) => b[0].localeCompare(a[0]));
+        const gosterilen = filtreAktif ? sirali.slice(0, 8) : sirali.slice(0, 1);
+        const toplam = odenmis.reduce((s, t) => s + Number(t.tutar || 0), 0);
+        const surecte = visibleList.filter(t => !["DIREKTOR_ONAY", "TAMAMLANDI", "REDDEDILDI"].includes(t.durum));
+        const gunFmt = (g) => { const [y, m, d] = g.split("-"); return `${d}.${m}.${y}`; };
+        const AYLAR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+        const gunUzun = (g) => { const [y, m, d] = g.split("-"); return `${Number(d)} ${AYLAR[Number(m) - 1]}`; };
+        return (
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "stretch", marginBottom: "16px" }}>
+            {filtreAktif && (
+              <div style={{ background: "linear-gradient(135deg, #1e3a5f, #2d5a8f)", borderRadius: "14px", padding: "12px 20px", color: "#fff", minWidth: "170px", boxShadow: "0 4px 14px rgba(30,58,95,0.25)" }}>
+                <div style={{ fontSize: "10.5px", fontWeight: 700, opacity: 0.75, letterSpacing: "0.05em" }}>💸 FİLTREDE ÖDENEN TOPLAM</div>
+                <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "2px" }}>₺{toplam.toLocaleString("tr-TR")}</div>
+                <div style={{ fontSize: "11px", opacity: 0.7 }}>{odenmis.length} kayıt · {sirali.length} gün{surecte.length ? ` · ${surecte.length} talep süreçte` : ""}</div>
+              </div>
+            )}
+            {gosterilen.map(([g, v]) => (
+              <div key={g} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: "4px solid #2563eb", borderRadius: "14px", padding: "12px 18px", minWidth: "140px" }}>
+                <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#64748b" }}>📅 {gunUzun(g)}{!filtreAktif ? " (son ödeme günü)" : ""}</div>
+                <div style={{ fontSize: "19px", fontWeight: 800, color: "#1e3a5f", marginTop: "2px" }}>₺{v.toplam.toLocaleString("tr-TR")}</div>
+                <div style={{ fontSize: "11px", color: "#94a3b8" }}>{v.adet} avans ödendi · {gunFmt(g)}</div>
+              </div>
+            ))}
+            {filtreAktif && sirali.length > 8 && (
+              <div style={{ alignSelf: "center", fontSize: "11.5px", color: "#94a3b8" }}>+{sirali.length - 8} gün daha (tarih aralığını daraltın)</div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Personel arama özeti: ada eşleşen personelin üzerindeki toplam avans/bakiye
           (yönetici görünümü — bakiyeler verisinden; kayıt kime istendiyse ona işlenir) */}
       {!isRequester && searchText.trim().length >= 3 && (() => {
