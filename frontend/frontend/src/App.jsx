@@ -13577,6 +13577,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           const aktifP = personelList.filter(p => puantajIstihdam(p));
                           let _toplamIsverenMal = 0;
                           let _toplamSgkIsv = 0;
+                          // Banka/Elden dağılımı girilmemiş personelde (ikisi de 0)
+                          // net maaşın tamamı bankadan (kayıtlı) varsayılır — aksi
+                          // halde brüt toplam nete göre eksik çıkar.
+                          const _split = (p) => {
+                            const b = Number(p?.bankadan_gosterilen || 0);
+                            const e = Number(p?.elden_verilen || 0);
+                            return (b + e > 0) ? { b, e } : { b: Number(p?.net_maas || 0), e: 0 };
+                          };
                           if (ozet.length > 0) {
                             ozet.forEach(o => {
                               const p = aktifP.find(x => String(x.id) === String(o.personel_id));
@@ -13584,8 +13592,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               const netMaas   = Number(p?.net_maas || 0);
                               const hakedilen = Number(o.hakedilen_maas || 0);
                               const ratio     = (netMaas > 0 ? hakedilen / netMaas : 1) * oran;
-                              const bankadan  = Math.round(Number(p?.bankadan_gosterilen || 0) * ratio);
-                              const elden     = Math.round(Number(p?.elden_verilen || 0) * ratio);
+                              const sp        = _split(p);
+                              const bankadan  = Math.round(sp.b * ratio);
+                              const elden     = Math.round(sp.e * ratio);
                               const bm        = calcBrutMaas(bankadan);
                               _toplamIsverenMal += bm.isverenMaliyet + elden;
                               _toplamSgkIsv     += bm.sgkIssizlikIsv;
@@ -13593,8 +13602,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           } else {
                             aktifP.forEach(p => {
                               const oran     = ahyMaasOran(p);
-                              const bankadan = Math.round(Number(p.bankadan_gosterilen || 0) * oran);
-                              const elden    = Math.round(Number(p.elden_verilen || 0) * oran);
+                              const sp       = _split(p);
+                              const bankadan = Math.round(sp.b * oran);
+                              const elden    = Math.round(sp.e * oran);
                               const bm       = calcBrutMaas(bankadan);
                               _toplamIsverenMal += bm.isverenMaliyet + elden;
                               _toplamSgkIsv     += bm.sgkIssizlikIsv;
