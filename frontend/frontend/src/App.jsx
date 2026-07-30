@@ -478,10 +478,12 @@ async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, 
     font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
     alignment: { horizontal: "center", vertical: "center" },
   };
+  // Başlıklar TEK SATIR: wrap yok; kolon genişliği başlık sığacak kadar
+  // otomatik büyütülür (aşağıda !cols hesabında)
   const headerStyle = {
     fill: { patternType: "solid", fgColor: { rgb: "203864" } },
     font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
-    alignment: { horizontal: "center", vertical: "center", wrapText: true },
+    alignment: { horizontal: "center", vertical: "center", wrapText: false },
     border: {
       top: { style: "thin", color: { rgb: "B7C9E2" } },
       bottom: { style: "thin", color: { rgb: "B7C9E2" } },
@@ -527,7 +529,11 @@ async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, 
     });
   });
   ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
-  ws["!cols"] = (colWidths || headers.map(() => 18)).map((wch) => ({ wch }));
+  // Kolon genişliği: verilen genişlik ile başlık uzunluğunun büyüğü
+  // (+4 filtre oku payı) — başlık hiçbir zaman iki satıra kırılmaz
+  ws["!cols"] = (colWidths || headers.map(() => 18)).map((wch, i) => ({
+    wch: Math.max(Number(wch) || 18, String(headers[i] || "").length + 4),
+  }));
   ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...aoa.slice(2).map(() => ({ hpt: 20 }))];
 
   const wb = XLSXStyle.utils.book_new();
@@ -19406,17 +19412,25 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           return Number(row.done_qty || 0) > 0 && hwFaturali;
         })
         .map((row) => {
-          const totalTRY = getSubconAmountTRY(row);
           const doneQty = Number(row.done_qty || 0);
-          const taseronUnit = doneQty > 0 ? totalTRY / doneQty : 0;
+          // Miktar sınırı: HW'ye fiilen faturalanmış miktar (billed) belliyse
+          // taşeron en fazla o kadarını kesebilir — yapılan fazlası HW'ye
+          // faturalandıkça listeye girer. Billed bilinmiyorsa (fatura item
+          // eşleşmesi) yapılan miktar esas alınır.
+          const billedQ = Number(row.billed_qty || 0);
+          const efQty = billedQ > 0 ? Math.min(doneQty, billedQ) : doneQty;
+          const scale = doneQty > 0 ? efQty / doneQty : 1;
+          const totalTRY = getSubconAmountTRY(row) * scale;
+          const taseronUnit = efQty > 0 ? totalTRY / efQty : 0;
           const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
           const inv = invoicedByKey[key] || null;
           // Fatura zinciri: Şimşek HW'ye montaj bedelinin %80'ini keser;
           // taşeron da Şimşek'e o kesilenin kendi kırılım oranı kadarını keser.
-          const hwRaw = getRowTotalTRY(row);
+          const hwRaw = getRowTotalTRY(row) * scale;
           const simsekHw = hwRaw * 0.8;
           const kesmeliBedel = simsekHw * getSubconRateByRow(row);
           return {
+            fatura_qty: efQty,
             simsek_hw_kesilen: simsekHw,
             kesmesi_gereken: kesmeliBedel,
             site_id: row.site_code,
@@ -19454,6 +19468,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       "Item Code",
       "Done Qty",
       "Request Qty",
+      "Fatura Qty",
       `${_name.toUpperCase()} Birim Fiyat (₺)`,
       `${_name.toUpperCase()} Toplam Fiyat (₺)`,
       "Şimşek → HW Kesilen Bedel (%80) (₺)",
@@ -19476,6 +19491,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         x.item_code || "",
         x.done_qty,
         x.requested_qty,
+        Number(x.fatura_qty || 0),
         Number(x.unit_price || 0),
         Number(x.total_price || 0),
         Number(x.simsek_hw_kesilen || 0),
@@ -19487,14 +19503,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         x.vade || "",
       ]);
     }
-    aoa.push(["", "", "", "", "", "TOPLAM", grand, grandHw, grandKesmeli, "", "", "", "", ""]);
+    aoa.push(["", "", "", "", "", "", "TOPLAM", grand, grandHw, grandKesmeli, "", "", "", "", ""]);
     exportStandardExcel({
       title: `${_name} - Fatura Kesilebilir Kalemler`,
       sheetName: "Fatura Kesilebilir",
       fileBase: `${_name} - Fatura Kesilebilir`,
       headers: header,
-      colWidths: [19, 44, 14, 10, 12, 17, 19, 21, 23, 12, 16, 13, 15, 13],
-      numericCols: [3, 4, 5, 6, 7, 8, 12],
+      colWidths: [19, 44, 14, 10, 12, 12, 17, 19, 21, 23, 12, 16, 13, 15, 13],
+      numericCols: [3, 4, 5, 6, 7, 8, 9, 13],
       rows: aoa.slice(1),
     }).catch((e) => alert("Excel indirilemedi: " + e.message));
   };
