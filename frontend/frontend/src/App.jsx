@@ -510,7 +510,12 @@ async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, 
   aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
   rows.forEach((r, idx) => {
     const isEven = idx % 2 === 1;
-    aoa.push(r.map((v, ci) => ({ v: v ?? "", s: cellStyle(isEven, numSet.has(ci)) })));
+    aoa.push(r.map((v, ci) => {
+      const s = cellStyle(isEven, numSet.has(ci));
+      // Sayısal hücreler binlik ayraç + 2 ondalıkla, tek satırda okunur
+      if (numSet.has(ci) && typeof v === "number") s.numFmt = "#,##0.00";
+      return { v: v ?? "", s };
+    }));
   });
 
   const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
@@ -19488,7 +19493,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       sheetName: "Fatura Kesilebilir",
       fileBase: `${_name} - Fatura Kesilebilir`,
       headers: header,
-      colWidths: [18, 40, 14, 10, 10, 14, 16, 19, 21, 13, 18, 13, 16, 13],
+      colWidths: [19, 44, 14, 10, 12, 17, 19, 21, 23, 12, 16, 13, 15, 13],
       numericCols: [3, 4, 5, 6, 7, 8, 12],
       rows: aoa.slice(1),
     }).catch((e) => alert("Excel indirilemedi: " + e.message));
