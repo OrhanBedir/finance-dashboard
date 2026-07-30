@@ -21300,6 +21300,57 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 background: "#fff",
               }}
             >
+              {_isPoBeklerDetail ? (
+              /* PO Açılmamış detayı: sade görünüm — miktarlar + ne yapılmalı notu */
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+                <thead>
+                  <tr style={{ background: "#1f2937" }}>
+                    <th style={detailThStyle}>Durum</th>
+                    <th style={detailThStyle}>Project</th>
+                    <th style={detailThStyle}>Site Code</th>
+                    <th style={detailThStyle}>Item Description</th>
+                    <th style={detailThStyle}>Yapılan (Done)</th>
+                    <th style={detailThStyle}>PO (Requested)</th>
+                    <th style={detailThStyle}>Not</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.length === 0 ? (
+                    <tr><td colSpan="7" style={{ textAlign: "center", padding: "20px" }}>Kayıt yok</td></tr>
+                  ) : (
+                    filteredRows.map((row, index) => {
+                      const done = Number(row.done_qty || 0);
+                      const req = Number(row.requested_qty || 0);
+                      const eksik = done - req;
+                      const hicYok = req === 0;
+                      const tdP = { padding: "12px 14px", borderBottom: "1px solid #e5e7eb" };
+                      return (
+                        <tr key={row.id ?? `${row.project_code}-${row.site_code}-${row.item_code}-${index}`}>
+                          <td style={tdP}>
+                            {hicYok
+                              ? <span style={{ padding: "5px 11px", borderRadius: "20px", fontSize: "12px", fontWeight: 700, background: "#fdecea", color: "#d32f2f", whiteSpace: "nowrap" }}>PO YOK</span>
+                              : <span style={{ padding: "5px 11px", borderRadius: "20px", fontSize: "12px", fontWeight: 700, background: "#fff8db", color: "#a16207", whiteSpace: "nowrap" }}>EKSİK PO</span>}
+                          </td>
+                          <td style={tdP}>{row.project_code || "-"}</td>
+                          <td style={{ ...tdP, fontWeight: 600 }}>{row.site_code || "-"}</td>
+                          <td style={tdP}>
+                            {row.item_description || "-"}
+                            <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "2px" }}>{row.item_code || ""}</div>
+                          </td>
+                          <td style={{ ...tdP, textAlign: "center", fontWeight: 700 }}>{done}</td>
+                          <td style={{ ...tdP, textAlign: "center", fontWeight: 700, color: hicYok ? "#d32f2f" : "#a16207" }}>{req}</td>
+                          <td style={{ ...tdP, fontSize: "13px", fontWeight: 600, color: hicYok ? "#b91c1c" : "#92400e" }}>
+                            {hicYok
+                              ? `PO hiç açılmamış — ${eksik} adet açılmalı`
+                              : `Eksik açılmış — ${eksik} adet daha açılması lazım`}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+              ) : (
               <table
                 style={{
                   width: "100%",
@@ -21470,6 +21521,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   )}
                 </tbody>
               </table>
+              )}
             </div>
           </div>
         </div>
