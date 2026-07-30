@@ -2945,6 +2945,7 @@ function buildMasterJoinedQuery(
 
       COALESCE(m.done_qty, 0) *
       CASE
+        WHEN TRIM(COALESCE(m.item_code, '')) = '8818278098' THEN 986.23
         WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.unit_price, 0)
         ELSE COALESCE(item_po.unit_price, 0)
       END AS total_done_amount,
