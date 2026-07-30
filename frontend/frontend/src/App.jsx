@@ -20915,15 +20915,21 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   }}
                 >
                   <div style={{ fontSize: "14px" }}>
-                    <b>{billableRows.length}</b> kalem · Toplam:{" "}
-                    <b style={{ color: "#15803d" }}>
+                    <b>{billableRows.length}</b> kalem
+                    {" · "}Kesilecek Fatura Toplamı:{" "}
+                    <b style={{ color: "#15803d", fontSize: "16px" }}>
                       {formatTRY(
                         billableRows.reduce(
-                          (s, x) => s + Number(x.total_price || 0),
+                          (s, x) => s + Number(x.kesmesi_gereken || 0),
                           0,
                         ),
                       )}
                     </b>
+                    <span style={{ color: "#94a3b8", fontSize: "12px" }}> (KDV hariç)</span>
+                    <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>
+                      Hakediş toplamı: {formatTRY(billableRows.reduce((s, x) => s + Number(x.total_price || 0), 0))}
+                      {" · "}Şimşek → HW kesilen (%80): {formatTRY(billableRows.reduce((s, x) => s + Number(x.simsek_hw_kesilen || 0), 0))}
+                    </div>
                   </div>
                   <button
                     type="button"
