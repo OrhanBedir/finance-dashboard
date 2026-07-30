@@ -19175,6 +19175,50 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       alert("İndirilecek kayıt bulunamadı");
       return;
     }
+    // PO Açılmamış detayı: modaldaki sade görünümün aynısı — fiyat/fatura kolonu yok
+    if (_isPoBeklerDetail) {
+      const dateStr = new Date().toLocaleDateString("tr-TR");
+      const headers = ["Durum", "Project", "Site Code", "Item Code", "Item Description", "Yapılan (Done)", "PO (Requested)", "Not"];
+      const titleStyle = { fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } }, font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" }, alignment: { horizontal: "center", vertical: "center" } };
+      const headerStyle = { fill: { patternType: "solid", fgColor: { rgb: "203864" } }, font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" }, alignment: { horizontal: "center", vertical: "center", wrapText: true } };
+      const cellBorder = { top: { style: "hair", color: { rgb: "E5E7EB" } }, bottom: { style: "hair", color: { rgb: "E5E7EB" } }, left: { style: "hair", color: { rgb: "E5E7EB" } }, right: { style: "hair", color: { rgb: "E5E7EB" } } };
+      const cellStyle = (isEven, num) => ({ fill: { patternType: "solid", fgColor: { rgb: isEven ? "F8FAFC" : "FFFFFF" } }, font: { sz: 11, name: "Calibri", color: { rgb: "111827" } }, alignment: { horizontal: num ? "center" : "left", vertical: "middle" }, border: cellBorder });
+      const aoa = [];
+      const titleRow = Array(headers.length).fill({ v: "", s: titleStyle });
+      titleRow[0] = { v: `${detailTitle} (${dateStr})`, s: titleStyle };
+      aoa.push(titleRow);
+      aoa.push(headers.map(h => ({ v: h, s: headerStyle })));
+      detailRows.forEach((row, idx) => {
+        const isEven = idx % 2 === 1;
+        const done = Number(row.done_qty || 0);
+        const req = Number(row.requested_qty || 0);
+        const hicYok = req === 0;
+        const durumStyle = { ...cellStyle(isEven, false), font: { sz: 11, name: "Calibri", bold: true, color: { rgb: hicYok ? "D32F2F" : "A16207" } } };
+        const notStyle = { ...cellStyle(isEven, false), font: { sz: 11, name: "Calibri", bold: true, color: { rgb: hicYok ? "B91C1C" : "92400E" } } };
+        aoa.push([
+          { v: hicYok ? "PO YOK" : "EKSİK PO", s: durumStyle },
+          { v: row.project_code || "", s: cellStyle(isEven, false) },
+          { v: row.site_code || "", s: cellStyle(isEven, false) },
+          { v: row.item_code || "", s: cellStyle(isEven, false) },
+          { v: row.item_description || "", s: cellStyle(isEven, false) },
+          { v: done, s: cellStyle(isEven, true) },
+          { v: req, s: cellStyle(isEven, true) },
+          { v: hicYok ? `PO hiç açılmamış — ${done - req} adet açılmalı` : `Eksik açılmış — ${done - req} adet daha açılması lazım`, s: notStyle },
+        ]);
+      });
+      const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map(r => r.map(c => c.v)));
+      aoa.forEach((r, ri) => r.forEach((c, ci) => {
+        const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
+        if (ws[addr]) ws[addr].s = c.s;
+      }));
+      ws["!cols"] = [12, 14, 24, 16, 55, 14, 14, 42].map(wch => ({ wch }));
+      ws["!rows"] = [{ hpt: 26 }, { hpt: 22 }];
+      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }];
+      const wb = XLSXStyle.utils.book_new();
+      XLSXStyle.utils.book_append_sheet(wb, ws, "PO Bekleyen");
+      XLSXStyle.writeFile(wb, `${(detailTitle || "PO_Bekleyen").replace(/[^\wğüşöçıİĞÜŞÖÇ -]/gi, "").replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      return;
+    }
     // Ana Bölge Analizi export'unun birebir stilli formatını kullan (detailRows ile).
     await handleExportRegionExcel(detailRows, detailTitle || "Detay", detailTitle || "Bölge Analizi");
   };
