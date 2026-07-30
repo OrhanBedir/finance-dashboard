@@ -19449,7 +19449,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       "Item Code",
       "Done Qty",
       "Request Qty",
-      "Birim Fiyat (₺)",
+      `${_name.toUpperCase()} Birim Fiyat (₺)`,
       `${_name.toUpperCase()} Toplam Fiyat (₺)`,
       "Şimşek → HW Kesilen Bedel (%80) (₺)",
       `${_name.toUpperCase()} Kesmesi Gereken Bedel (%${_pct}) (₺)`,
