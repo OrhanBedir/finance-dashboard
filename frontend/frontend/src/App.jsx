@@ -19462,6 +19462,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     try {
       // Hangi satırlar export edilecek: detay modalı kendi satırlarını gönderir, yoksa tüm bölge listesi
       const _exportRows = Array.isArray(overrideRows) ? overrideRows : sortedRows;
+      // PO Açılmamış detay exportu: PO'su olup done > requested kalan kalemler
+      // Status kolonunda OK yerine EKSİK_PO yazar (Huawei statüsü OK olsa da
+      // eksik PO açılmıştır — dosyanın amacı bu listeyi vermek)
+      const _poBeklerExp = String(overrideTitle || "").includes("PO Açılmamış");
+      const _dispStatus = (row) => {
+        const s = String(row.status || "").toUpperCase();
+        if (_poBeklerExp && s !== "PO_BEKLER" && Number(row.done_qty || 0) > Number(row.requested_qty || 0)) return "EKSİK_PO";
+        return row.status || "";
+      };
       // Fatura verisini her export'ta taze çek
       let bfMap = bolgeFaturaMap;
       try {
@@ -19548,7 +19557,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const statusStyle = (status, isEven) => {
         const base = cellStyle(isEven, false);
         const s = String(status || "").toUpperCase();
-        const colors = { OK: "15803D", PO_BEKLER: "D97706", CANCEL: "B91C1C", PARTIAL: "2563EB" };
+        const colors = { OK: "15803D", PO_BEKLER: "D97706", CANCEL: "B91C1C", PARTIAL: "2563EB", "EKSİK_PO": "B45309" };
         if (colors[s]) return { ...base, font: { ...base.font, bold: true, color: { rgb: colors[s] } } };
         return base;
       };
@@ -19644,7 +19653,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
         aoa.push([
           { v: getRegion(row.site_code, row.project_code) || "", s: cellStyle(isEven, false) },
-          { v: row.status || "",                                  s: statusStyle(row.status, isEven) },
+          { v: _dispStatus(row),                                  s: statusStyle(_dispStatus(row), isEven) },
           { v: getAnaliz(row),                                    s: cellStyle(isEven, false) },
           { v: row.project_code || "",                            s: cellStyle(isEven, false) },
           { v: row.site_code || "",                               s: cellStyle(isEven, false) },
@@ -21333,7 +21342,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         }
                       >
                         <td>
-                          <StatusBadge status={row.status} />
+                          {/* PO Açılmamış detayında: PO'su var ama done > requested olan
+                              kalemler OK değil EKSİK_PO olarak etiketlenir */}
+                          {_isPoBeklerDetail && String(row.status || "").toUpperCase() !== "PO_BEKLER" && Number(row.done_qty || 0) > Number(row.requested_qty || 0)
+                            ? <span style={{ padding: "6px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: 700, display: "inline-block", background: "#fff8db", color: "#a16207" }}>EKSİK_PO</span>
+                            : <StatusBadge status={row.status} />}
                         </td>
                         <td
                           style={{
