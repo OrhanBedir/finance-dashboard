@@ -19351,11 +19351,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   }, 0);
 
   // Faz 3: Huawei'ye faturalanmış kalemler ile taşeronun yaptığı işi çarpıştır
-  const handleOpenBillable = async () => {
-    try {
-      setBillableLoading(true);
-      setBillableModalOpen(true);
-      setBillableRows([]);
+  // Fatura Kesilebilir hesabı — modal VE genel özet kartı aynı fonksiyonu
+  // kullanır ki rakamlar hiçbir zaman ayrışmasın
+  const computeBillableRows = async () => {
       const r = await fetch(
         `${API_BASE}/finance/hw-invoice-items/billable-keys`,
         {
@@ -19449,13 +19447,38 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             vade: dueByKey[key] || "",
           };
         });
-      setBillableRows(matched);
+      return matched;
+  };
+
+  const handleOpenBillable = async () => {
+    try {
+      setBillableLoading(true);
+      setBillableModalOpen(true);
+      setBillableRows([]);
+      setBillableRows(await computeBillableRows());
     } catch (e) {
       setBillableRows([]);
     } finally {
       setBillableLoading(false);
     }
   };
+
+  // Genel özet kartındaki "Kesilecek Fatura" — modalla aynı hesaptan
+  const [kesilecekOzet, setKesilecekOzet] = useState(null);
+  useEffect(() => {
+    if (!isSubconUser || !rows.length) return;
+    let iptal = false;
+    computeBillableRows()
+      .then((m) => {
+        if (iptal) return;
+        setKesilecekOzet({
+          toplam: m.reduce((s, x) => s + Number(x.kesmesi_gereken || 0), 0),
+          kalem: m.length,
+        });
+      })
+      .catch(() => {});
+    return () => { iptal = true; };
+  }, [isSubconUser, rows]);
 
   const handleExportBillable = () => {
     const _name = subconDisplayName || userSubconName || "Taşeron";
@@ -20044,7 +20067,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   },
                 },
                 {
-                  label: "HW'ye Faturalanan", sub: "fatura kesilen · saha listesi için tıkla", value: subconSummary.faturalanan, pct: subconSummary.faturaPct, pctLabel: "fizikinin", color: "#7c3aed",
+                  // Kesilecek fatura: Fatura Kesilebilir modalıyla AYNI hesap
+                  // (HW'ye faturalanan miktar × %80 × kırılım). Hesap yüklenene
+                  // kadar hakediş bazlı değer görünür.
+                  label: kesilecekOzet ? "Kesilecek Fatura (HW'ye faturalanan)" : "HW'ye Faturalanan",
+                  sub: kesilecekOzet ? `${kesilecekOzet.kalem} kalem · Fatura Kesilebilir ile aynı · liste için tıkla` : "fatura kesilen · saha listesi için tıkla",
+                  value: kesilecekOzet ? kesilecekOzet.toplam : subconSummary.faturalanan,
+                  pct: kesilecekOzet && subconSummary.fizikiIs > 0 ? (kesilecekOzet.toplam / subconSummary.fizikiIs) * 100 : subconSummary.faturaPct,
+                  pctLabel: "fizikinin", color: "#7c3aed",
                   tik: () => {
                     // Kalem bazlı faturalanan liste (billed_qty > 0): item + miktar + tutar
                     const list = rows
