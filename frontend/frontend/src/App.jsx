@@ -19406,7 +19406,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           const taseronUnit = doneQty > 0 ? totalTRY / doneQty : 0;
           const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
           const inv = invoicedByKey[key] || null;
+          // Fatura zinciri: Şimşek HW'ye montaj bedelinin %80'ini keser;
+          // taşeron da Şimşek'e o kesilenin kendi kırılım oranı kadarını keser.
+          const hwRaw = getRowTotalTRY(row);
+          const simsekHw = hwRaw * 0.8;
+          const kesmeliBedel = simsekHw * getSubconRateByRow(row);
           return {
+            simsek_hw_kesilen: simsekHw,
+            kesmesi_gereken: kesmeliBedel,
             site_id: row.site_code,
             item_description: row.item_description,
             item_code: row.item_code,
@@ -19432,6 +19439,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   };
 
   const handleExportBillable = () => {
+    const _name = subconDisplayName || userSubconName || "Taşeron";
+    // Fatura zinciri kolonları: Şimşek HW'ye %80 keser; taşeron Şimşek'e
+    // o bedelin kendi kırılım yüzdesi kadarını keser (AHY %90 → net %72)
+    const _pct = canonTaseron(userSubconName) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(userSubconName)) ? 75 : 80;
     const header = [
       "Site ID",
       "İş Açıklaması",
@@ -19439,7 +19450,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       "Done Qty",
       "Request Qty",
       "Birim Fiyat (₺)",
-      "Toplam Fiyat (₺)",
+      `${_name.toUpperCase()} Toplam Fiyat (₺)`,
+      "Şimşek → HW Kesilen Bedel (%80) (₺)",
+      `${_name.toUpperCase()} Kesmesi Gereken Bedel (%${_pct}) (₺)`,
       "Durum",
       "Fatura No",
       "Fatura Tarihi",
@@ -19447,9 +19460,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       "Vade (Ödeme)",
     ];
     const aoa = [header];
-    let grand = 0;
+    let grand = 0, grandHw = 0, grandKesmeli = 0;
     for (const x of billableRows) {
       grand += Number(x.total_price || 0);
+      grandHw += Number(x.simsek_hw_kesilen || 0);
+      grandKesmeli += Number(x.kesmesi_gereken || 0);
       aoa.push([
         x.site_id || "",
         x.item_description || "",
@@ -19458,6 +19473,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         x.requested_qty,
         Number(x.unit_price || 0),
         Number(x.total_price || 0),
+        Number(x.simsek_hw_kesilen || 0),
+        Number(x.kesmesi_gereken || 0),
         x.durum || "",
         x.fatura_no || "",
         x.fatura_tarihi || "",
@@ -19465,15 +19482,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         x.vade || "",
       ]);
     }
-    aoa.push(["", "", "", "", "", "TOPLAM", grand, "", "", "", "", ""]);
-    const _name = subconDisplayName || userSubconName || "Taşeron";
+    aoa.push(["", "", "", "", "", "TOPLAM", grand, grandHw, grandKesmeli, "", "", "", "", ""]);
     exportStandardExcel({
       title: `${_name} - Fatura Kesilebilir Kalemler`,
       sheetName: "Fatura Kesilebilir",
       fileBase: `${_name} - Fatura Kesilebilir`,
       headers: header,
-      colWidths: [18, 40, 14, 10, 10, 14, 16, 13, 18, 13, 16, 13],
-      numericCols: [3, 4, 5, 6, 10],
+      colWidths: [18, 40, 14, 10, 10, 14, 16, 19, 21, 13, 18, 13, 16, 13],
+      numericCols: [3, 4, 5, 6, 7, 8, 12],
       rows: aoa.slice(1),
     }).catch((e) => alert("Excel indirilemedi: " + e.message));
   };
