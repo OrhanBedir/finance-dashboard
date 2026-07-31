@@ -18515,6 +18515,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const usdRate = useUsdRate();
 
   const [qcReadyModalOpen, setQcReadyModalOpen] = useState(false);
+  const [qcReadySearch, setQcReadySearch] = useState(""); // QC OK modal saha/kalem arama
   const [qcReadyModalRegion, setQcReadyModalRegion] = useState("");
   const [qcReadyType, setQcReadyType] = useState("");
   const [bolgeFaturaMap, setBolgeFaturaMap] = useState({});
@@ -18557,6 +18558,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const openQcReadyModal = (regionName, type) => {
     setQcReadyModalRegion(regionName);
     setQcReadyType(type);
+    setQcReadySearch("");
     setQcReadyModalOpen(true);
   };
 
@@ -18849,7 +18851,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     }, 0);
   };
 
-  const qcReadyModalRows =
+  const _qcReadyHamRows =
     qcReadyType === "80"
       ? getQcReady80RowsByRegion(qcReadyModalRegion)
       : qcReadyType === "20_fac_ok"
@@ -18857,6 +18859,19 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         : qcReadyType === "20_fac_nok"
           ? getFacNok20RowsByRegion(qcReadyModalRegion)
           : [];
+  // Arama (saha/proje/item) + saha koduna göre alfabetik sıralama —
+  // BO sahaları, ES sahaları vb. yan yana gelir; sayaç ve toplam filtreyi izler
+  const qcReadyModalRows = _qcReadyHamRows
+    .filter((row) => {
+      const q = qcReadySearch.trim().toLowerCase();
+      if (!q) return true;
+      return [row.site_code, row.project_code, row.item_code, row.item_description]
+        .some((v) => String(v || "").toLowerCase().includes(q));
+    })
+    .slice()
+    .sort((a, b) =>
+      String(a.site_code || "").localeCompare(String(b.site_code || "")) ||
+      String(a.item_code || "").localeCompare(String(b.item_code || "")));
 
   const qcReadyModalTotal = qcReadyModalRows.reduce((sum, row) => {
     const currency = normalizeCurrency(row.currency);
@@ -20565,6 +20580,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               <h3 style={{ margin: 0 }}>
                 QC OK Fatura Kesilecek {qcReadyType}% - {qcReadyModalRegion}
               </h3>
+
+              <input
+                type="text"
+                placeholder="🔍 Saha / proje / item ara... (örn. ES, BO0008)"
+                value={qcReadySearch}
+                onChange={(e) => setQcReadySearch(e.target.value)}
+                style={{ padding: "9px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "13.5px", minWidth: "260px", flex: "1 1 260px", maxWidth: "380px" }}
+              />
 
               <div
                 style={{
