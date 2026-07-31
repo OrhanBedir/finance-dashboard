@@ -20573,9 +20573,21 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               borderRadius: "20px",
               padding: "24px",
               boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+              position: "relative",
             }}
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Sağ üst köşe kapatma */}
+            <button
+              type="button"
+              aria-label="Kapat"
+              onClick={() => setQcReadyModalOpen(false)}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#fee2e2"; e.currentTarget.style.color = "#b91c1c"; e.currentTarget.style.transform = "rotate(90deg)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#f3f4f6"; e.currentTarget.style.color = "#6b7280"; e.currentTarget.style.transform = "rotate(0deg)"; }}
+              style={{ position: "absolute", top: "14px", right: "14px", width: "34px", height: "34px", borderRadius: "50%", border: "none", background: "#f3f4f6", color: "#6b7280", fontSize: "16px", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, transition: "all 0.18s ease", zIndex: 2 }}
+            >
+              ✕
+            </button>
             <div
               style={{
                 display: "flex",
@@ -20584,6 +20596,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 marginBottom: "16px",
                 gap: "12px",
                 flexWrap: "wrap",
+                paddingRight: "40px",
               }}
             >
               <h3 style={{ margin: 0 }}>
@@ -20646,14 +20659,6 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   onClick={handleExportQcReadyExcel}
                 >
                   Excel İndir
-                </button>
-
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={() => setQcReadyModalOpen(false)}
-                >
-                  Kapat
                 </button>
               </div>
             </div>
