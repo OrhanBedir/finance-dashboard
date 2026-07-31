@@ -8453,7 +8453,23 @@ function FinanceDashboard({
               <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#f59e0b,#fbbf24)" }}/>
               {/* Header */}
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
-                <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>HW Fatura Onay Bekler</div>
+                <div>
+                  <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>HW Fatura Onay Bekler</div>
+                  {/* Son yükleme zamanı — "güncel mi?" sorusuna tek bakışta cevap */}
+                  {acc?.last_upload && (() => {
+                    const d = new Date(acc.last_upload);
+                    if (Number.isNaN(d.getTime())) return null;
+                    const bugunMu = d.toDateString() === new Date().toDateString();
+                    const gunAy = d.toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
+                    const saat = d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+                    return (
+                      <div style={{ display:"inline-flex", alignItems:"center", gap:"4px", marginTop:"3px", padding:"2px 8px", borderRadius:"20px", fontSize:"10px", fontWeight:700,
+                        background: bugunMu ? "#f0fdf4" : "#fffbeb", color: bugunMu ? "#15803d" : "#b45309", border: `1px solid ${bugunMu ? "#bbf7d0" : "#fde68a"}` }}>
+                        🕐 {bugunMu ? `Bugün ${saat} yüklendi` : `Son yükleme: ${gunAy} · ${saat}`}
+                      </div>
+                    );
+                  })()}
+                </div>
                 <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
                   <button
                     onClick={openRejectedModal}
@@ -8481,21 +8497,41 @@ function FinanceDashboard({
                   {(() => {
                     const combinedTry = totalTry + totalUsd * usdTryLiveRate;
                     const fmt = (v) => v >= 1000000 ? `₺${(v/1000000).toFixed(1)}M` : `₺${Math.round(v/1000)}K`;
-                    // Milestone dağılımını hesapla
+                    // Milestone dağılımı: adet + KDV dahil tutar (TL karşılığı)
                     const allItems = rawHandlers.flatMap(h => h.items || []);
-                    const ac1Count = allItems.filter(it => String(it.milestone||'').toUpperCase().includes('AC1')).length;
-                    const ac2Count = allItems.filter(it => String(it.milestone||'').toUpperCase().includes('AC2')).length;
+                    const _lineTry = (it) => {
+                      const cur = String(it.currency || "").toUpperCase();
+                      const v = Number(it.line_total || 0);
+                      return (cur === "TRY" || cur === "TL") ? v : v * usdTryLiveRate;
+                    };
+                    const ac1Items = allItems.filter(it => String(it.milestone||'').toUpperCase().includes('AC1'));
+                    const ac2Items = allItems.filter(it => String(it.milestone||'').toUpperCase().includes('AC2'));
+                    const ac1Sum = ac1Items.reduce((s, it) => s + _lineTry(it), 0);
+                    const ac2Sum = ac2Items.reduce((s, it) => s + _lineTry(it), 0);
                     return (
                       <div style={{ marginBottom:"8px" }}>
                         <div style={{ display:"flex", alignItems:"baseline", gap:"6px" }}>
                           <div style={{ fontSize:"20px", fontWeight:800, color:"#0f172a" }}>{fmt(combinedTry)}</div>
-                          <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance</div>
+                          <div style={{ fontSize:"10px", color:"#9ca3af" }}>{count} acceptance · KDV dahil</div>
                         </div>
-                        <div style={{ display:"flex", gap:"6px", marginTop:"4px", flexWrap:"wrap" }}>
-                          {ac1Count > 0 && <span style={{ fontSize:"9px", fontWeight:600, background:"#dbeafe", color:"#1d4ed8", borderRadius:"8px", padding:"1px 6px" }}>AC1 %80+KDV · {ac1Count} kalem</span>}
-                          {ac2Count > 0 && <span style={{ fontSize:"9px", fontWeight:600, background:"#fef3c7", color:"#92400e", borderRadius:"8px", padding:"1px 6px" }}>AC2 %20+KDV · {ac2Count} kalem</span>}
-                          {totalUsd > 0 && <span style={{ fontSize:"9px", color:"#94a3b8" }}>${Math.round(totalUsd/1000)}K USD · {usdTryLiveRate.toFixed(1)}₺/$</span>}
+                        {/* AC1 / AC2 yan yana mini kartlar */}
+                        <div style={{ display:"flex", gap:"6px", marginTop:"6px" }}>
+                          {ac1Items.length > 0 && (
+                            <div style={{ flex:1, background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:"9px", padding:"6px 9px" }}>
+                              <div style={{ fontSize:"9px", fontWeight:800, color:"#1d4ed8", letterSpacing:"0.03em" }}>AC1 · %80+KDV</div>
+                              <div style={{ fontSize:"13px", fontWeight:800, color:"#1e40af", marginTop:"1px" }}>{fmt(ac1Sum)}</div>
+                              <div style={{ fontSize:"9px", color:"#60a5fa" }}>{ac1Items.length} kalem</div>
+                            </div>
+                          )}
+                          {ac2Items.length > 0 && (
+                            <div style={{ flex:1, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:"9px", padding:"6px 9px" }}>
+                              <div style={{ fontSize:"9px", fontWeight:800, color:"#b45309", letterSpacing:"0.03em" }}>AC2 · %20+KDV</div>
+                              <div style={{ fontSize:"13px", fontWeight:800, color:"#92400e", marginTop:"1px" }}>{fmt(ac2Sum)}</div>
+                              <div style={{ fontSize:"9px", color:"#d97706" }}>{ac2Items.length} kalem</div>
+                            </div>
+                          )}
                         </div>
+                        {totalUsd > 0 && <div style={{ fontSize:"9px", color:"#94a3b8", marginTop:"4px" }}>${Math.round(totalUsd/1000)}K USD · {usdTryLiveRate.toFixed(1)}₺/$ kuru ile çevrildi</div>}
                       </div>
                     );
                   })()}

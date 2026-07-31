@@ -18509,7 +18509,11 @@ app.get("/hw-acceptance/onay-bekleyen", authMiddleware, async (req, res) => {
       const c = canonSub(scopeName);
       rows = rows.filter((row) => canonSub(row.subcon_name) === c);
     }
-    res.json({ ok: true, rows });
+    // Son acceptance yüklemesinin zamanı — kartta "güncel mi?" sorusuna cevap
+    const son = await pool.query(
+      `SELECT to_char(MAX(created_at) AT TIME ZONE 'Europe/Istanbul', 'YYYY-MM-DD HH24:MI') AS son_yukleme
+       FROM hw_acceptance_rows`).catch(() => ({ rows: [{}] }));
+    res.json({ ok: true, rows, son_yukleme: son.rows[0]?.son_yukleme || null });
   } catch (e) {
     console.error("HW ONAY BEKLEYEN ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });
