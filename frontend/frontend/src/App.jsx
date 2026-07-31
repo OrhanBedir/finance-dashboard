@@ -17307,7 +17307,26 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
           ödeme gününe göre gruplanır. Filtre yokken yalnız son ödeme günü gösterilir. */}
       {!isRequester && (() => {
         const filtreAktif = !!(searchText || filterDurum || filterGider || filterBolge || filterProje || filterBaslangic || filterBitis);
-        const odenmis = visibleList.filter(t => t.durum === "TAMAMLANDI" && (t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi));
+        // Ödenen kartları: tarih filtresi TALEP tarihine değil ÖDEME tarihine
+        // uygulanır — 28'de talep edilip 30'da ödenen avans 30'un kartına girer
+        // (Nakit Akışı ile birebir aynı mantık). Diğer filtreler aynen geçerli.
+        const _odGun = (t) => String(t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi || "").split("T")[0];
+        const odenmis = list.filter(t => {
+          if (t.durum !== "TAMAMLANDI") return false;
+          const g = _odGun(t);
+          if (!g) return false;
+          if (filterBaslangic && g < filterBaslangic) return false;
+          if (filterBitis && g > filterBitis) return false;
+          if (searchText) {
+            const s = searchText.toLowerCase();
+            if (!t.talep_eden_ad?.toLowerCase().includes(s) && !t.personel_ad?.toLowerCase().includes(s) && !t.aciklama?.toLowerCase().includes(s)) return false;
+          }
+          if (filterDurum && t.durum !== filterDurum) return false;
+          if (filterGider && t.gider_turu !== filterGider) return false;
+          if (filterBolge && t.bolge !== filterBolge) return false;
+          if (filterProje && t.proje !== filterProje) return false;
+          return true;
+        });
         // Ödeme bekleyen = PD onaylı, muhasebe henüz ödemedi → bugün gereken nakit.
         // Filtreden bağımsız tüm listeden hesaplanır ki ihtiyaç hiç gizlenmesin.
         const bekleyenOdeme = list.filter(t => t.durum === "DIREKTOR_ONAY");
