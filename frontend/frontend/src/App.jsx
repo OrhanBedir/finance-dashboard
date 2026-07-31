@@ -20037,12 +20037,16 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         const done = Number(row.done_qty || 0);
                         const billed = Number(row.billed_qty || 0);
                         const due = Math.max(0, done - billed);
+                        const req = Number(row.requested_qty || 0);
+                        // PO durumu: hiç PO yok / eksik açılmış / açık
+                        const poDurum = req === 0 ? "🔴 PO Bekler" : done > req ? "🟠 Eksik PO" : "🟢 PO Açık";
                         return {
+                          po_durum: poDurum,
                           site: String(row.site_code).trim().toUpperCase(),
                           item_code: row.item_code || "",
                           kalem: row.item_description || "",
                           done_q: done,
-                          req_q: Number(row.requested_qty || 0),
+                          req_q: req,
                           billed_q: billed,
                           due_q: due,
                           qc: due <= 0 ? "OK" : "NOK",
@@ -20053,6 +20057,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     setOzetModal({
                       title: "✅ QC Onaylı İş — Hakediş İlerleme Listesi",
                       cols: [
+                        { k: "po_durum", l: "PO Durumu" },
                         { k: "site", l: "Site ID" },
                         { k: "item_code", l: "Item Code" },
                         { k: "kalem", l: "Kalem Adı" },
