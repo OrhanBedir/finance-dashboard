@@ -6741,7 +6741,7 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
       const kabulNot = getCell(r, ["Kabul Not", "kabul_not"]);
 
       const normalizedSiteCode = siteCode
-        ? String(siteCode).trim().toUpperCase()
+        ? String(siteCode).replace(/\s+/g, "").toUpperCase()
         : "";
 
       const normalizedItemCode = itemCode ? String(itemCode).trim() : "";
@@ -6935,7 +6935,7 @@ app.post("/rollout/add-site", async (req, res) => {
       return res.status(400).json({ ok: false, error: "site_code zorunlu" });
     }
 
-    const normalizedSiteCode = String(siteCode).trim().toUpperCase();
+    const normalizedSiteCode = String(siteCode).replace(/\s+/g, "").toUpperCase();
 
     const exists = await pool.query(
       `
@@ -7781,7 +7781,7 @@ app.post("/import/archive-restore", upload.single("file"), async (req, res) => {
       const kabulNot = getCell(r, ["Kabul Not", "kabul_not"]);
 
       const normalizedSiteCode = siteCode
-        ? String(siteCode).trim().toUpperCase()
+        ? String(siteCode).replace(/\s+/g, "").toUpperCase()
         : "";
       const normalizedItemCode = itemCode ? String(itemCode).trim() : "";
       const normalizedProjectCode = projectCode
@@ -8474,8 +8474,10 @@ app.post("/master/add", async (req, res) => {
     });
 
     const projectCode = String(m.project_code || "").trim();
+    // Saha kodunda boşluk olamaz: "MU3848 _NS_AE" gibi girişler HW mutabakat
+    // exportuna boşluklu gidiyordu — TÜM boşluklar silinir
     const siteCode = String(m.site_code || "")
-      .trim()
+      .replace(/\s+/g, "")
       .toUpperCase();
     const itemCode = String(m.item_code || "").trim();
 
