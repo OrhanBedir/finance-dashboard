@@ -16974,22 +16974,25 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const openNew = () => {
     setEditingId(null);
-    setForm({ personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0], aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: "", plaka: "" });
+    setForm({ personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0], aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: "", plaka: "", firma: _altMarka ? _marka : "" });
     setShowModal(true);
   };
 
   const openEdit = (t) => {
     setEditingId(t.id);
-    setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "", plaka: t.plaka || "" });
+    setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "", plaka: t.plaka || "", firma: t.firma || (_altMarka ? _marka : "") });
     setShowModal(true);
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (!_altMarka && !form.firma) { alert("Lütfen önce firma seçin (ŞİMŞEK / AHY)"); return; }
     setSaving(true);
     try {
       const body = {
         ...form,
+        // AHY oturumunda firma sorulmaz, otomatik AHY yazılır
+        firma: _altMarka ? _marka : form.firma,
         talep_eden_email: currentUser?.email,
         talep_eden_ad: currentUser?.name || currentUser?.email,
       };
@@ -17599,6 +17602,27 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
             </div>
             <form onSubmit={handleSave}>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {/* Firma seçimi EN BAŞTA: avans hangi firmanın kasasından çıkacak?
+                    AHY oturumunda sorulmaz (otomatik AHY). */}
+                {!_altMarka && (
+                  <div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>
+                      Hangi firma ödeyecek? <span style={{ color: "#dc2626" }}>*</span>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      {[["ERC", "🏢 ŞİMŞEK (ERC)"], ["AHY", "⚡ AHY Elektrik"]].map(([val, lbl]) => (
+                        <button key={val} type="button" onClick={() => setForm(f => ({ ...f, firma: val }))}
+                          style={{ flex: 1, padding: "10px", borderRadius: "10px", fontSize: "13.5px", fontWeight: 700, cursor: "pointer",
+                            border: form.firma === val ? "2px solid #1e3a5f" : "1.5px solid #e5e7eb",
+                            background: form.firma === val ? (val === "AHY" ? "#fef3c7" : "#dbeafe") : "#fff",
+                            color: form.firma === val ? (val === "AHY" ? "#92400e" : "#1e40af") : "#6b7280" }}>
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                    {!form.firma && <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "4px" }}>Kaydetmeden önce firma seçin</div>}
+                  </div>
+                )}
                 {/* Personel seçimi: sadece yöneticiler ve Nurcan görebilir */}
                 {(isPM || isDirektor || isMuhasebe || isNurcan) && (
                   <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>

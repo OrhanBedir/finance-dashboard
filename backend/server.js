@@ -13768,7 +13768,10 @@ app.post("/hr/is-avans", async (req, res) => {
       banka_adi,
       iban,
       plaka,
+      firma,                              // talep anında AHY / ERC seçimi
     } = req.body;
+    const firmaFinal = String(firma || "").toUpperCase() === "AHY" ? "AHY"
+      : String(firma || "").toUpperCase() === "ERC" ? "ERC" : null;
 
     const adFinal    = talep_eden_ad || talep_eden || "";
     const projeFinal = proje || proje_kodu || null;
@@ -13797,8 +13800,8 @@ app.post("/hr/is-avans", async (req, res) => {
 
     const r = await pool.query(
       `INSERT INTO is_avans_talep
-         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi,plaka)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi,plaka,firma)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
       [
         personel_id || null,
         talep_eden_email,
@@ -13815,6 +13818,7 @@ app.post("/hr/is-avans", async (req, res) => {
         durumFinal,
         pmOnayTarihi,
         plaka ? String(plaka).trim().toUpperCase().replace(/\s+/g, " ") : null,
+        firmaFinal,
       ]
     );
     res.json(r.rows[0]);
