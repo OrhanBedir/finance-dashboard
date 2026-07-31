@@ -1556,12 +1556,16 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     // Gizleme QC'si (QC-CW "Gizleme" şablonu) yalnız gizleme kalemlerini kapatır —
     // IZ2683 vakası: Gizleme Closed iken sahanın tamamı OK'lanmıştı
     const ITEM_GIZLEME = ["8812184642", "8818274259"];
-    const OZEL_ITEMLER = [...ITEM_TRS, ...ITEM_LPRT, ...ITEM_ENERJI, ...ITEM_GIZLEME];
+    // DSS-GPS Readiness şablonu yalnız GPS kalemini kapatır — CN0017 vakası:
+    // GPS Closed iken STANDALONE AI Rejected olmasına rağmen saha OK'lanmıştı
+    const ITEM_GPS = ["88123MGE"];
+    const OZEL_ITEMLER = [...ITEM_TRS, ...ITEM_LPRT, ...ITEM_ENERJI, ...ITEM_GIZLEME, ...ITEM_GPS];
     const scopeOf = (t) => {
       if (t.includes("TRS QUALITY CHECK")) return "TRS";
       if (t.includes("AG OG ENERJI")) return "ENERJI";
       if (t.includes("5G READINESS YENI POLE")) return "LPRT";
       if (t.includes("GIZLEME") || t.includes("CAMOUFLAGE")) return "GIZLEME";
+      if (t.includes("DSS-GPS") || t.includes("GPS READINES")) return "GPS";
       return "ANA";
     };
 
@@ -1609,6 +1613,7 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       const items = m.scope === "TRS" ? ITEM_TRS
         : m.scope === "LPRT" ? ITEM_LPRT
         : m.scope === "GIZLEME" ? ITEM_GIZLEME
+        : m.scope === "GPS" ? ITEM_GPS
         : ITEM_ENERJI;
       const r = await pool.query(
         `UPDATE master_works
