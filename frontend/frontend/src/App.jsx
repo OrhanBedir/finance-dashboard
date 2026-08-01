@@ -19441,10 +19441,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const keys = d.keys || [];
       const keySet = new Set();
       const invMap = {};
+      const rateByKey = {}; // HW faturasının kesildiği andaki sabit kur (AH kolonu)
       keys.forEach((k) => {
         const key = `${String(k.site_id || "").toUpperCase()}|${String(k.item_code || "").trim()}`;
         keySet.add(key);
         invMap[key] = k.invoice_nos || "";
+        const rr = Number(k.reference_rate || 0);
+        if (rr > 0) rateByKey[key] = rr;
       });
 
       // Taşeronun kestiği fatura + vade bilgisi (mutabakat) — kendi adıyla
@@ -19493,13 +19496,20 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           const billedQ = Number(row.billed_qty || 0);
           const efQty = billedQ > 0 ? Math.min(doneQty, billedQ) : doneQty;
           const scale = doneQty > 0 ? efQty / doneQty : 1;
-          const totalTRY = getSubconAmountTRY(row) * scale;
-          const taseronUnit = efQty > 0 ? totalTRY / efQty : 0;
           const key = `${String(row.site_code || "").toUpperCase()}|${String(row.item_code || "").trim()}`;
           const inv = invoicedByKey[key] || null;
+          // USD kalemlerde KUR SABİTLEME: Şimşek HW'ye faturayı hangi kurla
+          // kestiyse (Reference Exchange Rate) taşeron hesabı da o kuru kullanır
+          // — günlük kur değişse de tutar kuruşuna aynı kalır. Fatura kuru
+          // yoksa canlı kurla devam edilir.
+          const _refRate = rateByKey[key] || 0;
+          const kurF = (normalizeCurrency(row.currency) === "USD" && _refRate > 0 && Number(usdRate) > 0)
+            ? _refRate / Number(usdRate) : 1;
+          const totalTRY = getSubconAmountTRY(row) * scale * kurF;
+          const taseronUnit = efQty > 0 ? totalTRY / efQty : 0;
           // Fatura zinciri: Şimşek HW'ye montaj bedelinin %80'ini keser;
           // taşeron da Şimşek'e o kesilenin kendi kırılım oranı kadarını keser.
-          const hwRaw = getRowTotalTRY(row) * scale;
+          const hwRaw = getRowTotalTRY(row) * scale * kurF;
           const simsekHw = hwRaw * 0.8;
           const kesmeliBedel = simsekHw * getSubconRateByRow(row);
           return {

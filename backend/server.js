@@ -2803,6 +2803,13 @@ async function ensureHwInvoiceTable() {
     ADD COLUMN IF NOT EXISTS invoice_status TEXT
   `);
 
+  // Faturanın kesildiği andaki HW referans kuru (AH kolonu) — USD kalemlerde
+  // taşeron faturası bu SABİT kurla hesaplanır, günlük kurla oynamaz
+  await pool.query(`
+    ALTER TABLE hw_invoice_rows
+    ADD COLUMN IF NOT EXISTS reference_rate NUMERIC
+  `);
+
   await pool.query(`
     ALTER TABLE hw_invoice_rows
     ADD COLUMN IF NOT EXISTS customer_name TEXT
@@ -10413,9 +10420,10 @@ app.post(
            currency,
            terms,
            invoice_status,
-           upload_batch
+           upload_batch,
+           reference_rate
          )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
           `,
           [
             invoiceNo,
@@ -10426,6 +10434,7 @@ app.post(
             terms,
             invoiceStatus,
             files.map((f) => f.originalname).join(" + ").slice(0, 250),
+            referenceRate || null,
           ],
         );
 
@@ -10724,16 +10733,20 @@ app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
 app.get("/finance/hw-invoice-items/billable-keys", async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
+    // reference_rate: faturanın kesildiği andaki HW kuru (head template AH kolonu)
+    // — USD kalemlerde taşeron hesabı bu sabit kuru kullanır
     const r = await pool.query(`
       SELECT
-        UPPER(TRIM(COALESCE(site_id, ''))) AS site_id,
-        TRIM(COALESCE(item_code, '')) AS item_code,
-        string_agg(DISTINCT invoice_no, ', ') AS invoice_nos,
-        SUM(COALESCE(invoiced_amount_incl, 0)) AS invoiced_amount
-      FROM hw_invoice_items
-      WHERE invoice_no IS NOT NULL
-        AND TRIM(COALESCE(site_id, '')) <> ''
-      GROUP BY UPPER(TRIM(COALESCE(site_id, ''))), TRIM(COALESCE(item_code, ''))
+        UPPER(TRIM(COALESCE(i.site_id, ''))) AS site_id,
+        TRIM(COALESCE(i.item_code, '')) AS item_code,
+        string_agg(DISTINCT i.invoice_no, ', ') AS invoice_nos,
+        SUM(COALESCE(i.invoiced_amount_incl, 0)) AS invoiced_amount,
+        MAX(hr.reference_rate) AS reference_rate
+      FROM hw_invoice_items i
+      LEFT JOIN hw_invoice_rows hr ON TRIM(hr.invoice_no) = TRIM(i.invoice_no)
+      WHERE i.invoice_no IS NOT NULL
+        AND TRIM(COALESCE(i.site_id, '')) <> ''
+      GROUP BY UPPER(TRIM(COALESCE(i.site_id, ''))), TRIM(COALESCE(i.item_code, ''))
     `);
     return res.json({ ok: true, keys: r.rows });
   } catch (err) {
