@@ -27640,9 +27640,33 @@ function App() {
                   <div style={{background:"#fff",borderRadius:"16px",boxShadow:"0 4px 20px rgba(0,0,0,0.07)",border:"1px solid #f3f4f6",overflow:"hidden"}}>
                     <div style={{padding:"20px 24px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                       <h3 style={{margin:0,fontSize:"16px",fontWeight:700,color:"#1f2937"}}>Kullanıcılar</h3>
-                      <div style={{display:"flex",gap:"8px"}}>
+                      <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
                         <span style={{background:"#dcfce7",color:"#166534",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>u.is_active).length} Aktif</span>
                         <span style={{background:"#fee2e2",color:"#991b1b",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>!u.is_active).length} Pasif</span>
+                        <button
+                          onClick={() => {
+                            const rolAdi = (u) =>
+                              u.role==="platform_admin"?"Platform Admin":u.role==="admin"?"Admin"
+                              :u.role==="rollout_mudur"?(u.email?.toLowerCase()==="serdar.altinova@simsektel.com"?"Bölge Müdürü":"Rollout Müdürü")
+                              :u.role==="pm"?"Proje Müdürü":u.role==="direktor"?"Direktör":u.role==="muhasebe"?"Muhasebe":"Personel";
+                            const firmaAdi = (u) =>
+                              String(u.marka||"").toUpperCase()==="AHY" ? "AHY Elektrik"
+                              : (u.tenant && u.tenant!=="erc") ? u.tenant : "ERC Mühendislik";
+                            const sirali = [...adminUsers].sort((a,b) =>
+                              (b.is_active?1:0)-(a.is_active?1:0) || String(a.name||"").localeCompare(String(b.name||""), "tr"));
+                            exportStandardExcel({
+                              title: "Kullanıcı Listesi",
+                              sheetName: "Kullanıcılar",
+                              fileBase: "Kullanici_Listesi",
+                              headers: ["Ad Soyad", "E-posta", "Firma", "Konum", "Durum"],
+                              colWidths: [26, 34, 20, 18, 10],
+                              numericCols: [],
+                              rows: sirali.map(u => [u.name||"", u.email||"", firmaAdi(u), rolAdi(u), u.is_active?"Aktif":"Pasif"]),
+                            }).catch(e => alert("Excel indirilemedi: " + e.message));
+                          }}
+                          style={{padding:"5px 12px",background:"#166534",color:"#fff",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:"4px"}}>
+                          📥 Excel İndir
+                        </button>
                       </div>
                     </div>
                     {adminLoading ? (
