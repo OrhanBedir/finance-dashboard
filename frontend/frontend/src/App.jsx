@@ -20115,6 +20115,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         const req = Number(row.requested_qty || 0);
                         // PO durumu: hiç PO yok / eksik açılmış / açık
                         const poDurum = req === 0 ? "🔴 PO Bekler" : done > req ? "🟠 Eksik PO" : "🟢 PO Açık";
+                        // QC kapanış tarihi (rollout'tan) — "iş ne zaman tamamlandı?"
+                        const qcTarih = row.qc_closed_date
+                          ? String(row.qc_closed_date).slice(0, 10).split("-").reverse().join(".")
+                          : "—";
                         return {
                           po_durum: poDurum,
                           site: String(row.site_code).trim().toUpperCase(),
@@ -20126,6 +20130,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                           due_q: due,
                           qc: due <= 0 ? "OK" : "NOK",
                           fat_durum: due <= 0 ? "✓ Faturalandı" : (billed > 0 ? `Kısmi — ${due} kalan` : "İlerletilmeli"),
+                          qc_tarih: qcTarih,
                         };
                       })
                       .sort((a, b) => (a.due_q > 0 ? 0 : 1) - (b.due_q > 0 ? 0 : 1) || a.site.localeCompare(b.site));
@@ -20141,6 +20146,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         { k: "billed_q", l: "Billed Qty" },
                         { k: "due_q", l: "Due Qty" },
                         { k: "fat_durum", l: "Hakediş Durumu" },
+                        { k: "qc_tarih", l: "QC Kapanış Tarihi" },
                       ],
                       rows: list,
                     });

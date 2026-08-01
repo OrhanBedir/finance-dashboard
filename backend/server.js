@@ -2955,7 +2955,8 @@ function buildMasterJoinedQuery(
         ELSE COALESCE(item_po.unit_price, 0)
       END AS total_done_amount,
 
-      (rp.pac_actual_end_date IS NOT NULL) AS pac_from_rollout
+      (rp.pac_actual_end_date IS NOT NULL) AS pac_from_rollout,
+      to_char(rp.qc_closed_date, 'YYYY-MM-DD') AS qc_closed_date
 
     FROM master_works m
     LEFT JOIN best_site_po site_po
