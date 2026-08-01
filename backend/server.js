@@ -10765,7 +10765,8 @@ app.get("/finance/hw-invoice-items/billable-keys", async (req, res) => {
         TRIM(COALESCE(i.item_code, '')) AS item_code,
         string_agg(DISTINCT i.invoice_no, ', ') AS invoice_nos,
         SUM(COALESCE(i.invoiced_amount_incl, 0)) AS invoiced_amount,
-        MAX(hr.reference_rate) AS reference_rate
+        MAX(hr.reference_rate) AS reference_rate,
+        to_char(MIN(hr.invoice_date), 'YYYY-MM-DD') AS invoice_date
       FROM hw_invoice_items i
       LEFT JOIN hw_invoice_rows hr ON TRIM(hr.invoice_no) = TRIM(i.invoice_no)
       WHERE i.invoice_no IS NOT NULL

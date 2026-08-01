@@ -19442,12 +19442,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const keySet = new Set();
       const invMap = {};
       const rateByKey = {}; // HW faturasının kesildiği andaki sabit kur (AH kolonu)
+      const invDateByKey = {}; // Şimşek'in HW faturasını kestiği tarih
       keys.forEach((k) => {
         const key = `${String(k.site_id || "").toUpperCase()}|${String(k.item_code || "").trim()}`;
         keySet.add(key);
         invMap[key] = k.invoice_nos || "";
         const rr = Number(k.reference_rate || 0);
         if (rr > 0) rateByKey[key] = rr;
+        if (k.invoice_date) invDateByKey[key] = String(k.invoice_date).slice(0, 10);
       });
 
       // Taşeronun kestiği fatura + vade bilgisi (mutabakat) — kendi adıyla
@@ -19532,6 +19534,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             fatura_tarihi: inv ? inv.fatura_tarihi || "" : "",
             fatura_miktari: inv ? Number(inv.fatura_miktari || 0) : null,
             vade: dueByKey[key] || "",
+            // Şimşek'in HW faturasını kestiği tarih (Invoice Date)
+            hw_fatura_tarihi: invDateByKey[key] || "",
             // Şimşek tahsilatı: HW faturası Huawei tarafından ödendi mi?
             tahsilat_tarihi: paidByKey[key] || "",
           };
@@ -19589,6 +19593,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       "Fatura No",
       "Fatura Tarihi",
       "Kestiği Tutar (₺)",
+      "HW Fatura Tarihi",
       "Vade (Ödeme)",
       "Şimşek Tahsilatı",
     ];
@@ -19613,17 +19618,18 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         x.fatura_no || "",
         x.fatura_tarihi || "",
         x.fatura_miktari != null ? Number(x.fatura_miktari) : "",
+        x.hw_fatura_tarihi || "",
         x.vade || "",
-        x.tahsilat_tarihi ? `Ödeme Yapıldı (${x.tahsilat_tarihi})` : (x.vade ? "Gelecek" : ""),
+        x.tahsilat_tarihi ? `Ödeme Yapıldı (${x.tahsilat_tarihi})` : (x.vade ? "Gelecek" : "HW Muhasebe Onayı Bekliyor"),
       ]);
     }
-    aoa.push(["", "", "", "", "", "", "TOPLAM", grand, grandHw, grandKesmeli, "", "", "", "", "", ""]);
+    aoa.push(["", "", "", "", "", "", "TOPLAM", grand, grandHw, grandKesmeli, "", "", "", "", "", "", ""]);
     exportStandardExcel({
       title: `${_name} - Fatura Kesilebilir Kalemler`,
       sheetName: "Fatura Kesilebilir",
       fileBase: `${_name} - Fatura Kesilebilir`,
       headers: header,
-      colWidths: [19, 44, 14, 10, 12, 12, 17, 19, 21, 23, 12, 16, 13, 15, 13, 22],
+      colWidths: [19, 44, 14, 10, 12, 12, 17, 19, 21, 23, 12, 16, 13, 15, 15, 13, 26],
       numericCols: [3, 4, 5, 6, 7, 8, 9, 13],
       rows: aoa.slice(1),
     }).catch((e) => alert("Excel indirilemedi: " + e.message));
@@ -21128,6 +21134,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         <th style={{ padding: "6px 8px", textAlign: "right" }}>Toplam ₺</th>
                         <th style={{ padding: "6px 8px" }}>Durum</th>
                         <th style={{ padding: "6px 8px", textAlign: "right" }}>Kestiği ₺</th>
+                        <th style={{ padding: "6px 8px" }}>HW Fatura Tarihi</th>
                         <th style={{ padding: "6px 8px" }}>Vade</th>
                         <th style={{ padding: "6px 8px" }}>Şimşek Tahsilatı</th>
                       </tr>
@@ -21144,13 +21151,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                           <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 600 }}>{formatTRY(x.total_price)}</td>
                           <td style={{ padding: "6px 8px", color: x.durum === "Faturalandı" ? "#16a34a" : "#b45309", fontWeight: 600 }}>{x.durum}</td>
                           <td style={{ padding: "6px 8px", textAlign: "right" }}>{x.fatura_miktari != null ? formatTRY(x.fatura_miktari) : "-"}</td>
+                          <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{x.hw_fatura_tarihi ? new Date(x.hw_fatura_tarihi).toLocaleDateString("tr-TR") : "-"}</td>
                           <td style={{ padding: "6px 8px" }}>{x.vade ? new Date(x.vade).toLocaleDateString("tr-TR") : "-"}</td>
                           <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
                             {x.tahsilat_tarihi
                               ? <span style={{ color: "#15803d", fontWeight: 700 }}>✓ Ödeme Yapıldı · {new Date(x.tahsilat_tarihi).toLocaleDateString("tr-TR")}</span>
                               : x.vade
                                 ? <span style={{ color: "#b45309", fontWeight: 600 }}>⏳ Gelecek</span>
-                                : <span style={{ color: "#94a3b8" }}>—</span>}
+                                : <span style={{ color: "#64748b", fontSize: "12px" }}>🕓 HW Muhasebe Onayı Bekliyor</span>}
                           </td>
                         </tr>
                       ))}
