@@ -9991,11 +9991,35 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
       }
     }
 
+    // Şimşek tahsilat durumu: kalemin HW faturası Huawei tarafından ÖDENDİ mi?
+    // (hw_payment_rows.payment_date dolu = para Şimşek'e geçti)
+    const paidRes = await pool.query(
+      `SELECT invoice_no, MAX(payment_date) AS pay_date
+       FROM hw_payment_rows
+       WHERE payment_date IS NOT NULL AND invoice_no IS NOT NULL
+       GROUP BY invoice_no`,
+    ).catch(() => ({ rows: [] }));
+    const paidByInvoice = new Map();
+    paidRes.rows.forEach((r) => {
+      if (r.invoice_no) paidByInvoice.set(String(r.invoice_no).trim(), r.pay_date);
+    });
+    const paidByKey = {};
+    for (const [k, invs] of hwInvByKey.entries()) {
+      for (const inv of invs) {
+        const pd = paidByInvoice.get(String(inv).trim());
+        if (pd) {
+          paidByKey[k] = pd instanceof Date ? pd.toISOString().slice(0, 10) : String(pd).slice(0, 10);
+          break;
+        }
+      }
+    }
+
     return res.json({
       ok: true,
       taseron,
       invoiced_by_key: invoicedByKey,
       due_by_key: dueByKey,
+      paid_by_key: paidByKey,
       invoiced: {
         count: invoiced.length,
         total: invoicedTotal,

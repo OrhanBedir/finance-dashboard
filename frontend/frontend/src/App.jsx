@@ -19453,6 +19453,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       // Taşeronun kestiği fatura + vade bilgisi (mutabakat) — kendi adıyla
       let invoicedByKey = {};
       let dueByKey = {};
+      let paidByKey = {};
       try {
         const rec = await fetch(
           `${API_BASE}/finance/subcon-reconcile?taseron=${encodeURIComponent(userSubconName || "")}`,
@@ -19466,6 +19467,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         if (rd.ok) {
           invoicedByKey = rd.invoiced_by_key || {};
           dueByKey = rd.due_by_key || {};
+          paidByKey = rd.paid_by_key || {};
         }
       } catch (e) {
         /* sessiz */
@@ -19530,6 +19532,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             fatura_tarihi: inv ? inv.fatura_tarihi || "" : "",
             fatura_miktari: inv ? Number(inv.fatura_miktari || 0) : null,
             vade: dueByKey[key] || "",
+            // Şimşek tahsilatı: HW faturası Huawei tarafından ödendi mi?
+            tahsilat_tarihi: paidByKey[key] || "",
           };
         });
       return matched;
@@ -19586,6 +19590,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       "Fatura Tarihi",
       "Kestiği Tutar (₺)",
       "Vade (Ödeme)",
+      "Şimşek Tahsilatı",
     ];
     const aoa = [header];
     let grand = 0, grandHw = 0, grandKesmeli = 0;
@@ -19609,15 +19614,16 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         x.fatura_tarihi || "",
         x.fatura_miktari != null ? Number(x.fatura_miktari) : "",
         x.vade || "",
+        x.tahsilat_tarihi ? `Ödeme Yapıldı (${x.tahsilat_tarihi})` : (x.vade ? "Gelecek" : ""),
       ]);
     }
-    aoa.push(["", "", "", "", "", "", "TOPLAM", grand, grandHw, grandKesmeli, "", "", "", "", ""]);
+    aoa.push(["", "", "", "", "", "", "TOPLAM", grand, grandHw, grandKesmeli, "", "", "", "", "", ""]);
     exportStandardExcel({
       title: `${_name} - Fatura Kesilebilir Kalemler`,
       sheetName: "Fatura Kesilebilir",
       fileBase: `${_name} - Fatura Kesilebilir`,
       headers: header,
-      colWidths: [19, 44, 14, 10, 12, 12, 17, 19, 21, 23, 12, 16, 13, 15, 13],
+      colWidths: [19, 44, 14, 10, 12, 12, 17, 19, 21, 23, 12, 16, 13, 15, 13, 22],
       numericCols: [3, 4, 5, 6, 7, 8, 9, 13],
       rows: aoa.slice(1),
     }).catch((e) => alert("Excel indirilemedi: " + e.message));
@@ -21123,6 +21129,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         <th style={{ padding: "6px 8px" }}>Durum</th>
                         <th style={{ padding: "6px 8px", textAlign: "right" }}>Kestiği ₺</th>
                         <th style={{ padding: "6px 8px" }}>Vade</th>
+                        <th style={{ padding: "6px 8px" }}>Şimşek Tahsilatı</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -21138,6 +21145,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                           <td style={{ padding: "6px 8px", color: x.durum === "Faturalandı" ? "#16a34a" : "#b45309", fontWeight: 600 }}>{x.durum}</td>
                           <td style={{ padding: "6px 8px", textAlign: "right" }}>{x.fatura_miktari != null ? formatTRY(x.fatura_miktari) : "-"}</td>
                           <td style={{ padding: "6px 8px" }}>{x.vade ? new Date(x.vade).toLocaleDateString("tr-TR") : "-"}</td>
+                          <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                            {x.tahsilat_tarihi
+                              ? <span style={{ color: "#15803d", fontWeight: 700 }}>✓ Ödeme Yapıldı · {new Date(x.tahsilat_tarihi).toLocaleDateString("tr-TR")}</span>
+                              : x.vade
+                                ? <span style={{ color: "#b45309", fontWeight: 600 }}>⏳ Gelecek</span>
+                                : <span style={{ color: "#94a3b8" }}>—</span>}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
