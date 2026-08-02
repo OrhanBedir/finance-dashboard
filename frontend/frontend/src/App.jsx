@@ -2369,9 +2369,10 @@ function OrgSemasiPanel({ currentUser }) {
   const [ekipler, setEkipler] = useState([]);
   const [aracList, setAracList] = useState([]);
   const [showEkip, setShowEkip] = useState(false);
+  const [ekipDetay, setEkipDetay] = useState(null); // tıklanan ekip (detay modalı — herkes görür)
   // Ekip yönetimi yalnız yönetim ekibine açık — şema herkese görünür kalır
   const _oEmail = (currentUser?.email || "").toLowerCase();
-  const canEdit = ["orhan.bedir@simsektel.com", "duzgun.simsek@simsektel.com", "nurcan.kus@simsektel.com", "muhasebe@simsektel.com"].includes(_oEmail);
+  const canEdit = ["orhan.bedir@simsektel.com", "duzgun.simsek@simsektel.com", "nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com", "erencan.simsek@simsektel.com"].includes(_oEmail);
   const loadOrgData = async () => {
     try {
       const [rp, re, ra] = await Promise.all([
@@ -2401,6 +2402,15 @@ function OrgSemasiPanel({ currentUser }) {
       loadOrgData();
     } catch {}
   };
+  // Üyeye araç ata (araç kişiye yazılır — ekibi kuran seçer)
+  const setUyeArac = async (id, plaka) => {
+    try {
+      await fetch(`${API_BASE}/hr/personel/${id}/ekip`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ekip_arac_plaka: plaka }) });
+      loadOrgData();
+    } catch {}
+  };
+  const ekipAdi = (e) => (e.ad && e.ad.trim()) || `Ekip ${e.ekip_no}`;
+  const bolgeEkipleri = (anahtar) => ekipler.filter(e => String(e.bolge || "").toLocaleUpperCase("tr-TR").includes(anahtar));
 
   const NAVY = "#1e3a5f", BLUE = "#2563eb", IZMIR = "#0c4a6e", ANKARA = "#7c2d12";
   const Box = ({ x, y, w, h, fill, stroke, nameText, title, sub, light, dashed }) => (
@@ -2504,27 +2514,23 @@ function OrgSemasiPanel({ currentUser }) {
     ws2["!freeze"] = { xSplit: 0, ySplit: 1 };
 
     // 3. sayfa: EKİPLER — canlı veriden (kim hangi ekipte, hangi araçla)
-    const eHead = ["Ekip No", "Araç Plakası", "Bölge", "Kişi", "Ekip Üyeleri (birlikte çalışanlar)"];
-    const eRows = ekipler.map(e => {
+    const eHead = ["Ekip", "Bölge", "Adı Soyadı", "Ünvanı", "Tel No", "Araç Plaka"];
+    const eRows = [];
+    ekipler.forEach(e => {
       const uyeler = ekipUyeleri(e.ekip_no);
-      return [
-        `Ekip ${e.ekip_no}`,
-        e.plaka || "—",
-        e.bolge || "",
-        uyeler.length,
-        uyeler.map(p => `${p.ad_soyad}${p.unvan ? ` (${p.unvan})` : ""}`).join(" · ") || "Üye atanmadı",
-      ];
+      if (!uyeler.length) { eRows.push([ekipAdi(e), e.bolge || "", "— üye atanmadı —", "", "", ""]); return; }
+      uyeler.forEach(p => eRows.push([ekipAdi(e), e.bolge || "", p.ad_soyad, p.unvan || "", p.telefon || "", p.ekip_arac_plaka || ""]));
     });
     const atanmamis = personelList.filter(p => p.aktif && !String(p.ekip_bilgisi || "").trim());
-    if (atanmamis.length) eRows.push(["—", "—", "", atanmamis.length, `Ekipsiz: ${atanmamis.map(p => p.ad_soyad).join(" · ")}`]);
+    atanmamis.forEach(p => eRows.push(["— Ekipsiz —", "", p.ad_soyad, p.unvan || "", p.telefon || "", ""]));
     const eData = [eHead, ...eRows];
     const ws3 = XLSXStyle.utils.aoa_to_sheet(eData);
-    ws3["!cols"] = [{ wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 7 }, { wch: 90 }];
+    ws3["!cols"] = [{ wch: 16 }, { wch: 12 }, { wch: 30 }, { wch: 24 }, { wch: 14 }, { wch: 13 }];
     ws3["!rows"] = eData.map((_, i) => ({ hpt: i === 0 ? 24 : 20 }));
     eHead.forEach((_, ci) => { const a = XLSXStyle.utils.encode_cell({ r: 0, c: ci }); if (ws3[a]) ws3[a].s = boxS("1E3A5F", "FFFFFF", 11); });
     eRows.forEach((_, ri) => eHead.forEach((__, ci) => {
       const a = XLSXStyle.utils.encode_cell({ r: ri + 1, c: ci }); if (!ws3[a]) return;
-      ws3[a].s = { fill: { patternType: "solid", fgColor: { rgb: ri % 2 === 0 ? "F0F6FF" : "FFFFFF" } }, font: { sz: 10, name: "Arial", bold: ci === 0 }, alignment: { horizontal: [0, 1, 3].includes(ci) ? "center" : "left", vertical: "center", wrapText: ci === 4 }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
+      ws3[a].s = { fill: { patternType: "solid", fgColor: { rgb: ri % 2 === 0 ? "F0F6FF" : "FFFFFF" } }, font: { sz: 10, name: "Arial", bold: ci === 0 }, alignment: { horizontal: [1, 4, 5].includes(ci) ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
     }));
     ws3["!freeze"] = { xSplit: 0, ySplit: 1 };
 
@@ -2566,25 +2572,29 @@ function OrgSemasiPanel({ currentUser }) {
         </div>
       </div>
 
-      {/* Canlı saha ekipleri — yönetim görünümü (personel.ekip_bilgisi + ekipler tablosundan) */}
-      {canEdit && ekipler.length > 0 && (
+      {/* Canlı saha ekipleri — HERKESE görünür; karta tıklayınca detay modalı açılır */}
+      {ekipler.length > 0 && (
         <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "16px 20px", marginBottom: "18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "12px" }}>
-            <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>👷 Saha Ekipleri <span style={{ fontSize: "11.5px", fontWeight: 500, color: "#94a3b8" }}>canlı — Ekip Yönetimi'nden güncellenir</span></div>
+            <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>👷 Saha Ekipleri <span style={{ fontSize: "11.5px", fontWeight: 500, color: "#94a3b8" }}>karta tıkla → ekip detayı</span></div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: "12px" }}>
             {ekipler.map(e => {
               const uyeler = ekipUyeleri(e.ekip_no);
               return (
-                <div key={e.ekip_no} style={{ border: "1.5px solid #e2e8f0", borderRadius: "12px", overflow: "hidden" }}>
+                <div key={e.ekip_no} onClick={() => setEkipDetay(e)}
+                  style={{ border: "1.5px solid #e2e8f0", borderRadius: "12px", overflow: "hidden", cursor: "pointer", transition: "all 0.15s" }}
+                  onMouseEnter={ev => { ev.currentTarget.style.boxShadow = "0 8px 24px rgba(30,58,95,0.18)"; ev.currentTarget.style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={ev => { ev.currentTarget.style.boxShadow = "none"; ev.currentTarget.style.transform = "none"; }}>
                   <div style={{ background: "linear-gradient(120deg,#1e3a5f,#1e40af)", color: "#fff", padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontWeight: 800, fontSize: "13.5px" }}>Ekip {e.ekip_no}{e.bolge ? ` · ${e.bolge}` : ""}</span>
-                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: "6px", padding: "1px 8px", fontSize: "11.5px", fontWeight: 700 }}>{e.plaka ? `🚗 ${e.plaka}` : "araç yok"}</span>
+                    <span style={{ fontWeight: 800, fontSize: "13.5px" }}>{ekipAdi(e)}{e.bolge ? ` · ${e.bolge}` : ""}</span>
+                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: "6px", padding: "1px 8px", fontSize: "11.5px", fontWeight: 700 }}>{uyeler.length} kişi</span>
                   </div>
                   <div style={{ padding: "8px 12px" }}>
                     {uyeler.map(p => (
-                      <div key={p.id} style={{ fontSize: "12.5px", color: "#374151", padding: "3px 0", borderBottom: "1px dashed #f1f5f9" }}>
-                        {p.ad_soyad} <span style={{ color: "#9ca3af", fontSize: "11px" }}>{p.unvan || ""}</span>
+                      <div key={p.id} style={{ fontSize: "12.5px", color: "#374151", padding: "3px 0", borderBottom: "1px dashed #f1f5f9", display: "flex", justifyContent: "space-between", gap: "6px" }}>
+                        <span>{p.ad_soyad} <span style={{ color: "#9ca3af", fontSize: "11px" }}>{p.unvan || ""}</span></span>
+                        {p.ekip_arac_plaka && <span style={{ color: "#1d4ed8", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>🚗 {p.ekip_arac_plaka}</span>}
                       </div>
                     ))}
                     {uyeler.length === 0 && <div style={{ fontSize: "12px", color: "#cbd5e1", padding: "4px 0" }}>Üye atanmadı</div>}
@@ -2595,6 +2605,92 @@ function OrgSemasiPanel({ currentUser }) {
           </div>
         </div>
       )}
+
+      {/* Ekip Detay modalı — HERKES görür, yalnız yetkililer düzenler */}
+      {ekipDetay && (() => {
+        const e = ekipler.find(x => x.ekip_no === ekipDetay.ekip_no) || ekipDetay;
+        const uyeler = ekipUyeleri(e.ekip_no);
+        const ekipsizler = personelList.filter(p => p.aktif && !String(p.ekip_bilgisi || "").trim());
+        const thE = { padding: "9px 14px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" };
+        const tdE = { padding: "10px 14px", fontSize: "13.5px", color: "#1f2937", borderBottom: "1px solid #f1f5f9" };
+        return (
+          <div onClick={() => setEkipDetay(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", backdropFilter: "blur(2px)" }}>
+            <div onClick={ev => ev.stopPropagation()} style={{ background: "#fff", borderRadius: "18px", width: "min(780px, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 30px 70px rgba(0,0,0,0.35)" }}>
+              {/* Başlık */}
+              <div style={{ background: "linear-gradient(120deg,#1e3a5f,#1e40af)", padding: "18px 24px", color: "#fff", display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ width: "42px", height: "42px", borderRadius: "12px", background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", flexShrink: 0 }}>👷</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "17px", fontWeight: 800 }}>{ekipAdi(e)}</div>
+                  <div style={{ fontSize: "12px", opacity: 0.8, marginTop: "2px" }}>
+                    {e.bolge ? `📍 ${e.bolge}` : "Bölge atanmadı"} · {uyeler.length} kişi
+                  </div>
+                </div>
+                {canEdit && (
+                  <select value={e.bolge || ""} onChange={ev => saveEkip({ ...e, bolge: ev.target.value })}
+                    style={{ padding: "6px 10px", borderRadius: "8px", border: "none", fontSize: "12.5px", fontWeight: 700, background: "rgba(255,255,255,0.92)", color: "#1e3a5f", cursor: "pointer" }}>
+                    <option value="">📍 Bölge…</option>
+                    {["İzmir","Ankara","Bursa","Antalya"].map(bl => <option key={bl} value={bl}>{bl}</option>)}
+                  </select>
+                )}
+                <button onClick={() => setEkipDetay(null)} aria-label="Kapat"
+                  style={{ width: "34px", height: "34px", borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.18)", color: "#fff", fontSize: "15px", fontWeight: 700, cursor: "pointer", lineHeight: 1, flexShrink: 0 }}>✕</button>
+              </div>
+              {/* Üyeler */}
+              <div style={{ overflowY: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead><tr style={{ background: "#f8fafc" }}>
+                    <th style={thE}>Adı Soyadı</th>
+                    <th style={thE}>Ünvanı</th>
+                    <th style={thE}>Tel No</th>
+                    <th style={thE}>Araç Plaka</th>
+                    {canEdit && <th style={thE}></th>}
+                  </tr></thead>
+                  <tbody>
+                    {uyeler.map(pr => (
+                      <tr key={pr.id}>
+                        <td style={{ ...tdE, fontWeight: 700 }}>{pr.ad_soyad}</td>
+                        <td style={tdE}>{pr.unvan || "—"}</td>
+                        <td style={{ ...tdE, whiteSpace: "nowrap" }}>{pr.telefon || "—"}</td>
+                        <td style={tdE}>
+                          {canEdit ? (
+                            <select value={pr.ekip_arac_plaka || ""} onChange={ev => setUyeArac(pr.id, ev.target.value)}
+                              style={{ padding: "5px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px", background: pr.ekip_arac_plaka ? "#eff6ff" : "#fff" }}>
+                              <option value="">— araç yok —</option>
+                              {aracList.map(a => <option key={a.id} value={a.plaka}>{a.plaka}</option>)}
+                              {pr.ekip_arac_plaka && !aracList.some(a => a.plaka === pr.ekip_arac_plaka) && <option value={pr.ekip_arac_plaka}>{pr.ekip_arac_plaka}</option>}
+                            </select>
+                          ) : (pr.ekip_arac_plaka ? <span style={{ color: "#1d4ed8", fontWeight: 700 }}>🚗 {pr.ekip_arac_plaka}</span> : "—")}
+                        </td>
+                        {canEdit && (
+                          <td style={{ ...tdE, textAlign: "right" }}>
+                            <button onClick={() => setPersonelEkip(pr.id, "")} title="Ekipten çıkar"
+                              style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "7px", padding: "4px 10px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer" }}>Çıkar</button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                    {uyeler.length === 0 && <tr><td colSpan={canEdit ? 5 : 4} style={{ ...tdE, textAlign: "center", color: "#94a3b8" }}>Henüz üye atanmadı</td></tr>}
+                  </tbody>
+                </table>
+                {/* Üye ekleme — yalnız yetkililer */}
+                {canEdit && (
+                  <div style={{ padding: "12px 16px", background: "#f8fafc", borderTop: "1px solid #e5e7eb", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#1e3a5f" }}>＋ Üye Ekle:</span>
+                    <select value="" onChange={ev => { if (ev.target.value) setPersonelEkip(ev.target.value, String(e.ekip_no)); }}
+                      style={{ flex: "1 1 240px", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: "9px", fontSize: "13px", background: "#fff" }}>
+                      <option value="">Aktif personelden seç… (ünvan ve tel otomatik gelir)</option>
+                      {ekipsizler.sort((x, y) => x.ad_soyad.localeCompare(y.ad_soyad, "tr")).map(pr => (
+                        <option key={pr.id} value={pr.id}>{pr.ad_soyad}{pr.unvan ? ` — ${pr.unvan}` : ""}{pr.telefon ? ` · ${pr.telefon}` : ""}</option>
+                      ))}
+                    </select>
+                    <span style={{ fontSize: "11px", color: "#94a3b8" }}>seçim anında kaydedilir</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Ekip Yönetimi modalı */}
       {showEkip && (
@@ -2617,16 +2713,16 @@ function OrgSemasiPanel({ currentUser }) {
                 {ekipler.map(e => (
                   <div key={e.ekip_no} style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr auto", gap: "8px", alignItems: "center", background: "#f8fafc", borderRadius: "10px", padding: "7px 10px" }}>
                     <span style={{ fontWeight: 800, color: "#1e3a5f", fontSize: "13px" }}>Ekip {e.ekip_no}</span>
-                    <select value={e.plaka || ""} onChange={ev => saveEkip({ ...e, plaka: ev.target.value })}
-                      style={{ padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px" }}>
-                      <option value="">🚗 Araç seç…</option>
-                      {aracList.map(a => <option key={a.id} value={a.plaka}>{a.plaka}</option>)}
-                      {e.plaka && !aracList.some(a => a.plaka === e.plaka) && <option value={e.plaka}>{e.plaka}</option>}
-                    </select>
-                    <input value={e.bolge || ""} placeholder="Bölge (İzmir/Ankara/Bursa)"
-                      onChange={ev => setEkipler(list => list.map(x => x.ekip_no === e.ekip_no ? { ...x, bolge: ev.target.value } : x))}
-                      onBlur={ev => saveEkip({ ...e, bolge: ev.target.value })}
+                    <input value={e.ad || ""} placeholder={`Ekip adı (örn. RF Ekip ${e.ekip_no}, ENH Ekibi)`}
+                      onChange={ev => setEkipler(list => list.map(x => x.ekip_no === e.ekip_no ? { ...x, ad: ev.target.value } : x))}
+                      onBlur={ev => saveEkip({ ...e, ad: ev.target.value })}
                       style={{ padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px" }} />
+                    <select value={e.bolge || ""} onChange={ev => saveEkip({ ...e, bolge: ev.target.value })}
+                      style={{ padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px" }}>
+                      <option value="">📍 Bölge seç…</option>
+                      {["İzmir","Ankara","Bursa","Antalya"].map(bl => <option key={bl} value={bl}>{bl}</option>)}
+                      {e.bolge && !["İzmir","Ankara","Bursa","Antalya"].includes(e.bolge) && <option value={e.bolge}>{e.bolge}</option>}
+                    </select>
                     <button onClick={async () => {
                       if (!window.confirm(`Ekip ${e.ekip_no} silinsin mi? Üyelerin ataması kaldırılır.`)) return;
                       await fetch(`${API_BASE}/hr/ekipler/${e.ekip_no}`, { method: "DELETE" });
@@ -2686,10 +2782,28 @@ function OrgSemasiPanel({ currentUser }) {
           <Box x={205} y={456} w={250} h={72} fill="#0369a1" nameText="SERDAR ALTINOVA" title="İzmir Regional Manager" />
           <L d="M330 528 V560" />
           <Box x={205} y={560} w={250} h={64} light stroke="#0369a1" nameText="KASIM EVİN" title="Site Supervisor · İzmir (Ankara destek)" />
-          <L d="M330 624 V660 M150 660 H510 M150 660 V690 M330 660 V690 M510 660 V690" />
-          <Box x={70} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 1" />
-          <Box x={250} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 2" />
-          <Box x={430} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 3" />
+          <L d="M330 624 V660" />
+          {(() => {
+            const list = bolgeEkipleri("İZM").concat(bolgeEkipleri("IZM").filter(e => !bolgeEkipleri("İZM").includes(e)));
+            if (!list.length) return null;
+            const W = Math.min(160, Math.floor(540 / list.length) - 12), H = 60, y = 690;
+            const toplamW = list.length * (W + 20) - 20;
+            const bas = 330 - toplamW / 2;
+            return (
+              <g>
+                <L d={`M${bas + W / 2} 660 H${bas + toplamW - W / 2}`} />
+                {list.map((e, i) => {
+                  const x = bas + i * (W + 20);
+                  return (
+                    <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
+                      <L d={`M${x + W / 2} 660 V${y}`} />
+                      <Box x={x} y={y} w={W} h={H} light stroke="#0369a1" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} />
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })()}
           {/* ANKARA bloğu */}
           <rect x={630} y={396} width={580} height={492} rx="14" fill="#fffbf5" stroke="#e7d5c0" strokeWidth="1.5" />
           <rect x={630} y={396} width={580} height={38} rx="14" fill={ANKARA} />
@@ -2698,10 +2812,28 @@ function OrgSemasiPanel({ currentUser }) {
           <Box x={795} y={456} w={250} h={72} fill="#b45309" nameText="NURCAN KUŞ" title="Ankara Regional Manager" />
           <L d="M920 528 V560" />
           <Box x={795} y={560} w={250} h={64} light stroke="#b45309" dashed nameText="KASIM EVİN" title="Site Support (İzmir'den destek)" />
-          <L d="M920 624 V660 M740 660 H1100 M740 660 V690 M920 660 V690 M1100 660 V690" />
-          <Box x={660} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 4" />
-          <Box x={840} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 5" />
-          <Box x={1020} y={690} w={160} h={60} light stroke="#94a3b8" nameText="RF TEAM 6" />
+          <L d="M920 624 V660" />
+          {(() => {
+            const list = bolgeEkipleri("ANK");
+            if (!list.length) return null;
+            const W = Math.min(160, Math.floor(540 / list.length) - 12), H = 60, y = 690;
+            const toplamW = list.length * (W + 20) - 20;
+            const bas = 920 - toplamW / 2;
+            return (
+              <g>
+                <L d={`M${bas + W / 2} 660 H${bas + toplamW - W / 2}`} />
+                {list.map((e, i) => {
+                  const x = bas + i * (W + 20);
+                  return (
+                    <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
+                      <L d={`M${x + W / 2} 660 V${y}`} />
+                      <Box x={x} y={y} w={W} h={H} light stroke="#b45309" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} />
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })()}
           <text x={625} y={905} textAnchor="middle" fontSize="10.5" fill="#94a3b8" fontFamily="Arial">Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · {new Date().toLocaleDateString("tr-TR")}</text>
         </svg>
       </div>

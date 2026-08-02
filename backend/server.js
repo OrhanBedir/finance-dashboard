@@ -15058,6 +15058,9 @@ pool.query(`CREATE TABLE IF NOT EXISTS ekipler (
   aciklama TEXT,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`).catch(() => {});
+// Ekip adı (örn. "ENH Ekibi") + üye bazlı araç ataması (araç kişiye yazılır)
+pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS ad TEXT`).catch(() => {});
+pool.query(`ALTER TABLE personel ADD COLUMN IF NOT EXISTS ekip_arac_plaka TEXT`).catch(() => {});
 
 app.get("/hr/ekipler", async (req, res) => {
   try {
@@ -15071,11 +15074,11 @@ app.post("/hr/ekipler", async (req, res) => {
     const no = Number(req.body.ekip_no || 0);
     if (!no || no < 1) return res.status(400).json({ error: "Geçerli ekip no gerekli" });
     const r = await pool.query(
-      `INSERT INTO ekipler (ekip_no, plaka, bolge, aciklama)
-       VALUES ($1,$2,$3,$4)
-       ON CONFLICT (ekip_no) DO UPDATE SET plaka=$2, bolge=$3, aciklama=$4, updated_at=NOW()
+      `INSERT INTO ekipler (ekip_no, plaka, bolge, aciklama, ad)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (ekip_no) DO UPDATE SET plaka=$2, bolge=$3, aciklama=$4, ad=$5, updated_at=NOW()
        RETURNING *`,
-      [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null]);
+      [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null, req.body.ad || null]);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -15093,10 +15096,23 @@ app.delete("/hr/ekipler/:no", async (req, res) => {
 // Personel → ekip ataması (yalnız ekip_bilgisi alanını günceller)
 app.put("/hr/personel/:id/ekip", async (req, res) => {
   try {
-    const v = req.body.ekip_bilgisi;
+    const sets = [], vals = [req.params.id];
+    if ("ekip_bilgisi" in req.body) {
+      const v = req.body.ekip_bilgisi;
+      vals.push(v === null || v === undefined || v === "" ? null : String(v));
+      sets.push(`ekip_bilgisi=$${vals.length}`);
+      // Ekipten çıkarılınca araç ataması da temizlenir
+      if (v === null || v === undefined || v === "") sets.push(`ekip_arac_plaka=NULL`);
+    }
+    if ("ekip_arac_plaka" in req.body) {
+      const a = req.body.ekip_arac_plaka;
+      vals.push(a === null || a === undefined || a === "" ? null : String(a).trim().toUpperCase());
+      sets.push(`ekip_arac_plaka=$${vals.length}`);
+    }
+    if (!sets.length) return res.status(400).json({ error: "Güncellenecek alan yok" });
     const r = await pool.query(
-      `UPDATE personel SET ekip_bilgisi=$2 WHERE id=$1 RETURNING id, ad_soyad, ekip_bilgisi`,
-      [req.params.id, v === null || v === undefined || v === "" ? null : String(v)]);
+      `UPDATE personel SET ${sets.join(", ")} WHERE id=$1 RETURNING id, ad_soyad, ekip_bilgisi, ekip_arac_plaka`,
+      vals);
     if (!r.rows.length) return res.status(404).json({ error: "Personel bulunamadı" });
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
