@@ -13896,6 +13896,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                   {[
                                     { label:"Personel",    align:"left"  },
                                     { label:"Ünvan",       align:"left"  },
+                                    { label:"Maaş",        align:"right", color:"#0369a1" },
                                     { label:"Hakediş",     align:"right" },
                                     { label:"🏦 Banka Öd.", align:"right", color:"#1d4ed8" },
                                     { label:"💵 Elden Öd.", align:"right", color:"#15803d" },
@@ -13912,7 +13913,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                   <tr key={p.id} style={{ background: i%2===0?"#fff":"#f9fafb" }}>
                                     <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}</td>
                                     <td style={{ padding:"7px 12px", color:"#6b7280", whiteSpace:"nowrap" }}>{p.unvan||"-"}</td>
-                                    <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:600 }}>₺{p.hakEdis.toLocaleString("tr-TR")}</td>
+                                    <td style={{ padding:"7px 12px", textAlign:"right", color:"#0369a1", fontWeight:600 }}
+                                      title="Aylık net maaş (tam ay)">₺{Number(p.net_maas||0).toLocaleString("tr-TR")}</td>
+                                    <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:600 }}
+                                      title="Bu ayki hakediş (işe giriş / puantaj / devir payına göre)">₺{p.hakEdis.toLocaleString("tr-TR")}</td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.banka>0?"#1d4ed8":"#9ca3af", fontWeight:600 }}>
                                       {p.banka>0 ? `₺${p.banka.toLocaleString("tr-TR")}` : "—"}
                                     </td>
