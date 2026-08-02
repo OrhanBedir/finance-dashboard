@@ -13858,15 +13858,23 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           onClick={()=>setOdemeTabloAcik(v=>!v)}
                           style={{ background:"#1e3a5f", padding:"0", cursor:"pointer", userSelect:"none" }}
                         >
-                          {/* Başlık + rozetler + ok */}
-                          <div style={{ padding:"10px 18px", display:"flex", alignItems:"center", gap:"10px" }}>
+                          {/* Başlık + rozetler + belirgin aç/kapat butonu (solda) */}
+                          <div style={{ padding:"10px 18px", display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+                            <button
+                              type="button"
+                              onClick={(e)=>{ e.stopPropagation(); setOdemeTabloAcik(v=>!v); }}
+                              style={{ display:"flex", alignItems:"center", gap:"6px", padding:"7px 14px", borderRadius:"9px", border:"none", cursor:"pointer",
+                                background: odemeTabloAcik ? "#fbbf24" : "#22c55e", color: odemeTabloAcik ? "#78350f" : "#fff",
+                                fontSize:"13px", fontWeight:800, whiteSpace:"nowrap", boxShadow:"0 2px 8px rgba(0,0,0,0.25)" }}>
+                              <span style={{ transition:"transform 0.25s", display:"inline-block", transform: odemeTabloAcik?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
+                              {odemeTabloAcik ? "Tabloyu Gizle" : "Tabloyu Aç"}
+                            </button>
                             <span style={{ color:"#fff", fontWeight:700, fontSize:"14px", flex:1 }}>
                               📋 {ayAdi} {yilStr} — Maaş Ödeme Durumu
                             </span>
                             <span style={{ background:"#dcfce7", color:"#166534", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>✅ {tamamlandi} tamamlandı</span>
                             {bekleyen>0 && <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>⏳ {bekleyen} bekliyor</span>}
                             {fazlaSay>0 && <span style={{ background:"#fef3c7", color:"#92400e", borderRadius:"20px", padding:"2px 10px", fontSize:"12px", fontWeight:700 }}>⚠️ {fazlaSay} fazla ödeme</span>}
-                            <span style={{ color:"#93c5fd", fontSize:"16px", marginLeft:"6px", transition:"transform 0.25s", display:"inline-block", transform: odemeTabloAcik?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
                           </div>
                           {/* Alt özet şeridi (her zaman görünür) */}
                           <div style={{ background:"rgba(0,0,0,0.25)", padding:"8px 18px", display:"flex", gap:"0" }}>
