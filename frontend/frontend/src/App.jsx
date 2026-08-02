@@ -19295,7 +19295,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     // PO Açılmamış detayı: modaldaki sade görünümün aynısı — fiyat/fatura kolonu yok
     if (_isPoBeklerDetail) {
       const dateStr = new Date().toLocaleDateString("tr-TR");
-      const headers = ["Durum", "Project", "Site Code", "Item Code", "Item Description", "Yapılan (Done)", "PO (Requested)", "Not"];
+      const headers = ["QC", "Durum", "Project", "Site Code", "Item Code", "Item Description", "Yapılan (Done)", "PO (Requested)", "Not"];
       const titleStyle = { fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } }, font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" }, alignment: { horizontal: "center", vertical: "center" } };
       const headerStyle = { fill: { patternType: "solid", fgColor: { rgb: "203864" } }, font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" }, alignment: { horizontal: "center", vertical: "center", wrapText: true } };
       const cellBorder = { top: { style: "hair", color: { rgb: "E5E7EB" } }, bottom: { style: "hair", color: { rgb: "E5E7EB" } }, left: { style: "hair", color: { rgb: "E5E7EB" } }, right: { style: "hair", color: { rgb: "E5E7EB" } } };
@@ -19312,7 +19312,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const hicYok = req === 0;
         const durumStyle = { ...cellStyle(isEven, false), font: { sz: 11, name: "Calibri", bold: true, color: { rgb: hicYok ? "D32F2F" : "A16207" } } };
         const notStyle = { ...cellStyle(isEven, false), font: { sz: 11, name: "Calibri", bold: true, color: { rgb: hicYok ? "B91C1C" : "92400E" } } };
+        const qcOk = String(row.qc_durum || "").toUpperCase() === "OK";
+        const qcStyle2 = { ...cellStyle(isEven, false), font: { sz: 11, name: "Calibri", bold: true, color: { rgb: qcOk ? "15803D" : "6B7280" } } };
         aoa.push([
+          { v: qcOk ? "QC OK" : "NOK", s: qcStyle2 },
           { v: hicYok ? "PO YOK" : "EKSİK PO", s: durumStyle },
           { v: row.project_code || "", s: cellStyle(isEven, false) },
           { v: row.site_code || "", s: cellStyle(isEven, false) },
@@ -19328,7 +19331,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
         if (ws[addr]) ws[addr].s = c.s;
       }));
-      ws["!cols"] = [12, 14, 24, 16, 55, 14, 14, 42].map(wch => ({ wch }));
+      ws["!cols"] = [9, 12, 14, 24, 16, 55, 14, 14, 42].map(wch => ({ wch }));
       ws["!rows"] = [{ hpt: 26 }, { hpt: 22 }];
       ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }];
       const wb = XLSXStyle.utils.book_new();
@@ -21580,6 +21583,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
                 <thead>
                   <tr style={{ background: "#1f2937" }}>
+                    <th style={detailThStyle}>QC</th>
                     <th style={detailThStyle}>Durum</th>
                     <th style={detailThStyle}>Project</th>
                     <th style={detailThStyle}>Site Code</th>
@@ -21591,7 +21595,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 </thead>
                 <tbody>
                   {filteredRows.length === 0 ? (
-                    <tr><td colSpan="7" style={{ textAlign: "center", padding: "20px" }}>Kayıt yok</td></tr>
+                    <tr><td colSpan="8" style={{ textAlign: "center", padding: "20px" }}>Kayıt yok</td></tr>
                   ) : (
                     filteredRows.map((row, index) => {
                       const done = Number(row.done_qty || 0);
@@ -21601,6 +21605,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                       const tdP = { padding: "12px 14px", borderBottom: "1px solid #e5e7eb" };
                       return (
                         <tr key={row.id ?? `${row.project_code}-${row.site_code}-${row.item_code}-${index}`}>
+                          <td style={tdP}>
+                            {String(row.qc_durum || "").toUpperCase() === "OK"
+                              ? <span style={{ padding: "4px 10px", borderRadius: "20px", fontSize: "12px", fontWeight: 800, background: "#dcfce7", color: "#15803d" }}>QC OK</span>
+                              : <span style={{ padding: "4px 10px", borderRadius: "20px", fontSize: "12px", fontWeight: 700, background: "#f3f4f6", color: "#6b7280" }}>NOK</span>}
+                          </td>
                           <td style={tdP}>
                             {hicYok
                               ? <span style={{ padding: "5px 11px", borderRadius: "20px", fontSize: "12px", fontWeight: 700, background: "#fdecea", color: "#d32f2f", whiteSpace: "nowrap" }}>PO YOK</span>
