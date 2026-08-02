@@ -12975,9 +12975,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   // Maaş görünürlüğü (21.07.2026): ERC'de YALNIZ Orhan Bedir + Düzgün Şimşek.
   // Muhasebe maaş bilgilerini GÖREMEZ (puantaj/ISG erişimi devam eder).
   // info@ahyelektrik.com kendi markasını ek şifreyle (ahy2026gsm) görür.
-  // MAAŞ GÖRME YETKİSİ (02.08.2026): YALNIZ Orhan Bedir, Düzgün Şimşek ve
-  // Erencan Şimşek — başka hiç kimse, hiçbir ekranda maaş göremez.
-  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "erencan.simsek@simsektel.com";
+  // MAAŞ GÖRME YETKİSİ: Orhan Bedir, Düzgün Şimşek, Erencan Şimşek (şifresiz)
+  // + info@ahyelektrik (Haşım Bey — YALNIZ ekstra şifreyle: ahy2026gsm).
+  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "erencan.simsek@simsektel.com" || _hrEmail === "info@ahyelektrik.com";
   // İK marka izolasyonu (TEK YÖNLÜ): ERC ana yüklenici — maaş ve kalan
   // ödemeleri yaptığı için TÜM personeli görür. Alt marka (AHY) yalnız
   // kendi markasının personelini görür; devir tarihi (15 Temmuz 2026)
@@ -12998,8 +12998,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
   const _isMuhasebe = currentUser?.role === "muhasebe";
   // Maaş gizli modu: personel KÜNYESİNİ yönetir (İBAN, işe giriş, TC...) ama
-  // maaş alanlarını GÖREMEZ — muhasebe ve AHY yönetimi (info@ahyelektrik)
-  const _maasGizli = _isMuhasebe || _hrEmail === "info@ahyelektrik.com";
+  // maaş alanlarını GÖREMEZ — muhasebe (Tuğçe)
+  const _maasGizli = _isMuhasebe;
   // AHY tarafında maaşlar ekstra şifre korumalı: sadece Haşım Bey bilir
   // (ahy2026gsm). ERC yetkilileri şifresiz girer, AHY yetkilisi şifreyle.
   const _maasSifreli = _hrEmail === "info@ahyelektrik.com";
@@ -14210,7 +14210,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <div style={{ minWidth:"130px" }}>
                       <div style={{ fontWeight:700, fontSize:"15px" }}>{sp.ad_soyad}</div>
                       <div style={{ fontSize:"12px", color:"#9ca3af", marginTop:"2px" }}>{sp.unvan}</div>
-                      {_hrYetkili && <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"4px" }}>Net Maaş: <b>₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}</b></div>}
+                      {_hrYetkili && personelUnlocked && <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"4px" }}>Net Maaş: <b>₺{Number(sp.net_maas||0).toLocaleString("tr-TR")}</b></div>}
                     </div>
                     <div style={{ display:"flex", gap:"10px", flex:1, flexWrap:"wrap" }}>
                       {[
@@ -14233,8 +14233,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         </div>
                       )}
                     </div>
-                    {/* ── Extra blok + Kart sütunu ── (maaş içerir: yalnız yetkili görür) */}
-                    {_hrYetkili && (() => {
+                    {/* ── Extra blok + Kart sütunu ── (maaş içerir: yalnız kilidi açık yetkili görür) */}
+                    {_hrYetkili && personelUnlocked && (() => {
                       const bankadan_gosterilen = Number(sp.bankadan_gosterilen||0);
                       const elden_verilen       = Number(sp.elden_verilen||0);
                       // Bu ay maas_odeme kayıtlarından banka / elden ayrımı
