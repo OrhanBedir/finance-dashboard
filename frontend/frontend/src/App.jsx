@@ -13551,11 +13551,17 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
 
       {/* Modül sekmeleri — ERP tarzı segment (İş Avansı Muhasebe menüsündedir) */}
       <div style={{ display:"inline-flex", gap:"4px", marginBottom:"22px", background:"#f1f5f9", borderRadius:"14px", padding:"5px", flexWrap:"wrap" }}>
-        {[["personel","👤","Personel Maaş","Kadro & maaş yönetimi"],["maas_avans","💰","Maaş Avansı","Avans kayıtları"],["puantaj","📋","Puantaj","Devam & hakediş"],["isg","🎓","ISG / Belgeler","Eğitim & sertifika"]]
-        .filter(([k]) => _hrYetkili || !_isMuhasebe || !["personel","maas_avans"].includes(k))
+        {[
+          // Muhasebe maaş göremez ama personel KÜNYESİNİ yönetir: sekme adı
+          // ona 'Personel' olarak görünür, Maaş Avansı sekmesi hiç görünmez
+          ["personel","👤", _maasGizli ? "Personel" : "Personel Maaş", _maasGizli ? "Kadro & künye yönetimi" : "Kadro & maaş yönetimi"],
+          ["maas_avans","💰","Maaş Avansı","Avans kayıtları"],
+          ["puantaj","📋","Puantaj","Devam & hakediş"],
+          ["isg","🎓","ISG / Belgeler","Eğitim & sertifika"]]
+        .filter(([k]) => !(_isMuhasebe && !_hrYetkili && k === "maas_avans"))
         .map(([k, ic, l, alt]) => (
           <button key={k} onClick={()=>{
-            if ((k === "personel" || k === "maas_avans") && !personelUnlocked) {
+            if ((k === "personel" || k === "maas_avans") && !personelUnlocked && !(_isMuhasebe && k === "personel")) {
               const pwd = prompt("Maaş bilgileri için şifre giriniz:");
               if (!_maasSifreler.includes(pwd)) { alert("Yetkisiz erişim!"); return; }
               setPersonelUnlocked(true);
