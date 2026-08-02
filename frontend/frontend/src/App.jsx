@@ -1013,11 +1013,11 @@ function KirilimRaporuPanel() {
     <div style={{ padding: "24px", maxWidth: "1100px" }}>
       <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🧮 Hakediş Kırılımı</h2>
       <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>
-        HW'ye kesilen faturalar üzerinden aylık pay dağılımı — ERC Mühendislik %{yuzde} • AHY Elektrik %{100 - yuzde}
+        Yalnız <b>AHY*</b> taşeronlarının yaptığı işlerin HW faturaları kırılıma girer — ERC Mühendislik %{yuzde} • AHY Elektrik %{100 - yuzde}
       </div>
       <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
         <div style={{ background: "linear-gradient(135deg,#1e3a5f,#2d5a8f)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
-          <div style={{ fontSize: "11px", opacity: 0.85, textTransform: "uppercase", letterSpacing: "0.05em" }}>Toplam HW Fatura</div>
+          <div style={{ fontSize: "11px", opacity: 0.85, textTransform: "uppercase", letterSpacing: "0.05em" }}>AHY İşleri HW Fatura</div>
           <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tTry)}{tUsd > 0 && <span style={{ fontSize: "14px", fontWeight: 600 }}> + ${fmt(tUsd)}</span>}</div>
         </div>
         <div style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)", color: "#fff", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
@@ -1028,6 +1028,29 @@ function KirilimRaporuPanel() {
           <div style={{ fontSize: "11px", opacity: 0.9, textTransform: "uppercase", letterSpacing: "0.05em" }}>AHY Payı (%{100 - yuzde})</div>
           <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(tTry * (100 - yuzde) / 100)}{tUsd > 0 && <span style={{ fontSize: "14px", fontWeight: 600 }}> + ${fmt(tUsd * (100 - yuzde) / 100)}</span>}</div>
         </div>
+        {(() => {
+          const dTry = aylar.reduce((s, a2) => s + (a2.diger_try || 0), 0);
+          const dUsd = aylar.reduce((s, a2) => s + (a2.diger_usd || 0), 0);
+          const kTry = aylar.reduce((s, a2) => s + (a2.dokumsuz_try || 0), 0);
+          const kUsd = aylar.reduce((s, a2) => s + (a2.dokumsuz_usd || 0), 0);
+          return (
+            <>
+              {(dTry > 0 || dUsd > 0) && (
+                <div style={{ background: "#f1f5f9", border: "1.5px solid #e2e8f0", color: "#334155", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}>
+                  <div style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>Diğer Taşeron İşleri (kırılım dışı)</div>
+                  <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(dTry)}{dUsd > 0 && <span style={{ fontSize: "13px", fontWeight: 600 }}> + ${fmt(dUsd)}</span>}</div>
+                </div>
+              )}
+              {(kTry > 0 || kUsd > 0) && (
+                <div style={{ background: "#fffbeb", border: "1.5px solid #fde68a", color: "#92400e", borderRadius: "14px", padding: "16px 22px", minWidth: "200px" }}
+                  title="Bu faturaların kalem dökümü (Huawei Fatura Item) yüklenmediği için hangi taşerona ait olduğu bilinmiyor — döküm yüklendikçe otomatik dağılır">
+                  <div style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em" }}>⚠ Dökümü Yüklenmemiş (atanamadı)</div>
+                  <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "4px" }}>₺{fmt(kTry)}{kUsd > 0 && <span style={{ fontSize: "13px", fontWeight: 600 }}> + ${fmt(kUsd)}</span>}</div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
       <div style={{ background: "#fff", borderRadius: "14px", overflow: "auto", border: "1px solid #e5e7eb" }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>

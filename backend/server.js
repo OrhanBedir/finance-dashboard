@@ -6162,18 +6162,61 @@ app.get("/finance/kirilim-raporu", authMiddleware, async (req, res) => {
       const m = await pool.query("SELECT kirilim_yuzde FROM markalar WHERE kod='AHY' LIMIT 1");
       if (m.rows[0]) yuzde = Number(m.rows[0].kirilim_yuzde || 10);
     } catch {}
+    // Fatura → taşeron ataması: kalem dökümü (hw_invoice_items) + PO fiyat
+    // ağırlığı ile her faturanın AHY* payı bulunur. Kırılım YALNIZ adı AHY ile
+    // başlayan taşeronların (AHY, AHY_2KX, AHY_NETELKOM...) işlerine uygulanır;
+    // diğer taşeron işleri ve dökümü yüklenmemiş faturalar ayrı raporlanır.
+    const canonInvK = (v) => String(v || "").trim().toUpperCase()
+      .replace(/-.*$/, "").replace(/^(SIM\d{4})0+/, "$1");
+    const attr = new Map(); // canon invoice_no → { total, ahy }
+    try {
+      const subRes = await pool.query(`
+        SELECT h.invoice_no,
+               COALESCE(p.unit_price, 0) AS w,
+               (SELECT m.subcon_name FROM master_works m
+                  WHERE m.site_code = h.site_id AND m.item_code = h.item_code
+                  ORDER BY m.done_qty DESC NULLS LAST LIMIT 1) AS subcon
+        FROM hw_invoice_items h
+        LEFT JOIN po_rows p ON p.po_no = h.po_no AND p.po_line_no = h.line_no
+        WHERE h.invoice_no IS NOT NULL AND h.invoice_no <> ''
+      `);
+      for (const x of subRes.rows) {
+        const w = Number(x.w || 0) || 1; // fiyat yoksa eşit ağırlık
+        const key = canonInvK(x.invoice_no);
+        const a = attr.get(key) || { total: 0, ahy: 0 };
+        a.total += w;
+        if (String(x.subcon || "").trim().toUpperCase().startsWith("AHY")) a.ahy += w;
+        attr.set(key, a);
+      }
+    } catch (e) { console.error("kirilim taşeron atama:", e.message); }
+
     const r = await pool.query(`
-      SELECT to_char(invoice_date,'YYYY-MM') AS ay,
-        SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))='USD' THEN invoice_amount ELSE 0 END) AS usd_toplam,
-        SUM(CASE WHEN UPPER(COALESCE(currency,'TRY'))<>'USD' THEN invoice_amount ELSE 0 END) AS try_toplam,
-        COUNT(*)::int AS fatura_sayisi
+      SELECT invoice_no, to_char(invoice_date,'YYYY-MM') AS ay,
+             COALESCE(invoice_amount,0) AS tutar,
+             UPPER(COALESCE(currency,'TRY')) AS cur
       FROM hw_invoice_rows
       WHERE invoice_date IS NOT NULL
-      GROUP BY 1
-      ORDER BY 1 DESC
     `);
-    const aylar = r.rows.map((x) => {
-      const tryT = Number(x.try_toplam || 0), usdT = Number(x.usd_toplam || 0);
+    const ayMap = new Map();
+    for (const x of r.rows) {
+      const o = ayMap.get(x.ay) || { ay: x.ay, fatura_sayisi: 0, try_toplam: 0, usd_toplam: 0, diger_try: 0, diger_usd: 0, dokumsuz_try: 0, dokumsuz_usd: 0 };
+      const isUsd = x.cur === "USD";
+      const tutar = Number(x.tutar || 0);
+      const a = attr.get(canonInvK(x.invoice_no));
+      if (a && a.total > 0) {
+        const ahyPay = tutar * (a.ahy / a.total);
+        const digerPay = tutar - ahyPay;
+        if (isUsd) { o.usd_toplam += ahyPay; o.diger_usd += digerPay; }
+        else { o.try_toplam += ahyPay; o.diger_try += digerPay; }
+        if (a.ahy > 0) o.fatura_sayisi += 1;
+      } else {
+        // Kalem dökümü yüklenmemiş: taşeronu bilinmiyor — ayrı gösterilir
+        if (isUsd) o.dokumsuz_usd += tutar; else o.dokumsuz_try += tutar;
+      }
+      ayMap.set(x.ay, o);
+    }
+    const aylar = [...ayMap.values()].sort((a, b) => b.ay.localeCompare(a.ay)).map((x) => {
+      const tryT = +x.try_toplam.toFixed(2), usdT = +x.usd_toplam.toFixed(2);
       return {
         ay: x.ay,
         fatura_sayisi: x.fatura_sayisi,
@@ -6183,6 +6226,10 @@ app.get("/finance/kirilim-raporu", authMiddleware, async (req, res) => {
         ahy_try: +(tryT * (100 - yuzde) / 100).toFixed(2),
         erc_usd: +(usdT * yuzde / 100).toFixed(2),
         ahy_usd: +(usdT * (100 - yuzde) / 100).toFixed(2),
+        diger_try: +x.diger_try.toFixed(2),
+        diger_usd: +x.diger_usd.toFixed(2),
+        dokumsuz_try: +x.dokumsuz_try.toFixed(2),
+        dokumsuz_usd: +x.dokumsuz_usd.toFixed(2),
       };
     });
     res.json({ ok: true, yuzde, aylar });
