@@ -2572,40 +2572,6 @@ function OrgSemasiPanel({ currentUser }) {
         </div>
       </div>
 
-      {/* Canlı saha ekipleri — HERKESE görünür; karta tıklayınca detay modalı açılır */}
-      {ekipler.length > 0 && (
-        <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "16px 20px", marginBottom: "18px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "12px" }}>
-            <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>👷 Saha Ekipleri <span style={{ fontSize: "11.5px", fontWeight: 500, color: "#94a3b8" }}>karta tıkla → ekip detayı</span></div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: "12px" }}>
-            {ekipler.map(e => {
-              const uyeler = ekipUyeleri(e.ekip_no);
-              return (
-                <div key={e.ekip_no} onClick={() => setEkipDetay(e)}
-                  style={{ border: "1.5px solid #e2e8f0", borderRadius: "12px", overflow: "hidden", cursor: "pointer", transition: "all 0.15s" }}
-                  onMouseEnter={ev => { ev.currentTarget.style.boxShadow = "0 8px 24px rgba(30,58,95,0.18)"; ev.currentTarget.style.transform = "translateY(-2px)"; }}
-                  onMouseLeave={ev => { ev.currentTarget.style.boxShadow = "none"; ev.currentTarget.style.transform = "none"; }}>
-                  <div style={{ background: "linear-gradient(120deg,#1e3a5f,#1e40af)", color: "#fff", padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontWeight: 800, fontSize: "13.5px" }}>{ekipAdi(e)}{e.bolge ? ` · ${e.bolge}` : ""}</span>
-                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: "6px", padding: "1px 8px", fontSize: "11.5px", fontWeight: 700 }}>{uyeler.length} kişi</span>
-                  </div>
-                  <div style={{ padding: "8px 12px" }}>
-                    {uyeler.map(p => (
-                      <div key={p.id} style={{ fontSize: "12.5px", color: "#374151", padding: "3px 0", borderBottom: "1px dashed #f1f5f9", display: "flex", justifyContent: "space-between", gap: "6px" }}>
-                        <span>{p.ad_soyad} <span style={{ color: "#9ca3af", fontSize: "11px" }}>{p.unvan || ""}</span></span>
-                        {p.ekip_arac_plaka && <span style={{ color: "#1d4ed8", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>🚗 {p.ekip_arac_plaka}</span>}
-                      </div>
-                    ))}
-                    {uyeler.length === 0 && <div style={{ fontSize: "12px", color: "#cbd5e1", padding: "4px 0" }}>Üye atanmadı</div>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Ekip Detay modalı — HERKES görür, yalnız yetkililer düzenler */}
       {ekipDetay && (() => {
         const e = ekipler.find(x => x.ekip_no === ekipDetay.ekip_no) || ekipDetay;
@@ -2837,6 +2803,41 @@ function OrgSemasiPanel({ currentUser }) {
           <text x={625} y={905} textAnchor="middle" fontSize="10.5" fill="#94a3b8" fontFamily="Arial">Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · {new Date().toLocaleDateString("tr-TR")}</text>
         </svg>
       </div>
+
+      {/* Canlı saha ekipleri — HERKESE görünür; karta tıklayınca detay modalı açılır */}
+      {ekipler.length > 0 && (
+        <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "16px 20px", marginBottom: "18px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "12px" }}>
+            <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>👷 Saha Ekipleri <span style={{ fontSize: "11.5px", fontWeight: 500, color: "#94a3b8" }}>karta tıkla → ekip detayı</span></div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: "12px" }}>
+            {ekipler.map(e => {
+              const uyeler = ekipUyeleri(e.ekip_no);
+              return (
+                <div key={e.ekip_no} onClick={() => setEkipDetay(e)}
+                  style={{ border: "1.5px solid #e2e8f0", borderRadius: "12px", overflow: "hidden", cursor: "pointer", transition: "all 0.15s" }}
+                  onMouseEnter={ev => { ev.currentTarget.style.boxShadow = "0 8px 24px rgba(30,58,95,0.18)"; ev.currentTarget.style.transform = "translateY(-2px)"; }}
+                  onMouseLeave={ev => { ev.currentTarget.style.boxShadow = "none"; ev.currentTarget.style.transform = "none"; }}>
+                  <div style={{ background: "linear-gradient(120deg,#1e3a5f,#1e40af)", color: "#fff", padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontWeight: 800, fontSize: "13.5px" }}>{ekipAdi(e)}{e.bolge ? ` · ${e.bolge}` : ""}</span>
+                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: "6px", padding: "1px 8px", fontSize: "11.5px", fontWeight: 700 }}>{uyeler.length} kişi</span>
+                  </div>
+                  <div style={{ padding: "8px 12px" }}>
+                    {uyeler.map(p => (
+                      <div key={p.id} style={{ fontSize: "12.5px", color: "#374151", padding: "3px 0", borderBottom: "1px dashed #f1f5f9", display: "flex", justifyContent: "space-between", gap: "6px" }}>
+                        <span>{p.ad_soyad} <span style={{ color: "#9ca3af", fontSize: "11px" }}>{p.unvan || ""}</span></span>
+                        {p.ekip_arac_plaka && <span style={{ color: "#1d4ed8", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>🚗 {p.ekip_arac_plaka}</span>}
+                      </div>
+                    ))}
+                    {uyeler.length === 0 && <div style={{ fontSize: "12px", color: "#cbd5e1", padding: "4px 0" }}>Üye atanmadı</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
         💡 Excel çıktısı 2 sayfadır: "Organization Chart" (şema) + "Details" (resmi eleman listesi: Team 1-7 — Adı Soyadı, Görevi, Bölge, Tel NO, Firma Adı).
       </div>
