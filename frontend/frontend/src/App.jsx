@@ -27035,8 +27035,18 @@ function App() {
             )}
           </div>
 
-          {/* Footer */}
-          <div style={{textAlign:'center',padding:'28px 16px',fontSize:'12px',color:'#94a3b8'}}>
+          {/* Footer — kurumsal alt bilgi */}
+          <div style={{textAlign:'center',padding:'22px 16px 26px',fontSize:'12px',color:'#94a3b8',borderTop:'1px solid #e2e8f0',marginTop:'12px'}}>
+            <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:'14px',marginBottom:'8px',flexWrap:'wrap'}}>
+              <span style={{fontWeight:600,color:'#64748b'}}>Omnix — Operations & Project Platform</span>
+              <span style={{color:'#cbd5e1'}}>|</span>
+              <details style={{display:'inline-block'}}>
+                <summary style={{cursor:'pointer',color:'#1e3a5f',fontWeight:700,listStyle:'none',display:'inline'}}>İletişim</summary>
+                <div style={{marginTop:'6px'}}>
+                  <a href="mailto:orhan.bedir@gmail.com" style={{color:'#1d4ed8',fontWeight:600,textDecoration:'none'}}>📧 orhan.bedir@gmail.com</a>
+                </div>
+              </details>
+            </div>
             © {new Date().getFullYear()} Omnix Platform. Tüm hakları saklıdır.
           </div>
         </div>
