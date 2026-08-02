@@ -19618,7 +19618,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         x.fatura_no || "",
         x.fatura_tarihi || "",
         x.fatura_miktari != null ? Number(x.fatura_miktari) : "",
-        x.hw_fatura_tarihi || "",
+        x.hw_fatura_tarihi || "Kalem dökümü yüklenmemiş",
         x.vade || "",
         x.tahsilat_tarihi ? `Ödeme Yapıldı (${x.tahsilat_tarihi})` : (x.vade ? "Gelecek" : "HW Muhasebe Onayı Bekliyor"),
       ]);
@@ -21151,7 +21151,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                           <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 600 }}>{formatTRY(x.total_price)}</td>
                           <td style={{ padding: "6px 8px", color: x.durum === "Faturalandı" ? "#16a34a" : "#b45309", fontWeight: 600 }}>{x.durum}</td>
                           <td style={{ padding: "6px 8px", textAlign: "right" }}>{x.fatura_miktari != null ? formatTRY(x.fatura_miktari) : "-"}</td>
-                          <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{x.hw_fatura_tarihi ? new Date(x.hw_fatura_tarihi).toLocaleDateString("tr-TR") : "-"}</td>
+                          <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}
+                            title={x.hw_fatura_tarihi ? undefined : "Bu kalemin hangi faturayla kesildiği sistemde yok — Huawei Fatura Item Yükle'den o faturanın PDF/Excel dökümünü yükleyin, tarih otomatik gelir"}>
+                            {x.hw_fatura_tarihi
+                              ? new Date(x.hw_fatura_tarihi).toLocaleDateString("tr-TR")
+                              : <span style={{ color: "#94a3b8", fontSize: "11.5px" }}>📄 Kalem dökümü yüklenmemiş</span>}
+                          </td>
                           <td style={{ padding: "6px 8px" }}>{x.vade ? new Date(x.vade).toLocaleDateString("tr-TR") : "-"}</td>
                           <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
                             {x.tahsilat_tarihi
