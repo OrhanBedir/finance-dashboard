@@ -26227,7 +26227,7 @@ function App() {
   const [pendingAvansCount, setPendingAvansCount] = useState(0);
   const [pendingMasrafCount, setPendingMasrafCount] = useState(0);
   const [pendingMalzemeCount, setPendingMalzemeCount] = useState(0);
-  const [openSections, setOpenSections] = useState({ anaMeny: true, ik: false, muhasebe: false, depo: false });
+  const [openSections, setOpenSections] = useState({ anaMeny: true, hwYukle: false, ik: false, muhasebe: false, depo: false });
   const toggleSection = (key) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     // Alt yüklenici (AHY/Federal/UBS gibi) giriş yapınca sol menü kapalı başlasın → sadece kartlar.
@@ -27013,20 +27013,21 @@ function App() {
     <>
       <style>{`
         .app-layout { display: flex; height: 100vh; overflow: hidden; background: #f0f2f5; }
-        .sidebar { width: 240px; background: #0f1623; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width 0.22s ease; }
+        .sidebar { width: 246px; background: linear-gradient(180deg, #0a0f1c 0%, #0f1725 45%, #0b1220 100%); color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width 0.22s ease; }
         .sidebar.collapsed { width: 0; overflow: hidden; }
         .topbar-toggle { width: 34px; height: 34px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #475569; flex-shrink: 0; transition: background 0.15s; }
         .topbar-toggle:hover { background: #e2e8f0; color: #0f172a; }
         .sidebar-logo { padding: 20px 16px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; gap: 10px; }
         .sidebar-logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
-        .sidebar-section-title { padding: 10px 16px 6px; font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.8px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; transition: color 0.15s; }
-        .sidebar-section-title:hover { color: #cbd5e1; }
-        .sidebar-section-chevron { font-size: 12px; color: #94a3b8; transition: transform 0.2s; line-height: 1; }
+        .sidebar-section-title { margin: 10px 10px 4px; padding: 9px 12px; border-radius: 9px; font-size: 11px; font-weight: 800; color: #e2e8f0; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.07); text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; transition: all 0.18s; }
+        .sidebar-section-title:hover { background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.25); color: #fff; }
+        .sidebar-section-chevron { font-size: 12px; color: #7d8ba1; transition: transform 0.22s; line-height: 1; }
         .sidebar-section-chevron.open { transform: rotate(0deg); }
         .sidebar-section-chevron.closed { transform: rotate(-90deg); }
-        .sidebar-nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 1px 8px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; color: #cbd5e1; transition: all 0.15s; position: relative; }
-        .sidebar-nav-item:hover { background: #1e2a3a; color: #f1f5f9; }
-        .sidebar-nav-item.active { background: #1d4ed8; color: #fff; }
+        .sidebar-nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 12px; margin: 1px 10px 1px 18px; border-radius: 8px; cursor: pointer; font-size: 13.5px; font-weight: 500; color: #9aa9bd; transition: all 0.16s; position: relative; }
+        .sidebar-nav-item:hover { background: rgba(59,130,246,0.13); color: #f1f5f9; transform: translateX(2px); }
+        .sidebar-nav-item.active { background: linear-gradient(90deg, #2563eb, #1d4ed8); color: #fff; font-weight: 600; box-shadow: 0 4px 14px rgba(37,99,235,0.35); }
+        .sidebar-nav-item.active::before { content: ''; position: absolute; left: -12px; top: 18%; bottom: 18%; width: 3px; border-radius: 3px; background: #60a5fa; }
         .sidebar-badge { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #dc2626; color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
         .sidebar-user { margin-top: auto; padding: 12px; border-top: 1px solid #1e2a3a; }
         .sidebar-user-card { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; background: #1e2a3a; }
@@ -27144,9 +27145,18 @@ function App() {
                       <span>🧮</span> Hakediş Kırılımı
                     </div>
                   )}
-                  {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && canHwUpload && (
-                    <>
-                      <div style={{margin:'4px 8px 2px',height:'1px',background:'#1e2a3a'}}/>
+                </div>
+              )}
+
+              {/* ── HW DOSYA YÜKLE (katlanır grup) ── */}
+              {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && canHwUpload && !isAltMarka && (
+                <>
+                  <div className="sidebar-section-title" onClick={()=>toggleSection('hwYukle')}>
+                    <span>HW Dosya Yükle</span>
+                    <span className={`sidebar-section-chevron ${openSections.hwYukle?'open':'closed'}`}>▾</span>
+                  </div>
+                  {openSections.hwYukle && (
+                    <div>
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); }}>
                         <span>📤</span> HW Payment Yükle
                       </div>
@@ -27162,9 +27172,9 @@ function App() {
                       <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); }}>
                         <span>📋</span> HW Acceptance Yükle
                       </div>
-                    </>
+                    </div>
                   )}
-                </div>
+                </>
               )}
 
               {/* ── İNSAN KAYNAKLARI ── */}
