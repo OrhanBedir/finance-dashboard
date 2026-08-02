@@ -27318,35 +27318,6 @@ function App() {
                 </div>
               )}
 
-              {/* ── HW DOSYA YÜKLE (katlanır grup) ── */}
-              {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && canHwUpload && !isAltMarka && (
-                <>
-                  <div className="sidebar-section-title" onClick={()=>toggleSection('hwYukle')}>
-                    <span>HW Dosya Yükle</span>
-                    <span className={`sidebar-section-chevron ${openSections.hwYukle?'open':'closed'}`}>▾</span>
-                  </div>
-                  {openSections.hwYukle && (
-                    <div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); }}>
-                        <span>📤</span> HW Payment Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura'); }}>
-                        <span>🧾</span> HW Fatura Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura_item'); }}>
-                        <span>📑</span> Huawei Fatura Item Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); }}>
-                        <span>🔩</span> HW PO Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); }}>
-                        <span>📋</span> HW Acceptance Yükle
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-
               {/* ── İNSAN KAYNAKLARI ── */}
               <div className="sidebar-section-title" onClick={()=>toggleSection('ik')}>
                 <span>İnsan Kaynakları</span>
@@ -27442,6 +27413,36 @@ function App() {
                   )}
                 </>
               )}
+
+              {/* ── HW DOSYA YÜKLE (katlanır grup) ── */}
+              {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && canHwUpload && !isAltMarka && (
+                <>
+                  <div className="sidebar-section-title" onClick={()=>toggleSection('hwYukle')}>
+                    <span>HW Dosya Yükle</span>
+                    <span className={`sidebar-section-chevron ${openSections.hwYukle?'open':'closed'}`}>▾</span>
+                  </div>
+                  {openSections.hwYukle && (
+                    <div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); }}>
+                        <span>📤</span> HW Payment Yükle
+                      </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura'); }}>
+                        <span>🧾</span> HW Fatura Yükle
+                      </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura_item'); }}>
+                        <span>📑</span> Huawei Fatura Item Yükle
+                      </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); }}>
+                        <span>🔩</span> HW PO Yükle
+                      </div>
+                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); }}>
+                        <span>📋</span> HW Acceptance Yükle
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
             </>
           )}
 
