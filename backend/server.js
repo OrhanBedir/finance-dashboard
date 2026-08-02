@@ -12885,14 +12885,24 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
 
       const netMaas = Number(p.net_maas) || 0;
       const dailyRate = netMaas / REFERANS_GUN;
+      // İşe giriş bu ayın İÇİNDEYSE giriş öncesi günler hakedişe girmez:
+      // taban maaş kalan takvim günü oranıyla kısılır (Ender/Selçuk vakası —
+      // puantajda giriş öncesi gün kaydı olmadığından kesinti hiç oluşmuyordu)
+      let girisFactor = 1;
+      if (p.ise_giris_tarihi) {
+        const g = new Date(p.ise_giris_tarihi);
+        if (!Number.isNaN(g.getTime()) && g.getFullYear() === Number(yil) && (g.getMonth() + 1) === Number(ay)) {
+          girisFactor = (totalDays - g.getDate() + 1) / totalDays;
+        }
+      }
       // Pazar/resmi tatil bonusu maaşa EKLENMEZ — dinlenme bakiyesine birikir
-      const hakedilen = Math.round(netMaas - gelmedi * dailyRate);
+      const hakedilen = Math.max(0, Math.round(netMaas * girisFactor - gelmedi * dailyRate));
       const pazarBonus = 0; // Artık maaşa yansımıyor, dinlenme hakkı olarak birikiyor
 
       const bankaDailyRate = (Number(p.bankadan_gosterilen) || 0) / REFERANS_GUN;
       const eldenDailyRate = (Number(p.elden_verilen) || 0) / REFERANS_GUN;
-      const bankadan = Math.round((Number(p.bankadan_gosterilen) || 0) - gelmedi * bankaDailyRate);
-      const elden = Math.round((Number(p.elden_verilen) || 0) - gelmedi * eldenDailyRate);
+      const bankadan = Math.max(0, Math.round((Number(p.bankadan_gosterilen) || 0) * girisFactor - gelmedi * bankaDailyRate));
+      const elden = Math.max(0, Math.round((Number(p.elden_verilen) || 0) * girisFactor - gelmedi * eldenDailyRate));
 
       const avansRow = avansList.rows.find(a => a.personel_id === p.id);
       const avans = Number(avansRow?.toplam || 0);
