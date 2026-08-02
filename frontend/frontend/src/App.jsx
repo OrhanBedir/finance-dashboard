@@ -26610,6 +26610,7 @@ function App() {
   const [financeLoginLoading, setFinanceLoginLoading] = useState(false);
 
   const [authTab, setAuthTab] = useState('login');
+  const [footerModal, setFooterModal] = useState(null); // 'iletisim' | 'gizlilik' — giriş sayfası alt bilgi pencereleri
   const [showPassword, setShowPassword] = useState(false);
   const [regForm, setRegForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
   const [regLoading, setRegLoading] = useState(false);
@@ -27035,20 +27036,66 @@ function App() {
             )}
           </div>
 
-          {/* Footer — kurumsal alt bilgi */}
-          <div style={{textAlign:'center',padding:'22px 16px 26px',fontSize:'12px',color:'#94a3b8',borderTop:'1px solid #e2e8f0',marginTop:'12px'}}>
-            <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:'14px',marginBottom:'8px',flexWrap:'wrap'}}>
-              <span style={{fontWeight:600,color:'#64748b'}}>Omnix — Operations & Project Platform</span>
-              <span style={{color:'#cbd5e1'}}>|</span>
-              <details style={{display:'inline-block'}}>
-                <summary style={{cursor:'pointer',color:'#1e3a5f',fontWeight:700,listStyle:'none',display:'inline'}}>İletişim</summary>
-                <div style={{marginTop:'6px'}}>
-                  <a href="mailto:orhan.bedir@gmail.com" style={{color:'#1d4ed8',fontWeight:600,textDecoration:'none'}}>📧 orhan.bedir@gmail.com</a>
-                </div>
-              </details>
-            </div>
-            © {new Date().getFullYear()} Omnix Platform. Tüm hakları saklıdır.
+          {/* Footer — Huawei düzeni: solda telif, sağda linkler */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'12px',flexWrap:'wrap',padding:'18px 28px',fontSize:'12.5px',color:'#94a3b8',borderTop:'1px solid #e2e8f0',marginTop:'12px'}}>
+            <span>Copyright © {new Date().getFullYear()} Omnix Platform. Tüm hakları saklıdır.</span>
+            <span style={{display:'flex',gap:'22px'}}>
+              <span onClick={()=>setFooterModal('iletisim')} style={{cursor:'pointer',color:'#475569',fontWeight:600}}>İletişim</span>
+              <span onClick={()=>setFooterModal('gizlilik')} style={{cursor:'pointer',color:'#475569',fontWeight:600}}>Gizlilik Bildirimi</span>
+            </span>
           </div>
+
+          {/* İletişim modalı — ortada küçük kart */}
+          {footerModal === 'iletisim' && (
+            <div onClick={()=>setFooterModal(null)} style={{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',zIndex:5000,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+              <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'14px',width:'min(480px,92vw)',padding:'26px 30px',boxShadow:'0 25px 60px rgba(0,0,0,0.3)'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'12px'}}>
+                  <div style={{fontSize:'19px',fontWeight:800,color:'#0f172a'}}>İletişim</div>
+                  <button onClick={()=>setFooterModal(null)} aria-label="Kapat"
+                    style={{width:'32px',height:'32px',borderRadius:'50%',border:'none',background:'#f3f4f6',color:'#6b7280',fontSize:'15px',fontWeight:700,cursor:'pointer',lineHeight:1}}>✕</button>
+                </div>
+                <div style={{fontSize:'14.5px',color:'#334155',marginBottom:'10px'}}>Her türlü soru, öneri ve destek talebiniz için bize ulaşın:</div>
+                <a href="mailto:orhan.bedir@gmail.com" style={{fontSize:'15px',color:'#1d4ed8',fontWeight:700,textDecoration:'none'}}>orhan.bedir@gmail.com</a>
+              </div>
+            </div>
+          )}
+
+          {/* Gizlilik Bildirimi — tam ekran kaydırmalı sayfa (Huawei Uniportal kalıbı) */}
+          {footerModal === 'gizlilik' && (
+            <div style={{position:'fixed',inset:0,background:'#fff',zIndex:5000,display:'flex',flexDirection:'column'}}>
+              <div style={{padding:'14px 28px',borderBottom:'1px solid #e5e7eb',display:'flex',alignItems:'center',gap:'10px',flexShrink:0}}>
+                <div style={{width:'30px',height:'30px',background:'linear-gradient(135deg,#3b82f6,#6366f1)',borderRadius:'7px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'15px'}}>🏗</div>
+                <span style={{fontWeight:800,fontSize:'16px',color:'#0f172a'}}>Omnix</span>
+              </div>
+              <div style={{flex:1,overflowY:'auto',padding:'34px 8vw 60px',color:'#1f2937',fontSize:'14.5px',lineHeight:1.65}}>
+                <h1 style={{textAlign:'center',fontSize:'28px',fontWeight:800,margin:'0 0 8px'}}>Gizlilik ve Kişisel Verilerin Korunması Bildirimi</h1>
+                <div style={{textAlign:'right',fontSize:'13px',color:'#6b7280',marginBottom:'26px'}}>Son güncelleme: 02.08.2026<br/>Yürürlük tarihi: 02.08.2026</div>
+                <p>Omnix Platform ("Platform" veya "biz"), Şimşek Haberleşme ve iş ortaklarının saha operasyonları, hakediş ve insan kaynakları süreçlerinin yönetimi amacıyla işletilmektedir. Kişisel verilerinizin güvenliğine önem veriyor ve 6698 sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") ile ilgili mevzuata uygun hareket ediyoruz. Lütfen Platform'u kullanmadan önce bu bildirimi dikkatlice okuyunuz.</p>
+                <h2 style={{fontSize:'20px',fontWeight:800,marginTop:'28px'}}>1. Topladığımız Kişisel Veriler</h2>
+                <p><b>Hesap ve kimlik bilgileri:</b> ad soyad, e-posta adresi, şifre (yalnız geri döndürülemez özetlenmiş/hash'li olarak saklanır).<br/>
+                <b>Personel özlük bilgileri:</b> T.C. kimlik numarası, doğum tarihi, telefon, işe giriş/ayrılış tarihleri, ünvan, maaş ve ödeme bilgileri (banka/IBAN) — yalnız yetkili İK ve yönetim kullanıcılarının erişimine açıktır.<br/>
+                <b>Operasyonel kayıtlar:</b> puantaj, avans ve masraf kayıtları, iş sağlığı ve güvenliği (İSG) eğitim/sertifika bilgileri.<br/>
+                <b>Kullanım bilgileri:</b> giriş zamanı ve oturum kayıtları gibi güvenlik amaçlı teknik kayıtlar.</p>
+                <h2 style={{fontSize:'20px',fontWeight:800,marginTop:'28px'}}>2. İşleme Amaçları</h2>
+                <p>Kişisel veriler; iş sözleşmesinin ifası, bordro ve hakediş süreçlerinin yürütülmesi, proje ve saha operasyonlarının takibi, iş ortağı (ör. Huawei) raporlama yükümlülüklerinin yerine getirilmesi, İSG mevzuatına uyum ve Platform güvenliğinin sağlanması amaçlarıyla işlenir.</p>
+                <h2 style={{fontSize:'20px',fontWeight:800,marginTop:'28px'}}>3. Hukuki Sebepler</h2>
+                <p>Verileriniz KVKK m.5 kapsamında; sözleşmenin kurulması ve ifası, hukuki yükümlülüklerin yerine getirilmesi ve meşru menfaat hukuki sebeplerine dayanılarak işlenir.</p>
+                <h2 style={{fontSize:'20px',fontWeight:800,marginTop:'28px'}}>4. Verilerin Aktarılması</h2>
+                <p>Kişisel veriler; yalnız hizmetin gerektirdiği ölçüde, proje raporlama süreçleri kapsamında iş ortaklarına (saha/kalite raporları) ve Platform'un barındırma/veritabanı hizmet sağlayıcılarına aktarılabilir. Barındırma altyapısı yurt dışında bulunabilir; bu durumda mevzuatın öngördüğü güvenlik tedbirleri uygulanır. Verileriniz hiçbir koşulda pazarlama amacıyla üçüncü kişilerle paylaşılmaz.</p>
+                <h2 style={{fontSize:'20px',fontWeight:800,marginTop:'28px'}}>5. Saklama Süresi ve Güvenlik</h2>
+                <p>Veriler, iş ilişkisi ve yasal saklama yükümlülükleri (İş Kanunu, SGK ve vergi mevzuatı) süresince saklanır; sürenin sonunda silinir veya anonimleştirilir. Erişim, rol bazlı yetkilendirme ile sınırlandırılmıştır; şifreler geri döndürülemez şekilde saklanır ve hassas alanlar yalnız yetkili kullanıcılarca görüntülenebilir.</p>
+                <h2 style={{fontSize:'20px',fontWeight:800,marginTop:'28px'}}>6. Haklarınız</h2>
+                <p>KVKK m.11 uyarınca; kişisel verilerinizin işlenip işlenmediğini öğrenme, bilgi talep etme, düzeltilmesini veya silinmesini isteme, aktarıldığı üçüncü kişileri bilme ve zarara uğramanız hâlinde giderilmesini talep etme haklarına sahipsiniz. Talepleriniz için aşağıdaki iletişim adresini kullanabilirsiniz.</p>
+                <h2 style={{fontSize:'20px',fontWeight:800,marginTop:'28px'}}>7. Bildirimin Güncellenmesi</h2>
+                <p>Bu bildirim gerektiğinde güncellenebilir; güncel sürüm her zaman bu sayfada yayımlanır.</p>
+                <h2 style={{fontSize:'20px',fontWeight:800,marginTop:'28px'}}>8. İletişim</h2>
+                <p>Gizlilikle ilgili soru, öneri ve talepleriniz için: <a href="mailto:orhan.bedir@gmail.com" style={{color:'#1d4ed8',fontWeight:600}}>orhan.bedir@gmail.com</a></p>
+              </div>
+              <div style={{padding:'14px',borderTop:'1px solid #e5e7eb',textAlign:'center',flexShrink:0}}>
+                <button onClick={()=>setFooterModal(null)} style={{padding:'10px 40px',borderRadius:'8px',border:'1px solid #d1d5db',background:'#fff',fontSize:'14px',fontWeight:700,color:'#374151',cursor:'pointer'}}>Kapat</button>
+              </div>
+            </div>
+          )}
         </div>
       </>
     );
