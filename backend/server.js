@@ -9913,10 +9913,14 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
        WHERE due_date IS NOT NULL AND invoice_no IS NOT NULL
        GROUP BY invoice_no`,
     ).catch(() => ({ rows: [] }));
+    // Fatura no normalizasyonu: '-cur' eki atılır, SIM+yıl sonrası baştaki
+    // sıfırlar kırpılır (kalem/head/payment dosyaları farklı doldurabiliyor)
+    const canonInv = (v) => String(v || "").trim().toUpperCase()
+      .replace(/-.*$/, "").replace(/^(SIM\d{4})0+/, "$1");
     const dueByInvoice = new Map();
     pay.rows.forEach((r) => {
       if (r.invoice_no)
-        dueByInvoice.set(String(r.invoice_no).trim(), r.due_date);
+        dueByInvoice.set(canonInv(r.invoice_no), r.due_date);
     });
 
     const payBuckets = new Map(); // due_date -> { amount, invoice_nos:Set }
@@ -9930,8 +9934,8 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
       let usedInv = null;
       if (hwInvs) {
         for (const inv of hwInvs) {
-          if (dueByInvoice.has(String(inv).trim())) {
-            due = dueByInvoice.get(String(inv).trim());
+          if (dueByInvoice.has(canonInv(inv))) {
+            due = dueByInvoice.get(canonInv(inv));
             usedInv = inv;
             break;
           }
@@ -9980,7 +9984,7 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
     const dueByKey = {};
     for (const [k, invs] of hwInvByKey.entries()) {
       for (const inv of invs) {
-        const due = dueByInvoice.get(String(inv).trim());
+        const due = dueByInvoice.get(canonInv(inv));
         if (due) {
           dueByKey[k] =
             due instanceof Date
@@ -10001,12 +10005,12 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
     ).catch(() => ({ rows: [] }));
     const paidByInvoice = new Map();
     paidRes.rows.forEach((r) => {
-      if (r.invoice_no) paidByInvoice.set(String(r.invoice_no).trim(), r.pay_date);
+      if (r.invoice_no) paidByInvoice.set(canonInv(r.invoice_no), r.pay_date);
     });
     const paidByKey = {};
     for (const [k, invs] of hwInvByKey.entries()) {
       for (const inv of invs) {
-        const pd = paidByInvoice.get(String(inv).trim());
+        const pd = paidByInvoice.get(canonInv(inv));
         if (pd) {
           paidByKey[k] = pd instanceof Date ? pd.toISOString().slice(0, 10) : String(pd).slice(0, 10);
           break;
@@ -10768,7 +10772,12 @@ app.get("/finance/hw-invoice-items/billable-keys", async (req, res) => {
         MAX(hr.reference_rate) AS reference_rate,
         to_char(MIN(hr.invoice_date), 'YYYY-MM-DD') AS invoice_date
       FROM hw_invoice_items i
-      LEFT JOIN hw_invoice_rows hr ON TRIM(hr.invoice_no) = TRIM(i.invoice_no)
+      -- Fatura no normalizasyonu: kalem dosyasında seri fazladan sıfırlı
+      -- (SIM20260000000746), head'de kısa (SIM2026000000746) gelebiliyor;
+      -- '-cur' gibi ekler de atılır — SIM+yıl sonrası baştaki sıfırlar kırpılır
+      LEFT JOIN hw_invoice_rows hr
+        ON regexp_replace(regexp_replace(TRIM(hr.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+         = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
       WHERE i.invoice_no IS NOT NULL
         AND TRIM(COALESCE(i.site_id, '')) <> ''
       GROUP BY UPPER(TRIM(COALESCE(i.site_id, ''))), TRIM(COALESCE(i.item_code, ''))
