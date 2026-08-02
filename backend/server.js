@@ -10740,22 +10740,6 @@ app.get("/finance/hw-invoice-items", async (req, res) => {
 });
 
 // Tek bir faturanın kalem detayları
-app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
-  try {
-    await ensureHwInvoiceItemsTable();
-    const result = await pool.query(
-      `SELECT * FROM hw_invoice_items WHERE invoice_no = $1 ORDER BY site_id, line_no`,
-      [req.params.invoiceNo],
-    );
-    return res.json({ ok: true, items: result.rows });
-  } catch (err) {
-    console.error("HW INVOICE ITEMS DETAIL ERROR:", err);
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message || "Detay alınamadı" });
-  }
-});
-
 // Huawei'ye FATURALANMIŞ (invoice_no dolu) kalemlerin site_id|item_code anahtarları
 // Taşeron "Fatura Kesilebilir" çarpıştırması için.
 app.get("/finance/hw-invoice-items/billable-keys", async (req, res) => {
@@ -10788,6 +10772,22 @@ app.get("/finance/hw-invoice-items/billable-keys", async (req, res) => {
     return res
       .status(500)
       .json({ ok: false, error: err.message || "Anahtarlar alınamadı" });
+  }
+});
+
+app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
+  try {
+    await ensureHwInvoiceItemsTable();
+    const result = await pool.query(
+      `SELECT * FROM hw_invoice_items WHERE invoice_no = $1 ORDER BY site_id, line_no`,
+      [req.params.invoiceNo],
+    );
+    return res.json({ ok: true, items: result.rows });
+  } catch (err) {
+    console.error("HW INVOICE ITEMS DETAIL ERROR:", err);
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Detay alınamadı" });
   }
 });
 
