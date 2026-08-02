@@ -13900,7 +13900,6 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     { label:"🏦 Banka Öd.", align:"right", color:"#1d4ed8" },
                                     { label:"💵 Elden Öd.", align:"right", color:"#15803d" },
                                     { label:"💰 M.Avansı",  align:"right", color:"#9d174d" },
-                                    { label:"🏗 İş Avansı", align:"right", color:"#b45309" },
                                     { label:"Toplam Öd.",  align:"right" },
                                     { label:"Kalan",       align:"right" },
                                   ].map(h=>(
@@ -13923,9 +13922,6 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.avans>0?"#9d174d":"#9ca3af", fontWeight:600 }}
                                       title={p.avans>0 ? "Maaş avansı — bu ayın maaşından kesilir, ödenen toplamına dahildir" : undefined}>
                                       {p.avans>0 ? `₺${p.avans.toLocaleString("tr-TR")}` : "—"}
-                                    </td>
-                                    <td style={{ padding:"7px 12px", textAlign:"right", color: p.isAvans>0?"#b45309":"#9ca3af", fontWeight:600 }}>
-                                      {p.isAvans>0 ? `₺${p.isAvans.toLocaleString("tr-TR")}` : "—"}
                                     </td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.odenen>0?"#166534":"#9ca3af", fontWeight:700 }}>
                                       {p.odenen>0 ? `₺${p.odenen.toLocaleString("tr-TR")}` : "—"}
