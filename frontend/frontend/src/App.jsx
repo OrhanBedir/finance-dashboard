@@ -13749,7 +13749,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     return (
                       <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"5px", alignItems:"flex-start" }}>
                         <div style={labelSt}>
-                          📊 {ayAdi} {yilStr} Tahmini Maaş Bütçesi:
+                          📊 {ayAdi} {yilStr} Maaş Bütçesi (tavan):
                           <span style={amountSt("#1e40af")}>
                             ₺{Math.round(personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)).toLocaleString("tr-TR")}
                           </span>
@@ -13758,18 +13758,30 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           </span>
                         </div>
                         <div style={labelSt}>
-                          💰 An İtibariyle {ayAdi} {yilStr} Ayı Maaş Ödemesi Yapılacak:
+                          💰 An İtibariyle {ayAdi} {yilStr} NET Ödenecek Maaş:
                           <span style={amountSt("#15803d")}>
-                            ₺{Math.round(ozet.length > 0
-                              ? ozet.reduce((s,o) => {
-                                  // Marka filtresi: listede olmayan personel (diğer marka) hesaba girmez
-                                  const pp = personelList.find(x=>String(x.id)===String(o.personel_id));
-                                  if (!pp) return s;
-                                  return s + Number(o.hakedilen_maas||0) * ahyMaasOran(pp);
-                                }, 0)
-                              : personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)
-                            ).toLocaleString("tr-TR")}
+                            ₺{(() => {
+                              // Maaş Ödeme Durumu tablosundaki KALAN ile aynı mantık:
+                              // hakediş(oranlı) − devir − (banka+elden+maaş avansı ödemeleri)
+                              const avansByPer = {};
+                              (avansList || []).filter(av => (av.avans_turu||"MAAS").toUpperCase()==="MAAS" && maasAvansAit(av))
+                                .forEach(av => { avansByPer[av.personel_id] = (avansByPer[av.personel_id]||0) + Number(av.tutar||0); });
+                              const odemeByPer = {};
+                              (aylikOdemeler || []).filter(ahyOdemeGor).forEach(o => {
+                                odemeByPer[o.personel_id] = (odemeByPer[o.personel_id]||0) + Number(o.bankadan||0) + Number(o.elden||0);
+                              });
+                              let toplamKalan = 0;
+                              personelList.filter(pp => puantajIstihdam(pp)).forEach(pp => {
+                                const oz = ozet.find(o => String(o.personel_id) === String(pp.id));
+                                const hak = Math.round((oz ? Number(oz.hakedilen_maas||0) : Number(pp.net_maas||0)) * ahyMaasOran(pp));
+                                const gereken = Math.max(0, hak - getDevirFazla(pp.id));
+                                const odenen = (odemeByPer[pp.id]||0) + (avansByPer[pp.id]||0);
+                                toplamKalan += Math.max(0, gereken - odenen);
+                              });
+                              return Math.round(toplamKalan).toLocaleString("tr-TR");
+                            })()}
                           </span>
+                          <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:500 }}>(hakediş − avanslar/ödemeler − devir)</span>
                         </div>
                         {(()=>{
                           // Her personel için: bankadan_gosterilen üzerinden brüt (vergi var),
