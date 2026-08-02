@@ -26307,6 +26307,7 @@ function App() {
   }, [user, token]);
 
   const [adminUsers, setAdminUsers] = useState([]);
+  const [adminUserSearch, setAdminUserSearch] = useState(""); // kullanıcı listesi hızlı arama
   const [adminMarkalar, setAdminMarkalar] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState("");
@@ -27663,7 +27664,16 @@ function App() {
 
                   <div style={{background:"#fff",borderRadius:"16px",boxShadow:"0 4px 20px rgba(0,0,0,0.07)",border:"1px solid #f3f4f6",overflow:"hidden"}}>
                     <div style={{padding:"20px 24px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                      <h3 style={{margin:0,fontSize:"16px",fontWeight:700,color:"#1f2937"}}>Kullanıcılar</h3>
+                      <div style={{display:"flex",alignItems:"center",gap:"12px",flex:"1 1 auto",minWidth:0}}>
+                        <h3 style={{margin:0,fontSize:"16px",fontWeight:700,color:"#1f2937",whiteSpace:"nowrap"}}>Kullanıcılar</h3>
+                        <input
+                          type="text"
+                          placeholder="🔍 İsim veya e-posta ara..."
+                          value={adminUserSearch}
+                          onChange={e=>setAdminUserSearch(e.target.value)}
+                          style={{padding:"8px 14px",border:"1.5px solid #e5e7eb",borderRadius:"10px",fontSize:"13px",flex:"1 1 180px",maxWidth:"300px",minWidth:"140px"}}
+                        />
+                      </div>
                       <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
                         <span style={{background:"#dcfce7",color:"#166534",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>u.is_active).length} Aktif</span>
                         <span style={{background:"#fee2e2",color:"#991b1b",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>!u.is_active).length} Pasif</span>
@@ -27697,7 +27707,11 @@ function App() {
                       <div style={{padding:"40px",textAlign:"center",color:"#9ca3af"}}>Yükleniyor...</div>
                     ) : (
                       <div>
-                        {adminUsers.map((u,i) => (
+                        {adminUsers.filter(u => {
+                          const q = adminUserSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          return String(u.name||"").toLowerCase().includes(q) || String(u.email||"").toLowerCase().includes(q);
+                        }).map((u,i) => (
                           <div key={u.id} style={{display:"grid",gridTemplateColumns:"48px minmax(170px,1fr) 150px minmax(0,auto)",alignItems:"center",gap:"16px",padding:"16px 28px",borderBottom:i<adminUsers.length-1?"1px solid #f3f4f6":"none",background:"#fff",transition:"background 0.15s"}}
                             onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                             onMouseLeave={e=>e.currentTarget.style.background="#fff"}
