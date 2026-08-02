@@ -12915,6 +12915,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [isgBelgeDosya, setIsgBelgeDosya] = useState(null);
   const [notModal, setNotModal] = useState(null); // { puantajRow, personelAd, tarih }
   const [maasOdeModal, setMaasOdeModal] = useState(null); // personel object
+  const [personelListeModal, setPersonelListeModal] = useState(false); // aktif personel künye listesi
   const [maasOdeHak, setMaasOdeHak] = useState(0); // bu ay gerçek hakediş (pazar primiyle)
   const [maasOdeList, setMaasOdeList] = useState([]);
   const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
@@ -13870,6 +13871,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                   URL.revokeObjectURL(url);
                                 });
                               }}>📋 Excel İndir</button>
+                            <button style={{ padding:"5px 12px", background:"#7c3aed", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
+                              onClick={()=>setPersonelListeModal(true)}>👥 Personel Listesi</button>
                             <button style={{ padding:"5px 12px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
                               onClick={()=>{ setEditingPersonel(null); setPForm({ ad_soyad:"",tc_no:"",dogum_tarihi:"",telefon:"",email:"",unvan:"",bolge:"",ise_giris_tarihi:"",isten_ayrilma_tarihi:"",net_maas:"",bankadan_gosterilen:"",elden_verilen:"",iban:"",banka_adi:"",banka_hesap_no:"",aktif:true }); setShowPersonelForm(true); }}>
                               + Personel Ekle</button>
@@ -14411,6 +14414,69 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               </div>
         </div>
       )}
+
+      {/* ===== PERSONEL KÜNYE LİSTESİ MODAL ===== */}
+      {personelListeModal && (() => {
+        const fmtT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "—";
+        const liste = personelList
+          .filter(p => p.aktif)
+          .slice()
+          .sort((x, y) => String(x.ad_soyad||"").localeCompare(String(y.ad_soyad||""), "tr"));
+        const thL = { padding: "9px 12px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#fff", background: "#1e3a5f", whiteSpace: "nowrap" };
+        const tdL = { padding: "8px 12px", fontSize: "13px", color: "#374151", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" };
+        const indirExcel = () => {
+          exportStandardExcel({
+            title: "Aktif Personel Listesi",
+            sheetName: "Personel",
+            fileBase: "Aktif_Personel_Listesi",
+            headers: ["Adı Soyadı", "Tel No", "TC No", "Doğum Tarihi", "İşe Giriş Tarihi", "Pozisyon", "Durum"],
+            colWidths: [28, 16, 15, 14, 16, 24, 10],
+            numericCols: [],
+            rows: liste.map(p => [p.ad_soyad||"", p.telefon||"", p.tc_no||"", fmtT(p.dogum_tarihi), fmtT(p.ise_giris_tarihi), p.unvan||"", "Aktif"]),
+          }).catch(e => alert("Excel indirilemedi: " + e.message));
+        };
+        return (
+          <div onClick={()=>setPersonelListeModal(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"min(980px, 96vw)", maxHeight:"86vh", display:"flex", flexDirection:"column", boxShadow:"0 25px 60px rgba(0,0,0,0.3)", overflow:"hidden" }}>
+              <div style={{ padding:"16px 20px", display:"flex", alignItems:"center", gap:"12px", borderBottom:"1px solid #e5e7eb" }}>
+                <div style={{ fontWeight:800, fontSize:"16px", color:"#111827", flex:1 }}>👥 Aktif Personel Listesi <span style={{ fontSize:"12px", color:"#6b7280", fontWeight:600 }}>({liste.length} kişi)</span></div>
+                <button onClick={indirExcel} style={{ padding:"8px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>📥 Excel İndir</button>
+                <button onClick={()=>setPersonelListeModal(false)} aria-label="Kapat"
+                  onMouseEnter={(e)=>{ e.currentTarget.style.background="#fee2e2"; e.currentTarget.style.color="#b91c1c"; }}
+                  onMouseLeave={(e)=>{ e.currentTarget.style.background="#f3f4f6"; e.currentTarget.style.color="#6b7280"; }}
+                  style={{ width:"32px", height:"32px", borderRadius:"50%", border:"none", background:"#f3f4f6", color:"#6b7280", fontSize:"15px", fontWeight:700, cursor:"pointer", lineHeight:1 }}>✕</button>
+              </div>
+              <div style={{ overflow:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                  <thead><tr>
+                    <th style={thL}>Adı Soyadı</th>
+                    <th style={thL}>Tel No</th>
+                    <th style={thL}>TC No</th>
+                    <th style={thL}>Doğum Tarihi</th>
+                    <th style={thL}>İşe Giriş Tarihi</th>
+                    <th style={thL}>Pozisyon</th>
+                    <th style={thL}>Durum</th>
+                  </tr></thead>
+                  <tbody>
+                    {liste.map((p, i) => (
+                      <tr key={p.id} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                        <td style={{ ...tdL, fontWeight:700, color:"#111827" }}>{p.ad_soyad}</td>
+                        <td style={tdL}>{p.telefon || "—"}</td>
+                        <td style={tdL}>{p.tc_no || "—"}</td>
+                        <td style={tdL}>{fmtT(p.dogum_tarihi)}</td>
+                        <td style={tdL}>{fmtT(p.ise_giris_tarihi)}</td>
+                        <td style={tdL}>{p.unvan || "—"}</td>
+                        <td style={tdL}><span style={{ background:"#dcfce7", color:"#166534", borderRadius:"12px", padding:"2px 10px", fontSize:"11px", fontWeight:700 }}>✓ Aktif</span></td>
+                      </tr>
+                    ))}
+                    {liste.length === 0 && <tr><td colSpan={7} style={{ ...tdL, textAlign:"center", color:"#9ca3af" }}>Aktif personel yok</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ===== MAAŞ ÖDEME MODAL ===== */}
       {maasOdeModal && (
