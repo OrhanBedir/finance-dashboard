@@ -27163,11 +27163,6 @@ function App() {
                       <span>👥</span> Bekleyen Kullanıcılar {pendingUsers.length > 0 && <span style={{background:'#ef4444',color:'#fff',borderRadius:'10px',padding:'1px 7px',fontSize:'11px',marginLeft:'4px'}}>{pendingUsers.length}</span>}
                     </div>
                   )}
-                  {isAdmin && !isAltMarka && (
-                    <div className={`sidebar-nav-item ${page==='kirilim'?'active':''}`} onClick={()=>setPage('kirilim')}>
-                      <span>🧮</span> Hakediş Kırılımı
-                    </div>
-                  )}
                 </div>
               )}
 
