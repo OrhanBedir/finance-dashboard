@@ -13761,7 +13761,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           💰 An İtibariyle {ayAdi} {yilStr} Ayı Maaş Ödemesi Yapılacak:
                           <span style={amountSt("#15803d")}>
                             ₺{Math.round(ozet.length > 0
-                              ? ozet.reduce((s,o) => s + Number(o.hakedilen_maas||0) * ahyMaasOran(personelList.find(x=>String(x.id)===String(o.personel_id))), 0)
+                              ? ozet.reduce((s,o) => {
+                                  // Marka filtresi: listede olmayan personel (diğer marka) hesaba girmez
+                                  const pp = personelList.find(x=>String(x.id)===String(o.personel_id));
+                                  if (!pp) return s;
+                                  return s + Number(o.hakedilen_maas||0) * ahyMaasOran(pp);
+                                }, 0)
                               : personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)
                             ).toLocaleString("tr-TR")}
                           </span>
