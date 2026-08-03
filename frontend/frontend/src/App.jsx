@@ -1990,23 +1990,6 @@ function MarkaTaseronPanel({ currentUser }) {
   const topFatura = data.faturalar.reduce((s, f) => s + Number(f.toplam_tutar || f.tutar || 0), 0);
   const topOdenen = data.odemeler.reduce((s, o) => s + Number(o.tutar || 0), 0);
   const kalan = topFatura - topOdenen;
-  // Taşeron bazında bakiye: fatura (KDV dahil) − ödenen (avans+ödeme).
-  // Farklı yazımlar (kısa ad / tam ünvan / AHY_EKIP) kanonik anahtarla birleşir.
-  const bakiyeler = (() => {
-    const grup = {};
-    const ekle = (ad, f, o) => {
-      const k = mtCanon(ad);
-      const g = grup[k] || (grup[k] = { adlar: [], fatura: 0, odenen: 0 });
-      if (ad && !g.adlar.includes(ad)) g.adlar.push(ad);
-      g.fatura += f; g.odenen += o;
-    };
-    data.faturalar.forEach(x => ekle(x.taseron_adi, Number(x.toplam_tutar || x.tutar || 0), 0));
-    data.odemeler.forEach(x => ekle(x.taseron_adi, 0, Number(x.tutar || 0)));
-    return Object.values(grup).map(g => {
-      const sirali = g.adlar.slice().sort((a, b) => b.length - a.length);
-      return { taseron: sirali[0] || "—", digerAdlar: sirali.slice(1), fatura: g.fatura, odenen: g.odenen, kalan: g.fatura - g.odenen };
-    }).sort((a, b) => b.kalan - a.kalan);
-  })();
   const inp = { width: "100%", padding: "9px 11px", border: "1.5px solid #e5e7eb", borderRadius: "9px", fontSize: "13.5px", boxSizing: "border-box" };
   const lbl = { fontSize: "11.5px", fontWeight: 700, color: "#475569", marginBottom: "4px", display: "block" };
   const kaydetFatura = async () => {
@@ -2107,57 +2090,70 @@ function MarkaTaseronPanel({ currentUser }) {
         </div>
       )}
 
-      {/* Taşeron bazında bakiyeler */}
-      {bakiyeler.length > 0 && (
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "18px" }}>
-          {bakiyeler.map(b => (
-            <div key={b.taseron} style={{ background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: "10px", padding: "10px 14px", minWidth: "190px" }}>
-              <div style={{ fontSize: "12.5px", fontWeight: 800, color: "#0f172a" }}>{b.taseron}</div>
-              {b.digerAdlar.length > 0 && <div style={{ fontSize: "10.5px", color: "#94a3b8", marginTop: "1px" }}>≈ {b.digerAdlar.join(" · ")}</div>}
-              <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>Fatura ₺{fmt(b.fatura)} · Ödenen ₺{fmt(b.odenen)}</div>
-              <div style={{ fontSize: "13px", fontWeight: 800, marginTop: "2px", color: b.kalan > 0 ? "#b45309" : "#15803d" }}>Kalan ₺{fmt(b.kalan)}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── Fatura Kesilecek — markanın alt ekiplerinin (AHY_xxx) yaptığı işler ── */}
-      {hakedis?.ekipler?.length > 0 && (() => {
-        const kur = Number(hakedis.kur || 0);
-        const rows = hakedis.ekipler.map(e => ({
-          subcon: e.subcon,
-          isSayisi: Number(e.is_sayisi || 0),
-          bedel: Number(e.try || 0) + Number(e.billed_tl || 0) + (kur > 0 ? Number(e.usd || 0) * kur : 0),
-        }));
-        const topBedel = rows.reduce((sm, r) => sm + r.bedel, 0);
+      {/* ── Taşeron Hesabı: ekip hakedişleri + fatura/ödeme borç durumu (tek tablo) ── */}
+      {(() => {
+        const kur = Number(hakedis?.kur || 0);
+        const grup = {};
+        const getG = (ad) => { const k = mtCanon(ad); return grup[k] || (grup[k] = { adlar: [], ekip: "", isSayisi: 0, isBedeli: 0, fatura: 0, odenen: 0 }); };
+        (hakedis?.ekipler || []).forEach(e => {
+          const g = getG(e.subcon); g.ekip = e.subcon;
+          g.isSayisi += Number(e.is_sayisi || 0);
+          g.isBedeli += Number(e.try || 0) + Number(e.billed_tl || 0) + (kur > 0 ? Number(e.usd || 0) * kur : 0);
+        });
+        data.faturalar.forEach(f => { const g = getG(f.taseron_adi); if (f.taseron_adi && !g.adlar.includes(f.taseron_adi)) g.adlar.push(f.taseron_adi); g.fatura += Number(f.toplam_tutar || f.tutar || 0); });
+        data.odemeler.forEach(o => { const g = getG(o.taseron_adi); if (o.taseron_adi && !g.adlar.includes(o.taseron_adi)) g.adlar.push(o.taseron_adi); g.odenen += Number(o.tutar || 0); });
+        const rows = Object.values(grup).map(g => {
+          const sirali = g.adlar.slice().sort((a, b) => b.length - a.length);
+          return { ad: sirali[0] || g.ekip || "—", ekip: g.ekip, isSayisi: g.isSayisi, isBedeli: g.isBedeli, fatura: g.fatura, odenen: g.odenen, kalan: g.fatura - g.odenen };
+        }).sort((a, b) => (b.kalan - a.kalan) || (b.isBedeli - a.isBedeli));
+        if (rows.length === 0) return null;
+        const topIs = rows.reduce((sm, r) => sm + r.isBedeli, 0);
+        const topKalan = rows.reduce((sm, r) => sm + Math.max(0, r.kalan), 0);
+        const num = { ...tdS, textAlign: "right", whiteSpace: "nowrap" };
         return (
           <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
             <div style={{ padding: "12px 16px", background: "#065f46", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
-              <span>📐 Fatura Kesilecek — Ekip Hakedişleri ({rows.length})</span>
-              <span>Yapılan İş Toplamı: ₺{fmt(topBedel)}</span>
+              <span>📐 Taşeron Hesabı — Fatura Kesilecek & Borç Durumu ({rows.length})</span>
+              <span>Yapılan İş: ₺{fmt(topIs)} · Kalan Borç: ₺{fmt(topKalan)}</span>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead><tr>
-                  <th style={thS}>Taşeron Ekibi</th>
-                  <th style={thS}>İş Kalemi</th>
-                  <th style={{ ...thS, textAlign: "right" }}>Yapılan İş Bedeli (TL)</th>
+                  <th style={thS}>Taşeron</th>
+                  <th style={{ ...thS, textAlign: "right" }}>Yapılan İş Bedeli</th>
                   <th style={{ ...thS, textAlign: "right" }}>Taşeron Bedeli</th>
+                  <th style={{ ...thS, textAlign: "right" }}>Kestiği Fatura</th>
+                  <th style={{ ...thS, textAlign: "right" }}>Ödenen</th>
+                  <th style={{ ...thS, textAlign: "right" }}>Kalan Borç</th>
+                  <th style={thS}></th>
                 </tr></thead>
                 <tbody>
                   {rows.map(r => (
-                    <tr key={r.subcon}>
-                      <td style={{ ...tdS, fontWeight: 700 }}>{r.subcon}</td>
-                      <td style={tdS}>{r.isSayisi}</td>
-                      <td style={{ ...tdS, textAlign: "right", fontWeight: 700 }}>₺{fmt(r.bedel)}</td>
-                      <td style={{ ...tdS, textAlign: "right", color: "#94a3b8", fontStyle: "italic" }}>hesap kuralı bekleniyor</td>
+                    <tr key={r.ad}>
+                      <td style={tdS}>
+                        <div style={{ fontWeight: 700 }}>{r.ad}</div>
+                        {(r.ekip && r.ekip !== r.ad) || r.isSayisi > 0 ? (
+                          <div style={{ fontSize: "10.5px", color: "#94a3b8" }}>
+                            {r.ekip && r.ekip !== r.ad ? r.ekip : ""}{r.ekip && r.ekip !== r.ad && r.isSayisi > 0 ? " · " : ""}{r.isSayisi > 0 ? `${r.isSayisi} iş kalemi` : ""}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td style={num}>{r.isBedeli > 0 ? `₺${fmt(r.isBedeli)}` : "—"}</td>
+                      <td style={{ ...num, color: "#94a3b8", fontStyle: "italic", fontSize: "12px" }}>{r.isBedeli > 0 ? "kural bekleniyor" : "—"}</td>
+                      <td style={num}>{r.fatura > 0 ? `₺${fmt(r.fatura)}` : "—"}</td>
+                      <td style={num}>{r.odenen > 0 ? `₺${fmt(r.odenen)}` : "—"}</td>
+                      <td style={{ ...num, fontWeight: 800, color: r.kalan > 0 ? "#b45309" : "#15803d" }}>₺{fmt(r.kalan)}</td>
+                      <td style={{ ...tdS, whiteSpace: "nowrap" }}>
+                        <button onClick={() => { setOEditId(null); setOForm({ taseron_adi: r.ad, tip: r.kalan > 0 ? "FATURA_ODEME" : "AVANS", tutar: r.kalan > 0 ? String(r.kalan) : "", tarih: bugun, aciklama: "" }); setOdemeModal(true); }}
+                          style={{ padding: "6px 12px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>💸 Ödeme Gir</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
-              Ekiplerin günlük iş girişindeki fiziki işleri PO/BOQ birim fiyatlarıyla değerlenir (HW'ye faturalanan USD kısmı sabit fatura kurunda). "Taşeron Bedeli" hesap kuralı tanımlanınca bu kolon otomatik dolacak ve planlı gider olarak Kâr/Zarar'a yansıyacak.
+              Yapılan İş Bedeli: ekiplerin günlük iş girişindeki fiziki işlerin PO/BOQ değeri (HW'ye faturalanan USD sabit fatura kurunda). "Taşeron Bedeli" hesap kuralı tanımlanınca otomatik dolacak. Girilen ödemeler nakit akışına taşeron ödemesi olarak düşer ve Kâr/Zarar'daki Toplam Gider'e yansır; ödenmemiş fatura kalanları da planlı gider olarak P&L şeridinde görünür.
             </div>
           </div>
         );
