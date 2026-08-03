@@ -9954,6 +9954,7 @@ function FinanceDashboard({
                                 if (p.fatura_no)    { next.fatura_no = p.fatura_no;         filled.push("Fatura No"); }
                                 if (p.fatura_tarihi){ next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
                                 if (p.tedarikci)    { next.tedarikci = p.tedarikci;         filled.push("Tedarikçi"); }
+                                if (p.is_kalemi)    { next.is_kalemi = p.is_kalemi;         filled.push("İş Kalemi"); }
                                 if (p.tutar)        { next.tutar = p.tutar;                 filled.push("Tutar"); }
                                 if (p.kdv)          { next.kdv = p.kdv;                     filled.push("KDV"); }
                                 if (p.toplam_tutar) { next.toplam_tutar = p.toplam_tutar;   filled.push("Toplam"); }
@@ -10044,7 +10045,25 @@ function FinanceDashboard({
                       { label: "İş Kalemi", name: "is_kalemi", placeholder: "KONAKLAMA / PROJE" },
                       { label: "PO No", name: "po_no", placeholder: "PO numarası" },
                       { label: "Site ID", name: "site_id", placeholder: "BU8944" },
-                    ].map(f => (
+                    ].map(f => f.name === "is_kalemi" ? (
+                      /* İş Kalemi: AHY Taşeron Faturaları'ndaki kategori chipleri */
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>İş Kalemi</label>
+                        <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
+                          {MT_KATEGORILER.map(([val, adi]) => {
+                            const secili = String(invoiceForm.is_kalemi || "").toUpperCase() === val;
+                            return (
+                              <button key={val} type="button" onClick={() => setInvoiceForm(pr => ({ ...pr, is_kalemi: secili ? "" : val }))}
+                                style={{ padding: "7px 10px", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer", border: `1.5px solid ${secili ? "#1e3a5f" : "#e5e7eb"}`, background: secili ? "#1e3a5f" : "#fff", color: secili ? "#fff" : "#6b7280" }}>{adi}</button>
+                            );
+                          })}
+                          {invoiceForm.is_kalemi && !MT_KATEGORILER.some(([v]) => v === String(invoiceForm.is_kalemi).toUpperCase()) && (
+                            <button type="button" title="Serbest metin değer — kaldırmak için tıklayın" onClick={() => setInvoiceForm(pr => ({ ...pr, is_kalemi: "" }))}
+                              style={{ padding: "7px 10px", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer", border: "1.5px solid #1e3a5f", background: "#1e3a5f", color: "#fff" }}>{invoiceForm.is_kalemi} ✕</button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
                       <div key={f.name}>
                         <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
                         <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}

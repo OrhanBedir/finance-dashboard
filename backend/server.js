@@ -12661,6 +12661,13 @@ app.post("/invoice-parse", authMiddleware, uploadInvoiceParse.single("file"), as
 
   const pdfText = await extractPdfText(pdfBuffer, isPDF);
   const parsed  = parseTurkishInvoice(pdfText);
+  // İş Kalemi tahmini: fatura metninden kategori yakala (chip seçicide otomatik seçilir)
+  try {
+    const low = String(pdfText || "").toLocaleLowerCase("tr");
+    if (/konaklama|otel\b|oda\/room|hotel/.test(low)) parsed.is_kalemi = "KONAKLAMA";
+    else if (/vin[çc]\b|vin[çc] hizmet|mobil vin[çc]/.test(low)) parsed.is_kalemi = "VINC";
+    else if (/nakliye|lojistik|ta[şs][ıi]mac[ıi]l[ıi]k/.test(low)) parsed.is_kalemi = "NAKLIYE";
+  } catch {}
   res.json({ ok: true, parsed, temp_key: tempKey, temp_url: tempUrl });
 });
 
