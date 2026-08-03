@@ -5673,27 +5673,51 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     // ── Proje P&L şeridi (kartların üstü) ──
     // Fiziki tamamlanan iş bedeli: Bölge Analizi ile aynı fiyat zinciri —
     // tamamlanan_qty (yoksa done_qty) × PO/BOQ birim fiyatı, para birimi ayrımlı.
-    let fiziki = { try: 0, usd: 0 };
+    // USD işlerin HW'ye FATURALANMIŞ kısmı fatura anındaki sabit kurla
+    // kilitlenir (kur oynasa da değişmez): kalem eşleşmesi varsa o faturanın
+    // reference_rate'i, yoksa head dosyalarındaki ortalama sabit kur.
+    // Yalnız faturalanmamış kalan USD güncel TCMB kuruyla döner.
+    let fiziki = { try: 0, usd: 0, billed_tl: 0, billed_usd: 0, sabit_kur: 0 };
     try {
       const fr = await pool.query(`
         ${COMMON_MATCH_CTES}
+        , item_ref AS (
+          SELECT
+            UPPER(TRIM(COALESCE(i.site_id, ''))) AS site_id,
+            TRIM(COALESCE(i.item_code, '')) AS item_code,
+            MAX(hr.reference_rate) AS ref_rate
+          FROM hw_invoice_items i
+          LEFT JOIN hw_invoice_rows hr
+            ON regexp_replace(regexp_replace(TRIM(hr.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+             = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+          WHERE i.invoice_no IS NOT NULL
+          GROUP BY 1, 2
+        ), avg_ref AS (
+          SELECT AVG(reference_rate) AS r FROM hw_invoice_rows WHERE reference_rate IS NOT NULL
+        )
         SELECT
-          COALESCE(SUM(CASE WHEN t.cur = 'USD' THEN t.amt ELSE 0 END), 0) AS usd,
-          COALESCE(SUM(CASE WHEN t.cur <> 'USD' THEN t.amt ELSE 0 END), 0) AS try
+          COALESCE(SUM(CASE WHEN t.cur <> 'USD' THEN t.fq * t.price ELSE 0 END), 0) AS try,
+          COALESCE(SUM(CASE WHEN t.cur = 'USD' THEN (t.fq - LEAST(t.fq, t.bq)) * t.price ELSE 0 END), 0) AS usd,
+          COALESCE(SUM(CASE WHEN t.cur = 'USD' THEN LEAST(t.fq, t.bq) * t.price * COALESCE(t.item_rate, t.avg_rate, 0) ELSE 0 END), 0) AS billed_tl,
+          COALESCE(SUM(CASE WHEN t.cur = 'USD' THEN LEAST(t.fq, t.bq) * t.price ELSE 0 END), 0) AS billed_usd,
+          MAX(t.avg_rate) AS sabit_kur
         FROM (
           SELECT
-            (CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty, 0) END) *
+            GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty, 0) END) AS fq,
+            COALESCE(site_po.billed_qty, 0) AS bq,
             (CASE
               WHEN TRIM(COALESCE(m.item_code, '')) = '8818278098' THEN 986.23
               WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.unit_price, 0)
               ELSE COALESCE(item_po.unit_price, 0)
-            END) AS amt,
+            END) AS price,
             (CASE
               WHEN COALESCE(TRIM(best_boq.currency), '') <> '' THEN UPPER(TRIM(best_boq.currency))
               WHEN site_po.id IS NOT NULL THEN UPPER(COALESCE(site_po.currency, 'TRY'))
               WHEN item_po.id IS NOT NULL THEN UPPER(COALESCE(item_po.currency, 'TRY'))
               ELSE 'TRY'
-            END) AS cur
+            END) AS cur,
+            ir.ref_rate AS item_rate,
+            avg_ref.r AS avg_rate
           FROM master_works m
           LEFT JOIN best_site_po site_po
             ON TRIM(COALESCE(site_po.project_code, '')) = TRIM(COALESCE(m.project_code, ''))
@@ -5703,9 +5727,18 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
             ON TRIM(COALESCE(item_po.item_code, '')) = TRIM(COALESCE(m.item_code, ''))
           LEFT JOIN best_boq
             ON TRIM(COALESCE(best_boq.s_bom_code, '')) = TRIM(COALESCE(m.item_code, ''))
+          LEFT JOIN item_ref ir
+            ON ir.site_id = UPPER(TRIM(COALESCE(m.site_code, '')))
+           AND ir.item_code = TRIM(COALESCE(m.item_code, ''))
+          CROSS JOIN avg_ref
         ) t
       `);
-      fiziki = { try: Number(fr.rows[0]?.try || 0), usd: Number(fr.rows[0]?.usd || 0) };
+      const r0 = fr.rows[0] || {};
+      fiziki = {
+        try: Number(r0.try || 0), usd: Number(r0.usd || 0),
+        billed_tl: Number(r0.billed_tl || 0), billed_usd: Number(r0.billed_usd || 0),
+        sabit_kur: Number(r0.sabit_kur || 0),
+      };
     } catch (e) { console.error("MARKA OZET fiziki:", e.message); }
     let kur = 0;
     try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}

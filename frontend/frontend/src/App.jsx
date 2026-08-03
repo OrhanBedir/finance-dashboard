@@ -1147,8 +1147,10 @@ function MarkaFinansPanel({ currentUser }) {
       {data?.fiziki && (() => {
         const kur = Number(data.kur || 0);
         const payOran = Number(data.pay_yuzde || 90);
-        const usdTutar = Number(data.fiziki.usd || 0);
-        const fizikiTL = Number(data.fiziki.try || 0) + (kur > 0 ? usdTutar * kur : 0);
+        const usdTutar = Number(data.fiziki.usd || 0); // henüz faturalanmamış USD
+        const billedTL = Number(data.fiziki.billed_tl || 0); // HW'ye faturalanan USD — sabit fatura kuruyla TL (kur oynasa da değişmez)
+        const billedUsd = Number(data.fiziki.billed_usd || 0);
+        const fizikiTL = Number(data.fiziki.try || 0) + billedTL + (kur > 0 ? usdTutar * kur : 0);
         const tamamlanan = fizikiTL * (payOran / 100);
         const gerceklesen = tGider;
         const planli = Number(data.bekleyen_maas || 0);
@@ -1171,7 +1173,7 @@ function MarkaFinansPanel({ currentUser }) {
               <div style={{ flex: "1 1 220px", minWidth: "210px" }}>
                 <div style={lbl}>Tamamlanan İş (Hakediş)</div>
                 <div style={val}>₺{fmt(tamamlanan)}</div>
-                <div style={sub}>Proje kapsamında fiziki yapılan iş bedeli · %{payOran} pay{usdTutar > 0 && kur > 0 ? ` · $${fmt(usdTutar)} dahil (TL karşılığı)` : ""}{usdTutar > 0 && !(kur > 0) ? ` · +$${fmt(usdTutar)} (kur alınamadı, hariç)` : ""}</div>
+                <div style={sub}>Proje kapsamında fiziki yapılan iş bedeli · %{payOran} pay{billedUsd > 0 ? ` · faturalanan $${fmt(billedUsd)} sabit fatura kuruyla` : ""}{usdTutar > 0 && kur > 0 ? ` · kalan $${fmt(usdTutar)} güncel kurla` : ""}{usdTutar > 0 && !(kur > 0) ? ` · +$${fmt(usdTutar)} (kur alınamadı, hariç)` : ""}</div>
               </div>
               <div style={opSt}>−</div>
               <div style={{ flex: "1 1 220px", minWidth: "210px" }}>
