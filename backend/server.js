@@ -12434,6 +12434,22 @@ function parseTurkishInvoice(rawText) {
   // ── FATURA TARİHİ ──────────────────────────────────────────────────────────
   // Önce e-fatura konum tabanlı sonuç, yoksa genel arama
   let dateRaw = efTarihi;
+  // Etiket-yakınlık araması: "Fatura Tarihi" geçen satırda ya da sonraki birkaç
+  // satırda ilk tarihi al. PDF metin çıkarımı sütunları ayrı satırlara dökebilir
+  // ve metin sırası görsel sırayla eşleşmez — genel "ilk tarih" yedeği bu yüzden
+  // faturanın alt notlarındaki tarihleri (C-IN/C-OUT vb.) yakalayabiliyordu.
+  const DATE_RX = /(\d{1,2}[-./]\d{1,2}[-./]\d{4})/;
+  if (!dateRaw) {
+    for (const lblRx of [/fatura\s*tar[iİıI]h/i, /d[üuÜU]zenleme\s*tar[iİıI]h/i]) {
+      const li = lines.findIndex(l => lblRx.test(l));
+      if (li === -1) continue;
+      for (let j = li; j < Math.min(lines.length, li + 8); j++) {
+        const dm = lines[j].match(DATE_RX);
+        if (dm) { dateRaw = dm[1]; break; }
+      }
+      if (dateRaw) break;
+    }
+  }
   if (!dateRaw) dateRaw = findAfterLabel(
     /^fatura\s*tar[iİ]h[iİ]\s*:?\s*$/i,
     /(\d{2}[-./]\d{2}[-./]\d{4})/
