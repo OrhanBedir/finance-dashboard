@@ -15613,11 +15613,29 @@ app.put("/hr/personel/:id/ekip", async (req, res) => {
       sets.push(`ekip_arac_plaka=$${vals.length}`);
     }
     if (!sets.length) return res.status(400).json({ error: "Güncellenecek alan yok" });
+    const onceQ = await pool.query(`SELECT ad_soyad, ekip_arac_plaka FROM personel WHERE id=$1`, [req.params.id]);
+    const once = onceQ.rows[0] || {};
     const r = await pool.query(
       `UPDATE personel SET ${sets.join(", ")} WHERE id=$1 RETURNING id, ad_soyad, ekip_bilgisi, ekip_arac_plaka`,
       vals);
     if (!r.rows.length) return res.status(404).json({ error: "Personel bulunamadı" });
-    res.json(r.rows[0]);
+    const yeni = r.rows[0];
+    // ── Araç Yönetimi senkronu: org şemasındaki atama araç kartına yansır ──
+    // Atanan aracın sürücüsü = üye, bölgesi = ekibin bölgesi; atama
+    // kaldırılınca/değişince eski aracın sürücüsü temizlenir.
+    try {
+      if (once.ekip_arac_plaka && once.ekip_arac_plaka !== yeni.ekip_arac_plaka) {
+        await pool.query(`UPDATE araclar SET surucu=NULL WHERE plaka=$1 AND surucu=$2`,
+          [once.ekip_arac_plaka, once.ad_soyad]);
+      }
+      if (yeni.ekip_arac_plaka) {
+        const ek = await pool.query(`SELECT bolge FROM ekipler WHERE ekip_no::text = $1 LIMIT 1`,
+          [String(yeni.ekip_bilgisi || "")]).catch(() => ({ rows: [] }));
+        await pool.query(`UPDATE araclar SET surucu=$2, bolge=COALESCE(NULLIF($3,''), bolge) WHERE plaka=$1`,
+          [yeni.ekip_arac_plaka, yeni.ad_soyad, ek.rows[0]?.bolge || ""]);
+      }
+    } catch (se) { console.error("ARAC SENKRON:", se.message); }
+    res.json(yeni);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
