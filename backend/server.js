@@ -12387,10 +12387,20 @@ function parseTurkishInvoice(rawText) {
       const val = vals[i] || "";
       if (lbl === "Fatura No:") efFaturaNo = val;
       if (lbl === "Fatura Tarihi:") {
+        // Konum kaymasında (örn. araya "Düzenleme Tarihi:" girince) değer tarih
+        // olmayabilir — tarih DEĞİLSE boş bırak ki alttaki genel arama çalışsın
         const dm = val.match(/(\d{2}[-./]\d{2}[-./]\d{4})/);
-        efTarihi = dm ? dm[1] : val;
+        efTarihi = dm ? dm[1] : "";
       }
     });
+    // Konum eşleşmesi tarih bulamadıysa değer sütunundaki İLK tarihi al
+    // (saat değil: GG-AA-YYYY deseni yalnız tarihe uyar)
+    if (!efTarihi) {
+      for (const v of vals) {
+        const dm = String(v).match(/(\d{2}[-./]\d{2}[-./]\d{4})/);
+        if (dm) { efTarihi = dm[1]; break; }
+      }
+    }
   }
 
   // ── FATURA NO ──────────────────────────────────────────────────────────────
