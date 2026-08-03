@@ -15267,6 +15267,134 @@ app.get("/hr/masraf-belge/file/:filename", async (req, res) => {
 const aracUpload = multer({ storage: multer.memoryStorage() });
 const ofisUpload = multer({ storage: multer.memoryStorage() });
 
+// ── YEMEK KARTLARI (Pluxee) ─────────────────────────────────────────────
+// İK panelindeki kart listesi + dönem bazlı ödeme takibi. Ödemeler
+// cashflow_odeme'ye (kategori TICKET, firma etiketiyle) otomatik yazılır —
+// ERC Nakit Akışı, AHY Nakit Akışı ve Kâr/Zarar panelleri oradan beslenir.
+async function ensureYemekKartiTables() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS yemek_kartlari (
+    id SERIAL PRIMARY KEY,
+    ad_soyad TEXT NOT NULL,
+    kart_no TEXT,
+    aylik_tutar NUMERIC DEFAULT 0,
+    firma TEXT DEFAULT 'AHY',
+    aktif BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT now())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS yemek_karti_odemeler (
+    id SERIAL PRIMARY KEY,
+    kart_id INTEGER REFERENCES yemek_kartlari(id) ON DELETE CASCADE,
+    donem TEXT NOT NULL,
+    tutar NUMERIC DEFAULT 0,
+    tarih DATE DEFAULT CURRENT_DATE,
+    firma TEXT DEFAULT 'AHY',
+    cashflow_id INTEGER,
+    aciklama TEXT,
+    created_at TIMESTAMP DEFAULT now(),
+    UNIQUE (kart_id, donem))`);
+}
+
+app.get("/hr/yemek-kartlari", async (req, res) => {
+  try {
+    await ensureYemekKartiTables();
+    const [kartlar, odemeler] = await Promise.all([
+      pool.query(`SELECT * FROM yemek_kartlari ORDER BY ad_soyad`),
+      pool.query(`SELECT o.*, to_char(o.tarih,'YYYY-MM-DD') AS tarih_str FROM yemek_karti_odemeler o ORDER BY o.donem DESC, o.id`),
+    ]);
+    res.json({ ok: true, kartlar: kartlar.rows, odemeler: odemeler.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post("/hr/yemek-kartlari", async (req, res) => {
+  try {
+    await ensureYemekKartiTables();
+    const { ad_soyad, kart_no, aylik_tutar, firma } = req.body;
+    if (!String(ad_soyad || "").trim()) return res.status(400).json({ ok: false, error: "Ad soyad zorunlu" });
+    const r = await pool.query(
+      `INSERT INTO yemek_kartlari (ad_soyad, kart_no, aylik_tutar, firma) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [String(ad_soyad).trim().toUpperCase(), kart_no || null, Number(aylik_tutar || 0),
+       String(firma || "AHY").toUpperCase() === "SIMSEK" ? "SIMSEK" : "AHY"]);
+    res.json({ ok: true, kart: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.put("/hr/yemek-kartlari/:id", async (req, res) => {
+  try {
+    await ensureYemekKartiTables();
+    const alanlar = [];
+    const vals = [];
+    const izinli = { ad_soyad: "text", kart_no: "text", aylik_tutar: "num", firma: "firma", aktif: "bool" };
+    for (const [k, tip] of Object.entries(izinli)) {
+      if (!(k in req.body)) continue;
+      let v = req.body[k];
+      if (tip === "num") v = Number(v || 0);
+      if (tip === "bool") v = !!v;
+      if (tip === "firma") v = String(v || "AHY").toUpperCase() === "SIMSEK" ? "SIMSEK" : "AHY";
+      if (tip === "text") v = v === null ? null : String(v);
+      vals.push(v); alanlar.push(`${k}=$${vals.length}`);
+    }
+    if (!alanlar.length) return res.status(400).json({ ok: false, error: "Güncellenecek alan yok" });
+    vals.push(req.params.id);
+    const r = await pool.query(`UPDATE yemek_kartlari SET ${alanlar.join(", ")} WHERE id=$${vals.length} RETURNING *`, vals);
+    res.json({ ok: true, kart: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.delete("/hr/yemek-kartlari/:id", async (req, res) => {
+  try {
+    await ensureYemekKartiTables();
+    // Karta bağlı ödemelerin nakit akışı kayıtlarını da temizle
+    const cfs = await pool.query(`SELECT cashflow_id FROM yemek_karti_odemeler WHERE kart_id=$1 AND cashflow_id IS NOT NULL`, [req.params.id]);
+    for (const r of cfs.rows) await pool.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [r.cashflow_id]).catch(() => {});
+    await pool.query(`DELETE FROM yemek_kartlari WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Dönem ödemesi (upsert): nakit akışına TICKET kaydı açar/günceller
+app.post("/hr/yemek-kartlari/:id/ode", async (req, res) => {
+  try {
+    await ensureYemekKartiTables();
+    await ensureCashflowOdemeTable();
+    const { donem, tutar, tarih, firma } = req.body;
+    if (!donem || !Number(tutar || 0)) return res.status(400).json({ ok: false, error: "Dönem ve tutar zorunlu" });
+    const kq = await pool.query(`SELECT * FROM yemek_kartlari WHERE id=$1`, [req.params.id]);
+    if (!kq.rows[0]) return res.status(404).json({ ok: false, error: "Kart bulunamadı" });
+    const kart = kq.rows[0];
+    const f = String(firma || kart.firma || "AHY").toUpperCase() === "SIMSEK" ? "SIMSEK" : "AHY";
+    const cfMarka = f === "AHY" ? "AHY" : "ERC"; // Şimşek ödemeleri ERC nakit akışında
+    const t = tarih || new Date().toISOString().slice(0, 10);
+    const acik = `${kart.ad_soyad} · yemek kartı`;
+    const mevcut = await pool.query(`SELECT * FROM yemek_karti_odemeler WHERE kart_id=$1 AND donem=$2`, [req.params.id, donem]);
+    let cashflowId = mevcut.rows[0]?.cashflow_id || null;
+    if (cashflowId) {
+      await pool.query(`UPDATE cashflow_odeme SET tarih=$1, tutar=$2, donem=$3, aciklama=$4, marka=$5 WHERE id=$6`,
+        [t, Number(tutar), donem, acik, cfMarka, cashflowId]).catch(() => {});
+    } else {
+      const cf = await pool.query(
+        `INSERT INTO cashflow_odeme (kategori, tarih, tutar, donem, aciklama, marka) VALUES ('TICKET',$1,$2,$3,$4,$5) RETURNING id`,
+        [t, Number(tutar), donem, acik, cfMarka]);
+      cashflowId = cf.rows[0].id;
+    }
+    const r = await pool.query(`
+      INSERT INTO yemek_karti_odemeler (kart_id, donem, tutar, tarih, firma, cashflow_id)
+      VALUES ($1,$2,$3,$4,$5,$6)
+      ON CONFLICT (kart_id, donem) DO UPDATE SET tutar=$3, tarih=$4, firma=$5, cashflow_id=$6
+      RETURNING *`, [req.params.id, donem, Number(tutar), t, f, cashflowId]);
+    res.json({ ok: true, odeme: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.delete("/hr/yemek-kartlari/:id/ode/:donem", async (req, res) => {
+  try {
+    await ensureYemekKartiTables();
+    const r = await pool.query(`DELETE FROM yemek_karti_odemeler WHERE kart_id=$1 AND donem=$2 RETURNING cashflow_id`,
+      [req.params.id, req.params.donem]);
+    if (r.rows[0]?.cashflow_id)
+      await pool.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [r.rows[0].cashflow_id]).catch(() => {});
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.get("/hr/araclar", async (req, res) => {
   const { rows } = await pool.query(`
     SELECT a.*, json_agg(b ORDER BY b.belge_turu) FILTER (WHERE b.id IS NOT NULL) as belgeler

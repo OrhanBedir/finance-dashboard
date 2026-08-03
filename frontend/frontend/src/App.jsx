@@ -13375,6 +13375,27 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   };
   // Maaş avansı bu ayın maaşına mı ait? donem varsa ona göre, yoksa tarih (eski kayıt)
   const maasAvansAit = (a) => a.donem ? String(a.donem) === puantajAy : (a.tarih || "").startsWith(puantajAy);
+  // ── Yemek Kartları (Pluxee): kart listesi + dönem bazlı ödeme takibi ──
+  const [yemekKartlar, setYemekKartlar] = useState([]);
+  const [yemekOdemeler, setYemekOdemeler] = useState([]);
+  const [yemekOdeModal, setYemekOdeModal] = useState(null); // ödenen kart
+  const [yemekOdeForm, setYemekOdeForm] = useState({ tutar: "", tarih: "", firma: "AHY" });
+  const [yemekKartModal, setYemekKartModal] = useState(false);
+  const [yemekKartForm, setYemekKartForm] = useState({ ad_soyad: "", kart_no: "", aylik_tutar: "", firma: "AHY" });
+  const loadYemek = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/hr/yemek-kartlari`);
+      const d = await r.json();
+      if (d.ok) { setYemekKartlar(d.kartlar || []); setYemekOdemeler(d.odemeler || []); }
+    } catch {}
+  };
+  useEffect(() => { loadYemek(); }, []);
+  const yemekKartGuncelle = async (id, patch) => {
+    try {
+      await fetch(`${API_BASE}/hr/yemek-kartlari/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      loadYemek();
+    } catch {}
+  };
   // Önceki aydan devreden FAZLA maaş ödemesi: geçen ay hakedişten fazla ödendiyse
   // (avans + banka + elden > hakediş) fark bu ayın maaşından düşülür.
   const _prevAyStr = (() => { const [y, m] = puantajAy.split("-").map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
@@ -13951,7 +13972,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           ["personel","👤", _maasGizli ? "Personel" : "Personel Maaş", _maasGizli ? "Kadro & künye yönetimi" : "Kadro & maaş yönetimi"],
           ["maas_avans","💰","Maaş Avansı","Avans kayıtları"],
           ["puantaj","📋","Puantaj","Devam & hakediş"],
-          ["isg","🎓","ISG / Belgeler","Eğitim & sertifika"]]
+          ["isg","🎓","ISG / Belgeler","Eğitim & sertifika"],
+          ["yemek","🍽","Yemek Kartları","Pluxee kart & ödeme"]]
         .filter(([k]) => !(_maasGizli && !_hrYetkili && k === "maas_avans"))
         .map(([k, ic, l, alt]) => (
           <button key={k} onClick={()=>{
@@ -13973,6 +13995,200 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           </button>
         ))}
       </div>
+
+      {/* ===== YEMEK KARTLARI SEKMESİ ===== */}
+      {tab==="yemek" && (() => {
+        const donem = puantajAy;
+        const aktifKartlar = yemekKartlar.filter(k => k.aktif);
+        const odemeOf = (k) => yemekOdemeler.find(o => String(o.kart_id) === String(k.id) && o.donem === donem);
+        const topGereken = aktifKartlar.reduce((sm,k) => sm + Number(k.aylik_tutar||0), 0);
+        const topOdenen = aktifKartlar.reduce((sm,k) => { const o = odemeOf(k); return sm + (o ? Number(o.tutar||0) : 0); }, 0);
+        const topBorc = aktifKartlar.reduce((sm,k) => { const o = odemeOf(k); return sm + (o ? 0 : Number(k.aylik_tutar||0)); }, 0);
+        const fmtY = (n) => Number(n||0).toLocaleString("tr-TR");
+        const fmtTar = (t) => t ? String(t).slice(0,10).split("-").reverse().join(".") : "—";
+        const thY = { padding:"10px 13px", textAlign:"left", fontSize:"11px", fontWeight:700, color:"#64748b", background:"#f8fafc", borderBottom:"1.5px solid #e5e7eb", textTransform:"uppercase", letterSpacing:"0.4px", whiteSpace:"nowrap" };
+        const tdY = { padding:"10px 13px", fontSize:"13px", color:"#374151", borderBottom:"1px solid #f1f5f9", whiteSpace:"nowrap" };
+        const indirYemekExcel = () => exportStandardExcel({
+          title: `Yemek Kartları (Pluxee) — ${donem}`,
+          sheetName: "Yemek Kartları", fileBase: `Yemek_Kartlari_${donem.replace("-","_")}`,
+          headers: ["Kart Sahibi","Kart No","Firma","Dönem","Durum","Aylık Tutar","Ödenen","Ödeme Tarihi"],
+          colWidths: [28, 22, 10, 10, 12, 14, 14, 14],
+          numericCols: [5, 6],
+          rows: aktifKartlar.map(k => { const o = odemeOf(k); return [
+            k.ad_soyad, k.kart_no || "", (o?.firma || k.firma) === "SIMSEK" ? "Şimşek" : "AHY", donem,
+            o ? "ÖDENDİ" : "ÖDENMEDİ", Number(k.aylik_tutar||0), o ? Number(o.tutar||0) : 0,
+            o ? fmtTar(o.tarih_str || o.tarih) : "" ]; }),
+        }).catch(e => alert("Excel indirilemedi: " + e.message));
+        return (
+          <div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:"10px", marginBottom:"14px" }}>
+              <div>
+                <div style={{ fontSize:"18px", fontWeight:800, color:"#0f172a" }}>🍽 Yemek Kartları (Pluxee) — {donem}</div>
+                <div style={{ fontSize:"12px", color:"#64748b", marginTop:"2px" }}>Ödemeler seçilen firmanın Nakit Akışı'na (Ticket/Yemek) otomatik işlenir ve Kâr/Zarar giderine yansır · takip Ağustos 2026 itibarıyla</div>
+              </div>
+              <div style={{ display:"flex", gap:"8px" }}>
+                <button onClick={indirYemekExcel} style={{ padding:"9px 16px", background:"#166534", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>📥 Excel İndir</button>
+                <button onClick={() => { setYemekKartForm({ ad_soyad:"", kart_no:"", aylik_tutar:"", firma:"AHY" }); setYemekKartModal(true); }} style={{ padding:"9px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>+ Kart Ekle</button>
+              </div>
+            </div>
+
+            {/* Özet bar — maaş tablosu görsel dili */}
+            <div style={{ background:"linear-gradient(120deg,#1e3a5f,#1e40af)", borderRadius:"14px", padding:"16px 22px", marginBottom:"16px", display:"flex", flexWrap:"wrap", gap:"10px" }}>
+              {[["Aylık Gereken", topGereken, "#93c5fd"], ["Bu Dönem Ödenen", topOdenen, "#6ee7b7"], ["Kalan Borç", topBorc, topBorc > 0 ? "#fca5a5" : "#6ee7b7"]].map(([l, v, c]) => (
+                <div key={l} style={{ flex:"1 1 160px", textAlign:"center" }}>
+                  <div style={{ fontSize:"11px", fontWeight:700, color:"#bfdbfe", letterSpacing:"0.06em", textTransform:"uppercase" }}>{l}</div>
+                  <div style={{ fontSize:"22px", fontWeight:800, color:c }}>₺{fmtY(v)}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"14px", overflow:"hidden" }}>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                  <thead><tr>
+                    <th style={thY}>Kart Sahibi</th><th style={thY}>Kart No</th>
+                    <th style={{ ...thY, textAlign:"right" }}>Aylık Tutar</th>
+                    <th style={thY}>Firma</th><th style={thY}>Durum</th>
+                    <th style={{ ...thY, textAlign:"right" }}>Ödenen</th>
+                    <th style={thY}>Ödeme Tarihi</th><th style={thY}>Dönem</th><th style={thY}></th>
+                  </tr></thead>
+                  <tbody>
+                    {aktifKartlar.length === 0 && (
+                      <tr><td colSpan={9} style={{ padding:"26px", textAlign:"center", color:"#94a3b8", fontSize:"13px" }}>Kart yok — "+ Kart Ekle" ile başlayın</td></tr>
+                    )}
+                    {aktifKartlar.map(k => {
+                      const o = odemeOf(k);
+                      return (
+                        <tr key={k.id}>
+                          <td style={{ ...tdY, fontWeight:700 }}>{k.ad_soyad}</td>
+                          <td style={{ ...tdY, fontFamily:"monospace", fontSize:"12.5px", color:"#64748b" }}>{k.kart_no || "—"}</td>
+                          <td style={{ ...tdY, textAlign:"right" }}>
+                            <input type="number" defaultValue={k.aylik_tutar || ""} placeholder="0"
+                              onBlur={e => { const v = Number(e.target.value || 0); if (v !== Number(k.aylik_tutar || 0)) yemekKartGuncelle(k.id, { aylik_tutar: v }); }}
+                              style={{ width:"90px", padding:"5px 8px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px", textAlign:"right" }} />
+                          </td>
+                          <td style={tdY}>
+                            <button onClick={() => yemekKartGuncelle(k.id, { firma: k.firma === "SIMSEK" ? "AHY" : "SIMSEK" })} title="Değiştirmek için tıklayın"
+                              style={{ padding:"4px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, cursor:"pointer", border:"none",
+                                background: k.firma === "SIMSEK" ? "#fffbeb" : "#eff6ff", color: k.firma === "SIMSEK" ? "#92400e" : "#1e40af" }}>
+                              {k.firma === "SIMSEK" ? "🟨 Şimşek" : "⚡ AHY"}
+                            </button>
+                          </td>
+                          <td style={tdY}>
+                            {o ? (
+                              <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:"#dcfce7", color:"#166534" }}>✓ Ödendi</span>
+                            ) : (
+                              <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:"#fee2e2", color:"#b91c1c" }}>
+                                Ödenmedi{Number(k.aylik_tutar||0) > 0 ? ` · ₺${fmtY(k.aylik_tutar)}` : ""}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ ...tdY, textAlign:"right", fontWeight:700, color: o ? "#166534" : "#9ca3af" }}>{o ? `₺${fmtY(o.tutar)}` : "—"}</td>
+                          <td style={tdY}>{o ? fmtTar(o.tarih_str || o.tarih) : "—"}</td>
+                          <td style={{ ...tdY, color:"#64748b" }}>{donem}</td>
+                          <td style={{ ...tdY }}>
+                            {o ? (
+                              <button onClick={async () => { if (!window.confirm("Bu dönem ödemesi geri alınsın mı? (Nakit akışından da silinir)")) return; await fetch(`${API_BASE}/hr/yemek-kartlari/${k.id}/ode/${donem}`, { method:"DELETE" }); loadYemek(); }}
+                                style={{ padding:"5px 10px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>↩ Geri Al</button>
+                            ) : (
+                              <button onClick={() => { setYemekOdeModal(k); setYemekOdeForm({ tutar: String(k.aylik_tutar || ""), tarih: new Date().toISOString().slice(0,10), firma: k.firma || "AHY" }); }}
+                                style={{ padding:"5px 12px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>💸 Öde</button>
+                            )}
+                            <button onClick={async () => { if (!window.confirm(`${k.ad_soyad} kartı silinsin mi? (Tüm dönem ödemeleri ve nakit akışı kayıtları da silinir)`)) return; await fetch(`${API_BASE}/hr/yemek-kartlari/${k.id}`, { method:"DELETE" }); loadYemek(); }}
+                              style={{ padding:"5px 8px", background:"none", border:"none", cursor:"pointer", fontSize:"13px" }} title="Kartı sil">🗑</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Ödeme modalı */}
+            {yemekOdeModal && (
+              <div onClick={() => setYemekOdeModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+                <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(420px, 94vw)", padding:"22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)" }}>
+                  <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"3px" }}>💸 Yemek Kartı Ödemesi</div>
+                  <div style={{ fontSize:"12.5px", color:"#64748b", marginBottom:"14px" }}>{yemekOdeModal.ad_soyad} · dönem {donem}</div>
+                  <div style={{ display:"grid", gap:"10px" }}>
+                    <div>
+                      <span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Firma</span>
+                      <div style={{ display:"flex", gap:"6px" }}>
+                        {[["AHY","⚡ AHY"],["SIMSEK","🟨 Şimşek"]].map(([v,l]) => (
+                          <button key={v} type="button" onClick={() => setYemekOdeForm(f => ({ ...f, firma: v }))}
+                            style={{ flex:1, padding:"8px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekOdeForm.firma===v?"#1e3a5f":"#e5e7eb"}`, background: yemekOdeForm.firma===v?"#1e3a5f":"#fff", color: yemekOdeForm.firma===v?"#fff":"#6b7280" }}>{l}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+                      <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Tutar *</span>
+                        <input type="number" value={yemekOdeForm.tutar} onChange={e => setYemekOdeForm(f => ({ ...f, tutar: e.target.value }))}
+                          style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
+                      <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Ödeme Tarihi</span>
+                        <input type="date" value={yemekOdeForm.tarih} onChange={e => setYemekOdeForm(f => ({ ...f, tarih: e.target.value }))}
+                          style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:"8px", marginTop:"16px", justifyContent:"flex-end" }}>
+                    <button onClick={() => setYemekOdeModal(null)} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer", color:"#4b5563" }}>Vazgeç</button>
+                    <button onClick={async () => {
+                      if (!Number(yemekOdeForm.tutar || 0)) { alert("Tutar giriniz"); return; }
+                      const r = await fetch(`${API_BASE}/hr/yemek-kartlari/${yemekOdeModal.id}/ode`, {
+                        method:"POST", headers:{ "Content-Type":"application/json" },
+                        body: JSON.stringify({ donem, tutar: Number(yemekOdeForm.tutar), tarih: yemekOdeForm.tarih, firma: yemekOdeForm.firma }),
+                      });
+                      const d = await r.json().catch(() => ({}));
+                      if (!r.ok || !d.ok) { alert(d.error || "Kaydedilemedi"); return; }
+                      setYemekOdeModal(null); loadYemek();
+                    }} style={{ padding:"9px 18px", background:"#166534", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>Ödendi Kaydet</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Kart ekleme modalı */}
+            {yemekKartModal && (
+              <div onClick={() => setYemekKartModal(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+                <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(440px, 94vw)", padding:"22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)" }}>
+                  <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"14px" }}>🍽 Yeni Yemek Kartı</div>
+                  <div style={{ display:"grid", gap:"10px" }}>
+                    <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Kart Sahibi *</span>
+                      <input value={yemekKartForm.ad_soyad} onChange={e => setYemekKartForm(f => ({ ...f, ad_soyad: e.target.value }))}
+                        style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
+                    <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Kart No</span>
+                      <input value={yemekKartForm.kart_no} onChange={e => setYemekKartForm(f => ({ ...f, kart_no: e.target.value }))} placeholder="6273 …"
+                        style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+                      <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Aylık Tutar</span>
+                        <input type="number" value={yemekKartForm.aylik_tutar} onChange={e => setYemekKartForm(f => ({ ...f, aylik_tutar: e.target.value }))} placeholder="0"
+                          style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
+                      <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Firma</span>
+                        <div style={{ display:"flex", gap:"6px" }}>
+                          {[["AHY","AHY"],["SIMSEK","Şimşek"]].map(([v,l]) => (
+                            <button key={v} type="button" onClick={() => setYemekKartForm(f => ({ ...f, firma: v }))}
+                              style={{ flex:1, padding:"8px 4px", borderRadius:"8px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekKartForm.firma===v?"#1e3a5f":"#e5e7eb"}`, background: yemekKartForm.firma===v?"#1e3a5f":"#fff", color: yemekKartForm.firma===v?"#fff":"#6b7280" }}>{l}</button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:"8px", marginTop:"16px", justifyContent:"flex-end" }}>
+                    <button onClick={() => setYemekKartModal(false)} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer", color:"#4b5563" }}>Vazgeç</button>
+                    <button onClick={async () => {
+                      if (!yemekKartForm.ad_soyad.trim()) { alert("Kart sahibi zorunlu"); return; }
+                      const r = await fetch(`${API_BASE}/hr/yemek-kartlari`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ ...yemekKartForm, aylik_tutar: Number(yemekKartForm.aylik_tutar || 0) }) });
+                      const d = await r.json().catch(() => ({}));
+                      if (!r.ok || !d.ok) { alert(d.error || "Kaydedilemedi"); return; }
+                      setYemekKartModal(false); loadYemek();
+                    }} style={{ padding:"9px 18px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>Kaydet</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ===== PERSONEL SEKMESİ ===== */}
       {(tab==="personel" || tab==="maas_avans") && !personelUnlocked && !(_maasGizli && tab==="personel") && (
