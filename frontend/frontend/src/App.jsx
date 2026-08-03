@@ -29555,7 +29555,9 @@ function AraclarPanel({ currentUser, onBack }) {
   // AHY görünümü (alt marka): yalnız aktif araçlar — iade edilmiş/pasif filo görünmez
   const _altMarkaGorunum = currentUser?.hw_yukleme === false;
   const _aracBaz = _altMarkaGorunum ? araclar.filter(a => a.durum === "AKTİF") : araclar;
-  const filtered = _aracBaz.filter(a => filter === "TUMU" ? true : a.durum === filter);
+  // TÜMÜ görünümü pasif (iade edilmiş) araçları gizler — kayıtlar DB'de durur,
+  // PASİF filtresiyle hâlâ görüntülenebilir
+  const filtered = _aracBaz.filter(a => filter === "TUMU" ? a.durum !== "PASİF" : a.durum === filter);
 
   const TIPLER = ["Binek","Pickup","Minibüs","Panelvan","Kamyon","Motosiklet","Diğer"];
   const DURUMLAR = ["AKTİF","PASİF","SERVİSTE"];
