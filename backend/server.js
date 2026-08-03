@@ -5818,17 +5818,23 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       }
     } catch (e) { console.error("MARKA OZET bekleyen maas:", e.message); }
 
-    // Planlı taşeron gideri: Taşeron Faturaları panelindeki fatura toplamı −
-    // yapılan ödemeler (avans+ödeme). "Fatura Kesilecek" hakediş kuralı
-    // tanımlanınca bu kaleme o da eklenecek.
+    // Planlı taşeron gideri: TAŞERON BAZINDA fatura − ödeme (negatifler 0).
+    // Bir firmanın fazla avansı başka firmanın ödenmemiş faturasını mahsuplaşmaz.
+    // Ad eşleştirme kanonik anahtarla (NETELCOM ≈ AHY_NETELKOM ≈ tam ünvan).
+    // "Fatura Kesilecek" hakediş kuralı tanımlanınca bu kaleme o da eklenecek.
     let bekleyenTaseron = 0;
     try {
-      const bt = await pool.query(`
-        SELECT GREATEST(0,
-          COALESCE((SELECT SUM(COALESCE(toplam_tutar,0)) FROM invoice_entries WHERE UPPER(COALESCE(firma,'')) = $1), 0)
-          - COALESCE((SELECT SUM(COALESCE(tutar,0)) FROM marka_taseron_odeme WHERE UPPER(marka) = $1), 0)
-        ) AS t`, [marka]);
-      bekleyenTaseron = Number(bt.rows[0]?.t || 0);
+      const [bf, bo] = await Promise.all([
+        pool.query(`SELECT COALESCE(tedarikci,'') AS ad,
+            (CASE WHEN COALESCE(toplam_tutar,0) > 0 THEN toplam_tutar ELSE COALESCE(tutar,0) END) AS t
+          FROM invoice_entries WHERE UPPER(COALESCE(firma,'')) = $1`, [marka]),
+        pool.query(`SELECT COALESCE(taseron_adi,'') AS ad, COALESCE(tutar,0) AS t
+          FROM marka_taseron_odeme WHERE UPPER(marka) = $1`, [marka]).catch(() => ({ rows: [] })),
+      ]);
+      const grp = {};
+      bf.rows.forEach(r => { const k = taseronCanonKey(r.ad); grp[k] = grp[k] || { f: 0, o: 0 }; grp[k].f += Number(r.t || 0); });
+      bo.rows.forEach(r => { const k = taseronCanonKey(r.ad); grp[k] = grp[k] || { f: 0, o: 0 }; grp[k].o += Number(r.t || 0); });
+      bekleyenTaseron = Object.values(grp).reduce((sm, x) => sm + Math.max(0, x.f - x.o), 0);
     } catch {}
 
     res.json({ ok: true, marka, pay_yuzde: 100 - yuzde, gelir_kaynak: "fatura", aylar,
@@ -5990,6 +5996,20 @@ app.delete("/finance/marka-kasa/:id", authMiddleware, async (req, res) => {
 
 // MARKA TAŞERON: AHY'nin taşeronlarının (AHY_OLCAY vb.) kestiği faturalar
 // (invoice_entries.firma='AHY') + bu taşeronlara yapılan avans/fatura ödemeleri.
+// Taşeron adı kanonik anahtarı: "NETELCOM", "NETELCOM TELEKOMÜNİKASYON SAN.
+// VE TİC. LTD. ŞTİ." ve "AHY_NETELKOM" aynı taşerona işaret eder.
+// Kural: AHY_ önekini at, TR harfleri sadeleştir, şirket tür kelimelerini at,
+// ilk anlamlı kelimeyi al, K→C normalize et (NETELKOM/NETELCOM farkı).
+function taseronCanonKey(ad) {
+  let t = String(ad || "").toUpperCase()
+    .replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ç/g, "C")
+    .replace(/Ğ/g, "G").replace(/Ü/g, "U").replace(/Ö/g, "O");
+  t = t.replace(/^AHY[_\s-]+/, "").replace(/[^A-Z0-9 ]/g, " ");
+  t = t.replace(/\b(TELEKOMUNIKASYON|ILETISIM|HABERLESME|MAKINE|MAKINA|SANAYI|SAN|VE|TICARET|TIC|LIMITED|LTD|STI|SIRKETI|INSAAT|TURIZM|GIDA|ORGANIZASYON|RESTORAN|ELEKTRIK|ELEKTRONIK|MUHENDISLIK|HIZMETLERI|SISTEMLERI)\b/g, " ");
+  t = t.trim().split(/\s+/)[0] || String(ad || "").toUpperCase().trim();
+  return t.replace(/K/g, "C");
+}
+
 app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))

@@ -1936,6 +1936,16 @@ const MT_KATEGORILER = [
   ["DIGER", "📋 Diğer"],
 ];
 const mtKatAdi = (k) => { const f = MT_KATEGORILER.find(x => x[0] === String(k || "").toUpperCase()); return f ? f[1] : (k || "—"); };
+// Taşeron adı kanonik anahtarı: "NETELCOM" ≈ "NETELCOM TELEKOMÜNİKASYON … LTD ŞTİ" ≈ "AHY_NETELKOM"
+const mtCanon = (ad) => {
+  let t = String(ad || "").toUpperCase()
+    .replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ç/g, "C")
+    .replace(/Ğ/g, "G").replace(/Ü/g, "U").replace(/Ö/g, "O");
+  t = t.replace(/^AHY[_\s-]+/, "").replace(/[^A-Z0-9 ]/g, " ");
+  t = t.replace(/\b(TELEKOMUNIKASYON|ILETISIM|HABERLESME|MAKINE|MAKINA|SANAYI|SAN|VE|TICARET|TIC|LIMITED|LTD|STI|SIRKETI|INSAAT|TURIZM|GIDA|ORGANIZASYON|RESTORAN|ELEKTRIK|ELEKTRONIK|MUHENDISLIK|HIZMETLERI|SISTEMLERI)\b/g, " ");
+  t = t.trim().split(/\s+/)[0] || String(ad || "").toUpperCase().trim();
+  return t.replace(/K/g, "C");
+};
 
 function MarkaTaseronPanel({ currentUser }) {
   const [data, setData] = useState({ faturalar: [], odemeler: [] });
@@ -1980,12 +1990,23 @@ function MarkaTaseronPanel({ currentUser }) {
   const topFatura = data.faturalar.reduce((s, f) => s + Number(f.toplam_tutar || f.tutar || 0), 0);
   const topOdenen = data.odemeler.reduce((s, o) => s + Number(o.tutar || 0), 0);
   const kalan = topFatura - topOdenen;
-  // Taşeron bazında bakiye: fatura (KDV dahil) − ödenen (avans+ödeme)
-  const bakiyeler = taseronlar.map(t => {
-    const f = data.faturalar.filter(x => x.taseron_adi === t).reduce((s, x) => s + Number(x.toplam_tutar || x.tutar || 0), 0);
-    const o = data.odemeler.filter(x => x.taseron_adi === t).reduce((s, x) => s + Number(x.tutar || 0), 0);
-    return { taseron: t, fatura: f, odenen: o, kalan: f - o };
-  });
+  // Taşeron bazında bakiye: fatura (KDV dahil) − ödenen (avans+ödeme).
+  // Farklı yazımlar (kısa ad / tam ünvan / AHY_EKIP) kanonik anahtarla birleşir.
+  const bakiyeler = (() => {
+    const grup = {};
+    const ekle = (ad, f, o) => {
+      const k = mtCanon(ad);
+      const g = grup[k] || (grup[k] = { adlar: [], fatura: 0, odenen: 0 });
+      if (ad && !g.adlar.includes(ad)) g.adlar.push(ad);
+      g.fatura += f; g.odenen += o;
+    };
+    data.faturalar.forEach(x => ekle(x.taseron_adi, Number(x.toplam_tutar || x.tutar || 0), 0));
+    data.odemeler.forEach(x => ekle(x.taseron_adi, 0, Number(x.tutar || 0)));
+    return Object.values(grup).map(g => {
+      const sirali = g.adlar.slice().sort((a, b) => b.length - a.length);
+      return { taseron: sirali[0] || "—", digerAdlar: sirali.slice(1), fatura: g.fatura, odenen: g.odenen, kalan: g.fatura - g.odenen };
+    }).sort((a, b) => b.kalan - a.kalan);
+  })();
   const inp = { width: "100%", padding: "9px 11px", border: "1.5px solid #e5e7eb", borderRadius: "9px", fontSize: "13.5px", boxSizing: "border-box" };
   const lbl = { fontSize: "11.5px", fontWeight: 700, color: "#475569", marginBottom: "4px", display: "block" };
   const kaydetFatura = async () => {
@@ -2092,6 +2113,7 @@ function MarkaTaseronPanel({ currentUser }) {
           {bakiyeler.map(b => (
             <div key={b.taseron} style={{ background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: "10px", padding: "10px 14px", minWidth: "190px" }}>
               <div style={{ fontSize: "12.5px", fontWeight: 800, color: "#0f172a" }}>{b.taseron}</div>
+              {b.digerAdlar.length > 0 && <div style={{ fontSize: "10.5px", color: "#94a3b8", marginTop: "1px" }}>≈ {b.digerAdlar.join(" · ")}</div>}
               <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>Fatura ₺{fmt(b.fatura)} · Ödenen ₺{fmt(b.odenen)}</div>
               <div style={{ fontSize: "13px", fontWeight: 800, marginTop: "2px", color: b.kalan > 0 ? "#b45309" : "#15803d" }}>Kalan ₺{fmt(b.kalan)}</div>
             </div>
