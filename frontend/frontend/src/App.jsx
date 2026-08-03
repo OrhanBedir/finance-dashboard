@@ -28130,7 +28130,7 @@ function App() {
                   {openSections.depo && (
                     <div style={altNavGrup}>
                       <AltNavItem aktif={page==='malzeme'} onClick={()=>setPage('malzeme')} ikon="📦" label="Malzeme Yönetimi" badge={pendingMalzemeCount} />
-                      {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && (
+                      {(isAdmin || ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com"].includes(_userEmail)) && (
                         <AltNavItem aktif={page==='araclar'} onClick={()=>setPage('araclar')} ikon="🚗" label="Araç Yönetimi" />
                       )}
                       {isAdmin && (
@@ -29736,7 +29736,7 @@ function AraclarPanel({ currentUser, onBack }) {
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
-  const isRollout = currentUser?.email === "nurcan.kus@simsektel.com"; // filo güncelleme yetkisi
+  const isRollout = ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com"].includes(currentUser?.email); // filo güncelleme yetkisi
   const canEdit = isPM || isDirektor || isMuhasebe || isRollout;
 
   const [araclar, setAraclar] = useState([]);
