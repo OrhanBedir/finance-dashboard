@@ -28127,7 +28127,7 @@ function App() {
               {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
                 <>
                   <div className="sidebar-section-title" onClick={()=>toggleSection('depo')}>
-                    <span>Depo & Envanter</span>
+                    <span>Araç & Depo & Envanter</span>
                     <span className={`sidebar-section-chevron ${openSections.depo?'open':'closed'}`}>▾</span>
                   </div>
                   {openSections.depo && (
