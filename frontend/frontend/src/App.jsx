@@ -2142,7 +2142,13 @@ function MarkaTaseronPanel({ currentUser }) {
         const rows = Object.values(grup).map(g => {
           const sirali = g.adlar.slice().sort((a, b) => b.length - a.length);
           return { ad: sirali[0] || g.ekip || "—", ekip: g.ekip, isSayisi: g.isSayisi, isBedeli: g.isBedeli, bedel: g.bedel || 0, detay: g.detay || [], fatura: g.fatura, odenen: g.odenen, kalan: g.fatura - g.odenen };
-        }).sort((a, b) => (b.kalan - a.kalan) || (b.isBedeli - a.isBedeli));
+        }).sort((a, b) => {
+          // RF montaj ekipleri (hesaplanan bedeli/iş kalemi olanlar) üstte;
+          // vinç/nakliye/konaklama gibi fatura-bazlı tedarikçiler altta
+          const rfA = (a.bedel > 0 || a.isSayisi > 0) ? 1 : 0;
+          const rfB = (b.bedel > 0 || b.isSayisi > 0) ? 1 : 0;
+          return (rfB - rfA) || (b.kalan - a.kalan) || (b.bedel - a.bedel);
+        });
         if (rows.length === 0) return null;
         const topIs = rows.reduce((sm, r) => sm + r.isBedeli, 0);
         const topBedel = rows.reduce((sm, r) => sm + (r.bedel || 0), 0);
@@ -2181,7 +2187,9 @@ function MarkaTaseronPanel({ currentUser }) {
                             style={{ background: "none", border: "none", cursor: "pointer", color: "#065f46", fontWeight: 800, fontSize: "13px", padding: 0 }}>
                             ₺{fmt(r.bedel)} <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 600 }}>+KDV 🔍</span>
                           </button>
-                        ) : "—"}
+                        ) : r.isSayisi > 0 ? "—" : (
+                          <span title="Vinç/nakliye/konaklama gibi hizmetlerde hakediş kestiği fatura kadardır" style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>fatura kadar</span>
+                        )}
                       </td>
                       <td style={num}>{r.fatura > 0 ? `₺${fmt(r.fatura)}` : "—"}</td>
                       <td style={num}>{r.odenen > 0 ? `₺${fmt(r.odenen)}` : "—"}</td>
@@ -2196,7 +2204,7 @@ function MarkaTaseronPanel({ currentUser }) {
               </table>
             </div>
             <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
-              Taşeron Bedeli: saha tipine göre otomatik hesap — co-located (NR700/TRP) kalem bazlı, standalone (NS) paket fiyat (radyolu 52.000 / radyosuz 40.000) + 7,2m LPRT; tutara tıklayıp saha bazlı dökümü görebilirsiniz. Ödemeler nakit akışına ve Kâr/Zarar giderine otomatik yansır.
+              Taşeron Bedeli: saha tipine göre otomatik hesap — co-located (NR700/TRP) kalem bazlı, standalone (NS) paket fiyat (radyolu 52.000 / radyosuz 40.000) + 7,2m LPRT; tutara tıklayıp saha bazlı dökümü görebilirsiniz. Vinç, nakliye, konaklama gibi hizmetlerde hakediş kestikleri fatura kadardır. Ödemeler nakit akışına ve Kâr/Zarar giderine otomatik yansır.
             </div>
           </div>
         );
