@@ -5610,7 +5610,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     // bazlı) — hakediş tahmini değil. Gider = devirden (15 Temmuz 2026) sonraki
     // nakit akışı: maaş + avanslar (ödeme tarihi) + kira/manuel (giriş zamanı).
     const DEVIR = "2026-07-15";
-    const [fatura, maas, mavans, iavans, kiralar, ofisk, manuel, taseronOd] = await Promise.all([
+    const [fatura, maas, mavans, iavans, kiralar, ofisk, manuel, taseronOd, yemekOd] = await Promise.all([
       pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
           TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
           COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
@@ -5648,6 +5648,9 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
         FROM marka_taseron_odeme
         WHERE UPPER(marka) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
+      // Yemek kartı ödemeleri (cashflow kategori TICKET) — kalem dökümü için ayrı
+      pool.query(`SELECT SUM(tutar) AS t FROM cashflow_odeme
+        WHERE UPPER(COALESCE(marka,'ERC')) = $1 AND UPPER(COALESCE(kategori,'')) = 'TICKET'`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const map = {};
     const rowOf = (ay) => (map[ay] = map[ay] || { ay, gelir_try: 0, gelir_usd: 0, maas: 0, maas_avans: 0, is_avans: 0, diger: 0 });
@@ -5670,6 +5673,17 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       const gider = o.maas + o.maas_avans + o.is_avans + o.diger;
       return { ...o, gider, net: +(o.gelir_try - gider).toFixed(2) };
     });
+    // ── Gider kalem dökümü (P&L şeridinin dikey gelir tablosu için) ──
+    const _top = (q) => (q.rows || []).reduce((sm, r) => sm + Number(r.t || 0), 0);
+    const yemekToplam = _top(yemekOd);
+    const gider_kalemleri = {
+      maas: +( _top(maas) + _top(mavans) ).toFixed(2),          // maaş + maaş avansları
+      arac_kira: +_top(kiralar).toFixed(2),
+      ofis_kira: +_top(ofisk).toFixed(2),
+      yemek: +yemekToplam.toFixed(2),
+      taseron: +_top(taseronOd).toFixed(2),
+      genel: +( _top(iavans) + Math.max(0, _top(manuel) - yemekToplam) ).toFixed(2), // iş avansları + manuel (yemek hariç)
+    };
     // ── Proje P&L şeridi (kartların üstü) ──
     // Fiziki tamamlanan iş bedeli: Bölge Analizi ile aynı fiyat zinciri —
     // tamamlanan_qty (yoksa done_qty) × PO/BOQ birim fiyatı, para birimi ayrımlı.
@@ -5838,7 +5852,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     } catch {}
 
     res.json({ ok: true, marka, pay_yuzde: 100 - yuzde, gelir_kaynak: "fatura", aylar,
-      fiziki, kur, bekleyen_maas: Math.round(bekleyenMaas),
+      fiziki, kur, gider_kalemleri, bekleyen_maas: Math.round(bekleyenMaas),
       bekleyen_taseron: Math.round(bekleyenTaseron) });
   } catch (e) {
     console.error("MARKA OZET ERROR:", e.message);

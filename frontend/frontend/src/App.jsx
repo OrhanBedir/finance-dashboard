@@ -1096,70 +1096,99 @@ function KirilimRaporuPanel() {
 // Alt marka (AHY) Kar/Zarar özeti: gelir = HW faturaları × marka payı,
 // gider = kendi personelinin maaş ödemeleri + avansları. ERC finansı görünmez.
 // ── Proje Kâr/Zarar özet şeridi — Finans Özeti ve P&L panellerinin ortak üst bandı ──
+// Dikey gelir tablosu düzeni: hakediş (KDV dahil) → gider kalemleri → brüt kâr
 function ProjePLSeridi({ ozet, tGider }) {
   if (!ozet?.fiziki) return null;
   const data = ozet;
   const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  const kur = Number(data.kur || 0);
+  const payOran = Number(data.pay_yuzde || 90);
+  const usdTutar = Number(data.fiziki.usd || 0); // henüz faturalanmamış USD
+  const billedTL = Number(data.fiziki.billed_tl || 0); // faturalanan USD sabit kurla
+  const billedUsd = Number(data.fiziki.billed_usd || 0);
+  const fizikiTL = Number(data.fiziki.try || 0) + billedTL + (kur > 0 ? usdTutar * kur : 0);
+  const KDV = 1.20;
+  // Harcamalar KDV dahil ödendiği için hakediş de KDV dahil gösterilir (elma-elma)
+  const hakedis = fizikiTL * (payOran / 100) * KDV;
+  const planliMaas = Number(data.bekleyen_maas || 0);   // İK NET Ödenecek ile birebir
+  const planliTas = Number(data.bekleyen_taseron || 0); // taşeron fatura − ödeme
+  const gk = data.gider_kalemleri || null;
+  const kalemler = gk ? [
+    ["🚗", "Araç Kiraları", Number(gk.arac_kira || 0), ""],
+    ["🏢", "Ofis & Depo Kiraları", Number(gk.ofis_kira || 0), ""],
+    ["🍽", "Yemek Kartı Ödemeleri", Number(gk.yemek || 0), ""],
+    ["🔧", "Taşeron Ödemeleri", Number(gk.taseron || 0) + planliTas, planliTas > 0 ? `planlı ₺${fmt(planliTas)} dahil` : ""],
+    ["👥", "Personel Maaş & Avansları", Number(gk.maas || 0) + planliMaas, planliMaas > 0 ? `planlı maaş ₺${fmt(planliMaas)} dahil` : ""],
+    ["📋", "Genel Saha & İşletme Giderleri", Number(gk.genel || 0), "iş avansları + günlük ödemeler"],
+  ] : [
+    ["💸", "Gerçekleşen Giderler", Number(tGider || 0), ""],
+    ["👥", "Planlı Maaş", planliMaas, ""],
+    ["🔧", "Planlı Taşeron", planliTas, ""],
+  ];
+  const toplamG = kalemler.reduce((sm, k) => sm + k[2], 0);
+  const brut = hakedis - toplamG;
+  const marj = hakedis > 0 ? (brut / hakedis) * 100 : 0;
+  const gidPct = hakedis > 0 ? Math.min(100, (toplamG / hakedis) * 100) : 0;
+  const rowSt = { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.07)" };
+  const lblK = { fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.85)", display: "flex", alignItems: "baseline", gap: "8px", minWidth: 0 };
+  const notK = { fontSize: "10.5px", fontWeight: 500, color: "rgba(255,255,255,0.4)" };
+  return (
+    <div style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #0f2436 100%)", borderRadius: "18px", padding: "24px 30px 20px", marginBottom: "24px", boxShadow: "0 16px 40px rgba(15,23,42,0.35)", position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "3px", background: "linear-gradient(90deg, #f59e0b, #fbbf24, #f59e0b)" }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "8px", marginBottom: "14px" }}>
+        <div style={{ fontSize: "15px", fontWeight: 800, color: "#fff", letterSpacing: "0.5px" }}>PROJE KÂR / ZARAR ÖZETİ</div>
+        <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)" }}>Tutarlar KDV dahil · fiziki ilerleme bazlı · %{payOran} hakediş{kur > 0 ? ` · $/₺ ${kur.toLocaleString("tr-TR", { maximumFractionDigits: 2 })}` : ""}</div>
+      </div>
 
-        const kur = Number(data.kur || 0);
-        const payOran = Number(data.pay_yuzde || 90);
-        const usdTutar = Number(data.fiziki.usd || 0); // henüz faturalanmamış USD
-        const billedTL = Number(data.fiziki.billed_tl || 0); // HW'ye faturalanan USD — sabit fatura kuruyla TL (kur oynasa da değişmez)
-        const billedUsd = Number(data.fiziki.billed_usd || 0);
-        const fizikiTL = Number(data.fiziki.try || 0) + billedTL + (kur > 0 ? usdTutar * kur : 0);
-        const tamamlanan = fizikiTL * (payOran / 100);
-        const gerceklesen = tGider;
-        const planli = Number(data.bekleyen_maas || 0); // İK NET Ödenecek ile birebir
-        const planliTas = Number(data.bekleyen_taseron || 0); // taşeron fatura − ödeme
-        const toplamG = gerceklesen + planli + planliTas;
-        const brut = tamamlanan - toplamG;
-        const marj = tamamlanan > 0 ? (brut / tamamlanan) * 100 : 0;
-        const gidPct = tamamlanan > 0 ? Math.min(100, (toplamG / tamamlanan) * 100) : 0;
-        const lbl = { fontSize: "11px", fontWeight: 700, letterSpacing: "1.2px", textTransform: "uppercase", color: "rgba(255,255,255,0.55)" };
-        const val = { fontSize: "30px", fontWeight: 800, letterSpacing: "-0.5px", color: "#fff", marginTop: "6px", fontVariantNumeric: "tabular-nums" };
-        const sub = { fontSize: "11px", color: "rgba(255,255,255,0.45)", marginTop: "6px", lineHeight: 1.5 };
-        const opSt = { fontSize: "28px", fontWeight: 300, color: "rgba(255,255,255,0.3)", alignSelf: "center", padding: "0 2px" };
-        return (
-          <div style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #0f2436 100%)", borderRadius: "18px", padding: "26px 30px 20px", marginBottom: "24px", boxShadow: "0 16px 40px rgba(15,23,42,0.35)", position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "3px", background: "linear-gradient(90deg, #f59e0b, #fbbf24, #f59e0b)" }} />
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "8px", marginBottom: "18px" }}>
-              <div style={{ fontSize: "15px", fontWeight: 800, color: "#fff", letterSpacing: "0.5px" }}>PROJE KÂR / ZARAR ÖZETİ</div>
-              <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)" }}>Fiziki ilerleme bazlı · %{payOran} hakediş{kur > 0 ? ` · $/₺ ${kur.toLocaleString("tr-TR", { maximumFractionDigits: 2 })}` : ""}</div>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "stretch" }}>
-              <div style={{ flex: "1 1 220px", minWidth: "210px" }}>
-                <div style={lbl}>Tamamlanan İş (Hakediş)</div>
-                <div style={val}>₺{fmt(tamamlanan)}</div>
-                <div style={sub}>Proje kapsamında fiziki yapılan iş bedeli · %{payOran} pay{billedUsd > 0 ? ` · faturalanan $${fmt(billedUsd)} sabit fatura kuruyla` : ""}{usdTutar > 0 && kur > 0 ? ` · kalan $${fmt(usdTutar)} güncel kurla` : ""}{usdTutar > 0 && !(kur > 0) ? ` · +$${fmt(usdTutar)} (kur alınamadı, hariç)` : ""}</div>
-              </div>
-              <div style={opSt}>−</div>
-              <div style={{ flex: "1 1 220px", minWidth: "210px" }}>
-                <div style={lbl}>Toplam Gider</div>
-                <div style={{ ...val, color: "#fca5a5" }}>₺{fmt(toplamG)}</div>
-                <div style={sub}>Gerçekleşen ₺{fmt(gerceklesen)}{planli > 0 ? ` + planlı maaş ₺${fmt(planli)}` : ""}{planliTas > 0 ? ` + planlı taşeron ₺${fmt(planliTas)}` : ""}</div>
-              </div>
-              <div style={opSt}>=</div>
-              <div style={{ flex: "1 1 240px", minWidth: "220px" }}>
-                <div style={lbl}>Brüt {brut >= 0 ? "Kâr" : "Zarar"} (Kalan)</div>
-                <div style={{ ...val, color: brut >= 0 ? "#6ee7b7" : "#fca5a5", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                  ₺{fmt(brut)}
-                  <span style={{ fontSize: "12px", fontWeight: 800, padding: "3px 10px", borderRadius: "999px", background: brut >= 0 ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)", color: brut >= 0 ? "#34d399" : "#f87171", border: `1px solid ${brut >= 0 ? "rgba(52,211,153,0.4)" : "rgba(248,113,113,0.4)"}` }}>%{Math.abs(marj).toFixed(1)} marj</span>
-                </div>
-                <div style={sub}>Tamamlanan iş − toplam gider</div>
-              </div>
-            </div>
-            <div style={{ marginTop: "18px" }}>
-              <div style={{ height: "8px", borderRadius: "999px", background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${gidPct}%`, borderRadius: "999px", background: gidPct < 70 ? "linear-gradient(90deg,#10b981,#34d399)" : gidPct < 90 ? "linear-gradient(90deg,#f59e0b,#fbbf24)" : "linear-gradient(90deg,#ef4444,#f87171)" }} />
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10.5px", color: "rgba(255,255,255,0.45)", marginTop: "5px" }}>
-                <span>Gider / hakediş oranı: %{gidPct.toFixed(1)}</span>
-                <span>Kalan pay: %{Math.max(0, 100 - gidPct).toFixed(1)}</span>
-              </div>
-            </div>
+      {/* Hakediş */}
+      <div style={{ ...rowSt, borderBottom: "1.5px solid rgba(255,255,255,0.15)", paddingBottom: "10px" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: "12px", fontWeight: 800, letterSpacing: "0.8px", color: "rgba(255,255,255,0.6)" }}>TAMAMLANAN İŞ (HAKEDİŞ · KDV DAHİL)</div>
+          <div style={{ fontSize: "10.5px", color: "rgba(255,255,255,0.4)", marginTop: "3px" }}>
+            Fiziki yapılan iş bedeli × %{payOran} pay × 1,20 KDV{billedUsd > 0 ? ` · faturalanan $${fmt(billedUsd)} sabit fatura kuruyla` : ""}{usdTutar > 0 && kur > 0 ? ` · kalan $${fmt(usdTutar)} güncel kurla` : ""}
           </div>
-        );
-      }
+        </div>
+        <div style={{ fontSize: "26px", fontWeight: 800, color: "#fff", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>₺{fmt(hakedis)}</div>
+      </div>
+
+      {/* Gider kalemleri */}
+      <div style={{ fontSize: "11px", fontWeight: 800, letterSpacing: "1px", color: "rgba(255,255,255,0.45)", margin: "12px 0 2px" }}>GİDERLER</div>
+      {kalemler.map(([ik, ad, tutar, not_]) => (
+        <div key={ad} style={rowSt}>
+          <span style={{ ...lblK, opacity: tutar > 0 ? 1 : 0.45 }}>
+            <span>{ik}</span><span>{ad}</span>
+            {not_ && <span style={notK}>{not_}</span>}
+          </span>
+          <span style={{ fontSize: "15px", fontWeight: 700, color: tutar > 0 ? "#fca5a5" : "rgba(255,255,255,0.35)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+            {tutar > 0 ? `−₺${fmt(tutar)}` : "₺0"}
+          </span>
+        </div>
+      ))}
+      <div style={{ ...rowSt, borderBottom: "1.5px solid rgba(255,255,255,0.15)" }}>
+        <span style={{ fontSize: "13px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>TOPLAM GİDER</span>
+        <span style={{ fontSize: "18px", fontWeight: 800, color: "#f87171", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>−₺{fmt(toplamG)}</span>
+      </div>
+
+      {/* Brüt kâr */}
+      <div style={{ ...rowSt, borderBottom: "none", paddingTop: "12px" }}>
+        <span style={{ fontSize: "13px", fontWeight: 800, letterSpacing: "0.8px", color: "rgba(255,255,255,0.85)" }}>BRÜT {brut >= 0 ? "KÂR" : "ZARAR"} (KALAN)</span>
+        <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <span style={{ fontSize: "26px", fontWeight: 800, color: brut >= 0 ? "#6ee7b7" : "#fca5a5", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>₺{fmt(brut)}</span>
+          <span style={{ fontSize: "12px", fontWeight: 800, padding: "3px 10px", borderRadius: "999px", background: brut >= 0 ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)", color: brut >= 0 ? "#34d399" : "#f87171", border: `1px solid ${brut >= 0 ? "rgba(52,211,153,0.4)" : "rgba(248,113,113,0.4)"}` }}>%{Math.abs(marj).toFixed(1)} marj</span>
+        </span>
+      </div>
+      <div style={{ marginTop: "10px" }}>
+        <div style={{ height: "8px", borderRadius: "999px", background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${gidPct}%`, borderRadius: "999px", background: gidPct < 70 ? "linear-gradient(90deg,#10b981,#34d399)" : gidPct < 90 ? "linear-gradient(90deg,#f59e0b,#fbbf24)" : "linear-gradient(90deg,#ef4444,#f87171)" }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10.5px", color: "rgba(255,255,255,0.45)", marginTop: "5px" }}>
+          <span>Gider / hakediş oranı: %{gidPct.toFixed(1)}</span>
+          <span>Kalan pay: %{Math.max(0, 100 - gidPct).toFixed(1)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function MarkaFinansPanel({ currentUser }) {
   const [data, setData] = useState(null);
