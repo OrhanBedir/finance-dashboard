@@ -1974,6 +1974,7 @@ function MarkaTaseronPanel({ currentUser }) {
   useEffect(() => { load(); }, []);
   // Fatura Kesilecek: markanın alt ekiplerinin (AHY_MURAT, AHY_NETELKOM…) yaptığı işler
   const [hakedis, setHakedis] = useState(null);
+  const [bedelDetay, setBedelDetay] = useState(null); // taşeron bedeli hesap dökümü modalı
   useEffect(() => {
     (async () => {
       try {
@@ -2099,22 +2100,25 @@ function MarkaTaseronPanel({ currentUser }) {
           const g = getG(e.subcon); g.ekip = e.subcon;
           g.isSayisi += Number(e.is_sayisi || 0);
           g.isBedeli += Number(e.try || 0) + Number(e.billed_tl || 0) + (kur > 0 ? Number(e.usd || 0) * kur : 0);
+          g.bedel = (g.bedel || 0) + Number(e.bedel || 0);
+          g.detay = (g.detay || []).concat(e.bedel_detay || []);
         });
         data.faturalar.forEach(f => { const g = getG(f.taseron_adi); if (f.taseron_adi && !g.adlar.includes(f.taseron_adi)) g.adlar.push(f.taseron_adi); g.fatura += Number(f.toplam_tutar || f.tutar || 0); });
         data.odemeler.forEach(o => { const g = getG(o.taseron_adi); if (o.taseron_adi && !g.adlar.includes(o.taseron_adi)) g.adlar.push(o.taseron_adi); g.odenen += Number(o.tutar || 0); });
         const rows = Object.values(grup).map(g => {
           const sirali = g.adlar.slice().sort((a, b) => b.length - a.length);
-          return { ad: sirali[0] || g.ekip || "—", ekip: g.ekip, isSayisi: g.isSayisi, isBedeli: g.isBedeli, fatura: g.fatura, odenen: g.odenen, kalan: g.fatura - g.odenen };
+          return { ad: sirali[0] || g.ekip || "—", ekip: g.ekip, isSayisi: g.isSayisi, isBedeli: g.isBedeli, bedel: g.bedel || 0, detay: g.detay || [], fatura: g.fatura, odenen: g.odenen, kalan: g.fatura - g.odenen };
         }).sort((a, b) => (b.kalan - a.kalan) || (b.isBedeli - a.isBedeli));
         if (rows.length === 0) return null;
         const topIs = rows.reduce((sm, r) => sm + r.isBedeli, 0);
+        const topBedel = rows.reduce((sm, r) => sm + (r.bedel || 0), 0);
         const topKalan = rows.reduce((sm, r) => sm + Math.max(0, r.kalan), 0);
         const num = { ...tdS, textAlign: "right", whiteSpace: "nowrap" };
         return (
           <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
             <div style={{ padding: "12px 16px", background: "#065f46", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
               <span>📐 Taşeron Hesabı — Fatura Kesilecek & Borç Durumu ({rows.length})</span>
-              <span>Yapılan İş: ₺{fmt(topIs)} · Kalan Borç: ₺{fmt(topKalan)}</span>
+              <span>Yapılan İş: ₺{fmt(topIs)} · Taşeron Bedeli: ₺{fmt(topBedel)} +KDV · Kalan Borç: ₺{fmt(topKalan)}</span>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -2139,7 +2143,14 @@ function MarkaTaseronPanel({ currentUser }) {
                         ) : null}
                       </td>
                       <td style={num}>{r.isBedeli > 0 ? `₺${fmt(r.isBedeli)}` : "—"}</td>
-                      <td style={{ ...num, color: "#94a3b8", fontStyle: "italic", fontSize: "12px" }}>{r.isBedeli > 0 ? "kural bekleniyor" : "—"}</td>
+                      <td style={num}>
+                        {r.bedel > 0 ? (
+                          <button onClick={() => setBedelDetay({ ad: r.ad, bedel: r.bedel, detay: r.detay })} title="Hesap dökümünü görmek için tıklayın"
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "#065f46", fontWeight: 800, fontSize: "13px", padding: 0 }}>
+                            ₺{fmt(r.bedel)} <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 600 }}>+KDV 🔍</span>
+                          </button>
+                        ) : "—"}
+                      </td>
                       <td style={num}>{r.fatura > 0 ? `₺${fmt(r.fatura)}` : "—"}</td>
                       <td style={num}>{r.odenen > 0 ? `₺${fmt(r.odenen)}` : "—"}</td>
                       <td style={{ ...num, fontWeight: 800, color: r.kalan > 0 ? "#b45309" : "#15803d" }}>₺{fmt(r.kalan)}</td>
@@ -2153,7 +2164,7 @@ function MarkaTaseronPanel({ currentUser }) {
               </table>
             </div>
             <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
-              Yapılan İş Bedeli: ekiplerin günlük iş girişindeki fiziki işlerin PO/BOQ değeri (HW'ye faturalanan USD sabit fatura kurunda). "Taşeron Bedeli" hesap kuralı tanımlanınca otomatik dolacak. Girilen ödemeler nakit akışına taşeron ödemesi olarak düşer ve Kâr/Zarar'daki Toplam Gider'e yansır; ödenmemiş fatura kalanları da planlı gider olarak P&L şeridinde görünür.
+              Yapılan İş Bedeli: fiziki işlerin PO/BOQ değeri (HW'ye faturalanan USD sabit fatura kurunda). Taşeron Bedeli: saha tipine göre otomatik hesap — co-located (NR700/TRP) kalem bazlı, standalone (NS) paket fiyat (radyolu 52.000 / radyosuz 40.000) + 7,2m LPRT; tutara tıklayıp saha bazlı dökümü görebilirsiniz. Ödemeler nakit akışına ve Kâr/Zarar giderine otomatik yansır.
             </div>
           </div>
         );
@@ -2226,6 +2237,42 @@ function MarkaTaseronPanel({ currentUser }) {
           </table>
         </div>
       </div>
+
+      {/* Taşeron bedeli hesap dökümü modalı */}
+      {bedelDetay && (
+        <div onClick={() => setBedelDetay(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(700px, 94vw)", maxHeight: "80vh", overflow: "auto", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "4px" }}>📐 {bedelDetay.ad} — Taşeron Bedeli Dökümü</div>
+            <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>Saha tipi ve kalem bazlı hesap · fiyatlar KDV hariç</div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr>
+                <th style={thS}>Site</th><th style={thS}>Kalem</th>
+                <th style={{ ...thS, textAlign: "right" }}>Adet</th>
+                <th style={{ ...thS, textAlign: "right" }}>Birim</th>
+                <th style={{ ...thS, textAlign: "right" }}>Tutar</th>
+              </tr></thead>
+              <tbody>
+                {bedelDetay.detay.map((d, i) => (
+                  <tr key={i}>
+                    <td style={{ ...tdS, whiteSpace: "nowrap" }}>{d.site}</td>
+                    <td style={tdS}>{d.kalem}</td>
+                    <td style={{ ...tdS, textAlign: "right" }}>{d.adet}</td>
+                    <td style={{ ...tdS, textAlign: "right", whiteSpace: "nowrap" }}>₺{fmt(d.birim)}</td>
+                    <td style={{ ...tdS, textAlign: "right", fontWeight: 700, whiteSpace: "nowrap" }}>₺{fmt(d.tutar)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "18px", marginTop: "12px", fontSize: "13.5px", fontWeight: 800, flexWrap: "wrap" }}>
+              <span>Toplam: ₺{fmt(bedelDetay.bedel)} <span style={{ color: "#64748b", fontWeight: 600 }}>+ KDV</span></span>
+              <span style={{ color: "#065f46" }}>KDV Dahil (%20): ₺{fmt(bedelDetay.bedel * 1.2)}</span>
+            </div>
+            <div style={{ textAlign: "right", marginTop: "14px" }}>
+              <button onClick={() => setBedelDetay(null)} style={{ padding: "8px 16px", background: "#f3f4f6", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}>Kapat</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Fatura giriş modalı */}
       {faturaModal && (

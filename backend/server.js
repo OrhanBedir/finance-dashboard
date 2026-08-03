@@ -6034,6 +6034,53 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
     res.json({ ok: true, faturalar: faturalar.rows, odemeler: odemeler.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// ── AHY taşeron bedeli hesap kuralı (2026-08 anlaşması) ──
+// Co-located saha (site ID'de NR700/TRP): kalem bazlı birim fiyat × adet.
+// Standalone saha (site ID'de NS / NS_MERKEZ): paket fiyat — Antenna
+// Installation veya outdoor cabinet kalemi varsa; mikrodalga (New Microwave
+// Installation) da yapıldıysa "Radyolu" 52.000, yoksa "Radyosuz" 40.000.
+// 7,2m LPRT pole her iki saha tipinde de adet × 8.000 eklenir.
+// Fiyatlar TL + KDV (KDV hariç döner). Yeni kalem çıkarsa buraya eklenecek.
+const AHY_BEDEL_COLOCATED = [
+  [/co-located site with antenna/i, 26500, "Co-Located Site with Antenna"],
+  [/co-located site without antenna/i, 22000, "Co-Located Site without Antenna"],
+  [/rru dismantling/i, 400, "RRU dismantling"],
+  [/dc cable dismantle/i, 1500, "DC Cable Dismantle"],
+  [/7[.,]2\s*m\s*lprt/i, 8000, "Installation of 7,2m LPRT pole"],
+];
+function ahyTaseronBedel(rows) {
+  // rows: [{subcon, site, kalem, fq}] → { [subcon]: { bedel, detay[] } }
+  const bySiteKey = {};
+  for (const r of rows) {
+    const k = r.subcon + "|" + r.site;
+    (bySiteKey[k] = bySiteKey[k] || { subcon: r.subcon, site: r.site, items: [] }).items.push(r);
+  }
+  const out = {};
+  for (const g of Object.values(bySiteKey)) {
+    const ek = (out[g.subcon] = out[g.subcon] || { bedel: 0, detay: [] });
+    const qty = (rx) => g.items.filter(i => rx.test(i.kalem)).reduce((sm, i) => sm + Number(i.fq || 0), 0);
+    const has = (rx) => g.items.some(i => rx.test(i.kalem) && Number(i.fq || 0) > 0);
+    const st = g.site;
+    if (/NR700|TRP/.test(st)) {
+      for (const [rx, fiyat, ad] of AHY_BEDEL_COLOCATED) {
+        const q = qty(rx);
+        if (q > 0) { ek.bedel += q * fiyat; ek.detay.push({ site: st, kalem: ad, adet: q, birim: fiyat, tutar: q * fiyat }); }
+      }
+    } else if (/(^|[_\-])NS([_\-]|$)|NS_MERKEZ/.test(st)) {
+      const paketVar = has(/antenna installation\s*,\s*per pcs/i) || has(/outdoor cabinet family installation/i);
+      if (paketVar) {
+        const radyolu = has(/new microwave installation/i);
+        const fiyat = radyolu ? 52000 : 40000;
+        ek.bedel += fiyat;
+        ek.detay.push({ site: st, kalem: radyolu ? "New Site Radyolu (paket)" : "New Site Radyosuz (paket)", adet: 1, birim: fiyat, tutar: fiyat });
+      }
+      const qL = qty(/7[.,]2\s*m\s*lprt/i);
+      if (qL > 0) { ek.bedel += qL * 8000; ek.detay.push({ site: st, kalem: "Installation of 7,2m LPRT pole", adet: qL, birim: 8000, tutar: qL * 8000 }); }
+    }
+  }
+  return out;
+}
+
 // "Fatura Kesilecek" kurgusu: markanın alt ekiplerinin (AHY_MURAT, AHY_NETELKOM…)
 // yaptığı işlerin bedeli — ana marka ekibi (AHY) hariç, yalnız altçizgili ekipler.
 // USD kalemlerde HW'ye faturalanan kısım sabit fatura kuruyla kilitli (P&L şeridi kuralı).
@@ -6101,9 +6148,29 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
       GROUP BY t.subcon
       ORDER BY t.subcon
     `, [marka]);
+    // Taşeron bedeli: kalem açıklamaları üzerinden hesap kuralı
+    let bedelMap = {};
+    try {
+      const det = await pool.query(`
+        WITH best_boq AS (
+          SELECT DISTINCT ON (s_bom_code) * FROM boq_items
+          WHERE COALESCE(TRIM(s_bom_code), '') <> '' ORDER BY s_bom_code, created_at DESC
+        )
+        SELECT UPPER(TRIM(m.subcon_name)) AS subcon,
+          UPPER(TRIM(COALESCE(m.site_code,''))) AS site,
+          COALESCE(NULLIF(TRIM(m.item_description),''), best_boq.boq_items_en, COALESCE(m.item_code,'')) AS kalem,
+          GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty,0) END) AS fq
+        FROM master_works m
+        LEFT JOIN best_boq ON TRIM(COALESCE(best_boq.s_bom_code,'')) = TRIM(COALESCE(m.item_code,''))
+        WHERE UPPER(TRIM(COALESCE(m.subcon_name,''))) LIKE $1 || '\\_%'`, [marka]);
+      bedelMap = ahyTaseronBedel(det.rows);
+    } catch (e) { console.error("TASERON BEDEL ERROR:", e.message); }
     let kur = 0;
     try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
-    res.json({ ok: true, marka, kur, ekipler: r.rows });
+    res.json({ ok: true, marka, kur,
+      ekipler: r.rows.map(e => ({ ...e,
+        bedel: Math.round(bedelMap[e.subcon]?.bedel || 0),
+        bedel_detay: bedelMap[e.subcon]?.detay || [] })) });
   } catch (e) {
     console.error("MARKA TASERON HAKEDIS ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });
