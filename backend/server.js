@@ -5999,7 +5999,8 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
       pool.query(`SELECT id, COALESCE(tedarikci,'') AS taseron_adi, fatura_no,
           to_char(fatura_tarihi,'YYYY-MM-DD') AS fatura_tarihi,
           COALESCE(tutar,0) AS tutar, COALESCE(kdv,0) AS kdv,
-          COALESCE(toplam_tutar,0) AS toplam_tutar, COALESCE(note,'') AS note
+          COALESCE(toplam_tutar,0) AS toplam_tutar, COALESCE(note,'') AS note,
+          COALESCE(is_kalemi,'') AS kategori
         FROM invoice_entries
         WHERE UPPER(COALESCE(firma,'')) = $1
         ORDER BY fatura_tarihi DESC NULLS LAST, id DESC`, [marka]),
@@ -6094,15 +6095,16 @@ app.post("/finance/marka-taseron-fatura", authMiddleware, async (req, res) => {
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-    const { marka, taseron_adi, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note } = req.body;
+    const { marka, taseron_adi, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note, kategori } = req.body;
     const m = String(marka || "AHY").toUpperCase();
     if (!taseron_adi || !fatura_no || !Number(toplam_tutar || 0))
       return res.status(400).json({ ok: false, error: "Taşeron adı, fatura no ve toplam tutar zorunlu" });
     const r = await pool.query(`INSERT INTO invoice_entries
-        (tedarikci, rf_montaj_firma, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note, fatura_turu, firma)
-      VALUES ($1,$1,$2,$3,$4,$5,$6,$7,'GELEN',$8) RETURNING id`,
+        (tedarikci, rf_montaj_firma, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note, fatura_turu, firma, is_kalemi)
+      VALUES ($1,$1,$2,$3,$4,$5,$6,$7,'GELEN',$8,$9) RETURNING id`,
       [String(taseron_adi).trim(), fatura_no, fatura_tarihi || null,
-       Number(tutar || 0), Number(kdv || 0), Number(toplam_tutar || 0), note || null, m]);
+       Number(tutar || 0), Number(kdv || 0), Number(toplam_tutar || 0), note || null, m,
+       String(kategori || "").toUpperCase() || null]);
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -6110,17 +6112,18 @@ app.put("/finance/marka-taseron-fatura/:id", authMiddleware, async (req, res) =>
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-    const { marka, taseron_adi, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note } = req.body;
+    const { marka, taseron_adi, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note, kategori } = req.body;
     const m = String(marka || "AHY").toUpperCase();
     if (!taseron_adi || !fatura_no || !Number(toplam_tutar || 0))
       return res.status(400).json({ ok: false, error: "Taşeron adı, fatura no ve toplam tutar zorunlu" });
     // Yalnız kendi markasının faturası güncellenebilir
     await pool.query(`UPDATE invoice_entries SET
         tedarikci=$1, rf_montaj_firma=$1, fatura_no=$2, fatura_tarihi=$3,
-        tutar=$4, kdv=$5, toplam_tutar=$6, note=$7
-      WHERE id=$8 AND UPPER(COALESCE(firma,''))=$9`,
+        tutar=$4, kdv=$5, toplam_tutar=$6, note=$7, is_kalemi=$8
+      WHERE id=$9 AND UPPER(COALESCE(firma,''))=$10`,
       [String(taseron_adi).trim(), fatura_no, fatura_tarihi || null,
        Number(tutar || 0), Number(kdv || 0), Number(toplam_tutar || 0), note || null,
+       String(kategori || "").toUpperCase() || null,
        req.params.id, m]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }

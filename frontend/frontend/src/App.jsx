@@ -1927,6 +1927,16 @@ function MarkaNakitPanel({ currentUser }) {
 // MARKA TAŞERON FATURALARI (AHY): AHY_taşeronların kestiği faturalar
 // (invoice_entries.firma='AHY' — ERC fatura girişinde AHY seçilenler + burada
 // girilenler) ve taşeronlara yapılan avans/fatura ödemeleri (nakit akışına düşer).
+// AHY'ye fatura ile yapılan iş kategorileri (Taşeron Faturaları paneli)
+const MT_KATEGORILER = [
+  ["RF MONTAJ", "🔧 RF Montaj"],
+  ["KONAKLAMA", "🏨 Konaklama"],
+  ["VINC", "🏗 Vinç"],
+  ["NAKLIYE", "🚚 Nakliye"],
+  ["DIGER", "📋 Diğer"],
+];
+const mtKatAdi = (k) => { const f = MT_KATEGORILER.find(x => x[0] === String(k || "").toUpperCase()); return f ? f[1] : (k || "—"); };
+
 function MarkaTaseronPanel({ currentUser }) {
   const [data, setData] = useState({ faturalar: [], odemeler: [] });
   const [loading, setLoading] = useState(true);
@@ -1936,7 +1946,7 @@ function MarkaTaseronPanel({ currentUser }) {
   const [fEditId, setFEditId] = useState(null); // düzenlenen fatura id
   const [oEditId, setOEditId] = useState(null); // düzenlenen ödeme id
   const bugun = new Date().toISOString().slice(0, 10);
-  const [fForm, setFForm] = useState({ taseron_adi: "", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" });
+  const [fForm, setFForm] = useState({ taseron_adi: "", kategori: "RF MONTAJ", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" });
   const [oForm, setOForm] = useState({ taseron_adi: "", tip: "AVANS", tutar: "", tarih: bugun, aciklama: "" });
   const marka = String(currentUser?.marka || "AHY").toUpperCase();
   const markaAd = currentUser?.marka_ad || marka;
@@ -1984,18 +1994,18 @@ function MarkaTaseronPanel({ currentUser }) {
       const url = fEditId ? `${API_BASE}/finance/marka-taseron-fatura/${fEditId}` : `${API_BASE}/finance/marka-taseron-fatura`;
       const r = await fetch(url, {
         method: fEditId ? "PUT" : "POST", headers: { ..._auth, "Content-Type": "application/json" },
-        body: JSON.stringify({ marka, taseron_adi: fForm.taseron_adi, fatura_no: fForm.fatura_no, fatura_tarihi: fForm.fatura_tarihi || null, tutar: _num(fForm.tutar), kdv: _num(fForm.kdv), toplam_tutar: _num(fForm.toplam_tutar), note: fForm.note }),
+        body: JSON.stringify({ marka, taseron_adi: fForm.taseron_adi, kategori: fForm.kategori || "RF MONTAJ", fatura_no: fForm.fatura_no, fatura_tarihi: fForm.fatura_tarihi || null, tutar: _num(fForm.tutar), kdv: _num(fForm.kdv), toplam_tutar: _num(fForm.toplam_tutar), note: fForm.note }),
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
       setFaturaModal(false); setFEditId(null);
-      setFForm({ taseron_adi: "", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" });
+      setFForm({ taseron_adi: "", kategori: "RF MONTAJ", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" });
       load();
     } catch (e) { alert(e.message); }
   };
   const duzeltFatura = (f) => {
     setFEditId(f.id);
-    setFForm({ taseron_adi: f.taseron_adi || "", fatura_no: f.fatura_no || "", fatura_tarihi: f.fatura_tarihi || bugun, tutar: String(f.tutar || ""), kdv: String(f.kdv || ""), toplam_tutar: String(f.toplam_tutar || ""), note: f.note || "" });
+    setFForm({ taseron_adi: f.taseron_adi || "", kategori: String(f.kategori || "RF MONTAJ").toUpperCase(), fatura_no: f.fatura_no || "", fatura_tarihi: f.fatura_tarihi || bugun, tutar: String(f.tutar || ""), kdv: String(f.kdv || ""), toplam_tutar: String(f.toplam_tutar || ""), note: f.note || "" });
     setFaturaModal(true);
   };
   const kaydetOdeme = async () => {
@@ -2036,11 +2046,11 @@ function MarkaTaseronPanel({ currentUser }) {
         <div>
           <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🔧 {markaAd} — Taşeron Faturaları</h2>
           <div style={{ fontSize: "13px", color: "#64748b" }}>
-            {markaAd} taşeronlarının kestiği faturalar + onlara ödenen avans/ödemeler (ödemeler nakit akışına düşer)
+            RF montaj taşeronları + konaklama, vinç, nakliye — {markaAd}'ye fatura ile yapılan tüm işler; ödemeler nakit akışına düşer
           </div>
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={() => { setFEditId(null); setFForm({ taseron_adi: "", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" }); setFaturaModal(true); }} style={{ padding: "9px 16px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Fatura Girişi</button>
+          <button onClick={() => { setFEditId(null); setFForm({ taseron_adi: "", kategori: "RF MONTAJ", fatura_no: "", fatura_tarihi: bugun, tutar: "", kdv: "", toplam_tutar: "", note: "" }); setFaturaModal(true); }} style={{ padding: "9px 16px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Fatura Girişi</button>
           <button onClick={() => { setOEditId(null); setOForm({ taseron_adi: "", tip: "AVANS", tutar: "", tarih: bugun, aciklama: "" }); setOdemeModal(true); }} style={{ padding: "9px 16px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Avans / Ödeme</button>
         </div>
       </div>
@@ -2060,6 +2070,21 @@ function MarkaTaseronPanel({ currentUser }) {
           <div style={{ fontSize: "22px", fontWeight: 800, color: kalan > 0 ? "#b45309" : "#15803d", marginTop: "4px" }}>₺{fmt(kalan)}</div>
         </div>
       </div>
+
+      {/* Kategori bazında fatura toplamları (RF montaj, konaklama, vinç, nakliye…) */}
+      {data.faturalar.length > 0 && (
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "18px" }}>
+          {Object.entries(data.faturalar.reduce((acc, f) => {
+            const k = String(f.kategori || "DIGER").toUpperCase() || "DIGER";
+            acc[k] = (acc[k] || 0) + Number(f.toplam_tutar || f.tutar || 0);
+            return acc;
+          }, {})).map(([k, t]) => (
+            <div key={k} style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "10px", padding: "8px 14px", fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
+              {mtKatAdi(k)} · <span style={{ color: "#1e3a5f" }}>₺{fmt(t)}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Taşeron bazında bakiyeler */}
       {bakiyeler.length > 0 && (
@@ -2122,16 +2147,17 @@ function MarkaTaseronPanel({ currentUser }) {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ background: "#f8fafc" }}>
-              <th style={thS}>Taşeron</th><th style={thS}>Fatura No</th><th style={thS}>Tarih</th>
+              <th style={thS}>Taşeron</th><th style={thS}>Kategori</th><th style={thS}>Fatura No</th><th style={thS}>Tarih</th>
               <th style={{ ...thS, textAlign: "right" }}>Tutar</th><th style={{ ...thS, textAlign: "right" }}>KDV</th>
               <th style={{ ...thS, textAlign: "right" }}>Toplam (KDV Dahil)</th><th style={thS}>Not</th><th style={thS}></th>
             </tr></thead>
             <tbody>
               {data.faturalar.length === 0 ? (
-                <tr><td colSpan={8} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz fatura girilmemiş — ERC fatura girişinde {markaAd} seçilenler de burada görünür</td></tr>
+                <tr><td colSpan={9} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz fatura girilmemiş — ERC fatura girişinde {markaAd} seçilenler de burada görünür</td></tr>
               ) : data.faturalar.map(f => (
                 <tr key={f.id}>
                   <td style={{ ...tdS, fontWeight: 700 }}>{f.taseron_adi}</td>
+                  <td style={tdS}><span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px", background: "#eef2ff", color: "#3730a3", whiteSpace: "nowrap" }}>{mtKatAdi(f.kategori)}</span></td>
                   <td style={tdS}>{f.fatura_no}</td>
                   <td style={tdS}>{f.fatura_tarihi || "—"}</td>
                   <td style={{ ...tdS, textAlign: "right" }}>₺{fmt(f.tutar)}</td>
@@ -2189,9 +2215,17 @@ function MarkaTaseronPanel({ currentUser }) {
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(460px, 94vw)", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "14px" }}>{fEditId ? "✏️ Taşeron Faturası Düzelt" : "🧾 Taşeron Faturası Girişi"}</div>
             <div style={{ display: "grid", gap: "10px" }}>
-              <div><span style={lbl}>Taşeron Adı *</span>
-                <input list="mtTaseronList" style={inp} value={fForm.taseron_adi} onChange={e => setFForm(p => ({ ...p, taseron_adi: e.target.value }))} placeholder={`${marka}_OLCAY gibi`} />
+              <div><span style={lbl}>Taşeron / Firma Adı *</span>
+                <input list="mtTaseronList" style={inp} value={fForm.taseron_adi} onChange={e => setFForm(p => ({ ...p, taseron_adi: e.target.value }))} placeholder={`${marka}_OLCAY veya otel/vinç/nakliye firması`} />
                 <datalist id="mtTaseronList">{taseronlar.map(t => <option key={t} value={t} />)}</datalist>
+              </div>
+              <div><span style={lbl}>Kategori</span>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  {MT_KATEGORILER.map(([val, adi]) => (
+                    <button key={val} type="button" onClick={() => setFForm(p => ({ ...p, kategori: val }))}
+                      style={{ padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer", border: `1.5px solid ${(fForm.kategori || "RF MONTAJ") === val ? "#1e3a5f" : "#e5e7eb"}`, background: (fForm.kategori || "RF MONTAJ") === val ? "#1e3a5f" : "#fff", color: (fForm.kategori || "RF MONTAJ") === val ? "#fff" : "#6b7280" }}>{adi}</button>
+                  ))}
+                </div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                 <div><span style={lbl}>Fatura No *</span><input style={inp} value={fForm.fatura_no} onChange={e => setFForm(p => ({ ...p, fatura_no: e.target.value }))} /></div>
