@@ -29887,27 +29887,46 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
           <div>
             <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>🚗 Araç Filosu</h2>
             <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>{araclar.filter(a=>a.durum==="AKTİF").length} aktif araç</p>
-            <div style={{ marginTop:"5px", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
-              <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💰 Aylık Toplam Kira:</span>
-              <span style={{ fontSize:"16px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 12px" }}>
-                ₺{araclar.filter(a=>a.durum==="AKTİF").reduce((s,a)=>s+Number(a.aylik_kira||0),0).toLocaleString("tr-TR")}
+            <div style={{ marginTop:"5px", display:"flex", alignItems:"center", gap:"14px", flexWrap:"wrap" }}>
+              <span style={{ display:"inline-flex", alignItems:"center", gap:"7px", whiteSpace:"nowrap" }}>
+                <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💰 Aylık Toplam Kira:</span>
+                <span style={{ fontSize:"15px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 10px" }}>
+                  ₺{araclar.filter(a=>a.durum==="AKTİF").reduce((s,a)=>s+Number(a.aylik_kira||0),0).toLocaleString("tr-TR")}
+                </span>
               </span>
               {(() => {
                 const toplamBorc = araclar.reduce((s, a) => s + borcHesap(a).tutar, 0);
                 return (
-                  <>
+                  <span style={{ display:"inline-flex", alignItems:"center", gap:"7px", whiteSpace:"nowrap" }}>
                     <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💳 Toplam Borç:</span>
                     <span title="Aktif araçlarda ödenmemiş kira ayları toplamı (Temmuz 2026'dan itibaren)"
-                      style={{ fontSize:"16px", fontWeight:800, color: toplamBorc > 0 ? "#b91c1c" : "#166534", background: toplamBorc > 0 ? "#fee2e2" : "#dcfce7", borderRadius:"8px", padding:"2px 12px" }}>
+                      style={{ fontSize:"15px", fontWeight:800, color: toplamBorc > 0 ? "#b91c1c" : "#166534", background: toplamBorc > 0 ? "#fee2e2" : "#dcfce7", borderRadius:"8px", padding:"2px 10px" }}>
                       ₺{toplamBorc.toLocaleString("tr-TR")}
                     </span>
-                  </>
+                  </span>
                 );
               })()}
             </div>
           </div>
         </div>
-        <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"8px" }}>
+          {/* Üst sıra: ufak aksiyon butonları */}
+          <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+            {canEdit && (
+              <button onClick={openNew}
+                style={{ padding:"6px 14px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontWeight:700, cursor:"pointer", fontSize:"12.5px", whiteSpace:"nowrap" }}>
+                ＋ Araç Ekle
+              </button>
+            )}
+            {onGoOfis && (
+              <button onClick={onGoOfis} title="Ofis & Depo yönetimine geç"
+                style={{ padding:"6px 12px", background:"#f8fafc", color:"#1e3a5f", border:"1.5px solid #cbd5e1", borderRadius:"9px", fontWeight:700, cursor:"pointer", fontSize:"12.5px", whiteSpace:"nowrap" }}>
+                🏢 Ofis & Depo →
+              </button>
+            )}
+          </div>
+          {/* Alt sıra: rozet + Excel + filtreler */}
+          <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end" }}>
           {/* Excel: aktif filo listesi (sürücü adı soyadı dahil) */}
           <span style={{ fontSize:"12px", fontWeight:800, color:"#166534", background:"#dcfce7", borderRadius:"20px", padding:"5px 12px", whiteSpace:"nowrap" }}>
             🚗 {araclar.filter(a => a.aktif).length} aktif araç
@@ -29933,18 +29952,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
               {f}
             </button>
           ))}
-          {canEdit && (
-            <button onClick={openNew}
-              style={{ padding:"9px 18px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
-              ＋ Araç Ekle
-            </button>
-          )}
-          {onGoOfis && (
-            <button onClick={onGoOfis} title="Ofis & Depo yönetimine geç"
-              style={{ padding:"9px 16px", background:"#f8fafc", color:"#1e3a5f", border:"1.5px solid #cbd5e1", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"13px", whiteSpace:"nowrap" }}>
-              🏢 Ofis & Depo →
-            </button>
-          )}
+          </div>
         </div>
       </div>
 
