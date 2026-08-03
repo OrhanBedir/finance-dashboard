@@ -2624,7 +2624,11 @@ function OrgSemasiPanel({ currentUser }) {
   useEffect(() => { loadOrgData(); }, []);
 
   // Ekip üyeleri: personel.ekip_bilgisi == ekip_no (aktif personel)
-  const ekipUyeleri = (no) => personelList.filter(p => p.aktif && String(p.ekip_bilgisi || "").trim() === String(no));
+  // Ekip üyeleri: ekip şefi/şefler her zaman en üstte, kalanlar ada göre
+  const _sefMi = (p) => /şef|sef/i.test(String(p.unvan || ""));
+  const ekipUyeleri = (no) => personelList
+    .filter(p => p.aktif && String(p.ekip_bilgisi || "").trim() === String(no))
+    .sort((a, b) => (_sefMi(b) - _sefMi(a)) || String(a.ad_soyad || "").localeCompare(String(b.ad_soyad || ""), "tr"));
   const saveEkip = async (e) => {
     try {
       await fetch(`${API_BASE}/hr/ekipler`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(e) });
