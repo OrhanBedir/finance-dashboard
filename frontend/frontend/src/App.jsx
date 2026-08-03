@@ -14764,7 +14764,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       {personelListeModal && (() => {
         const fmtT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "—";
         const liste = personelList
-          .filter(p => p.aktif)
+          .filter(p => p.aktif && (p.firma_tipi || "simsek") === "simsek") // yalnız kendi kadromuz — taşeron ekip kayıtları hariç
           .slice()
           .sort((x, y) => String(x.ad_soyad||"").localeCompare(String(y.ad_soyad||""), "tr"));
         const thL = { padding: "9px 12px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#fff", background: "#1e3a5f", whiteSpace: "nowrap" };
