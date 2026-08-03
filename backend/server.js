@@ -5731,8 +5731,10 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
             ON ir.site_id = UPPER(TRIM(COALESCE(m.site_code, '')))
            AND ir.item_code = TRIM(COALESCE(m.item_code, ''))
           CROSS JOIN avg_ref
+          -- Yalnız bu markanın taşeron ekipleri (örn. AHY, AHY-2 …) — Hakediş Kırılımı kuralı
+          WHERE UPPER(TRIM(COALESCE(m.subcon_name, ''))) LIKE $1
         ) t
-      `);
+      `, [marka + "%"]);
       const r0 = fr.rows[0] || {};
       fiziki = {
         try: Number(r0.try || 0), usd: Number(r0.usd || 0),
