@@ -29978,7 +29978,7 @@ function AraclarPanel({ currentUser, onBack }) {
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"10px" }}>
                   {a.kiralama_firmasi && <div style={{ fontSize:"12px", color:"#6b7280" }}>🏢 {a.kiralama_firmasi}</div>}
                   {a.bolge && <div style={{ fontSize:"12px", color:"#6b7280" }}>📍 {a.bolge}</div>}
-                  {a.surucu && <div style={{ fontSize:"12px", color:"#6b7280" }}>👤 {a.surucu}</div>}
+                  {a.surucu && <div style={{ fontSize:"13px", fontWeight:800, color:"#1e3a5f", background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:"8px", padding:"3px 10px", display:"inline-flex", alignItems:"center", gap:"5px", width:"fit-content" }}>👤 {a.surucu}</div>}
                   {a.aylik_kira && <div style={{ fontSize:"12px", color:"#6b7280" }}>💰 ₺{Number(a.aylik_kira).toLocaleString("tr-TR")}/ay</div>}
                 </div>
                 {/* Expiry badges — pasif (iade edilmiş) araçta nötr gri, GEÇTİ uyarısı yok */}
