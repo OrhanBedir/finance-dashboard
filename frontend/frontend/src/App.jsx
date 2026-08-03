@@ -29907,7 +29907,25 @@ function AraclarPanel({ currentUser, onBack }) {
             </div>
           </div>
         </div>
-        <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+        <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+          {/* Excel: aktif filo listesi (sürücü adı soyadı dahil) */}
+          <span style={{ fontSize:"12px", fontWeight:800, color:"#166534", background:"#dcfce7", borderRadius:"20px", padding:"5px 12px", whiteSpace:"nowrap" }}>
+            🚗 {araclar.filter(a => a.aktif).length} aktif araç
+          </span>
+          <button onClick={() => {
+            const fT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "";
+            const liste = araclar.filter(a => a.aktif).slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka)));
+            exportStandardExcel({
+              title: "Araç Filosu — Aktif Araçlar",
+              sheetName: "Araçlar", fileBase: "Arac_Filosu",
+              headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira (₺)", "Kiralama Firması", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
+              colWidths: [12, 12, 14, 8, 10, 12, 26, 14, 20, 13, 13, 13, 13, 10],
+              numericCols: [7],
+              rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", a.bolge || "",
+                a.surucu || "", Number(a.aylik_kira || 0), a.kiralama_firmasi || "",
+                fT(a.kira_baslangic), fT(a.kira_bitis), fT(a.sigorta_bitis), fT(a.muayene_bitis), a.durum || ""]),
+            }).catch(e => alert("Excel indirilemedi: " + e.message));
+          }} style={{ padding:"7px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>📥 Excel İndir</button>
           {["TUMU","AKTİF","PASİF","SERVİSTE"].map(f => (
             <button key={f} onClick={()=>setFilter(f)}
               style={{ padding:"6px 14px", borderRadius:"20px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:600,
