@@ -6047,6 +6047,7 @@ const AHY_BEDEL_COLOCATED = [
   [/rru dismantling/i, 400, "RRU dismantling"],
   [/dc cable dismantle/i, 1500, "DC Cable Dismantle"],
   [/7[.,]2\s*m\s*lprt/i, 8000, "Installation of 7,2m LPRT pole"],
+  [/6\s*m\s*lprt/i, 7000, "Installation service 6m LPRT Pole"],
 ];
 function ahyTaseronBedel(rows) {
   // rows: [{subcon, site, kalem, fq}] → { [subcon]: { bedel, detay[] } }
@@ -6076,6 +6077,8 @@ function ahyTaseronBedel(rows) {
       }
       const qL = qty(/7[.,]2\s*m\s*lprt/i);
       if (qL > 0) { ek.bedel += qL * 8000; ek.detay.push({ site: st, kalem: "Installation of 7,2m LPRT pole", adet: qL, birim: 8000, tutar: qL * 8000 }); }
+      const qL6 = qty(/6\s*m\s*lprt/i);
+      if (qL6 > 0) { ek.bedel += qL6 * 7000; ek.detay.push({ site: st, kalem: "Installation service 6m LPRT Pole", adet: qL6, birim: 7000, tutar: qL6 * 7000 }); }
     }
   }
   return out;
