@@ -29971,10 +29971,12 @@ function AraclarPanel({ currentUser, onBack }) {
                           const _tutarNum = /^\d+(\.\d{1,2})?$/.test(_s)
                             ? Number(_s)
                             : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
+                          // Kasa sorusu: AHY kendi cebinden ödediyse nakit akışında görünür ama kasadan düşmez
+                          const _kasadan = window.confirm("Bu ödeme kasadaki nakitten mi yapıldı?\n\n✔ Tamam = Kasadan düş\n✘ İptal = AHY kendi ödedi (kasadan düşme, sadece gider)");
                           try {
                             const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/kira-ode`, {
                               method: "POST", headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ donem, tutar: _tutarNum }),
+                              body: JSON.stringify({ donem, tutar: _tutarNum, kasadan_dus: _kasadan }),
                             });
                             if (!r.ok) throw new Error("Kaydedilemedi");
                             await load();

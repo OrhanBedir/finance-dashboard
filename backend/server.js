@@ -5905,7 +5905,8 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2`, [marka, baslangic]),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad,
           'ARAC_KIRA' AS tip, o.tutar,
-          (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama
+          (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama,
+          COALESCE(o.kasadan_dus, true) AS kasadan_dus
         FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
         WHERE o.created_at >= $1::date`, [girisBaslangic]),
       // Ofis/Depo kiraları: devirden sonra girilen ödemeler (araç kira kuralıyla aynı).
@@ -15462,17 +15463,23 @@ app.put("/hr/araclar/:id/durum", async (req, res) => {
 });
 
 // Araç kira ödemesi: dönem başına bir kayıt (tekrar gönderilirse günceller)
+// kasadan_dus=false → kirayı AHY kendi ödedi: nakit akışında ve giderde
+// görünür, kasa bakiyesinden düşmez (ofis kira kurgusuyla aynı)
+pool.query(`ALTER TABLE arac_kira_odemeler ADD COLUMN IF NOT EXISTS kasadan_dus BOOLEAN DEFAULT true`).catch(() => {});
+
 app.post("/hr/araclar/:id/kira-ode", async (req, res) => {
   try {
     const { id } = req.params;
-    const { donem, tutar, tarih, aciklama } = req.body;
+    const { donem, tutar, tarih, aciklama, kasadan_dus } = req.body;
     if (!/^\d{4}-\d{2}$/.test(String(donem || ""))) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
     const r = await pool.query(
-      `INSERT INTO arac_kira_odemeler (arac_id, donem, tutar, tarih, aciklama)
-       VALUES ($1,$2,$3,COALESCE($4::date, CURRENT_DATE),$5)
-       ON CONFLICT (arac_id, donem) DO UPDATE SET tutar=$3, tarih=COALESCE($4::date, CURRENT_DATE), aciklama=$5
+      `INSERT INTO arac_kira_odemeler (arac_id, donem, tutar, tarih, aciklama, kasadan_dus)
+       VALUES ($1,$2,$3,COALESCE($4::date, CURRENT_DATE),$5,COALESCE($6, true))
+       ON CONFLICT (arac_id, donem) DO UPDATE SET tutar=$3, tarih=COALESCE($4::date, CURRENT_DATE), aciklama=$5,
+         kasadan_dus=COALESCE($6, arac_kira_odemeler.kasadan_dus)
        RETURNING *`,
-      [id, donem, Number(tutar || 0), tarih || null, aciklama || null],
+      [id, donem, Number(tutar || 0), tarih || null, aciklama || null,
+       kasadan_dus === undefined || kasadan_dus === null ? null : !!kasadan_dus],
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
