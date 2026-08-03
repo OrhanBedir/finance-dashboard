@@ -5745,62 +5745,95 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     let kur = 0;
     try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
 
-    // Planlı gider (bekleyen maaş, yaklaşık): devirden (2026-07) bu yana
-    // tahakkuk etmiş dönemlerin kalan net maaşları — İK NET ödenecek
-    // mantığının sunucu tarafı yaklaşığı (puantaj kesintileri hariç).
+    // Planlı gider (bekleyen maaş): devirden (2026-07) bu yana tahakkuk etmiş
+    // dönemlerin kalan net maaşları — İK panelindeki "NET Ödenecek" ile BİREBİR:
+    // puantaj gelmedi kesintisi (net/26 × gün) + işe giriş pro-rata + maaş
+    // versiyonu (personel_maas_gecmisi) + AHY devir oranı; fazla ödemeler
+    // sonraki döneme devreder.
     let bekleyenMaas = 0;
     try {
       const buAyStr = new Date().toISOString().slice(0, 7);
       const donemler = [];
-      let dd = new Date(Date.UTC(2026, 6, 1)); // 2026-07 (devir dönemi)
+      // AHY: Haziran'dan başla — devirden (15.07) SONRA ödenmiş eski dönem
+      // avansları fazla ödeme olarak Temmuz'a devretsin (İK getDevirFazla kuralı)
+      let dd = marka === "AHY" ? new Date(Date.UTC(2026, 5, 1)) : new Date(Date.UTC(2026, 6, 1));
       while (dd.toISOString().slice(0, 7) < buAyStr) {
         donemler.push(dd.toISOString().slice(0, 7));
         dd = new Date(Date.UTC(dd.getUTCFullYear(), dd.getUTCMonth() + 1, 1));
       }
-      if (donemler.length) {
-        const pr = await pool.query(
-          `SELECT id, COALESCE(net_maas,0) AS net_maas, ise_giris_tarihi
-             FROM personel
-            WHERE aktif = true AND UPPER(COALESCE(marka,'ERC')) = $1`, [marka]);
-        for (const donem of donemler) {
-          const [dy, dm] = donem.split("-").map(Number);
-          const gunSay = new Date(Date.UTC(dy, dm, 0)).getUTCDate();
-          const od = await pool.query(
-            `SELECT personel_id, SUM(COALESCE(bankadan,0)+COALESCE(elden,0)) AS t
-               FROM maas_odeme
-              WHERE COALESCE(donem, to_char(tarih,'YYYY-MM')) = $1
-                ${marka === "AHY" ? "AND tarih >= '2026-07-15'" : ""}
-              GROUP BY personel_id`, [donem]);
-          const av = await pool.query(
-            `SELECT personel_id, SUM(COALESCE(tutar,0)) AS t
-               FROM avans
-              WHERE UPPER(COALESCE(avans_turu,'MAAS')) = 'MAAS'
-                AND COALESCE(NULLIF(donem,''), to_char(tarih,'YYYY-MM')) = $1
-              GROUP BY personel_id`, [donem]);
-          const odM = new Map(od.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
-          const avM = new Map(av.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
-          for (const p of pr.rows) {
-            const gStr = p.ise_giris_tarihi
-              ? new Date(p.ise_giris_tarihi).toISOString().slice(0, 10) : null;
-            if (gStr && gStr.slice(0, 7) > donem) continue; // henüz işe girmemiş
-            let girisF = 1;
-            if (gStr && gStr.slice(0, 7) === donem)
-              girisF = (gunSay - Number(gStr.slice(8, 10)) + 1) / gunSay;
-            let oran = 1;
-            if (marka === "AHY") {
-              if (donem < "2026-07") oran = 0;
-              else if (donem === "2026-07") oran = (gStr && gStr >= "2026-07-15") ? 1 : 0.5;
-            }
-            const hak = Number(p.net_maas) * girisF * oran;
-            const oden = (odM.get(String(p.id)) || 0) + (avM.get(String(p.id)) || 0);
-            bekleyenMaas += Math.max(0, hak - oden);
+      const carry = {}; // personel bazlı devir (fazla ödeme)
+      for (const donem of donemler) {
+        const [dy, dm] = donem.split("-").map(Number);
+        const gunSay = new Date(Date.UTC(dy, dm, 0)).getUTCDate();
+        const pr = await pool.query(`
+          SELECT p.id, COALESCE(g.net_maas, p.net_maas, 0) AS net_maas, p.ise_giris_tarihi
+          FROM personel p
+          LEFT JOIN LATERAL (
+            SELECT net_maas FROM personel_maas_gecmisi
+            WHERE personel_id = p.id AND donem <= $2
+            ORDER BY donem DESC LIMIT 1
+          ) g ON true
+          WHERE p.aktif = true AND UPPER(COALESCE(p.marka,'ERC')) = $1`, [marka, donem]);
+        const gm = await pool.query(`
+          SELECT personel_id, COUNT(*) FILTER (WHERE durum = 'GELMEDI') AS gelmedi
+          FROM puantaj WHERE to_char(tarih,'YYYY-MM') = $1 GROUP BY personel_id`, [donem]);
+        const od = await pool.query(
+          `SELECT personel_id, SUM(COALESCE(bankadan,0)+COALESCE(elden,0)) AS t
+             FROM maas_odeme
+            WHERE COALESCE(donem, to_char(tarih,'YYYY-MM')) = $1
+              ${marka === "AHY" ? "AND tarih >= '2026-07-15'" : ""}
+            GROUP BY personel_id`, [donem]);
+        const av = await pool.query(
+          `SELECT personel_id, SUM(COALESCE(tutar,0)) AS t
+             FROM avans
+            WHERE UPPER(COALESCE(avans_turu,'MAAS')) = 'MAAS'
+              AND COALESCE(NULLIF(donem,''), to_char(tarih,'YYYY-MM')) = $1
+              ${marka === "AHY" ? "AND tarih >= '2026-07-15'" : ""}
+            GROUP BY personel_id`, [donem]);
+        const gmM = new Map(gm.rows.map(r => [String(r.personel_id), Number(r.gelmedi || 0)]));
+        const odM = new Map(od.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
+        const avM = new Map(av.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
+        const REFERANS_GUN = 26; // İK puantaj hakediş referansı
+        for (const p of pr.rows) {
+          const gStr = p.ise_giris_tarihi
+            ? new Date(p.ise_giris_tarihi).toISOString().slice(0, 10) : null;
+          if (gStr && gStr.slice(0, 7) > donem) continue; // henüz işe girmemiş
+          let girisF = 1;
+          if (gStr && gStr.slice(0, 7) === donem)
+            girisF = (gunSay - Number(gStr.slice(8, 10)) + 1) / gunSay;
+          const net = Number(p.net_maas || 0);
+          const gelmedi = gmM.get(String(p.id)) || 0;
+          const hakedilen = Math.max(0, Math.round(net * girisF - gelmedi * (net / REFERANS_GUN)));
+          let oran = 1;
+          if (marka === "AHY") {
+            if (donem < "2026-07") oran = 0;
+            else if (donem === "2026-07") oran = (gStr && gStr >= "2026-07-15") ? 1 : 0.5;
           }
+          const hak = Math.round(hakedilen * oran);
+          const oden = (odM.get(String(p.id)) || 0) + (avM.get(String(p.id)) || 0);
+          const dev = carry[p.id] || 0;
+          bekleyenMaas += Math.max(0, hak - oden - dev);
+          carry[p.id] = Math.max(0, oden + dev - hak);
         }
       }
     } catch (e) { console.error("MARKA OZET bekleyen maas:", e.message); }
 
+    // Planlı taşeron gideri: Taşeron Faturaları panelindeki fatura toplamı −
+    // yapılan ödemeler (avans+ödeme). "Fatura Kesilecek" hakediş kuralı
+    // tanımlanınca bu kaleme o da eklenecek.
+    let bekleyenTaseron = 0;
+    try {
+      const bt = await pool.query(`
+        SELECT GREATEST(0,
+          COALESCE((SELECT SUM(COALESCE(toplam_tutar,0)) FROM invoice_entries WHERE UPPER(COALESCE(firma,'')) = $1), 0)
+          - COALESCE((SELECT SUM(COALESCE(tutar,0)) FROM marka_taseron_odeme WHERE UPPER(marka) = $1), 0)
+        ) AS t`, [marka]);
+      bekleyenTaseron = Number(bt.rows[0]?.t || 0);
+    } catch {}
+
     res.json({ ok: true, marka, pay_yuzde: 100 - yuzde, gelir_kaynak: "fatura", aylar,
-      fiziki, kur, bekleyen_maas: Math.round(bekleyenMaas) });
+      fiziki, kur, bekleyen_maas: Math.round(bekleyenMaas),
+      bekleyen_taseron: Math.round(bekleyenTaseron) });
   } catch (e) {
     console.error("MARKA OZET ERROR:", e.message);
     res.status(500).json({ ok: false, error: "Marka özeti alınamadı" });
@@ -5980,6 +6013,82 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
     res.json({ ok: true, faturalar: faturalar.rows, odemeler: odemeler.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// "Fatura Kesilecek" kurgusu: markanın alt ekiplerinin (AHY_MURAT, AHY_NETELKOM…)
+// yaptığı işlerin bedeli — ana marka ekibi (AHY) hariç, yalnız altçizgili ekipler.
+// USD kalemlerde HW'ye faturalanan kısım sabit fatura kuruyla kilitli (P&L şeridi kuralı).
+// Taşeron BEDELİ hesap kuralı ayrıca tanımlanacak; şimdilik yapılan iş bedeli döner.
+app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const r = await pool.query(`
+      ${COMMON_MATCH_CTES}
+      , item_ref AS (
+        SELECT
+          UPPER(TRIM(COALESCE(i.site_id, ''))) AS site_id,
+          TRIM(COALESCE(i.item_code, '')) AS item_code,
+          MAX(hr.reference_rate) AS ref_rate
+        FROM hw_invoice_items i
+        LEFT JOIN hw_invoice_rows hr
+          ON regexp_replace(regexp_replace(TRIM(hr.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+           = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+        WHERE i.invoice_no IS NOT NULL
+        GROUP BY 1, 2
+      ), avg_ref AS (
+        SELECT AVG(reference_rate) AS r FROM hw_invoice_rows WHERE reference_rate IS NOT NULL
+      )
+      SELECT
+        t.subcon,
+        COUNT(*) FILTER (WHERE t.fq > 0) AS is_sayisi,
+        COALESCE(SUM(CASE WHEN t.cur <> 'USD' THEN t.fq * t.price ELSE 0 END), 0) AS try,
+        COALESCE(SUM(CASE WHEN t.cur = 'USD' THEN (t.fq - LEAST(t.fq, t.bq)) * t.price ELSE 0 END), 0) AS usd,
+        COALESCE(SUM(CASE WHEN t.cur = 'USD' THEN LEAST(t.fq, t.bq) * t.price * COALESCE(t.item_rate, t.avg_rate, 0) ELSE 0 END), 0) AS billed_tl
+      FROM (
+        SELECT
+          UPPER(TRIM(COALESCE(m.subcon_name, ''))) AS subcon,
+          GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty, 0) END) AS fq,
+          COALESCE(site_po.billed_qty, 0) AS bq,
+          (CASE
+            WHEN TRIM(COALESCE(m.item_code, '')) = '8818278098' THEN 986.23
+            WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.unit_price, 0)
+            ELSE COALESCE(item_po.unit_price, 0)
+          END) AS price,
+          (CASE
+            WHEN COALESCE(TRIM(best_boq.currency), '') <> '' THEN UPPER(TRIM(best_boq.currency))
+            WHEN site_po.id IS NOT NULL THEN UPPER(COALESCE(site_po.currency, 'TRY'))
+            WHEN item_po.id IS NOT NULL THEN UPPER(COALESCE(item_po.currency, 'TRY'))
+            ELSE 'TRY'
+          END) AS cur,
+          ir.ref_rate AS item_rate,
+          avg_ref.r AS avg_rate
+        FROM master_works m
+        LEFT JOIN best_site_po site_po
+          ON TRIM(COALESCE(site_po.project_code, '')) = TRIM(COALESCE(m.project_code, ''))
+         AND UPPER(TRIM(COALESCE(site_po.site_code, ''))) = UPPER(TRIM(COALESCE(m.site_code, '')))
+         AND TRIM(COALESCE(site_po.item_code, '')) = TRIM(COALESCE(m.item_code, ''))
+        LEFT JOIN best_item_po item_po
+          ON TRIM(COALESCE(item_po.item_code, '')) = TRIM(COALESCE(m.item_code, ''))
+        LEFT JOIN best_boq
+          ON TRIM(COALESCE(best_boq.s_bom_code, '')) = TRIM(COALESCE(m.item_code, ''))
+        LEFT JOIN item_ref ir
+          ON ir.site_id = UPPER(TRIM(COALESCE(m.site_code, '')))
+         AND ir.item_code = TRIM(COALESCE(m.item_code, ''))
+        CROSS JOIN avg_ref
+        WHERE UPPER(TRIM(COALESCE(m.subcon_name, ''))) LIKE $1 || '\\_%'
+      ) t
+      GROUP BY t.subcon
+      ORDER BY t.subcon
+    `, [marka]);
+    let kur = 0;
+    try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
+    res.json({ ok: true, marka, kur, ekipler: r.rows });
+  } catch (e) {
+    console.error("MARKA TASERON HAKEDIS ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // AHY panelinden taşeron faturası girişi (invoice_entries'e firma etiketiyle yazar)
 app.post("/finance/marka-taseron-fatura", authMiddleware, async (req, res) => {
   try {

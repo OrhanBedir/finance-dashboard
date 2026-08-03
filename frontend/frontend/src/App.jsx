@@ -1104,8 +1104,9 @@ function ProjePLSeridi({ ozet, tGider }) {
         const fizikiTL = Number(data.fiziki.try || 0) + billedTL + (kur > 0 ? usdTutar * kur : 0);
         const tamamlanan = fizikiTL * (payOran / 100);
         const gerceklesen = tGider;
-        const planli = Number(data.bekleyen_maas || 0);
-        const toplamG = gerceklesen + planli;
+        const planli = Number(data.bekleyen_maas || 0); // İK NET Ödenecek ile birebir
+        const planliTas = Number(data.bekleyen_taseron || 0); // taşeron fatura − ödeme
+        const toplamG = gerceklesen + planli + planliTas;
         const brut = tamamlanan - toplamG;
         const marj = tamamlanan > 0 ? (brut / tamamlanan) * 100 : 0;
         const gidPct = tamamlanan > 0 ? Math.min(100, (toplamG / tamamlanan) * 100) : 0;
@@ -1130,7 +1131,7 @@ function ProjePLSeridi({ ozet, tGider }) {
               <div style={{ flex: "1 1 220px", minWidth: "210px" }}>
                 <div style={lbl}>Toplam Gider</div>
                 <div style={{ ...val, color: "#fca5a5" }}>₺{fmt(toplamG)}</div>
-                <div style={sub}>Gerçekleşen ₺{fmt(gerceklesen)}{planli > 0 ? ` + planlı maaş ≈ ₺${fmt(planli)}` : ""}</div>
+                <div style={sub}>Gerçekleşen ₺{fmt(gerceklesen)}{planli > 0 ? ` + planlı maaş ₺${fmt(planli)}` : ""}{planliTas > 0 ? ` + planlı taşeron ₺${fmt(planliTas)}` : ""}</div>
               </div>
               <div style={opSt}>=</div>
               <div style={{ flex: "1 1 240px", minWidth: "220px" }}>
@@ -1951,6 +1952,17 @@ function MarkaTaseronPanel({ currentUser }) {
     } catch (e) { setErr(e.message); } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+  // Fatura Kesilecek: markanın alt ekiplerinin (AHY_MURAT, AHY_NETELKOM…) yaptığı işler
+  const [hakedis, setHakedis] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/finance/marka-taseron-hakedis?marka=${marka}`, { headers: _auth });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok !== false) setHakedis(d);
+      } catch {}
+    })();
+  }, []);
   const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
   const _num = (s) => { const t = String(s ?? "").trim(); if (!t) return 0; return /^\d+(\.\d{1,2})?$/.test(t) ? Number(t) : Number(t.replace(/\./g, "").replace(",", ".")) || 0; };
   // Taşeron adları (datalist): faturalardan + ödemelerden
@@ -2061,6 +2073,48 @@ function MarkaTaseronPanel({ currentUser }) {
           ))}
         </div>
       )}
+
+      {/* ── Fatura Kesilecek — markanın alt ekiplerinin (AHY_xxx) yaptığı işler ── */}
+      {hakedis?.ekipler?.length > 0 && (() => {
+        const kur = Number(hakedis.kur || 0);
+        const rows = hakedis.ekipler.map(e => ({
+          subcon: e.subcon,
+          isSayisi: Number(e.is_sayisi || 0),
+          bedel: Number(e.try || 0) + Number(e.billed_tl || 0) + (kur > 0 ? Number(e.usd || 0) * kur : 0),
+        }));
+        const topBedel = rows.reduce((sm, r) => sm + r.bedel, 0);
+        return (
+          <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
+            <div style={{ padding: "12px 16px", background: "#065f46", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
+              <span>📐 Fatura Kesilecek — Ekip Hakedişleri ({rows.length})</span>
+              <span>Yapılan İş Toplamı: ₺{fmt(topBedel)}</span>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead><tr>
+                  <th style={thS}>Taşeron Ekibi</th>
+                  <th style={thS}>İş Kalemi</th>
+                  <th style={{ ...thS, textAlign: "right" }}>Yapılan İş Bedeli (TL)</th>
+                  <th style={{ ...thS, textAlign: "right" }}>Taşeron Bedeli</th>
+                </tr></thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.subcon}>
+                      <td style={{ ...tdS, fontWeight: 700 }}>{r.subcon}</td>
+                      <td style={tdS}>{r.isSayisi}</td>
+                      <td style={{ ...tdS, textAlign: "right", fontWeight: 700 }}>₺{fmt(r.bedel)}</td>
+                      <td style={{ ...tdS, textAlign: "right", color: "#94a3b8", fontStyle: "italic" }}>hesap kuralı bekleniyor</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
+              Ekiplerin günlük iş girişindeki fiziki işleri PO/BOQ birim fiyatlarıyla değerlenir (HW'ye faturalanan USD kısmı sabit fatura kurunda). "Taşeron Bedeli" hesap kuralı tanımlanınca bu kolon otomatik dolacak ve planlı gider olarak Kâr/Zarar'a yansıyacak.
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Fatura listesi */}
       <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
@@ -18884,6 +18938,21 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const usdRate = useUsdRate();
+  // AHY görünümü: Fiziki Tamamlanan, P&L şeridiyle aynı sabit-kur kilidiyle
+  // hesaplanır (HW'ye faturalanan USD kısmı fatura anındaki kurda sabit)
+  const [ahyLockedFiziki, setAhyLockedFiziki] = useState(null);
+  useEffect(() => {
+    if (!(isSubconUser && String(userSubconName || "").toUpperCase().startsWith("AHY"))) return;
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/finance/marka-ozet?marka=AHY`, { headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` } });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.ok === false || !d.fiziki) return;
+        const kur = Number(d.kur || 0);
+        setAhyLockedFiziki(Number(d.fiziki.try || 0) + Number(d.fiziki.billed_tl || 0) + (kur > 0 ? Number(d.fiziki.usd || 0) * kur : 0));
+      } catch {}
+    })();
+  }, []);
 
   const [qcReadyModalOpen, setQcReadyModalOpen] = useState(false);
   const [qcReadySearch, setQcReadySearch] = useState(""); // QC OK modal saha/kalem arama
@@ -20379,7 +20448,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // Fiziki Tamamlanan (günlük iş girişindeki done) → QC Onaylı → HW'ye Faturalanan.
   // Her aşama bir öncekinin içinden ilerler; yüzdeler aşamalar arası makası gösterir.
   const _atanan  = (executiveSummary.assigned  || 0);
-  const _fiziki  = (executiveSummary.fiziki    || 0);
+  const _fiziki  = ahyLockedFiziki !== null ? ahyLockedFiziki : (executiveSummary.fiziki || 0);
   const _qcOk    = (executiveSummary.qcOk      || 0);
   const _fatura  = (executiveSummary.invoiced  || 0);
   const subconSummary = {
