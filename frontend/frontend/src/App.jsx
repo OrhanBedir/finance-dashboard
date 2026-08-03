@@ -15034,6 +15034,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               )}
 
               <div style={{ display:"grid", gap:"10px" }}>
+                {/* Muhasebe: maaş bloğu gizli olduğundan araç çubuğu görünmez —
+                    maaşsız künye listesi + Excel'i buradan açar */}
+                {_maasGizli && (
+                  <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:"2px" }}>
+                    <button style={{ padding:"7px 16px", background:"#7c3aed", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}
+                      onClick={()=>setPersonelListeModal(true)}>👥 Personel Listesi & Excel</button>
+                  </div>
+                )}
                 {personelList.filter(p => (p.firma_tipi||"simsek")==="simsek" && (!hrPersonelFilter || String(p.id) === String(hrPersonelFilter))).map(p => (
                   <div key={p.id} style={{ background:"#fff", borderRadius:"14px", padding:"16px 20px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"grid", gridTemplateColumns:"44px 1fr auto auto auto", alignItems:"center", gap:"16px", opacity: p.aktif?1:0.6 }}>
                     <div style={{ width:44, height:44, borderRadius:"12px", background: p.aktif?"linear-gradient(135deg,#60a5fa,#3b82f6)":"#e5e7eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"18px", fontWeight:700, color:"#fff" }}>
@@ -15074,10 +15082,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
             title: "Aktif Personel Listesi",
             sheetName: "Personel",
             fileBase: "Aktif_Personel_Listesi",
-            headers: ["Adı Soyadı", "Tel No", "TC No", "Doğum Tarihi", "İşe Giriş Tarihi", "Pozisyon", "Durum"],
-            colWidths: [28, 16, 15, 14, 16, 24, 10],
+            headers: ["Adı Soyadı", "Tel No", "TC No", "Doğum Tarihi", "İşe Giriş Tarihi", "Pozisyon", "Bölge", "Durum"],
+            colWidths: [28, 16, 15, 14, 16, 24, 14, 10],
             numericCols: [],
-            rows: liste.map(p => [p.ad_soyad||"", p.telefon||"", p.tc_no||"", fmtT(p.dogum_tarihi), fmtT(p.ise_giris_tarihi), p.unvan||"", "Aktif"]),
+            rows: liste.map(p => [p.ad_soyad||"", p.telefon||"", p.tc_no||"", fmtT(p.dogum_tarihi), fmtT(p.ise_giris_tarihi), p.unvan||"", p.bolge||"", "Aktif"]),
           }).catch(e => alert("Excel indirilemedi: " + e.message));
         };
         return (
@@ -15100,6 +15108,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <th style={thL}>Doğum Tarihi</th>
                     <th style={thL}>İşe Giriş Tarihi</th>
                     <th style={thL}>Pozisyon</th>
+                    <th style={thL}>Bölge</th>
                     <th style={thL}>Durum</th>
                   </tr></thead>
                   <tbody>
@@ -15111,10 +15120,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         <td style={tdL}>{fmtT(p.dogum_tarihi)}</td>
                         <td style={tdL}>{fmtT(p.ise_giris_tarihi)}</td>
                         <td style={tdL}>{p.unvan || "—"}</td>
+                        <td style={tdL}>{p.bolge || "—"}</td>
                         <td style={tdL}><span style={{ background:"#dcfce7", color:"#166534", borderRadius:"12px", padding:"2px 10px", fontSize:"11px", fontWeight:700 }}>✓ Aktif</span></td>
                       </tr>
                     ))}
-                    {liste.length === 0 && <tr><td colSpan={7} style={{ ...tdL, textAlign:"center", color:"#9ca3af" }}>Aktif personel yok</td></tr>}
+                    {liste.length === 0 && <tr><td colSpan={8} style={{ ...tdL, textAlign:"center", color:"#9ca3af" }}>Aktif personel yok</td></tr>}
                   </tbody>
                 </table>
               </div>
