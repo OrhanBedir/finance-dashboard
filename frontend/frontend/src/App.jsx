@@ -28134,10 +28134,7 @@ function App() {
                     <div style={altNavGrup}>
                       <AltNavItem aktif={page==='malzeme'} onClick={()=>setPage('malzeme')} ikon="📦" label="Malzeme Yönetimi" badge={pendingMalzemeCount} />
                       {(isAdmin || ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com"].includes(_userEmail)) && (
-                        <AltNavItem aktif={page==='araclar'} onClick={()=>setPage('araclar')} ikon="🚗" label="Araç Yönetimi" />
-                      )}
-                      {isAdmin && (
-                        <AltNavItem aktif={page==='ofis'} onClick={()=>setPage('ofis')} ikon="🏢" label="Ofis & Depo" />
+                        <AltNavItem aktif={page==='araclar' || page==='ofis'} onClick={()=>setPage('araclar')} ikon="🚗" label="Araç & Depo & Ofis" />
                       )}
                     </div>
                   )}
@@ -28286,7 +28283,7 @@ function App() {
             {page === "hr" && <HrDashboard onBack={()=>setPage("finance")} currentUser={user} initialTab={hrTab} onTabChange={setHrTab} />}
             {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
             {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
-            {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} />}
+            {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} onGoOfis={isAdmin ? () => setPage("ofis") : undefined} />}
             {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
@@ -29735,7 +29732,7 @@ const ARAC_MARKALAR = {
 const ARAC_YIL = Array.from({length: 25}, (_, i) => 2026 - i);
 
 // ─── ARAÇLAR PANELİ ───────────────────────────────────────────────────────────
-function AraclarPanel({ currentUser, onBack }) {
+function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
@@ -29940,6 +29937,12 @@ function AraclarPanel({ currentUser, onBack }) {
             <button onClick={openNew}
               style={{ padding:"9px 18px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
               ＋ Araç Ekle
+            </button>
+          )}
+          {onGoOfis && (
+            <button onClick={onGoOfis} title="Ofis & Depo yönetimine geç"
+              style={{ padding:"9px 16px", background:"#f8fafc", color:"#1e3a5f", border:"1.5px solid #cbd5e1", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"13px", whiteSpace:"nowrap" }}>
+              🏢 Ofis & Depo →
             </button>
           )}
         </div>
