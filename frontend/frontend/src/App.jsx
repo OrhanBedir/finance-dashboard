@@ -7903,6 +7903,7 @@ function FinanceDashboard({
       kalan_borc: row.kalan_borc ?? "",
       note: row.note || "",
       fatura_turu: row.fatura_turu || "GELEN",
+      firma: row.firma || "SIMSEK",
       bagli_fatura_id: row.bagli_fatura_id || "",
       currency: row.currency || "TRY",
       usd_kur: row.usd_kur ?? "",
@@ -7962,12 +7963,8 @@ function FinanceDashboard({
         ...(pdfTempKey && !editingInvoiceId ? { temp_belge_key: pdfTempKey } : {}),
       };
 
-      // Yeni faturada firma sorusu: AHY seçilirse AHY Taşeron Faturaları panelinde görünür
-      if (!editingInvoiceId) {
-        payload.firma = window.confirm(
-          "Bu fatura hangi firmaya ait?\n\n✔ Tamam = AHY ELEKTRİK (AHY paneline yansır)\n✘ İptal = ŞİMŞEK HABERLEŞME"
-        ) ? "AHY" : "SIMSEK";
-      }
+      // Firma seçimi (modaldaki Şimşek/AHY toggle) — AHY ise AHY Taşeron Faturaları paneline yansır
+      payload.firma = String(invoiceForm.firma || "SIMSEK").toUpperCase() === "AHY" ? "AHY" : "SIMSEK";
       console.log("MANUAL INVOICE PAYLOAD:", payload);
 
       if (editingInvoiceId) {
@@ -9963,6 +9960,19 @@ function FinanceDashboard({
                   )}
                 </div>
                 )}
+
+                {/* Firma: Şimşek / AHY — AHY seçilirse AHY Taşeron Faturaları paneline yansır */}
+                <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                  <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Firma:</span>
+                  {[["SIMSEK","🟨 Şimşek Haberleşme","#92400e","#fffbeb","#fcd34d"],["AHY","⚡ AHY Elektrik","#1e40af","#eff6ff","#93c5fd"]].map(([val,lbl,col,bg,brd])=>(
+                    <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:(invoiceForm.firma||"SIMSEK")===val?bg:"#f9fafb", border:`1.5px solid ${(invoiceForm.firma||"SIMSEK")===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:(invoiceForm.firma||"SIMSEK")===val?col:"#6b7280" }}>
+                      <input type="radio" name="fatura_firma" value={val} checked={(invoiceForm.firma||"SIMSEK")===val} onChange={()=>setInvoiceForm(p=>({...p,firma:val}))} style={{ display:"none" }} />{lbl}
+                    </label>
+                  ))}
+                  {(invoiceForm.firma||"SIMSEK")==="AHY" && (
+                    <span style={{ fontSize:12, color:"#1e40af", fontWeight:600 }}>→ AHY panelindeki Taşeron Faturaları'nda görünür</span>
+                  )}
+                </div>
 
                 {/* BÖLÜM 1: Proje Bilgileri */}
                 <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>

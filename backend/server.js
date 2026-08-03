@@ -8930,6 +8930,7 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
       note,
       currency,
       usd_kur,
+      firma, // ŞİMŞEK (SIMSEK) veya AHY — AHY taşeron panelinde görünür
     } = req.body;
 
     const result = await pool.query(
@@ -8955,8 +8956,9 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
         kalan_borc = $17,
         note = $18,
         currency = $19,
-        usd_kur = $20
-      WHERE id = $21
+        usd_kur = $20,
+        firma = COALESCE($21, firma)
+      WHERE id = $22
       RETURNING *
       `,
       [
@@ -8980,6 +8982,7 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
         note || null,
         currency || 'TRY',
         Number(usd_kur || 1),
+        firma ? (String(firma).toUpperCase() === "AHY" ? "AHY" : "SIMSEK") : null,
         id,
       ],
     );
