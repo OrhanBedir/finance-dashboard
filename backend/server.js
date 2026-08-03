@@ -5670,7 +5670,102 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       const gider = o.maas + o.maas_avans + o.is_avans + o.diger;
       return { ...o, gider, net: +(o.gelir_try - gider).toFixed(2) };
     });
-    res.json({ ok: true, marka, pay_yuzde: 100 - yuzde, gelir_kaynak: "fatura", aylar });
+    // ── Proje P&L şeridi (kartların üstü) ──
+    // Fiziki tamamlanan iş bedeli: Bölge Analizi ile aynı fiyat zinciri —
+    // tamamlanan_qty (yoksa done_qty) × PO/BOQ birim fiyatı, para birimi ayrımlı.
+    let fiziki = { try: 0, usd: 0 };
+    try {
+      const fr = await pool.query(`
+        ${COMMON_MATCH_CTES}
+        SELECT
+          COALESCE(SUM(CASE WHEN t.cur = 'USD' THEN t.amt ELSE 0 END), 0) AS usd,
+          COALESCE(SUM(CASE WHEN t.cur <> 'USD' THEN t.amt ELSE 0 END), 0) AS try
+        FROM (
+          SELECT
+            (CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty, 0) END) *
+            (CASE
+              WHEN TRIM(COALESCE(m.item_code, '')) = '8818278098' THEN 986.23
+              WHEN site_po.id IS NOT NULL THEN COALESCE(site_po.unit_price, 0)
+              ELSE COALESCE(item_po.unit_price, 0)
+            END) AS amt,
+            (CASE
+              WHEN COALESCE(TRIM(best_boq.currency), '') <> '' THEN UPPER(TRIM(best_boq.currency))
+              WHEN site_po.id IS NOT NULL THEN UPPER(COALESCE(site_po.currency, 'TRY'))
+              WHEN item_po.id IS NOT NULL THEN UPPER(COALESCE(item_po.currency, 'TRY'))
+              ELSE 'TRY'
+            END) AS cur
+          FROM master_works m
+          LEFT JOIN best_site_po site_po
+            ON TRIM(COALESCE(site_po.project_code, '')) = TRIM(COALESCE(m.project_code, ''))
+           AND UPPER(TRIM(COALESCE(site_po.site_code, ''))) = UPPER(TRIM(COALESCE(m.site_code, '')))
+           AND TRIM(COALESCE(site_po.item_code, '')) = TRIM(COALESCE(m.item_code, ''))
+          LEFT JOIN best_item_po item_po
+            ON TRIM(COALESCE(item_po.item_code, '')) = TRIM(COALESCE(m.item_code, ''))
+          LEFT JOIN best_boq
+            ON TRIM(COALESCE(best_boq.s_bom_code, '')) = TRIM(COALESCE(m.item_code, ''))
+        ) t
+      `);
+      fiziki = { try: Number(fr.rows[0]?.try || 0), usd: Number(fr.rows[0]?.usd || 0) };
+    } catch (e) { console.error("MARKA OZET fiziki:", e.message); }
+    let kur = 0;
+    try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
+
+    // Planlı gider (bekleyen maaş, yaklaşık): devirden (2026-07) bu yana
+    // tahakkuk etmiş dönemlerin kalan net maaşları — İK NET ödenecek
+    // mantığının sunucu tarafı yaklaşığı (puantaj kesintileri hariç).
+    let bekleyenMaas = 0;
+    try {
+      const buAyStr = new Date().toISOString().slice(0, 7);
+      const donemler = [];
+      let dd = new Date(Date.UTC(2026, 6, 1)); // 2026-07 (devir dönemi)
+      while (dd.toISOString().slice(0, 7) < buAyStr) {
+        donemler.push(dd.toISOString().slice(0, 7));
+        dd = new Date(Date.UTC(dd.getUTCFullYear(), dd.getUTCMonth() + 1, 1));
+      }
+      if (donemler.length) {
+        const pr = await pool.query(
+          `SELECT id, COALESCE(net_maas,0) AS net_maas, ise_giris_tarihi
+             FROM personel
+            WHERE aktif = true AND UPPER(COALESCE(marka,'ERC')) = $1`, [marka]);
+        for (const donem of donemler) {
+          const [dy, dm] = donem.split("-").map(Number);
+          const gunSay = new Date(Date.UTC(dy, dm, 0)).getUTCDate();
+          const od = await pool.query(
+            `SELECT personel_id, SUM(COALESCE(bankadan,0)+COALESCE(elden,0)) AS t
+               FROM maas_odeme
+              WHERE COALESCE(donem, to_char(tarih,'YYYY-MM')) = $1
+                ${marka === "AHY" ? "AND tarih >= '2026-07-15'" : ""}
+              GROUP BY personel_id`, [donem]);
+          const av = await pool.query(
+            `SELECT personel_id, SUM(COALESCE(tutar,0)) AS t
+               FROM avans
+              WHERE UPPER(COALESCE(avans_turu,'MAAS')) = 'MAAS'
+                AND COALESCE(NULLIF(donem,''), to_char(tarih,'YYYY-MM')) = $1
+              GROUP BY personel_id`, [donem]);
+          const odM = new Map(od.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
+          const avM = new Map(av.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
+          for (const p of pr.rows) {
+            const gStr = p.ise_giris_tarihi
+              ? new Date(p.ise_giris_tarihi).toISOString().slice(0, 10) : null;
+            if (gStr && gStr.slice(0, 7) > donem) continue; // henüz işe girmemiş
+            let girisF = 1;
+            if (gStr && gStr.slice(0, 7) === donem)
+              girisF = (gunSay - Number(gStr.slice(8, 10)) + 1) / gunSay;
+            let oran = 1;
+            if (marka === "AHY") {
+              if (donem < "2026-07") oran = 0;
+              else if (donem === "2026-07") oran = (gStr && gStr >= "2026-07-15") ? 1 : 0.5;
+            }
+            const hak = Number(p.net_maas) * girisF * oran;
+            const oden = (odM.get(String(p.id)) || 0) + (avM.get(String(p.id)) || 0);
+            bekleyenMaas += Math.max(0, hak - oden);
+          }
+        }
+      }
+    } catch (e) { console.error("MARKA OZET bekleyen maas:", e.message); }
+
+    res.json({ ok: true, marka, pay_yuzde: 100 - yuzde, gelir_kaynak: "fatura", aylar,
+      fiziki, kur, bekleyen_maas: Math.round(bekleyenMaas) });
   } catch (e) {
     console.error("MARKA OZET ERROR:", e.message);
     res.status(500).json({ ok: false, error: "Marka özeti alınamadı" });
