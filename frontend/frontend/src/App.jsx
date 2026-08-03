@@ -20858,6 +20858,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               <Row label="Atanan İş Tutarı (PO talebi)" value={subconSummary.atananIs}
                 onClick={() => {
                   // Saha bazında atanan iş: max(talep, yapılan) × birim fiyat (USD → TCMB)
+                  // + fiziki ilerleme durumu (montaja girilmemiş sahalar üstte)
                   const bySite = {};
                   rows.forEach(row => {
                     const site = String(row.site_code || "").trim().toUpperCase();
@@ -20865,28 +20866,43 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     const unitPrice = Number(row.unit_price || 0);
                     const q = Math.max(Number(row.requested_qty || 0), Number(row.done_qty || 0));
                     if (q <= 0 || unitPrice <= 0) return;
-                    const amt = q * unitPrice;
-                    const tl = normalizeCurrency(row.currency) === "USD" ? amt * usdRate : amt;
-                    const g = (bySite[site] = bySite[site] || { site, kalem: 0, tutar: 0 });
-                    g.kalem += 1; g.tutar += tl;
+                    const kur = normalizeCurrency(row.currency) === "USD" ? usdRate : 1;
+                    const fq = row.tamamlanan_qty === null || row.tamamlanan_qty === undefined
+                      ? Number(row.done_qty || 0) : Number(row.tamamlanan_qty || 0);
+                    const g = (bySite[site] = bySite[site] || { site, kalem: 0, tutar: 0, fiziki: 0 });
+                    g.kalem += 1;
+                    g.tutar += q * unitPrice * kur;
+                    g.fiziki += fq * unitPrice * kur;
                   });
-                  const grup = Object.values(bySite).sort((a, b) => b.tutar - a.tutar);
-                  const list = grup.map(g => ({
-                    site: g.site, kalem: g.kalem,
-                    tutar: Math.round(g.tutar).toLocaleString("tr-TR"),
-                    pay: Math.round(g.tutar * subconRate).toLocaleString("tr-TR"),
-                  }));
+                  const durumOf = (g) => g.fiziki <= 0 ? 0 : (g.fiziki >= g.tutar * 0.999 ? 2 : 1);
+                  const grup = Object.values(bySite).sort((a, b) => durumOf(a) - durumOf(b) || b.tutar - a.tutar);
+                  const list = grup.map(g => {
+                    const d = durumOf(g);
+                    return {
+                      durum: d === 0 ? "⬜ Montaja Girilmedi" : d === 2 ? "✅ Fiziki Tamamlandı" : `🔶 Kısmi (%${Math.round((g.fiziki / g.tutar) * 100)})`,
+                      site: g.site, kalem: g.kalem,
+                      fiziki: Math.round(g.fiziki).toLocaleString("tr-TR"),
+                      tutar: Math.round(g.tutar).toLocaleString("tr-TR"),
+                      pay: Math.round(g.tutar * subconRate).toLocaleString("tr-TR"),
+                    };
+                  });
                   const topT = grup.reduce((sm, g) => sm + g.tutar, 0);
+                  const topF = grup.reduce((sm, g) => sm + g.fiziki, 0);
+                  const girilmedi = grup.filter(g => durumOf(g) === 0).length;
                   list.push({
+                    durum: girilmedi > 0 ? `${girilmedi} saha girilmedi` : "—",
                     site: "— TOPLAM —", kalem: grup.reduce((sm, g) => sm + g.kalem, 0),
+                    fiziki: Math.round(topF).toLocaleString("tr-TR"),
                     tutar: Math.round(topT).toLocaleString("tr-TR"),
                     pay: Math.round(topT * subconRate).toLocaleString("tr-TR"),
                   });
                   setOzetModal({
                     title: "📋 Atanan İş — Saha Bazında (PO talebi)",
                     cols: [
+                      { k: "durum", l: "Fiziki Durum" },
                       { k: "site", l: "Site ID" },
                       { k: "kalem", l: "Kalem Sayısı" },
+                      { k: "fiziki", l: "Fiziki Tamamlanan (₺)" },
                       { k: "tutar", l: "Atanan Tutar (₺)" },
                       { k: "pay", l: `Hakediş Payı %${Math.round(subconRate * 100)} (₺)` },
                     ],
