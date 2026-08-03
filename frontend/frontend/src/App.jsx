@@ -2141,7 +2141,10 @@ function MarkaTaseronPanel({ currentUser }) {
         data.odemeler.forEach(o => { const g = getG(o.taseron_adi); if (o.taseron_adi && !g.adlar.includes(o.taseron_adi)) g.adlar.push(o.taseron_adi); g.odenen += Number(o.tutar || 0); });
         const rows = Object.values(grup).map(g => {
           const sirali = g.adlar.slice().sort((a, b) => b.length - a.length);
-          return { ad: sirali[0] || g.ekip || "—", ekip: g.ekip, isSayisi: g.isSayisi, isBedeli: g.isBedeli, bedel: g.bedel || 0, detay: g.detay || [], fatura: g.fatura, odenen: g.odenen, kalan: g.fatura - g.odenen };
+          // Borç tabanı: kestiği fatura ile bedel+KDV'den büyük olanı — RF
+          // ekipleri fatura kesmese de yapılan işin bedeli borçtur (maaş gibi)
+          const taban = Math.max(Number(g.fatura || 0), Number(g.bedel || 0) * 1.2);
+          return { ad: sirali[0] || g.ekip || "—", ekip: g.ekip, isSayisi: g.isSayisi, isBedeli: g.isBedeli, bedel: g.bedel || 0, detay: g.detay || [], fatura: g.fatura, odenen: g.odenen, kalan: taban - g.odenen };
         }).sort((a, b) => {
           // RF montaj ekipleri (hesaplanan bedeli/iş kalemi olanlar) üstte;
           // vinç/nakliye/konaklama gibi fatura-bazlı tedarikçiler altta
@@ -2204,7 +2207,7 @@ function MarkaTaseronPanel({ currentUser }) {
               </table>
             </div>
             <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
-              Taşeron Bedeli: saha tipine göre otomatik hesap — co-located (NR700/TRP) kalem bazlı, standalone (NS) paket fiyat (radyolu 52.000 / radyosuz 40.000) + 7,2m LPRT; tutara tıklayıp saha bazlı dökümü görebilirsiniz. Vinç, nakliye, konaklama gibi hizmetlerde hakediş kestikleri fatura kadardır. Ödemeler nakit akışına ve Kâr/Zarar giderine otomatik yansır.
+              Taşeron Bedeli: saha tipine göre otomatik hesap — co-located (NR700/TRP) kalem bazlı, standalone (NS) paket fiyat (radyolu 52.000 / radyosuz 40.000) + 7,2m LPRT; tutara tıklayıp saha bazlı dökümü görebilirsiniz. Kalan Borç, fatura kesilmemiş olsa da bedel + KDV üzerinden tahakkuk eder (fatura kesilince büyük olan esas alınır). Vinç, nakliye, konaklama gibi hizmetlerde hakediş kestikleri fatura kadardır. Ödemeler nakit akışına ve Kâr/Zarar giderine otomatik yansır.
             </div>
           </div>
         );

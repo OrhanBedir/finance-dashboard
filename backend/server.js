@@ -5848,7 +5848,35 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       const grp = {};
       bf.rows.forEach(r => { const k = taseronCanonKey(r.ad); grp[k] = grp[k] || { f: 0, o: 0 }; grp[k].f += Number(r.t || 0); });
       bo.rows.forEach(r => { const k = taseronCanonKey(r.ad); grp[k] = grp[k] || { f: 0, o: 0 }; grp[k].o += Number(r.t || 0); });
-      bekleyenTaseron = Object.values(grp).reduce((sm, x) => sm + Math.max(0, x.f - x.o), 0);
+      // RF ekip hakedişleri (bedel + %20 KDV): fatura kesilmemiş olsa da
+      // yapılan iş borçtur — maaşlar gibi tahakkuk eder. Fatura kesilmişse
+      // büyük olan esas alınır (çifte sayım olmaz).
+      const bedelByCanon = {};
+      try {
+        const det = await pool.query(`
+          WITH best_boq AS (
+            SELECT DISTINCT ON (s_bom_code) * FROM boq_items
+            WHERE COALESCE(TRIM(s_bom_code), '') <> '' ORDER BY s_bom_code, created_at DESC
+          )
+          SELECT UPPER(TRIM(m.subcon_name)) AS subcon,
+            UPPER(TRIM(COALESCE(m.site_code,''))) AS site,
+            COALESCE(NULLIF(TRIM(m.item_description),''), best_boq.boq_items_en, COALESCE(m.item_code,'')) AS kalem,
+            GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty,0) END) AS fq
+          FROM master_works m
+          LEFT JOIN best_boq ON TRIM(COALESCE(best_boq.s_bom_code,'')) = TRIM(COALESCE(m.item_code,''))
+          WHERE UPPER(TRIM(COALESCE(m.subcon_name,''))) LIKE $1 || '\\_%'`, [marka]);
+        const bm = ahyTaseronBedel(det.rows);
+        for (const [subcon, v] of Object.entries(bm)) {
+          const k = taseronCanonKey(subcon);
+          bedelByCanon[k] = (bedelByCanon[k] || 0) + Number(v.bedel || 0) * 1.20; // KDV dahil
+        }
+      } catch (be) { console.error("BEKLEYEN TASERON BEDEL:", be.message); }
+      const canonKeys = new Set([...Object.keys(grp), ...Object.keys(bedelByCanon)]);
+      bekleyenTaseron = [...canonKeys].reduce((sm, k) => {
+        const g = grp[k] || { f: 0, o: 0 };
+        const taban = Math.max(g.f, bedelByCanon[k] || 0);
+        return sm + Math.max(0, taban - g.o);
+      }, 0);
     } catch {}
 
     res.json({ ok: true, marka, pay_yuzde: 100 - yuzde, gelir_kaynak: "fatura", aylar,
