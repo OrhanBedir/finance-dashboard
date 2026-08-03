@@ -28,18 +28,23 @@ function AltNavItem({ aktif, onClick, ikon, label, badge }) {
 // AltNavItem grubu sarmalayıcısı: soldaki ince ray + girinti
 const altNavGrup = { margin: "2px 0 6px", borderLeft: "1px solid rgba(148,163,184,0.15)", marginLeft: "22px" };
 
-function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber }) {
+function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber, onClick }) {
   return (
     <div
+      onClick={onClick}
+      title={onClick ? "Saha bazlı detay için tıklayın" : undefined}
+      onMouseEnter={onClick ? (e) => { e.currentTarget.style.background = "#f0f9ff"; } : undefined}
+      onMouseLeave={onClick ? (e) => { e.currentTarget.style.background = "#fff"; } : undefined}
       style={{
         display: "flex",
         justifyContent: "space-between",
         padding: "10px 16px",
         borderBottom: "1px solid #e5e7eb",
         background: "#fff",
+        cursor: onClick ? "pointer" : "default",
       }}
     >
-      <div style={{ color: "#374151" }}>{label}</div>
+      <div style={{ color: "#374151" }}>{label}{onClick && <span style={{ marginLeft: 6, fontSize: "11px" }}>🔍</span>}</div>
 
       <div
         style={{
@@ -20850,7 +20855,44 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         <div style={{ background: "#f9fafb" }}>
           {isSubconUser ? (
             <>
-              <Row label="Atanan İş Tutarı (PO talebi)" value={subconSummary.atananIs} />
+              <Row label="Atanan İş Tutarı (PO talebi)" value={subconSummary.atananIs}
+                onClick={() => {
+                  // Saha bazında atanan iş: max(talep, yapılan) × birim fiyat (USD → TCMB)
+                  const bySite = {};
+                  rows.forEach(row => {
+                    const site = String(row.site_code || "").trim().toUpperCase();
+                    if (!site) return;
+                    const unitPrice = Number(row.unit_price || 0);
+                    const q = Math.max(Number(row.requested_qty || 0), Number(row.done_qty || 0));
+                    if (q <= 0 || unitPrice <= 0) return;
+                    const amt = q * unitPrice;
+                    const tl = normalizeCurrency(row.currency) === "USD" ? amt * usdRate : amt;
+                    const g = (bySite[site] = bySite[site] || { site, kalem: 0, tutar: 0 });
+                    g.kalem += 1; g.tutar += tl;
+                  });
+                  const grup = Object.values(bySite).sort((a, b) => b.tutar - a.tutar);
+                  const list = grup.map(g => ({
+                    site: g.site, kalem: g.kalem,
+                    tutar: Math.round(g.tutar).toLocaleString("tr-TR"),
+                    pay: Math.round(g.tutar * subconRate).toLocaleString("tr-TR"),
+                  }));
+                  const topT = grup.reduce((sm, g) => sm + g.tutar, 0);
+                  list.push({
+                    site: "— TOPLAM —", kalem: grup.reduce((sm, g) => sm + g.kalem, 0),
+                    tutar: Math.round(topT).toLocaleString("tr-TR"),
+                    pay: Math.round(topT * subconRate).toLocaleString("tr-TR"),
+                  });
+                  setOzetModal({
+                    title: "📋 Atanan İş — Saha Bazında (PO talebi)",
+                    cols: [
+                      { k: "site", l: "Site ID" },
+                      { k: "kalem", l: "Kalem Sayısı" },
+                      { k: "tutar", l: "Atanan Tutar (₺)" },
+                      { k: "pay", l: `Hakediş Payı %${Math.round(subconRate * 100)} (₺)` },
+                    ],
+                    rows: list,
+                  });
+                }} />
 
               {/* ── Hakediş Oranları: RF & Gizleme ── */}
               <div style={{ padding:"12px 16px", borderBottom:"1px solid #e5e7eb", background:"#fff" }}>
