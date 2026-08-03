@@ -6091,7 +6091,7 @@ const AHY_BEDEL_COLOCATED = [
   [/dc cable dismantle/i, 1500, "DC Cable Dismantle"],
   [/7[.,]2\s*m\s*lprt/i, 8000, "Installation of 7,2m LPRT pole"],
   [/6\s*m\s*lprt/i, 7000, "Installation service 6m LPRT Pole"],
-  [/one band addition/i, 14000, "One Band Addition at the same site visit"],
+  [/one band addition/i, 12000, "One Band Addition at the same site visit"],
 ];
 function ahyTaseronBedel(rows) {
   // rows: [{subcon, site, kalem, fq}] → { [subcon]: { bedel, detay[] } }
@@ -6125,7 +6125,7 @@ function ahyTaseronBedel(rows) {
       if (qL6 > 0) { ek.bedel += qL6 * 7000; ek.detay.push({ site: st, kalem: "Installation service 6m LPRT Pole", adet: qL6, birim: 7000, tutar: qL6 * 7000 }); }
       // One Band Addition: LTE benzeri ekstra iş — paket fiyata dahil değildir
       const qOB = qty(/one band addition/i);
-      if (qOB > 0) { ek.bedel += qOB * 14000; ek.detay.push({ site: st, kalem: "One Band Addition at the same site visit", adet: qOB, birim: 14000, tutar: qOB * 14000 }); }
+      if (qOB > 0) { ek.bedel += qOB * 12000; ek.detay.push({ site: st, kalem: "One Band Addition at the same site visit", adet: qOB, birim: 12000, tutar: qOB * 12000 }); }
     }
   }
   return out;
