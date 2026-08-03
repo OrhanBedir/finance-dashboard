@@ -14023,7 +14023,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       {/* ===== YEMEK KARTLARI SEKMESİ ===== */}
       {tab==="yemek" && (() => {
         const donem = puantajAy;
-        const aktifKartlar = yemekKartlar.filter(k => k.aktif);
+        // Alt marka görünümü (AHY) yalnız kendi firmasının kartlarını görür;
+        // ERC görünümü tümünü firma rozetleriyle görür
+        const aktifKartlar = yemekKartlar.filter(k => k.aktif && (_hrMarka === "ERC" || String(k.firma || "AHY").toUpperCase() === _hrMarka));
         const odemeOf = (k) => yemekOdemeler.find(o => String(o.kart_id) === String(k.id) && o.donem === donem);
         const topGereken = aktifKartlar.reduce((sm,k) => sm + Number(k.aylik_tutar||0), 0);
         const topOdenen = aktifKartlar.reduce((sm,k) => { const o = odemeOf(k); return sm + (o ? Number(o.tutar||0) : 0); }, 0);
@@ -14092,8 +14094,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               style={{ width:"90px", padding:"5px 8px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px", textAlign:"right" }} />
                           </td>
                           <td style={tdY}>
-                            <button onClick={() => yemekKartGuncelle(k.id, { firma: k.firma === "SIMSEK" ? "AHY" : "SIMSEK" })} title="Değiştirmek için tıklayın"
-                              style={{ padding:"4px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, cursor:"pointer", border:"none",
+                            <button onClick={_hrMarka === "ERC" ? () => yemekKartGuncelle(k.id, { firma: k.firma === "SIMSEK" ? "AHY" : "SIMSEK" }) : undefined}
+                              title={_hrMarka === "ERC" ? "Değiştirmek için tıklayın" : undefined}
+                              style={{ padding:"4px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, cursor: _hrMarka === "ERC" ? "pointer" : "default", border:"none",
                                 background: k.firma === "SIMSEK" ? "#fffbeb" : "#eff6ff", color: k.firma === "SIMSEK" ? "#92400e" : "#1e40af" }}>
                               {k.firma === "SIMSEK" ? "🟨 Şimşek" : "⚡ AHY"}
                             </button>
@@ -14139,7 +14142,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <div>
                       <span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Firma</span>
                       <div style={{ display:"flex", gap:"6px" }}>
-                        {[["AHY","⚡ AHY"],["SIMSEK","🟨 Şimşek"]].map(([v,l]) => (
+                        {[["AHY","⚡ AHY"],["SIMSEK","🟨 Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
                           <button key={v} type="button" onClick={() => setYemekOdeForm(f => ({ ...f, firma: v }))}
                             style={{ flex:1, padding:"8px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekOdeForm.firma===v?"#1e3a5f":"#e5e7eb"}`, background: yemekOdeForm.firma===v?"#1e3a5f":"#fff", color: yemekOdeForm.firma===v?"#fff":"#6b7280" }}>{l}</button>
                         ))}
