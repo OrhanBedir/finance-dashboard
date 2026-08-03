@@ -1090,61 +1090,12 @@ function KirilimRaporuPanel() {
 
 // Alt marka (AHY) Kar/Zarar özeti: gelir = HW faturaları × marka payı,
 // gider = kendi personelinin maaş ödemeleri + avansları. ERC finansı görünmez.
-function MarkaFinansPanel({ currentUser }) {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState("");
-  const [loading, setLoading] = useState(true);
-  const marka = String(currentUser?.marka || "AHY").toUpperCase();
-  const markaAd = currentUser?.marka_ad || marka;
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch(`${API_BASE}/finance/marka-ozet?marka=${marka}`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
-        });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok || d.ok === false) throw new Error(d.error || "Finans özeti alınamadı");
-        setData(d);
-      } catch (e) { setErr(e.message); } finally { setLoading(false); }
-    })();
-  }, []);
+// ── Proje Kâr/Zarar özet şeridi — Finans Özeti ve P&L panellerinin ortak üst bandı ──
+function ProjePLSeridi({ ozet, tGider }) {
+  if (!ozet?.fiziki) return null;
+  const data = ozet;
   const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
-  const fmtK = (n) => { n = Number(n || 0); if (n >= 1000000) return (n / 1000000).toFixed(1) + "M"; if (n >= 1000) return Math.round(n / 1000) + "K"; return String(Math.round(n)); };
-  if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
-  if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
-  const pay = data?.pay_yuzde ?? 90;
-  const aylar = data?.aylar || [];
-  const tGelir = aylar.reduce((s, a) => s + a.gelir_try, 0);
-  const tGelirUsd = aylar.reduce((s, a) => s + (a.gelir_usd || 0), 0);
-  const tGider = aylar.reduce((s, a) => s + a.gider, 0);
-  const tNet = tGelir - tGider;
-  const buAy = new Date().toISOString().slice(0, 7);
-  const buAyRow = aylar.find(a => a.ay === buAy) || { gelir_try: 0, gider: 0 };
-  const yil = buAy.slice(0, 4);
-  const AY_ADLARI = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
-  const grafikAylar = AY_ADLARI.map((ad, i) => {
-    const key = `${yil}-${String(i + 1).padStart(2, "0")}`;
-    const row = aylar.find(a => a.ay === key);
-    return { ad, gelir: row ? row.gelir_try : 0, gider: row ? row.gider : 0 };
-  });
-  const maxVal = Math.max(1, ...grafikAylar.flatMap(g => [g.gelir, g.gider]));
-  const barH = (v) => (v > 0 ? Math.max(6, Math.round((v / maxVal) * 150)) : 0);
-  // ERC Finans Paneli görsel dili: beyaz kart + üstte renkli şerit
-  const kart = (strip) => ({ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "20px 24px", flex: "1 1 200px", minWidth: "200px", borderTop: `4px solid ${strip}`, textAlign: "center" });
-  const kartBaslik = { fontSize: "13px", color: "#64748b", fontWeight: 600, marginBottom: "10px" };
-  const kartDeger = { fontSize: "26px", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.5px" };
-  const kartAlt = { fontSize: "12px", color: "#94a3b8", marginTop: "8px" };
-  const th = { padding: "12px 16px", fontSize: "12px", fontWeight: 700, color: "#374151", background: "#f8fafc", textAlign: "right", whiteSpace: "nowrap", borderBottom: "1.5px solid #e5e7eb" };
-  const td = { padding: "11px 16px", fontSize: "13px", textAlign: "right", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" };
-  return (
-    <div style={{ padding: "24px 28px", maxWidth: "1250px", margin: "0 auto" }}>
-      <h2 style={{ margin: "0 0 2px", fontSize: "20px", fontWeight: 800, color: "#0f172a", textAlign: "center" }}>📊 {markaAd} — Finans Özeti</h2>
-      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "22px", textAlign: "center" }}>
-        Gelir: Şimşek Haberleşme'ye kesilen faturalar • Gider: 15 Temmuz 2026 sonrası nakit akışı (maaş, avans, kira ve diğer)
-      </div>
 
-      {/* ── Proje Kâr / Zarar Özeti — kurumsal şerit ── */}
-      {data?.fiziki && (() => {
         const kur = Number(data.kur || 0);
         const payOran = Number(data.pay_yuzde || 90);
         const usdTutar = Number(data.fiziki.usd || 0); // henüz faturalanmamış USD
@@ -1202,7 +1153,63 @@ function MarkaFinansPanel({ currentUser }) {
             </div>
           </div>
         );
-      })()}
+      }
+
+function MarkaFinansPanel({ currentUser }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const marka = String(currentUser?.marka || "AHY").toUpperCase();
+  const markaAd = currentUser?.marka_ad || marka;
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/finance/marka-ozet?marka=${marka}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.ok === false) throw new Error(d.error || "Finans özeti alınamadı");
+        setData(d);
+      } catch (e) { setErr(e.message); } finally { setLoading(false); }
+    })();
+  }, []);
+  const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  const fmtK = (n) => { n = Number(n || 0); if (n >= 1000000) return (n / 1000000).toFixed(1) + "M"; if (n >= 1000) return Math.round(n / 1000) + "K"; return String(Math.round(n)); };
+  if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
+  if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+  const pay = data?.pay_yuzde ?? 90;
+  const aylar = data?.aylar || [];
+  const tGelir = aylar.reduce((s, a) => s + a.gelir_try, 0);
+  const tGelirUsd = aylar.reduce((s, a) => s + (a.gelir_usd || 0), 0);
+  const tGider = aylar.reduce((s, a) => s + a.gider, 0);
+  const tNet = tGelir - tGider;
+  const buAy = new Date().toISOString().slice(0, 7);
+  const buAyRow = aylar.find(a => a.ay === buAy) || { gelir_try: 0, gider: 0 };
+  const yil = buAy.slice(0, 4);
+  const AY_ADLARI = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+  const grafikAylar = AY_ADLARI.map((ad, i) => {
+    const key = `${yil}-${String(i + 1).padStart(2, "0")}`;
+    const row = aylar.find(a => a.ay === key);
+    return { ad, gelir: row ? row.gelir_try : 0, gider: row ? row.gider : 0 };
+  });
+  const maxVal = Math.max(1, ...grafikAylar.flatMap(g => [g.gelir, g.gider]));
+  const barH = (v) => (v > 0 ? Math.max(6, Math.round((v / maxVal) * 150)) : 0);
+  // ERC Finans Paneli görsel dili: beyaz kart + üstte renkli şerit
+  const kart = (strip) => ({ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "20px 24px", flex: "1 1 200px", minWidth: "200px", borderTop: `4px solid ${strip}`, textAlign: "center" });
+  const kartBaslik = { fontSize: "13px", color: "#64748b", fontWeight: 600, marginBottom: "10px" };
+  const kartDeger = { fontSize: "26px", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.5px" };
+  const kartAlt = { fontSize: "12px", color: "#94a3b8", marginTop: "8px" };
+  const th = { padding: "12px 16px", fontSize: "12px", fontWeight: 700, color: "#374151", background: "#f8fafc", textAlign: "right", whiteSpace: "nowrap", borderBottom: "1.5px solid #e5e7eb" };
+  const td = { padding: "11px 16px", fontSize: "13px", textAlign: "right", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" };
+  return (
+    <div style={{ padding: "24px 28px", maxWidth: "1250px", margin: "0 auto" }}>
+      <h2 style={{ margin: "0 0 2px", fontSize: "20px", fontWeight: 800, color: "#0f172a", textAlign: "center" }}>📊 {markaAd} — Finans Özeti</h2>
+      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "22px", textAlign: "center" }}>
+        Gelir: Şimşek Haberleşme'ye kesilen faturalar • Gider: 15 Temmuz 2026 sonrası nakit akışı (maaş, avans, kira ve diğer)
+      </div>
+
+      {/* ── Proje Kâr / Zarar Özeti — kurumsal şerit ── */}
+      <ProjePLSeridi ozet={data} tGider={tGider} />
 
       {/* Özet kartları — ERC Finans Paneli stili */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "24px", flexWrap: "wrap" }}>
@@ -1306,6 +1313,7 @@ function MarkaFinansPanel({ currentUser }) {
 function MarkaPLPanel({ currentUser }) {
   const [data, setData] = useState(null);
   const [sabit, setSabit] = useState(null); // aylık sabit giderler (ofis+araç+maaş)
+  const [ozet, setOzet] = useState(null); // marka-ozet: fiziki iş + kur + bekleyen maaş (P&L şeridi)
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
   const marka = String(currentUser?.marka || "AHY").toUpperCase();
@@ -1322,6 +1330,11 @@ function MarkaPLPanel({ currentUser }) {
           const rs = await fetch(`${API_BASE}/finance/marka-sabit-giderler?marka=${marka}`, { headers: hdr });
           const ds = await rs.json().catch(() => ({}));
           if (rs.ok && ds.ok) setSabit(ds);
+        } catch {}
+        try {
+          const ro = await fetch(`${API_BASE}/finance/marka-ozet?marka=${marka}`, { headers: hdr });
+          const doz = await ro.json().catch(() => ({}));
+          if (ro.ok && doz.ok !== false) setOzet(doz);
         } catch {}
       } catch (e) { setErr(e.message); } finally { setLoading(false); }
     })();
@@ -1508,6 +1521,9 @@ function MarkaPLPanel({ currentUser }) {
           </div>
         </div>
       </div>
+
+      {/* Proje Kâr/Zarar özet şeridi — fiziki iş bazlı */}
+      <ProjePLSeridi ozet={ozet} tGider={top("gider")} />
 
       {/* KPI kartları (bu ay) */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "20px", flexWrap: "wrap" }}>
