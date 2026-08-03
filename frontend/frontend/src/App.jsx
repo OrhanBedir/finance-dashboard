@@ -2152,13 +2152,12 @@ function MarkaTaseronPanel({ currentUser }) {
           <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
             <div style={{ padding: "12px 16px", background: "#065f46", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
               <span>📐 Taşeron Hesabı — Fatura Kesilecek & Borç Durumu ({rows.length})</span>
-              <span>Yapılan İş: ₺{fmt(topIs)} · Taşeron Bedeli: ₺{fmt(topBedel)} +KDV · Kalan Borç: ₺{fmt(topKalan)}</span>
+              <span>Taşeron Bedeli: ₺{fmt(topBedel)} +KDV · Kalan Borç: ₺{fmt(topKalan)}</span>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead><tr>
                   <th style={thS}>Taşeron</th>
-                  <th style={{ ...thS, textAlign: "right" }}>Yapılan İş Bedeli</th>
                   <th style={{ ...thS, textAlign: "right" }}>Taşeron Bedeli</th>
                   <th style={{ ...thS, textAlign: "right" }}>Kestiği Fatura</th>
                   <th style={{ ...thS, textAlign: "right" }}>Ödenen</th>
@@ -2176,7 +2175,6 @@ function MarkaTaseronPanel({ currentUser }) {
                           </div>
                         ) : null}
                       </td>
-                      <td style={num}>{r.isBedeli > 0 ? `₺${fmt(r.isBedeli)}` : "—"}</td>
                       <td style={num}>
                         {r.bedel > 0 ? (
                           <button onClick={() => setBedelDetay({ ad: r.ad, bedel: r.bedel, detay: r.detay })} title="Hesap dökümünü görmek için tıklayın"
@@ -2198,7 +2196,7 @@ function MarkaTaseronPanel({ currentUser }) {
               </table>
             </div>
             <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
-              Yapılan İş Bedeli: fiziki işlerin PO/BOQ değeri (HW'ye faturalanan USD sabit fatura kurunda). Taşeron Bedeli: saha tipine göre otomatik hesap — co-located (NR700/TRP) kalem bazlı, standalone (NS) paket fiyat (radyolu 52.000 / radyosuz 40.000) + 7,2m LPRT; tutara tıklayıp saha bazlı dökümü görebilirsiniz. Ödemeler nakit akışına ve Kâr/Zarar giderine otomatik yansır.
+              Taşeron Bedeli: saha tipine göre otomatik hesap — co-located (NR700/TRP) kalem bazlı, standalone (NS) paket fiyat (radyolu 52.000 / radyosuz 40.000) + 7,2m LPRT; tutara tıklayıp saha bazlı dökümü görebilirsiniz. Ödemeler nakit akışına ve Kâr/Zarar giderine otomatik yansır.
             </div>
           </div>
         );
