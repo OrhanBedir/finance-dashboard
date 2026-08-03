@@ -28111,11 +28111,11 @@ function App() {
                   {openSections.depo && (
                     <div style={altNavGrup}>
                       <AltNavItem aktif={page==='malzeme'} onClick={()=>setPage('malzeme')} ikon="📦" label="Malzeme Yönetimi" badge={pendingMalzemeCount} />
+                      {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && (
+                        <AltNavItem aktif={page==='araclar'} onClick={()=>setPage('araclar')} ikon="🚗" label="Araç Yönetimi" />
+                      )}
                       {isAdmin && (
-                        <>
-                          <AltNavItem aktif={page==='araclar'} onClick={()=>setPage('araclar')} ikon="🚗" label="Araç Yönetimi" />
-                          <AltNavItem aktif={page==='ofis'} onClick={()=>setPage('ofis')} ikon="🏢" label="Ofis & Depo" />
-                        </>
+                        <AltNavItem aktif={page==='ofis'} onClick={()=>setPage('ofis')} ikon="🏢" label="Ofis & Depo" />
                       )}
                     </div>
                   )}
@@ -29717,7 +29717,8 @@ function AraclarPanel({ currentUser, onBack }) {
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
-  const canEdit = isPM || isDirektor || isMuhasebe;
+  const isRollout = currentUser?.email === "nurcan.kus@simsektel.com"; // filo güncelleme yetkisi
+  const canEdit = isPM || isDirektor || isMuhasebe || isRollout;
 
   const [araclar, setAraclar] = useState([]);
   const [selected, setSelected] = useState(null); // detail/edit araç
