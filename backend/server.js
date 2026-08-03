@@ -15565,6 +15565,9 @@ pool.query(`CREATE TABLE IF NOT EXISTS ekipler (
 pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS ad TEXT`).catch(() => {});
 pool.query(`ALTER TABLE personel ADD COLUMN IF NOT EXISTS ekip_arac_plaka TEXT`).catch(() => {});
 
+// Ekip taşeron etiketi: kutucukta ekip adının altında görünür (örn. taşeron ekipler)
+pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS taseron_adi TEXT`).catch(() => {});
+
 app.get("/hr/ekipler", async (req, res) => {
   try {
     const r = await pool.query(`SELECT * FROM ekipler ORDER BY ekip_no`);
@@ -15577,11 +15580,12 @@ app.post("/hr/ekipler", async (req, res) => {
     const no = Number(req.body.ekip_no || 0);
     if (!no || no < 1) return res.status(400).json({ error: "Geçerli ekip no gerekli" });
     const r = await pool.query(
-      `INSERT INTO ekipler (ekip_no, plaka, bolge, aciklama, ad)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (ekip_no) DO UPDATE SET plaka=$2, bolge=$3, aciklama=$4, ad=$5, updated_at=NOW()
+      `INSERT INTO ekipler (ekip_no, plaka, bolge, aciklama, ad, taseron_adi)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (ekip_no) DO UPDATE SET plaka=$2, bolge=$3, aciklama=$4, ad=$5, taseron_adi=$6, updated_at=NOW()
        RETURNING *`,
-      [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null, req.body.ad || null]);
+      [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null, req.body.ad || null,
+       (req.body.taseron_adi || "").trim() || null]);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

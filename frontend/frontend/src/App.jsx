@@ -2827,7 +2827,7 @@ function OrgSemasiPanel({ currentUser }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: "17px", fontWeight: 800 }}>{ekipAdi(e)}</div>
                   <div style={{ fontSize: "12px", opacity: 0.8, marginTop: "2px" }}>
-                    {e.bolge ? `📍 ${e.bolge}` : "Bölge atanmadı"} · {uyeler.length} kişi
+                    {e.bolge ? `📍 ${e.bolge}` : "Bölge atanmadı"} · {uyeler.length} kişi{e.taseron_adi ? ` · 🤝 ${e.taseron_adi}` : ""}
                   </div>
                 </div>
                 {canEdit && (
@@ -2916,12 +2916,16 @@ function OrgSemasiPanel({ currentUser }) {
               </div>
               <div style={{ display: "grid", gap: "6px", marginBottom: "18px" }}>
                 {ekipler.map(e => (
-                  <div key={e.ekip_no} style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr auto", gap: "8px", alignItems: "center", background: "#f8fafc", borderRadius: "10px", padding: "7px 10px" }}>
+                  <div key={e.ekip_no} style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr 1fr auto", gap: "8px", alignItems: "center", background: "#f8fafc", borderRadius: "10px", padding: "7px 10px" }}>
                     <span style={{ fontWeight: 800, color: "#1e3a5f", fontSize: "13px" }}>Ekip {e.ekip_no}</span>
                     <input value={e.ad || ""} placeholder={`Ekip adı (örn. RF Ekip ${e.ekip_no}, ENH Ekibi)`}
                       onChange={ev => setEkipler(list => list.map(x => x.ekip_no === e.ekip_no ? { ...x, ad: ev.target.value } : x))}
                       onBlur={ev => saveEkip({ ...e, ad: ev.target.value })}
                       style={{ padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px" }} />
+                    <input value={e.taseron_adi || ""} placeholder="Taşeron adı (opsiyonel)"
+                      onChange={ev => setEkipler(list => list.map(x => x.ekip_no === e.ekip_no ? { ...x, taseron_adi: ev.target.value } : x))}
+                      onBlur={ev => saveEkip({ ...e, taseron_adi: ev.target.value })}
+                      style={{ padding: "6px 8px", border: "1px solid #fbbf24", background: "#fffbeb", borderRadius: "8px", fontSize: "12.5px" }} />
                     <select value={e.bolge || ""} onChange={ev => saveEkip({ ...e, bolge: ev.target.value })}
                       style={{ padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px" }}>
                       <option value="">📍 Bölge seç…</option>
@@ -3002,7 +3006,7 @@ function OrgSemasiPanel({ currentUser }) {
                   return (
                     <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
                       <L d={`M${x + W / 2} 660 V${y}`} />
-                      <Box x={x} y={y} w={W} h={H} light stroke="#0369a1" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} />
+                      <Box x={x} y={y} w={W} h={H} light stroke="#0369a1" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi${e.taseron_adi ? ` · ${e.taseron_adi}` : ""}`} />
                     </g>
                   );
                 })}
@@ -3032,7 +3036,7 @@ function OrgSemasiPanel({ currentUser }) {
                   return (
                     <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
                       <L d={`M${x + W / 2} 660 V${y}`} />
-                      <Box x={x} y={y} w={W} h={H} light stroke="#b45309" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} />
+                      <Box x={x} y={y} w={W} h={H} light stroke="#b45309" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi${e.taseron_adi ? ` · ${e.taseron_adi}` : ""}`} />
                     </g>
                   );
                 })}
@@ -3057,9 +3061,12 @@ function OrgSemasiPanel({ currentUser }) {
                   style={{ border: "1.5px solid #e2e8f0", borderRadius: "12px", overflow: "hidden", cursor: "pointer", transition: "all 0.15s" }}
                   onMouseEnter={ev => { ev.currentTarget.style.boxShadow = "0 8px 24px rgba(30,58,95,0.18)"; ev.currentTarget.style.transform = "translateY(-2px)"; }}
                   onMouseLeave={ev => { ev.currentTarget.style.boxShadow = "none"; ev.currentTarget.style.transform = "none"; }}>
-                  <div style={{ background: "linear-gradient(120deg,#1e3a5f,#1e40af)", color: "#fff", padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontWeight: 800, fontSize: "13.5px" }}>{ekipAdi(e)}{e.bolge ? ` · ${e.bolge}` : ""}</span>
-                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: "6px", padding: "1px 8px", fontSize: "11.5px", fontWeight: 700 }}>{uyeler.length} kişi</span>
+                  <div style={{ background: "linear-gradient(120deg,#1e3a5f,#1e40af)", color: "#fff", padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: "block", fontWeight: 800, fontSize: "13.5px" }}>{ekipAdi(e)}{e.bolge ? ` · ${e.bolge}` : ""}</span>
+                      {e.taseron_adi && <span style={{ display: "block", fontSize: "10.5px", fontWeight: 700, color: "#fde68a", marginTop: "1px" }}>🤝 {e.taseron_adi}</span>}
+                    </span>
+                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: "6px", padding: "1px 8px", fontSize: "11.5px", fontWeight: 700, flexShrink: 0 }}>{uyeler.length} kişi</span>
                   </div>
                   <div style={{ padding: "8px 12px" }}>
                     {uyeler.map(p => {
