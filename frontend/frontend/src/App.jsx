@@ -19788,13 +19788,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
       if (isSubconUser && rowSubcon !== currentUserSubcon) return false;
 
-      // Fiziki tamamlanan 0 ise fatura kesilemez: saha QC'si kapalı olsa da
-      // günlük iş girişinde bu kalemin fiziki ilerlemesi henüz işlenmemiş
-      // demektir — önce fiziki ilerletilmeli. (tamamlanan_qty girilmemişse
-      // done_qty fiziki kabul edilir — eski davranış korunur)
-      const fizikiQty = row.tamamlanan_qty === null || row.tamamlanan_qty === undefined
-        ? Number(row.done_qty || 0)
-        : Number(row.tamamlanan_qty || 0);
+      // Fiziki tamamlanan boş veya 0 ise fatura kesilemez: saha QC'si kapalı
+      // olsa da bu kalemin fiziki işi günlük girişte işlenmemiş demektir —
+      // önce fiziki ilerletilmeli (boş = sahada henüz yapılmamış)
+      const fizikiQty = Number(row.tamamlanan_qty || 0);
       if (fizikiQty <= 0) return false;
 
       return (

@@ -8835,6 +8835,9 @@ app.get("/export/qc-ready-excel", async (req, res) => {
       const progressedQty = diff;
 
       if (type === "80") {
+        // Fiziki tamamlanan boş/0 ise iş sahada yapılmamıştır — listeye girmez
+        // (ekrandaki QC OK Fatura Kesilecek %80 kuralıyla birebir)
+        if (Number(row.tamamlanan_qty || 0) <= 0) return false;
         return statusOk && qcOk && billedZero && diff === 0;
       }
 
