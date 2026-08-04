@@ -19228,6 +19228,8 @@ app.get("/hw-acceptance/rejected", authMiddleware, async (req, res) => {
     const days = Math.min(60, Math.max(1, parseInt(req.query.days, 10) || 4));
     const r = await pool.query(`
       SELECT a.site_code, a.project_code, a.acceptance_no, a.po_no,
+        COALESCE(a.unit_price,0) * COALESCE(NULLIF(a.acceptance_qty,0), a.requested_qty, 0) AS tutar,
+        COALESCE(a.currency,'USD') AS currency,
         COALESCE(NULLIF(a.rejected_reason,''),'—') AS rejected_reason,
         COALESCE(NULLIF(a.approver,''),'—') AS approver,
         to_char(a.application_processed,'DD.MM.YYYY') AS islem_tarihi,

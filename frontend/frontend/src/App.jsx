@@ -9682,7 +9682,7 @@ function FinanceDashboard({
                     <div style={{ fontSize:"12px", color:"#991b1b", marginTop:"4px", display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
                       <span style={{ background:"#dc2626", color:"#fff", borderRadius:"6px", padding:"1px 8px", fontWeight:700 }}>Bugün: {_nBugun}</span>
                       <span style={{ background:"#f59e0b", color:"#fff", borderRadius:"6px", padding:"1px 8px", fontWeight:700 }}>Dün: {_nDun}</span>
-                      <span>Son 4 gün: {rejectedRows.length} kalem · en yeni üstte</span>
+                      <span>Son 4 gün: {rejectedRows.length} kalem · gün içinde hakedişi yüksek saha üstte</span>
                     </div>
                   </div>
                   <button onClick={() => setRejectedModal(false)}
@@ -9691,6 +9691,26 @@ function FinanceDashboard({
               );
             })()}
             <div style={{ overflowY:"auto", padding:"0" }}>
+              {(() => {
+                // Gün grupları korunur (bugün → dün → …); gün içinde SAHA bazlı
+                // toplam tutar (hakediş) yüksek olan saha üstte, kalemleri birlikte
+                const kurr = Number(usdTryRate) || 47;
+                const tKey = (r) => `${String(r.application_processed || "").slice(0, 10)}|${String(r.site_code || "").toUpperCase()}`;
+                const tot = {};
+                rejectedRows.forEach((r) => {
+                  const t = Number(r.tutar || 0) * (String(r.currency || "").toUpperCase() === "USD" ? kurr : 1);
+                  tot[tKey(r)] = (tot[tKey(r)] || 0) + t;
+                });
+                rejectedRows.sort((a, b) => {
+                  const dA = String(a.application_processed || "").slice(0, 10);
+                  const dB = String(b.application_processed || "").slice(0, 10);
+                  if (dA !== dB) return dB.localeCompare(dA);
+                  const tA = tot[tKey(a)] || 0, tB = tot[tKey(b)] || 0;
+                  if (tA !== tB) return tB - tA;
+                  return String(a.site_code || "").localeCompare(String(b.site_code || ""));
+                });
+                return null;
+              })()}
               {rejectedLoading ? (
                 <div style={{ textAlign:"center", color:"#9ca3af", padding:"40px 0" }}>Yükleniyor…</div>
               ) : rejectedRows.length === 0 ? (
@@ -19940,38 +19960,40 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         : qcReadyType === "20_fac_nok"
           ? getFacNok20RowsByRegion(qcReadyModalRegion)
           : [];
-  // Arama (saha/proje/item) + saha koduna göre alfabetik sıralama —
-  // BO sahaları, ES sahaları vb. yan yana gelir; sayaç ve toplam filtreyi izler
-  const qcReadyModalRows = _qcReadyHamRows
-    .filter((row) => {
+  // Satırın modalda gösterilen tutarı (80% / 20% moduna göre)
+  const qcRowShownTotal = (row) => {
+    const currency = normalizeCurrency(row.currency);
+    const rawBase =
+      Number(row.total_done_amount || row.total_amount || row.total || 0) ||
+      Number(row.done_qty || 0) * Number(row.unit_price || 0);
+    const rawTotal = currency === "USD" ? rawBase * usdRate : rawBase;
+    const facBase = Number(row.due_qty || 0) * Number(row.unit_price || 0);
+    const total20 = currency === "USD" ? facBase * usdRate : facBase;
+    return qcReadyType === "80" ? rawTotal * 0.8 : total20;
+  };
+  // Arama (saha/proje/item) + SAHA BAZLI hakediş sıralaması: toplam hakedişi
+  // yüksek saha üstte, sahanın kalemleri birlikte; eşitlikte saha kodu alfabetik
+  const qcReadyModalRows = (() => {
+    const filtered = _qcReadyHamRows.filter((row) => {
       const q = qcReadySearch.trim().toLowerCase();
       if (!q) return true;
       return [row.site_code, row.project_code, row.item_code, row.item_description]
         .some((v) => String(v || "").toLowerCase().includes(q));
-    })
-    .slice()
-    .sort((a, b) =>
-      String(a.site_code || "").localeCompare(String(b.site_code || "")) ||
-      String(a.item_code || "").localeCompare(String(b.item_code || "")));
+    });
+    const siteTot = {};
+    filtered.forEach((r) => {
+      const k = String(r.site_code || "").toUpperCase();
+      siteTot[k] = (siteTot[k] || 0) + qcRowShownTotal(r);
+    });
+    return filtered.slice().sort((a, b) => {
+      const ka = String(a.site_code || "").toUpperCase();
+      const kb = String(b.site_code || "").toUpperCase();
+      if (ka !== kb) return ((siteTot[kb] || 0) - (siteTot[ka] || 0)) || ka.localeCompare(kb);
+      return String(a.item_code || "").localeCompare(String(b.item_code || ""));
+    });
+  })();
 
-  const qcReadyModalTotal = qcReadyModalRows.reduce((sum, row) => {
-    const currency = normalizeCurrency(row.currency);
-
-    const rawBase =
-      Number(row.total_done_amount || row.total_amount || row.total || 0) ||
-      Number(row.done_qty || 0) * Number(row.unit_price || 0);
-
-    const rawTotal = currency === "USD" ? rawBase * usdRate : rawBase;
-
-    const facBase = Number(row.due_qty || 0) * Number(row.unit_price || 0);
-    const total20 = currency === "USD" ? facBase * usdRate : facBase;
-
-    const total80 = rawTotal * 0.8;
-
-    const shownTotal = qcReadyType === "80" ? total80 : total20;
-
-    return sum + shownTotal;
-  }, 0);
+  const qcReadyModalTotal = qcReadyModalRows.reduce((sum, row) => sum + qcRowShownTotal(row), 0);
 
   const handleExportQcReadyExcel = async () => {
     try {
