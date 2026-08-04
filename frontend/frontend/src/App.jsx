@@ -2254,7 +2254,19 @@ function MarkaTaseronPanel({ currentUser }) {
           <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
             <div style={{ padding: "12px 16px", background: "#065f46", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
               <span>📐 Taşeron Hesabı — Fatura Kesilecek & Borç Durumu ({rows.length})</span>
-              <span>Taşeron Bedeli: ₺{fmt(topBedel)} +KDV · Kalan Borç: ₺{fmt(topKalan)}</span>
+              <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                <span>Taşeron Bedeli: ₺{fmt(topBedel)} +KDV · Kalan Borç: ₺{fmt(topKalan)}</span>
+                <button onClick={() => exportStandardExcel({
+                  title: "AHY Elektrik — Taşeron Hesabı (Fatura Kesilecek & Borç Durumu)",
+                  sheetName: "Taşeron Hesabı", fileBase: "AHY_Taseron_Hesabi",
+                  headers: ["Taşeron", "Ekip", "İş Kalemi", "Bedel (KDV Hariç)", "Bedel (KDV Dahil)", "Kestiği Fatura", "Ödenen", "Kalan Borç"],
+                  colWidths: [38, 16, 10, 16, 16, 14, 12, 13],
+                  numericCols: [3, 4, 5, 6, 7],
+                  rows: rows.map(r => [r.ad, r.ekip && r.ekip !== r.ad ? r.ekip : "", r.isSayisi || "",
+                    Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, Number(r.fatura || 0), Number(r.odenen || 0), Number(r.kalan || 0)]),
+                }).catch(e => alert("Excel indirilemedi: " + e.message))}
+                  style={{ padding: "5px 12px", background: "#fff", color: "#065f46", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>📥 Excel İndir</button>
+              </span>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
