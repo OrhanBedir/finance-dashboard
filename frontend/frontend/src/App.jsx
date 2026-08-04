@@ -10711,6 +10711,30 @@ function FinanceDashboard({
                       style={{ width:"100%", padding:"12px", background: odemeModalFirma && odemeModalTutar ? "#7e22ce" : "#d1d5db", color:"#fff", border:"none", borderRadius:"10px", fontSize:"15px", fontWeight:800, cursor: odemeModalFirma && odemeModalTutar ? "pointer" : "not-allowed" }}>
                       {odemeModalLoading ? "⏳ Kaydediliyor..." : "✅ Ödemeyi Kaydet"}
                     </button>
+                    {/* Tutar girilmeden dekont seçildiyse: yeni ödeme yerine SON ödemeye iliştir */}
+                    {odemeFormDekont && !Number(odemeModalTutar || 0) && odemeModalLog.length > 0 && (
+                      <button type="button" disabled={dekontUploading === "form"}
+                        onClick={async () => {
+                          const hedef = odemeModalLog[0];
+                          setDekontUploading("form");
+                          try {
+                            const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+                            const fd = new FormData();
+                            fd.append("file", odemeFormDekont);
+                            const r = await fetch(`${API_BASE}/finance/odeme-dekont/${hedef.id}`, {
+                              method: "POST", headers: { Authorization: `Bearer ${tkn}` }, body: fd,
+                            });
+                            const d = await r.json();
+                            if (!d.ok) throw new Error(d.error || "Yükleme başarısız");
+                            setOdemeModalLog(prev => prev.map(l => l.id === hedef.id ? { ...l, dekont_url: d.dekont_url } : l));
+                            setOdemeFormDekont(null);
+                          } catch (err) { alert(err.message); }
+                          setDekontUploading(null);
+                        }}
+                        style={{ width:"100%", marginTop:"8px", padding:"11px", background:"#f0fdf4", color:"#166534", border:"1.5px solid #86efac", borderRadius:"10px", fontSize:"13.5px", fontWeight:800, cursor:"pointer" }}>
+                        {dekontUploading === "form" ? "⏳ Yükleniyor..." : `📎 Sadece Dekontu Kaydet — son ödemeye eklenir (₺${Number(odemeModalLog[0].tutar || 0).toLocaleString("tr-TR")} · ${String(odemeModalLog[0].tarih || "").slice(0, 10)})`}
+                      </button>
+                    )}
                   </form>
 
                   {/* Sonuç */}
