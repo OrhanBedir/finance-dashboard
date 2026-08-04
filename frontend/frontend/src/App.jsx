@@ -1819,6 +1819,8 @@ function MarkaNakitPanel({ currentUser }) {
             <div style={{ fontSize: "15px", fontWeight: 800, color: "#1e3a5f", minWidth: "130px", textAlign: "center" }}>{ayBaslik}</div>
             <button onClick={() => ayKaydir(1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>›</button>
           </div>
+          {/* Kasa + borç kartları yan yana */}
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "stretch" }}>
           {/* Kasa kartı: manuel nakit girişleri − kasadan yapılan harcamalar = bakiye
               (AHY'nin kendi cebinden ödedikleri hariç tutulur) */}
           {(() => {
@@ -1889,6 +1891,7 @@ function MarkaNakitPanel({ currentUser }) {
             <div style={{ fontSize: "11px", color: "#6b7280", textAlign: "right" }} title="Şimşek'in kendi harcamaları için AHY'den aldığı borç — kasa hesabına dahil değildir">
               Alınan ₺{fk(borc.alinan)} − Geri ödenen ₺{fk(borc.odenen)} · kalan borç
             </div>
+          </div>
           </div>
         </div>
       </div>
