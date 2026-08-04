@@ -2262,13 +2262,22 @@ function MarkaTaseronPanel({ currentUser }) {
                   headers: ["Taşeron", "Ekip", "İş Kalemi", "Bedel (KDV Hariç)", "Bedel (KDV Dahil)", "Fatura No", "Kestiği Fatura", "Ödenen", "Kalan Borç"],
                   colWidths: [38, 16, 10, 16, 16, 24, 14, 12, 13],
                   numericCols: [3, 4, 6, 7, 8],
-                  rows: rows.map(r => {
-                    const fNolar = data.faturalar
-                      .filter(f => mtCanon(f.taseron_adi) === mtCanon(r.ad))
-                      .map(f => f.fatura_no).filter(Boolean).join(", ");
-                    return [r.ad, r.ekip && r.ekip !== r.ad ? r.ekip : "", r.isSayisi || "",
-                      Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, fNolar,
-                      Number(r.fatura || 0), Number(r.odenen || 0), Number(r.kalan || 0)];
+                  rows: rows.flatMap(r => {
+                    // Fatura bazlı satırlar: aynı numaralı kayıtlar tek satırda toplanır,
+                    // farklı faturalar ayrı satır olur; taşeron özeti ilk satırda yazılır
+                    const fatlar = {};
+                    data.faturalar.filter(f => mtCanon(f.taseron_adi) === mtCanon(r.ad)).forEach(f => {
+                      const no = String(f.fatura_no || "").trim() || "—";
+                      fatlar[no] = (fatlar[no] || 0) + Number(f.toplam_tutar || f.tutar || 0);
+                    });
+                    const ozet = [r.ad, r.ekip && r.ekip !== r.ad ? r.ekip : "", r.isSayisi || "",
+                      Number(r.bedel || 0), Number(r.bedel || 0) * 1.2];
+                    const entries = Object.entries(fatlar);
+                    if (entries.length === 0)
+                      return [[...ozet, "", 0, Number(r.odenen || 0), Number(r.kalan || 0)]];
+                    return entries.map(([no, t], i) => i === 0
+                      ? [...ozet, no, t, Number(r.odenen || 0), Number(r.kalan || 0)]
+                      : ["", "", "", "", "", no, t, "", ""]);
                   }),
                 }).catch(e => alert("Excel indirilemedi: " + e.message))}
                   style={{ padding: "5px 12px", background: "#fff", color: "#065f46", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>📥 Excel İndir</button>
