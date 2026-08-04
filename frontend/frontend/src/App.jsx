@@ -17718,7 +17718,18 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const _talepPersonel = form.personel_id
     ? personelList.find(p => String(p.id) === String(form.personel_id))
     : personelList.find(p => (p.email || "").toLowerCase().trim() === _email);
-  const _atananPlaka = String(_talepPersonel?.ekip_arac_plaka || "").toUpperCase();
+  // Önce kişinin kendi araç ataması; yoksa EKİBİNİN aracı (ekipte başka
+  // üyeye — örn. şefe — atanmış plaka): saha personeli telefondan talep
+  // açtığında da ekip aracı otomatik gelir
+  const [_atananPlaka, _atananKaynak] = (() => {
+    const pr = _talepPersonel;
+    if (!pr) return ["", ""];
+    if (pr.ekip_arac_plaka) return [String(pr.ekip_arac_plaka).toUpperCase(), "kisi"];
+    const ekipNo = String(pr.ekip_bilgisi || "").trim();
+    if (!ekipNo) return ["", ""];
+    const sahip = personelList.find(x => String(x.ekip_bilgisi || "").trim() === ekipNo && x.ekip_arac_plaka);
+    return sahip ? [String(sahip.ekip_arac_plaka).toUpperCase(), "ekip"] : ["", ""];
+  })();
   useEffect(() => {
     if (showModal && form.gider_turu === "Yakıt" && _atananPlaka && !farkliArac && !form.plaka) {
       setForm(f => ({ ...f, plaka: _atananPlaka }));
@@ -18534,7 +18545,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   {_atananPlaka && !farkliArac && form.plaka === _atananPlaka ? (
                     <div style={{ display: "flex", gap: "8px", alignItems: "stretch", marginTop: "4px" }}>
                       <span style={{ flex: 1, padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #bfdbfe", background: "#eff6ff", color: "#1e40af", fontWeight: 800, fontSize: "14px", boxSizing: "border-box" }}>
-                        🚗 {_atananPlaka} <span style={{ fontSize: "11px", fontWeight: 600, color: "#60a5fa" }}>· atanan aracınız (otomatik)</span>
+                        🚗 {_atananPlaka} <span style={{ fontSize: "11px", fontWeight: 600, color: "#60a5fa" }}>· {_atananKaynak === "ekip" ? "ekibinizin aracı (otomatik)" : "atanan aracınız (otomatik)"}</span>
                       </span>
                       <button type="button" onClick={() => { setFarkliArac(true); setForm(f => ({ ...f, plaka: "" })); }}
                         style={{ padding: "0 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", background: "#fff", fontSize: "12px", fontWeight: 700, cursor: "pointer", color: "#374151", whiteSpace: "nowrap" }}>Farklı araç seç</button>
