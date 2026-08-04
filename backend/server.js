@@ -18478,6 +18478,7 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
 
     res.json({
       ok: true,
+      log_id: logId, // form içinden dekont yüklemek için
       odenen: odemeAmount - kalan,
       avans: kalan > 0 ? kalan : 0,
       fazla: 0,

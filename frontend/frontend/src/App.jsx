@@ -6799,6 +6799,7 @@ function FinanceDashboard({
   const [odemeModalSonuc,   setOdemeModalSonuc]   = useState(null);
   const [dekontUploading,   setDekontUploading]   = useState(null); // log id being uploaded
   const dekontRef = React.useRef(null);
+  const [odemeFormDekont, setOdemeFormDekont] = useState(null); // ödeme formunda seçilen dekont dosyası
   const [bankaInfo,         setBankaInfo]         = useState(null);  // seçili firma banka bilgisi
   const [showBankaCard,     setShowBankaCard]     = useState(false); // banka kartı açık mı
   const [bankaEditMode,     setBankaEditMode]     = useState(false); // düzenleme modu
@@ -8139,6 +8140,17 @@ function FinanceDashboard({
           firma_marka: firmaMarka,
         }),
       });
+      // Formda dekont seçildiyse kaydedilen ödemeye otomatik iliştir
+      if (odemeFormDekont && result?.log_id) {
+        try {
+          const fd = new FormData();
+          fd.append("file", odemeFormDekont);
+          await fetch(`${API_BASE}/finance/odeme-dekont/${result.log_id}`, {
+            method: "POST", headers: { Authorization: `Bearer ${financeToken}` }, body: fd,
+          });
+        } catch {}
+      }
+      setOdemeFormDekont(null);
       setOdemeModalSonuc(result);
       setOdemeModalTutar("");
       setOdemeModalAciklama("");
@@ -10682,6 +10694,18 @@ function FinanceDashboard({
                       <input type="text" value={odemeModalAciklama} onChange={e=>setOdemeModalAciklama(e.target.value)}
                         placeholder="Banka transferi, EFT vb."
                         style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #e5e7eb", borderRadius:"10px", fontSize:"14px", boxSizing:"border-box" }} />
+                    </div>
+                    <div style={{ marginBottom:"12px" }}>
+                      <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"5px" }}>📎 Ödeme Dekontu (opsiyonel — PDF / foto)</label>
+                      <label style={{ display:"flex", alignItems:"center", gap:"8px", padding:"10px 12px", border:"1.5px dashed #d8b4fe", borderRadius:"10px", fontSize:"13px", cursor:"pointer", background: odemeFormDekont ? "#f0fdf4" : "#fdf4ff", color: odemeFormDekont ? "#166534" : "#7e22ce", fontWeight:700 }}>
+                        {odemeFormDekont ? `✅ ${odemeFormDekont.name}` : "Dekont seç — kayıtla birlikte yüklenir"}
+                        <input type="file" accept="image/*,application/pdf" style={{ display:"none" }}
+                          onChange={e => setOdemeFormDekont(e.target.files?.[0] || null)} />
+                        {odemeFormDekont && (
+                          <button type="button" onClick={ev => { ev.preventDefault(); setOdemeFormDekont(null); }}
+                            style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer", fontSize:"13px", color:"#dc2626", fontWeight:700 }}>✕</button>
+                        )}
+                      </label>
                     </div>
                     <button type="submit" disabled={!odemeModalFirma || !odemeModalTutar || odemeModalLoading}
                       style={{ width:"100%", padding:"12px", background: odemeModalFirma && odemeModalTutar ? "#7e22ce" : "#d1d5db", color:"#fff", border:"none", borderRadius:"10px", fontSize:"15px", fontWeight:800, cursor: odemeModalFirma && odemeModalTutar ? "pointer" : "not-allowed" }}>
