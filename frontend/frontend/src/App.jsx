@@ -1690,6 +1690,35 @@ function MarkaNakitPanel({ currentUser }) {
   const [ay, setAy] = useState(() => new Date().toISOString().slice(0, 7)); // görüntülenen ay (YYYY-MM)
   const [kasa, setKasa] = useState({ rows: [], toplam: 0 }); // manuel nakit girişleri
   const [kasaModal, setKasaModal] = useState(false);
+  // Borç defteri: AHY'den Şimşek'in kendi harcamaları için aldığı borçlar + geri ödemeler
+  const [borc, setBorc] = useState({ rows: [], alinan: 0, odenen: 0, kalan: 0 });
+  const [borcModal, setBorcModal] = useState(false);
+  const loadBorc = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-borc?marka=${marka}`, { headers: _auth });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) setBorc({ rows: d.rows || [], alinan: Number(d.alinan || 0), odenen: Number(d.odenen || 0), kalan: Number(d.kalan || 0) });
+    } catch {}
+  };
+  const borcEkle = async (tip) => {
+    const t = prompt(tip === "ODEME" ? "Geri ödenen tutar (₺):" : "AHY'den alınan borç tutarı (₺):");
+    if (!t) return;
+    const _s = String(t).trim();
+    const tutarN = /^\d+(\.\d{1,2})?$/.test(_s) ? Number(_s) : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
+    if (tutarN <= 0) { alert("Geçerli tutar giriniz"); return; }
+    const bugunS = new Date().toISOString().slice(0, 10);
+    const tarih = prompt("Tarih (YYYY-AA-GG):", bugunS) || bugunS;
+    const acikl = prompt("Açıklama (opsiyonel):", "") || "";
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-borc`, {
+        method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ marka, tip, tarih, tutar: tutarN, aciklama: acikl }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
+      loadBorc();
+    } catch (e2) { alert(e2.message); }
+  };
   const gridRef = useRef(null);
   const marka = String(currentUser?.marka || "AHY").toUpperCase();
   const markaAd = currentUser?.marka_ad || marka;
@@ -1709,6 +1738,7 @@ function MarkaNakitPanel({ currentUser }) {
         if (!r.ok || d.ok === false) throw new Error(d.error || "Nakit akışı alınamadı");
         setData(d);
         loadKasa();
+        loadBorc();
       } catch (e) { setErr(e.message); } finally { setLoading(false); }
     })();
   }, []);
@@ -1837,6 +1867,29 @@ function MarkaNakitPanel({ currentUser }) {
               </div>
             );
           })()}
+          {/* Borç defteri kartı: AHY → Şimşek (kendi harcamaları için) borç + geri ödeme.
+              Kasa hesabından AYRIDIR — yalnız kayıt/mutabakat amaçlıdır. */}
+          <div style={{ background: "#fffbeb", border: "2px solid #fcd34d", borderRadius: "14px", padding: "10px 16px", minWidth: "250px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+              <div style={{ fontSize: "11px", fontWeight: 800, color: "#92400e", letterSpacing: "0.04em" }}>🤝 BORÇ — AHY → ŞİMŞEK</div>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button onClick={() => borcEkle("BORC")}
+                  style={{ padding: "3px 10px", background: "#92400e", color: "#fff", border: "none", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>＋ Borç Ekle</button>
+                <button onClick={() => borcEkle("ODEME")}
+                  style={{ padding: "3px 10px", background: "#166534", color: "#fff", border: "none", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>↩ Geri Ödeme</button>
+                {borc.rows.length > 0 && (
+                  <button onClick={() => setBorcModal(true)} title="Kayıtları gör / sil"
+                    style={{ padding: "3px 8px", background: "#fff", color: "#374151", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>🧾 {borc.rows.length}</button>
+                )}
+              </div>
+            </div>
+            <div style={{ fontSize: "24px", fontWeight: 900, color: borc.kalan > 0 ? "#92400e" : "#166534", marginTop: "4px", textAlign: "right" }}>
+              ₺{fk(borc.kalan)}
+            </div>
+            <div style={{ fontSize: "11px", color: "#6b7280", textAlign: "right" }} title="Şimşek'in kendi harcamaları için AHY'den aldığı borç — kasa hesabına dahil değildir">
+              Alınan ₺{fk(borc.alinan)} − Geri ödenen ₺{fk(borc.odenen)} · kalan borç
+            </div>
+          </div>
         </div>
       </div>
       <div style={{ display: "flex", gap: "12px", marginBottom: "18px", flexWrap: "wrap" }}>
@@ -1950,6 +2003,43 @@ function MarkaNakitPanel({ currentUser }) {
                 </div>
               ))}
               {kasa.rows.length === 0 && <div style={{ padding: "20px", textAlign: "center", color: "#9ca3af" }}>Henüz nakit girişi yok</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Borç defteri modalı */}
+      {borcModal && (
+        <div onClick={() => setBorcModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(500px, 94vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid #e5e7eb", background: "#fffbeb" }}>
+              <div style={{ fontWeight: 800, fontSize: "15px", color: "#92400e" }}>🤝 Borç Defteri — AHY → Şimşek <span style={{ fontWeight: 600, fontSize: "12px", color: "#6b7280" }}>(kalan ₺{fk(borc.kalan)})</span></div>
+              <button onClick={() => setBorcModal(false)} style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "6px 11px", cursor: "pointer", fontWeight: 700 }}>✕</button>
+            </div>
+            <div style={{ overflowY: "auto", padding: "10px 14px" }}>
+              {borc.rows.map(r => (
+                <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "9px 10px", borderBottom: "1px solid #f1f5f9" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: "14px", color: r.tip === "ODEME" ? "#166534" : "#92400e" }}>
+                      {r.tip === "ODEME" ? "↩ Geri ödeme " : "＋ Borç "}₺{fk(r.tutar)}
+                    </div>
+                    <div style={{ fontSize: "11.5px", color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.tarih}{r.aciklama ? ` · ${r.aciklama}` : ""}</div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`₺${fk(r.tutar)} tutarındaki ${r.tip === "ODEME" ? "geri ödeme" : "borç"} kaydı silinsin mi?`)) return;
+                      try {
+                        const rr = await fetch(`${API_BASE}/finance/marka-borc/${r.id}`, { method: "DELETE", headers: _auth });
+                        const dd = await rr.json();
+                        if (!rr.ok || !dd.ok) throw new Error(dd.error || "Silinemedi");
+                        loadBorc();
+                      } catch (e2) { alert(e2.message); }
+                    }}
+                    style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", padding: "4px 10px", fontSize: "11px", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
+                  >🗑 Sil</button>
+                </div>
+              ))}
+              {borc.rows.length === 0 && <div style={{ padding: "20px", textAlign: "center", color: "#9ca3af" }}>Henüz borç kaydı yok</div>}
             </div>
           </div>
         </div>

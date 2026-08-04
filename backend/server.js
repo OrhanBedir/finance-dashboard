@@ -6037,6 +6037,60 @@ app.delete("/finance/marka-kasa/:id", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+
+// MARKA BORÇ DEFTERİ: AHY'den Şimşek'in KENDİ harcamaları için aldığı borçlar
+// ve geri ödemeleri. Kasa akışından ayrıdır — yalnız kayıt/mutabakat amaçlı.
+async function ensureMarkaBorcTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marka_borc (
+      id SERIAL PRIMARY KEY,
+      marka TEXT NOT NULL,
+      tip TEXT NOT NULL DEFAULT 'BORC', -- BORC: AHY'den alınan · ODEME: geri ödeme
+      tarih DATE NOT NULL,
+      tutar NUMERIC NOT NULL,
+      aciklama TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+}
+app.get("/finance/marka-borc", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureMarkaBorcTable();
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const r = await pool.query(
+      `SELECT id, tip, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama
+       FROM marka_borc WHERE UPPER(marka)=$1 ORDER BY tarih DESC, id DESC`, [marka]);
+    const alinan = r.rows.filter(x => x.tip !== 'ODEME').reduce((s, x) => s + Number(x.tutar || 0), 0);
+    const odenen = r.rows.filter(x => x.tip === 'ODEME').reduce((s, x) => s + Number(x.tutar || 0), 0);
+    res.json({ ok: true, rows: r.rows, alinan, odenen, kalan: alinan - odenen });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/finance/marka-borc", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureMarkaBorcTable();
+    const marka = String(req.body.marka || "AHY").toUpperCase();
+    const tip = String(req.body.tip || "BORC").toUpperCase() === "ODEME" ? "ODEME" : "BORC";
+    const { tarih, tutar, aciklama } = req.body;
+    const t = Number(tutar || 0);
+    if (!tarih || !t) return res.status(400).json({ ok: false, error: "tarih ve tutar zorunlu" });
+    const r = await pool.query(
+      `INSERT INTO marka_borc (marka, tip, tarih, tutar, aciklama) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [marka, tip, tarih, t, aciklama || null]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/marka-borc/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`DELETE FROM marka_borc WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // MARKA TAŞERON: AHY'nin taşeronlarının (AHY_OLCAY vb.) kestiği faturalar
 // (invoice_entries.firma='AHY') + bu taşeronlara yapılan avans/fatura ödemeleri.
 // Taşeron adı kanonik anahtarı: "NETELCOM", "NETELCOM TELEKOMÜNİKASYON SAN.
