@@ -28214,7 +28214,10 @@ function App() {
                     <div style={altNavGrup}>
                       <AltNavItem aktif={page==='malzeme'} onClick={()=>setPage('malzeme')} ikon="📦" label="Malzeme Yönetimi" badge={pendingMalzemeCount} />
                       {(isAdmin || ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com"].includes(_userEmail)) && (
-                        <AltNavItem aktif={page==='araclar' || page==='ofis'} onClick={()=>setPage('araclar')} ikon="🚗" label="Araç & Depo & Ofis" />
+                        <AltNavItem aktif={page==='araclar'} onClick={()=>setPage('araclar')} ikon="🚗" label="Araç Yönetimi" />
+                      )}
+                      {isAdmin && (
+                        <AltNavItem aktif={page==='ofis'} onClick={()=>setPage('ofis')} ikon="🏢" label="Depo & Ofis Kiraları" />
                       )}
                     </div>
                   )}
