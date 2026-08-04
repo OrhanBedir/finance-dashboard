@@ -4981,6 +4981,17 @@ app.post(
 );
 
 /* ================== MANUAL INVOICE ENTRY ================== */
+// Mükerrer fatura kontrolü: aynı fatura no ikinci kez girilemez (panel fark etmez)
+async function faturaNoMukerrerMi(fatura_no, haricId) {
+  const no = String(fatura_no || "").trim();
+  if (!no) return null;
+  const r = await pool.query(
+    `SELECT id, tedarikci, UPPER(COALESCE(firma,'')) AS firma FROM invoice_entries
+     WHERE UPPER(TRIM(fatura_no)) = UPPER($1) ${haricId ? "AND id <> $2" : ""} LIMIT 1`,
+    haricId ? [no, haricId] : [no]).catch(() => ({ rows: [] }));
+  return r.rows[0] || null;
+}
+
 app.post("/finance/invoice-entry/add", async (req, res) => {
   try {
     const {
@@ -5009,6 +5020,11 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       firma, // ŞİMŞEK (boş/SIMSEK) veya AHY — AHY seçilirse AHY taşeron panelinde görünür
       temp_belge_key, // PDF önceden yüklendiyse geçici dosya yolu
     } = req.body;
+    const mukerrer = await faturaNoMukerrerMi(fatura_no);
+    if (mukerrer) {
+      return res.status(409).json({ ok: false,
+        error: `Bu fatura numarası zaten kayıtlı (${mukerrer.tedarikci} · ${mukerrer.firma === "AHY" ? "AHY" : "Şimşek"} etiketi). Aynı faturayı ikinci kez girmeyin — iki panel de aynı kayıttan beslenir.` });
+    }
     const firmaNorm = String(firma || "").toUpperCase() === "AHY" ? "AHY" : "SIMSEK";
 
     const result = await pool.query(
@@ -6290,6 +6306,11 @@ app.post("/finance/marka-taseron-fatura", authMiddleware, async (req, res) => {
     const m = String(marka || "AHY").toUpperCase();
     if (!taseron_adi || !fatura_no || !Number(toplam_tutar || 0))
       return res.status(400).json({ ok: false, error: "Taşeron adı, fatura no ve toplam tutar zorunlu" });
+    const mukerrer = await faturaNoMukerrerMi(fatura_no);
+    if (mukerrer) {
+      return res.status(409).json({ ok: false,
+        error: `Bu fatura numarası zaten kayıtlı (${mukerrer.tedarikci} · ${mukerrer.firma === "AHY" ? "AHY" : "Şimşek"} etiketi). İki panel aynı kayıttan beslenir — tekrar girişe gerek yok.` });
+    }
     const r = await pool.query(`INSERT INTO invoice_entries
         (tedarikci, rf_montaj_firma, fatura_no, fatura_tarihi, tutar, kdv, toplam_tutar, note, fatura_turu, firma, is_kalemi)
       VALUES ($1,$1,$2,$3,$4,$5,$6,$7,'GELEN',$8,$9) RETURNING id`,
