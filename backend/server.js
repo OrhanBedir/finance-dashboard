@@ -14320,12 +14320,23 @@ app.post("/hr/is-avans", async (req, res) => {
         ADD COLUMN IF NOT EXISTS iban      TEXT
     `).catch(() => {});
 
+    // Personel seçilmediyse avansın alıcısı talep edendir: e-postasından
+    // personel kaydını bulup bağla — kişisel bakiye (mobil "üzerimdeki iş
+    // avansı") ve personel avans bakiyeleri doğru işlesin
+    let personelIdFinal = personel_id || null;
+    if (!personelIdFinal && talep_eden_email) {
+      const pf = await pool.query(
+        `SELECT id FROM personel WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) AND aktif = true LIMIT 1`,
+        [talep_eden_email]).catch(() => ({ rows: [] }));
+      personelIdFinal = pf.rows[0]?.id || null;
+    }
+
     const r = await pool.query(
       `INSERT INTO is_avans_talep
          (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi,plaka,firma)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
       [
-        personel_id || null,
+        personelIdFinal,
         talep_eden_email,
         adFinal,
         tutar,
