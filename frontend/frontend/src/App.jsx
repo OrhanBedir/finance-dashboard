@@ -21770,6 +21770,20 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     <th
                       style={{
                         padding: "16px 14px",
+                        fontSize: "13px",
+                        fontWeight: "700",
+                        color: "#fff",
+                        textAlign: "left",
+                        borderBottom: "1px solid #374151",
+                        whiteSpace: "nowrap",
+                        background: "#1f2937",
+                      }}
+                    >
+                      PO Durumu
+                    </th>
+                    <th
+                      style={{
+                        padding: "16px 14px",
 
                         fontSize: "13px",
 
@@ -21975,6 +21989,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                               i % 2 === 0 ? "#ffffff" : "#f9fafb")
                           }
                         >
+                          <td style={{ padding: "14px", textAlign: "left", whiteSpace: "nowrap" }}>
+                            {Number(row.requested_qty || 0) > 0 ? (
+                              <span style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 800, background: "#dcfce7", color: "#166534" }}>✓ PO Açık</span>
+                            ) : (
+                              <span style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 800, background: "#fee2e2", color: "#b91c1c" }}>⏳ PO Bekler</span>
+                            )}
+                          </td>
                           <td style={{ padding: "14px", textAlign: "left" }}>
                             {row.project_code || "-"}
                           </td>
