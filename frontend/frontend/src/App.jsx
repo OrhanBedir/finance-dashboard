@@ -2272,12 +2272,18 @@ function MarkaTaseronPanel({ currentUser }) {
                     });
                     const ozet = [r.ad, r.ekip && r.ekip !== r.ad ? r.ekip : "", r.isSayisi || "",
                       Number(r.bedel || 0), Number(r.bedel || 0) * 1.2];
-                    const entries = Object.entries(fatlar);
+                    const entries = Object.entries(fatlar).sort((a, b) => a[0].localeCompare(b[0]));
                     if (entries.length === 0)
                       return [[...ozet, "", 0, Number(r.odenen || 0), Number(r.kalan || 0)]];
-                    return entries.map(([no, t], i) => i === 0
-                      ? [...ozet, no, t, Number(r.odenen || 0), Number(r.kalan || 0)]
-                      : ["", "", "", "", "", no, t, "", ""]);
+                    if (entries.length === 1)
+                      return [[...ozet, entries[0][0], entries[0][1], Number(r.odenen || 0), Number(r.kalan || 0)]];
+                    // Çok faturalı: önce taşeron özet satırı (toplamlarla), altında
+                    // numara sırasıyla fatura satırları — kalan borç fatura satırına yapışmaz
+                    const topFat = entries.reduce((sm, [, t]) => sm + t, 0);
+                    return [
+                      [...ozet, `${entries.length} fatura ↓`, topFat, Number(r.odenen || 0), Number(r.kalan || 0)],
+                      ...entries.map(([no, t]) => ["", "", "", "", "", no, t, "", ""]),
+                    ];
                   }),
                 }).catch(e => alert("Excel indirilemedi: " + e.message))}
                   style={{ padding: "5px 12px", background: "#fff", color: "#065f46", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>📥 Excel İndir</button>
