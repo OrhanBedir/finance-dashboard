@@ -2259,11 +2259,17 @@ function MarkaTaseronPanel({ currentUser }) {
                 <button onClick={() => exportStandardExcel({
                   title: "AHY Elektrik — Taşeron Hesabı (Fatura Kesilecek & Borç Durumu)",
                   sheetName: "Taşeron Hesabı", fileBase: "AHY_Taseron_Hesabi",
-                  headers: ["Taşeron", "Ekip", "İş Kalemi", "Bedel (KDV Hariç)", "Bedel (KDV Dahil)", "Kestiği Fatura", "Ödenen", "Kalan Borç"],
-                  colWidths: [38, 16, 10, 16, 16, 14, 12, 13],
-                  numericCols: [3, 4, 5, 6, 7],
-                  rows: rows.map(r => [r.ad, r.ekip && r.ekip !== r.ad ? r.ekip : "", r.isSayisi || "",
-                    Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, Number(r.fatura || 0), Number(r.odenen || 0), Number(r.kalan || 0)]),
+                  headers: ["Taşeron", "Ekip", "İş Kalemi", "Bedel (KDV Hariç)", "Bedel (KDV Dahil)", "Fatura No", "Kestiği Fatura", "Ödenen", "Kalan Borç"],
+                  colWidths: [38, 16, 10, 16, 16, 24, 14, 12, 13],
+                  numericCols: [3, 4, 6, 7, 8],
+                  rows: rows.map(r => {
+                    const fNolar = data.faturalar
+                      .filter(f => mtCanon(f.taseron_adi) === mtCanon(r.ad))
+                      .map(f => f.fatura_no).filter(Boolean).join(", ");
+                    return [r.ad, r.ekip && r.ekip !== r.ad ? r.ekip : "", r.isSayisi || "",
+                      Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, fNolar,
+                      Number(r.fatura || 0), Number(r.odenen || 0), Number(r.kalan || 0)];
+                  }),
                 }).catch(e => alert("Excel indirilemedi: " + e.message))}
                   style={{ padding: "5px 12px", background: "#fff", color: "#065f46", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>📥 Excel İndir</button>
               </span>
