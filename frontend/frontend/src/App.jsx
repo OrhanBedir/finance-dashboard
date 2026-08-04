@@ -17711,6 +17711,19 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const isNurcan       = _email === "nurcan.kus@simsektel.com";
   // Rollout Manager: rollout_mudur veya bolge_mudur rolüne sahip kullanıcılar
   const isRolloutMudur = _role === "rollout_mudur" || _role === "bolge_mudur";
+  // Yakıt talebinde araç otomatiği: talep edilen personelin (personel seçilmemişse
+  // giriş yapan kullanıcının) org şemasındaki araç ataması plakaya otomatik gelir;
+  // "Farklı araç seç" ile serbest seçime dönülür
+  const [farkliArac, setFarkliArac] = useState(false);
+  const _talepPersonel = form.personel_id
+    ? personelList.find(p => String(p.id) === String(form.personel_id))
+    : personelList.find(p => (p.email || "").toLowerCase().trim() === _email);
+  const _atananPlaka = String(_talepPersonel?.ekip_arac_plaka || "").toUpperCase();
+  useEffect(() => {
+    if (showModal && form.gider_turu === "Yakıt" && _atananPlaka && !farkliArac && !form.plaka) {
+      setForm(f => ({ ...f, plaka: _atananPlaka }));
+    }
+  }, [showModal, form.gider_turu, form.personel_id, _atananPlaka, farkliArac]);
   // Alt marka (AHY) tam paneli: firma=AHY işaretli TÜM avansları görür
   // (nakit akışına yansıyanlarla aynı küme — onay firması seçilenler)
   const _altMarka = currentUser?.hw_yukleme === false;
@@ -17799,12 +17812,14 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
   const openNew = () => {
     setEditingId(null);
+    setFarkliArac(false);
     setForm({ personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0], aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: "", plaka: "", firma: _altMarka ? _marka : "" });
     setShowModal(true);
   };
 
   const openEdit = (t) => {
     setEditingId(t.id);
+    setFarkliArac(true); // düzenlemede mevcut plaka korunur, otomatik doldurma devreye girmez
     setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "", plaka: t.plaka || "", firma: t.firma || (_altMarka ? _marka : "") });
     setShowModal(true);
   };
@@ -18516,12 +18531,28 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                 </label>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Araç Plakası (opsiyonel)
-                  <input value={form.plaka} onChange={e => setForm(f => ({...f, plaka: e.target.value.toUpperCase()}))}
-                    list="isavans-plaka-list" placeholder="Örn. 16GB307"
-                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", background: "#fff", color: "#1f2937", textTransform: "uppercase" }} />
-                  <datalist id="isavans-plaka-list">
-                    {aracPlakalari.map(p => <option key={p} value={p} />)}
-                  </datalist>
+                  {_atananPlaka && !farkliArac && form.plaka === _atananPlaka ? (
+                    <div style={{ display: "flex", gap: "8px", alignItems: "stretch", marginTop: "4px" }}>
+                      <span style={{ flex: 1, padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #bfdbfe", background: "#eff6ff", color: "#1e40af", fontWeight: 800, fontSize: "14px", boxSizing: "border-box" }}>
+                        🚗 {_atananPlaka} <span style={{ fontSize: "11px", fontWeight: 600, color: "#60a5fa" }}>· atanan aracınız (otomatik)</span>
+                      </span>
+                      <button type="button" onClick={() => { setFarkliArac(true); setForm(f => ({ ...f, plaka: "" })); }}
+                        style={{ padding: "0 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", background: "#fff", fontSize: "12px", fontWeight: 700, cursor: "pointer", color: "#374151", whiteSpace: "nowrap" }}>Farklı araç seç</button>
+                    </div>
+                  ) : (
+                    <>
+                      <input value={form.plaka} onChange={e => setForm(f => ({...f, plaka: e.target.value.toUpperCase()}))}
+                        list="isavans-plaka-list" placeholder="Örn. 16GB307"
+                        style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", background: "#fff", color: "#1f2937", textTransform: "uppercase" }} />
+                      <datalist id="isavans-plaka-list">
+                        {aracPlakalari.map(p => <option key={p} value={p} />)}
+                      </datalist>
+                      {_atananPlaka && (
+                        <button type="button" onClick={() => { setFarkliArac(false); setForm(f => ({ ...f, plaka: _atananPlaka })); }}
+                          style={{ marginTop: "6px", padding: "4px 10px", borderRadius: "8px", border: "none", background: "#f1f5f9", fontSize: "11.5px", fontWeight: 700, cursor: "pointer", color: "#1e40af" }}>↩ Atanan araca dön ({_atananPlaka})</button>
+                      )}
+                    </>
+                  )}
                 </label>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Açıklama
