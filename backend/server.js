@@ -1543,14 +1543,16 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
 
     // ── ŞABLON → KALEM KAPSAMI KURGUSU (17.07.2026, DE0334_NS_AE örneği) ──
     // Bir sahada birden çok QC görevi açılır; her şablon FARKLI kalemleri kapatır:
-    //   TRS Quality CheckList   → yalnız 8812184600 (outdoor kabin)
+    //   TRS Quality CheckList   → 8812184600 (outdoor kabin) + 8818274546 (mikrodalga/TRS)
     //   AG OG Enerji Template   → yalnız enerji kalemleri (+ enh kapanış tarihi)
     //   5G Readiness Yeni Pole  → yalnız LPRT kalemleri (8818278108, 8818278098)
     //   STANDALONE AI / diğer ana şablonlar → yukarıdakiler DIŞINDA kalan kalemler
     // Saha (rollout) QC durumunu YALNIZ ana şablon belirler. QA görevleri
     // (EHS Audit vb.) hiçbir kapsamda QC belirleyemez; QC-CW/QC-TE geçerlidir.
     // Aynı saha+kapsamda birden çok satır varsa OK öncelikli birleştirilir.
-    const ITEM_TRS = ["8812184600"];
+    // 8818274546: New Microwave Installation (transmisyon) — standalone
+    // sahalardaki 4 görevden TRS CheckList kapatınca bu kalem OK olur (05.08.2026)
+    const ITEM_TRS = ["8812184600", "8818274546"];
     const ITEM_LPRT = ["8818278108", "8818278098"];
     const ITEM_ENERJI = ["8812184681", "8812184682", "8812184684", "8812184690", "8812184851", "8818278116"];
     // Gizleme QC'si (QC-CW "Gizleme" şablonu) yalnız gizleme kalemlerini kapatır —
