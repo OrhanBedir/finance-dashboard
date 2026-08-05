@@ -5980,11 +5980,14 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           tutar, COALESCE(donem,'') AS aciklama
         FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1`, [marka]).catch(() => ({ rows: [] })),
-      // Taşeron ödemeleri (AHY_taşeronlara avans + fatura ödemesi) — ödeme tarihiyle düşer
+      // Taşeron ödemeleri: AVANSLAR kasadaki nakitten çıkar (kasadan düşer);
+      // FATURA ödemelerini AHY kendisi yapar — nakit akışında/giderde görünür,
+      // kasa bakiyesinden DÜŞMEZ (araç/ofis kirasındaki kasadan_dus kurgusu)
       pool.query(`SELECT to_char(tarih,'YYYY-MM-DD') AS tarih, taseron_adi AS ad_soyad,
           'TASERON' AS tip, tutar,
-          ((CASE UPPER(COALESCE(tip,'AVANS')) WHEN 'AVANS' THEN 'Avans' ELSE 'Fatura ödemesi' END)
-            || COALESCE(' · '||NULLIF(aciklama,''),'')) AS aciklama
+          ((CASE UPPER(COALESCE(tip,'AVANS')) WHEN 'AVANS' THEN 'Avans' ELSE 'Fatura ödemesi (AHY ödedi)' END)
+            || COALESCE(' · '||NULLIF(aciklama,''),'')) AS aciklama,
+          (UPPER(COALESCE(tip,'AVANS')) = 'AVANS') AS kasadan_dus
         FROM marka_taseron_odeme
         WHERE UPPER(marka) = $1`, [marka]).catch(() => ({ rows: [] })),
     ]);
