@@ -2693,32 +2693,22 @@ function detectSiteTypeFromSiteCode(siteCode) {
 }
 
 function getRegion(siteCode, projectCode = "") {
-  const code = String(siteCode || "")
-    .trim()
-    .toUpperCase();
+  // Frontend'teki getRegion ile BİREBİR aynı tutulur — ekran ve Excel
+  // exportları aynı bölge eşlemesini kullanmalı (BOHAS vakası, 05.08.2026)
+  const code = String(siteCode || "").trim().toUpperCase();
+  const project = String(projectCode || "").trim().toUpperCase();
 
-  const project = String(projectCode || "")
-    .trim()
-    .toUpperCase();
-
-  // 🔴 1) TT PROJESİ (56A0SJC) ÖZEL KURAL
-  if (project === "56A0SJC") {
-    if (code.endsWith("_IZM")) return "İzmir";
-    if (code.endsWith("_KON")) return "Konya";
-    if (code.endsWith("_ANT")) return "Antalya";
-    if (code.endsWith("_ANK")) return "Ankara";
-  }
-
-  // 🟡 2) NORMAL HUAWEI KURALLARI
   if (
     code.startsWith("ES") ||
     code.startsWith("BO") ||
     code.startsWith("ZO") ||
     code.startsWith("KA") ||
+    code.startsWith("BI") ||
+    code.startsWith("AN") ||
+    code.startsWith("CN") ||
     code.startsWith("DU") ||
     code.includes("_ANK") ||
-    code.includes("_KON") || // Konya sahaları Ankara bölgesine bağlı
-    code.startsWith("AN")
+    code.includes("_KON")
   ) {
     return "Ankara";
   }
@@ -2730,7 +2720,7 @@ function getRegion(siteCode, projectCode = "") {
     code.startsWith("MN") ||
     code.startsWith("AI") ||
     code.startsWith("DE") ||
-    code.includes("_IZM") // bunu da ekledik
+    code.includes("_IZM")
   ) {
     return "İzmir";
   }
@@ -2740,12 +2730,16 @@ function getRegion(siteCode, projectCode = "") {
     code.startsWith("IP") ||
     code.startsWith("BU") ||
     code.startsWith("AF") ||
-    code.includes("_ANT") // bunu da ekledik
+    code.includes("_ANT")
   ) {
     return "Antalya";
   }
 
-  return "DİĞER";
+  if (project.includes("ANK")) return "Ankara";
+  if (project.includes("IZM") || project.includes("IZ")) return "İzmir";
+  if (project.includes("ANT")) return "Antalya";
+
+  return "Tanımsız";
 }
 
 async function ensureHwAcceptanceTable() {
