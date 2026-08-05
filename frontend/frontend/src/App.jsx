@@ -21422,11 +21422,16 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 style={{ display: "flex", justifyContent: "space-between", padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff", cursor: "pointer" }}
                 title="Onay bekleyen kalemler için tıklayın"
               >
-                <div style={{ color: "#374151" }}>Huawei Fatura Onay Bekler <span style={{ fontSize: "11px", color: "#9ca3af" }}>🔍</span></div>
-                <div style={{ fontWeight: 600, color: "#b45309" }}>
-                  {hwOzet.saha} saha
-                  {hwOzet.usd > 0 && <span> · ${hwOzet.usd.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}</span>}
-                  {hwOzet.tl > 0 && <span> · ₺{hwOzet.tl.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}</span>}
+                <div style={{ color: "#374151", whiteSpace: "nowrap" }}>Huawei Fatura Onay Bekler <span style={{ fontSize: "11px", color: "#9ca3af" }}>🔍</span></div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", whiteSpace: "nowrap", flexShrink: 0 }}>
+                  <span style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: "999px", padding: "2px 10px", fontSize: "11.5px", fontWeight: 800, color: "#92400e" }}>
+                    {hwOzet.saha} saha
+                  </span>
+                  <span style={{ fontWeight: 800, color: "#b45309", fontVariantNumeric: "tabular-nums" }}>
+                    {hwOzet.tl > 0 && <>₺{hwOzet.tl.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}</>}
+                    {hwOzet.tl > 0 && hwOzet.usd > 0 && <span style={{ color: "#d97706", fontWeight: 600 }}> + </span>}
+                    {hwOzet.usd > 0 && <span style={{ fontSize: "13px" }}>${hwOzet.usd.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}</span>}
+                  </span>
                 </div>
               </div>
             </>
