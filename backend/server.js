@@ -1551,8 +1551,10 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     // (EHS Audit vb.) hiçbir kapsamda QC belirleyemez; QC-CW/QC-TE geçerlidir.
     // Aynı saha+kapsamda birden çok satır varsa OK öncelikli birleştirilir.
     // 8818274546: New Microwave Installation (transmisyon) — standalone
-    // sahalardaki 4 görevden TRS CheckList kapatınca bu kalem OK olur (05.08.2026)
-    const ITEM_TRS = ["8812184600", "8818274546"];
+    // sahalardaki 4 görevden TRS CheckList kapatınca bu kalem OK olur.
+    // NOT (05.08.2026, MU3381 vakası): 8812184600 (TP48200 cabinet) ana
+    // kalemdir, TRS kapsamına GİRMEZ — STANDALONE AI şablonu belirler.
+    const ITEM_TRS = ["8818274546"];
     const ITEM_LPRT = ["8818278108", "8818278098"];
     const ITEM_ENERJI = ["8812184681", "8812184682", "8812184684", "8812184690", "8812184851", "8818278116"];
     // Gizleme QC'si (QC-CW "Gizleme" şablonu) yalnız gizleme kalemlerini kapatır —
