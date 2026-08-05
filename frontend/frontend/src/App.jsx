@@ -22331,6 +22331,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           // total_done_amount (done×fiyat), USD kalemler kurla çevrilir. Fiziki
           // listeye giren sahaların (fiz>0) TÜM kalemleri toplanır.
           const fizSiteler = new Set(_fizRows.map(x => String(x.row.site_code).trim().toUpperCase()));
+          // Saha bazında QC durumu: fiziki tamamlanan kalemlerin kaçı QC OK
+          const qcMap = new Map(); // site → {ok, tot}
+          _fizRows.forEach(({ row }) => {
+            const s = String(row.site_code).trim().toUpperCase();
+            const q = qcMap.get(s) || { ok: 0, tot: 0 };
+            q.tot += 1;
+            if (String(row.qc_durum || "").toUpperCase() === "OK") q.ok += 1;
+            qcMap.set(s, q);
+          });
           const perSite = new Map();
           rows.forEach(row => {
             const s = String(row.site_code || "").trim().toUpperCase();
@@ -22343,11 +22352,20 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           });
           const list = [...perSite.values()]
             .sort((a, b) => a.site.localeCompare(b.site))
-            .map(a => ({ site: a.site, bolge: a.bolge, toplam: `₺${a._t.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`, _t: a._t }));
+            .map(a => {
+              const q = qcMap.get(a.site) || { ok: 0, tot: 0 };
+              const qc = q.tot > 0 && q.ok === q.tot
+                ? "✅ QC OK"
+                : q.ok > 0
+                  ? `🔶 QC ${q.ok}/${q.tot} OK`
+                  : "⬜ QC Bekliyor";
+              return { qc, site: a.site, bolge: a.bolge, toplam: `₺${a._t.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`, _t: a._t };
+            });
           setFizikiSoru(false);
           setOzetModal({
             title: "🏗️ Fiziki Tamamlanan — Saha Listesi",
             cols: [
+              { k: "qc", l: "QC Durumu" },
               { k: "site", l: "Site ID" },
               { k: "bolge", l: "Bölge" },
               { k: "toplam", l: "Toplam Tutar (TL)" },
