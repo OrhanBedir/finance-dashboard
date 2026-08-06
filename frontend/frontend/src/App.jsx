@@ -2127,7 +2127,7 @@ function ErcTaseronPanel() {
   const rowsF = filtre ? rows.filter(r => r.canon === filtre) : rows;
   const topBedel = rowsF.reduce((sm, r) => sm + Number(r.bedel || 0), 0);
   const topKalan = rowsF.reduce((sm, r) => sm + Math.max(0, r.kalan), 0);
-  const kuralAd = (r) => r.canon === "ferrumx" ? "AHY paket kuralı" : `Hakedişin %${Math.round((r.pct || 0) * 100)}'i`;
+  const kuralAd = (r) => r.canon === "2kx_asbuilt" ? "Sabit 750 TL/saha" : r.canon === "ferrumx" ? "AHY paket kuralı" : `Hakedişin %${Math.round((r.pct || 0) * 100)}'i`;
   const indirExcel = () => exportStandardExcel({
     title: "Şimşek — Taşeron Hesabı (STATE %80 · 2KX %75 · FERRUMX paket)",
     sheetName: "Taşeron Hesabı", fileBase: "Simsek_Taseron_Hesabi",
@@ -2137,15 +2137,49 @@ function ErcTaseronPanel() {
     rows: rowsF.map(r => [r.ad, kuralAd(r), r.is_sayisi || "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2,
       Number(r.fatura || 0), Number(r.odenen || 0), Number(r.kalan || 0)]),
     extraSheets: [{
+      // As-built HARİÇ kalemler — as-built'in sahibi farklı, ayrı sayfada
       sheetName: "Fatura Kesilecek (Bedel)",
-      title: "Şimşek — Taşeron Bedeli Saha Dökümü (fatura onayı için)",
+      title: "Şimşek — Taşeron Bedeli Saha Dökümü (fatura onayı için · as-built hariç)",
       headers: ["Taşeron", "Saha", "Paket / Kalem", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)", "QC (Ana Kalemler)"],
       colWidths: [42, 22, 44, 7, 16, 16, 16, 16],
       numericCols: [3, 4, 5, 6],
-      rows: rowsF.filter(r => (r.bedel_detay || []).length > 0).flatMap(r => [
+      rows: rowsF.filter(r => r.canon !== "2kx_asbuilt" && (r.bedel_detay || []).length > 0).flatMap(r => [
         ...r.bedel_detay.map(d => [r.ad, d.site || "", d.kalem || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2, d.qc || ""]),
         { cells: ["", `${r.ad} — FATURA KESECEĞİ TUTAR`, "", "", "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, ""], bold: true, merge: [1, 4] },
       ]),
+    },
+    ...(rowsF.some(r => r.canon === "2kx_asbuilt" && (r.bedel_detay || []).length > 0) ? [{
+      // As-built ayrı sayfa: sahibi farklı, ödemesi ayrı yapılır
+      sheetName: "As-Built (750 TL sabit)",
+      title: "Şimşek — 2KX As-Built Dokümantasyon (sabit 750 TL/saha · sahibi farklı, ödemesi ayrı)",
+      headers: ["Saha", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)", "QC"],
+      colWidths: [26, 8, 16, 16, 16, 10],
+      numericCols: [1, 2, 3, 4],
+      rows: (() => {
+        const r = rowsF.find(x => x.canon === "2kx_asbuilt");
+        return [
+          ...r.bedel_detay.map(d => [d.site || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2, d.qc || ""]),
+          { cells: ["AS-BUILT TOPLAM", r.is_sayisi, "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, ""], bold: true },
+        ];
+      })(),
+    }] : []),
+    {
+      // Sisteme girilmiş kesilen faturalar (finans paneli kayıtları)
+      sheetName: "Kesilen Faturalar",
+      title: "Şimşek — Taşeronların Kestiği Faturalar (sisteme girilenler)",
+      headers: ["Taşeron", "Fatura No", "Tarih", "Tutar (KDV Dahil)"],
+      colWidths: [42, 24, 13, 17],
+      numericCols: [3],
+      rows: (() => {
+        const out = [];
+        rowsF.filter(r => (r.faturalar || []).length > 0).forEach(r => {
+          r.faturalar.slice().sort((a, b) => String(a.tarih || "").localeCompare(String(b.tarih || ""))).forEach(f => {
+            out.push([r.ad, f.fatura_no || "—", f.tarih || "—", Number(f.tutar || 0)]);
+          });
+          out.push({ cells: ["", `${r.ad} — TOPLAM (${r.faturalar.length} fatura)`, "", Number(r.fatura || 0)], bold: true, merge: [1, 2] });
+        });
+        return out.length ? out : [["Kayıtlı fatura yok", "", "", 0]];
+      })(),
     }],
   }).catch(e => alert("Excel indirilemedi: " + e.message));
   return (

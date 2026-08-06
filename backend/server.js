@@ -6391,6 +6391,7 @@ app.get("/finance/erc-taseron-hakedis", authMiddleware, async (req, res) => {
       )
       SELECT UPPER(TRIM(m.subcon_name)) AS subcon,
         UPPER(TRIM(COALESCE(m.site_code,''))) AS site,
+        TRIM(COALESCE(m.item_code,'')) AS item,
         COALESCE(NULLIF(TRIM(m.item_description),''), best_boq.boq_items_en, COALESCE(m.item_code,'')) AS kalem,
         GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty,0) END) AS fq,
         (UPPER(TRIM(COALESCE(m.qc_durum,'NOK'))) = 'OK') AS qc_ok,
@@ -6410,6 +6411,14 @@ app.get("/finance/erc-taseron-hakedis", authMiddleware, async (req, res) => {
       if (!adlar[c] || r.subcon.length > adlar[c].length) adlar[c] = r.subcon;
     });
     const sonuc = [];
+    // 2KX as-built (8812184927): sabit 750 TL/adet — sahibi farklı, ayrı hesap
+    // olarak döner; %75 kırılım hesabına GİRMEZ
+    const ASBUILT_ITEM = "8812184927", ASBUILT_FIYAT = 750;
+    let asbuiltRows = [];
+    if (rowsByCanon["2kx"]) {
+      asbuiltRows = rowsByCanon["2kx"].filter(r => r.item === ASBUILT_ITEM);
+      rowsByCanon["2kx"] = rowsByCanon["2kx"].filter(r => r.item !== ASBUILT_ITEM);
+    }
     for (const canon of ["state", "2kx", "ferrumx"]) {
       const rows = rowsByCanon[canon];
       let bedel = 0, detay = [];
@@ -6436,6 +6445,19 @@ app.get("/finance/erc-taseron-hakedis", authMiddleware, async (req, res) => {
         bedel = Math.round(bedel);
       }
       sonuc.push({ canon, ad: adlar[canon] || canon.toUpperCase(), pct: canon === "ferrumx" ? null : PCT[canon], is_sayisi: isSayisi, bedel, bedel_detay: detay });
+    }
+    {
+      const asbDetay = [];
+      let asbBedel = 0, asbAdet = 0;
+      asbuiltRows.filter(r => Number(r.fq) > 0)
+        .sort((a, b) => a.site.localeCompare(b.site))
+        .forEach(r => {
+          const q = Number(r.fq);
+          asbAdet += q; asbBedel += q * ASBUILT_FIYAT;
+          asbDetay.push({ site: r.site, kalem: "Site as-built documentation (sabit 750 TL)", adet: q, birim: ASBUILT_FIYAT, tutar: q * ASBUILT_FIYAT, qc: r.qc_ok ? "OK" : "NOK" });
+        });
+      sonuc.push({ canon: "2kx_asbuilt", ad: "2KX — AS-BUILT DOKÜMANTASYON", pct: null, sabit: true,
+        is_sayisi: asbAdet, bedel: Math.round(asbBedel), bedel_detay: asbDetay });
     }
     const fat = await pool.query(`SELECT id, COALESCE(tedarikci,'') AS taseron_adi, fatura_no,
         to_char(fatura_tarihi,'YYYY-MM-DD') AS fatura_tarihi,
