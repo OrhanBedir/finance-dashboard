@@ -28667,7 +28667,6 @@ function App() {
                         <>
                           <AltNavItem aktif={page==='finance'} onClick={()=>setPage('finance')} ikon="📊" label="Finans Paneli" />
                           <AltNavItem onClick={()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); }} ikon="🧾" label="Fatura Girişi" />
-                          <AltNavItem onClick={()=>{ setPage('finance'); setFinanceActionTrigger('taseron_hakedis'); }} ikon="🏗️" label="Taşeron Hakediş" />
                           <AltNavItem aktif={page==='erc_taseron'} onClick={()=>setPage('erc_taseron')} ikon="📐" label="Taşeron Hesabı" />
                         </>
                       )}
