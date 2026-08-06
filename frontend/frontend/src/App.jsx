@@ -475,9 +475,7 @@ function getQtyAnalysis(doneQty, requestedQty) {
 // Tüm indirmelerin tek tip olması için: Bölge Analizi formatı (lacivert başlık,
 // koyu header + autofilter + dondurulmuş üst satırlar, zebra satırlar, gridsiz).
 // rows: dizi dizisi; numericCols: sağa yaslanacak kolon indexleri (Set/dizi).
-async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, sheetName = "Rapor", numericCols = [] }) {
-  const numSet = new Set(numericCols);
-  const NCOLS = headers.length;
+async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, sheetName = "Rapor", numericCols = [], extraSheets = [] }) {
   const titleStyle = {
     fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
     font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
@@ -510,56 +508,72 @@ async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, 
   });
 
   const dateStr = new Date().toLocaleDateString("tr-TR");
-  const aoa = [];
-  const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
-  titleRow[0] = { v: `${title} (${dateStr})`, s: titleStyle };
-  aoa.push(titleRow);
-  aoa.push(headers.map((h) => ({ v: h, s: headerStyle })));
-  rows.forEach((r, idx) => {
-    const isEven = idx % 2 === 1;
-    aoa.push(r.map((v, ci) => {
-      const s = cellStyle(isEven, numSet.has(ci));
-      // Sayısal hücreler binlik ayraç + 2 ondalıkla, tek satırda okunur
-      if (numSet.has(ci) && typeof v === "number") s.numFmt = "#,##0.00";
-      return { v: v ?? "", s };
-    }));
-  });
-
-  const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
-  aoa.forEach((row, ri) => {
-    row.forEach((cell, ci) => {
-      const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
-      if (!ws[addr]) ws[addr] = { v: cell.v };
-      ws[addr].s = cell.s;
+  // Tek sayfa kurulumunu extraSheets için de aynen kullanan yardımcı
+  const buildSheet = (sh) => {
+    const numSet = new Set(sh.numericCols || []);
+    const NCOLS = sh.headers.length;
+    const aoa = [];
+    const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
+    titleRow[0] = { v: `${sh.title} (${dateStr})`, s: titleStyle };
+    aoa.push(titleRow);
+    aoa.push(sh.headers.map((h) => ({ v: h, s: headerStyle })));
+    sh.rows.forEach((r, idx) => {
+      const isEven = idx % 2 === 1;
+      aoa.push(r.map((v, ci) => {
+        const s2 = cellStyle(isEven, numSet.has(ci));
+        // Sayısal hücreler binlik ayraç + 2 ondalıkla, tek satırda okunur
+        if (numSet.has(ci) && typeof v === "number") s2.numFmt = "#,##0.00";
+        return { v: v ?? "", s: s2 };
+      }));
     });
-  });
-  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
-  // Kolon genişliği: verilen genişlik ile başlık uzunluğunun büyüğü
-  // (+4 filtre oku payı) — başlık hiçbir zaman iki satıra kırılmaz
-  ws["!cols"] = (colWidths || headers.map(() => 18)).map((wch, i) => ({
-    wch: Math.max(Number(wch) || 18, String(headers[i] || "").length + 4),
-  }));
-  ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...aoa.slice(2).map(() => ({ hpt: 20 }))];
+    const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
+    aoa.forEach((row, ri) => {
+      row.forEach((cell, ci) => {
+        const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
+        if (!ws[addr]) ws[addr] = { v: cell.v };
+        ws[addr].s = cell.s;
+      });
+    });
+    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
+    // Kolon genişliği: verilen genişlik ile başlık uzunluğunun büyüğü
+    // (+4 filtre oku payı) — başlık hiçbir zaman iki satıra kırılmaz
+    ws["!cols"] = (sh.colWidths || sh.headers.map(() => 18)).map((wch, i) => ({
+      wch: Math.max(Number(wch) || 18, String(sh.headers[i] || "").length + 4),
+    }));
+    ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...aoa.slice(2).map(() => ({ hpt: 20 }))];
+    return { ws, NCOLS };
+  };
 
   const wb = XLSXStyle.utils.book_new();
-  XLSXStyle.utils.book_append_sheet(wb, ws, sheetName);
+  const sheets = [{ sheetName, title, headers, rows, colWidths, numericCols }, ...extraSheets];
+  const ncolsList = [];
+  sheets.forEach((sh, i) => {
+    const { ws, NCOLS } = buildSheet(sh);
+    XLSXStyle.utils.book_append_sheet(wb, ws, String(sh.sheetName || `Sayfa${i + 1}`).slice(0, 31));
+    ncolsList.push(NCOLS);
+  });
 
   const dateFile = new Date().toISOString().slice(0, 10);
   const fileName = `${String(fileBase).replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ _-]/g, "").slice(0, 60)}_${dateFile}.xlsx`;
 
-  // Gridline kapat + üst 2 satırı dondur + header'a autofilter (Bölge Analizi ile aynı)
-  const lastColLetter = XLSXStyle.utils.encode_col(NCOLS - 1);
+  // Gridline kapat + üst 2 satırı dondur + header'a autofilter (Bölge Analizi ile aynı) — her sayfada
   const freezePane = `<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/>`;
   const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
   const zip = await JSZip.loadAsync(buf);
-  let xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
-  xml = xml
-    .replace('<sheetView workbookViewId="0"/>', `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`)
-    .replace('<sheetView tabSelected="1" workbookViewId="0"/>', `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`);
-  if (!xml.includes("<autoFilter")) {
-    xml = xml.replace("</sheetData>", `</sheetData><autoFilter ref="A2:${lastColLetter}2"/>`);
+  for (let si = 0; si < ncolsList.length; si++) {
+    const path = `xl/worksheets/sheet${si + 1}.xml`;
+    const f = zip.file(path);
+    if (!f) continue;
+    let xml = await f.async("string");
+    xml = xml
+      .replace('<sheetView workbookViewId="0"/>', `<sheetView showGridLines="0" workbookViewId="0">${freezePane}</sheetView>`)
+      .replace('<sheetView tabSelected="1" workbookViewId="0"/>', `<sheetView showGridLines="0" tabSelected="1" workbookViewId="0">${freezePane}</sheetView>`);
+    if (!xml.includes("<autoFilter")) {
+      const lastColLetter = XLSXStyle.utils.encode_col(ncolsList[si] - 1);
+      xml = xml.replace("</sheetData>", `</sheetData><autoFilter ref="A2:${lastColLetter}2"/>`);
+    }
+    zip.file(path, xml);
   }
-  zip.file("xl/worksheets/sheet1.xml", xml);
   const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -2285,6 +2299,20 @@ function MarkaTaseronPanel({ currentUser }) {
                       ...entries.map(([no, t]) => ["", "", "", "", "", no, t, "", ""]),
                     ];
                   }),
+                  // 2. sayfa: saha saha bedel dökümü — fatura onayı bu sayfadan verilir.
+                  // Paket adı (Radyolu/Radyosuz) fiziki tamamlanan'a göre motor kararıdır:
+                  // MW fiziki 0 ise Radyosuz görünür, radyo yapılınca Radyolu'ya döner.
+                  extraSheets: [{
+                    sheetName: "Fatura Kesilecek (Bedel)",
+                    title: "AHY Elektrik — Taşeron Bedeli Saha Dökümü (fatura onayı için)",
+                    headers: ["Taşeron", "Saha", "Paket / Kalem", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)"],
+                    colWidths: [38, 22, 36, 7, 16, 16, 16],
+                    numericCols: [3, 4, 5, 6],
+                    rows: rows.filter(r => (r.detay || []).length > 0).flatMap(r => [
+                      ...r.detay.map(d => [r.ad, d.site || "", d.kalem || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2]),
+                      [`${r.ad} — FATURA KESECEĞİ TUTAR`, "", "", "", "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2],
+                    ]),
+                  }],
                 }).catch(e => alert("Excel indirilemedi: " + e.message))}
                   style={{ padding: "5px 12px", background: "#fff", color: "#065f46", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>📥 Excel İndir</button>
               </span>
