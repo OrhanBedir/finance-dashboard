@@ -6252,6 +6252,13 @@ function ahyTaseronBedel(rows) {
       // One Band Addition: LTE benzeri ekstra iş — paket fiyata dahil değildir
       const qOB = qty(/one band addition/i);
       if (qOB > 0) { ek.bedel += qOB * 12000; ek.detay.push({ site: st, kalem: "One Band Addition at the same site visit", adet: qOB, birim: 12000, tutar: qOB * 12000, qc: qcOf(/one band addition/i) }); }
+    } else {
+      // Diğer saha tipleri (L1800/L2100 One Band, co-located revizyon vb.):
+      // anlaşma fiyat listesindeki kalemler adet bazlı uygulanır
+      for (const [rx, fiyat, ad] of AHY_BEDEL_COLOCATED) {
+        const q = qty(rx);
+        if (q > 0) { ek.bedel += q * fiyat; ek.detay.push({ site: st, kalem: ad, adet: q, birim: fiyat, tutar: q * fiyat, qc: qcOf(rx) }); }
+      }
     }
   }
   return out;
@@ -6350,6 +6357,111 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
         bedel_detay: bedelMap[e.subcon]?.detay || [] })) });
   } catch (e) {
     console.error("MARKA TASERON HAKEDIS ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── ERC (Şimşek) Taşeron Hesabı: yalnız STATE / 2KX / FERRUMX ──
+// Bedel kuralları (06.08.2026, Orhan): STATE → Huawei hakedişinin %80'i,
+// 2KX → %75'i (Şimşek kırılım anlaşmaları); FERRUMX → AHY paket kural
+// motorunun birebir aynısı (ahyTaseronBedel). Fatura: invoice_entries'in
+// Şimşek tarafı (AHY etiketli hariç). Ödeme: taseron_odeme_log (AHY marka
+// panelinden yazılan satırlar hariç) + fatura girişindeki Ödenen Tutar.
+const ercTaseronCanon = (ad) => {
+  const u = String(ad || "").toUpperCase();
+  if (u.includes("2KX")) return "2kx";
+  if (u.includes("FERRUM")) return "ferrumx";
+  if (u.includes("STATE")) return "state";
+  return null;
+};
+app.get("/finance/erc-taseron-hakedis", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    let kur = 0;
+    try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
+    const det = await pool.query(`
+      WITH best_boq AS (
+        SELECT DISTINCT ON (s_bom_code) * FROM boq_items
+        WHERE COALESCE(TRIM(s_bom_code), '') <> '' ORDER BY s_bom_code, created_at DESC
+      ), po AS (
+        SELECT DISTINCT ON (UPPER(TRIM(site_code)), TRIM(item_code))
+          UPPER(TRIM(site_code)) AS site, TRIM(item_code) AS item, unit_price, currency
+        FROM po_rows ORDER BY UPPER(TRIM(site_code)), TRIM(item_code), id DESC
+      )
+      SELECT UPPER(TRIM(m.subcon_name)) AS subcon,
+        UPPER(TRIM(COALESCE(m.site_code,''))) AS site,
+        COALESCE(NULLIF(TRIM(m.item_description),''), best_boq.boq_items_en, COALESCE(m.item_code,'')) AS kalem,
+        GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty,0) END) AS fq,
+        (UPPER(TRIM(COALESCE(m.qc_durum,'NOK'))) = 'OK') AS qc_ok,
+        COALESCE(po.unit_price, 0) AS price, COALESCE(po.currency,'TRY') AS cur
+      FROM master_works m
+      LEFT JOIN best_boq ON TRIM(COALESCE(best_boq.s_bom_code,'')) = TRIM(COALESCE(m.item_code,''))
+      LEFT JOIN po ON po.site = UPPER(TRIM(COALESCE(m.site_code,''))) AND po.item = TRIM(COALESCE(m.item_code,''))
+      WHERE UPPER(TRIM(COALESCE(m.subcon_name,''))) NOT LIKE 'AHY\\_%'
+        AND (UPPER(m.subcon_name) LIKE '%2KX%' OR UPPER(m.subcon_name) LIKE '%FERRUM%' OR UPPER(m.subcon_name) LIKE '%STATE%')`);
+    const PCT = { state: 0.80, "2kx": 0.75 };
+    const rowsByCanon = { state: [], "2kx": [], ferrumx: [] };
+    const adlar = {};
+    det.rows.forEach(r => {
+      const c = ercTaseronCanon(r.subcon);
+      if (!c) return;
+      rowsByCanon[c].push(r);
+      if (!adlar[c] || r.subcon.length > adlar[c].length) adlar[c] = r.subcon;
+    });
+    const sonuc = [];
+    for (const canon of ["state", "2kx", "ferrumx"]) {
+      const rows = rowsByCanon[canon];
+      let bedel = 0, detay = [];
+      const isSayisi = rows.filter(r => Number(r.fq) > 0).length;
+      if (canon === "ferrumx") {
+        const bm = ahyTaseronBedel(rows.map(r => ({ subcon: "FERRUMX", site: r.site, kalem: r.kalem, fq: r.fq, qc_ok: r.qc_ok })));
+        bedel = Math.round(bm.FERRUMX?.bedel || 0);
+        detay = bm.FERRUMX?.detay || [];
+      } else {
+        const pct = PCT[canon];
+        const bySite = {};
+        rows.forEach(r => {
+          if (Number(r.fq) <= 0) return;
+          const tl = Number(r.fq) * Number(r.price) * (String(r.cur).toUpperCase() === "USD" ? kur : 1);
+          const b = (bySite[r.site] = bySite[r.site] || { hak: 0, ok: true, n: 0 });
+          b.hak += tl; b.n += 1;
+          if (!r.qc_ok) b.ok = false;
+        });
+        Object.entries(bySite).sort((a, b) => a[0].localeCompare(b[0])).forEach(([site, v]) => {
+          const pay = v.hak * pct;
+          bedel += pay;
+          detay.push({ site, kalem: `Saha hakedişi ₺${Math.round(v.hak).toLocaleString("tr-TR")} × %${Math.round(pct * 100)} (${v.n} kalem)`, adet: 1, birim: Math.round(pay), tutar: Math.round(pay), qc: v.ok ? "OK" : "NOK" });
+        });
+        bedel = Math.round(bedel);
+      }
+      sonuc.push({ canon, ad: adlar[canon] || canon.toUpperCase(), pct: canon === "ferrumx" ? null : PCT[canon], is_sayisi: isSayisi, bedel, bedel_detay: detay });
+    }
+    const fat = await pool.query(`SELECT id, COALESCE(tedarikci,'') AS taseron_adi, fatura_no,
+        to_char(fatura_tarihi,'YYYY-MM-DD') AS fatura_tarihi,
+        (CASE WHEN COALESCE(toplam_tutar,0) > 0 THEN toplam_tutar ELSE COALESCE(tutar,0) END) AS toplam_tutar,
+        COALESCE(odenen_tutar,0) AS odenen_tutar
+      FROM invoice_entries WHERE UPPER(COALESCE(firma,'')) <> 'AHY'`);
+    const ode = await pool.query(`SELECT COALESCE(firma,'') AS ad, COALESCE(tutar,0) AS tutar
+      FROM taseron_odeme_log
+      WHERE id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`);
+    for (const t of sonuc) {
+      const fs = fat.rows.filter(f => ercTaseronCanon(f.taseron_adi) === t.canon);
+      t.faturalar = fs.map(f => ({ fatura_no: f.fatura_no, tarih: f.fatura_tarihi, tutar: Number(f.toplam_tutar || 0) }));
+      t.fatura = fs.reduce((sm, f) => sm + Number(f.toplam_tutar || 0), 0);
+      const logOde = ode.rows.filter(o => ercTaseronCanon(o.ad) === t.canon).reduce((sm, o) => sm + Number(o.tutar || 0), 0);
+      // Fatura girişindeki Ödenen Tutar: aynı tutar ödeme geçmişinde de varsa çift sayma
+      const faturaOde = fs.reduce((sm, f) => {
+        const v = Number(f.odenen_tutar || 0);
+        if (v <= 0) return sm;
+        const zatenVar = ode.rows.some(o => ercTaseronCanon(o.ad) === t.canon && Math.abs(Number(o.tutar || 0) - v) < 1);
+        return sm + (zatenVar ? 0 : v);
+      }, 0);
+      t.odenen = logOde + faturaOde;
+    }
+    res.json({ ok: true, kur, taseronlar: sonuc });
+  } catch (e) {
+    console.error("ERC TASERON HAKEDIS ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });

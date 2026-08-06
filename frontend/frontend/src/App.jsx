@@ -2100,6 +2100,151 @@ const mtCanon = (ad) => {
   return t.replace(/K/g, "C");
 };
 
+// ── ERC (Şimşek) Taşeron Hesabı: STATE %80 · 2KX %75 · FERRUMX AHY paket kuralı ──
+function ErcTaseronPanel() {
+  const [veri, setVeri] = useState(null);
+  const [hata, setHata] = useState("");
+  const [filtre, setFiltre] = useState("");
+  const [detayModal, setDetayModal] = useState(null);
+  const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  const thS = { padding: "9px 12px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" };
+  const tdS = { padding: "10px 12px", fontSize: "13px", color: "#111827", borderBottom: "1px solid #f1f5f9", verticalAlign: "middle" };
+  const num = { ...tdS, textAlign: "right", whiteSpace: "nowrap" };
+  useEffect(() => { (async () => {
+    try {
+      const r = await fetch(`${API_BASE}/finance/erc-taseron-hakedis`);
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || "Veri alınamadı");
+      setVeri(d);
+    } catch (e) { setHata(e.message); }
+  })(); }, []);
+  if (hata) return <div style={{ padding: "30px", color: "#b91c1c" }}>Hata: {hata}</div>;
+  if (!veri) return <div style={{ padding: "30px", color: "#64748b" }}>Yükleniyor…</div>;
+  const rows = (veri.taseronlar || []).map(t => {
+    const taban = Math.max(Number(t.fatura || 0), Number(t.bedel || 0) * 1.2);
+    return { ...t, kalan: taban - Number(t.odenen || 0) };
+  });
+  const rowsF = filtre ? rows.filter(r => r.canon === filtre) : rows;
+  const topBedel = rowsF.reduce((sm, r) => sm + Number(r.bedel || 0), 0);
+  const topKalan = rowsF.reduce((sm, r) => sm + Math.max(0, r.kalan), 0);
+  const kuralAd = (r) => r.canon === "ferrumx" ? "AHY paket kuralı" : `Hakedişin %${Math.round((r.pct || 0) * 100)}'i`;
+  const indirExcel = () => exportStandardExcel({
+    title: "Şimşek — Taşeron Hesabı (STATE %80 · 2KX %75 · FERRUMX paket)",
+    sheetName: "Taşeron Hesabı", fileBase: "Simsek_Taseron_Hesabi",
+    headers: ["Taşeron", "Kural", "İş Kalemi", "Bedel (KDV Hariç)", "Bedel (KDV Dahil)", "Kestiği Fatura", "Ödenen", "Kalan Borç"],
+    colWidths: [42, 18, 10, 16, 16, 15, 12, 13],
+    numericCols: [3, 4, 5, 6, 7],
+    rows: rowsF.map(r => [r.ad, kuralAd(r), r.is_sayisi || "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2,
+      Number(r.fatura || 0), Number(r.odenen || 0), Number(r.kalan || 0)]),
+    extraSheets: [{
+      sheetName: "Fatura Kesilecek (Bedel)",
+      title: "Şimşek — Taşeron Bedeli Saha Dökümü (fatura onayı için)",
+      headers: ["Taşeron", "Saha", "Paket / Kalem", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)", "QC (Ana Kalemler)"],
+      colWidths: [42, 22, 44, 7, 16, 16, 16, 16],
+      numericCols: [3, 4, 5, 6],
+      rows: rowsF.filter(r => (r.bedel_detay || []).length > 0).flatMap(r => [
+        ...r.bedel_detay.map(d => [r.ad, d.site || "", d.kalem || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2, d.qc || ""]),
+        { cells: ["", `${r.ad} — FATURA KESECEĞİ TUTAR`, "", "", "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, ""], bold: true, merge: [1, 4] },
+      ]),
+    }],
+  }).catch(e => alert("Excel indirilemedi: " + e.message));
+  return (
+    <div style={{ maxWidth: "1250px", margin: "0 auto", padding: "20px" }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>📐 Şimşek — Taşeron Hesabı</h2>
+      <p style={{ margin: "0 0 18px", fontSize: "13px", color: "#64748b" }}>
+        STATE hakedişin %80'i · 2KX hakedişin %75'i · FERRUMX AHY paket kuralı (radyolu 52.000 / radyosuz 40.000 + ekstralar) — bedeller KDV hariç, kalan borç bedel + KDV üzerinden tahakkuk eder
+      </p>
+      <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden" }}>
+        <div style={{ padding: "12px 16px", background: "#065f46", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            📐 Taşeron Hesabı — Fatura Kesilecek & Borç Durumu ({rowsF.length})
+            <select value={filtre} onChange={e => setFiltre(e.target.value)}
+              style={{ padding: "4px 8px", borderRadius: "8px", border: "none", fontSize: "12px", fontWeight: 700, color: "#065f46", maxWidth: "260px" }}>
+              <option value="">Tüm Taşeronlar</option>
+              {rows.map(r => <option key={r.canon} value={r.canon}>{r.ad}</option>)}
+            </select>
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <span>Taşeron Bedeli: ₺{fmt(topBedel)} +KDV · Kalan Borç: ₺{fmt(topKalan)}</span>
+            <button onClick={indirExcel}
+              style={{ padding: "5px 12px", background: "#fff", color: "#065f46", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>📥 Excel İndir</button>
+          </span>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>
+              <th style={thS}>Taşeron</th>
+              <th style={thS}>Kural</th>
+              <th style={{ ...thS, textAlign: "right" }}>Taşeron Bedeli</th>
+              <th style={{ ...thS, textAlign: "right" }}>Kestiği Fatura</th>
+              <th style={{ ...thS, textAlign: "right" }}>Ödenen</th>
+              <th style={{ ...thS, textAlign: "right" }}>Kalan Borç</th>
+            </tr></thead>
+            <tbody>
+              {rowsF.map(r => (
+                <tr key={r.canon}>
+                  <td style={tdS}>
+                    <div style={{ fontWeight: 700 }}>{r.ad}</div>
+                    {r.is_sayisi > 0 && <div style={{ fontSize: "10.5px", color: "#94a3b8" }}>{r.is_sayisi} iş kalemi</div>}
+                  </td>
+                  <td style={tdS}><span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px", background: "#eef2ff", color: "#3730a3", whiteSpace: "nowrap" }}>{kuralAd(r)}</span></td>
+                  <td style={num}>
+                    {r.bedel > 0 ? (
+                      <button onClick={() => setDetayModal(r)} title="Hesap dökümü için tıklayın"
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "#065f46", fontWeight: 800, fontSize: "13px", padding: 0 }}>
+                        ₺{fmt(r.bedel)} <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 600 }}>+KDV 🔍</span>
+                      </button>
+                    ) : "—"}
+                  </td>
+                  <td style={num}>{r.fatura > 0 ? `₺${fmt(r.fatura)}` : "—"}</td>
+                  <td style={num}>{r.odenen > 0 ? `₺${fmt(r.odenen)}` : "—"}</td>
+                  <td style={{ ...num, fontWeight: 800, color: r.kalan > 0 ? "#b45309" : "#15803d" }}>₺{fmt(r.kalan)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
+          Fatura: finans panelinden girilen Şimşek etiketli faturalar (AHY hariç) · Ödeme: taşeron ödeme geçmişi + fatura girişindeki Ödenen Tutar (çift sayım korumalı) · Excel'in 2. sayfası saha saha bedel dökümü ve QC durumudur
+        </div>
+      </div>
+      {detayModal && (
+        <div onClick={() => setDetayModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(760px, 94vw)", maxHeight: "80vh", overflow: "auto", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "4px" }}>📐 {detayModal.ad} — Bedel Dökümü</div>
+            <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>{kuralAd(detayModal)} · fiyatlar KDV hariç</div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr>
+                <th style={thS}>Site</th><th style={thS}>Kalem</th>
+                <th style={{ ...thS, textAlign: "right" }}>Tutar</th>
+                <th style={thS}>QC</th>
+              </tr></thead>
+              <tbody>
+                {(detayModal.bedel_detay || []).map((d, i) => (
+                  <tr key={i}>
+                    <td style={tdS}>{d.site}</td>
+                    <td style={{ ...tdS, fontSize: "12px" }}>{d.kalem}</td>
+                    <td style={num}>₺{fmt(d.tutar)}</td>
+                    <td style={tdS}>{d.qc === "OK" ? "✅ OK" : d.qc === "NOK" ? "🔶 NOK" : ""}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td style={{ ...tdS, fontWeight: 800 }} colSpan={2}>TOPLAM (fatura keseceği tutar)</td>
+                  <td style={{ ...num, fontWeight: 800 }}>₺{fmt(detayModal.bedel)} <span style={{ fontSize: "11px", color: "#64748b" }}>+KDV = ₺{fmt(detayModal.bedel * 1.2)}</span></td>
+                  <td style={tdS}></td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{ textAlign: "right", marginTop: "14px" }}>
+              <button onClick={() => setDetayModal(null)} style={{ padding: "8px 18px", background: "#065f46", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>Kapat</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MarkaTaseronPanel({ currentUser }) {
   const [data, setData] = useState({ faturalar: [], odemeler: [] });
   // Uzun tablolar: ilk 10 satır görünür, "daha göster" ile açılır; açıkken
@@ -28293,6 +28438,7 @@ function App() {
       case "cashflow": return "Nakit Akışı";
       case "marka_pl": return "Kâr / Zarar (P&L)";
       case "marka_taseron": return "Taşeron Faturaları";
+      case "erc_taseron": return "Taşeron Hesabı";
       case "cek_senet": return "Çek & Senet";
       case "admin": return "Admin Panel";
       case "twokx-prices": return "2KX Özel Item Fiyatları";
@@ -28488,6 +28634,7 @@ function App() {
                           <AltNavItem aktif={page==='finance'} onClick={()=>setPage('finance')} ikon="📊" label="Finans Paneli" />
                           <AltNavItem onClick={()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); }} ikon="🧾" label="Fatura Girişi" />
                           <AltNavItem onClick={()=>{ setPage('finance'); setFinanceActionTrigger('taseron_hakedis'); }} ikon="🏗️" label="Taşeron Hakediş" />
+                          <AltNavItem aktif={page==='erc_taseron'} onClick={()=>setPage('erc_taseron')} ikon="📐" label="Taşeron Hesabı" />
                         </>
                       )}
                       <AltNavItem aktif={page==='is_avans'} onClick={()=>setPage('is_avans')} ikon="💳" label="İş Avansı" badge={pendingAvansCount} />
@@ -28628,6 +28775,7 @@ function App() {
             {page === "marka_pl" && isAltMarka && <MarkaPLPanel currentUser={user} />}
             {page === "marka_nakit" && isAltMarka && <MarkaNakitPanel currentUser={user} />}
             {page === "marka_taseron" && isAltMarka && <MarkaTaseronPanel currentUser={user} />}
+            {page === "erc_taseron" && !isAltMarka && <ErcTaseronPanel />}
             {page === "cek_senet" && !isAltMarka && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","muhasebe@simsektel.com","erencan.simsek@simsektel.com"].includes(_userEmail) && <CekSenetPanel currentUser={user} />}
             {page === "finance" && isFinanceUser && !isAltMarka && (
               financeToken ? (
