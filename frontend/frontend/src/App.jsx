@@ -2102,6 +2102,18 @@ const mtCanon = (ad) => {
 
 function MarkaTaseronPanel({ currentUser }) {
   const [data, setData] = useState({ faturalar: [], odemeler: [] });
+  // Uzun tablolar: ilk 10 satır görünür, "daha göster" ile açılır; açıkken
+  // pencere içi scroll + yapışkan başlık (uluslararası panel standardı)
+  const TABLO_LIMIT = 10;
+  const [tabloAcik, setTabloAcik] = useState({});
+  const tabloKes = (id, list) => (tabloAcik[id] ? list : list.slice(0, TABLO_LIMIT));
+  const tabloScrollS = (id, count) => ({ overflowX: "auto", ...(tabloAcik[id] && count > TABLO_LIMIT ? { maxHeight: "560px", overflowY: "auto" } : {}) });
+  const TabloAcKapa = ({ id, count }) => count > TABLO_LIMIT ? (
+    <div onClick={() => setTabloAcik(a => ({ ...a, [id]: !a[id] }))}
+      style={{ padding: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: "#1e3a5f", background: "#f8fafc", borderTop: "1px solid #e5e7eb", cursor: "pointer", userSelect: "none", letterSpacing: "0.2px" }}>
+      {tabloAcik[id] ? "▲ Daralt — ilk 10 kayıt" : `▼ ${count - TABLO_LIMIT} kayıt daha göster (toplam ${count})`}
+    </div>
+  ) : null;
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [faturaModal, setFaturaModal] = useState(false);
@@ -2198,6 +2210,7 @@ function MarkaTaseronPanel({ currentUser }) {
   if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
   if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
   const thS = { padding: "9px 12px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" };
+  const thF = { ...thS, position: "sticky", top: 0, zIndex: 2, background: "#f8fafc" };
   const tdS = { padding: "10px 12px", fontSize: "13px", color: "#374151", borderBottom: "1px solid #f1f5f9" };
   return (
     <div style={{ padding: "24px", maxWidth: "1200px" }}>
@@ -2339,18 +2352,18 @@ function MarkaTaseronPanel({ currentUser }) {
                   style={{ padding: "5px 12px", background: "#fff", color: "#065f46", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>📥 Excel İndir</button>
               </span>
             </div>
-            <div style={{ overflowX: "auto" }}>
+            <div style={tabloScrollS("hesap", rowsF.length)}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead><tr>
-                  <th style={thS}>Taşeron</th>
-                  <th style={{ ...thS, textAlign: "right" }}>Taşeron Bedeli</th>
-                  <th style={{ ...thS, textAlign: "right" }}>Kestiği Fatura</th>
-                  <th style={{ ...thS, textAlign: "right" }}>Ödenen</th>
-                  <th style={{ ...thS, textAlign: "right" }}>Kalan Borç</th>
-                  <th style={thS}></th>
+                  <th style={thF}>Taşeron</th>
+                  <th style={{ ...thF, textAlign: "right" }}>Taşeron Bedeli</th>
+                  <th style={{ ...thF, textAlign: "right" }}>Kestiği Fatura</th>
+                  <th style={{ ...thF, textAlign: "right" }}>Ödenen</th>
+                  <th style={{ ...thF, textAlign: "right" }}>Kalan Borç</th>
+                  <th style={thF}></th>
                 </tr></thead>
                 <tbody>
-                  {rowsF.map(r => (
+                  {tabloKes("hesap", rowsF).map(r => (
                     <tr key={r.ad}>
                       <td style={tdS}>
                         <div style={{ fontWeight: 700 }}>{r.ad}</div>
@@ -2382,6 +2395,7 @@ function MarkaTaseronPanel({ currentUser }) {
                 </tbody>
               </table>
             </div>
+            <TabloAcKapa id="hesap" count={rowsF.length} />
             <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
               Taşeron Bedeli: saha tipine göre otomatik hesap — co-located (NR700/TRP) kalem bazlı, standalone (NS) paket fiyat (radyolu 52.000 / radyosuz 40.000) + 7,2m LPRT; tutara tıklayıp saha bazlı dökümü görebilirsiniz. Kalan Borç, fatura kesilmemiş olsa da bedel + KDV üzerinden tahakkuk eder (fatura kesilince büyük olan esas alınır). Vinç, nakliye, konaklama gibi hizmetlerde hakediş kestikleri fatura kadardır. Ödemeler nakit akışına ve Kâr/Zarar giderine otomatik yansır.
             </div>
@@ -2392,17 +2406,17 @@ function MarkaTaseronPanel({ currentUser }) {
       {/* Fatura listesi */}
       <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
         <div style={{ padding: "12px 16px", background: "#1e3a5f", color: "#fff", fontSize: "14px", fontWeight: 700 }}>🧾 Taşeron Faturaları ({data.faturalar.length})</div>
-        <div style={{ overflowX: "auto" }}>
+        <div style={tabloScrollS("fatura", data.faturalar.length)}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ background: "#f8fafc" }}>
-              <th style={thS}>Taşeron</th><th style={thS}>Kategori</th><th style={thS}>Fatura No</th><th style={thS}>Tarih</th>
-              <th style={{ ...thS, textAlign: "right" }}>Tutar</th><th style={{ ...thS, textAlign: "right" }}>KDV</th>
-              <th style={{ ...thS, textAlign: "right" }}>Toplam (KDV Dahil)</th><th style={thS}>Not</th><th style={thS}></th>
+              <th style={thF}>Taşeron</th><th style={thF}>Kategori</th><th style={thF}>Fatura No</th><th style={thF}>Tarih</th>
+              <th style={{ ...thF, textAlign: "right" }}>Tutar</th><th style={{ ...thF, textAlign: "right" }}>KDV</th>
+              <th style={{ ...thF, textAlign: "right" }}>Toplam (KDV Dahil)</th><th style={thF}>Not</th><th style={thF}></th>
             </tr></thead>
             <tbody>
               {data.faturalar.length === 0 ? (
                 <tr><td colSpan={9} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz fatura girilmemiş — ERC fatura girişinde {markaAd} seçilenler de burada görünür</td></tr>
-              ) : data.faturalar.map(f => (
+              ) : tabloKes("fatura", data.faturalar).map(f => (
                 <tr key={f.id}>
                   <td style={{ ...tdS, fontWeight: 700 }}>{f.taseron_adi}</td>
                   <td style={tdS}><span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px", background: "#eef2ff", color: "#3730a3", whiteSpace: "nowrap" }}>{mtKatAdi(f.kategori)}</span></td>
@@ -2421,21 +2435,22 @@ function MarkaTaseronPanel({ currentUser }) {
             </tbody>
           </table>
         </div>
+        <TabloAcKapa id="fatura" count={data.faturalar.length} />
       </div>
 
       {/* Ödeme listesi */}
       <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden" }}>
         <div style={{ padding: "12px 16px", background: "#9d174d", color: "#fff", fontSize: "14px", fontWeight: 700 }}>💸 Avans & Ödemeler ({data.odemeler.length}) — nakit akışına düşer</div>
-        <div style={{ overflowX: "auto" }}>
+        <div style={tabloScrollS("odeme", data.odemeler.length)}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ background: "#f8fafc" }}>
-              <th style={thS}>Tarih</th><th style={thS}>Taşeron</th><th style={thS}>Tip</th>
-              <th style={{ ...thS, textAlign: "right" }}>Tutar</th><th style={thS}>Açıklama</th><th style={thS}></th>
+              <th style={thF}>Tarih</th><th style={thF}>Taşeron</th><th style={thF}>Tip</th>
+              <th style={{ ...thF, textAlign: "right" }}>Tutar</th><th style={thF}>Açıklama</th><th style={thF}></th>
             </tr></thead>
             <tbody>
               {data.odemeler.length === 0 ? (
                 <tr><td colSpan={6} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz ödeme girilmemiş</td></tr>
-              ) : data.odemeler.map(o => (
+              ) : tabloKes("odeme", data.odemeler).map(o => (
                 <tr key={o.id}>
                   <td style={tdS}>{o.tarih}</td>
                   <td style={{ ...tdS, fontWeight: 700 }}>{o.taseron_adi}</td>
@@ -2459,6 +2474,7 @@ function MarkaTaseronPanel({ currentUser }) {
             </tbody>
           </table>
         </div>
+        <TabloAcKapa id="odeme" count={data.odemeler.length} />
       </div>
 
       {/* Taşeron bedeli hesap dökümü modalı */}
