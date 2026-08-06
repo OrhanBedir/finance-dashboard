@@ -2128,9 +2128,13 @@ function ErcTaseronPanel() {
   const topBedel = rowsF.reduce((sm, r) => sm + Number(r.bedel || 0), 0);
   const topKalan = rowsF.reduce((sm, r) => sm + Math.max(0, r.kalan), 0);
   const kuralAd = (r) => r.canon === "ferrumx" ? "AHY paket kuralı" : r.canon === "2kx" ? "Hakedişin %75'i + as-built 750 TL" : `Hakedişin %${Math.round((r.pct || 0) * 100)}'i`;
-  const indirExcel = () => exportStandardExcel({
-    title: "Şimşek — Taşeron Hesabı (STATE %80 · 2KX %75 · FERRUMX paket)",
-    sheetName: "Taşeron Hesabı", fileBase: "Simsek_Taseron_Hesabi",
+  const indirExcel = () => {
+    // Filtre seçiliyse başlık ve dosya adı o taşerona göre yazılır
+    const secili = filtre ? rows.find(r => r.canon === filtre) : null;
+    const kisaAd = secili ? String(secili.ad).split(" ")[0] : "";
+    return exportStandardExcel({
+    title: secili ? `Şimşek — ${secili.ad} · Taşeron Hesabı (${kuralAd(secili)})` : "Şimşek — Taşeron Hesabı (STATE %80 · 2KX %75 · FERRUMX paket)",
+    sheetName: "Taşeron Hesabı", fileBase: secili ? `Simsek_Taseron_${kisaAd}` : "Simsek_Taseron_Hesabi",
     headers: ["Taşeron", "Kural", "İş Kalemi", "Bedel (KDV Hariç)", "Bedel (KDV Dahil)", "Kestiği Fatura", "Ödenen", "Kalan Borç"],
     colWidths: [42, 18, 10, 16, 16, 15, 12, 13],
     numericCols: [3, 4, 5, 6, 7],
@@ -2186,6 +2190,7 @@ function ErcTaseronPanel() {
       })(),
     }],
   }).catch(e => alert("Excel indirilemedi: " + e.message));
+  };
   return (
     <div style={{ maxWidth: "1250px", margin: "0 auto", padding: "20px" }}>
       <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>📐 Şimşek — Taşeron Hesabı</h2>
