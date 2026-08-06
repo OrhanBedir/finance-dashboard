@@ -5859,9 +5859,15 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         pool.query(`SELECT COALESCE(taseron_adi,'') AS ad, COALESCE(tutar,0) AS t
           FROM marka_taseron_odeme WHERE UPPER(marka) = $1
           UNION ALL
-          SELECT COALESCE(tedarikci,''), COALESCE(odenen_tutar,0)
-          FROM invoice_entries
-          WHERE UPPER(COALESCE(firma,'')) = $1 AND COALESCE(odenen_tutar,0) > 0`, [marka]).catch(() => ({ rows: [] })),
+          SELECT COALESCE(i.tedarikci,''), COALESCE(i.odenen_tutar,0)
+          FROM invoice_entries i
+          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM marka_taseron_odeme mo
+            WHERE UPPER(mo.marka) = $1
+              AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
+              AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+          )`, [marka]).catch(() => ({ rows: [] })),
       ]);
       const grp = {};
       bf.rows.forEach(r => { const k = taseronCanonKey(r.ad); grp[k] = grp[k] || { f: 0, o: 0 }; grp[k].f += Number(r.t || 0); });
@@ -5995,7 +6001,21 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
             || COALESCE(' · '||NULLIF(aciklama,''),'')) AS aciklama,
           (UPPER(COALESCE(tip,'AVANS')) = 'AVANS') AS kasadan_dus
         FROM marka_taseron_odeme
-        WHERE UPPER(marka) = $1`, [marka]).catch(() => ({ rows: [] })),
+        WHERE UPPER(marka) = $1
+        UNION ALL
+        SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM-DD') AS tarih,
+          COALESCE(i.tedarikci,'') AS ad_soyad, 'TASERON' AS tip, COALESCE(i.odenen_tutar,0) AS tutar,
+          ('Fatura ödemesi (AHY ödedi) · fatura girişinden: ' || COALESCE(i.fatura_no,'')) AS aciklama,
+          false AS kasadan_dus
+        FROM invoice_entries i
+        WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+          -- Aynı ödeme AHY panelinden de girildiyse çift sayma (taşeron ilk kelime + tutar eşleşmesi)
+          AND NOT EXISTS (
+            SELECT 1 FROM marka_taseron_odeme mo
+            WHERE UPPER(mo.marka) = $1
+              AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
+              AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+          )`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...ofisKiralar.rows, ...manuel.rows, ...taseronOdeme.rows]
       .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))
@@ -6158,8 +6178,15 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
           to_char(COALESCE(odeme_tarihi, fatura_tarihi),'YYYY-MM-DD') AS tarih,
           ('Fatura girişinde ödendi: ' || COALESCE(fatura_no,'')) AS aciklama,
           id AS fatura_id, 'FATURA' AS kaynak
-        FROM invoice_entries
-        WHERE UPPER(COALESCE(firma,'')) = $1 AND COALESCE(odenen_tutar,0) > 0`, [marka]);
+        FROM invoice_entries i
+        WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+          -- Aynı ödeme Avans/Ödeme olarak da girildiyse çift sayma
+          AND NOT EXISTS (
+            SELECT 1 FROM marka_taseron_odeme mo
+            WHERE UPPER(mo.marka) = $1
+              AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
+              AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+          )`, [marka]);
       faturaOdemeleri = fo.rows;
     } catch {}
     const tumOdemeler = [...odemeler.rows, ...faturaOdemeleri]
