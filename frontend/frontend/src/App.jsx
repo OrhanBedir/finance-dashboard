@@ -2085,6 +2085,7 @@ const MT_KATEGORILER = [
   ["KONAKLAMA", "🏨 Konaklama"],
   ["VINC", "🏗 Vinç"],
   ["NAKLIYE", "🚚 Nakliye"],
+  ["MALZEME", "🧱 Malzeme"],
   ["DIGER", "📋 Diğer"],
 ];
 const mtKatAdi = (k) => { const f = MT_KATEGORILER.find(x => x[0] === String(k || "").toUpperCase()); return f ? f[1] : (k || "—"); };
@@ -2446,8 +2447,12 @@ function MarkaTaseronPanel({ currentUser }) {
                   <td style={{ ...tdS, textAlign: "right", fontWeight: 800, color: "#9d174d" }}>₺{fmt(o.tutar)}</td>
                   <td style={{ ...tdS, fontSize: "12px", color: "#6b7280" }}>{o.aciklama || ""}</td>
                   <td style={{ ...tdS, whiteSpace: "nowrap" }}>
-                    <button onClick={() => duzeltOdeme(o)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", marginRight: "4px" }} title="Düzelt">✏️</button>
-                    <button onClick={() => silOdeme(o.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button>
+                    {o.kaynak === "FATURA" ? (
+                      <span title="Fatura girişindeki 'Ödenen Tutar' alanından geldi — düzeltmek için faturayı düzenleyin" style={{ fontSize: "10.5px", color: "#94a3b8", fontStyle: "italic" }}>fatura girişinden</span>
+                    ) : (<>
+                      <button onClick={() => duzeltOdeme(o)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", marginRight: "4px" }} title="Düzelt">✏️</button>
+                      <button onClick={() => silOdeme(o.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button>
+                    </>)}
                   </td>
                 </tr>
               ))}

@@ -5857,7 +5857,11 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
             (CASE WHEN COALESCE(toplam_tutar,0) > 0 THEN toplam_tutar ELSE COALESCE(tutar,0) END) AS t
           FROM invoice_entries WHERE UPPER(COALESCE(firma,'')) = $1`, [marka]),
         pool.query(`SELECT COALESCE(taseron_adi,'') AS ad, COALESCE(tutar,0) AS t
-          FROM marka_taseron_odeme WHERE UPPER(marka) = $1`, [marka]).catch(() => ({ rows: [] })),
+          FROM marka_taseron_odeme WHERE UPPER(marka) = $1
+          UNION ALL
+          SELECT COALESCE(tedarikci,''), COALESCE(odenen_tutar,0)
+          FROM invoice_entries
+          WHERE UPPER(COALESCE(firma,'')) = $1 AND COALESCE(odenen_tutar,0) > 0`, [marka]).catch(() => ({ rows: [] })),
       ]);
       const grp = {};
       bf.rows.forEach(r => { const k = taseronCanonKey(r.ad); grp[k] = grp[k] || { f: 0, o: 0 }; grp[k].f += Number(r.t || 0); });
@@ -6145,7 +6149,22 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
         WHERE UPPER(marka) = $1
         ORDER BY tarih DESC, id DESC`, [marka]).catch(() => ({ rows: [] })),
     ]);
-    res.json({ ok: true, faturalar: faturalar.rows, odemeler: odemeler.rows });
+    // Fatura girişinde "Ödenen Tutar" doldurulmuş faturalar da ödemedir —
+    // finans panelinden girilen ödeme AHY panelinde borç bırakmasın
+    let faturaOdemeleri = [];
+    try {
+      const fo = await pool.query(`SELECT (id * -1) AS id, COALESCE(tedarikci,'') AS taseron_adi,
+          'FATURA_ODEME' AS tip, COALESCE(odenen_tutar,0) AS tutar,
+          to_char(COALESCE(odeme_tarihi, fatura_tarihi),'YYYY-MM-DD') AS tarih,
+          ('Fatura girişinde ödendi: ' || COALESCE(fatura_no,'')) AS aciklama,
+          id AS fatura_id, 'FATURA' AS kaynak
+        FROM invoice_entries
+        WHERE UPPER(COALESCE(firma,'')) = $1 AND COALESCE(odenen_tutar,0) > 0`, [marka]);
+      faturaOdemeleri = fo.rows;
+    } catch {}
+    const tumOdemeler = [...odemeler.rows, ...faturaOdemeleri]
+      .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || '')));
+    res.json({ ok: true, faturalar: faturalar.rows, odemeler: tumOdemeler });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // ── AHY taşeron bedeli hesap kuralı (2026-08 anlaşması) ──
