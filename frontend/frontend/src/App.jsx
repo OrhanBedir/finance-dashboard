@@ -2116,6 +2116,7 @@ function MarkaTaseronPanel({ currentUser }) {
   // Fatura Kesilecek: markanın alt ekiplerinin (AHY_MURAT, AHY_NETELKOM…) yaptığı işler
   const [hakedis, setHakedis] = useState(null);
   const [bedelDetay, setBedelDetay] = useState(null); // taşeron bedeli hesap dökümü modalı
+  const [mtHesapFiltre, setMtHesapFiltre] = useState(""); // Taşeron Hesabı tablosu + Excel filtresi ("" = tümü)
   useEffect(() => {
     (async () => {
       try {
@@ -2260,14 +2261,23 @@ function MarkaTaseronPanel({ currentUser }) {
           return (rfB - rfA) || (b.kalan - a.kalan) || (b.bedel - a.bedel);
         });
         if (rows.length === 0) return null;
-        const topIs = rows.reduce((sm, r) => sm + r.isBedeli, 0);
-        const topBedel = rows.reduce((sm, r) => sm + (r.bedel || 0), 0);
-        const topKalan = rows.reduce((sm, r) => sm + Math.max(0, r.kalan), 0);
+        // Taşeron filtresi: seçiliyken tablo, üst toplamlar ve Excel yalnız o taşeronu içerir
+        const rowsF = mtHesapFiltre ? rows.filter(r => r.ad === mtHesapFiltre) : rows;
+        const topIs = rowsF.reduce((sm, r) => sm + r.isBedeli, 0);
+        const topBedel = rowsF.reduce((sm, r) => sm + (r.bedel || 0), 0);
+        const topKalan = rowsF.reduce((sm, r) => sm + Math.max(0, r.kalan), 0);
         const num = { ...tdS, textAlign: "right", whiteSpace: "nowrap" };
         return (
           <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
             <div style={{ padding: "12px 16px", background: "#065f46", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
-              <span>📐 Taşeron Hesabı — Fatura Kesilecek & Borç Durumu ({rows.length})</span>
+              <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                📐 Taşeron Hesabı — Fatura Kesilecek & Borç Durumu ({rowsF.length})
+                <select value={mtHesapFiltre} onChange={e => setMtHesapFiltre(e.target.value)}
+                  style={{ padding: "4px 8px", borderRadius: "8px", border: "none", fontSize: "12px", fontWeight: 700, color: "#065f46", maxWidth: "260px" }}>
+                  <option value="">Tüm Taşeronlar</option>
+                  {rows.map(r => <option key={r.ad} value={r.ad}>{r.ad}</option>)}
+                </select>
+              </span>
               <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <span>Taşeron Bedeli: ₺{fmt(topBedel)} +KDV · Kalan Borç: ₺{fmt(topKalan)}</span>
                 <button onClick={() => exportStandardExcel({
@@ -2276,7 +2286,7 @@ function MarkaTaseronPanel({ currentUser }) {
                   headers: ["Taşeron", "Ekip", "İş Kalemi", "Bedel (KDV Hariç)", "Bedel (KDV Dahil)", "Fatura No", "Kestiği Fatura", "Ödenen", "Kalan Borç"],
                   colWidths: [38, 16, 10, 16, 16, 24, 14, 12, 13],
                   numericCols: [3, 4, 6, 7, 8],
-                  rows: rows.flatMap(r => {
+                  rows: rowsF.flatMap(r => {
                     // Fatura bazlı satırlar: aynı numaralı kayıtlar tek satırda toplanır,
                     // farklı faturalar ayrı satır olur; taşeron özeti ilk satırda yazılır
                     const fatlar = {};
@@ -2305,12 +2315,12 @@ function MarkaTaseronPanel({ currentUser }) {
                   extraSheets: [{
                     sheetName: "Fatura Kesilecek (Bedel)",
                     title: "AHY Elektrik — Taşeron Bedeli Saha Dökümü (fatura onayı için)",
-                    headers: ["Taşeron", "Saha", "Paket / Kalem", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)"],
-                    colWidths: [38, 22, 36, 7, 16, 16, 16],
+                    headers: ["Taşeron", "Saha", "Paket / Kalem", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)", "QC (Ana Kalemler)"],
+                    colWidths: [38, 22, 36, 7, 16, 16, 16, 15],
                     numericCols: [3, 4, 5, 6],
-                    rows: rows.filter(r => (r.detay || []).length > 0).flatMap(r => [
-                      ...r.detay.map(d => [r.ad, d.site || "", d.kalem || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2]),
-                      [`${r.ad} — FATURA KESECEĞİ TUTAR`, "", "", "", "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2],
+                    rows: rowsF.filter(r => (r.detay || []).length > 0).flatMap(r => [
+                      ...r.detay.map(d => [r.ad, d.site || "", d.kalem || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2, d.qc || ""]),
+                      [`${r.ad} — FATURA KESECEĞİ TUTAR`, "", "", "", "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, ""],
                     ]),
                   }],
                 }).catch(e => alert("Excel indirilemedi: " + e.message))}
@@ -2328,7 +2338,7 @@ function MarkaTaseronPanel({ currentUser }) {
                   <th style={thS}></th>
                 </tr></thead>
                 <tbody>
-                  {rows.map(r => (
+                  {rowsF.map(r => (
                     <tr key={r.ad}>
                       <td style={tdS}>
                         <div style={{ fontWeight: 700 }}>{r.ad}</div>

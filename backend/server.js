@@ -6176,11 +6176,18 @@ function ahyTaseronBedel(rows) {
     const ek = (out[g.subcon] = out[g.subcon] || { bedel: 0, detay: [] });
     const qty = (rx) => g.items.filter(i => rx.test(i.kalem)).reduce((sm, i) => sm + Number(i.fq || 0), 0);
     const has = (rx) => g.items.some(i => rx.test(i.kalem) && Number(i.fq || 0) > 0);
+    // QC: verilen regex'lere uyan, fiziki yapılmış (fq>0) ana kalemlerin TÜMÜ
+    // QC OK ise "OK" — yardımcı kalemler (as-built, TK sertifika…) hesaba girmez
+    const qcOf = (...rxs) => {
+      const ana = g.items.filter(i => Number(i.fq || 0) > 0 && rxs.some(rx => rx.test(i.kalem)));
+      if (!ana.length) return "";
+      return ana.every(i => i.qc_ok === true) ? "OK" : "NOK";
+    };
     const st = g.site;
     if (/NR700|TRP/.test(st)) {
       for (const [rx, fiyat, ad] of AHY_BEDEL_COLOCATED) {
         const q = qty(rx);
-        if (q > 0) { ek.bedel += q * fiyat; ek.detay.push({ site: st, kalem: ad, adet: q, birim: fiyat, tutar: q * fiyat }); }
+        if (q > 0) { ek.bedel += q * fiyat; ek.detay.push({ site: st, kalem: ad, adet: q, birim: fiyat, tutar: q * fiyat, qc: qcOf(rx) }); }
       }
     } else if (/(^|[_\-])NS([_\-]|$)|NS_MERKEZ/.test(st)) {
       const paketVar = has(/antenna installation\s*,\s*per pcs/i) || has(/outdoor cabinet family installation/i);
@@ -6188,15 +6195,17 @@ function ahyTaseronBedel(rows) {
         const radyolu = has(/new microwave installation/i);
         const fiyat = radyolu ? 52000 : 40000;
         ek.bedel += fiyat;
-        ek.detay.push({ site: st, kalem: radyolu ? "New Site Radyolu (paket)" : "New Site Radyosuz (paket)", adet: 1, birim: fiyat, tutar: fiyat });
+        const anchors = [/antenna installation\s*,\s*per pcs/i, /outdoor cabinet family installation/i, /dbs\/bts system installation/i];
+        if (radyolu) anchors.push(/new microwave installation/i);
+        ek.detay.push({ site: st, kalem: radyolu ? "New Site Radyolu (paket)" : "New Site Radyosuz (paket)", adet: 1, birim: fiyat, tutar: fiyat, qc: qcOf(...anchors) });
       }
       const qL = qty(/7[.,]2\s*m\s*lprt/i);
-      if (qL > 0) { ek.bedel += qL * 8000; ek.detay.push({ site: st, kalem: "Installation of 7,2m LPRT pole", adet: qL, birim: 8000, tutar: qL * 8000 }); }
+      if (qL > 0) { ek.bedel += qL * 8000; ek.detay.push({ site: st, kalem: "Installation of 7,2m LPRT pole", adet: qL, birim: 8000, tutar: qL * 8000, qc: qcOf(/7[.,]2\s*m\s*lprt/i) }); }
       const qL6 = qty(/6\s*m\s*lprt/i);
-      if (qL6 > 0) { ek.bedel += qL6 * 7000; ek.detay.push({ site: st, kalem: "Installation service 6m LPRT Pole", adet: qL6, birim: 7000, tutar: qL6 * 7000 }); }
+      if (qL6 > 0) { ek.bedel += qL6 * 7000; ek.detay.push({ site: st, kalem: "Installation service 6m LPRT Pole", adet: qL6, birim: 7000, tutar: qL6 * 7000, qc: qcOf(/6\s*m\s*lprt/i) }); }
       // One Band Addition: LTE benzeri ekstra iş — paket fiyata dahil değildir
       const qOB = qty(/one band addition/i);
-      if (qOB > 0) { ek.bedel += qOB * 12000; ek.detay.push({ site: st, kalem: "One Band Addition at the same site visit", adet: qOB, birim: 12000, tutar: qOB * 12000 }); }
+      if (qOB > 0) { ek.bedel += qOB * 12000; ek.detay.push({ site: st, kalem: "One Band Addition at the same site visit", adet: qOB, birim: 12000, tutar: qOB * 12000, qc: qcOf(/one band addition/i) }); }
     }
   }
   return out;
@@ -6280,7 +6289,8 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
         SELECT UPPER(TRIM(m.subcon_name)) AS subcon,
           UPPER(TRIM(COALESCE(m.site_code,''))) AS site,
           COALESCE(NULLIF(TRIM(m.item_description),''), best_boq.boq_items_en, COALESCE(m.item_code,'')) AS kalem,
-          GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty,0) END) AS fq
+          GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty,0) END) AS fq,
+          (UPPER(TRIM(COALESCE(m.qc_durum,'NOK'))) = 'OK') AS qc_ok
         FROM master_works m
         LEFT JOIN best_boq ON TRIM(COALESCE(best_boq.s_bom_code,'')) = TRIM(COALESCE(m.item_code,''))
         WHERE UPPER(TRIM(COALESCE(m.subcon_name,''))) LIKE $1 || '\\_%'`, [marka]);
