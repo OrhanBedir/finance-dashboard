@@ -6447,6 +6447,8 @@ app.get("/finance/erc-taseron-hakedis", authMiddleware, async (req, res) => {
       sonuc.push({ canon, ad: adlar[canon] || canon.toUpperCase(), pct: canon === "ferrumx" ? null : PCT[canon], is_sayisi: isSayisi, bedel, bedel_detay: detay });
     }
     {
+      // As-built aynı firmanın (2KX) hesabına dahildir; yalnız dökümde ayrı
+      // gösterilir (Excel'de ayrı sayfa) — 2KX o bedeli as-built sahibine öder
       const asbDetay = [];
       let asbBedel = 0, asbAdet = 0;
       asbuiltRows.filter(r => Number(r.fq) > 0)
@@ -6456,8 +6458,12 @@ app.get("/finance/erc-taseron-hakedis", authMiddleware, async (req, res) => {
           asbAdet += q; asbBedel += q * ASBUILT_FIYAT;
           asbDetay.push({ site: r.site, kalem: "Site as-built documentation (sabit 750 TL)", adet: q, birim: ASBUILT_FIYAT, tutar: q * ASBUILT_FIYAT, qc: r.qc_ok ? "OK" : "NOK" });
         });
-      sonuc.push({ canon: "2kx_asbuilt", ad: "2KX — AS-BUILT DOKÜMANTASYON", pct: null, sabit: true,
-        is_sayisi: asbAdet, bedel: Math.round(asbBedel), bedel_detay: asbDetay });
+      const t2 = sonuc.find(x => x.canon === "2kx");
+      if (t2) {
+        t2.asbuilt = { adet: asbAdet, bedel: Math.round(asbBedel), detay: asbDetay };
+        t2.bedel += Math.round(asbBedel);
+        t2.is_sayisi += asbDetay.length;
+      }
     }
     const fat = await pool.query(`SELECT id, COALESCE(tedarikci,'') AS taseron_adi, fatura_no,
         to_char(fatura_tarihi,'YYYY-MM-DD') AS fatura_tarihi,

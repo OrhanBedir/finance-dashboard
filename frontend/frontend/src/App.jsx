@@ -2127,7 +2127,7 @@ function ErcTaseronPanel() {
   const rowsF = filtre ? rows.filter(r => r.canon === filtre) : rows;
   const topBedel = rowsF.reduce((sm, r) => sm + Number(r.bedel || 0), 0);
   const topKalan = rowsF.reduce((sm, r) => sm + Math.max(0, r.kalan), 0);
-  const kuralAd = (r) => r.canon === "2kx_asbuilt" ? "Sabit 750 TL/saha" : r.canon === "ferrumx" ? "AHY paket kuralı" : `Hakedişin %${Math.round((r.pct || 0) * 100)}'i`;
+  const kuralAd = (r) => r.canon === "ferrumx" ? "AHY paket kuralı" : r.canon === "2kx" ? "Hakedişin %75'i + as-built 750 TL" : `Hakedişin %${Math.round((r.pct || 0) * 100)}'i`;
   const indirExcel = () => exportStandardExcel({
     title: "Şimşek — Taşeron Hesabı (STATE %80 · 2KX %75 · FERRUMX paket)",
     sheetName: "Taşeron Hesabı", fileBase: "Simsek_Taseron_Hesabi",
@@ -2143,23 +2143,27 @@ function ErcTaseronPanel() {
       headers: ["Taşeron", "Saha", "Paket / Kalem", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)", "QC (Ana Kalemler)"],
       colWidths: [42, 22, 44, 7, 16, 16, 16, 16],
       numericCols: [3, 4, 5, 6],
-      rows: rowsF.filter(r => r.canon !== "2kx_asbuilt" && (r.bedel_detay || []).length > 0).flatMap(r => [
-        ...r.bedel_detay.map(d => [r.ad, d.site || "", d.kalem || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2, d.qc || ""]),
-        { cells: ["", `${r.ad} — FATURA KESECEĞİ TUTAR`, "", "", "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, ""], bold: true, merge: [1, 4] },
-      ]),
+      rows: rowsF.filter(r => (r.bedel_detay || []).length > 0).flatMap(r => {
+        const normalBedel = Number(r.bedel || 0) - Number(r.asbuilt?.bedel || 0);
+        const etiket = r.asbuilt?.bedel ? `${r.ad} — FATURA KESECEĞİ TUTAR (as-built hariç)` : `${r.ad} — FATURA KESECEĞİ TUTAR`;
+        return [
+          ...r.bedel_detay.map(d => [r.ad, d.site || "", d.kalem || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2, d.qc || ""]),
+          { cells: ["", etiket, "", "", "", normalBedel, normalBedel * 1.2, ""], bold: true, merge: [1, 4] },
+        ];
+      }),
     },
-    ...(rowsF.some(r => r.canon === "2kx_asbuilt" && (r.bedel_detay || []).length > 0) ? [{
-      // As-built ayrı sayfa: sahibi farklı, ödemesi ayrı yapılır
+    ...(rowsF.some(r => (r.asbuilt?.detay || []).length > 0) ? [{
+      // As-built ayrı sayfa: aynı firma (2KX), döküm ayrı — 2KX bu bedeli as-built sahibine öder
       sheetName: "As-Built (750 TL sabit)",
-      title: "Şimşek — 2KX As-Built Dokümantasyon (sabit 750 TL/saha · sahibi farklı, ödemesi ayrı)",
+      title: "Şimşek — 2KX As-Built Dokümantasyon (sabit 750 TL/saha · dökümü ayrı tutulur)",
       headers: ["Saha", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)", "QC"],
       colWidths: [26, 8, 16, 16, 16, 10],
       numericCols: [1, 2, 3, 4],
       rows: (() => {
-        const r = rowsF.find(x => x.canon === "2kx_asbuilt");
+        const r = rowsF.find(x => (x.asbuilt?.detay || []).length > 0);
         return [
-          ...r.bedel_detay.map(d => [d.site || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2, d.qc || ""]),
-          { cells: ["AS-BUILT TOPLAM", r.is_sayisi, "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, ""], bold: true },
+          ...r.asbuilt.detay.map(d => [d.site || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2, d.qc || ""]),
+          { cells: ["AS-BUILT TOPLAM", r.asbuilt.adet, "", Number(r.asbuilt.bedel || 0), Number(r.asbuilt.bedel || 0) * 1.2, ""], bold: true },
         ];
       })(),
     }] : []),
@@ -2262,6 +2266,11 @@ function ErcTaseronPanel() {
                     <td style={tdS}>{d.qc === "OK" ? "✅ OK" : d.qc === "NOK" ? "🔶 NOK" : ""}</td>
                   </tr>
                 ))}
+                {(detayModal.asbuilt?.detay || []).length > 0 && (
+                  <tr><td colSpan={4} style={{ ...tdS, background: "#fefce8", fontWeight: 800, fontSize: "12px", color: "#92400e" }}>
+                    📄 AS-BUILT DOKÜMANTASYON — sabit 750 TL/adet · toplam {detayModal.asbuilt.adet} adet · ₺{fmt(detayModal.asbuilt.bedel)} (saha dökümü Excel'in As-Built sayfasında)
+                  </td></tr>
+                )}
                 <tr>
                   <td style={{ ...tdS, fontWeight: 800 }} colSpan={2}>TOPLAM (fatura keseceği tutar)</td>
                   <td style={{ ...num, fontWeight: 800 }}>₺{fmt(detayModal.bedel)} <span style={{ fontSize: "11px", color: "#64748b" }}>+KDV = ₺{fmt(detayModal.bedel * 1.2)}</span></td>
