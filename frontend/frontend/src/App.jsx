@@ -517,12 +517,23 @@ async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, 
     titleRow[0] = { v: `${sh.title} (${dateStr})`, s: titleStyle };
     aoa.push(titleRow);
     aoa.push(sh.headers.map((h) => ({ v: h, s: headerStyle })));
+    const extraMerges = [];
     sh.rows.forEach((r, idx) => {
       const isEven = idx % 2 === 1;
-      aoa.push(r.map((v, ci) => {
+      // Satır dizi yerine {cells, bold, merge:[c1,c2]} objesi olabilir:
+      // bold → tüm satır kalın siyah; merge → etiket hücreleri birleşir (sağa yaslı)
+      const rowObj = r && !Array.isArray(r) && Array.isArray(r.cells) ? r : null;
+      const cells = rowObj ? rowObj.cells : r;
+      if (rowObj?.merge) extraMerges.push({ s: { r: aoa.length, c: rowObj.merge[0] }, e: { r: aoa.length, c: rowObj.merge[1] } });
+      aoa.push(cells.map((v, ci) => {
         const s2 = cellStyle(isEven, numSet.has(ci));
         // Sayısal hücreler binlik ayraç + 2 ondalıkla, tek satırda okunur
         if (numSet.has(ci) && typeof v === "number") s2.numFmt = "#,##0.00";
+        if (rowObj?.bold) {
+          s2.font = { ...s2.font, bold: true, color: { rgb: "000000" } };
+          s2.fill = { patternType: "solid", fgColor: { rgb: "E8EEF7" } };
+        }
+        if (rowObj?.merge && ci === rowObj.merge[0]) s2.alignment = { horizontal: "right", vertical: "middle" };
         return { v: v ?? "", s: s2 };
       }));
     });
@@ -534,7 +545,7 @@ async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, 
         ws[addr].s = cell.s;
       });
     });
-    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
+    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }, ...extraMerges];
     // Kolon genişliği: verilen genişlik ile başlık uzunluğunun büyüğü
     // (+4 filtre oku payı) — başlık hiçbir zaman iki satıra kırılmaz
     ws["!cols"] = (sh.colWidths || sh.headers.map(() => 18)).map((wch, i) => ({
@@ -2320,7 +2331,7 @@ function MarkaTaseronPanel({ currentUser }) {
                     numericCols: [3, 4, 5, 6],
                     rows: rowsF.filter(r => (r.detay || []).length > 0).flatMap(r => [
                       ...r.detay.map(d => [r.ad, d.site || "", d.kalem || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), Number(d.tutar || 0) * 1.2, d.qc || ""]),
-                      [`${r.ad} — FATURA KESECEĞİ TUTAR`, "", "", "", "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, ""],
+                      { cells: ["", `${r.ad} — FATURA KESECEĞİ TUTAR`, "", "", "", Number(r.bedel || 0), Number(r.bedel || 0) * 1.2, ""], bold: true, merge: [1, 4] },
                     ]),
                   }],
                 }).catch(e => alert("Excel indirilemedi: " + e.message))}
