@@ -1265,7 +1265,7 @@ function MarkaFinansPanel({ currentUser }) {
     <div style={{ padding: "24px 28px", maxWidth: "1250px", margin: "0 auto" }}>
       <h2 style={{ margin: "0 0 2px", fontSize: "20px", fontWeight: 800, color: "#0f172a", textAlign: "center" }}>📊 {markaAd} — Finans Özeti</h2>
       <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "22px", textAlign: "center" }}>
-        Gelir: Şimşek Haberleşme'ye kesilen faturalar • Gider: 15 Temmuz 2026 sonrası nakit akışı (maaş, avans, kira ve diğer)
+        Gelir: Şimşek Haberleşme'ye kesilen faturalar (KDV dahil) • Gider: 15 Temmuz 2026 sonrası nakit akışı (maaş, avans, kira ve diğer)
       </div>
 
       {/* ── Proje Kâr / Zarar Özeti — kurumsal şerit ── */}
@@ -1587,7 +1587,7 @@ function MarkaPLPanel({ currentUser }) {
 
       {/* KPI kartları (bu ay) */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "20px", flexWrap: "wrap" }}>
-        {kpi({ ikon: "🧾", ikonBg: "#eef2ff", baslik: "Bu Ay Kesilen Fatura", deger: `₺${fmt(cur.fatura)}`, alt: "Şimşek Haberleşme'ye · KDV hariç" })}
+        {kpi({ ikon: "🧾", ikonBg: "#eef2ff", baslik: "Bu Ay Kesilen Fatura", deger: `₺${fmt(cur.fatura)}`, alt: "Şimşek Haberleşme'ye · KDV dahil" })}
         {kpi({ ikon: "💵", ikonBg: "#ecfdf5", baslik: "Bu Ay Tahsilat", deger: `₺${fmt(cur.tahsilat)}`, renk: "#047857", alt: "Kasaya giren", rozet: tahsOran, rozetRenk: "yesil" })}
         {kpi({ ikon: "💸", ikonBg: "#fef2f2", baslik: "Bu Ay Harcama", deger: `₺${fmt(cur.gider)}`, renk: "#b91c1c", alt: "Kasadan çıkan" })}
         {kpi({ ikon: (cur.kar || 0) >= 0 ? "📈" : "📉", ikonBg: (cur.kar || 0) >= 0 ? "#fffbeb" : "#fef2f2", baslik: "Bu Ay Kâr / Zarar", deger: `${(cur.kar || 0) < 0 ? "-" : ""}₺${fmt(Math.abs(cur.kar || 0))}`, renk: (cur.kar || 0) >= 0 ? "#047857" : "#b91c1c", alt: "Fatura − Gider", rozet: karMarj, rozetRenk: (cur.kar || 0) >= 0 ? "yesil" : "kirmizi" })}

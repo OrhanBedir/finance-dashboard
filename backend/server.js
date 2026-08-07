@@ -5650,11 +5650,14 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     // KESTİĞİ faturalar (invoice_entries, firma canon eşleşme, fatura tarihi
     // bazlı) — hakediş tahmini değil. Gider = devirden (15 Temmuz 2026) sonraki
     // nakit akışı: maaş + avanslar (ödeme tarihi) + kira/manuel (giriş zamanı).
+    // GELİR KDV DAHİL okunur (07.08.2026): giderler nakit çıkışı olarak KDV
+    // dahil kaydediliyor, kâr/zarar elma-elma olsun diye gelir de KDV dahil.
+    // P&L şeridindeki hakediş × 1,20 kuralıyla da aynı hizada.
     const DEVIR = "2026-07-15";
     const [fatura, maas, mavans, iavans, kiralar, ofisk, manuel, taseronOd, yemekOd] = await Promise.all([
       pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
           TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
-          COALESCE(NULLIF(tutar,0), toplam_tutar, 0) AS t
+          COALESCE(NULLIF(toplam_tutar,0), tutar, 0) AS t
         FROM invoice_entries
         WHERE fatura_tarihi IS NOT NULL`),
       // Temmuz 2026 dönem maaşı: devir öncesi girenlerde %50 AHY payı,
