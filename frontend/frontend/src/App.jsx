@@ -1587,7 +1587,7 @@ function MarkaPLPanel({ currentUser }) {
 
       {/* KPI kartları (bu ay) */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "20px", flexWrap: "wrap" }}>
-        {kpi({ ikon: "🧾", ikonBg: "#eef2ff", baslik: "Bu Ay Kesilen Fatura", deger: `₺${fmt(cur.fatura)}`, alt: "Şimşek Haberleşme'ye" })}
+        {kpi({ ikon: "🧾", ikonBg: "#eef2ff", baslik: "Bu Ay Kesilen Fatura", deger: `₺${fmt(cur.fatura)}`, alt: "Şimşek Haberleşme'ye · KDV hariç" })}
         {kpi({ ikon: "💵", ikonBg: "#ecfdf5", baslik: "Bu Ay Tahsilat", deger: `₺${fmt(cur.tahsilat)}`, renk: "#047857", alt: "Kasaya giren", rozet: tahsOran, rozetRenk: "yesil" })}
         {kpi({ ikon: "💸", ikonBg: "#fef2f2", baslik: "Bu Ay Harcama", deger: `₺${fmt(cur.gider)}`, renk: "#b91c1c", alt: "Kasadan çıkan" })}
         {kpi({ ikon: (cur.kar || 0) >= 0 ? "📈" : "📉", ikonBg: (cur.kar || 0) >= 0 ? "#fffbeb" : "#fef2f2", baslik: "Bu Ay Kâr / Zarar", deger: `${(cur.kar || 0) < 0 ? "-" : ""}₺${fmt(Math.abs(cur.kar || 0))}`, renk: (cur.kar || 0) >= 0 ? "#047857" : "#b91c1c", alt: "Fatura − Gider", rozet: karMarj, rozetRenk: (cur.kar || 0) >= 0 ? "yesil" : "kirmizi" })}
