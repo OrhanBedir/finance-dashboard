@@ -1563,6 +1563,12 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     // DSS-GPS Readiness şablonu yalnız GPS kalemini kapatır — CN0017 vakası:
     // GPS Closed iken STANDALONE AI Rejected olmasına rağmen saha OK'lanmıştı
     const ITEM_GPS = ["88123MGE"];
+    // DSS sahalarında (site ID'de DSS/GPS) tek QC görevi DSS-GPS Readiness'tir;
+    // kapandığında BBU Modernization da OK olur (KA3028 vakası, 07.08.2026).
+    // Bu kalem yalnız DSS/GPS sahalarda kullanıldığı için diğer saha
+    // tiplerinde ana şablonun belirlemesi sürer.
+    const ITEM_BBU_DSS = ["8818270786"];
+    const isDssSite = (sc) => /DSS|GPS/.test(String(sc || "").toUpperCase());
     const OZEL_ITEMLER = [...ITEM_TRS, ...ITEM_LPRT, ...ITEM_ENERJI, ...ITEM_GIZLEME, ...ITEM_GPS];
     const scopeOf = (t) => {
       if (t.includes("TRS QUALITY CHECK")) return "TRS";
@@ -1617,7 +1623,7 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       const items = m.scope === "TRS" ? ITEM_TRS
         : m.scope === "LPRT" ? ITEM_LPRT
         : m.scope === "GIZLEME" ? ITEM_GIZLEME
-        : m.scope === "GPS" ? ITEM_GPS
+        : m.scope === "GPS" ? (isDssSite(m.siteCode) ? [...ITEM_GPS, ...ITEM_BBU_DSS] : ITEM_GPS)
         : ITEM_ENERJI;
       const r = await pool.query(
         `UPDATE master_works
@@ -1688,8 +1694,9 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
             AND TRIM(COALESCE(item_code, '')) <> ALL($3::text[])
           `,
         // Özel kapsam kalemleri (TRS/LPRT/enerji) kendi şablonlarından güncellenir;
-        // 2KX manuel takip kalemleri de blanket güncellemenin dışındadır
-        [m.qcDurum, siteCode, [...EXCLUDED_ITEMS, ...OZEL_ITEMLER]],
+        // 2KX manuel takip kalemleri de blanket güncellemenin dışındadır.
+        // DSS sahalarında BBU Modernization da DSS-GPS Readiness'e bağlıdır.
+        [m.qcDurum, siteCode, [...EXCLUDED_ITEMS, ...OZEL_ITEMLER, ...(isDssSite(siteCode) ? ITEM_BBU_DSS : [])]],
       );
       updatedCount += mw.rowCount || 0;
 
