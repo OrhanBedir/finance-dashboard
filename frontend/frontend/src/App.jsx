@@ -20934,7 +20934,15 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             tahsilat_tarihi: paidByKey[key] || "",
           };
         });
-      return matched;
+      // Panel yalnız KESİLMESİ GEREKENLERİ gösterir: taşeronun faturasını
+      // kestiği kalemler listeden düşer (07.08.2026). Kaç kalemin
+      // faturalandığı ayrı sayaçta durur ki kayıp hissi olmasın.
+      const _kesilebilir = matched.filter(x => x.durum !== "Faturalandı");
+      _kesilebilir.faturalanmisAdet = matched.length - _kesilebilir.length;
+      _kesilebilir.faturalanmisTutar = matched
+        .filter(x => x.durum === "Faturalandı")
+        .reduce((s, x) => s + Number(x.kesmesi_gereken || 0), 0);
+      return _kesilebilir;
   };
 
   const handleOpenBillable = async () => {
@@ -22599,6 +22607,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>
                       Hakediş toplamı: {formatTRY(billableRows.reduce((s, x) => s + Number(x.total_price || 0), 0))}
                       {" · "}Şimşek → HW kesilen (%80): {formatTRY(billableRows.reduce((s, x) => s + Number(x.simsek_hw_kesilen || 0), 0))}
+                      {Number(billableRows.faturalanmisAdet || 0) > 0 && (
+                        <span style={{ marginLeft: "8px", color: "#15803d", fontWeight: 700 }}>
+                          · ✓ {billableRows.faturalanmisAdet} kalem faturalandı ({formatTRY(billableRows.faturalanmisTutar || 0)}) — listeden düşüldü
+                        </span>
+                      )}
                     </div>
                   </div>
                   <button
