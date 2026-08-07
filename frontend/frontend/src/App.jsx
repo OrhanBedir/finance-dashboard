@@ -21223,10 +21223,18 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const _rowRate = getSubconRateByRow(row);
         const federalHakedis = toplamHakedis * _rowRate;
 
-        // Fatura kesilecek: FEDERAL/UBS/AHY/2KX, Billed Qty > 0 ise
+        // Fatura kesilecek: FEDERAL/UBS/AHY/2KX, HW'ye faturalanmış kalemler
         const subconLower = String(row.subcon_name || "").toLowerCase().trim();
         const isFaturaTaseron = FATURA_TASERONLAR.some(t => subconLower.includes(t));
-        const faturaKesilecek = (isFaturaTaseron && billedQty > 0) ? billedQty * unitPrice * (isUSD ? _usdK : 1) * _rowRate : 0;
+        // Şimşek HW'ye QC-OK aşamasında bedelin %80'ini faturalar (kalan %20 PAC'ta).
+        // Taşeron da bu kesilen tutarın kendi kırılım oranı kadarını keser —
+        // "Fatura Kesilebilir Kalemler" paneliyle birebir aynı hesap (07.08.2026).
+        const _hwInvRow = hwInvByKey[`${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}`] || {};
+        const _hwFaturali = billedQty > 0 || !!_hwInvRow.no;
+        const _efQty = billedQty > 0 ? Math.min(doneQty, billedQty) : doneQty;
+        const _scale = doneQty > 0 ? _efQty / doneQty : 1;
+        const simsekHwFatura = _hwFaturali ? toplamHakedis * _scale * 0.80 : 0;
+        const faturaKesilecek = (isFaturaTaseron && _hwFaturali) ? simsekHwFatura * _rowRate : 0;
 
         // Girilmiş fatura verisi (canon taşeron adıyla eşle — "2KX" kısa adı da yakalar)
         const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${canonTaseron(row.subcon_name)}`;
@@ -21235,10 +21243,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
         const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
 
-        // Şimşek'in HW'ye faturaladığı bedel (KDV hariç, PO'daki billed × birim fiyat)
-        // + o faturanın numarası/tarihi — taşerona "hangi faturamızın karşılığı" şeffaflığı
-        const simsekHwFatura = billedQty * unitPrice * (isUSD ? _usdK : 1);
-        const _hwInv = hwInvByKey[`${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}`] || {};
+        const _hwInv = _hwInvRow;
         // Tablo KDV HARİÇ: taşeron faturası KDV dahil saklandığı için 1,20'ye bölünür
         const faturaMiktarHaric = faturaToplamMiktar / 1.20;
         // Kalan: şu an kesilebilir bedel − taşeronun kestiği fatura (ikisi de KDV hariç)
