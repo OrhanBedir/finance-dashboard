@@ -13814,6 +13814,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [puantajData, setPuantajData] = useState([]);
   const [ozet, setOzet] = useState([]);
   const [avansList, setAvansList] = useState([]);
+  // Avans listesi tarih aralığı filtresi — varsayılan: içinde bulunulan ay
+  const [avansFiltre, setAvansFiltre] = useState(() => {
+    const n = new Date();
+    return { bas: `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-01`, bit: n.toISOString().slice(0, 10) };
+  });
   const [avansForm, setAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
   const [isAvansList, setIsAvansList] = useState([]);
   const [isAvansForm, setIsAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
@@ -16568,7 +16573,16 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       {/* ===== AVANS SEKMESİ ===== */}
       {(tab==="maas_avans") && personelUnlocked && (() => {
         const isMaas = tab === "maas_avans";
-        const list = isMaas ? avansList : isAvansList;
+        const _tumList = isMaas ? avansList : isAvansList;
+        // Tarih aralığı filtresi (varsayılan: içinde bulunulan ay)
+        const _f = avansFiltre.bas, _t = avansFiltre.bit;
+        const list = _tumList.filter(a => {
+          const d = String(a.tarih || "").slice(0, 10);
+          if (!d) return false;
+          return (!_f || d >= _f) && (!_t || d <= _t);
+        });
+        const _topTutar = list.reduce((sm, a) => sm + Number(a.tutar || 0), 0);
+        const _kisiSayisi = new Set(list.map(a => a.ad_soyad)).size;
         const form = isMaas ? avansForm : isAvansForm;
         const setForm = isMaas ? setAvansForm : setIsAvansForm;
         const onSave = isMaas ? handleSaveAvans : handleSaveIsAvans;
@@ -16629,8 +16643,45 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
             </div>
 
             <div style={{ ...secSt, padding:0, overflow:"hidden" }}>
-              <div style={{ padding:"16px 20px", borderBottom:"1px solid #f3f4f6", fontWeight:700 }}>
-                {isMaas ? "💰 Maaş Avansı Kayıtları" : "🏗 İş Avansı Kayıtları"}
+              <div style={{ padding:"14px 20px", borderBottom:"1px solid #f3f4f6", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:"10px" }}>
+                <div style={{ fontWeight:700 }}>
+                  {isMaas ? "💰 Maaş Avansı Kayıtları" : "🏗 İş Avansı Kayıtları"}
+                  <span style={{ marginLeft:"10px", fontSize:"12px", fontWeight:600, color:"#6b7280" }}>
+                    {list.length} kayıt · {_kisiSayisi} kişi · ₺{_topTutar.toLocaleString("tr-TR")}
+                  </span>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+                  <input type="date" value={avansFiltre.bas} onChange={e=>setAvansFiltre(f=>({...f, bas:e.target.value}))}
+                    style={{ padding:"5px 8px", border:"1px solid #e5e7eb", borderRadius:"7px", fontSize:"12px" }} />
+                  <span style={{ fontSize:"12px", color:"#9ca3af" }}>—</span>
+                  <input type="date" value={avansFiltre.bit} onChange={e=>setAvansFiltre(f=>({...f, bit:e.target.value}))}
+                    style={{ padding:"5px 8px", border:"1px solid #e5e7eb", borderRadius:"7px", fontSize:"12px" }} />
+                  <button type="button" onClick={()=>{ const y=new Date(); setAvansFiltre({ bas:`${y.getFullYear()}-${String(y.getMonth()+1).padStart(2,"0")}-01`, bit:y.toISOString().slice(0,10) }); }}
+                    style={{ padding:"5px 10px", background:"#eef2ff", color:"#3730a3", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>Bu ay</button>
+                  <button type="button" onClick={()=>setAvansFiltre({ bas:"", bit:"" })}
+                    style={{ padding:"5px 10px", background:"#f1f5f9", color:"#475569", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>Tümü</button>
+                  <button type="button" onClick={()=>exportStandardExcel({
+                    title: `${isMaas ? "Maaş Avansı" : "İş Avansı"} Kayıtları${_f||_t ? ` (${_f||"başlangıç"} — ${_t||"bugün"})` : " (tüm dönem)"}`,
+                    sheetName: isMaas ? "Maaş Avansı" : "İş Avansı",
+                    fileBase: isMaas ? "Maas_Avansi" : "Is_Avansi",
+                    headers: ["Personel","Ödeme Tarihi","Kesilecek Dönem","Tutar (₺)","Açıklama","Durum"],
+                    colWidths: [30, 14, 16, 14, 34, 12],
+                    numericCols: [3],
+                    rows: (() => {
+                      const sirali = list.slice().sort((a,b)=> String(a.ad_soyad||"").localeCompare(String(b.ad_soyad||""),"tr") || String(a.tarih||"").localeCompare(String(b.tarih||"")));
+                      const out = sirali.map(a => [a.ad_soyad||"", String(a.tarih||"").slice(0,10), a.donem||"", Number(a.tutar||0), a.aciklama||"", a.odendi?"Ödendi":"Bekliyor"]);
+                      // Kişi bazlı özet: kim ne kadar almış
+                      const kisi = {};
+                      sirali.forEach(a => { kisi[a.ad_soyad||"?"] = (kisi[a.ad_soyad||"?"]||0) + Number(a.tutar||0); });
+                      out.push({ cells: ["", "", "", "", "", ""], bold: true });
+                      out.push({ cells: ["", "KİŞİ BAZLI TOPLAM", "", "", "", ""], bold: true, merge: [1, 2] });
+                      Object.entries(kisi).sort((a,b)=>b[1]-a[1]).forEach(([ad,t]) => out.push([ad, "", "", t, "", ""]));
+                      out.push({ cells: ["", `GENEL TOPLAM (${sirali.length} kayıt · ${Object.keys(kisi).length} kişi)`, "", _topTutar, "", ""], bold: true, merge: [1, 2] });
+                      return out;
+                    })(),
+                  }).catch(e=>alert("Excel indirilemedi: "+e.message))}
+                    style={{ padding:"5px 12px", background:"#166534", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>📥 Excel İndir</button>
+                </div>
               </div>
               <div style={{ overflowX:"auto" }}>
                 <table style={{ width:"100%", borderCollapse:"collapse" }}>
