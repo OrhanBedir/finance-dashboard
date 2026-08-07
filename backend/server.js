@@ -2876,14 +2876,30 @@ async function ensureHwInvoiceItemsTable() {
 /* ================== COMMON CTE ================== */
 const COMMON_MATCH_CTES = `
   WITH best_site_po AS (
-    SELECT DISTINCT ON (project_code, site_code, item_code)
-      *
-    FROM po_rows
-    WHERE COALESCE(TRIM(item_code), '') <> ''
+    -- Huawei aynı saha+kalem için birden fazla PO açabiliyor (ör. 2 gün vinç →
+    -- 2 ayrı PO × 1 adet). Tek satır seçmek "requested 1 / done 2" gibi sahte
+    -- fark üretiyordu; miktarlar artık saha+kalem bazında TOPLANIR, fiyat ve
+    -- para birimi temsilci satırdan gelir (07.08.2026).
+    SELECT DISTINCT ON (
+        TRIM(COALESCE(project_code, '')),
+        UPPER(TRIM(COALESCE(site_code, ''))),
+        TRIM(COALESCE(item_code, '')))
+      p.*,
+      SUM(COALESCE(p.requested_qty, 0)) OVER w AS agg_requested_qty,
+      SUM(COALESCE(p.billed_qty, 0)) OVER w AS agg_billed_qty,
+      SUM(COALESCE(p.due_qty, 0)) OVER w AS agg_due_qty,
+      COUNT(*) OVER w AS agg_po_count,
+      string_agg(COALESCE(p.po_no, ''), ' + ') OVER w AS agg_po_no
+    FROM po_rows p
+    WHERE COALESCE(TRIM(p.item_code), '') <> ''
+    WINDOW w AS (PARTITION BY
+        TRIM(COALESCE(p.project_code, '')),
+        UPPER(TRIM(COALESCE(p.site_code, ''))),
+        TRIM(COALESCE(p.item_code, '')))
     ORDER BY
-      project_code,
-      site_code,
-      item_code,
+      TRIM(COALESCE(project_code, '')),
+      UPPER(TRIM(COALESCE(site_code, ''))),
+      TRIM(COALESCE(item_code, '')),
       COALESCE(unit_price, 0) DESC,
       COALESCE(requested_qty, 0) DESC,
       created_at DESC
@@ -2932,10 +2948,12 @@ function buildMasterJoinedQuery(
       COALESCE(m.kabul_not, '') AS kabul_not,
       m.created_at,
 
-      COALESCE(site_po.requested_qty, 0) AS requested_qty,
-      COALESCE(site_po.billed_qty, 0) AS billed_qty,
-      COALESCE(site_po.due_qty, 0) AS due_qty,
+      COALESCE(site_po.agg_requested_qty, 0) AS requested_qty,
+      COALESCE(site_po.agg_billed_qty, 0) AS billed_qty,
+      COALESCE(site_po.agg_due_qty, 0) AS due_qty,
       COALESCE(site_po.po_no, '') AS po_no,
+      COALESCE(site_po.agg_po_count, 0) AS po_adedi,
+      COALESCE(site_po.agg_po_no, '') AS po_no_all,
 
       CASE
         WHEN TRIM(COALESCE(m.item_code, '')) = '8818278098' THEN 986.23
@@ -2955,8 +2973,8 @@ function buildMasterJoinedQuery(
 
       CASE
         WHEN COALESCE(m.done_qty, 0) = 0 THEN 'CANCEL'
-        WHEN COALESCE(site_po.requested_qty, 0) = 0 THEN 'PO_BEKLER'
-        WHEN COALESCE(m.done_qty, 0) < COALESCE(site_po.requested_qty, 0) THEN 'PARTIAL'
+        WHEN COALESCE(site_po.agg_requested_qty, 0) = 0 THEN 'PO_BEKLER'
+        WHEN COALESCE(m.done_qty, 0) < COALESCE(site_po.agg_requested_qty, 0) THEN 'PARTIAL'
         ELSE 'OK'
       END AS status,
 
@@ -3848,9 +3866,11 @@ app.get("/lookup/site-pos", async (req, res) => {
         site_po.site_code,
         site_po.item_code,
         COALESCE(NULLIF(TRIM(site_po.item_description), ''), best_boq.boq_items_en, '') AS item_description,
-        COALESCE(site_po.requested_qty, 0) AS requested_qty,
-        COALESCE(site_po.billed_qty, 0) AS billed_qty,
-        COALESCE(site_po.due_qty, 0) AS due_qty,
+        COALESCE(site_po.agg_requested_qty, 0) AS requested_qty,
+        COALESCE(site_po.agg_billed_qty, 0) AS billed_qty,
+        COALESCE(site_po.agg_due_qty, 0) AS due_qty,
+        COALESCE(site_po.agg_po_count, 0) AS po_adedi,
+        COALESCE(site_po.agg_po_no, '') AS po_no_all,
         COALESCE(site_po.unit_price, 0) AS unit_price,
         COALESCE(best_boq.currency, 'TRY') AS currency
       FROM best_site_po site_po

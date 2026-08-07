@@ -5336,7 +5336,17 @@ function DailyEntry() {
                     style={{ borderBottom:"1px solid #f1f5f9" }}
                     onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
                     onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    <td style={{ padding:"9px 12px", fontSize:13 }}>{row.po_no || "-"}</td>
+                    <td style={{ padding:"9px 12px", fontSize:13 }}>
+                      {row.po_no || "-"}
+                      {/* HW aynı kalem için ayrı PO açabiliyor (2 gün vinç → 2 PO);
+                          miktarlar toplanır, kullanıcı da bölünmeyi görsün */}
+                      {Number(row.po_adedi || 0) > 1 && (
+                        <span title={`Bu kalem ${row.po_adedi} ayrı PO'ya bölünmüş — miktarlar toplandı:\n${row.po_no_all || ""}`}
+                          style={{ marginLeft:6, background:"#fef3c7", color:"#92400e", border:"1px solid #fde68a", borderRadius:"999px", padding:"1px 7px", fontSize:"10.5px", fontWeight:800, whiteSpace:"nowrap", cursor:"help" }}>
+                          ⚠ {row.po_adedi} PO
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding:"9px 12px", fontSize:13 }}>{row.project_code || "-"}</td>
                     <td style={{ padding:"9px 12px", fontSize:13, fontWeight:600 }}>{row.site_code || "-"}</td>
                     <td style={{ padding:"9px 12px", fontSize:12, fontFamily:"monospace" }}>{row.item_code || "-"}</td>
