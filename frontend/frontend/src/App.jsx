@@ -21087,7 +21087,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const hk = await fetchJson(`${API_BASE}/finance/hw-invoice-items/billable-keys`);
         (hk.keys || []).forEach(k => {
           const key = `${String(k.site_id || "").toUpperCase()}|${String(k.item_code || "").trim()}`;
-          hwInvByKey[key] = { no: k.invoice_nos || "", tarih: k.invoice_date ? String(k.invoice_date).slice(0, 10) : "" };
+          hwInvByKey[key] = { no: k.invoice_nos || "", tarih: k.invoice_date ? String(k.invoice_date).slice(0, 10) : "",
+            kur: Number(k.reference_rate || 0) };
         });
       } catch (_) { /* fatura kalem yüklemesi yoksa boş geçilir */ }
 
@@ -21224,8 +21225,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const dueQty = doneQty - billedQty;
         const usdBirimFiyat = isUSD ? unitPrice : 0;
         const usdToplamFiyat = isUSD ? doneQty * unitPrice : 0;
-        // USD kalemler TL'ye çevrilir — Toplam Hakediş ve türev kolonlar hep TL cinsinden
-        const _usdK = Number(usdRate || 0) || 1;
+        // USD kalemler TL'ye çevrilir. KUR SABİTLEME: kalem HW'ye faturalandıysa
+        // Şimşek'in o faturayı kestiği günün kuru (Reference Exchange Rate)
+        // kullanılır — günlük kur oynasa da tutar kuruşuna aynı kalır.
+        // "Fatura Kesilebilir" panelindeki kural exporta da işlendi (07.08.2026).
+        const _hwInvRow = hwInvByKey[`${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}`] || {};
+        const _canliKur = Number(usdRate || 0) || 1;
+        const _usdK = (isUSD && Number(_hwInvRow.kur || 0) > 0) ? Number(_hwInvRow.kur) : _canliKur;
         const toplamHakedis = Number(row.total_done_amount || 0) * (isUSD ? _usdK : 1);
         // Taşerona göre kırılım oranı (Federal/AHY %80, UBS %75-90, 2KX %75)
         const _rowRate = getSubconRateByRow(row);
@@ -21237,7 +21243,6 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         // Şimşek HW'ye QC-OK aşamasında bedelin %80'ini faturalar (kalan %20 PAC'ta).
         // Taşeron da bu kesilen tutarın kendi kırılım oranı kadarını keser —
         // "Fatura Kesilebilir Kalemler" paneliyle birebir aynı hesap (07.08.2026).
-        const _hwInvRow = hwInvByKey[`${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}`] || {};
         const _hwFaturali = billedQty > 0 || !!_hwInvRow.no;
         const _efQty = billedQty > 0 ? Math.min(doneQty, billedQty) : doneQty;
         const _scale = doneQty > 0 ? _efQty / doneQty : 1;
