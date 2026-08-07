@@ -21072,13 +21072,26 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         setBolgeFaturaMap(bfMap);
       } catch (_) { bfMap = {}; }
 
+      // Şimşek'in HW'ye kestiği fatura no/tarihi (saha+kalem bazında) — taşerona
+      // "hangi faturamızın karşılığı" şeffaflığı için exporta işlenir
+      const hwInvByKey = {};
+      try {
+        const hk = await fetchJson(`${API_BASE}/finance/hw-invoice-items/billable-keys`);
+        (hk.keys || []).forEach(k => {
+          const key = `${String(k.site_id || "").toUpperCase()}|${String(k.item_code || "").trim()}`;
+          hwInvByKey[key] = { no: k.invoice_nos || "", tarih: k.invoice_date ? String(k.invoice_date).slice(0, 10) : "" };
+        });
+      } catch (_) { /* fatura kalem yüklemesi yoksa boş geçilir */ }
+
       const dateStr = new Date().toLocaleDateString("tr-TR");
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
       // Hakediş kolon başlığı taşerona göre dinamik (Federal → AHY → UBS ...)
       const _expSub = String(userSubconName || "").trim();
       const _expPct = canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş";
-      const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş KDV Dahil";
+      // Tablo KDV HARİÇ kurgulanır (taşeron faturasını KDV hariç bedel üzerinden keser)
+      const _tsr = _expSub ? _expSub.toUpperCase() : "TAŞERON";
+      const _kesHdr = `${_tsr} Kesecek Bedel (KDV Hariç)`;
 
       const getAnaliz = (row) => {
         if (row.status === "PO_BEKLER") return "Eksik";
@@ -21093,12 +21106,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
         "Done Qty", "Requested Qty", "QC Durum", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Toplam Hakediş (TL)", _hakHdr, _hakKdvHdr,
-        "Fatura Kesilecek", "Fatura No", "Fatura Miktarı (KDV Dahil)", "Fatura Tarihi",
-        "Kalan / Fatura No (2)", "Kalan Bedel / Fatura Miktarı (2) (KDV Dahil)", "Fatura Tarihi (2)",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)",
+        "Şimşek Toplam Hakediş (TL)", _hakHdr,
+        "Şimşek→HW Fatura Miktarı (KDV Hariç)", "Şimşek→HW Fatura No", "Şimşek→HW Fatura Tarihi",
+        _kesHdr, `${_tsr} Fatura No`, `${_tsr} Fatura Miktarı (KDV Hariç)`, `${_tsr} Fatura Tarihi`,
+        `${_tsr} Kalan Bedel (KDV Hariç)`,
         "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 11, 10, 10, 10, 14, 16, 14, 18, 20, 24, 20, 18, 22, 14, 20, 30, 16, 18];
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 11, 10, 10, 10, 14, 16, 14, 22, 22, 24, 24, 18, 24, 22, 24, 18, 24, 18];
       const NCOLS = headers.length;
 
       const titleStyle = {
@@ -21220,8 +21235,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
         const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
 
-        // Kalan bedel: taşeronun hak ettiği (KDV dahil) − şimdiye kadar kesilen fatura (KDV dahil)
-        const kalanBedel = isFaturaTaseron ? Math.max(0, federalHakedis * 1.20 - faturaToplamMiktar) : 0;
+        // Şimşek'in HW'ye faturaladığı bedel (KDV hariç, PO'daki billed × birim fiyat)
+        // + o faturanın numarası/tarihi — taşerona "hangi faturamızın karşılığı" şeffaflığı
+        const simsekHwFatura = billedQty * unitPrice * (isUSD ? _usdK : 1);
+        const _hwInv = hwInvByKey[`${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}`] || {};
+        // Tablo KDV HARİÇ: taşeron faturası KDV dahil saklandığı için 1,20'ye bölünür
+        const faturaMiktarHaric = faturaToplamMiktar / 1.20;
+        // Kalan: şu an kesilebilir bedel − taşeronun kestiği fatura (ikisi de KDV hariç)
+        const kalanBedel = isFaturaTaseron ? Math.max(0, faturaKesilecek - faturaMiktarHaric) : 0;
 
         if (aggregateBySite) {
           // Saha bazında topla: aynı saha kodundaki kalemleri tek satırda birleştir
@@ -21237,6 +21258,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           a.usdToplam += usdToplamFiyat;
           a.toplamHakedis += toplamHakedis; a.federalHakedis += federalHakedis;
           a.faturaKesilecek += faturaKesilecek; a.faturaMiktar += faturaToplamMiktar;
+          a.simsekHwFatura = (a.simsekHwFatura || 0) + simsekHwFatura;
+          a.hwInvNos = a.hwInvNos || new Set(); a.hwInvTarihler = a.hwInvTarihler || new Set();
+          String(_hwInv.no || "").split(", ").filter(Boolean).forEach(x => a.hwInvNos.add(x));
+          if (_hwInv.tarih) a.hwInvTarihler.add(_hwInv.tarih);
           if (row.currency) a.currencySet.add(String(row.currency).toUpperCase());
           if (!a.subcon && row.subcon_name) a.subcon = row.subcon_name;
           faturaNo.split(", ").filter(Boolean).forEach(x => a.faturaNos.add(x));
@@ -21264,14 +21289,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           { v: unitPrice,                                         s: cellStyle(isEven, true) },
           { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
           { v: federalHakedis,                                    s: federalStyle(isEven) },
-          { v: federalHakedis * 1.20,                             s: federalKdvStyle(isEven) },
+          { v: simsekHwFatura || "",                              s: federalKdvStyle(isEven) },
+          { v: _hwInv.no || "",                                   s: cellStyle(isEven, false) },
+          { v: _hwInv.tarih || "",                                s: cellStyle(isEven, false) },
           { v: faturaKesilecek,                                   s: faturaKesilecek > 0 ? faturaStyle(isEven) : cellStyle(isEven, true) },
           { v: faturaNo,                                          s: cellStyle(isEven, false) },
-          { v: faturaToplamMiktar || "",                          s: cellStyle(isEven, true) },
+          { v: faturaMiktarHaric > 0.01 ? faturaMiktarHaric : "", s: cellStyle(isEven, true) },
           { v: faturaTarihi,                                      s: cellStyle(isEven, false) },
-          { v: "",                                                s: cellStyle(isEven, false) },
           { v: kalanBedel > 0.01 ? kalanBedel : "",               s: kalanBedel > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
-          { v: "",                                                s: cellStyle(isEven, false) },
           { v: row.subcon_name || "",                             s: cellStyle(isEven, false) },
         ]);
       });
@@ -21280,7 +21305,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         [..._siteAgg.values()].forEach((a, idx) => {
           const isEven = idx % 2 === 1;
           const curr = a.currencySet.size === 1 ? [...a.currencySet][0] : (a.currencySet.size > 1 ? "KARMA" : "");
-          const kalanBedel = Math.max(0, a.federalHakedis * 1.20 - a.faturaMiktar);
+          // Saha toplamı da KDV hariç: kesilebilir bedel − taşeronun kestiği fatura
+          const _aFatHaric = Number(a.faturaMiktar || 0) / 1.20;
+          const kalanBedel = Math.max(0, a.faturaKesilecek - _aFatHaric);
           aoa.push([
             { v: a.region,                              s: cellStyle(isEven, false) },
             { v: "SAHA",                                s: cellStyle(isEven, false) },
@@ -21301,14 +21328,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             { v: "",                                    s: cellStyle(isEven, true) },
             { v: a.toplamHakedis,                       s: cellStyle(isEven, true) },
             { v: a.federalHakedis,                      s: federalStyle(isEven) },
-            { v: a.federalHakedis * 1.20,               s: federalKdvStyle(isEven) },
+            { v: a.simsekHwFatura || "",                s: federalKdvStyle(isEven) },
+            { v: [...(a.hwInvNos || [])].join(", "),    s: cellStyle(isEven, false) },
+            { v: [...(a.hwInvTarihler || [])].join(", "), s: cellStyle(isEven, false) },
             { v: a.faturaKesilecek,                     s: a.faturaKesilecek > 0 ? faturaStyle(isEven) : cellStyle(isEven, true) },
             { v: [...a.faturaNos].join(", "),           s: cellStyle(isEven, false) },
-            { v: a.faturaMiktar || "",                  s: cellStyle(isEven, true) },
+            { v: _aFatHaric > 0.01 ? _aFatHaric : "",   s: cellStyle(isEven, true) },
             { v: [...a.faturaTarihler].join(", "),      s: cellStyle(isEven, false) },
-            { v: "",                                    s: cellStyle(isEven, false) },
             { v: kalanBedel > 0.01 ? kalanBedel : "",   s: kalanBedel > 0.01 ? kalanStyle(isEven) : cellStyle(isEven, true) },
-            { v: "",                                    s: cellStyle(isEven, false) },
             { v: a.subcon,                              s: cellStyle(isEven, false) },
           ]);
         });
