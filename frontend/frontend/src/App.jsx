@@ -23685,7 +23685,9 @@ function CashFlowPanel({ currentUser, onBack }) {
     const t = Number(o.tutar || 0);
     if (t <= 0) return;
     const tip = `${o.aciklama || KAT_LBL[o.kategori] || o.kategori}${o.donem ? ` (${AY_KISA(o.donem)})` : ""}: ₺${t.toLocaleString("tr-TR")}`;
-    const eskiDonem = o.donem && o.donem !== expDonem;
+    // Geciken = dönemi beklenen dönemden ESKİ olan; cari/gelecek dönem (yemek
+    // kartı gibi ay içi giderler) kendi satırında kalır
+    const eskiDonem = o.donem && o.donem < expDonem;
     if (o.kategori === "ARAC" && !eskiDonem) addTo(aracByDay, aracTips, d, t, tip);
     else if (o.kategori === "TICKET" && !eskiDonem) addTo(ticketByDay, ticketTips, d, t, tip);
     else if (o.kategori === "CEKSENET") addTo(cekSenetByDay, cekSenetTips, d, t, tip);
