@@ -27697,6 +27697,7 @@ function App() {
     password: "",
     role: "user",
     marka: "ERC",
+    subcon_name: "",
   });
   const [token, setToken] = useState(localStorage.getItem("token") || "");
 
@@ -28037,7 +28038,7 @@ function App() {
 
       if (!res.ok) throw new Error(data.error);
 
-      setNewUser({ name: "", email: "", password: "", role: "user", marka: "ERC" });
+      setNewUser({ name: "", email: "", password: "", role: "user", marka: "ERC", subcon_name: "" });
       loadAdminUsers();
     } catch (err) {
       alert(err.message);
@@ -29350,12 +29351,20 @@ function App() {
                       <input placeholder="Şifre" type="password" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
                       <select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",background:"#fff",cursor:"pointer"}}>
                         <option value="user">👤 Personel</option>
+                        <option value="subcon">🔧 Taşeron</option>
                         <option value="admin">👑 Admin</option>
                         <option value="rollout_mudur">🏗 Bölge Müdürü</option>
                         <option value="pm">📋 Proje Müdürü</option>
                         <option value="direktor">🎯 Direktör</option>
                         <option value="muhasebe">💼 Muhasebe</option>
                       </select>
+                      {/* Taşeron rolünde firma adı zorunlu: kullanıcı yalnız bu
+                          taşerona ait satırları görür (FERRUMX → AHY_FERRUMX dahil) */}
+                      {newUser.role === "subcon" && (
+                        <input placeholder="Taşeron Adı (ör. FERRUMX)" value={newUser.subcon_name||""}
+                          onChange={e=>setNewUser({...newUser, subcon_name: e.target.value.toUpperCase()})}
+                          style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #f59e0b",fontSize:"14px",outline:"none",background:"#fffbeb"}} />
+                      )}
                       {adminMarkalar.length > 1 && (
                         <select value={newUser.marka||"ERC"} onChange={e=>setNewUser({...newUser,marka:e.target.value})} title="Firma markası" style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",background:"#fff",cursor:"pointer"}}>
                           {adminMarkalar.map(m=>(<option key={m.kod} value={m.kod}>🏢 {m.ad}</option>))}
