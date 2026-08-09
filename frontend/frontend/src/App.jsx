@@ -21894,7 +21894,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           margin: "20px auto",
         }}
       >
-        {regionSummary.length === 0 ? (
+        {/* Tek bölgede çalışan taşeronda bölge kartı genel özetin tekrarı olur —
+            gizlenir; birden çok bölgesi olan taşeronda kartlar görünmeye devam eder */}
+        {isSubconUser && regionSummary.length <= 1 ? null : regionSummary.length === 0 ? (
           <div className="loading">Bölge verisi bulunamadı</div>
         ) : (
           regionSummary.map((item) => {
@@ -28780,11 +28782,7 @@ function App() {
               <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
                 <span>📍</span> Bölge Analizi
               </div>
-              {!is2KXUser && (
-                <div className={`sidebar-nav-item ${page==='orgsema'?'active':''}`} onClick={()=>setPage('orgsema')}>
-                  <span>🏢</span> Organizasyon Şeması
-                </div>
-              )}
+              {/* Organizasyon şeması iç yapıdır — taşeron kullanıcılara gösterilmez */}
             </>
           ) : (
             <>
