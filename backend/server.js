@@ -6400,6 +6400,48 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
   }
 });
 
+// ── Taşeronun kendi paket bedeli (FERRUMX gibi paket fiyatla çalışanlar) ──
+// Taşeron kullanıcısı kendi işlerinin bedelini AHY'nin gördüğü fiyat kuralıyla
+// görür (radyolu 52.000 / radyosuz 40.000 + LPRT/One Band ekstraları).
+// FERRUMX kapsamı hem "FERRUMX" (Şimşek'e direkt) hem "AHY_FERRUMX" (AHY
+// üzerinden) satırlarını içerir; kaynak her satırda ayrıca döner. (07.08.2026)
+app.get("/finance/subcon-paket-bedel", authMiddleware, async (req, res) => {
+  try {
+    const scopeName = subconScope(req) || String(req.query.sub || "").trim();
+    if (!scopeName) return res.status(403).json({ ok: false, error: "Taşeron kapsamı yok" });
+    const det = await pool.query(`
+      WITH best_boq AS (
+        SELECT DISTINCT ON (s_bom_code) * FROM boq_items
+        WHERE COALESCE(TRIM(s_bom_code), '') <> '' ORDER BY s_bom_code, created_at DESC
+      )
+      SELECT UPPER(TRIM(m.subcon_name)) AS subcon,
+        UPPER(TRIM(COALESCE(m.site_code,''))) AS site,
+        COALESCE(NULLIF(TRIM(m.item_description),''), best_boq.boq_items_en, COALESCE(m.item_code,'')) AS kalem,
+        GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty,0) END) AS fq,
+        (UPPER(TRIM(COALESCE(m.qc_durum,'NOK'))) = 'OK') AS qc_ok
+      FROM master_works m
+      LEFT JOIN best_boq ON TRIM(COALESCE(best_boq.s_bom_code,'')) = TRIM(COALESCE(m.item_code,''))
+      WHERE COALESCE(TRIM(m.subcon_name),'') <> ''`);
+    const kendi = det.rows.filter(r => subconRowMatches(scopeName, r.subcon));
+    // Bedel motoru saha bazlı çalışır; kaynağı (FERRUMX / AHY_FERRUMX) korumak
+    // için subcon alanını olduğu gibi geçiyoruz — her kayıt ayrı grup olur
+    const bm = ahyTaseronBedel(kendi.map(r => ({ subcon: r.subcon, site: r.site, kalem: r.kalem, fq: r.fq, qc_ok: r.qc_ok })));
+    const detay = [];
+    let toplam = 0;
+    for (const [kaynak, v] of Object.entries(bm)) {
+      (v.detay || []).forEach(d => detay.push({ ...d, kaynak }));
+      toplam += Number(v.bedel || 0);
+    }
+    detay.sort((a, b) => String(a.kaynak).localeCompare(String(b.kaynak)) || String(a.site).localeCompare(String(b.site)));
+    const kaynakOzet = {};
+    detay.forEach(d => { kaynakOzet[d.kaynak] = (kaynakOzet[d.kaynak] || 0) + Number(d.tutar || 0); });
+    res.json({ ok: true, taseron: scopeName, bedel: Math.round(toplam), detay, kaynak_ozet: kaynakOzet });
+  } catch (e) {
+    console.error("SUBCON PAKET BEDEL ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── ERC (Şimşek) Taşeron Hesabı: yalnız STATE / 2KX / FERRUMX ──
 // Bedel kuralları (06.08.2026, Orhan): STATE → Huawei hakedişinin %80'i,
 // 2KX → %75'i (Şimşek kırılım anlaşmaları); FERRUMX → AHY paket kural

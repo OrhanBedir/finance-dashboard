@@ -7411,7 +7411,7 @@ function FinanceDashboard({
         : "tum_taseronlar";
       // Hakediş kolon başlığı seçili taşerona göre dinamik (yoksa genel "Taşeron Hakediş")
       const _expSub = String(subconFilter || "").trim();
-      const _expPct = ["ahy", "ferrumx"].includes(canonTaseron(_expSub)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş (Kırılım)";
       const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş (Kırılım) KDV Dahil";
 
@@ -20946,6 +20946,18 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       return _kesilebilir;
   };
 
+  // Paket fiyatla çalışan taşeronlar (FERRUMX): bedel yüzde kırılımdan değil,
+  // anlaşma paket fiyatından hesaplanır — AHY'nin gördüğü fiyatın aynısı
+  const _paketTaseron = canonTaseron(userSubconName) === "ferrumx";
+  const [paketModal, setPaketModal] = useState(null);
+  const handleOpenPaket = async () => {
+    try {
+      const d = await fetchJson(`${API_BASE}/finance/subcon-paket-bedel`);
+      if (!d.ok) throw new Error(d.error || "Bedel alınamadı");
+      setPaketModal(d);
+    } catch (e) { alert("Paket bedeli alınamadı: " + e.message); }
+  };
+
   const handleOpenBillable = async () => {
     try {
       setBillableLoading(true);
@@ -20980,7 +20992,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     const _name = subconDisplayName || userSubconName || "Taşeron";
     // Fatura zinciri kolonları: Şimşek HW'ye %80 keser; taşeron Şimşek'e
     // o bedelin kendi kırılım yüzdesi kadarını keser (AHY %90 → net %72)
-    const _pct = ["ahy", "ferrumx"].includes(canonTaseron(userSubconName)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(userSubconName)) ? 75 : 80;
+    const _pct = canonTaseron(userSubconName) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(userSubconName)) ? 75 : 80;
     const header = [
       "Site ID",
       "İş Açıklaması",
@@ -21101,7 +21113,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
       // Hakediş kolon başlığı taşerona göre dinamik (Federal → AHY → UBS ...)
       const _expSub = String(userSubconName || "").trim();
-      const _expPct = ["ahy", "ferrumx"].includes(canonTaseron(_expSub)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş";
       // Tablo KDV HARİÇ kurgulanır (taşeron faturasını KDV hariç bedel üzerinden keser)
       const _tsr = _expSub ? _expSub.toUpperCase() : "TAŞERON";
@@ -22519,6 +22531,71 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         </div>
       )}
 
+      {/* Paket fiyat dökümü (FERRUMX): saha saha bedel + kaynak ayrımı */}
+      {paketModal && (
+        <div onClick={() => setPaketModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(920px,96vw)", maxHeight:"84vh", overflow:"auto", padding:"22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:"10px", marginBottom:"6px" }}>
+              <div>
+                <div style={{ fontWeight:800, fontSize:"17px", color:"#111827" }}>📐 Fatura Kesilecek Bedel</div>
+                <div style={{ fontSize:"12px", color:"#64748b", marginTop:"3px" }}>
+                  Anlaşma paket fiyatları · fiyatlar KDV hariç · toplam{" "}
+                  <b style={{ color:"#065f46" }}>₺{Number(paketModal.bedel||0).toLocaleString("tr-TR")}</b>
+                  {" "}(KDV dahil ₺{Math.round(Number(paketModal.bedel||0)*1.2).toLocaleString("tr-TR")})
+                </div>
+                <div style={{ fontSize:"11.5px", color:"#64748b", marginTop:"4px" }}>
+                  {Object.entries(paketModal.kaynak_ozet||{}).map(([k,v]) => (
+                    <span key={k} style={{ marginRight:"10px" }}>
+                      <b>{k}</b>: ₺{Math.round(v).toLocaleString("tr-TR")}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:"8px" }}>
+                <button type="button" onClick={() => exportStandardExcel({
+                  title: `${paketModal.taseron} — Fatura Kesilecek Bedel (paket fiyat)`,
+                  sheetName: "Fatura Kesilecek", fileBase: `${paketModal.taseron} - Fatura Kesilecek Bedel`,
+                  headers: ["Saha","Paket / Kalem","Adet","Birim (KDV Hariç)","Tutar (KDV Hariç)","Tutar (KDV Dahil)","QC","Taşeron Kaydı"],
+                  colWidths: [24,44,8,17,18,18,10,18],
+                  numericCols: [2,3,4,5],
+                  rows: [
+                    ...(paketModal.detay||[]).map(d => [d.site||"", d.kalem||"", Number(d.adet||0), Number(d.birim||0),
+                      Number(d.tutar||0), Number(d.tutar||0)*1.2, d.qc||"", d.kaynak||""]),
+                    { cells:["", "FATURA KESİLECEK TOPLAM", "", "", Number(paketModal.bedel||0), Number(paketModal.bedel||0)*1.2, "", ""], bold:true, merge:[1,3] },
+                  ],
+                }).catch(e => alert("Excel indirilemedi: " + e.message))}
+                  style={{ padding:"8px 14px", background:"#065f46", color:"#fff", border:"none", borderRadius:"9px", fontSize:"12.5px", fontWeight:800, cursor:"pointer" }}>📥 Excel İndir</button>
+                <button type="button" onClick={() => setPaketModal(null)}
+                  style={{ padding:"8px 14px", background:"#e2e8f0", color:"#334155", border:"none", borderRadius:"9px", fontSize:"12.5px", fontWeight:700, cursor:"pointer" }}>Kapat</button>
+              </div>
+            </div>
+            <div style={{ overflowX:"auto", marginTop:"12px" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                <thead><tr style={{ background:"#f8fafc" }}>
+                  {["Saha","Paket / Kalem","Adet","Tutar (KDV Hariç)","QC","Taşeron Kaydı"].map((h,i) => (
+                    <th key={h} style={{ padding:"9px 12px", textAlign: i>=2 && i<=3 ? "right" : "left", fontSize:"11px", fontWeight:700, color:"#64748b", borderBottom:"1px solid #e2e8f0", textTransform:"uppercase", letterSpacing:"0.4px", whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {(paketModal.detay||[]).length === 0 ? (
+                    <tr><td colSpan={6} style={{ padding:"26px", textAlign:"center", color:"#94a3b8", fontSize:"13px" }}>Henüz bedel oluşmuş iş yok</td></tr>
+                  ) : (paketModal.detay||[]).map((d,i) => (
+                    <tr key={i} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                      <td style={{ padding:"9px 12px", fontSize:"13px", fontWeight:600 }}>{d.site}</td>
+                      <td style={{ padding:"9px 12px", fontSize:"12.5px" }}>{d.kalem}</td>
+                      <td style={{ padding:"9px 12px", fontSize:"13px", textAlign:"right" }}>{d.adet}</td>
+                      <td style={{ padding:"9px 12px", fontSize:"13px", textAlign:"right", fontWeight:800, color:"#065f46" }}>₺{Number(d.tutar||0).toLocaleString("tr-TR")}</td>
+                      <td style={{ padding:"9px 12px", fontSize:"12px" }}>{d.qc === "OK" ? "✅ OK" : d.qc === "NOK" ? "🔶 NOK" : "—"}</td>
+                      <td style={{ padding:"9px 12px", fontSize:"11.5px", color:"#64748b", whiteSpace:"nowrap" }}>{d.kaynak}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {billableModalOpen && (
         <div
           style={{
@@ -23413,10 +23490,16 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               🏗 Saha bazında
             </button>
           </div>
-          {isSubconUser && (
+          {isSubconUser && !_paketTaseron && (
             <button type="button" onClick={handleOpenBillable}
               style={{ height:"42px", display:"flex", alignItems:"center", justifyContent:"center", whiteSpace:"nowrap", borderRadius:"10px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#b45309,#f59e0b)", boxShadow:"0 3px 8px rgba(245,158,11,0.32)" }}>
               💰 Fatura Kesilebilir
+            </button>
+          )}
+          {isSubconUser && _paketTaseron && (
+            <button type="button" onClick={handleOpenPaket}
+              style={{ height:"42px", display:"flex", alignItems:"center", justifyContent:"center", whiteSpace:"nowrap", borderRadius:"10px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#065f46,#10b981)", boxShadow:"0 3px 8px rgba(16,185,129,0.32)" }}>
+              📐 Fatura Kesilecek Bedel
             </button>
           )}
         </div>
