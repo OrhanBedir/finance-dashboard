@@ -425,7 +425,7 @@ app.use((req, res, next) => {
 app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, email, role, is_active, created_at, tenant, marka
+      SELECT id, name, email, role, is_active, created_at, tenant, marka, subcon_name
       FROM users
       ORDER BY id DESC
     `);
@@ -628,21 +628,26 @@ app.put(
   async (req, res) => {
     try {
       const { id } = req.params;
-      const { role } = req.body;
+      const { role, subcon_name } = req.body;
 
-      if (!role || !["admin", "user", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe"].includes(role)) {
+      if (!role || !["admin", "user", "subcon", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe"].includes(role)) {
         return res.status(400).json({ ok: false, error: "Geçersiz rol" });
+      }
+      if (role === "subcon" && !String(subcon_name || "").trim()) {
+        return res.status(400).json({ ok: false, error: "Taşeron rolü için taşeron adı zorunlu" });
       }
       if (!(await guardUserScope(req, res, id))) return;
 
+      // Taşeron rolünde firma adı da yazılır; başka role geçilirse kapsam temizlenir
       const result = await pool.query(
         `
       UPDATE users
-      SET role = $1
+      SET role = $1,
+          subcon_name = CASE WHEN $1 = 'subcon' THEN $3 ELSE NULL END
       WHERE id = $2
-      RETURNING id, name, email, role, is_active, created_at
+      RETURNING id, name, email, role, subcon_name, is_active, created_at
       `,
-        [role, id],
+        [role, id, String(subcon_name || "").trim().toUpperCase() || null],
       );
 
       if (!result.rows.length) {

@@ -28000,15 +28000,27 @@ function App() {
     }
   };
 
-  const handleAdminRoleChange = async (userId, newRole) => {
+  const handleAdminRoleChange = async (userId, newRole, mevcutSubcon = "") => {
     try {
+      // Taşeron rolünde firma adı zorunlu — kullanıcı yalnız o taşeronun
+      // satırlarını görür (FERRUMX kapsamı AHY_FERRUMX'i de içerir)
+      let subconAdi = mevcutSubcon || "";
+      if (newRole === "subcon") {
+        const girilen = window.prompt(
+          "Taşeron adını yazın (ör. FERRUMX).\nKullanıcı yalnız bu taşerona ait işleri görecek:",
+          subconAdi,
+        );
+        if (girilen === null) return;
+        subconAdi = String(girilen).trim().toUpperCase();
+        if (!subconAdi) { alert("Taşeron adı boş olamaz"); return; }
+      }
       const response = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ role: newRole }),
+        body: JSON.stringify({ role: newRole, subcon_name: subconAdi }),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -29454,14 +29466,21 @@ function App() {
                               <button onClick={()=>handleToggleActive(u.id)} style={{padding:"7px 14px",background:u.is_active?"#fef3c7":"#f0fdf4",color:u.is_active?"#92400e":"#166534",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
                                 {u.is_active?"Pasife Al":"Aktif Et"}
                               </button>
-                              <select value={u.role||"user"} onChange={e=>handleAdminRoleChange(u.id,e.target.value)} style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:"#f9fafb",color:"#374151"}}>
+                              <select value={u.role||"user"} onChange={e=>handleAdminRoleChange(u.id,e.target.value,u.subcon_name||"")} style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:(u.role==="subcon")?"#fffbeb":"#f9fafb",color:(u.role==="subcon")?"#92400e":"#374151"}}>
                                 <option value="user">👤 Personel</option>
+                                <option value="subcon">🔧 Taşeron</option>
                                 <option value="admin">👑 Admin</option>
                                 <option value="rollout_mudur">🏗 Bölge Müdürü</option>
                                 <option value="pm">📋 Proje Müdürü</option>
                                 <option value="direktor">🎯 Direktör</option>
                                 <option value="muhasebe">💼 Muhasebe</option>
                               </select>
+                              {u.role === "subcon" && (
+                                <span onClick={()=>handleAdminRoleChange(u.id,"subcon",u.subcon_name||"")} title="Taşeron adını değiştir"
+                                  style={{padding:"7px 10px",background:"#fef3c7",color:"#92400e",border:"1px solid #fde68a",borderRadius:"8px",fontSize:"11.5px",fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>
+                                  🔧 {u.subcon_name || "taşeron adı yok"}
+                                </span>
+                              )}
                               {adminMarkalar.length > 1 && (u.tenant||'erc')==='erc' && (
                                 <select value={u.marka||"ERC"} onChange={e=>handleAdminMarkaChange(u.id,e.target.value)} title="Firma markası" style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:(u.marka==="AHY")?"#fff7ed":"#f9fafb",color:(u.marka==="AHY")?"#9a3412":"#374151"}}>
                                   {adminMarkalar.map(m=>(<option key={m.kod} value={m.kod}>🏢 {m.ad}</option>))}
