@@ -7411,7 +7411,7 @@ function FinanceDashboard({
         : "tum_taseronlar";
       // Hakediş kolon başlığı seçili taşerona göre dinamik (yoksa genel "Taşeron Hakediş")
       const _expSub = String(subconFilter || "").trim();
-      const _expPct = canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = ["ahy", "ferrumx"].includes(canonTaseron(_expSub)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş (Kırılım)";
       const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş (Kırılım) KDV Dahil";
 
@@ -20917,6 +20917,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             site_id: row.site_code,
             item_description: row.item_description,
             item_code: row.item_code,
+            subcon_name: row.subcon_name || "",
             done_qty: doneQty,
             requested_qty: Number(row.requested_qty || 0),
             unit_price: taseronUnit,
@@ -20979,7 +20980,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     const _name = subconDisplayName || userSubconName || "Taşeron";
     // Fatura zinciri kolonları: Şimşek HW'ye %80 keser; taşeron Şimşek'e
     // o bedelin kendi kırılım yüzdesi kadarını keser (AHY %90 → net %72)
-    const _pct = canonTaseron(userSubconName) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(userSubconName)) ? 75 : 80;
+    const _pct = ["ahy", "ferrumx"].includes(canonTaseron(userSubconName)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(userSubconName)) ? 75 : 80;
     const header = [
       "Site ID",
       "İş Açıklaması",
@@ -20997,6 +20998,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       "Kestiği Tutar (₺)",
       "Vade (Ödeme)",
       "Şimşek Tahsilatı",
+      // FERRUMX gibi hem direkt hem alt-marka üzerinden çalışan firmalarda
+      // işin hangi kayıt altında yapıldığı (FERRUMX / AHY_FERRUMX) görünsün
+      "Taşeron Kaydı",
     ];
     const aoa = [header];
     let grand = 0, grandHw = 0, grandKesmeli = 0;
@@ -21021,15 +21025,16 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         x.fatura_miktari != null ? Number(x.fatura_miktari) : "",
         x.vade || "",
         x.tahsilat_tarihi ? `Ödeme Yapıldı (${x.tahsilat_tarihi})` : (x.vade ? "Gelecek" : "HW Muhasebe Onayı Bekliyor"),
+        x.subcon_name || "",
       ]);
     }
-    aoa.push(["", "", "", "", "", "", "TOPLAM", grand, grandHw, grandKesmeli, "", "", "", "", "", ""]);
+    aoa.push(["", "", "", "", "", "", "TOPLAM", grand, grandHw, grandKesmeli, "", "", "", "", "", "", ""]);
     exportStandardExcel({
       title: `${_name} - Fatura Kesilebilir Kalemler`,
       sheetName: "Fatura Kesilebilir",
       fileBase: `${_name} - Fatura Kesilebilir`,
       headers: header,
-      colWidths: [19, 44, 14, 10, 12, 12, 17, 19, 21, 23, 12, 16, 13, 15, 13, 26],
+      colWidths: [19, 44, 14, 10, 12, 12, 17, 19, 21, 23, 12, 16, 13, 15, 13, 26, 18],
       numericCols: [3, 4, 5, 6, 7, 8, 9, 13],
       rows: aoa.slice(1),
     }).catch((e) => alert("Excel indirilemedi: " + e.message));
@@ -21096,7 +21101,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
       // Hakediş kolon başlığı taşerona göre dinamik (Federal → AHY → UBS ...)
       const _expSub = String(userSubconName || "").trim();
-      const _expPct = canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = ["ahy", "ferrumx"].includes(canonTaseron(_expSub)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş";
       // Tablo KDV HARİÇ kurgulanır (taşeron faturasını KDV hariç bedel üzerinden keser)
       const _tsr = _expSub ? _expSub.toUpperCase() : "TAŞERON";

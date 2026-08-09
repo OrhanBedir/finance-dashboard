@@ -254,6 +254,7 @@ function canonSub(name) {
   if (n.includes("ubs")) return "ubs";
   if (n.includes("ahy")) return "ahy";
   if (n.includes("2kx")) return "2kx";
+  if (n.includes("ferrum")) return "ferrumx";
   return n.trim();
 }
 
@@ -280,11 +281,19 @@ function subconScope(req) {
   return null;
 }
 
+// FERRUMX istisnası (07.08.2026): firma hem Şimşek'e direkt ("FERRUMX")
+// hem AHY üzerinden ("AHY_FERRUMX") iş yapıyor. FERRUMX yöneticisi ikisini
+// birlikte görür; AHY tarafı da AHY_FERRUMX'i görmeye devam eder (canon 'ahy').
+function subconRowMatches(scopeName, rowSubcon) {
+  const c = canonSub(scopeName);
+  if (c === "ferrumx") return String(rowSubcon || "").toLowerCase().includes("ferrum");
+  return canonSub(rowSubcon) === c;
+}
+
 function applySubconFilter(req, rows) {
   const scopeName = subconScope(req);
   if (!scopeName) return rows || [];
-  const c = canonSub(scopeName);
-  return (rows || []).filter((row) => canonSub(row.subcon_name) === c);
+  return (rows || []).filter((row) => subconRowMatches(scopeName, row.subcon_name));
 }
 
 const pool = require("./db");
@@ -3955,8 +3964,8 @@ app.get("/dashboard/result", authMiddleware, async (req, res) => {
       currency: normalizeCurrency(row.currency),
     }));
     if (scopeName) {
-      const c = canonSub(scopeName);
-      rows = rows.filter((row) => canonSub(row.subcon_name) === c);
+      // FERRUMX kapsamı hem "FERRUMX" hem "AHY_FERRUMX" satırlarını içerir
+      rows = rows.filter((row) => subconRowMatches(scopeName, row.subcon_name));
     }
 
     res.json({ ok: true, rows });
@@ -19477,8 +19486,7 @@ app.get("/hw-acceptance/rejected", authMiddleware, async (req, res) => {
     let rows = r.rows;
     const scopeName = subconScope(req) || String(req.query.sub || "").trim();
     if (scopeName) {
-      const c = canonSub(scopeName);
-      rows = rows.filter((row) => canonSub(row.subcon_name) === c);
+      rows = rows.filter((row) => subconRowMatches(scopeName, row.subcon_name));
     }
     res.json({ ok: true, rows });
   } catch (e) {
@@ -19517,8 +19525,7 @@ app.get("/hw-acceptance/onay-bekleyen", authMiddleware, async (req, res) => {
     let rows = r.rows;
     const scopeName = subconScope(req) || String(req.query.sub || "").trim();
     if (scopeName) {
-      const c = canonSub(scopeName);
-      rows = rows.filter((row) => canonSub(row.subcon_name) === c);
+      rows = rows.filter((row) => subconRowMatches(scopeName, row.subcon_name));
     }
     // Son acceptance yüklemesinin zamanı — kartta "güncel mi?" sorusuna cevap
     const son = await pool.query(
