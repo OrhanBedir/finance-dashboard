@@ -20989,6 +20989,46 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     }],
   }).catch(e => alert("Excel indirilemedi: " + e.message));
 
+  // Atanan İş görünümü (paket taşeron): saha bazında kendi alacağı bedel —
+  // kalem sayısı ve Huawei PO tutarları gösterilmez
+  const handleOpenAtananPaket = async () => {
+    try {
+      const d = await fetchJson(`${API_BASE}/finance/subcon-paket-bedel`);
+      if (!d.ok) throw new Error(d.error || "Bedel alınamadı");
+      const bySite = {};
+      (d.tum_detay || []).forEach(x => {
+        const g = (bySite[x.site] = bySite[x.site] || { site: x.site, paketler: [], tutar: 0, qcOk: 0, n: 0 });
+        g.paketler.push(x.kalem);
+        g.tutar += Number(x.tutar || 0);
+        g.n += 1;
+        if (String(x.qc || "").toUpperCase() === "OK") g.qcOk += 1;
+      });
+      const list = Object.values(bySite)
+        .sort((a, b) => b.tutar - a.tutar)
+        .map(g => ({
+          site: g.site,
+          paket: g.paketler.join(" + "),
+          qc: g.qcOk === g.n ? "✅ QC OK" : g.qcOk > 0 ? `🔶 ${g.qcOk}/${g.n} OK` : "⬜ QC Bekliyor",
+          bedel: Math.round(g.tutar).toLocaleString("tr-TR"),
+          bedel_kdv: Math.round(g.tutar * 1.2).toLocaleString("tr-TR"),
+        }));
+      list.push({ site: "— TOPLAM —", paket: "", qc: "",
+        bedel: Math.round(Number(d.bedel_tum || 0)).toLocaleString("tr-TR"),
+        bedel_kdv: Math.round(Number(d.bedel_tum || 0) * 1.2).toLocaleString("tr-TR") });
+      setOzetModal({
+        title: "📋 Yapılan İş — Saha Bazında (paket bedeli)",
+        cols: [
+          { k: "site", l: "Site ID" },
+          { k: "paket", l: "Paket / Kalem" },
+          { k: "qc", l: "QC" },
+          { k: "bedel", l: "Alacağı Bedel (KDV Hariç) ₺" },
+          { k: "bedel_kdv", l: "Alacağı Bedel (KDV Dahil) ₺" },
+        ],
+        rows: list,
+      });
+    } catch (e) { alert("Bedel alınamadı: " + e.message); }
+  };
+
   const handleExportPaketSaha = async () => {
     try {
       const d = await fetchJson(`${API_BASE}/finance/subcon-paket-bedel`);
@@ -21577,6 +21617,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             <>
               <Row label="Atanan İş Tutarı (PO talebi)" value={subconSummary.atananIs}
                 onClick={() => {
+                  // Paket fiyatlı taşeron PO tutarını değil kendi alacağı bedeli görür
+                  if (_paketTaseron) { handleOpenAtananPaket(); return; }
                   // Saha bazında atanan iş: max(talep, yapılan) × birim fiyat (USD → TCMB)
                   // + fiziki ilerleme durumu (montaja girilmemiş sahalar üstte)
                   const bySite = {};
@@ -21668,7 +21710,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               {[
                 {
                   label: "Fiziki Tamamlanan", sub: "saha girişi bazlı · liste için tıkla", value: subconSummary.fizikiIs, pct: subconSummary.fizikiPct, pctLabel: "atananın", color: "#1d4ed8",
-                  tik: () => setFizikiSoru(true),
+                  tik: () => _paketTaseron ? handleOpenAtananPaket() : setFizikiSoru(true),
                 },
                 {
                   label: "QC Onaylı İş", sub: _paketTaseron ? "Huawei QC kapalı · paket dökümü için tıkla" : "Huawei QC kapalı · saha listesi için tıkla", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857",

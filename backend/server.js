@@ -6431,14 +6431,22 @@ app.get("/finance/subcon-paket-bedel", authMiddleware, async (req, res) => {
     // Bedel motoru saha bazlı çalışır; kaynağı (FERRUMX / AHY_FERRUMX) korumak
     // için subcon alanını olduğu gibi geçiyoruz — her kayıt ayrı grup olur
     const bm = ahyTaseronBedel(kendi.map(r => ({ subcon: r.subcon, site: r.site, kalem: r.kalem, fq: r.fq, qc_ok: r.qc_ok })));
-    // Yalnız QC OK kalemler faturalanabilir — firma QC kapanmadan fatura kesmez
+    // Yalnız QC OK kalemler faturalanabilir — firma QC kapanmadan fatura kesmez.
+    // tum_detay ise yapılan tüm işi verir (Atanan İş görünümü için).
     const detay = [];
-    let toplam = 0;
+    const tumDetay = [];
+    let toplam = 0, toplamTum = 0;
     for (const [kaynak, v] of Object.entries(bm)) {
-      (v.detay || [])
-        .filter(d => String(d.qc || "").toUpperCase() === "OK")
-        .forEach(d => { detay.push({ ...d, kaynak }); toplam += Number(d.tutar || 0); });
+      (v.detay || []).forEach(d => {
+        tumDetay.push({ ...d, kaynak });
+        toplamTum += Number(d.tutar || 0);
+        if (String(d.qc || "").toUpperCase() === "OK") {
+          detay.push({ ...d, kaynak });
+          toplam += Number(d.tutar || 0);
+        }
+      });
     }
+    tumDetay.sort((a, b) => String(a.site).localeCompare(String(b.site)));
     detay.sort((a, b) => String(a.kaynak).localeCompare(String(b.kaynak)) || String(a.site).localeCompare(String(b.site)));
     const kaynakOzet = {};
     detay.forEach(d => { kaynakOzet[d.kaynak] = (kaynakOzet[d.kaynak] || 0) + Number(d.tutar || 0); });
@@ -6458,7 +6466,8 @@ app.get("/finance/subcon-paket-bedel", authMiddleware, async (req, res) => {
         .map(r => ({ fatura_no: r.fatura_no, tarih: r.tarih, kalem: Number(r.kalem || 0),
           tutar_kdv_dahil: Number(r.tutar || 0), tutar_kdv_haric: Number(r.tutar || 0) / 1.2 }));
     } catch (fe) { console.error("SUBCON PAKET FATURA:", fe.message); }
-    res.json({ ok: true, taseron: scopeName, bedel: Math.round(toplam), detay, kaynak_ozet: kaynakOzet, faturalar });
+    res.json({ ok: true, taseron: scopeName, bedel: Math.round(toplam), detay,
+      bedel_tum: Math.round(toplamTum), tum_detay: tumDetay, kaynak_ozet: kaynakOzet, faturalar });
   } catch (e) {
     console.error("SUBCON PAKET BEDEL ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });
