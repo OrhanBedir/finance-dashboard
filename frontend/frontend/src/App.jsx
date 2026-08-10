@@ -21681,10 +21681,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     });
                   },
                 },
-                {
+                ...(_paketTaseron ? [] : [{
                   // Kesilecek fatura: Fatura Kesilebilir modalıyla AYNI hesap
                   // (HW'ye faturalanan miktar × %80 × kırılım). Hesap yüklenene
-                  // kadar hakediş bazlı değer görünür.
+                  // kadar hakediş bazlı değer görünür. Paket fiyatlı taşeronda
+                  // gizlenir — Şimşek'in HW'ye kestiği fatura onu ilgilendirmez.
                   label: kesilecekOzet ? "Kesilecek Fatura (HW'ye faturalanan)" : "HW'ye Faturalanan",
                   sub: kesilecekOzet ? `${kesilecekOzet.kalem} kalem · Fatura Kesilebilir ile aynı · liste için tıkla` : "fatura kesilen · saha listesi için tıkla",
                   value: kesilecekOzet ? kesilecekOzet.toplam : subconSummary.faturalanan,
@@ -21726,7 +21727,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                       rows: list,
                     });
                   },
-                },
+                }]),
               ].map((h) => (
                 <div key={h.label} onClick={h.tik} title={h.tik ? "Saha listesi için tıklayın" : undefined}
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff", cursor: h.tik ? "pointer" : "default" }}>
@@ -21744,15 +21745,20 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 </div>
               ))}
 
-              <Row
-                label="PO Bekleyen Hakediş"
-                value={subconSummary.poBeklerHakedis}
-              />
-
-              <Row
-                label="Faturalanmamış Hakediş"
-                value={subconSummary.notInvoicedHakedis}
-              />
+              {/* PO / faturalanmamış hakediş Şimşek'in HW süreci — paket
+                  fiyatla çalışan taşeronu ilgilendirmez, gizlenir */}
+              {!_paketTaseron && (
+                <>
+                  <Row
+                    label="PO Bekleyen Hakediş"
+                    value={subconSummary.poBeklerHakedis}
+                  />
+                  <Row
+                    label="Faturalanmamış Hakediş"
+                    value={subconSummary.notInvoicedHakedis}
+                  />
+                </>
+              )}
 
               {/* QC Tamamlanma — saha bazlı, tıklayınca excel görünümlü detay */}
               <div
@@ -21778,7 +21784,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 </div>
               </div>
 
-              {/* Huawei Fatura Onay Bekler — acceptance excel'inden, site→taşeron eşleşmeli */}
+              {/* Huawei Fatura Onay Bekler — acceptance excel'inden, site→taşeron eşleşmeli.
+                  Paket fiyatlı taşeronda gizli: Şimşek'in HW onay süreci onu bağlamaz */}
+              {!_paketTaseron && (
               <div
                 onClick={() =>
                   setOzetModal({
@@ -21820,6 +21828,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   </span>
                 </div>
               </div>
+              )}
             </>
           ) : (
             <>
@@ -22565,6 +22574,22 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                       Number(d.tutar||0), Number(d.tutar||0)*1.2, d.qc||"", d.kaynak||""]),
                     { cells:["", "FATURA KESİLECEK TOPLAM", "", "", Number(paketModal.bedel||0), Number(paketModal.bedel||0)*1.2, "", ""], bold:true, merge:[1,3] },
                   ],
+                  extraSheets: [{
+                    sheetName: "Kestiğim Faturalar",
+                    title: `${paketModal.taseron} — Şimşek Haberleşme'ye Kesilen Faturalar`,
+                    headers: ["Fatura No", "Fatura Tarihi", "Kalem", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)"],
+                    colWidths: [26, 15, 9, 19, 19],
+                    numericCols: [2, 3, 4],
+                    rows: (paketModal.faturalar || []).length
+                      ? [
+                          ...(paketModal.faturalar || []).map(f => [f.fatura_no || "", f.tarih || "",
+                            Number(f.kalem || 0), Number(f.tutar_kdv_haric || 0), Number(f.tutar_kdv_dahil || 0)]),
+                          { cells: ["TOPLAM", "", (paketModal.faturalar || []).reduce((a, f) => a + Number(f.kalem || 0), 0),
+                            (paketModal.faturalar || []).reduce((a, f) => a + Number(f.tutar_kdv_haric || 0), 0),
+                            (paketModal.faturalar || []).reduce((a, f) => a + Number(f.tutar_kdv_dahil || 0), 0)], bold: true },
+                        ]
+                      : [["Henüz fatura kaydı yok", "", "", 0, 0]],
+                  }],
                 }).catch(e => alert("Excel indirilemedi: " + e.message))}
                   style={{ padding:"8px 14px", background:"#065f46", color:"#fff", border:"none", borderRadius:"9px", fontSize:"12.5px", fontWeight:800, cursor:"pointer" }}>📥 Excel İndir</button>
                 <button type="button" onClick={() => setPaketModal(null)}
@@ -23483,10 +23508,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         <div style={{ display:"flex", flexDirection:"column", gap:"8px", minWidth:"300px" }}>
           <div style={{ fontSize:"11px", color:"#6b7280", fontWeight:700, textAlign:"center", letterSpacing:"0.04em" }}>📥 EXCEL İNDİR</div>
           <div style={{ display:"flex", gap:"8px" }}>
+            {/* Paket fiyatlı taşeronda kalem bazlı döküm anlamsız — bedel saha paketinden gelir */}
+            {!_paketTaseron && (
             <button type="button" onClick={() => handleExportRegionExcel()}
               style={{ flex:1, height:"42px", display:"flex", alignItems:"center", justifyContent:"center", whiteSpace:"nowrap", borderRadius:"10px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#15803d,#22c55e)", boxShadow:"0 3px 8px rgba(34,197,94,0.32)" }}>
               📋 Kalem bazında
             </button>
+            )}
             <button type="button" onClick={() => handleExportRegionExcel(null, null, null, true)}
               style={{ flex:1, height:"42px", display:"flex", alignItems:"center", justifyContent:"center", whiteSpace:"nowrap", borderRadius:"10px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#1e3a8a,#3b82f6)", boxShadow:"0 3px 8px rgba(59,130,246,0.32)" }}>
               🏗 Saha bazında

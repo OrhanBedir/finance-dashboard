@@ -6440,7 +6440,23 @@ app.get("/finance/subcon-paket-bedel", authMiddleware, async (req, res) => {
     detay.sort((a, b) => String(a.kaynak).localeCompare(String(b.kaynak)) || String(a.site).localeCompare(String(b.site)));
     const kaynakOzet = {};
     detay.forEach(d => { kaynakOzet[d.kaynak] = (kaynakOzet[d.kaynak] || 0) + Number(d.tutar || 0); });
-    res.json({ ok: true, taseron: scopeName, bedel: Math.round(toplam), detay, kaynak_ozet: kaynakOzet });
+    // Taşeronun Şimşek'e kestiği faturalar (bolge_fatura) — kendi fatura geçmişi
+    let faturalar = [];
+    try {
+      const fr = await pool.query(`SELECT fatura_no, to_char(fatura_tarihi,'YYYY-MM-DD') AS tarih,
+          SUM(COALESCE(fatura_miktari,0)) AS tutar, COUNT(*) AS kalem
+        FROM bolge_fatura
+        WHERE COALESCE(TRIM(fatura_no),'') <> ''
+        GROUP BY fatura_no, fatura_tarihi
+        ORDER BY fatura_tarihi DESC NULLS LAST`);
+      const c = canonSub(scopeName);
+      const bf = await pool.query(`SELECT DISTINCT TRIM(taseron_adi) AS ad, TRIM(fatura_no) AS no FROM bolge_fatura WHERE COALESCE(TRIM(fatura_no),'') <> ''`);
+      const kendiNo = new Set(bf.rows.filter(r => subconRowMatches(scopeName, r.ad)).map(r => r.no));
+      faturalar = fr.rows.filter(r => kendiNo.has(String(r.fatura_no || "").trim()))
+        .map(r => ({ fatura_no: r.fatura_no, tarih: r.tarih, kalem: Number(r.kalem || 0),
+          tutar_kdv_dahil: Number(r.tutar || 0), tutar_kdv_haric: Number(r.tutar || 0) / 1.2 }));
+    } catch (fe) { console.error("SUBCON PAKET FATURA:", fe.message); }
+    res.json({ ok: true, taseron: scopeName, bedel: Math.round(toplam), detay, kaynak_ozet: kaynakOzet, faturalar });
   } catch (e) {
     console.error("SUBCON PAKET BEDEL ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });
