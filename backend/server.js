@@ -6146,19 +6146,26 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
     const q = (sql, params = [t0]) =>
       pool.query(sql, params).then(r => Number(r.rows[0]?.t || 0)).catch(() => 0);
 
-    const [tahsilat, maas, ikAvans, isAvans, manuel, aracKira, ofisKira, taseron, cek] = await Promise.all([
+    // YALNIZ Şimşek çıkışları (10.08.2026): AHY markalı personel/avans/fatura
+    // hariç; araç-ofis kiraları AHY operasyon kasasından ödenir, hiç sayılmaz.
+    // İş avansları yalnız is_avans_talep'ten okunur — İK avans tablosundaki
+    // İŞ kopyaları çift sayım yapar, orada sadece MAAS avansı sayılır.
+    const [tahsilat, maas, ikAvans, isAvans, manuel, taseron, cek] = await Promise.all([
       q(`SELECT COALESCE(SUM(payment_amount),0) t FROM hw_payment_rows
          WHERE COALESCE(currency,'TRY')='TRY' AND payment_date IS NOT NULL AND payment_date >= $1::date`),
-      q(`SELECT COALESCE(SUM(COALESCE(bankadan,0)+COALESCE(elden,0)),0) t FROM maas_odeme WHERE tarih >= $1::date`),
-      q(`SELECT COALESCE(SUM(tutar),0) t FROM avans WHERE odendi=true AND COALESCE(odeme_tarihi, tarih) >= $1::date`),
+      q(`SELECT COALESCE(SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)),0) t
+         FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
+         WHERE m.tarih >= $1::date AND UPPER(COALESCE(p.marka,'ERC')) <> 'AHY'`),
+      q(`SELECT COALESCE(SUM(a.tutar),0) t
+         FROM avans a JOIN personel p ON p.id = a.personel_id
+         WHERE a.odendi=true AND a.avans_turu='MAAS'
+           AND COALESCE(a.odeme_tarihi, a.tarih) >= $1::date
+           AND UPPER(COALESCE(p.marka,'ERC')) <> 'AHY'`),
       q(`SELECT COALESCE(SUM(tutar),0) t FROM is_avans_talep
-         WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date`),
+         WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date
+           AND UPPER(COALESCE(firma,'ERC')) <> 'AHY'`),
       q(`SELECT COALESCE(SUM(tutar),0) t FROM cashflow_odeme
          WHERE UPPER(COALESCE(marka,'ERC'))='ERC' AND tarih >= $1::date`),
-      q(`SELECT COALESCE(SUM(tutar),0) t FROM arac_kira_odemeler
-         WHERE COALESCE(kasadan_dus,true)=true AND COALESCE(tarih, created_at::date) >= $1::date`),
-      q(`SELECT COALESCE(SUM(tutar),0) t FROM ofis_kira_odemeler
-         WHERE COALESCE(kasadan_dus,true)=true AND COALESCE(tarih, created_at::date) >= $1::date`),
       q(`SELECT COALESCE(SUM(COALESCE(tutar,0)),0) t FROM taseron_odeme_log
          WHERE tarih >= $1::date
            AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`),
@@ -6166,7 +6173,7 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
          WHERE durum='ODENDI' AND COALESCE(odeme_tarihi, vade_tarihi) >= $1::date`),
     ]);
 
-    const giderler = { maas, ik_avans: ikAvans, is_avans: isAvans, manuel, arac_kira: aracKira, ofis_kira: ofisKira, taseron, cek_senet: cek };
+    const giderler = { maas, maas_avans: ikAvans, is_avans: isAvans, manuel, taseron, cek_senet: cek };
     const giderToplam = Object.values(giderler).reduce((s, v) => s + v, 0);
     res.json({ ok: true, kurulu: true, t0, girisler: g.rows, giris_toplam: girisToplam,
       tahsilat, gider: giderToplam, gider_detay: giderler,

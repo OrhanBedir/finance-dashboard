@@ -24473,12 +24473,10 @@ function CashFlowPanel({ currentUser, onBack }) {
             </table>
             {banka?.kurulu && banka?.gider_detay && (
               <div style={{ marginTop:"14px", fontSize:"11.5px", color:"#64748b", background:"#f8fafc", borderRadius:"10px", padding:"10px 12px" }}>
-                Harcama dökümü (T0 sonrası): maaş ₺{Number(banka.gider_detay.maas||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
-                İK avans ₺{Number(banka.gider_detay.ik_avans||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
+                Harcama dökümü (T0 sonrası · yalnız Şimşek): maaş ₺{Number(banka.gider_detay.maas||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
+                maaş avansı ₺{Number(banka.gider_detay.maas_avans||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
                 iş avansı ₺{Number(banka.gider_detay.is_avans||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
                 manuel ₺{Number(banka.gider_detay.manuel||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
-                araç kira ₺{Number(banka.gider_detay.arac_kira||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
-                ofis kira ₺{Number(banka.gider_detay.ofis_kira||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
                 taşeron ₺{Number(banka.gider_detay.taseron||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
                 çek/senet ₺{Number(banka.gider_detay.cek_senet||0).toLocaleString("tr-TR",{maximumFractionDigits:0})}
               </div>
