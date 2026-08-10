@@ -6165,7 +6165,10 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
          WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date
            AND UPPER(COALESCE(firma,'ERC')) <> 'AHY'`),
       q(`SELECT COALESCE(SUM(tutar),0) t FROM cashflow_odeme
-         WHERE UPPER(COALESCE(marka,'ERC'))='ERC' AND tarih >= $1::date`),
+         WHERE UPPER(COALESCE(marka,'ERC'))='ERC' AND tarih >= $1::date
+           -- Dönemi T0 ayından ESKİ olan kayıtlar geçmiş harcamanın geç girişidir:
+           -- para T0 açılış bakiyesinden zaten düşmüştü, tekrar düşülmez (10.08.2026)
+           AND COALESCE(NULLIF(TRIM(donem),''), to_char(tarih,'YYYY-MM')) >= to_char($1::date,'YYYY-MM')`),
       q(`SELECT COALESCE(SUM(COALESCE(tutar,0)),0) t FROM taseron_odeme_log
          WHERE tarih >= $1::date
            AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`),
