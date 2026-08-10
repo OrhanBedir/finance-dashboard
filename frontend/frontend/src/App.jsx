@@ -21671,8 +21671,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   tik: () => setFizikiSoru(true),
                 },
                 {
-                  label: "QC Onaylı İş", sub: "Huawei QC kapalı · saha listesi için tıkla", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857",
+                  label: "QC Onaylı İş", sub: _paketTaseron ? "Huawei QC kapalı · paket dökümü için tıkla" : "Huawei QC kapalı · saha listesi için tıkla", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857",
                   tik: () => {
+                    // Paket fiyatlı taşeron kalem kırılımını değil kendi saha
+                    // paketlerini görür — QC OK olanların paket dökümü
+                    if (_paketTaseron) { handleOpenPaket(); return; }
                     // QC OK kalemler: fatura ilerletilmiş mi görünsün (billed/due)
                     const list = rows
                       .filter(row => String(row.qc_durum || "").toUpperCase() === "OK" && Number(row.done_qty || 0) > 0 && String(row.site_code || "").trim())
