@@ -6431,11 +6431,13 @@ app.get("/finance/subcon-paket-bedel", authMiddleware, async (req, res) => {
     // Bedel motoru saha bazlı çalışır; kaynağı (FERRUMX / AHY_FERRUMX) korumak
     // için subcon alanını olduğu gibi geçiyoruz — her kayıt ayrı grup olur
     const bm = ahyTaseronBedel(kendi.map(r => ({ subcon: r.subcon, site: r.site, kalem: r.kalem, fq: r.fq, qc_ok: r.qc_ok })));
+    // Yalnız QC OK kalemler faturalanabilir — firma QC kapanmadan fatura kesmez
     const detay = [];
     let toplam = 0;
     for (const [kaynak, v] of Object.entries(bm)) {
-      (v.detay || []).forEach(d => detay.push({ ...d, kaynak }));
-      toplam += Number(v.bedel || 0);
+      (v.detay || [])
+        .filter(d => String(d.qc || "").toUpperCase() === "OK")
+        .forEach(d => { detay.push({ ...d, kaynak }); toplam += Number(d.tutar || 0); });
     }
     detay.sort((a, b) => String(a.kaynak).localeCompare(String(b.kaynak)) || String(a.site).localeCompare(String(b.site)));
     const kaynakOzet = {};
