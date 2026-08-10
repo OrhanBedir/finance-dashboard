@@ -20950,6 +20950,17 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // anlaşma paket fiyatından hesaplanır — AHY'nin gördüğü fiyatın aynısı
   const _paketTaseron = canonTaseron(userSubconName) === "ferrumx";
   const [paketModal, setPaketModal] = useState(null);
+  // Paket taşeronda özet kutuları ve alt tablo kendi bedelinden beslenir —
+  // sayfa açılışında bir kez çekilir
+  const [paketVeri, setPaketVeri] = useState(null);
+  useEffect(() => {
+    if (!_paketTaseron) return;
+    let iptal = false;
+    fetchJson(`${API_BASE}/finance/subcon-paket-bedel`)
+      .then(d => { if (!iptal && d.ok) setPaketVeri(d); })
+      .catch(() => {});
+    return () => { iptal = true; };
+  }, [_paketTaseron]);
   const handleOpenPaket = async () => {
     try {
       const d = await fetchJson(`${API_BASE}/finance/subcon-paket-bedel`);
@@ -23525,9 +23536,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             textAlign: "center",
           }}
         >
-          <div style={{ fontSize: "12px", color: "#6b7280" }}>Toplam Satır</div>
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>{_paketTaseron ? "Toplam Saha" : "Toplam Satır"}</div>
           <div style={{ fontWeight: "700", fontSize: "20px" }}>
-            {regionFilteredRowCount}
+            {_paketTaseron ? new Set((paketVeri?.tum_detay || []).map(x => x.site)).size : regionFilteredRowCount}
           </div>
         </div>
 
@@ -23541,9 +23552,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             textAlign: "center",
           }}
         >
-          <div style={{ fontSize: "12px", color: "#6b7280" }}>Toplam Tutar</div>
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>{_paketTaseron ? "Toplam Bedel (KDV Hariç)" : "Toplam Tutar"}</div>
           <div style={{ fontWeight: "700", fontSize: "20px" }}>
-            {formatTRY(regionFilteredRowTotal)}
+            {formatTRY(_paketTaseron ? Number(paketVeri?.bedel_tum || 0) : regionFilteredRowTotal)}
           </div>
         </div>
         {isSubconUser && (
@@ -23558,12 +23569,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
             }}
           >
             <div style={{ fontSize: "12px", color: "#6b7280" }}>
-              {`${subconDisplayName} Hakediş`}
+              {_paketTaseron ? "Fatura Kesilebilir (QC OK)" : `${subconDisplayName} Hakediş`}
             </div>
             <div
               style={{ fontWeight: "700", fontSize: "20px", color: "#166534" }}
             >
-              {formatTRY(subconHakedisTotal)}
+              {formatTRY(_paketTaseron ? Number(paketVeri?.bedel || 0) : subconHakedisTotal)}
             </div>
           </div>
         )}
@@ -23598,6 +23609,51 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         </div>
       </div>
 
+      {/* Paket taşeron: alt liste saha bazlı paket bedelidir — kalem/PO detayı yok */}
+      {_paketTaseron && (
+        <div className="tableWrap" style={{ maxWidth: "1000px", margin: "0 auto 40px auto", maxHeight: "60vh", overflowY: "auto", background: "#fff", borderRadius: "16px", boxShadow: "0 10px 25px rgba(0,0,0,0.08)", border: "1px solid #e5e7eb" }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Saha</th>
+                <th>Paket / Kalem</th>
+                <th style={{ textAlign: "center" }}>Adet</th>
+                <th style={{ textAlign: "center" }}>QC</th>
+                <th style={{ textAlign: "right" }}>Bedel (KDV Hariç)</th>
+                <th style={{ textAlign: "right" }}>Bedel (KDV Dahil)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(paketVeri?.tum_detay || []).length === 0 ? (
+                <tr><td colSpan={6} style={{ padding: "26px", textAlign: "center", color: "#94a3b8" }}>Yükleniyor…</td></tr>
+              ) : (
+                <>
+                  {(paketVeri.tum_detay || []).slice().sort((a, b) => String(a.site).localeCompare(String(b.site))).map((x, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{x.site}</td>
+                      <td>{x.kalem}</td>
+                      <td style={{ textAlign: "center" }}>{x.adet}</td>
+                      <td style={{ textAlign: "center" }}>{String(x.qc || "").toUpperCase() === "OK" ? "✅ OK" : "🔶 NOK"}</td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>₺{Number(x.tutar || 0).toLocaleString("tr-TR")}</td>
+                      <td style={{ textAlign: "right" }}>₺{Math.round(Number(x.tutar || 0) * 1.2).toLocaleString("tr-TR")}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#f8fafc" }}>
+                    <td style={{ fontWeight: 800 }}>— TOPLAM —</td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td style={{ textAlign: "right", fontWeight: 800 }}>₺{Number(paketVeri.bedel_tum || 0).toLocaleString("tr-TR")}</td>
+                    <td style={{ textAlign: "right", fontWeight: 800 }}>₺{Math.round(Number(paketVeri.bedel_tum || 0) * 1.2).toLocaleString("tr-TR")}</td>
+                  </tr>
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!_paketTaseron && (
       <div
         className="tableWrap"
         style={{
@@ -23799,6 +23855,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           </tbody>
         </table>
       </div>
+      )}
     </>
   );
 }
