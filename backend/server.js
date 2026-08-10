@@ -6252,7 +6252,13 @@ function taseronCanonKey(ad) {
     .replace(/Ğ/g, "G").replace(/Ü/g, "U").replace(/Ö/g, "O");
   t = t.replace(/^AHY[_\s-]+/, "").replace(/[^A-Z0-9 ]/g, " ");
   t = t.replace(/\b(TELEKOMUNIKASYON|ILETISIM|HABERLESME|MAKINE|MAKINA|SANAYI|SAN|VE|TICARET|TIC|LIMITED|LTD|STI|SIRKETI|INSAAT|TURIZM|GIDA|ORGANIZASYON|RESTORAN|ELEKTRIK|ELEKTRONIK|MUHENDISLIK|HIZMETLERI|SISTEMLERI)\b/g, " ");
-  t = t.trim().split(/\s+/)[0] || String(ad || "").toUpperCase().trim();
+  // Kişi adlarında (kısa ilk kelime: HALIL, MURAT, SEFER...) soyad da anahtara
+  // girer — "HALIL UYAR" ile "HALIL IBRAHIM ERALP" farklı kişilerdir, tek
+  // kelime ikisini birleştiriyordu (10.08.2026). Firma kısa adları (NETELCOM,
+  // FERRUMX...) tek kelimede kalır ki kesik/uzun ünvan yazımları ayrışmasın.
+  const kelimeler = t.trim().split(/\s+/).filter(Boolean);
+  const ikiKelime = kelimeler.length > 1 && kelimeler[0].length <= 5;
+  t = (ikiKelime ? kelimeler.slice(0, 2).join("") : kelimeler[0] || "") || String(ad || "").toUpperCase().trim();
   return t.replace(/K/g, "C");
 }
 
