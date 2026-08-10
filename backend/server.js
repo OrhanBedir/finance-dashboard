@@ -16562,7 +16562,13 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
         let pipeline = sharp(rawBuf);
         if (origW > origH) pipeline = pipeline.rotate(90);
 
-        const buf = await pipeline.jpeg({ quality: 88 }).toBuffer({ resolveWithObject: true });
+        // PDF'te fiş ~270×360 pt'lik slota basılıyor — telefon fotoğrafını tam
+        // çözünürlükte gömmek dosyayı 30+ MB yapıp indirmeyi koparıyordu
+        // (10.08.2026, form #120 vakası). 1200px uzun kenar fazlasıyla okunur.
+        const buf = await pipeline
+          .resize({ width: 900, height: 1200, fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 72, mozjpeg: true })
+          .toBuffer({ resolveWithObject: true });
         trimmed.push({ buf: buf.data, w: buf.info.width, h: buf.info.height, meta: img });
       } catch {
         try {
@@ -16575,7 +16581,8 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
             const isLandscape = w0 > h0;
             const buf = await sharp(rawBuf)
               .rotate(isLandscape ? 90 : 0)
-              .jpeg({ quality: 88 })
+              .resize({ width: 900, height: 1200, fit: "inside", withoutEnlargement: true })
+              .jpeg({ quality: 72, mozjpeg: true })
               .toBuffer({ resolveWithObject: true });
             trimmed.push({ buf: buf.data, w: buf.info.width, h: buf.info.height, meta: img });
           }
