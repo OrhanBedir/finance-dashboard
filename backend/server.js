@@ -15231,15 +15231,26 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     );
     const cezaKalemler = cezaKalemRes.rows;
 
-    // 6. İş avansı bakiye — avans tablosundan (web ile aynı hesaplama)
+    // 6. İş avansı bakiye — web paneli (/hr/is-avans/bakiye) ile AYNI kaynak:
+    // is_avans_talep'te kişiye PERSONEL olarak atanan TAMAMLANDI avanslar +
+    // personel bağlanmamış kendi talepleri. (Eski kod İK 'avans' tablosundan
+    // okuyordu ve web'den 50.000 eksik gösteriyordu — 10.08.2026 vakası.)
     let avansToplamOnaylanan = 0;
-    if (personelId) {
+    {
       const bakiyeAvansRes = await pool.query(
-        `SELECT COALESCE(SUM(tutar),0) as toplam FROM avans
-         WHERE personel_id=$1 AND avans_turu='IS'`,
-        [personelId]
+        `SELECT COALESCE(SUM(t.tutar),0) as toplam
+         FROM is_avans_talep t
+         JOIN personel p ON p.id = t.personel_id
+         WHERE LOWER(p.email)=LOWER($1) AND t.durum='TAMAMLANDI'`,
+        [queryEmail]
       );
-      avansToplamOnaylanan = Number(bakiyeAvansRes.rows[0].toplam);
+      const bakiyeFallbackRes = await pool.query(
+        `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep
+         WHERE LOWER(talep_eden_email)=LOWER($1) AND durum='TAMAMLANDI'
+         AND personel_id IS NULL`,
+        [queryEmail]
+      );
+      avansToplamOnaylanan = Number(bakiyeAvansRes.rows[0].toplam) + Number(bakiyeFallbackRes.rows[0].toplam);
     }
     const bakiyeMasrafRes = await pool.query(
       `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
