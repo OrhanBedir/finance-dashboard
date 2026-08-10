@@ -16787,6 +16787,10 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [viewForm, setViewForm]   = useState(null); // form detail view
   const [showNewForm, setShowNewForm] = useState(false);
   const [filterDurum, setFilterDurum] = useState("");
+  // Personel + tarih aralığı filtreleri (oluşturma tarihine göre)
+  const [filterKisi, setFilterKisi] = useState("");
+  const [filterBas, setFilterBas] = useState("");
+  const [filterBit, setFilterBit] = useState("");
   const [notModal, setNotModal]   = useState(null); // {id, action}
   const [notText, setNotText]     = useState("");
   const [redModal, setRedModal]   = useState(null);
@@ -17196,6 +17200,10 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     // Onaylayıcılar başkasının TASLAK'larını görmez ama KENDİ TASLAK'larını görebilir
     if (isApprover && f.durum === "TASLAK" && f.talep_eden_email !== currentUser?.email) return false;
     if (filterDurum && f.durum !== filterDurum) return false;
+    if (filterKisi && String(f.talep_eden_ad || "").trim() !== filterKisi) return false;
+    const _fTarih = String(f.created_at || "").slice(0, 10);
+    if (filterBas && _fTarih && _fTarih < filterBas) return false;
+    if (filterBit && _fTarih && _fTarih > filterBit) return false;
     return true;
   }).sort((a, b) => {
     // Onay bekleyen formlar her zaman en üste gelsin
@@ -17991,7 +17999,25 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
           <option value="ARSIVLENDI">Arşivlendi</option>
           <option value="REDDEDILDI">Reddedildi</option>
         </select>
-        {filterDurum && <button onClick={()=>setFilterDurum("")} style={{ padding:"8px 12px", background:"#f3f4f6", border:"none", borderRadius:"8px", cursor:"pointer", fontSize:"13px" }}>Temizle</button>}
+        {/* Personel filtresi — onaylayıcılar için; listedeki adlardan otomatik dolar */}
+        {isApprover && (
+          <select value={filterKisi} onChange={e=>setFilterKisi(e.target.value)}
+            style={{ padding:"8px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", maxWidth:"220px" }}>
+            <option value="">Tüm Personel</option>
+            {[...new Set(list.map(f => String(f.talep_eden_ad || "").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"tr")).map(ad => (
+              <option key={ad} value={ad}>{ad}</option>
+            ))}
+          </select>
+        )}
+        <input type="date" value={filterBas} onChange={e=>setFilterBas(e.target.value)} title="Başlangıç tarihi"
+          style={{ padding:"7px 10px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"13px" }} />
+        <span style={{ fontSize:"12px", color:"#9ca3af" }}>—</span>
+        <input type="date" value={filterBit} onChange={e=>setFilterBit(e.target.value)} title="Bitiş tarihi"
+          style={{ padding:"7px 10px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"13px" }} />
+        {(filterDurum || filterKisi || filterBas || filterBit) && (
+          <button onClick={()=>{ setFilterDurum(""); setFilterKisi(""); setFilterBas(""); setFilterBit(""); }}
+            style={{ padding:"8px 12px", background:"#f3f4f6", border:"none", borderRadius:"8px", cursor:"pointer", fontSize:"13px" }}>Temizle</button>
+        )}
         {isMuhasebe && (() => {
           const [dlDonem, setDlDonem] = [nfDonem, setNfDonem];
           return (
