@@ -22970,7 +22970,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
               style={{ background: "#fff", borderRadius: "14px", width: "min(420px, 94vw)", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)", textAlign: "center" }}
             >
               <div style={{ fontWeight: 800, fontSize: "16px", color: "#111827", marginBottom: "6px" }}>🏗️ Fiziki Tamamlanan</div>
-              <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>Listeyi nasıl görmek istersiniz?</div>
+              <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>{_paketTaseron ? "Saha listesini açmak için tıklayın" : "Listeyi nasıl görmek istersiniz?"}</div>
               <div style={{ display: "flex", gap: "10px" }}>
                 <button
                   onClick={acSahaBazli}
@@ -22979,6 +22979,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   🏢 Saha Bazlı
                   <div style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginTop: "3px" }}>site ID + toplam tutar</div>
                 </button>
+                {/* Kalem kırılımı ve bölge ortalama fiyatları iç veridir —
+                    paket fiyatlı taşerona gösterilmez, yalnız saha listesi kalır */}
+                {!_paketTaseron && (
                 <button
                   onClick={acKalemBazli}
                   style={{ flex: 1, background: "#047857", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}
@@ -22986,7 +22989,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   📋 Kalem Bazlı
                   <div style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginTop: "3px" }}>done · tamamlanan · QC detayı</div>
                 </button>
+                )}
               </div>
+              {!_paketTaseron && (
               <button
                 onClick={acTipOrtalama}
                 style={{ width: "100%", marginTop: "10px", background: "linear-gradient(135deg,#7c3aed,#6d28d9)", color: "#fff", border: "none", borderRadius: "10px", padding: "13px 10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}
@@ -22994,6 +22999,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 📊 Ortalama Saha Tipi Fiyatları
                 <div style={{ fontSize: "11px", fontWeight: 500, opacity: 0.85, marginTop: "3px" }}>İzmir & Ankara · Standalone · NR700 · NR3500 · TRP ortalaması</div>
               </button>
+              )}
               <button
                 onClick={() => setFizikiSoru(false)}
                 style={{ marginTop: "12px", background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "8px 18px", fontSize: "12px", fontWeight: 700, cursor: "pointer", color: "#4b5563" }}
