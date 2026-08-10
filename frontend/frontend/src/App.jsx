@@ -23912,6 +23912,40 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [taseronModal,setTaseronModal]= useState(null); // {gun, items, rect}
   const [manualDelModal,setManualDelModal]= useState(null); // {gun} — o günün manuel ödemeleri (sil)
   const [odemeler,    setOdemeler]    = useState([]); // manuel ödemeler (araç/ticket/diğer)
+  // ── Banka bakiyesi (T0 açılış + HW tahsilat − nakit çıkışları) ──
+  const [banka, setBanka] = useState(null);
+  const [bankaModal, setBankaModal] = useState(false);
+  const [bankaForm, setBankaForm] = useState({ tarih: new Date().toISOString().slice(0, 10), tutar: "", aciklama: "" });
+  const bankaYukle = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/finance/erc-banka`, { headers: { Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("finance_token") || ""}` } });
+      const d = await r.json();
+      if (d.ok) setBanka(d);
+    } catch {}
+  };
+  useEffect(() => { bankaYukle(); }, []);
+  const bankaKaydet = async () => {
+    const t = Number(bankaForm.tutar || 0);
+    if (!t || !bankaForm.tarih) { alert("Tarih ve tutar zorunlu"); return; }
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-kasa`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("finance_token") || ""}` },
+        body: JSON.stringify({ marka: "ERC", tarih: bankaForm.tarih, tutar: t, aciklama: bankaForm.aciklama }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || "Kaydedilemedi");
+      setBankaForm({ tarih: new Date().toISOString().slice(0, 10), tutar: "", aciklama: "" });
+      bankaYukle();
+    } catch (e) { alert(e.message); }
+  };
+  const bankaSil = async (id) => {
+    if (!window.confirm("Bu banka girişi silinsin mi?")) return;
+    try {
+      await fetch(`${API_BASE}/finance/marka-kasa/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("finance_token") || ""}` } });
+      bankaYukle();
+    } catch {}
+  };
   const [maasOdemeler,setMaasOdemeler]= useState([]); // İK maas_odeme (bu ay yapılan)
   const [isAvanslar,  setIsAvanslar]  = useState([]); // PD onaylı iş avansları (otomatik)
   const [showOdemeModal, setShowOdemeModal] = useState(false);
@@ -24360,6 +24394,30 @@ function CashFlowPanel({ currentUser, onBack }) {
         </div>
       )}
 
+      {/* ── Banka / Kasa kartı ── */}
+      <div onClick={() => setBankaModal(true)} title="Girişleri görmek ve nakit eklemek için tıklayın"
+        style={{ marginBottom:"14px", background:"linear-gradient(135deg,#0f172a,#1e3a5f)", border:"1.5px solid #334155", borderRadius:"16px", padding:"18px 22px", display:"flex", alignItems:"center", gap:"18px", flexWrap:"wrap", cursor:"pointer", boxShadow:"0 8px 24px rgba(15,23,42,0.25)" }}>
+        <div style={{ flex:"1 1 220px" }}>
+          <div style={{ fontSize:"11px", fontWeight:800, color:"#93c5fd", letterSpacing:"0.6px" }}>🏦 BANKA BAKİYESİ (ANLIK)</div>
+          {banka?.kurulu ? (
+            <div style={{ fontSize:"30px", fontWeight:800, color: (banka.bakiye>=0?"#4ade80":"#f87171"), marginTop:"4px", fontVariantNumeric:"tabular-nums" }}>
+              ₺{Number(banka.bakiye||0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}
+            </div>
+          ) : (
+            <div style={{ fontSize:"15px", fontWeight:700, color:"#e2e8f0", marginTop:"6px" }}>Açılış bakiyesi girilmedi — tıklayıp bugünkü banka mevcudunu girin</div>
+          )}
+        </div>
+        {banka?.kurulu && (
+          <div style={{ display:"flex", gap:"16px", flexWrap:"wrap", fontSize:"12px", color:"#cbd5e1" }}>
+            <div><div style={{ color:"#94a3b8" }}>Girilen nakit</div><b style={{ color:"#e2e8f0" }}>₺{Number(banka.giris_toplam||0).toLocaleString("tr-TR",{maximumFractionDigits:0})}</b></div>
+            <div><div style={{ color:"#94a3b8" }}>HW tahsilat (T0 sonrası)</div><b style={{ color:"#4ade80" }}>+₺{Number(banka.tahsilat||0).toLocaleString("tr-TR",{maximumFractionDigits:0})}</b></div>
+            <div><div style={{ color:"#94a3b8" }}>Harcanan (T0 sonrası)</div><b style={{ color:"#f87171" }}>−₺{Number(banka.gider||0).toLocaleString("tr-TR",{maximumFractionDigits:0})}</b></div>
+          </div>
+        )}
+        <button type="button" onClick={e => { e.stopPropagation(); setBankaModal(true); }}
+          style={{ padding:"10px 18px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:"10px", fontSize:"13px", fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>+ Nakit Ekle</button>
+      </div>
+
       {/* Özet kartları */}
       <div style={{ display:"flex", gap:"12px", marginBottom:"20px", flexWrap:"wrap" }}>
         {[
@@ -24377,6 +24435,60 @@ function CashFlowPanel({ currentUser, onBack }) {
           </div>
         ))}
       </div>
+
+      {/* Banka girişleri modalı */}
+      {bankaModal && (
+        <div onClick={() => setBankaModal(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1200, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(640px,94vw)", maxHeight:"82vh", overflow:"auto", padding:"22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"4px" }}>🏦 Banka Girişleri</div>
+            <div style={{ fontSize:"12px", color:"#64748b", marginBottom:"14px" }}>
+              Bakiye = girilen nakit + T0 sonrası Huawei tahsilatları − T0 sonrası tüm nakit çıkışları (maaş, avanslar, kiralar, taşeron, çek/senet, manuel ödemeler).
+              Huawei tahsilatları otomatik eklenir — onları elle girmeyin, çift sayılır.
+            </div>
+            <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginBottom:"14px", alignItems:"center" }}>
+              <input type="date" value={bankaForm.tarih} onChange={e=>setBankaForm(f=>({...f, tarih:e.target.value}))}
+                style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13px" }} />
+              <input type="number" placeholder="Tutar (₺)" value={bankaForm.tutar} onChange={e=>setBankaForm(f=>({...f, tutar:e.target.value}))}
+                style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13px", width:"130px" }} />
+              <input placeholder="Açıklama (ör. açılış bakiyesi)" value={bankaForm.aciklama} onChange={e=>setBankaForm(f=>({...f, aciklama:e.target.value}))}
+                style={{ padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13px", flex:1, minWidth:"170px" }} />
+              <button onClick={bankaKaydet} style={{ padding:"9px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:800, cursor:"pointer" }}>Ekle</button>
+            </div>
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <thead><tr style={{ background:"#f8fafc" }}>
+                {["Tarih","Tutar","Açıklama",""].map(h => <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontSize:"11px", fontWeight:700, color:"#64748b", borderBottom:"1px solid #e2e8f0" }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {(banka?.girisler || []).length === 0 ? (
+                  <tr><td colSpan={4} style={{ padding:"20px", textAlign:"center", color:"#94a3b8", fontSize:"13px" }}>Henüz giriş yok</td></tr>
+                ) : (banka.girisler || []).slice().reverse().map(gi => (
+                  <tr key={gi.id} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                    <td style={{ padding:"8px 10px", fontSize:"13px" }}>{gi.tarih}</td>
+                    <td style={{ padding:"8px 10px", fontSize:"13px", fontWeight:700 }}>₺{Number(gi.tutar||0).toLocaleString("tr-TR")}</td>
+                    <td style={{ padding:"8px 10px", fontSize:"12px", color:"#6b7280" }}>{gi.aciklama}</td>
+                    <td style={{ padding:"8px 10px" }}><button onClick={()=>bankaSil(gi.id)} style={{ background:"none", border:"none", cursor:"pointer" }} title="Sil">🗑</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {banka?.kurulu && banka?.gider_detay && (
+              <div style={{ marginTop:"14px", fontSize:"11.5px", color:"#64748b", background:"#f8fafc", borderRadius:"10px", padding:"10px 12px" }}>
+                Harcama dökümü (T0 sonrası): maaş ₺{Number(banka.gider_detay.maas||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
+                İK avans ₺{Number(banka.gider_detay.ik_avans||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
+                iş avansı ₺{Number(banka.gider_detay.is_avans||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
+                manuel ₺{Number(banka.gider_detay.manuel||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
+                araç kira ₺{Number(banka.gider_detay.arac_kira||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
+                ofis kira ₺{Number(banka.gider_detay.ofis_kira||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
+                taşeron ₺{Number(banka.gider_detay.taseron||0).toLocaleString("tr-TR",{maximumFractionDigits:0})} ·
+                çek/senet ₺{Number(banka.gider_detay.cek_senet||0).toLocaleString("tr-TR",{maximumFractionDigits:0})}
+              </div>
+            )}
+            <div style={{ textAlign:"right", marginTop:"12px" }}>
+              <button onClick={()=>setBankaModal(false)} style={{ padding:"8px 18px", background:"#e2e8f0", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>Kapat</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Sarkan Ödemeler Bandı ── */}
       {sarkanlar.length > 0 && (

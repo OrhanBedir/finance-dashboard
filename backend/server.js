@@ -6123,6 +6123,60 @@ app.delete("/finance/marka-kasa/:id", authMiddleware, async (req, res) => {
 });
 
 
+// ── ERC BANKA BAKİYESİ (10.08.2026, Orhan talebi) ──
+// T0: marka_kasa'ya (marka=ERC) elle girilen açılış bakiyesi + sonraki girişler.
+// Gelir: T0'dan itibaren HW tahsilatları (hw_payment_rows.payment_date) otomatik.
+// Gider: T0'dan itibaren Şimşek nakit çıkışları — maaş, İK avansları, iş avansı,
+// manuel ödemeler, araç/ofis kiraları (kasadan_dus=false yani AHY ödedi hariç),
+// taşeron ödemeleri (AHY marka kasasından yazılanlar hariç), ödenen çek/senet.
+app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureMarkaKasaTable();
+    const g = await pool.query(
+      `SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama
+       FROM marka_kasa WHERE UPPER(marka)='ERC' ORDER BY tarih, id`);
+    const girisler = g.rows;
+    const girisToplam = girisler.reduce((s, x) => s + Number(x.tutar || 0), 0);
+    if (!girisler.length)
+      return res.json({ ok: true, kurulu: false, girisler: [], giris_toplam: 0, tahsilat: 0, gider: 0, bakiye: 0 });
+    const t0 = girisler[0].tarih;
+
+    const q = (sql, params = [t0]) =>
+      pool.query(sql, params).then(r => Number(r.rows[0]?.t || 0)).catch(() => 0);
+
+    const [tahsilat, maas, ikAvans, isAvans, manuel, aracKira, ofisKira, taseron, cek] = await Promise.all([
+      q(`SELECT COALESCE(SUM(payment_amount),0) t FROM hw_payment_rows
+         WHERE COALESCE(currency,'TRY')='TRY' AND payment_date IS NOT NULL AND payment_date >= $1::date`),
+      q(`SELECT COALESCE(SUM(COALESCE(bankadan,0)+COALESCE(elden,0)),0) t FROM maas_odeme WHERE tarih >= $1::date`),
+      q(`SELECT COALESCE(SUM(tutar),0) t FROM avans WHERE odendi=true AND COALESCE(odeme_tarihi, tarih) >= $1::date`),
+      q(`SELECT COALESCE(SUM(tutar),0) t FROM is_avans_talep
+         WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date`),
+      q(`SELECT COALESCE(SUM(tutar),0) t FROM cashflow_odeme
+         WHERE UPPER(COALESCE(marka,'ERC'))='ERC' AND tarih >= $1::date`),
+      q(`SELECT COALESCE(SUM(tutar),0) t FROM arac_kira_odemeler
+         WHERE COALESCE(kasadan_dus,true)=true AND COALESCE(tarih, created_at::date) >= $1::date`),
+      q(`SELECT COALESCE(SUM(tutar),0) t FROM ofis_kira_odemeler
+         WHERE COALESCE(kasadan_dus,true)=true AND COALESCE(tarih, created_at::date) >= $1::date`),
+      q(`SELECT COALESCE(SUM(COALESCE(tutar,0)),0) t FROM taseron_odeme_log
+         WHERE tarih >= $1::date
+           AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`),
+      q(`SELECT COALESCE(SUM(tutar),0) t FROM cek_senet
+         WHERE durum='ODENDI' AND COALESCE(odeme_tarihi, vade_tarihi) >= $1::date`),
+    ]);
+
+    const giderler = { maas, ik_avans: ikAvans, is_avans: isAvans, manuel, arac_kira: aracKira, ofis_kira: ofisKira, taseron, cek_senet: cek };
+    const giderToplam = Object.values(giderler).reduce((s, v) => s + v, 0);
+    res.json({ ok: true, kurulu: true, t0, girisler: g.rows, giris_toplam: girisToplam,
+      tahsilat, gider: giderToplam, gider_detay: giderler,
+      bakiye: girisToplam + tahsilat - giderToplam });
+  } catch (e) {
+    console.error("ERC BANKA ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // MARKA BORÇ DEFTERİ: AHY'den Şimşek'in KENDİ harcamaları için aldığı borçlar
 // ve geri ödemeleri. Kasa akışından ayrıdır — yalnız kayıt/mutabakat amaçlı.
 async function ensureMarkaBorcTable() {
