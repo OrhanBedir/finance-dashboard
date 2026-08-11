@@ -21073,12 +21073,69 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       .catch(() => {});
     return () => { iptal = true; };
   }, [_paketTaseron]);
+  // Arama kutusu paket saha listesini de filtreler (saha veya paket adına göre)
+  const paketAra = String(regionSearch || "").trim().toUpperCase();
+  const paketTumDetay = (paketVeri?.tum_detay || []).filter(x => !paketAra ||
+    String(x.site || "").toUpperCase().includes(paketAra) ||
+    String(x.kalem || "").toUpperCase().includes(paketAra));
+  const paketFiltreToplam = paketTumDetay.reduce((s, x) => s + Number(x.tutar || 0), 0);
   const handleOpenPaket = async () => {
     try {
       const d = await fetchJson(`${API_BASE}/finance/subcon-paket-bedel`);
       if (!d.ok) throw new Error(d.error || "Bedel alınamadı");
       setPaketModal(d);
     } catch (e) { alert("Paket bedeli alınamadı: " + e.message); }
+  };
+
+  // "Kestiğim Faturalar" sayfası iki paket Excel'inde de aynıdır
+  const paketFaturaSheet = (d) => ({
+    sheetName: "Kestiğim Faturalar",
+    title: `${d.taseron} — Şimşek Haberleşme'ye Kesilen Faturalar`,
+    headers: ["Fatura No", "Fatura Tarihi", "Kalem", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)"],
+    colWidths: [26, 15, 9, 19, 19],
+    numericCols: [2, 3, 4],
+    rows: (d.faturalar || []).length
+      ? [
+          ...(d.faturalar || []).map(f => [f.fatura_no || "", f.tarih || "",
+            Number(f.kalem || 0), Number(f.tutar_kdv_haric || 0), Number(f.tutar_kdv_dahil || 0)]),
+          { cells: ["TOPLAM", "", (d.faturalar || []).reduce((a, f) => a + Number(f.kalem || 0), 0),
+            (d.faturalar || []).reduce((a, f) => a + Number(f.tutar_kdv_haric || 0), 0),
+            (d.faturalar || []).reduce((a, f) => a + Number(f.tutar_kdv_dahil || 0), 0)], bold: true },
+        ]
+      : [["Henüz fatura kaydı yok", "", "", 0, 0]],
+  });
+
+  // Genel saha listesi Exceli: yapılan TÜM işler + sağda kesilen fatura
+  // eşleşmesi (fatura no/tarih/bedel/KDV) ve kalan (faturalanmamış) bedel
+  const exportPaketGenelExcel = (d) => {
+    const rowsX = (d.tum_detay || []).map(x => {
+      const fat = !!x.fatura_no;
+      return [x.site || "", x.kalem || "", Number(x.adet || 0), x.qc || "", x.kaynak || "",
+        Number(x.tutar || 0), Number(x.tutar || 0) * 1.2,
+        x.fatura_no || "", x.fatura_tarihi || "",
+        fat ? Number(x.fatura_kdv_haric || 0) : "",
+        fat ? Math.round((Number(x.fatura_kdv_dahil || 0) - Number(x.fatura_kdv_haric || 0)) * 100) / 100 : "",
+        fat ? Number(x.fatura_kdv_dahil || 0) : "",
+        fat ? Number(x.kalan || 0) : Number(x.tutar || 0)];
+    });
+    const tBedel = rowsX.reduce((s, r) => s + Number(r[5] || 0), 0);
+    const tFatura = rowsX.reduce((s, r) => s + Number(r[9] || 0), 0);
+    const tKalan = rowsX.reduce((s, r) => s + Number(r[12] || 0), 0);
+    return exportStandardExcel({
+      title: `${d.taseron} — Saha Bazlı İş Dökümü (paket fiyat · fatura eşleşmeli)`,
+      sheetName: "Saha Bazlı Genel", fileBase: `${d.taseron} - Saha Bazli Genel Liste`,
+      headers: ["Saha", "Paket / Kalem", "Adet", "QC", "Taşeron Kaydı",
+        "Bedel (KDV Hariç)", "Bedel (KDV Dahil)", "Fatura No", "Fatura Tarihi",
+        "Fatura (KDV Hariç)", "Fatura KDV", "Fatura (KDV Dahil)", "Kalan Bedel (KDV Hariç)"],
+      colWidths: [22, 42, 7, 9, 15, 16, 16, 22, 13, 16, 13, 16, 20],
+      numericCols: [2, 5, 6, 9, 10, 11, 12],
+      rows: [
+        ...rowsX,
+        { cells: ["", "TOPLAM", "", "", "", tBedel, tBedel * 1.2, "", "", tFatura,
+          Math.round((tFatura * 0.2) * 100) / 100, Math.round((tFatura * 1.2) * 100) / 100, tKalan], bold: true, merge: [1, 4] },
+      ],
+      extraSheets: [paketFaturaSheet(d)],
+    }).catch(e => alert("Excel indirilemedi: " + e.message));
   };
 
   // Paket fiyatlı taşeronun saha bazlı Exceli: kalem/PO/HW kolonları yok —
@@ -21094,22 +21151,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         Number(x.tutar || 0), Number(x.tutar || 0) * 1.2, x.qc || "", x.kaynak || ""]),
       { cells: ["", "FATURA KESİLECEK TOPLAM", "", "", Number(d.bedel || 0), Number(d.bedel || 0) * 1.2, "", ""], bold: true, merge: [1, 3] },
     ],
-    extraSheets: [{
-      sheetName: "Kestiğim Faturalar",
-      title: `${d.taseron} — Şimşek Haberleşme'ye Kesilen Faturalar`,
-      headers: ["Fatura No", "Fatura Tarihi", "Kalem", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)"],
-      colWidths: [26, 15, 9, 19, 19],
-      numericCols: [2, 3, 4],
-      rows: (d.faturalar || []).length
-        ? [
-            ...(d.faturalar || []).map(f => [f.fatura_no || "", f.tarih || "",
-              Number(f.kalem || 0), Number(f.tutar_kdv_haric || 0), Number(f.tutar_kdv_dahil || 0)]),
-            { cells: ["TOPLAM", "", (d.faturalar || []).reduce((a, f) => a + Number(f.kalem || 0), 0),
-              (d.faturalar || []).reduce((a, f) => a + Number(f.tutar_kdv_haric || 0), 0),
-              (d.faturalar || []).reduce((a, f) => a + Number(f.tutar_kdv_dahil || 0), 0)], bold: true },
-          ]
-        : [["Henüz fatura kaydı yok", "", "", 0, 0]],
-    }],
+    extraSheets: [paketFaturaSheet(d)],
   }).catch(e => alert("Excel indirilemedi: " + e.message));
 
   // Atanan İş görünümü (paket taşeron): saha bazında kendi alacağı bedel —
@@ -21156,7 +21198,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     try {
       const d = await fetchJson(`${API_BASE}/finance/subcon-paket-bedel`);
       if (!d.ok) throw new Error(d.error || "Bedel alınamadı");
-      exportPaketExcel(d);
+      exportPaketGenelExcel(d);
     } catch (e) { alert("Excel indirilemedi: " + e.message); }
   };
 
@@ -22768,6 +22810,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     </span>
                   ))}
                 </div>
+                {Number(paketModal.faturalanmis?.kalem || 0) > 0 && (
+                  <div style={{ fontSize:"12px", color:"#059669", fontWeight:700, marginTop:"5px" }}>
+                    ✓ {paketModal.faturalanmis.kalem} kalem faturalandı — listeden düşüldü
+                    (₺{Math.round(Number(paketModal.faturalanmis.tutar_kdv_haric || 0)).toLocaleString("tr-TR")} KDV hariç)
+                  </div>
+                )}
               </div>
               <div style={{ display:"flex", gap:"8px" }}>
                 <button type="button" onClick={() => exportPaketExcel(paketModal)}
@@ -23650,7 +23698,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         >
           <div style={{ fontSize: "12px", color: "#6b7280" }}>{_paketTaseron ? "Toplam Saha" : "Toplam Satır"}</div>
           <div style={{ fontWeight: "700", fontSize: "20px" }}>
-            {_paketTaseron ? new Set((paketVeri?.tum_detay || []).map(x => x.site)).size : regionFilteredRowCount}
+            {_paketTaseron ? new Set(paketTumDetay.map(x => x.site)).size : regionFilteredRowCount}
           </div>
         </div>
 
@@ -23666,7 +23714,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         >
           <div style={{ fontSize: "12px", color: "#6b7280" }}>{_paketTaseron ? "Toplam Bedel (KDV Hariç)" : "Toplam Tutar"}</div>
           <div style={{ fontWeight: "700", fontSize: "20px" }}>
-            {formatTRY(_paketTaseron ? Number(paketVeri?.bedel_tum || 0) : regionFilteredRowTotal)}
+            {formatTRY(_paketTaseron ? Math.round(paketFiltreToplam) : regionFilteredRowTotal)}
           </div>
         </div>
         {isSubconUser && (
@@ -23733,14 +23781,17 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                 <th style={{ textAlign: "center" }}>QC</th>
                 <th style={{ textAlign: "right" }}>Bedel (KDV Hariç)</th>
                 <th style={{ textAlign: "right" }}>Bedel (KDV Dahil)</th>
+                <th>Fatura</th>
               </tr>
             </thead>
             <tbody>
               {(paketVeri?.tum_detay || []).length === 0 ? (
-                <tr><td colSpan={6} style={{ padding: "26px", textAlign: "center", color: "#94a3b8" }}>Yükleniyor…</td></tr>
+                <tr><td colSpan={7} style={{ padding: "26px", textAlign: "center", color: "#94a3b8" }}>Yükleniyor…</td></tr>
+              ) : paketTumDetay.length === 0 ? (
+                <tr><td colSpan={7} style={{ padding: "26px", textAlign: "center", color: "#94a3b8" }}>Aramayla eşleşen kayıt yok</td></tr>
               ) : (
                 <>
-                  {(paketVeri.tum_detay || []).slice().sort((a, b) => String(a.site).localeCompare(String(b.site))).map((x, i) => (
+                  {paketTumDetay.slice().sort((a, b) => String(a.site).localeCompare(String(b.site))).map((x, i) => (
                     <tr key={i}>
                       <td style={{ fontWeight: 600 }}>{x.site}</td>
                       <td>{x.kalem}</td>
@@ -23748,6 +23799,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                       <td style={{ textAlign: "center" }}>{String(x.qc || "").toUpperCase() === "OK" ? "✅ OK" : "🔶 NOK"}</td>
                       <td style={{ textAlign: "right", fontWeight: 700 }}>₺{Number(x.tutar || 0).toLocaleString("tr-TR")}</td>
                       <td style={{ textAlign: "right" }}>₺{Math.round(Number(x.tutar || 0) * 1.2).toLocaleString("tr-TR")}</td>
+                      <td style={{ fontSize: "12px", whiteSpace: "nowrap" }}>
+                        {x.fatura_no
+                          ? <span title={`${x.fatura_tarihi || ""} · ₺${Number(x.fatura_kdv_dahil || 0).toLocaleString("tr-TR")} KDV dahil`} style={{ color: "#065f46", fontWeight: 700 }}>🧾 {x.fatura_no}</span>
+                          : <span style={{ color: "#94a3b8" }}>—</span>}
+                      </td>
                     </tr>
                   ))}
                   <tr style={{ background: "#f8fafc" }}>
@@ -23755,8 +23811,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     <td></td>
                     <td></td>
                     <td></td>
-                    <td style={{ textAlign: "right", fontWeight: 800 }}>₺{Number(paketVeri.bedel_tum || 0).toLocaleString("tr-TR")}</td>
-                    <td style={{ textAlign: "right", fontWeight: 800 }}>₺{Math.round(Number(paketVeri.bedel_tum || 0) * 1.2).toLocaleString("tr-TR")}</td>
+                    <td style={{ textAlign: "right", fontWeight: 800 }}>₺{Math.round(paketFiltreToplam).toLocaleString("tr-TR")}</td>
+                    <td style={{ textAlign: "right", fontWeight: 800 }}>₺{Math.round(paketFiltreToplam * 1.2).toLocaleString("tr-TR")}</td>
+                    <td></td>
                   </tr>
                 </>
               )}

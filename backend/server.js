@@ -6534,6 +6534,47 @@ app.get("/finance/subcon-paket-bedel", authMiddleware, async (req, res) => {
         }
       });
     }
+    // Kesilen faturaların kalem eşleşmesi (bolge_fatura, saha+paket adı bazlı):
+    // faturalanan kalem "Fatura Kesilecek" listesinden düşer (çift kesim koruması),
+    // genel dökümde ise fatura no/tarih/tutar ve kalan bedelle görünür
+    const faturalanmis = { kalem: 0, tutar_kdv_haric: 0 };
+    try {
+      const bfk = await pool.query(`SELECT TRIM(taseron_adi) AS ad,
+          UPPER(TRIM(COALESCE(site_code,''))) AS site,
+          UPPER(TRIM(COALESCE(item_description,''))) AS kalem,
+          TRIM(fatura_no) AS no, to_char(fatura_tarihi,'DD.MM.YYYY') AS tarih,
+          COALESCE(fatura_miktari,0) AS dahil
+        FROM bolge_fatura WHERE COALESCE(TRIM(fatura_no),'') <> ''`);
+      const fMap = {};
+      bfk.rows.filter(r => subconRowMatches(scopeName, r.ad)).forEach(r => {
+        const k = r.site + "|" + r.kalem;
+        const g = (fMap[k] = fMap[k] || { nolar: [], tarih: "", dahil: 0 });
+        if (r.no && !g.nolar.includes(r.no)) g.nolar.push(r.no);
+        if (r.tarih) g.tarih = r.tarih;
+        g.dahil += Number(r.dahil || 0);
+      });
+      const donat = (d) => {
+        const m = fMap[String(d.site || "").toUpperCase() + "|" + String(d.kalem || "").toUpperCase()];
+        if (!m) return;
+        const haric = m.dahil / 1.2;
+        d.fatura_no = m.nolar.join(", ");
+        d.fatura_tarihi = m.tarih;
+        d.fatura_kdv_haric = Math.round(haric * 100) / 100;
+        d.fatura_kdv_dahil = Math.round(m.dahil * 100) / 100;
+        d.kalan = Math.max(0, Math.round((Number(d.tutar || 0) - haric) * 100) / 100);
+      };
+      tumDetay.forEach(donat);
+      detay.forEach(donat);
+      for (let i = detay.length - 1; i >= 0; i--) {
+        const d = detay[i];
+        if (d.fatura_no && Number(d.kalan || 0) < 1) {
+          faturalanmis.kalem += 1;
+          faturalanmis.tutar_kdv_haric += Number(d.tutar || 0);
+          toplam -= Number(d.tutar || 0);
+          detay.splice(i, 1);
+        }
+      }
+    } catch (fe) { console.error("SUBCON PAKET FATURA EŞLEŞME:", fe.message); }
     tumDetay.sort((a, b) => String(a.site).localeCompare(String(b.site)));
     detay.sort((a, b) => String(a.kaynak).localeCompare(String(b.kaynak)) || String(a.site).localeCompare(String(b.site)));
     const kaynakOzet = {};
@@ -6555,7 +6596,8 @@ app.get("/finance/subcon-paket-bedel", authMiddleware, async (req, res) => {
           tutar_kdv_dahil: Number(r.tutar || 0), tutar_kdv_haric: Number(r.tutar || 0) / 1.2 }));
     } catch (fe) { console.error("SUBCON PAKET FATURA:", fe.message); }
     res.json({ ok: true, taseron: scopeName, bedel: Math.round(toplam), detay,
-      bedel_tum: Math.round(toplamTum), tum_detay: tumDetay, kaynak_ozet: kaynakOzet, faturalar });
+      bedel_tum: Math.round(toplamTum), tum_detay: tumDetay, kaynak_ozet: kaynakOzet,
+      faturalar, faturalanmis });
   } catch (e) {
     console.error("SUBCON PAKET BEDEL ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });
