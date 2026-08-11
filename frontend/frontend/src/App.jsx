@@ -21118,6 +21118,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         fat ? Number(x.fatura_kdv_dahil || 0) : "",
         fat ? Number(x.kalan || 0) : Number(x.tutar || 0)];
     });
+    // Fatura kesilenler üstte (saha sırasıyla), faturalanmamışlar altta
+    rowsX.sort((a, b) => ((b[7] ? 1 : 0) - (a[7] ? 1 : 0)) || String(a[0]).localeCompare(String(b[0])));
     const tBedel = rowsX.reduce((s, r) => s + Number(r[5] || 0), 0);
     const tFatura = rowsX.reduce((s, r) => s + Number(r[9] || 0), 0);
     const tKalan = rowsX.reduce((s, r) => s + Number(r[12] || 0), 0);
