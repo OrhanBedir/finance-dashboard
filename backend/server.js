@@ -13146,17 +13146,68 @@ function parseTurkishInvoice(rawText) {
 
   console.log("[parseTurkishInvoice]", { fatura_no, fatura_tarihi, tedarikci, toplam_raw, kdv_raw, matrah_raw });
 
+  let tutar  = parseTRNum(matrah_raw);
+  let kdv    = parseTRNum(kdv_raw);
+  let toplam = parseTRNum(toplam_raw);
+  // OCR bazı etiketleri okuyamayabilir — "Not: CARI_BAKIYE:13.200,00 TL"
+  // dipnotu KDV dahil toplamı verir, boş kalan toplam buradan doldurulur
+  if (!toplam) {
+    const mB = flat.match(/CARI[_\s]*BAKIYE[:\s]*([\d.]+,\d{2})/i);
+    if (mB) toplam = parseTRNum(mB[1]);
+  }
+  // Üç değerden ikisi belliyse eksik olan türetilir (tutar+kdv=toplam)
+  if (!toplam && tutar && kdv) toplam = Math.round((tutar + kdv) * 100) / 100;
+  if (!kdv && toplam && tutar && toplam >= tutar) kdv = Math.round((toplam - tutar) * 100) / 100;
+  if (!tutar && toplam && kdv && toplam >= kdv) tutar = Math.round((toplam - kdv) * 100) / 100;
+
   return {
     fatura_no,
     fatura_tarihi,
     tedarikci,
-    tutar:        parseTRNum(matrah_raw),
-    kdv:          parseTRNum(kdv_raw),
-    toplam_tutar: parseTRNum(toplam_raw),
+    tutar,
+    kdv,
+    toplam_tutar: toplam,
   };
 }
 
 // PDF metin çıkarma — önce Python pdfminer (dijital PDF), yoksa OCR.space
+// pdf2json ile metin çıkarma: text-run'lar satır (y) bazında gruplanır,
+// x sırasına dizilir; karakterler ayrı run gelebildiği için boşluk x-aralığına
+// göre eklenir. Çıktıda etiket+tutar aynı satırda birleşir ("Ödenecek Tutar13.200,00 TL").
+function extractPdfTextPdf2json(buf) {
+  return new Promise((resolve, reject) => {
+    let PDFParser;
+    try { PDFParser = require("pdf2json"); } catch (e) { return reject(e); }
+    const pp = new PDFParser();
+    const dec = (t) => { try { return decodeURIComponent(t); } catch { return t; } };
+    pp.on("pdfParser_dataError", (e) => reject(new Error(e?.parserError?.message || e?.parserError || "pdf2json parse hatası")));
+    pp.on("pdfParser_dataReady", (data) => {
+      try {
+        const rows = new Map();
+        (data.Pages || []).forEach((pg, pi) => {
+          (pg.Texts || []).forEach((t) => {
+            const y = Math.round(t.y * 2) / 2 + pi * 1000;
+            if (!rows.has(y)) rows.set(y, []);
+            rows.get(y).push({ x: t.x, w: t.w || 0, s: (t.R || []).map((r) => dec(r.T)).join("") });
+          });
+        });
+        const lines = [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([, arr]) => {
+          arr.sort((a, b) => a.x - b.x);
+          let out = "", prevEnd = null;
+          for (const t of arr) {
+            if (prevEnd !== null && t.x - prevEnd > 0.45) out += " ";
+            out += t.s.trim() === "" ? " " : t.s;
+            prevEnd = t.x + (t.w || 0.4);
+          }
+          return out.replace(/\s+/g, " ").trim();
+        });
+        resolve(lines.join("\n"));
+      } catch (err) { reject(err); }
+    });
+    pp.parseBuffer(buf);
+  });
+}
+
 async function extractPdfText(pdfBuffer, isPDF) {
   // ── 1. Python pdfminer (dijital/e-fatura PDF'leri için en iyi) ────────────
   if (isPDF) {
@@ -13188,6 +13239,22 @@ async function extractPdfText(pdfBuffer, isPDF) {
       }
     } catch (e) {
       console.warn("[invoice-parse] pdfminer failed, falling back to OCR:", e.message);
+    }
+  }
+
+  // ── 1.5 pdf2json (saf JS): Render'da python/pdfminer yoksa dijital
+  // e-fatura PDF'lerinin metni buradan çıkar — OCR'a yalnız taramalılar düşer.
+  // OCR bazı etiket hücrelerini ("Hesaplanan KDV", "Ödenecek Tutar") hiç
+  // okuyamıyordu ve tutarlar boş kalıyordu (ASY vakası, 11.08.2026).
+  if (isPDF) {
+    try {
+      const text = await extractPdfTextPdf2json(pdfBuffer);
+      if (text && text.trim().length > 50) {
+        console.log("[invoice-parse] pdf2json snippet:", text.slice(0, 300));
+        return text;
+      }
+    } catch (e) {
+      console.warn("[invoice-parse] pdf2json failed, falling back to OCR:", e.message);
     }
   }
 
