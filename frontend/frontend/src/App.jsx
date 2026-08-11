@@ -23980,6 +23980,7 @@ function CashFlowPanel({ currentUser, onBack }) {
     } catch {}
   };
   useEffect(() => { bankaYukle(); }, []);
+  // Ay değişince ve panel verisi her yenilendiğinde bakiye de tazelenir
   const bankaKaydet = async () => {
     const t = Number(bankaForm.tutar || 0);
     if (!t || !bankaForm.tarih) { alert("Tarih ve tutar zorunlu"); return; }
@@ -24011,7 +24012,7 @@ function CashFlowPanel({ currentUser, onBack }) {
 
   const AY_ADLARI = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
 
-  useEffect(() => { loadData(); }, [ay, yil]);
+  useEffect(() => { loadData(); bankaYukle(); }, [ay, yil]);
 
   const loadData = async () => {
     setLoading(true);
@@ -24435,7 +24436,7 @@ function CashFlowPanel({ currentUser, onBack }) {
                               const r = await fetch(`${API_BASE}/finance/cashflow-odeme/${o.id}`, { method:"DELETE", headers });
                               const d = await r.json();
                               if(!d.ok) throw new Error(d.error||"Silinemedi");
-                              await loadData();
+                              await loadData(); bankaYukle();
                             } catch(e){ alert(e.message); }
                           }}
                           style={{ flexShrink:0, background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}
