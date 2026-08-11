@@ -1843,6 +1843,36 @@ function MarkaNakitPanel({ currentUser }) {
             <button onClick={() => ayKaydir(-1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>‹</button>
             <div style={{ fontSize: "15px", fontWeight: 800, color: "#1e3a5f", minWidth: "130px", textAlign: "center" }}>{ayBaslik}</div>
             <button onClick={() => ayKaydir(1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>›</button>
+            <button onClick={() => exportStandardExcel({
+              title: `${markaAd} — Günlük Nakit Akışı (tüm hareketler)`,
+              sheetName: "Nakit Akışı", fileBase: `${marka}_Nakit_Akisi`,
+              headers: ["Tarih", "Kategori", "Kişi / Kalem", "Açıklama", "Tutar (₺)", "Kasa"],
+              colWidths: [13, 18, 32, 46, 14, 16],
+              numericCols: [4],
+              rows: [
+                // Tüm hareketler tarih sırasıyla; kasadan düşmeyenler "AHY ödedi" işaretli
+                ...rows.slice().sort((a, b) => String(a.tarih || "").localeCompare(String(b.tarih || ""))).map(r => [
+                  r.tarih || "", (TIP[r.tip]?.ad) || r.tip || "Diğer", r.ad_soyad || "",
+                  r.aciklama || "", -Number(r.tutar || 0),
+                  r.kasadan_dus === false ? "AHY ödedi" : "Kasadan düştü",
+                ]),
+                { cells: ["", "TOPLAM HARCAMA", "", "", -rows.reduce((sm, r) => sm + Number(r.tutar || 0), 0), ""], bold: true, merge: [1, 3] },
+              ],
+              extraSheets: [{
+                sheetName: "Kasa Girişleri",
+                title: `${markaAd} — Kasaya Giren Nakit (manuel girişler)`,
+                headers: ["Tarih", "Açıklama", "Tutar (₺)"],
+                colWidths: [13, 52, 15],
+                numericCols: [2],
+                rows: [
+                  ...(kasa.rows || []).slice().sort((a, b) => String(a.tarih || "").localeCompare(String(b.tarih || ""))).map(k => [
+                    k.tarih || "", k.aciklama || "", Number(k.tutar || 0),
+                  ]),
+                  { cells: ["", "TOPLAM GİREN", Number(kasa.toplam || 0)], bold: true },
+                ],
+              }],
+            }).catch(e => alert("Excel indirilemedi: " + e.message))}
+              style={{ padding: "6px 14px", background: "#166534", color: "#fff", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>📥 Excel İndir</button>
           </div>
           {/* Kasa + borç kartları yan yana */}
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "stretch" }}>
