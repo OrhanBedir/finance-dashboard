@@ -15425,18 +15425,28 @@ app.get("/hr/masraf-formlari", async (req, res) => {
 // GET personel masraf bakiye — MUST be before /:id to avoid "bakiye" being matched as an id
 app.get("/hr/masraf-form/bakiye/:personelId", async (req, res) => {
   try {
+    // 11.08.2026: Bu uç eskiden İK'daki `avans` tablosunu (maaş avansı kalıntısı)
+    // ve TAMAMLANDI masrafları okuyordu — panel/mobil ile farklı rakam veriyordu.
+    // Artık tek kaynak: onaylanmış iş avansı talepleri − ARŞİVLENEN masraf.
     const pid = req.params.personelId;
+    const per = await pool.query(`SELECT LOWER(TRIM(email)) AS email FROM personel WHERE id=$1`, [pid]);
+    const email = per.rows[0]?.email || "";
     const avansRes = await pool.query(
-      `SELECT COALESCE(SUM(tutar),0) as toplam FROM avans WHERE personel_id=$1 AND avans_turu='IS'`,
-      [pid]
-    );
-    const masrafRes = await pool.query(
-      `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
+      `SELECT COALESCE(SUM(tutar),0) AS toplam FROM is_avans_talep
+       WHERE durum='TAMAMLANDI' AND personel_id=$1`, [pid]);
+    // Personele bağlanmamış eski kayıtlar talep edenin e-postasından yakalanır
+    const avansFallback = email ? await pool.query(
+      `SELECT COALESCE(SUM(tutar),0) AS toplam FROM is_avans_talep
+       WHERE durum='TAMAMLANDI' AND personel_id IS NULL AND LOWER(talep_eden_email)=$1`, [email])
+      : { rows: [{ toplam: 0 }] };
+    const masrafRes = email ? await pool.query(
+      `SELECT COALESCE(SUM(mk.tutar),0) AS toplam FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
-       WHERE mf.personel_id=$1 AND mf.durum='TAMAMLANDI'`,
-      [pid]
-    );
-    const avans = Number(avansRes.rows[0].toplam);
+       WHERE mf.durum='ARSIVLENDI'
+         AND (mf.personel_id=$1 OR (mf.personel_id IS NULL AND LOWER(mf.talep_eden_email)=$2))`,
+      [pid, email])
+      : { rows: [{ toplam: 0 }] };
+    const avans = Number(avansRes.rows[0].toplam) + Number(avansFallback.rows[0].toplam);
     const masraf = Number(masrafRes.rows[0].toplam);
     res.json({ avans, masraf, bakiye: avans - masraf });
   } catch (e) { res.status(500).json({ error: e.message }); }
