@@ -17174,6 +17174,22 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     } catch(err) { alert("Reddetme başarısız: " + err.message); }
   };
 
+  // Geri gönder: red DEĞİL — form TASLAK'a döner, personel fiş/detay düzeltip
+  // yeniden onaya gönderir. İade notu zorunlu (personel neyi düzelteceğini bilsin).
+  const [geriModal, setGeriModal] = useState(null);
+  const [geriText, setGeriText] = useState("");
+  const handleGeriGonder = async () => {
+    if (!geriText.trim()) return alert("İade açıklaması girilmeden geri gönderilemez — personel neyi düzelteceğini bilmeli!");
+    try {
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${geriModal}/geri-gonder`, {
+        method:"PUT", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ aciklama: geriText, gonderen_email: currentUser?.email })
+      });
+      if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || `Sunucu hatası (${r.status})`); }
+      setGeriModal(null); setGeriText(""); setViewForm(null); load();
+    } catch(err) { alert("Geri gönderme başarısız: " + err.message); }
+  };
+
   const durumBadge = (durum) => {
     const map = {
       TASLAK:         { bg:"#f3f4f6", color:"#374151", label:"Taslak" },
@@ -17285,7 +17301,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
               )}
             </div>
           </div>
-          {viewForm.red_aciklama && <div style={{ marginTop:"12px", background:"#fee2e2", borderRadius:"8px", padding:"10px 14px", color:"#991b1b", fontSize:"13px" }}>❌ Red: {viewForm.red_aciklama}</div>}
+          {viewForm.red_aciklama && (String(viewForm.red_aciklama).startsWith("↩")
+            ? <div style={{ marginTop:"12px", background:"#fef3c7", borderRadius:"8px", padding:"10px 14px", color:"#92400e", fontSize:"13px", fontWeight:600 }}>{viewForm.red_aciklama} — düzeltip yeniden onaya gönderin</div>
+            : <div style={{ marginTop:"12px", background:"#fee2e2", borderRadius:"8px", padding:"10px 14px", color:"#991b1b", fontSize:"13px" }}>❌ Red: {viewForm.red_aciklama}</div>)}
           {viewForm.pm_not && <div style={{ marginTop:"8px", background:"#fef9c3", borderRadius:"8px", padding:"8px 12px", color:"#713f12", fontSize:"13px" }}>PM Notu: {viewForm.pm_not}</div>}
           {viewForm.direktor_not && <div style={{ marginTop:"8px", background:"#d1fae5", borderRadius:"8px", padding:"8px 12px", color:"#065f46", fontSize:"13px" }}>Direktör Notu: {viewForm.direktor_not}</div>}
         </div>
@@ -17388,10 +17406,35 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
               style={{ padding:"12px 24px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}>
               ✅ Onayla {needsPMAction?"(PM)":"(Direktör)"}
             </button>
+            <button onClick={()=>{ setGeriModal(viewForm.id); setGeriText(""); }}
+              style={{ padding:"12px 24px", background:"#b45309", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}
+              title="Formu reddetmeden personele iade et — fiş/detay düzeltmesi için">
+              ↩ Geri Gönder
+            </button>
             <button onClick={()=>{ setRedModal(viewForm.id); setRedText(""); }}
               style={{ padding:"12px 24px", background:"#dc2626", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}>
               ❌ Reddet
             </button>
+          </div>
+        )}
+
+        {/* Geri gönder modalı */}
+        {geriModal && (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}
+            onClick={()=>setGeriModal(null)}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", padding:"24px", width:"min(480px,92vw)", boxShadow:"0 25px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"6px" }}>↩ Formu Personele Geri Gönder</div>
+              <div style={{ fontSize:"12.5px", color:"#6b7280", marginBottom:"12px" }}>
+                Form reddedilmez — taslağa döner, personel düzeltip yeniden onaya gönderir. Neyin düzeltileceğini yazın (ör. "3. kalemin fişi yanlış yüklenmiş").
+              </div>
+              <textarea value={geriText} onChange={e=>setGeriText(e.target.value)} rows={3} autoFocus
+                placeholder="İade sebebi / düzeltilecekler…"
+                style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #fbbf24", fontSize:"13.5px", boxSizing:"border-box", resize:"vertical" }} />
+              <div style={{ display:"flex", gap:"10px", marginTop:"14px", justifyContent:"flex-end" }}>
+                <button onClick={()=>setGeriModal(null)} style={{ padding:"10px 18px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"9px", fontWeight:600, cursor:"pointer" }}>Vazgeç</button>
+                <button onClick={handleGeriGonder} style={{ padding:"10px 18px", background:"#b45309", color:"#fff", border:"none", borderRadius:"9px", fontWeight:700, cursor:"pointer" }}>↩ Geri Gönder</button>
+              </div>
+            </div>
           </div>
         )}
 

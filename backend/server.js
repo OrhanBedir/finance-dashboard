@@ -16362,6 +16362,27 @@ app.put("/hr/masraf-form/:id/pm-reddet", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT Geri Gönder (PM_BEKLE / DIREKTOR_BEKLE → TASLAK): fiş hatası vb.
+// durumlarda form reddedilmeden personele iade edilir — personel düzeltip
+// yeniden onaya gönderir. İade notu red_aciklama alanında taşınır (11.08.2026).
+app.put("/hr/masraf-form/:id/geri-gonder", async (req, res) => {
+  try {
+    const { aciklama, gonderen_email } = req.body;
+    if (!String(aciklama || "").trim())
+      return res.status(400).json({ error: "İade açıklaması zorunlu — personel neyi düzelteceğini bilmeli" });
+    const { rows } = await pool.query(
+      `UPDATE masraf_form
+       SET durum='TASLAK',
+           red_aciklama=$1, reddeden_email=$2,
+           pm_not=NULL, pm_onay_tarihi=NULL, direktor_not=NULL, direktor_onay_tarihi=NULL
+       WHERE id=$3 AND durum IN ('PM_BEKLE','DIREKTOR_BEKLE') RETURNING *`,
+      [`↩ GERİ GÖNDERİLDİ: ${String(aciklama).trim()}`, gonderen_email || null, req.params.id]
+    );
+    if (!rows[0]) return res.status(400).json({ error: "Form onay aşamasında değil — yalnız PM/Direktör bekleyen formlar geri gönderilebilir" });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // PUT Direktör onayla (DIREKTOR_BEKLE → TAMAMLANDI) + avans düş
 app.put("/hr/masraf-form/:id/direktor-onayla", async (req, res) => {
   try {
