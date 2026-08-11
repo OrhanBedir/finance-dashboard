@@ -6151,8 +6151,12 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
     // İş avansları yalnız is_avans_talep'ten okunur — İK avans tablosundaki
     // İŞ kopyaları çift sayım yapar, orada sadece MAAS avansı sayılır.
     const [tahsilat, maas, ikAvans, isAvans, manuel, taseron, cek] = await Promise.all([
+      // Bugünün ödemeleri sayılmaz (11.08.2026 kuralı): HW aynı günün rakamını
+      // ertesi günkü dosyada revize edebiliyor — kart hep kesinleşmiş tahsilatı
+      // gösterir, bugün gelen para yarınki yüklemeyle bakiyeye girer.
       q(`SELECT COALESCE(SUM(payment_amount),0) t FROM hw_payment_rows
-         WHERE COALESCE(currency,'TRY')='TRY' AND payment_date IS NOT NULL AND payment_date >= $1::date`),
+         WHERE COALESCE(currency,'TRY')='TRY' AND payment_date IS NOT NULL
+           AND payment_date >= $1::date AND payment_date < CURRENT_DATE`),
       q(`SELECT COALESCE(SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)),0) t
          FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
          WHERE m.tarih >= $1::date AND UPPER(COALESCE(p.marka,'ERC')) <> 'AHY'`),
