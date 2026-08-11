@@ -10371,6 +10371,7 @@ function FinanceDashboard({
                       <th>Fatura No</th>
                       <th>Fatura Tarihi</th>
                       <th>Tedarikçi</th>
+                      <th>Firma</th>
                       <th>PO No</th>
                       <th>Site ID</th>
                       <th>Toplam</th>
@@ -10381,7 +10382,7 @@ function FinanceDashboard({
                   </thead>
                   <tbody>
                     {filteredManualInvoiceRows.length === 0 ? (
-                      <EmptyRow colSpan={13} text="Kayıt bulunamadı" />
+                      <EmptyRow colSpan={14} text="Kayıt bulunamadı" />
                     ) : (
                       filteredManualInvoiceRows.map((row, index) => (
                         <tr key={row.id ?? index}>
@@ -10392,6 +10393,12 @@ function FinanceDashboard({
                           <td>{row.fatura_no || "-"}</td>
                           <td>{formatDateOnly(row.fatura_tarihi)}</td>
                           <td>{row.tedarikci || "-"}</td>
+                          {/* Fatura hangi firmaya kesildi → ödemeyi o firma yapar */}
+                          <td>
+                            {String(row.firma || "").toUpperCase() === "AHY"
+                              ? <span style={{ padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:"#fff7ed", color:"#9a3412", border:"1px solid #fed7aa", whiteSpace:"nowrap" }}>🔧 AHY</span>
+                              : <span style={{ padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:"#eff6ff", color:"#1e40af", border:"1px solid #bfdbfe", whiteSpace:"nowrap" }}>⚡ Şimşek</span>}
+                          </td>
                           <td>{row.po_no || "-"}</td>
                           <td>{row.site_id || "-"}</td>
                           <td>{formatTRY(row.toplam_tutar || 0)}</td>
