@@ -5702,10 +5702,24 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
         FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
-      // Taşeron ödemeleri (avans + fatura ödemesi) — nakit akışıyla tutarlı
-      pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
-        FROM marka_taseron_odeme
-        WHERE UPPER(marka) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
+      // Taşeron ödemeleri (avans + fatura ödemesi) — nakit akışıyla tutarlı.
+      // Fatura girişindeki "Ödenen Tutar" da gerçek ödemedir (11.08.2026):
+      // gider, panel Ödenen'iyle aynı kaynaktan beslenir; çift sayım koruması
+      // marka-nakit'tekiyle birebir aynı (ilk kelime + tutar eşleşmesi).
+      pool.query(`SELECT ay, SUM(t) AS t FROM (
+          SELECT to_char(tarih,'YYYY-MM') AS ay, COALESCE(tutar,0) AS t
+          FROM marka_taseron_odeme WHERE UPPER(marka) = $1
+          UNION ALL
+          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), COALESCE(i.odenen_tutar,0)
+          FROM invoice_entries i
+          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+            AND NOT EXISTS (
+              SELECT 1 FROM marka_taseron_odeme mo
+              WHERE UPPER(mo.marka) = $1
+                AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
+                AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+            )
+        ) x GROUP BY ay`, [marka]).catch(() => ({ rows: [] })),
       // Yemek kartı ödemeleri (cashflow kategori TICKET) — kalem dökümü için ayrı
       pool.query(`SELECT SUM(tutar) AS t FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1 AND UPPER(COALESCE(kategori,'')) = 'TICKET'`, [marka]).catch(() => ({ rows: [] })),
@@ -6904,10 +6918,24 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, kategori, SUM(tutar) AS t
         FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1,2`, [marka]).catch(() => ({ rows: [] })),
-      // Taşeron ödemeleri (avans + fatura ödemesi) — nakit akışıyla tutarlı
-      pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
-        FROM marka_taseron_odeme
-        WHERE UPPER(marka) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
+      // Taşeron ödemeleri (avans + fatura ödemesi) — nakit akışıyla tutarlı.
+      // Fatura girişindeki "Ödenen Tutar" da gerçek ödemedir (11.08.2026):
+      // gider, panel Ödenen'iyle aynı kaynaktan beslenir; çift sayım koruması
+      // marka-nakit'tekiyle birebir aynı (ilk kelime + tutar eşleşmesi).
+      pool.query(`SELECT ay, SUM(t) AS t FROM (
+          SELECT to_char(tarih,'YYYY-MM') AS ay, COALESCE(tutar,0) AS t
+          FROM marka_taseron_odeme WHERE UPPER(marka) = $1
+          UNION ALL
+          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), COALESCE(i.odenen_tutar,0)
+          FROM invoice_entries i
+          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+            AND NOT EXISTS (
+              SELECT 1 FROM marka_taseron_odeme mo
+              WHERE UPPER(mo.marka) = $1
+                AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
+                AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+            )
+        ) x GROUP BY ay`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const map = {};
     const rowOf = (ay) => (map[ay] = map[ay] || {
