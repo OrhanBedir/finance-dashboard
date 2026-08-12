@@ -14935,6 +14935,18 @@ app.post("/hr/is-avans", async (req, res) => {
       personelIdFinal = pf.rows[0]?.id || null;
     }
 
+    // Mobil uygulamada araç alanı yok: Yakıt talebinde plaka boş geldiyse
+    // kişinin org şemasındaki araç ataması (ekip_arac_plaka) otomatik yazılır —
+    // web panelindeki araç otomatiğinin sunucu tarafı karşılığı (12.08.2026)
+    let plakaFinal = plaka ? String(plaka).trim().toUpperCase().replace(/\s+/g, " ") : null;
+    if (!plakaFinal && personelIdFinal && /yak[ıi]t/i.test(String(gider_turu || ""))) {
+      const pv = await pool.query(
+        `SELECT ekip_arac_plaka FROM personel WHERE id = $1`, [personelIdFinal]
+      ).catch(() => ({ rows: [] }));
+      const atanmis = String(pv.rows[0]?.ekip_arac_plaka || "").trim().toUpperCase();
+      if (atanmis) plakaFinal = atanmis;
+    }
+
     const r = await pool.query(
       `INSERT INTO is_avans_talep
          (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi,plaka,firma)
@@ -14954,7 +14966,7 @@ app.post("/hr/is-avans", async (req, res) => {
         iban || null,
         durumFinal,
         pmOnayTarihi,
-        plaka ? String(plaka).trim().toUpperCase().replace(/\s+/g, " ") : null,
+        plakaFinal,
         firmaFinal,
       ]
     );
