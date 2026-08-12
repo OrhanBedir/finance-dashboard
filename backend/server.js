@@ -11510,6 +11510,44 @@ function buildHwItemColMap(rawRows) {
   return { headerRowIdx, colMap };
 }
 
+// eSupplier Invoice Inquiry → "Export Invoice Line" formatı (12.08.2026):
+// teknik kolon adları (po_segment1, po_line_num, item_code...) bir satırda,
+// İngilizce fatura başlıkları (Invoice No., Invoice Date) bir SONRAKİ satırda.
+// Bu dosya fatura no + tarih + PO/Line/Shipment + kalem + tutarı hazır verir —
+// eski akıştaki "fatura notundan referans çıkarma" ihtiyacını kaldırır.
+function buildHwInvoiceLineColMap(rawRows) {
+  for (let i = 0; i < Math.min(rawRows.length, 6); i++) {
+    const row = rawRows[i] || [];
+    const idxOf = (name) => row.findIndex(
+      (c) => c != null && String(c).trim().toLowerCase() === name);
+    const poCol = idxOf("po_segment1");
+    if (poCol < 0) continue;
+    const next = rawRows[i + 1] || [];
+    const idxNext = (name) => next.findIndex(
+      (c) => c != null && String(c).trim().toLowerCase() === name);
+    const colMap = {
+      po_no: poCol,
+      release_no: idxOf("po_release_num"),
+      line_no: idxOf("po_line_num"),
+      shipment_no: idxOf("po_shipment_num"),
+      item_code: idxOf("item_code"),
+      description: idxOf("item_desc"),
+      qty: idxOf("line_qty"),
+      currency: idxOf("currency_code"),
+      unit_price: idxOf("line_price"),
+      line_amt: idxOf("line_amt"),
+      project_code: idxOf("project code"),
+      milestone: idxOf("acceptance"),
+      manufacturer: idxOf("manufacturer"),
+      invoice_no: idxNext("invoice no."),
+      invoice_date: idxNext("invoice date"),
+    };
+    if (colMap.invoice_no < 0 || colMap.line_no < 0 || colMap.item_code < 0) return null;
+    return { dataStartIdx: i + 2, colMap };
+  }
+  return null;
+}
+
 app.post(
   "/finance/hw-invoice-items/upload",
   requireHwYukleme,
@@ -11536,12 +11574,74 @@ app.post(
         defval: null,
       });
 
+      // Önce Invoice Line formatını dene (eSupplier → Export Invoice Line):
+      // fatura bazında TAM YENİLEME yapılır — aynı dosya tekrar yüklense de
+      // mükerrer kayıt oluşmaz, revize fatura eskisinin yerini alır
+      const lineMapInfo = buildHwInvoiceLineColMap(rawRows);
+      if (lineMapInfo) {
+        await ensureHwInvoiceItemsTable();
+        await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS invoice_date DATE`).catch(() => {});
+        const { dataStartIdx, colMap: cm } = lineMapInfo;
+        const batchId = String(Date.now());
+        const uploadDate = new Date().toISOString().slice(0, 10);
+        const val = (rowArr, key) => (cm[key] >= 0 ? rowArr[cm[key]] : null);
+        const txtL = (rowArr, key) => { const v = val(rowArr, key); return v == null ? null : String(v).trim() || null; };
+        const numL = (rowArr, key) => { const v = val(rowArr, key); if (v == null || v === "") return null; const n = parseFinanceNumber(v); return isNaN(n) ? null : n; };
+        const byInvoice = new Map();
+        for (let i = dataStartIdx; i < rawRows.length; i++) {
+          const rowArr = rawRows[i] || [];
+          const invNo = txtL(rowArr, "invoice_no");
+          const poNo = txtL(rowArr, "po_no");
+          if (!invNo || !poNo || !/^[A-Z]{2,4}\d{6,}/i.test(invNo)) continue;
+          if (!byInvoice.has(invNo)) byInvoice.set(invNo, []);
+          byInvoice.get(invNo).push(rowArr);
+        }
+        if (!byInvoice.size)
+          return res.status(400).json({ ok: false, error: "Invoice Line dosyasında geçerli satır bulunamadı" });
+        let inserted = 0;
+        for (const [invNo, rows] of byInvoice) {
+          // Normalize edilmiş fatura no ile sil: eski yüklemelerdeki fazladan
+          // sıfırlı seriler (SIM20260000000746) de aynı faturaya sayılır
+          await pool.query(
+            `DELETE FROM hw_invoice_items
+             WHERE regexp_replace(regexp_replace(TRIM(COALESCE(invoice_no,'')),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+                 = regexp_replace(regexp_replace(TRIM($1),'-.*$',''),'^(SIM\\d{4})0+','\\1')`,
+            [invNo]);
+          for (const rowArr of rows) {
+            const dtRaw = val(rowArr, "invoice_date");
+            let invDate = null;
+            if (dtRaw instanceof Date) invDate = dtRaw.toISOString().slice(0, 10);
+            else if (dtRaw != null && /^\d{4}-\d{2}-\d{2}/.test(String(dtRaw).trim())) invDate = String(dtRaw).trim().slice(0, 10);
+            const excl = numL(rowArr, "line_amt");
+            await pool.query(
+              `INSERT INTO hw_invoice_items
+               (invoice_no, invoice_date, po_no, release_no, line_no, shipment_no,
+                item_code, description, site_id, billed_qty, currency, unit_price,
+                invoiced_amount_excl, invoiced_amount_incl, acceptance_milestone,
+                project_code, upload_batch, batch_id, upload_date, invoice_matched_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW())`,
+              [invNo, invDate, txtL(rowArr, "po_no"), txtL(rowArr, "release_no"),
+               txtL(rowArr, "line_no"), txtL(rowArr, "shipment_no"),
+               txtL(rowArr, "item_code"), txtL(rowArr, "description"),
+               parseHwSiteId(val(rowArr, "manufacturer")),
+               numL(rowArr, "qty"), txtL(rowArr, "currency"), numL(rowArr, "unit_price"),
+               excl, excl != null ? Math.round(excl * 1.2 * 100) / 100 : null,
+               txtL(rowArr, "milestone"), txtL(rowArr, "project_code"),
+               "invoice-line", batchId, uploadDate]);
+            inserted++;
+          }
+        }
+        return res.json({ ok: true, format: "invoice-line", inserted,
+          invoice_count: byInvoice.size,
+          message: `${byInvoice.size} fatura / ${inserted} kalem yüklendi (Invoice Line formatı)` });
+      }
+
       const mapInfo = buildHwItemColMap(rawRows);
       if (!mapInfo || mapInfo.colMap.po_no === undefined) {
         return res.status(400).json({
           ok: false,
           error:
-            "Excel formatı tanınamadı (PO No. başlık satırı bulunamadı). Huawei poCreateExp dosyasını yükleyin.",
+            "Excel formatı tanınamadı. Huawei poCreateExp veya eSupplier Invoice Line (Export Invoice Line) dosyası yükleyin.",
         });
       }
       const { headerRowIdx, colMap } = mapInfo;
@@ -11713,21 +11813,34 @@ app.get("/finance/hw-invoice-items/billable-keys", async (req, res) => {
     await ensureHwInvoiceItemsTable();
     // reference_rate: faturanın kesildiği andaki HW kuru (head template AH kolonu)
     // — USD kalemlerde taşeron hesabı bu sabit kuru kullanır
+    await pool.query(`ALTER TABLE hw_invoice_items ADD COLUMN IF NOT EXISTS invoice_date DATE`).catch(() => {});
     const r = await pool.query(`
+      -- Ödeme bilgisi fatura başına önceden toplanır: JOIN çoğaltması SUM'ları bozmasın
+      WITH pay AS (
+        SELECT regexp_replace(regexp_replace(TRIM(invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') AS n,
+               MAX(payment_date) AS payment_date, MAX(due_date) AS due_date
+        FROM hw_payment_rows GROUP BY 1
+      ), head AS (
+        SELECT regexp_replace(regexp_replace(TRIM(invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') AS n,
+               MAX(reference_rate) AS reference_rate, MIN(invoice_date) AS invoice_date
+        FROM hw_invoice_rows GROUP BY 1
+      )
       SELECT
         UPPER(TRIM(COALESCE(i.site_id, ''))) AS site_id,
         TRIM(COALESCE(i.item_code, '')) AS item_code,
         string_agg(DISTINCT i.invoice_no, ', ') AS invoice_nos,
         SUM(COALESCE(i.invoiced_amount_incl, 0)) AS invoiced_amount,
-        MAX(hr.reference_rate) AS reference_rate,
-        to_char(MIN(hr.invoice_date), 'YYYY-MM-DD') AS invoice_date
+        MAX(head.reference_rate) AS reference_rate,
+        to_char(MIN(COALESCE(i.invoice_date, head.invoice_date)), 'YYYY-MM-DD') AS invoice_date,
+        to_char(MAX(pay.payment_date), 'YYYY-MM-DD') AS odeme_tarihi,
+        to_char(MAX(pay.due_date), 'YYYY-MM-DD') AS vade_tarihi,
+        BOOL_OR(pay.payment_date IS NOT NULL AND pay.payment_date < CURRENT_DATE) AS odendi
       FROM hw_invoice_items i
       -- Fatura no normalizasyonu: kalem dosyasında seri fazladan sıfırlı
       -- (SIM20260000000746), head'de kısa (SIM2026000000746) gelebiliyor;
       -- '-cur' gibi ekler de atılır — SIM+yıl sonrası baştaki sıfırlar kırpılır
-      LEFT JOIN hw_invoice_rows hr
-        ON regexp_replace(regexp_replace(TRIM(hr.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
-         = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+      LEFT JOIN head ON head.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+      LEFT JOIN pay  ON pay.n  = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
       WHERE i.invoice_no IS NOT NULL
         AND TRIM(COALESCE(i.site_id, '')) <> ''
       GROUP BY UPPER(TRIM(COALESCE(i.site_id, ''))), TRIM(COALESCE(i.item_code, ''))
