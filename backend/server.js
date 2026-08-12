@@ -16117,14 +16117,52 @@ app.delete("/hr/yemek-kartlari/:id/ode/:donem", async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// Araç KM kayıtları: tarihli log — ay sonu "gezilen km ↔ alınan yakıt"
+// karşılaştırması bu geçmişten yapılır (12.08.2026)
+async function ensureAracKmTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS arac_km_log (
+      id SERIAL PRIMARY KEY,
+      arac_id INTEGER NOT NULL,
+      km NUMERIC NOT NULL,
+      tarih DATE NOT NULL DEFAULT CURRENT_DATE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+}
+
 app.get("/hr/araclar", async (req, res) => {
+  await ensureAracKmTable().catch(() => {});
   const { rows } = await pool.query(`
-    SELECT a.*, json_agg(b ORDER BY b.belge_turu) FILTER (WHERE b.id IS NOT NULL) as belgeler
+    SELECT a.*, json_agg(b ORDER BY b.belge_turu) FILTER (WHERE b.id IS NOT NULL) as belgeler,
+      (SELECT json_agg(json_build_object('id', k.id, 'km', k.km, 'tarih', to_char(k.tarih,'YYYY-MM-DD'))
+              ORDER BY k.tarih DESC, k.id DESC)
+         FROM arac_km_log k WHERE k.arac_id = a.id) AS km_log
     FROM araclar a
     LEFT JOIN arac_belgeler b ON b.arac_id = a.id
     GROUP BY a.id ORDER BY a.plaka
   `);
   res.json(rows);
+});
+
+app.post("/hr/araclar/:id/km", async (req, res) => {
+  try {
+    await ensureAracKmTable();
+    const km = Number(req.body.km);
+    if (!km || isNaN(km) || km <= 0) return res.status(400).json({ error: "Geçerli KM girin" });
+    const tarih = String(req.body.tarih || "").match(/^\d{4}-\d{2}-\d{2}$/)
+      ? req.body.tarih : new Date().toISOString().slice(0, 10);
+    const r = await pool.query(
+      `INSERT INTO arac_km_log (arac_id, km, tarih) VALUES ($1,$2,$3) RETURNING id`,
+      [req.params.id, km, tarih]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/arac-km/:id", async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM arac_km_log WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/hr/araclar", async (req, res) => {

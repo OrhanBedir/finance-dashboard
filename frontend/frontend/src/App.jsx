@@ -30992,6 +30992,23 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   });
   const [belgeUpload, setBelgeUpload] = useState({ turu:null, file:null }); // {turu, file}
   const [filter, setFilter] = useState("TUMU"); // TUMU | AKTİF | PASİF
+  // Araç KM girişi: kart başına {km, tarih} — kayıtlar tarihli log olarak tutulur,
+  // ay sonu km ↔ yakıt karşılaştırması bu geçmişten yapılır
+  const [kmGiris, setKmGiris] = useState({});
+  const kmKaydet = async (aracId) => {
+    const g = kmGiris[aracId] || {};
+    if (!g.km || isNaN(Number(g.km)) || Number(g.km) <= 0) { alert("Geçerli bir KM girin"); return; }
+    try {
+      const r = await fetch(`${API_BASE}/hr/araclar/${aracId}/km`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ km: Number(g.km), tarih: g.tarih || new Date().toISOString().slice(0, 10) }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "KM kaydedilemedi");
+      setKmGiris(s => ({ ...s, [aracId]: { km: "", tarih: "" } }));
+      load();
+    } catch (e) { alert(e.message); }
+  };
 
   const [kiraOdemeler, setKiraOdemeler] = useState([]);
   const load = async () => {
@@ -31276,6 +31293,31 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                     </span>
                   )}
                 </div>
+                {/* KM takibi: son okuma rozeti (geçmiş fare üzerinde) + hızlı giriş */}
+                {a.aktif && (
+                  <div style={{ display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap", marginBottom:"10px" }}>
+                    {(a.km_log || []).length > 0 && (
+                      <span title={(a.km_log || []).slice(0, 8).map(k => `${k.tarih.split("-").reverse().join(".")}: ${Number(k.km).toLocaleString("tr-TR")} km`).join("\n")}
+                        style={{ fontSize:"11px", fontWeight:700, padding:"3px 8px", borderRadius:"6px", background:"#eef2ff", color:"#3730a3", whiteSpace:"nowrap" }}>
+                        📏 Son KM: {Number(a.km_log[0].km).toLocaleString("tr-TR")} · {a.km_log[0].tarih.split("-").reverse().join(".")}
+                      </span>
+                    )}
+                    {canEdit && (
+                      <>
+                        <input type="number" placeholder="KM" value={(kmGiris[a.id]?.km) || ""}
+                          onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), km: e.target.value } }))}
+                          style={{ width:"88px", padding:"4px 8px", border:"1px solid #d1d5db", borderRadius:"6px", fontSize:"12px" }} />
+                        <input type="date" value={(kmGiris[a.id]?.tarih) || new Date().toISOString().slice(0, 10)}
+                          onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), tarih: e.target.value } }))}
+                          style={{ padding:"4px 6px", border:"1px solid #d1d5db", borderRadius:"6px", fontSize:"12px", color:"#374151" }} />
+                        <button onClick={() => kmKaydet(a.id)}
+                          style={{ padding:"4px 10px", background:"#3730a3", color:"#fff", border:"none", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
+                          📏 KM Kaydet
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
                 {/* Kira ödeme durumu — sadece aktif kiralık araçlarda */}
                 {a.aktif && Number(a.aylik_kira || 0) > 0 && (() => {
                   const _buAy = new Date().toISOString().slice(0, 7);
