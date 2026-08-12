@@ -5972,6 +5972,62 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
 
 // MARKA GÜNLÜK NAKİT AKIŞI: alt markanın (AHY) devir tarihinden (15 Temmuz 2026)
 // itibaren günlük harcamaları — maaş ödemeleri + maaş/iş avansları.
+// GELECEK BAKİYE (AHY Nakit Akışı üst satırı, 12.08.2026): HW'ye faturalanmış
+// ama HENÜZ ÖDENMEMİŞ kalemlerin AHY payı, HW vade gününe yazılır. Kaynak:
+// Invoice Line kalemleri (tutar) + hw_payment (vade/ödeme) + master_works
+// (kalemin AHY* taşeronuna aitliği). Vadesiz kalanlar "HW onayında" sayılır.
+app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
+  try {
+    const rol = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(rol))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    if (marka !== "AHY") return res.json({ ok: true, gunler: [], onay_bekleyen: 0, toplam: 0 });
+    let yuzde = 10;
+    try {
+      const m = await pool.query("SELECT kirilim_yuzde FROM markalar WHERE kod='AHY' LIMIT 1");
+      if (m.rows[0]) yuzde = Number(m.rows[0].kirilim_yuzde || 10);
+    } catch {}
+    const ahyPay = (100 - yuzde) / 100; // varsayılan %90
+    const r = await pool.query(`
+      WITH py AS (
+        SELECT regexp_replace(regexp_replace(TRIM(invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n,
+               MAX(payment_date) pd, MAX(due_date) dd
+        FROM hw_payment_rows GROUP BY 1),
+      hd AS (
+        SELECT regexp_replace(regexp_replace(TRIM(invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n,
+               MAX(reference_rate) rate
+        FROM hw_invoice_rows GROUP BY 1)
+      SELECT to_char(py.dd,'YYYY-MM-DD') AS vade,
+             SUM(CASE WHEN UPPER(COALESCE(i.currency,'TRY'))='USD'
+                      THEN COALESCE(i.invoiced_amount_excl,0) * COALESCE(hd.rate,0)
+                      ELSE COALESCE(i.invoiced_amount_excl,0) END) AS simsek_haric,
+             COUNT(*)::int AS kalem
+      FROM hw_invoice_items i
+      LEFT JOIN py ON py.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+      LEFT JOIN hd ON hd.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+      WHERE TRIM(COALESCE(i.invoice_no,'')) <> ''
+        AND (py.pd IS NULL OR py.pd >= CURRENT_DATE)
+        AND UPPER(COALESCE((SELECT m.subcon_name FROM master_works m
+              WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(COALESCE(i.site_id,'')))
+                AND TRIM(COALESCE(m.item_code,'')) = TRIM(COALESCE(i.item_code,''))
+              ORDER BY m.done_qty DESC NULLS LAST LIMIT 1),'')) LIKE 'AHY%'
+      GROUP BY 1 ORDER BY 1 NULLS LAST`);
+    const gunler = [];
+    let onay = 0, toplam = 0;
+    for (const x of r.rows) {
+      const t = Math.round(Number(x.simsek_haric || 0) * ahyPay * 1.2); // AHY payı, KDV dahil
+      if (!x.vade) onay += t;
+      else gunler.push({ tarih: x.vade, tutar: t, kalem: x.kalem });
+      toplam += t;
+    }
+    res.json({ ok: true, gunler, onay_bekleyen: onay, toplam, pay_yuzde: Math.round(ahyPay * 100) });
+  } catch (e) {
+    console.error("MARKA GELECEK TAHSILAT ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
   try {
     const rol = String(req.user?.role || "").toLowerCase();

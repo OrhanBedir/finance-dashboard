@@ -1715,6 +1715,8 @@ function MarkaNakitPanel({ currentUser }) {
   const [ay, setAy] = useState(() => new Date().toISOString().slice(0, 7)); // görüntülenen ay (YYYY-MM)
   const [kasa, setKasa] = useState({ rows: [], toplam: 0 }); // manuel nakit girişleri
   const [kasaModal, setKasaModal] = useState(false);
+  // Gelecek bakiye: HW'ye faturalanmış, ödenmemiş kalemlerin AHY payı (vade gününde)
+  const [gelecek, setGelecek] = useState({ gunler: [], onay_bekleyen: 0, toplam: 0 });
   // Borç defteri: AHY'den Şimşek'in kendi harcamaları için aldığı borçlar + geri ödemeler
   const [borc, setBorc] = useState({ rows: [], alinan: 0, odenen: 0, kalan: 0 });
   const [borcModal, setBorcModal] = useState(false);
@@ -1764,6 +1766,8 @@ function MarkaNakitPanel({ currentUser }) {
         setData(d);
         loadKasa();
         loadBorc();
+        fetch(`${API_BASE}/finance/marka-gelecek-tahsilat?marka=${marka}`, { headers: _auth })
+          .then(r2 => r2.json()).then(g => { if (g && g.ok) setGelecek(g); }).catch(() => {});
       } catch (e) { setErr(e.message); } finally { setLoading(false); }
     })();
   }, []);
@@ -1980,6 +1984,42 @@ function MarkaNakitPanel({ currentUser }) {
             </tr>
           </thead>
           <tbody>
+            {/* Gelecek Bakiye: HW vade gününe yazılmış AHY payı — yeşil, + işaretli */}
+            {(() => {
+              const gGun = {};
+              (gelecek.gunler || []).forEach(x => {
+                if (String(x.tarih || "").startsWith(ay)) {
+                  const g = Number(String(x.tarih).slice(8, 10));
+                  const c = (gGun[g] = gGun[g] || { t: 0, kalem: 0 });
+                  c.t += Number(x.tutar || 0); c.kalem += Number(x.kalem || 0);
+                }
+              });
+              const aySatirT = Object.values(gGun).reduce((s, c) => s + c.t, 0);
+              if (!aySatirT && !Number(gelecek.onay_bekleyen || 0)) return null;
+              return (
+                <tr style={{ borderBottom: "2px solid #86efac", background: "#f0fdf4" }}>
+                  <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#f0fdf4", padding: "9px 14px", borderRight: "1px solid #e5e7eb" }}>
+                    <div style={{ fontWeight: 800, color: "#14532d", fontSize: "13px", whiteSpace: "nowrap" }}>📈 Gelecek Bakiye</div>
+                    <div style={{ fontSize: "10px", color: "#4d7c0f", marginTop: "2px", whiteSpace: "nowrap" }}>
+                      HW vade günü · AHY payı KDV dahil
+                      {Number(gelecek.onay_bekleyen || 0) > 0 ? ` · +₺${fk(gelecek.onay_bekleyen)} HW onayında` : ""}
+                    </div>
+                  </td>
+                  {gunListesi.map(g => {
+                    const c = gGun[g];
+                    return (
+                      <td key={g} title={c ? `${c.kalem} kalem · vade ${String(g).padStart(2, "0")}.${ay.slice(5, 7)}` : ""}
+                        style={{ textAlign: "center", padding: "8px 3px", background: c ? "#bbf7d0" : (haftaSonu(g) ? "#f8fafc" : "#f0fdf4"), color: "#14532d", fontWeight: 800, fontSize: "11.5px", cursor: c ? "help" : "default", borderLeft: "1px solid #f8fafc", whiteSpace: "nowrap" }}>
+                        {c ? `+${fk(c.t)}` : ""}
+                      </td>
+                    );
+                  })}
+                  <td style={{ position: "sticky", right: 0, zIndex: 2, textAlign: "center", padding: "8px 6px", background: "#bbf7d0", color: "#14532d", fontWeight: 900, fontSize: "12px", whiteSpace: "nowrap", borderLeft: "2px solid #86efac" }}>
+                    {aySatirT > 0 ? `+${fk(aySatirT)}` : ""}
+                  </td>
+                </tr>
+              );
+            })()}
             {KATEGORILER.map(([tip, ad, aciklamaNot]) => {
               const satirToplam = Object.values(hucre[tip] || {}).reduce((s, m) => s + m.t, 0);
               return (
