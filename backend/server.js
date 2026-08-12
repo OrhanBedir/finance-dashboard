@@ -6186,10 +6186,10 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
       q(`SELECT COALESCE(SUM(tutar),0) t FROM is_avans_talep
          WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date
            AND UPPER(COALESCE(firma,'ERC')) <> 'AHY'`),
-      -- Ölçüt ödeme TARİHİDİR, dönem değil: dönem giderin ait olduğu ayı söyler,
-      -- para tarih günü bankadan çıkar (12.08.2026 — Etas/Meriç cari ödemeleri
-      -- Temmuz dönemli girildiği için kartta görünmüyordu). T0 öncesi yapılmış
-      -- ödemeler gerçek ödeme tarihiyle girilir; tarih >= T0 ise sayılır.
+      // Ölçüt ödeme TARİHİDİR, dönem değil: dönem giderin ait olduğu ayı söyler,
+      // para tarih günü bankadan çıkar (12.08.2026 — Etas/Meriç cari ödemeleri
+      // Temmuz dönemli girildiği için kartta görünmüyordu). T0 öncesi yapılmış
+      // ödemeler gerçek ödeme tarihiyle girilir; tarih >= T0 ise sayılır.
       q(`SELECT COALESCE(SUM(tutar),0) t FROM cashflow_odeme
          WHERE UPPER(COALESCE(marka,'ERC'))='ERC' AND tarih >= $1::date`),
       q(`SELECT COALESCE(SUM(COALESCE(tutar,0)),0) t FROM taseron_odeme_log
