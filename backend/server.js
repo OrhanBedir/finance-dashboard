@@ -6171,9 +6171,13 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
       q(`SELECT COALESCE(SUM(payment_amount),0) t FROM hw_payment_rows
          WHERE COALESCE(currency,'TRY')='TRY' AND payment_date IS NOT NULL
            AND payment_date >= $1::date AND payment_date < CURRENT_DATE`),
+      // Devir (15.07.2026) öncesi dönem maaşları Şimşek borcudur: personel
+      // sonradan AHY'ye geçmiş olsa bile Haziran ve öncesi maaşlar Şimşek
+      // bankasından ödenir — dönem bazlı sayılır (12.08.2026 kuralı)
       q(`SELECT COALESCE(SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)),0) t
          FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
-         WHERE m.tarih >= $1::date AND UPPER(COALESCE(p.marka,'ERC')) <> 'AHY'`),
+         WHERE m.tarih >= $1::date
+           AND (UPPER(COALESCE(p.marka,'ERC')) <> 'AHY' OR COALESCE(m.donem,'') < '2026-07')`),
       q(`SELECT COALESCE(SUM(a.tutar),0) t
          FROM avans a JOIN personel p ON p.id = a.personel_id
          WHERE a.odendi=true AND a.avans_turu='MAAS'
@@ -6182,11 +6186,12 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
       q(`SELECT COALESCE(SUM(tutar),0) t FROM is_avans_talep
          WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date
            AND UPPER(COALESCE(firma,'ERC')) <> 'AHY'`),
+      -- Ölçüt ödeme TARİHİDİR, dönem değil: dönem giderin ait olduğu ayı söyler,
+      -- para tarih günü bankadan çıkar (12.08.2026 — Etas/Meriç cari ödemeleri
+      -- Temmuz dönemli girildiği için kartta görünmüyordu). T0 öncesi yapılmış
+      -- ödemeler gerçek ödeme tarihiyle girilir; tarih >= T0 ise sayılır.
       q(`SELECT COALESCE(SUM(tutar),0) t FROM cashflow_odeme
-         WHERE UPPER(COALESCE(marka,'ERC'))='ERC' AND tarih >= $1::date
-           -- Dönemi T0 ayından ESKİ olan kayıtlar geçmiş harcamanın geç girişidir:
-           -- para T0 açılış bakiyesinden zaten düşmüştü, tekrar düşülmez (10.08.2026)
-           AND COALESCE(NULLIF(TRIM(donem),''), to_char(tarih,'YYYY-MM')) >= to_char($1::date,'YYYY-MM')`),
+         WHERE UPPER(COALESCE(marka,'ERC'))='ERC' AND tarih >= $1::date`),
       q(`SELECT COALESCE(SUM(COALESCE(tutar,0)),0) t FROM taseron_odeme_log
          WHERE tarih >= $1::date
            AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`),
