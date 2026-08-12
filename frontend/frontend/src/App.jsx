@@ -1961,6 +1961,19 @@ function MarkaNakitPanel({ currentUser }) {
             <div style={{ fontSize: "20px", fontWeight: 800, color: c, marginTop: "3px" }}>₺{fk(v)}</div>
           </div>
         ))}
+        {/* Hakediş takibi kartları: HW'den gelen ve AHY'ye henüz gönderilmeyen — en sağda, gradyanlı */}
+        <div title="Bu ay HW'den kesinleşen tahsilatlardaki AHY payı (KDV dahil) — bugünün ödemeleri yarın kesinleşir"
+          style={{ marginLeft: "auto", background: "linear-gradient(135deg,#065f46,#10b981)", borderRadius: "12px", padding: "12px 20px", minWidth: "190px", boxShadow: "0 4px 12px rgba(16,185,129,0.30)" }}>
+          <div style={{ fontSize: "11px", color: "#d1fae5", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>💵 Bu Ay Gelen Bakiye</div>
+          <div style={{ fontSize: "20px", fontWeight: 800, color: "#fff", marginTop: "3px" }}>₺{fk(gelecek.gelen_bu_ay)}</div>
+          <div style={{ fontSize: "10px", color: "#a7f3d0", marginTop: "2px" }}>HW'den kesinleşen AHY payı</div>
+        </div>
+        <div title={`HW parayı ödedi ancak AHY'ye henüz gönderilmedi.\nHW'den gelen toplam AHY payı: ₺${fk(gelecek.hw_odenen_toplam)}\nAHY'ye gönderilen: ₺${fk(gelecek.gonderilen)}`}
+          style={{ background: Number(gelecek.geciken || 0) > 0 ? "linear-gradient(135deg,#991b1b,#ef4444)" : "linear-gradient(135deg,#374151,#6b7280)", borderRadius: "12px", padding: "12px 20px", minWidth: "190px", boxShadow: "0 4px 12px rgba(239,68,68,0.28)", cursor: "help" }}>
+          <div style={{ fontSize: "11px", color: "#fee2e2", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>⏳ Geciken Bakiye</div>
+          <div style={{ fontSize: "20px", fontWeight: 800, color: "#fff", marginTop: "3px" }}>₺{fk(gelecek.geciken)}</div>
+          <div style={{ fontSize: "10px", color: "#fecaca", marginTop: "2px" }}>HW ödedi · AHY'ye gönderilmedi</div>
+        </div>
       </div>
       <div ref={gridRef} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "14px", overflowX: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.05)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px" }}>
