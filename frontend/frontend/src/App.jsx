@@ -6155,6 +6155,46 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
   }, []);
 
   // 1) Excel = kalem master (PO+Line+Shipment). Fatura no GEREKMEZ.
+  // eSupplier "Export Invoice Line" Excel'leri — YENİ ANA YÖNTEM (12.08.2026):
+  // fatura no/tarih + PO/Line/Shipment + kalem + tutar hazır gelir; sistem
+  // fatura bazında tam yenileme yapar (aynı dosya tekrar yüklense mükerrer olmaz)
+  const [lineFiles, setLineFiles] = useState([]);
+  const [lineUploading, setLineUploading] = useState(false);
+  const [lineMessage, setLineMessage] = useState("");
+  const handleUploadInvoiceLines = async () => {
+    if (!lineFiles.length) {
+      setLineMessage("❌ eSupplier Invoice Line Excel dosyasını seç (birden çok seçebilirsin)");
+      return;
+    }
+    try {
+      setLineUploading(true);
+      setLineMessage("");
+      const sonuc = [];
+      for (const f of lineFiles) {
+        const fd = new FormData();
+        fd.append("file", f);
+        const r = await fetch(`${API_BASE}/finance/hw-invoice-items/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${localStorage.getItem("finance_token")}` },
+          body: fd,
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.ok === false) throw new Error(`${f.name}: ${d.error || "yükleme hatası"}`);
+        sonuc.push(`${f.name}: ${d.invoice_count || "?"} fatura / ${d.inserted || 0} kalem`);
+      }
+      setLineMessage(`✅ ${sonuc.join(" · ")}`);
+      setLineFiles([]);
+      const input = document.getElementById("finance-hw-invoice-line-input");
+      if (input) input.value = "";
+      await loadList();
+      if (onUploaded) await onUploaded();
+    } catch (err) {
+      setLineMessage(`❌ ${err.message}`);
+    } finally {
+      setLineUploading(false);
+    }
+  };
+
   const handleUpload = async () => {
     if (!file) {
       setMessage("❌ Lütfen Huawei poCreateExp Excel dosyası seç");
@@ -6441,13 +6481,13 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
             lineHeight: 1.5,
           }}
         >
-          Muhasebenin Huawei'ye kestiği <b>e-Fatura PDF'lerini</b> topluca seçip
-          yüklemeniz yeterli — sistem her PDF'ten Fatura No, Not satırındaki
-          PO/Line/Shipment ve tutarı okur; kalem bilgilerini (saha, item, fiyat)
-          sistemdeki PO listesinden otomatik tamamlar.
+          Huawei eSupplier → Invoice Inquiry → <b>Export Invoice Line</b> ile
+          indirdiğin Excel'i yüklemen yeterli — dosyada fatura no, fatura tarihi,
+          PO/Line/Shipment ve kalem tutarları hazır gelir; sistem fatura bazında
+          tam yenileme yapar (aynı dosyayı tekrar yüklersen mükerrer kayıt oluşmaz).
         </p>
 
-        {/* ── ANA ADIM: Kesilen Fatura PDF'leri ── */}
+        {/* ── ANA ADIM: eSupplier Invoice Line Excel ── */}
         <div
           style={{
             border: "2px solid #c7d2fe",
@@ -6458,11 +6498,60 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
           }}
         >
           <h4 style={{ margin: "0 0 4px", fontSize: "16px", color: "#1e3a5f" }}>
-            📎 Kesilen Fatura PDF'lerini Yükle
+            📊 eSupplier Invoice Line Excel'ini Yükle
           </h4>
           <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>
+            eSupplier → Finance → Invoice Inquiry ekranında <b>Export Invoice Line</b> ile
+            indirdiğin dosyaları seç (birden çok olabilir) — fatura no, tarih ve
+            kalemler dosyada hazır; eşleştirme sıfır hatayla otomatik yapılır.
+          </div>
+          <div className="formGrid">
+            <div className="formGroup formGroupWide">
+              <label>Invoice Line Excel dosyaları (invoiceLine_….xlsx)</label>
+              <input
+                id="finance-hw-invoice-line-input"
+                type="file"
+                accept=".xlsx,.xls,.xlsm"
+                multiple
+                onChange={(e) => setLineFiles(Array.from(e.target.files || []))}
+              />
+              {lineFiles.length > 0 && (
+                <span style={{ fontSize: "12px", color: "#64748b" }}>
+                  {lineFiles.length} Excel seçildi
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="entryActions">
+            <button
+              type="button"
+              className="saveButton"
+              onClick={handleUploadInvoiceLines}
+              disabled={lineUploading}
+            >
+              {lineUploading ? "Yükleniyor..." : "Fatura Kalemlerini Yükle"}
+            </button>
+          </div>
+          {lineMessage && <div className="entryMessage">{lineMessage}</div>}
+        </div>
+
+        {/* ── Eski yöntem: e-Fatura PDF eşleştirme (katlanır) ── */}
+        <details
+          style={{
+            border: "1px solid #e2e8f0",
+            borderRadius: "12px",
+            padding: "12px 16px",
+            marginBottom: "14px",
+            background: "#f8fafc",
+          }}
+        >
+          <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "#64748b" }}>
+            📎 Eski yöntem — Kesilen Fatura PDF'lerini eşleştir (Invoice Line Excel'i varken gerekmez)
+          </summary>
+          <div style={{ marginTop: "12px" }}>
+          <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>
             Muhasebeden gelen SIM… numaralı e-Fatura PDF'lerini topluca seç —
-            kalemler PO listesinden otomatik tamamlanır, başka yükleme gerekmez.
+            kalemler PO listesinden otomatik tamamlanır.
           </div>
           <div className="formGrid">
             <div className="formGroup formGroupWide">
@@ -6549,7 +6638,8 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
               </table>
             </div>
           )}
-        </div>
+          </div>
+        </details>
 
         {/* ── Gelişmiş: Kalem Master Excel (opsiyonel) ── */}
         <details
