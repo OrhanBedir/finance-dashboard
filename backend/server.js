@@ -14753,7 +14753,31 @@ pool.query(`
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS rollout_mudur_onay_tarihi DATE;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS plaka TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS firma TEXT;
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS arac_km NUMERIC;
 `).catch(e => console.error("is_avans_talep tablo hatası:", e.message));
+
+// Mobil yakıt talebi: kişinin atanan aracı (org şeması) — kişide yoksa
+// ekibindeki araçlı üyenin plakası döner (web'deki araç otomatiğinin aynısı)
+app.get("/hr/atanan-arac", async (req, res) => {
+  try {
+    const email = String(req.query.email || "").toLowerCase().trim();
+    if (!email) return res.status(400).json({ error: "email gerekli" });
+    const pr = await pool.query(
+      `SELECT id, ekip_arac_plaka, ekip_bilgisi FROM personel
+       WHERE LOWER(TRIM(email)) = $1 AND aktif = true LIMIT 1`, [email]);
+    const p = pr.rows[0];
+    if (!p) return res.json({ ok: true, plaka: "", kaynak: "" });
+    if (p.ekip_arac_plaka)
+      return res.json({ ok: true, plaka: String(p.ekip_arac_plaka).toUpperCase(), kaynak: "kisi" });
+    const ekipNo = String(p.ekip_bilgisi || "").trim();
+    if (!ekipNo) return res.json({ ok: true, plaka: "", kaynak: "" });
+    const e = await pool.query(
+      `SELECT ekip_arac_plaka FROM personel
+       WHERE TRIM(COALESCE(ekip_bilgisi,'')) = $1 AND COALESCE(ekip_arac_plaka,'') <> '' AND aktif = true LIMIT 1`, [ekipNo]);
+    const plaka = e.rows[0]?.ekip_arac_plaka || "";
+    res.json({ ok: true, plaka: String(plaka).toUpperCase(), kaynak: plaka ? "ekip" : "" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // GET iş avansı bakiye for a personel by email
 app.get("/hr/is-avans/bakiye", async (req, res) => {
@@ -14949,8 +14973,8 @@ app.post("/hr/is-avans", async (req, res) => {
 
     const r = await pool.query(
       `INSERT INTO is_avans_talep
-         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi,plaka,firma)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi,plaka,firma,arac_km)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
       [
         personelIdFinal,
         talep_eden_email,
@@ -14968,6 +14992,9 @@ app.post("/hr/is-avans", async (req, res) => {
         pmOnayTarihi,
         plakaFinal,
         firmaFinal,
+        // Araç KM (mobil yakıt talebi): ileride yakıt bedeli / km karşılaştırması için
+        req.body.arac_km != null && req.body.arac_km !== "" && !isNaN(Number(req.body.arac_km))
+          ? Number(req.body.arac_km) : null,
       ]
     );
     res.json(r.rows[0]);
