@@ -6035,39 +6035,60 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
           SELECT regexp_replace(regexp_replace(TRIM(invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n,
                  MAX(reference_rate) rate
           FROM hw_invoice_rows GROUP BY 1)
-        SELECT
-          COALESCE(SUM(CASE WHEN py.pd < CURRENT_DATE AND py.pd >= date_trunc('month', CURRENT_DATE)
-            THEN (CASE WHEN UPPER(COALESCE(i.currency,'TRY'))='USD'
-                       THEN COALESCE(i.invoiced_amount_excl,0) * COALESCE(hd.rate,0)
-                       ELSE COALESCE(i.invoiced_amount_excl,0) END) ELSE 0 END),0) AS bu_ay,
-          COALESCE(SUM(CASE WHEN py.pd < CURRENT_DATE
-            THEN (CASE WHEN UPPER(COALESCE(i.currency,'TRY'))='USD'
-                       THEN COALESCE(i.invoiced_amount_excl,0) * COALESCE(hd.rate,0)
-                       ELSE COALESCE(i.invoiced_amount_excl,0) END) ELSE 0 END),0) AS hw_odenen
+        SELECT to_char(py.pd,'YYYY-MM-DD') AS gun,
+          SUM(CASE WHEN UPPER(COALESCE(i.currency,'TRY'))='USD'
+                   THEN COALESCE(i.invoiced_amount_excl,0) * COALESCE(hd.rate,0)
+                   ELSE COALESCE(i.invoiced_amount_excl,0) END) AS haric,
+          COUNT(*)::int AS kalem
         FROM hw_invoice_items i
         LEFT JOIN py ON py.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
         LEFT JOIN hd ON hd.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
         WHERE TRIM(COALESCE(i.invoice_no,'')) <> ''
+          AND py.pd IS NOT NULL AND py.pd < CURRENT_DATE
           AND UPPER(COALESCE((SELECT m.subcon_name FROM master_works m
                 WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(COALESCE(i.site_id,'')))
                   AND TRIM(COALESCE(m.item_code,'')) = TRIM(COALESCE(i.item_code,''))
-                ORDER BY m.done_qty DESC NULLS LAST LIMIT 1),'')) LIKE 'AHY%'`),
-      // Şimşek → AHY ödemeleri: AHY'nin kestiği faturalardaki Ödenen Tutar
-      pool.query(`SELECT COALESCE(SUM(COALESCE(odenen_tutar,0)),0) t FROM invoice_entries
-        WHERE UPPER(split_part(TRIM(COALESCE(tedarikci,'')),' ',1)) = 'AHY'
-          AND UPPER(COALESCE(firma,'')) <> 'AHY'`).catch(() => ({ rows: [{ t: 0 }] })),
-      // + taşeron ödeme ekranından AHY'ye yapılan doğrudan ödemeler/avanslar
-      pool.query(`SELECT COALESCE(SUM(COALESCE(tutar,0)),0) t FROM taseron_odeme_log
+                ORDER BY m.done_qty DESC NULLS LAST LIMIT 1),'')) LIKE 'AHY%'
+        GROUP BY 1 ORDER BY 1`),
+      // Şimşek → AHY ödemeleri (12.08.2026 kuralı: "geldi" saymanın kaynağı ERC
+      // panelindeki taşeron ödeme girişleridir): AHY faturalarındaki Ödenen Tutar
+      // yalnız taşeron girişiyle eşleşmiyorsa sayılır (çift sayım koruması —
+      // ERC Taşeron Hesabı'ndaki kuralın aynısı). Ay içi ve kümülatif ayrı döner.
+      pool.query(`SELECT
+          COALESCE(SUM(COALESCE(i.odenen_tutar,0)),0) AS toplam,
+          COALESCE(SUM(COALESCE(i.odenen_tutar,0)) FILTER (
+            WHERE COALESCE(i.odeme_tarihi, i.fatura_tarihi) >= date_trunc('month', CURRENT_DATE)),0) AS bu_ay
+        FROM invoice_entries i
+        WHERE UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1)) = 'AHY'
+          AND UPPER(COALESCE(i.firma,'')) <> 'AHY'
+          AND COALESCE(i.odenen_tutar,0) > 0
+          AND NOT EXISTS (SELECT 1 FROM taseron_odeme_log o
+            WHERE UPPER(split_part(TRIM(COALESCE(o.firma,'')),' ',1)) = 'AHY'
+              AND ABS(COALESCE(o.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1)`).catch(() => ({ rows: [{ toplam: 0, bu_ay: 0 }] })),
+      pool.query(`SELECT
+          COALESCE(SUM(COALESCE(tutar,0)),0) AS toplam,
+          COALESCE(SUM(COALESCE(tutar,0)) FILTER (WHERE tarih >= date_trunc('month', CURRENT_DATE)),0) AS bu_ay
+        FROM taseron_odeme_log
         WHERE UPPER(split_part(TRIM(COALESCE(firma,'')),' ',1)) = 'AHY'
-          AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`).catch(() => ({ rows: [{ t: 0 }] })),
+          AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`).catch(() => ({ rows: [{ toplam: 0, bu_ay: 0 }] })),
     ]);
-    const gelenBuAy = Math.round(Number(odn.rows[0]?.bu_ay || 0) * ahyPay * 1.2);
-    const hwOdenen = Math.round(Number(odn.rows[0]?.hw_odenen || 0) * ahyPay * 1.2);
-    const gonderilen = Math.round(Number(fatOde.rows[0]?.t || 0) + Number(logOde.rows[0]?.t || 0));
+    // Günlük gelen dökümü (modal için) + toplamlar — AHY payı, KDV dahil
+    const buAyBas = new Date().toISOString().slice(0, 7);
+    const gelenGunluk = odn.rows.map(x => ({
+      tarih: x.gun,
+      tutar: Math.round(Number(x.haric || 0) * ahyPay * 1.2),
+      kalem: Number(x.kalem || 0),
+    }));
+    const hwOdenen = gelenGunluk.reduce((s, x) => s + x.tutar, 0);
+    const hwGelenBuAy = gelenGunluk.filter(x => String(x.tarih || "").startsWith(buAyBas))
+      .reduce((s, x) => s + x.tutar, 0);
+    const gonderilen = Math.round(Number(fatOde.rows[0]?.toplam || 0) + Number(logOde.rows[0]?.toplam || 0));
+    const gelenBuAy = Math.round(Number(fatOde.rows[0]?.bu_ay || 0) + Number(logOde.rows[0]?.bu_ay || 0));
     const geciken = Math.max(0, hwOdenen - gonderilen);
 
     res.json({ ok: true, gunler, onay_bekleyen: onay, toplam, pay_yuzde: Math.round(ahyPay * 100),
-      gelen_bu_ay: gelenBuAy, hw_odenen_toplam: hwOdenen, gonderilen, geciken });
+      gelen_bu_ay: gelenBuAy, hw_gelen_bu_ay: hwGelenBuAy,
+      hw_odenen_toplam: hwOdenen, gonderilen, geciken, gelen_gunluk: gelenGunluk });
   } catch (e) {
     console.error("MARKA GELECEK TAHSILAT ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });

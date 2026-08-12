@@ -1716,7 +1716,8 @@ function MarkaNakitPanel({ currentUser }) {
   const [kasa, setKasa] = useState({ rows: [], toplam: 0 }); // manuel nakit girişleri
   const [kasaModal, setKasaModal] = useState(false);
   // Gelecek bakiye: HW'ye faturalanmış, ödenmemiş kalemlerin AHY payı (vade gününde)
-  const [gelecek, setGelecek] = useState({ gunler: [], onay_bekleyen: 0, toplam: 0 });
+  const [gelecek, setGelecek] = useState({ gunler: [], onay_bekleyen: 0, toplam: 0, gelen_gunluk: [] });
+  const [gecikenModal, setGecikenModal] = useState(false);
   // Borç defteri: AHY'den Şimşek'in kendi harcamaları için aldığı borçlar + geri ödemeler
   const [borc, setBorc] = useState({ rows: [], alinan: 0, odenen: 0, kalan: 0 });
   const [borcModal, setBorcModal] = useState(false);
@@ -1961,20 +1962,76 @@ function MarkaNakitPanel({ currentUser }) {
             <div style={{ fontSize: "20px", fontWeight: 800, color: c, marginTop: "3px" }}>₺{fk(v)}</div>
           </div>
         ))}
-        {/* Hakediş takibi kartları: HW'den gelen ve AHY'ye henüz gönderilmeyen — en sağda, gradyanlı */}
-        <div title="Bu ay HW'den kesinleşen tahsilatlardaki AHY payı (KDV dahil) — bugünün ödemeleri yarın kesinleşir"
+        {/* Hakediş takibi kartları: AHY'ye fiilen gelen ve geciken — en sağda, gradyanlı */}
+        <div title={`ERC panelindeki taşeron ödeme girişleri (AHY) baz alınır.\nKarşılaştırma: HW'den bu ay kesinleşen AHY payı ₺${fk(gelecek.hw_gelen_bu_ay)}`}
           style={{ marginLeft: "auto", background: "linear-gradient(135deg,#065f46,#10b981)", borderRadius: "12px", padding: "12px 20px", minWidth: "190px", boxShadow: "0 4px 12px rgba(16,185,129,0.30)" }}>
           <div style={{ fontSize: "11px", color: "#d1fae5", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>💵 Bu Ay Gelen Bakiye</div>
           <div style={{ fontSize: "20px", fontWeight: 800, color: "#fff", marginTop: "3px" }}>₺{fk(gelecek.gelen_bu_ay)}</div>
-          <div style={{ fontSize: "10px", color: "#a7f3d0", marginTop: "2px" }}>HW'den kesinleşen AHY payı</div>
+          <div style={{ fontSize: "10px", color: "#a7f3d0", marginTop: "2px" }}>Şimşek'ten yapılan ödemeler</div>
         </div>
-        <div title={`HW parayı ödedi ancak AHY'ye henüz gönderilmedi.\nHW'den gelen toplam AHY payı: ₺${fk(gelecek.hw_odenen_toplam)}\nAHY'ye gönderilen: ₺${fk(gelecek.gonderilen)}`}
-          style={{ background: Number(gelecek.geciken || 0) > 0 ? "linear-gradient(135deg,#991b1b,#ef4444)" : "linear-gradient(135deg,#374151,#6b7280)", borderRadius: "12px", padding: "12px 20px", minWidth: "190px", boxShadow: "0 4px 12px rgba(239,68,68,0.28)", cursor: "help" }}>
+        <div onClick={() => setGecikenModal(true)}
+          title="Tıkla: gün gün gelen paralar ve aktarım durumu"
+          style={{ background: Number(gelecek.geciken || 0) > 0 ? "linear-gradient(135deg,#991b1b,#ef4444)" : "linear-gradient(135deg,#374151,#6b7280)", borderRadius: "12px", padding: "12px 20px", minWidth: "190px", boxShadow: "0 4px 12px rgba(239,68,68,0.28)", cursor: "pointer" }}>
           <div style={{ fontSize: "11px", color: "#fee2e2", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>⏳ Geciken Bakiye</div>
           <div style={{ fontSize: "20px", fontWeight: 800, color: "#fff", marginTop: "3px" }}>₺{fk(gelecek.geciken)}</div>
-          <div style={{ fontSize: "10px", color: "#fecaca", marginTop: "2px" }}>HW ödedi · AHY'ye gönderilmedi</div>
+          <div style={{ fontSize: "10px", color: "#fecaca", marginTop: "2px" }}>HW ödedi · AHY'ye gönderilmedi · detay için tıkla</div>
         </div>
       </div>
+
+      {/* Geciken Bakiye detayı: gün gün gelen paralar + aktarım durumu (FIFO mahsup) */}
+      {gecikenModal && (() => {
+        const gunlukList = (gelecek.gelen_gunluk || []).slice().sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)));
+        let kalanOdeme = Number(gelecek.gonderilen || 0);
+        const satirlar = gunlukList.map(g => {
+          const mahsup = Math.min(kalanOdeme, g.tutar);
+          kalanOdeme -= mahsup;
+          const kalan = g.tutar - mahsup;
+          return { ...g, mahsup, kalan };
+        }).reverse(); // en yeni üstte
+        return (
+          <div onClick={() => setGecikenModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(760px,96vw)", maxHeight: "82vh", overflow: "auto", padding: "22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", marginBottom: "8px" }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: "17px", color: "#111827" }}>⏳ Geciken Bakiye — Gün Gün Döküm</div>
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                    HW'den gelen toplam AHY payı <b>₺{fk(gelecek.hw_odenen_toplam)}</b> · Şimşek'ten AHY'ye aktarılan <b style={{ color: "#065f46" }}>₺{fk(gelecek.gonderilen)}</b> · geciken <b style={{ color: "#b91c1c" }}>₺{fk(gelecek.geciken)}</b>
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "3px" }}>Aktarımlar en eski günden itibaren mahsup edilir · tutarlar AHY payı, KDV dahil</div>
+                </div>
+                <button type="button" onClick={() => setGecikenModal(false)}
+                  style={{ padding: "8px 14px", background: "#e2e8f0", color: "#334155", border: "none", borderRadius: "9px", fontSize: "12.5px", fontWeight: 700, cursor: "pointer" }}>Kapat</button>
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "10px" }}>
+                <thead><tr style={{ background: "#f8fafc" }}>
+                  {["Paranın Geldiği Gün", "Gelen (AHY payı)", "AHY'ye Aktarılan", "Bekleyen", "Durum"].map((h, i) => (
+                    <th key={h} style={{ padding: "9px 12px", textAlign: i > 0 && i < 4 ? "right" : "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {satirlar.length === 0 ? (
+                    <tr><td colSpan={5} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>HW'den gelen ödeme kaydı yok</td></tr>
+                  ) : satirlar.map((s, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #f1f5f9", background: s.kalan > 0 ? "#fef2f2" : "transparent" }}>
+                      <td style={{ padding: "9px 12px", fontSize: "13px", fontWeight: 600 }}>{String(s.tarih).split("-").reverse().join(".")}<span style={{ color: "#94a3b8", fontWeight: 400, fontSize: "11px" }}> · {s.kalem} kalem</span></td>
+                      <td style={{ padding: "9px 12px", fontSize: "13px", textAlign: "right", fontWeight: 700 }}>₺{fk(s.tutar)}</td>
+                      <td style={{ padding: "9px 12px", fontSize: "13px", textAlign: "right", color: "#065f46" }}>{s.mahsup > 0 ? `₺${fk(s.mahsup)}` : "—"}</td>
+                      <td style={{ padding: "9px 12px", fontSize: "13px", textAlign: "right", fontWeight: 800, color: s.kalan > 0 ? "#b91c1c" : "#94a3b8" }}>{s.kalan > 0 ? `₺${fk(s.kalan)}` : "—"}</td>
+                      <td style={{ padding: "9px 12px", fontSize: "12px", whiteSpace: "nowrap" }}>
+                        {s.kalan === 0
+                          ? <span style={{ color: "#065f46", fontWeight: 700 }}>✓ AHY'ye aktarıldı</span>
+                          : s.mahsup > 0
+                            ? <span style={{ color: "#b45309", fontWeight: 700 }}>🔶 Kısmen aktarıldı</span>
+                            : <span style={{ color: "#b91c1c", fontWeight: 700 }}>Geldi · Şimşek tarafında ödeme yapılmadı</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
       <div ref={gridRef} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "14px", overflowX: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.05)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px" }}>
           <thead>
