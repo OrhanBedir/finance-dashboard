@@ -10553,7 +10553,7 @@ function FinanceDashboard({
             {/* SUMMARY */}
             <div style={{ padding:"12px 24px", display:"flex", gap:"10px", flexWrap:"wrap", borderBottom:"1px solid #e5e7eb", flexShrink:0, background:"#f8fafc" }}>
               <div style={{ flex:"1 1 140px", background:"#f0fdf4", border:"1.5px solid #86efac", borderRadius:12, padding:"10px 14px" }}>
-                <div style={{ fontSize:11, fontWeight:700, color:"#166534", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>📥 Toplam Gelen</div>
+                <div style={{ fontSize:11, fontWeight:700, color:"#166534", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>📥 {manualInvoiceSearch.trim() ? `${manualInvoiceSearch.trim().toUpperCase()}'NİN KESTİĞİ` : "Toplam Gelen"}</div>
                 <div style={{ fontSize:16, fontWeight:800, color:"#15803d" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalGelen||0,"TRY")}</div>
               </div>
               <div style={{ flex:"1 1 140px", background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:12, padding:"10px 14px" }}>
