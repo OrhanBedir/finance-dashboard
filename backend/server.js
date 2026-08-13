@@ -13805,6 +13805,7 @@ pool.query(`
     UNIQUE(personel_id, tarih)
   );
   ALTER TABLE puantaj ADD COLUMN IF NOT EXISTS fazla_mesai_saat NUMERIC DEFAULT 0;
+  ALTER TABLE personel ADD COLUMN IF NOT EXISTS puantaj_haric BOOLEAN DEFAULT FALSE;
   CREATE TABLE IF NOT EXISTS avans (
     id SERIAL PRIMARY KEY,
     personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE,

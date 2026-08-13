@@ -13638,6 +13638,8 @@ function PuantajPanel({ currentUser, onBack }) {
     return personelList.filter((p) => {
       // Taşeron personeli puantajda görünmez (sadece ISG için) — yalnız Şimşek
       if ((p.firma_tipi || "simsek") !== "simsek") return false;
+      // Bordro dışı kayıtlar (patron, test hesabı vb.) puantajda görünmez
+      if (p.puantaj_haric) return false;
       const giris = (p.ise_giris_tarihi || "").split("T")[0];
       const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
       if (giris && giris > monthEnd) return false; // o ay henüz işe girmemiş
