@@ -7759,9 +7759,9 @@ function FinanceDashboard({
 
         const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${subconCanon}`;
         const bfEntries = (bolgeFaturaMap || {})[bfKey] || [];
-        const faturaNo = bfEntries.map(e => e.fatura_no || "").filter(Boolean).join(", ");
+        const faturaNo = [...new Set(bfEntries.map(e => e.fatura_no || "").filter(Boolean))].join(", ");
         const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
-        const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
+        const faturaTarihi = [...new Set(bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean))].join(", ");
 
         // Kalan bedel: taşeronun hak ettiği (KDV dahil) − şimdiye kadar kesilen fatura (KDV dahil)
         const kalanBedel = isFaturaTaseron ? Math.max(0, federalHakedis * 1.20 - faturaToplamMiktar) : 0;
@@ -21721,9 +21721,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         // Girilmiş fatura verisi (canon taşeron adıyla eşle — "2KX" kısa adı da yakalar)
         const bfKey = `${String(row.site_code||'').toUpperCase()}|${String(row.item_code||'').trim()}|${canonTaseron(row.subcon_name)}`;
         const bfEntries = bfMapCanon[bfKey] || [];
-        const faturaNo = bfEntries.map(e => e.fatura_no || "").filter(Boolean).join(", ");
+        const faturaNo = [...new Set(bfEntries.map(e => e.fatura_no || "").filter(Boolean))].join(", ");
         const faturaToplamMiktar = bfEntries.reduce((s, e) => s + Number(e.fatura_miktari || 0), 0);
-        const faturaTarihi = bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean).join(", ");
+        const faturaTarihi = [...new Set(bfEntries.map(e => e.fatura_tarihi ? String(e.fatura_tarihi).slice(0,10) : "").filter(Boolean))].join(", ");
 
         const _hwInv = _hwInvRow;
         // HW ödeme takibi: fatura kesildiyse HW ödemesi geldi mi, gelmediyse vade ne zaman
