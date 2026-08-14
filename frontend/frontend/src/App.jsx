@@ -22110,8 +22110,11 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                       .map(row => {
                         const done = Number(row.done_qty || 0);
                         const billed = Number(row.billed_qty || 0);
-                        const due = Math.max(0, done - billed);
                         const req = Number(row.requested_qty || 0);
+                        // Kalan miktar: Huawei'nin kendi "Due Qty" değeri esas alınır
+                        // (kabul milestone'u yansıtır; ERC PO ekranıyla aynı rakam).
+                        // PO yoksa HW değeri 0 gelir — o durumda done bazlı hesaba düşülür.
+                        const due = req > 0 ? Number(row.due_qty || 0) : Math.max(0, done - billed);
                         // PO durumu: hiç PO yok / eksik açılmış / açık
                         const poDurum = req === 0 ? "🔴 PO Bekler" : done > req ? "🟠 Eksik PO" : "🟢 PO Açık";
                         // QC kapanış tarihi (rollout'tan) — "iş ne zaman tamamlandı?"
@@ -22128,7 +22131,13 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                           billed_q: billed,
                           due_q: due,
                           qc: due <= 0 ? "OK" : "NOK",
-                          fat_durum: due <= 0 ? "✓ Faturalandı" : (billed > 0 ? `Kısmi — ${due} kalan` : "İlerletilmeli"),
+                          // Kabul ilerlemiş ama henüz faturalanmamış kalemler (HW due < requested)
+                          // "İlerletilmeli" olarak işaretlenmez — süreç zaten başlamıştır.
+                          fat_durum: req <= 0 ? "PO bekleniyor"
+                            : due <= 0 ? "✓ Faturalandı"
+                            : billed > 0 ? `Kısmi — ${due} kalan`
+                            : due < req ? `Kabul sürecinde — ${due} kalan`
+                            : "İlerletilmeli",
                           qc_tarih: qcTarih,
                         };
                       })
