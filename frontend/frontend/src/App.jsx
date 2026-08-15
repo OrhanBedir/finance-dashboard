@@ -4760,6 +4760,19 @@ function DailyEntry() {
   const [showBoqUpload, setShowBoqUpload] = useState(false);
   const [showHwPoUpload, setShowHwPoUpload] = useState(false);
   const [showDailyIslemlerMenu, setShowDailyIslemlerMenu] = useState(false);
+  // Eksik kalem kartı: PO'su açık ama iş girişi yapılmamış kalemler (01.07.2026 sonrası PO'lar)
+  const [eksikData, setEksikData] = useState(null);
+  const [eksikModal, setEksikModal] = useState(false);
+  const [eksikQty, setEksikQty] = useState({});     // "SITE~ITEM" -> girilen miktar
+  const [eksikSaving, setEksikSaving] = useState("");
+  const [eksikAcikSaha, setEksikAcikSaha] = useState(null);
+  const loadEksik = async () => {
+    try {
+      const d = await fetchJson(`${API_BASE}/po/eksik-girisler`);
+      if (d && d.ok) setEksikData(d);
+    } catch { /* kart sessizce gizlenir */ }
+  };
+  useEffect(() => { loadEksik(); }, []);
   const [editingId, setEditingId] = useState(null);
   const [showCompletedImport, setShowCompletedImport] = useState(false);
   const [itemCodeSearch, setItemCodeSearch] = useState("");
@@ -5390,6 +5403,20 @@ function DailyEntry() {
           </div>
         </div>
         <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+          {/* Eksik kalem kartı — PO açık, iş girişi yok */}
+          {eksikData && eksikData.toplam_kalem > 0 && (
+            <button type="button" onClick={() => { setEksikModal(true); loadEksik(); }}
+              title="PO'su açılmış ancak iş girişi yapılmamış kalemler"
+              style={{ height:38, padding:"0 14px", background:"rgba(251,146,60,0.22)", border:"1px solid rgba(251,146,60,0.55)",
+                       borderRadius:9, color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer",
+                       display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:15 }}>⚠️</span>
+              <span>Eksik Kalem</span>
+              <span style={{ background:"#f97316", color:"#fff", borderRadius:20, padding:"1px 9px", fontSize:12, fontWeight:800 }}>
+                {eksikData.toplam_kalem}
+              </span>
+            </button>
+          )}
           {/* İşlemler dropdown */}
           <div style={{ position:"relative" }}>
             <button type="button"
@@ -5429,6 +5456,132 @@ function DailyEntry() {
       {showRolloutUpload && <RolloutUploadInline onClose={() => setShowRolloutUpload(false)} onUploaded={refreshAll} />}
       {showCompletedImport && <CompletedWorksImportInline onClose={() => setShowCompletedImport(false)} onImported={refreshAll} />}
       {showQcUpload && <QCUploadInline onClose={() => setShowQcUpload(false)} onUploaded={refreshAll} />}
+
+      {/* ═══ EKSİK KALEM MODALI ═══ */}
+      {eksikModal && eksikData && (
+        <div onClick={() => setEksikModal(false)}
+          style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", zIndex:1200, display:"flex",
+                   alignItems:"flex-start", justifyContent:"center", padding:"40px 20px", overflow:"auto" }}>
+          <div onClick={(e)=>e.stopPropagation()}
+            style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:1180, boxShadow:"0 20px 60px rgba(0,0,0,0.3)", overflow:"hidden" }}>
+            {/* başlık */}
+            <div style={{ background:"linear-gradient(135deg,#7c2d12 0%,#c2410c 60%,#f97316 100%)", padding:"18px 24px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <div>
+                <div style={{ color:"#fff", fontWeight:800, fontSize:18 }}>⚠️ PO Açık — İş Girişi Yapılmamış Kalemler</div>
+                <div style={{ color:"rgba(255,255,255,0.75)", fontSize:12.5, marginTop:3 }}>
+                  {eksikData.since.split("-").reverse().join(".")} sonrası açılan PO'lar · {eksikData.toplam_saha} saha · {eksikData.toplam_kalem} kalem
+                  {eksikData.faturali_kalem > 0 && ` · ${eksikData.faturali_kalem} kalem faturalanmış`}
+                </div>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ color:"rgba(255,255,255,0.7)", fontSize:11, textTransform:"uppercase", letterSpacing:"0.05em" }}>PO Tutarı</div>
+                  <div style={{ color:"#fff", fontWeight:800, fontSize:17 }}>₺{Number(eksikData.toplam_tutar||0).toLocaleString("tr-TR")}</div>
+                </div>
+                <button type="button" onClick={()=>setEksikModal(false)}
+                  style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:9, color:"#fff", padding:"8px 14px", fontWeight:700, cursor:"pointer" }}>Kapat</button>
+              </div>
+            </div>
+            {/* saha listesi */}
+            <div style={{ maxHeight:"64vh", overflow:"auto", padding:"14px 20px 22px" }}>
+              {eksikData.sites.map((sv) => {
+                const acik = eksikAcikSaha === sv.site_code;
+                return (
+                  <div key={sv.site_code} style={{ border:"1.5px solid #e2e8f0", borderRadius:12, marginBottom:10, overflow:"hidden" }}>
+                    <div onClick={()=>setEksikAcikSaha(acik ? null : sv.site_code)}
+                      style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px",
+                               background: acik ? "#fff7ed" : "#f8fafc", cursor:"pointer" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                        <span style={{ color:"#9a3412", fontWeight:800 }}>{acik ? "▾" : "▸"}</span>
+                        <span style={{ fontWeight:800, color:"#0f172a", fontSize:14.5 }}>{sv.site_code}</span>
+                        {sv.site_type && <span style={{ background:"#e0e7ff", color:"#3730a3", borderRadius:6, padding:"2px 8px", fontSize:11, fontWeight:700 }}>{sv.site_type}</span>}
+                        <span style={{ color:"#64748b", fontSize:12.5 }}>{sv.items.length} kalem</span>
+                      </div>
+                      <div style={{ fontWeight:800, color:"#c2410c", fontSize:14 }}>₺{Math.round(sv.tutar).toLocaleString("tr-TR")}</div>
+                    </div>
+                    {acik && (
+                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+                        <thead>
+                          <tr style={{ background:"#1e3a5f", color:"#fff" }}>
+                            {["Item Code","Kalem","PO No","PO Qty","Girilecek Done Qty",""].map((h,i)=>(
+                              <th key={i} style={{ padding:"8px 12px", textAlign: i>=3 ? "center" : "left", fontWeight:700, fontSize:12 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sv.items.map((it) => {
+                            const key = `${sv.site_code}~${it.item_code}`;
+                            return (
+                              <tr key={key} style={{ borderBottom:"1px solid #f1f5f9" }}>
+                                <td style={{ padding:"8px 12px", fontWeight:700, color:"#0f172a" }}>
+                                  {it.item_code}
+                                  {Number(it.billed_qty||0) > 0 && (
+                                    <span style={{ marginLeft:8, background:"#fee2e2", color:"#b91c1c", borderRadius:5, padding:"1px 6px", fontSize:10.5, fontWeight:800 }}>FATURALANMIŞ</span>
+                                  )}
+                                </td>
+                                <td style={{ padding:"8px 12px", color:"#475569" }}>{String(it.item_description||"").slice(0,52)}</td>
+                                <td style={{ padding:"8px 12px", color:"#64748b", fontSize:12 }}>{it.po_no}</td>
+                                <td style={{ padding:"8px 12px", textAlign:"center", fontWeight:700 }}>{Number(it.requested_qty||0)}</td>
+                                <td style={{ padding:"8px 12px", textAlign:"center" }}>
+                                  <input type="number" min="0" step="any"
+                                    value={eksikQty[key] ?? ""}
+                                    placeholder={String(Number(it.requested_qty||0))}
+                                    onChange={(e)=>setEksikQty(q=>({ ...q, [key]: e.target.value }))}
+                                    style={{ width:90, height:32, padding:"0 8px", border:"1.5px solid #cbd5e1", borderRadius:7, textAlign:"center", fontSize:13 }} />
+                                </td>
+                                <td style={{ padding:"8px 12px", textAlign:"center" }}>
+                                  <button type="button" disabled={eksikSaving===key}
+                                    onClick={async ()=>{
+                                      const adet = Number(eksikQty[key] ?? it.requested_qty ?? 0);
+                                      if (!(adet > 0)) { alert("Miktar giriniz"); return; }
+                                      setEksikSaving(key);
+                                      try {
+                                        await fetchJson(`${API_BASE}/master/add`, {
+                                          method:"POST", headers:{ "Content-Type":"application/json" },
+                                          body: JSON.stringify({
+                                            site_type: detectSiteTypeFromSiteCode(sv.site_code),
+                                            project_code: sv.project_code || "",
+                                            site_code: sv.site_code,
+                                            item_code: it.item_code,
+                                            item_description: it.item_description,
+                                            done_qty: adet,
+                                            tamamlanan_qty: null,
+                                            subcon_name: "",
+                                            onair_date: null,
+                                            note: "Eksik kalem kartından girildi",
+                                            qc_durum: "", kabul_durum: "", kabul_not: "",
+                                          }),
+                                        });
+                                        window.dispatchEvent(new Event("dataUpdated"));
+                                        await Promise.all([loadEksik(), loadRows()]);
+                                        setEksikQty(q => { const n = { ...q }; delete n[key]; return n; });
+                                      } catch (err) { alert(`Kaydedilemedi: ${err.message}`); }
+                                      finally { setEksikSaving(""); }
+                                    }}
+                                    style={{ height:32, padding:"0 14px", background: eksikSaving===key ? "#94a3b8" : "#15803d", color:"#fff",
+                                             border:"none", borderRadius:7, fontWeight:700, fontSize:12.5,
+                                             cursor: eksikSaving===key ? "wait" : "pointer" }}>
+                                    {eksikSaving===key ? "..." : "Kaydet"}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                );
+              })}
+              {eksikData.sites.length === 0 && (
+                <div style={{ padding:"40px", textAlign:"center", color:"#15803d", fontWeight:700 }}>
+                  ✅ Eksik kalem yok — tüm açık PO kalemleri sisteme girilmiş.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ SITE CODE SEARCH CARD ═══ */}
       <div style={{ background:"#fff", borderRadius:14, padding:"22px 28px", marginBottom:18, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", border:"1.5px solid #e2e8f0" }}>

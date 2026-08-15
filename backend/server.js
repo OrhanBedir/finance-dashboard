@@ -1394,6 +1394,81 @@ app.get("/create-admin", async (req, res) => {
 
   res.send("ADMIN CREATED");
 });
+// PO'su açık olup iş girişi yapılmamış kalemler — Günlük İş Girişi'ndeki
+// "Eksik Kalem" kartını besler. Varsayılan olarak 01.07.2026 sonrası açılan
+// PO'lara bakar; eski PO'lar için aksiyon alınmadığından kapsam dışıdır (15.08.2026).
+app.get("/po/eksik-girisler", authMiddleware, async (req, res) => {
+  try {
+    const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || ""))
+      ? String(req.query.since)
+      : "2026-07-01";
+    const r = await pool.query(
+      `
+      SELECT
+        UPPER(TRIM(p.site_code))            AS site_code,
+        TRIM(COALESCE(p.item_code, ''))     AS item_code,
+        COALESCE(p.item_description, '')    AS item_description,
+        COALESCE(p.po_no, '')               AS po_no,
+        COALESCE(p.requested_qty, 0)        AS requested_qty,
+        COALESCE(p.billed_qty, 0)           AS billed_qty,
+        COALESCE(p.unit_price, 0)           AS unit_price,
+        COALESCE(p.currency, 'TRY')         AS currency,
+        to_char(p.acceptance_date, 'YYYY-MM-DD') AS acceptance_date,
+        COALESCE(mw.site_type, '')          AS site_type,
+        COALESCE(mw.project_code, p.project_code, '') AS project_code
+      FROM po_rows p
+      LEFT JOIN LATERAL (
+        SELECT m.site_type, m.project_code FROM master_works m
+        WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(p.site_code))
+        ORDER BY m.id DESC LIMIT 1
+      ) mw ON true
+      WHERE p.acceptance_date >= $1::date
+        AND UPPER(COALESCE(p.po_status, 'OPEN')) = 'OPEN'
+        AND COALESCE(p.requested_qty, 0) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM master_works m
+          WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(p.site_code))
+            AND TRIM(COALESCE(m.item_code, '')) = TRIM(COALESCE(p.item_code, ''))
+            AND COALESCE(m.done_qty, 0) > 0
+        )
+      ORDER BY 1, 2
+      `,
+      [since],
+    );
+
+    // Saha bazında grupla — kart listesi saha kırılımıyla gösterilir
+    const bySite = new Map();
+    let toplamTutar = 0, faturaliKalem = 0;
+    for (const row of r.rows) {
+      const tutar = Number(row.requested_qty || 0) * Number(row.unit_price || 0);
+      toplamTutar += tutar;
+      if (Number(row.billed_qty || 0) > 0) faturaliKalem++;
+      if (!bySite.has(row.site_code)) {
+        bySite.set(row.site_code, {
+          site_code: row.site_code, site_type: row.site_type,
+          project_code: row.project_code, tutar: 0, items: [],
+        });
+      }
+      const g = bySite.get(row.site_code);
+      g.tutar += tutar;
+      g.items.push({ ...row, tutar });
+    }
+    const sites = Array.from(bySite.values()).sort((a, b) => b.tutar - a.tutar);
+
+    res.json({
+      ok: true, since,
+      toplam_kalem: r.rows.length,
+      toplam_saha: sites.length,
+      toplam_tutar: Math.round(toplamTutar),
+      faturali_kalem: faturaliKalem,
+      sites,
+    });
+  } catch (e) {
+    console.error("PO EKSIK GIRISLER ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("/rollout/missing-sites", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -3391,6 +3466,9 @@ app.get("/setup-db", async (req, res) => {
     `);
     await pool.query(`ALTER TABLE po_rows ADD COLUMN IF NOT EXISTS po_line_no TEXT`);
     await pool.query(`ALTER TABLE po_rows ADD COLUMN IF NOT EXISTS shipment_no TEXT`);
+    // Eksik iş girişi kartı için: PO'nun kabul tarihi ve durumu (15.08.2026)
+    await pool.query(`ALTER TABLE po_rows ADD COLUMN IF NOT EXISTS acceptance_date DATE`);
+    await pool.query(`ALTER TABLE po_rows ADD COLUMN IF NOT EXISTS po_status TEXT`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS boq_items (
@@ -7374,6 +7452,10 @@ app.post("/hw-po/upload", requireHwYukleme, upload.single("file"), async (req, r
       const poStatus = getCell(r, ['PO Status', 'Status', 'po_status', 'Durum']);
       if (poStatus && String(poStatus).trim().toUpperCase() === 'CANCELLED') continue;
 
+      // Kabul tarihi — "Temmuz sonrası açılan PO" filtresi bunun üzerinden çalışır
+      const acceptanceDate = parseExcelDateFlexible(
+        getCell(r, ['Acceptance Date', 'AcceptanceDate', 'Kabul Tarihi']));
+
       await pool.query(
         `
         INSERT INTO po_rows
@@ -7390,9 +7472,11 @@ app.post("/hw-po/upload", requireHwYukleme, upload.single("file"), async (req, r
           po_no,
           po_line_no,
           shipment_no,
-          upload_batch
+          upload_batch,
+          acceptance_date,
+          po_status
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         `,
         [
           projectCode ? String(projectCode).trim() : null,
@@ -7408,6 +7492,8 @@ app.post("/hw-po/upload", requireHwYukleme, upload.single("file"), async (req, r
           poLineNo ? String(poLineNo).trim() : null,
           shipmentNo ? String(shipmentNo).trim() : null,
           req.file.filename,
+          acceptanceDate,
+          poStatus ? String(poStatus).trim().toUpperCase() : null,
         ],
       );
 
