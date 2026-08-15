@@ -20949,16 +20949,81 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     return { saha: sites.size, usd, tl };
   }, [hwBekleyen]);
 
+  // Özet modal export'u — sistemdeki diğer Excel'lerle aynı kurumsal format:
+  // başlık bandı + lacivert header + zebra satır + durum renkleri + donmuş başlık
   const indirOzetModalExcel = () => {
     if (!ozetModal || !ozetModal.rows.length) return;
-    const data = ozetModal.rows.map((r) =>
-      Object.fromEntries(ozetModal.cols.map((c) => [c.l, r[c.k] ?? ""])),
-    );
-    const ws = XLSX.utils.json_to_sheet(data);
-    ws["!cols"] = ozetModal.cols.map((c) => ({ wch: Math.max(16, c.l.length + 6) }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Detay");
-    XLSX.writeFile(wb, `${ozetModal.title.replace(/[^\wçğıöşüÇĞİÖŞÜ0-9 ]/g, "").trim().replace(/\s+/g, "_")}.xlsx`);
+    const cols = ozetModal.cols;
+    const NCOLS = cols.length;
+    const dateStr = new Date().toLocaleDateString("tr-TR");
+    const mkFill = (hex6) => ({ patternType: "solid", fgColor: { rgb: hex6 } });
+    const hair = { top:{style:"hair",color:{rgb:"E5E7EB"}}, left:{style:"hair",color:{rgb:"E5E7EB"}},
+                   bottom:{style:"hair",color:{rgb:"E5E7EB"}}, right:{style:"hair",color:{rgb:"E5E7EB"}} };
+    const titleStyle = {
+      font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
+      fill: mkFill("1F4E78"),
+      alignment: { horizontal: "center", vertical: "center" },
+    };
+    const headerStyle = {
+      font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" },
+      fill: mkFill("203864"),
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: { top:{style:"thin",color:{rgb:"B7C9E2"}}, left:{style:"thin",color:{rgb:"B7C9E2"}},
+                bottom:{style:"medium",color:{rgb:"B7C9E2"}}, right:{style:"thin",color:{rgb:"B7C9E2"}} },
+    };
+    // Durum metnine göre renk (hakediş/PO durumu kolonları)
+    const durumRenk = (s) => {
+      const t = String(s || "");
+      if (t.includes("Faturalandı")) return { bg: "DCFCE7", fg: "166534" };
+      if (t.includes("Kısmi")) return { bg: "DBEAFE", fg: "1D4ED8" };
+      if (t.includes("Kabul sürecinde")) return { bg: "FEF9C3", fg: "854D0E" };
+      if (t.includes("İlerletilmeli")) return { bg: "FFEDD5", fg: "9A3412" };
+      if (t.includes("PO bekleniyor") || t.includes("PO Bekler")) return { bg: "FEE2E2", fg: "B91C1C" };
+      if (t.includes("Eksik PO")) return { bg: "FFEDD5", fg: "9A3412" };
+      if (t.includes("PO Açık")) return { bg: "DCFCE7", fg: "166534" };
+      return null;
+    };
+    const aoa = [];
+    const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
+    titleRow[0] = { v: `${ozetModal.title.replace(/^[^\wçğıöşüÇĞİÖŞÜ]+/, "").trim()} (${dateStr})`, s: titleStyle };
+    aoa.push(titleRow);
+    aoa.push(cols.map((c) => ({ v: c.l, s: headerStyle })));
+    ozetModal.rows.forEach((r, ri) => {
+      const bg = ri % 2 === 1 ? "F8FAFC" : "FFFFFF";
+      aoa.push(cols.map((c) => {
+        const raw = r[c.k] ?? "";
+        const isNum = typeof raw === "number";
+        const renk = durumRenk(raw);
+        return {
+          v: raw,
+          s: {
+            fill: mkFill(renk ? renk.bg : bg),
+            font: { sz: 11, name: "Calibri", bold: !!renk, color: { rgb: renk ? renk.fg : "111827" } },
+            alignment: { horizontal: isNum ? "right" : "left", vertical: "center" },
+            border: hair,
+          },
+        };
+      }));
+    });
+    const ws = XLSXStyle.utils.aoa_to_sheet(aoa.map((r) => r.map((c) => c.v)));
+    aoa.forEach((row, ri) => row.forEach((cell, ci) => {
+      const addr = XLSXStyle.utils.encode_cell({ r: ri, c: ci });
+      if (!ws[addr]) ws[addr] = { v: cell.v };
+      ws[addr].s = cell.s;
+    }));
+    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOLS - 1 } }];
+    // Sütun genişliği: başlık ve en uzun içeriğin büyüğü (60 karakterde sınırlanır)
+    ws["!cols"] = cols.map((c) => {
+      const enUzun = ozetModal.rows.reduce(
+        (m, r) => Math.max(m, String(r[c.k] ?? "").length), 0);
+      return { wch: Math.min(60, Math.max(12, String(c.l).length + 4, enUzun + 2)) };
+    });
+    ws["!rows"] = [{ hpt: 26 }, { hpt: 24 }, ...ozetModal.rows.map(() => ({ hpt: 18 }))];
+    ws["!freeze"] = { xSplit: 0, ySplit: 2 };
+    ws["!autofilter"] = { ref: `${XLSXStyle.utils.encode_cell({ r: 1, c: 0 })}:${XLSXStyle.utils.encode_cell({ r: aoa.length - 1, c: NCOLS - 1 })}` };
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, ws, "Detay");
+    XLSXStyle.writeFile(wb, `${ozetModal.title.replace(/[^\wçğıöşüÇĞİÖŞÜ0-9 ]/g, "").trim().replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const exportDetailRowsToExcel = async () => {
