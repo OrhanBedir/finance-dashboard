@@ -28615,6 +28615,10 @@ function App() {
   // Alt marka (AHY Elektrik gibi): ERC'nin finans ekranları gizli —
   // kendi Kar/Zarar özetini (marka_finans) ve kendi İK'sını görür.
   const isAltMarka = !isPlatformAdmin && user?.hw_yukleme === false;
+  // Kısıtlı kullanıcı yöneticisi: Admin Panel'i görür ama YALNIZ kullanıcı ekler
+  // ve şifre belirler; silme/rol/marka/pasife alma ve bekleyen onayı kapalıdır.
+  const isUsersAdminOnly = !isAdmin && user?.users_admin === true;
+  const canOpenAdminPanel = isAdmin || isUsersAdminOnly;
   const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role) || ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"].includes((user?.email || "").toLowerCase());
 
   // Ünvan görüntüleme fonksiyonu
@@ -29704,7 +29708,7 @@ function App() {
                       <span>⏱</span> Puantaj
                     </div>
                   )}
-                  {isAdmin && !isAltMarka && (
+                  {canOpenAdminPanel && !isAltMarka && (
                     <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
                       <span>👑</span> Admin Panel
                     </div>
@@ -30337,9 +30341,16 @@ function App() {
                             </div>
                             {/* Aksiyonlar — dar ekranda sarar, isim sütununu ezmez */}
                             <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
+                              {!isUsersAdminOnly && (
                               <button onClick={()=>handleToggleActive(u.id)} style={{padding:"7px 14px",background:u.is_active?"#fef3c7":"#f0fdf4",color:u.is_active?"#92400e":"#166534",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
                                 {u.is_active?"Pasife Al":"Aktif Et"}
                               </button>
+                              )}
+                              {isUsersAdminOnly ? (
+                                <span style={{padding:"7px 10px",background:"#f1f5f9",color:"#475569",border:"1px solid #e2e8f0",borderRadius:"8px",fontSize:"12px",fontWeight:700}}>
+                                  {({user:"👤 Personel",subcon:"🔧 Taşeron",admin:"👑 Admin",rollout_mudur:"🏗 Bölge Müdürü",pm:"📋 Proje Müdürü",direktor:"🎯 Direktör",muhasebe:"💼 Muhasebe"})[u.role||"user"] || u.role}
+                                </span>
+                              ) : (
                               <select value={u.role||"user"} onChange={e=>handleAdminRoleChange(u.id,e.target.value,u.subcon_name||"")} style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:(u.role==="subcon")?"#fffbeb":"#f9fafb",color:(u.role==="subcon")?"#92400e":"#374151"}}>
                                 <option value="user">👤 Personel</option>
                                 <option value="subcon">🔧 Taşeron</option>
@@ -30349,13 +30360,14 @@ function App() {
                                 <option value="direktor">🎯 Direktör</option>
                                 <option value="muhasebe">💼 Muhasebe</option>
                               </select>
+                              )}
                               {u.role === "subcon" && (
                                 <span onClick={()=>handleAdminRoleChange(u.id,"subcon",u.subcon_name||"")} title="Taşeron adını değiştir"
                                   style={{padding:"7px 10px",background:"#fef3c7",color:"#92400e",border:"1px solid #fde68a",borderRadius:"8px",fontSize:"11.5px",fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>
                                   🔧 {u.subcon_name || "taşeron adı yok"}
                                 </span>
                               )}
-                              {adminMarkalar.length > 1 && (u.tenant||'erc')==='erc' && (
+                              {!isUsersAdminOnly && adminMarkalar.length > 1 && (u.tenant||'erc')==='erc' && (
                                 <select value={u.marka||"ERC"} onChange={e=>handleAdminMarkaChange(u.id,e.target.value)} title="Firma markası" style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:(u.marka==="AHY")?"#fff7ed":"#f9fafb",color:(u.marka==="AHY")?"#9a3412":"#374151"}}>
                                   {adminMarkalar.map(m=>(<option key={m.kod} value={m.kod}>🏢 {m.ad}</option>))}
                                 </select>
@@ -30363,9 +30375,11 @@ function App() {
                               <button onClick={()=>handleResetPassword(u.id,u.name)} style={{padding:"7px 14px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}} title="Şifre değiştir">
                                 🔑 Şifre
                               </button>
+                              {!isUsersAdminOnly && (
                               <button onClick={()=>deleteUser(u.id)} style={{padding:"7px 14px",background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
                                 🗑 Sil
                               </button>
+                              )}
                             </div>
                           </div>
                         ))}

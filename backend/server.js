@@ -53,6 +53,10 @@ const TENANT_CONFIG = {
 
 // Platform sahibi — yeni firma/kullanıcı kayıt taleplerinin onayı buraya gelir.
 const PLATFORM_ADMIN_EMAIL = "orhan.bedir@gmail.com";
+// Kısıtlı kullanıcı yöneticisi: Admin Panel'de YALNIZ kullanıcı ekleme ve şifre
+// belirleme yapabilir; silme, rol/marka değiştirme, pasife alma ve bekleyen
+// kullanıcı onayı kapalıdır (16.08.2026 — Nurcan Kuş talebi).
+pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS users_admin BOOLEAN DEFAULT FALSE`).catch(() => {});
 
 function detectTenant(email, subconName) {
   const s = String(subconName || "").toUpperCase();
@@ -306,6 +310,14 @@ app.use(express.urlencoded({ extended: true }));
 // Health check
 app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-taslak-resume-v10" }));
 
+// Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
+// users_admin bayrağı olan kısıtlı yönetici.
+function requireUserAdmin(req, res, next) {
+  const r = req.user?.role;
+  if (r === "admin" || r === "platform_admin" || req.user?.users_admin === true) return next();
+  return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+}
+
 function requireAdmin(req, res, next) {
   // platform_admin (uygulama sahibi) firma admininin yapabildiği her şeyi yapabilir.
   if (!req.user || (req.user.role !== "admin" && req.user.role !== "platform_admin")) {
@@ -422,7 +434,7 @@ app.use((req, res, next) => {
 });
 
 // TÜM KULLANICILARI LİSTELE
-app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
+app.get("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, name, email, role, is_active, created_at, tenant, marka, subcon_name
@@ -438,7 +450,7 @@ app.get("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
     res.status(500).json({ ok: false, error: "Kullanıcılar alınamadı" });
   }
 });
-app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
+app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   try {
     const { name, password, role = "user" } = req.body;
     const email = String(req.body.email || "").trim().toLowerCase();
@@ -577,7 +589,7 @@ app.delete(
 );
 
 // YENİ KULLANICI EKLE
-app.post("/admin/users", authMiddleware, requireAdmin, async (req, res) => {
+app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   try {
     const {
       name,
@@ -740,7 +752,7 @@ app.put(
 app.put(
   "/admin/users/:id/password",
   authMiddleware,
-  requireAdmin,
+  requireUserAdmin,
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -821,7 +833,7 @@ app.post("/auth/login", async (req, res) => {
 
     const result = await pool.query(
       `
-      SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate, tenant, status, marka
+      SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate, tenant, status, marka, users_admin
       FROM users
       WHERE LOWER(TRIM(email)) = $1
       ORDER BY id DESC
@@ -950,6 +962,7 @@ app.post("/auth/login", async (req, res) => {
         marka: markaKod,
         marka_ad: markaAd,
         hw_yukleme: hwYukleme,
+        users_admin: user.users_admin === true,
       },
       process.env.JWT_SECRET || "simsek_secret_degistir",
       { expiresIn: "7d" },
@@ -989,7 +1002,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
     const email = String(req.user?.email || "").trim().toLowerCase();
     if (!email) return res.status(401).json({ ok: false, error: "Oturum geçersiz" });
     const r = await pool.query(
-      `SELECT id, name, email, role, is_active, subcon_name, payment_rate, tenant, status, marka
+      `SELECT id, name, email, role, is_active, subcon_name, payment_rate, tenant, status, marka, users_admin
        FROM users WHERE LOWER(TRIM(email)) = $1 ORDER BY id DESC LIMIT 1`, [email]);
     const u = r.rows[0];
     if (!u || !u.is_active || String(u.status || "active") !== "active") {
@@ -1018,6 +1031,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
       subcon_name: u.subcon_name, payment_rate: Number(u.payment_rate || 0.8),
       tenant: userTenant, tenant_name: tenantName,
       marka: markaKod, marka_ad: markaAd, hw_yukleme: hwYukleme,
+      users_admin: u.users_admin === true,
     }});
   } catch (e) {
     console.error("AUTH ME ERROR:", e.message);
