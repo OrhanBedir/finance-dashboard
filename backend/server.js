@@ -17759,7 +17759,8 @@ app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
     const role = (req.user?.role || "").toLowerCase();
     const email = (req.user?.email || "").toLowerCase();
     let durum = "FIYAT_GIRISI"; // default: Murat
-    if (role === "rollout_mudur" || role === "bolge_mudur") durum = "ROLLOUT_BEKLE";
+    // Nurcan Kuş rolü admin'e alındığında da rollout kuyruğunu görmeli (16.08.2026)
+    if (role === "rollout_mudur" || role === "bolge_mudur" || email === "nurcan.kus@simsektel.com") durum = "ROLLOUT_BEKLE";
     else if (email === "orhan.bedir@simsektel.com") durum = "PM_ONAY";
     else if (email === "duzgun.simsek@simsektel.com") durum = "DUZGUN_ONAY";
     const r = await pool.query(
