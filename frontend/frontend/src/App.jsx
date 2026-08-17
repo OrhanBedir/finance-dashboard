@@ -18987,9 +18987,10 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
           <span style={{ fontSize:"12px", color:"#78350f" }}>— Aşağıdaki sarı satırlara bakın</span>
         </div>
       )}
-      {/* Bakiye kutusu — kişisel avans bakiyesi; alt marka (AHY) izleme
-          amaçlı kullandığı için gösterilmez */}
-      {avansBakiye !== null && !_altMarka && (
+      {/* Bakiye kutusu — kişisel avans bakiyesi. Alt marka YÖNETİCİSİ izleme
+          amaçlı girdiği için gösterilmez; markalı PERSONEL (requester) kendi
+          bakiyesini her zaman görür (17.08.2026). */}
+      {avansBakiye !== null && (isRequester || !_altMarka) && (
         <div style={{ display:"flex", gap:"10px", marginBottom:"16px", flexWrap:"wrap" }}>
           <div style={{ flex:1, minWidth:"140px", background: avansBakiye.bakiye >= 0 ? "#f0fdf4" : "#fef2f2", border:`2px solid ${avansBakiye.bakiye >= 0 ? "#16a34a" : "#dc2626"}`, borderRadius:"14px", padding:"14px 20px" }}>
             <div style={{ fontSize:"11px", fontWeight:700, color: avansBakiye.bakiye >= 0 ? "#15803d" : "#b91c1c", letterSpacing:"0.5px", marginBottom:"4px" }}>İŞ AVANSI BAKİYE</div>
