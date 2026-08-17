@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "maas-oran-v17" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "odeyen-v18" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -5809,14 +5809,10 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           SUM((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
             CASE WHEN COALESCE(m.donem,'') = '2026-07'
                       AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
-                 THEN CASE
-                        -- Ay ortasi (2-14.07) girisli personelde gun bazli AHY payi:
-                        -- (16-31.07) / (giris-31.07); tam ay calisanlarda %50 (anlasma)
-                        WHEN p.ise_giris_tarihi::date > DATE '2026-07-01'
-                             AND p.ise_giris_tarihi::date < DATE '2026-07-15'
-                        THEN LEAST(1.0, 16.0 / (31 - EXTRACT(DAY FROM p.ise_giris_tarihi)::numeric + 1))
-                        ELSE 0.5
-                      END
+                 -- Anlasma (17.08.2026): devir oncesi girenlerde odemenin %50'si
+                 -- AHY'nin — ay ortasi girisliler dahil (tam maasin yarisi,
+                 -- or. Mehmet Bagci 55.000 -> 27.500). Gun bazli oran kaldirildi.
+                 THEN 0.5
                  ELSE 1 END) AS t
         FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2
@@ -7296,14 +7292,10 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
           SUM((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
             CASE WHEN COALESCE(m.donem,'') = '2026-07'
                       AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
-                 THEN CASE
-                        -- Ay ortasi (2-14.07) girisli personelde gun bazli AHY payi:
-                        -- (16-31.07) / (giris-31.07); tam ay calisanlarda %50 (anlasma)
-                        WHEN p.ise_giris_tarihi::date > DATE '2026-07-01'
-                             AND p.ise_giris_tarihi::date < DATE '2026-07-15'
-                        THEN LEAST(1.0, 16.0 / (31 - EXTRACT(DAY FROM p.ise_giris_tarihi)::numeric + 1))
-                        ELSE 0.5
-                      END
+                 -- Anlasma (17.08.2026): devir oncesi girenlerde odemenin %50'si
+                 -- AHY'nin — ay ortasi girisliler dahil (tam maasin yarisi,
+                 -- or. Mehmet Bagci 55.000 -> 27.500). Gun bazli oran kaldirildi.
+                 THEN 0.5
                  ELSE 1 END) AS t
         FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2
@@ -14548,11 +14540,12 @@ app.get("/hr/maas-odeme", async (req, res) => {
 
 app.post("/hr/maas-odeme", async (req, res) => {
   try {
-    const { personel_id, donem, bankadan, elden, tarih, aciklama, created_by } = req.body;
+    const { personel_id, donem, bankadan, elden, tarih, aciklama, created_by, odeyen } = req.body;
     const r = await pool.query(
-      `INSERT INTO maas_odeme (personel_id,donem,bankadan,elden,tarih,aciklama,created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [personel_id, donem, bankadan||0, elden||0, tarih, aciklama||"", created_by||""]
+      `INSERT INTO maas_odeme (personel_id,donem,bankadan,elden,tarih,aciklama,created_by,odeyen)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [personel_id, donem, bankadan||0, elden||0, tarih, aciklama||"", created_by||"",
+       (odeyen==="AHY"||odeyen==="SIMSEK") ? odeyen : (tarih>="2026-07-15" ? "AHY" : "SIMSEK")]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -14560,10 +14553,12 @@ app.post("/hr/maas-odeme", async (req, res) => {
 
 app.put("/hr/maas-odeme/:id", async (req, res) => {
   try {
-    const { donem, bankadan, elden, tarih, aciklama } = req.body;
+    const { donem, bankadan, elden, tarih, aciklama, odeyen } = req.body;
     const r = await pool.query(
-      `UPDATE maas_odeme SET donem=$1, bankadan=$2, elden=$3, tarih=$4, aciklama=$5 WHERE id=$6 RETURNING *`,
-      [donem, bankadan||0, elden||0, tarih, aciklama||"", req.params.id]
+      `UPDATE maas_odeme SET donem=$1, bankadan=$2, elden=$3, tarih=$4, aciklama=$5,
+         odeyen=COALESCE(NULLIF($6,''), odeyen) WHERE id=$7 RETURNING *`,
+      [donem, bankadan||0, elden||0, tarih, aciklama||"",
+       (odeyen==="AHY"||odeyen==="SIMSEK") ? odeyen : "", req.params.id]
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -14582,7 +14577,7 @@ app.get("/hr/maas-odeme-aylik", async (req, res) => {
     const { donem } = req.query;
     if (!donem) return res.status(400).json({ error: "donem required (YYYY-MM)" });
     const r = await pool.query(`
-      SELECT m.id, m.personel_id, m.bankadan, m.elden, m.tarih, m.aciklama, m.created_at,
+      SELECT m.id, m.personel_id, m.bankadan, m.elden, m.tarih, m.aciklama, m.odeyen, m.created_at,
              p.ad_soyad, p.net_maas,
              (COALESCE(m.bankadan,0) + COALESCE(m.elden,0)) AS toplam
       FROM maas_odeme m

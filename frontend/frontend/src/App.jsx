@@ -14304,7 +14304,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [personelListeModal, setPersonelListeModal] = useState(false); // aktif personel künye listesi
   const [maasOdeHak, setMaasOdeHak] = useState(0); // bu ay gerçek hakediş (pazar primiyle)
   const [maasOdeList, setMaasOdeList] = useState([]);
-  const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" });
+  const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"", odeyen:"SIMSEK" });
   const [maasOdeSaving, setMaasOdeSaving] = useState(false);
   const [maasOdeEditId, setMaasOdeEditId] = useState(null); // düzenlenen ödeme id'si
   const [aylikOdemeler, setAylikOdemeler] = useState([]); // tüm personel bu ay ödeme özeti
@@ -14586,7 +14586,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           body: JSON.stringify({ personel_id: maasOdeModal.id, ...maasOdeForm, created_by: currentUser?.email })
         });
       }
-      setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih: new Date().toISOString().split("T")[0], aciklama:"" });
+      setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih: new Date().toISOString().split("T")[0], aciklama:"", odeyen: _hrMarka==="AHY" ? "AHY" : "SIMSEK" });
       await loadMaasOde(maasOdeModal.id);
       loadAylikOdemeler();
     } catch (err) { alert("Kayıt sırasında hata: " + err.message); }
@@ -14844,15 +14844,20 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     if (ayKey > "2026-07") return 1;
     const giris = String(p?.ise_giris_tarihi || "").split("T")[0];
     if (giris && giris >= AHY_DEVIR) return 1;
-    // Ay ortasında (1-14.07) girenlerde %50 kuralı AHY payını eksik gösterir:
-    // kişinin çalıştığı dönemin yalnız başı Şimşek'e aittir. Gün bazlı bölüşüm:
-    // AHY payı = (16-31.07) / (giriş-31.07). Tam ay çalışanlarda %50 kalır (anlaşma).
-    const g = Number((giris || "").slice(8, 10));
-    if (giris && giris.slice(0, 7) === "2026-07" && g > 1 && g < 15) {
-      const toplamGun = 31 - g + 1;
-      return toplamGun > 0 ? Math.min(1, 16 / toplamGun) : 0.5;
-    }
     return 0.5;
+  };
+  // AHY maaş payı (tutar): anlaşma gereği devir öncesi girişlilerde tam aylık
+  // maaşın %50'si AHY'nin — ay ortasında (2-14.07) girenlerde de (ör. Mehmet
+  // Bağcı 55.000 → 27.500), hakediş giriş gününe göre kırpılmış olsa bile.
+  // Pay hakedişi aşamaz; diğer herkeste pay = hakediş × ahyMaasOran.
+  const ahyMaasPay = (p, base) => {
+    const giris = String(p?.ise_giris_tarihi || "").split("T")[0];
+    const g = Number((giris || "").slice(8, 10));
+    if (_hrMarka !== "ERC" && `${yilStr}-${ayStr}` === "2026-07"
+        && giris && giris.slice(0, 7) === "2026-07" && g > 1 && g < 15) {
+      return Math.min(Number(base || 0), Number(p?.net_maas || 0) * 0.5);
+    }
+    return Number(base || 0) * ahyMaasOran(p);
   };
   // AHY görünümünde yalnız devir sonrası yapılan maaş ödemeleri sayılır;
   // 15.07 öncesi ödemeler ERC'nindir (fazla ödeme hesabını bozmasın).
@@ -15249,7 +15254,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               let toplamKalan = 0;
                               personelList.filter(pp => puantajIstihdam(pp)).forEach(pp => {
                                 const oz = ozet.find(o => String(o.personel_id) === String(pp.id));
-                                const hak = Math.round((oz ? Number(oz.hakedilen_maas||0) : Number(pp.net_maas||0)) * ahyMaasOran(pp));
+                                const hak = Math.round(ahyMaasPay(pp, oz ? Number(oz.hakedilen_maas||0) : Number(pp.net_maas||0)));
                                 const gereken = Math.max(0, hak - getDevirFazla(pp.id));
                                 const odenen = (odemeByPer[pp.id]||0) + (avansByPer[pp.id]||0);
                                 toplamKalan += Math.max(0, gereken - odenen);
@@ -15277,10 +15282,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           if (ozet.length > 0) {
                             ozet.forEach(o => {
                               const p = aktifP.find(x => String(x.id) === String(o.personel_id));
-                              const oran      = ahyMaasOran(p);
                               const netMaas   = Number(p?.net_maas || 0);
                               const hakedilen = Number(o.hakedilen_maas || 0);
-                              const ratio     = (netMaas > 0 ? hakedilen / netMaas : 1) * oran;
+                              const pay       = ahyMaasPay(p, hakedilen);
+                              const ratio     = netMaas > 0 ? pay / netMaas : ahyMaasOran(p);
                               const sp        = _split(p);
                               const bankadan  = Math.round(sp.b * ratio);
                               const elden     = Math.round(sp.e * ratio);
@@ -15324,11 +15329,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       );
                     }
 
-                    // Maaş ödemeleri — banka / elden ayrımı
-                    const bankaByPer = {}, eldenByPer = {};
+                    // Maaş ödemeleri — banka / elden ayrımı + ödeyen firma kırılımı
+                    const bankaByPer = {}, eldenByPer = {}, odeSimsekByPer = {}, odeAhyByPer = {};
                     aylikOdemeler.filter(ahyOdemeGor).forEach(o => {
                       bankaByPer[o.personel_id] = (bankaByPer[o.personel_id]||0) + Number(o.bankadan||0);
                       eldenByPer[o.personel_id] = (eldenByPer[o.personel_id]||0) + Number(o.elden||0);
+                      const tut = Number(o.bankadan||0) + Number(o.elden||0);
+                      if (o.odeyen === "AHY") odeAhyByPer[o.personel_id] = (odeAhyByPer[o.personel_id]||0) + tut;
+                      else odeSimsekByPer[o.personel_id] = (odeSimsekByPer[o.personel_id]||0) + tut;
                     });
 
                     // Maaş avansları (avans_turu = 'MAAS')
@@ -15354,7 +15362,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     const aktifPer = personelList.filter(p=>puantajIstihdam(p));
                     const allRows = aktifPer.map(p => {
                       const ozO    = ozet.find(o=>String(o.personel_id)===String(p.id));
-                      const hakEdis  = Math.round((ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0)) * ahyMaasOran(p));
+                      const hakEdis  = Math.round(ahyMaasPay(p, ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0)));
                       const avans    = avansMapByPer[p.id]  || 0;
                       const isAvans  = isAvansMapByPer[p.id] || 0;
                       const banka    = bankaByPer[p.id]     || 0;
@@ -15368,7 +15376,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       const gereken  = Math.max(0, hakEdis - devir);
                       const kalan    = Math.max(0, gereken - odenen);
                       const fazla    = odenen > 0 ? Math.max(0, odenen - gereken) : 0;
-                      return { ...p, hakEdis, avans, isAvans, banka, elden, odenen, kalan, fazla, devir };
+                      const odeSimsek = odeSimsekByPer[p.id] || 0;
+                      const odeAhy    = odeAhyByPer[p.id]    || 0;
+                      return { ...p, hakEdis, avans, isAvans, banka, elden, odenen, kalan, fazla, devir, odeSimsek, odeAhy };
                     });
                     // Tablo satırları: filtre seçiliyse sadece o personel
                     const perRows = hrPersonelFilter
@@ -15609,6 +15619,13 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     </td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.odenen>0?"#166534":"#9ca3af", fontWeight:700 }}>
                                       {p.odenen>0 ? `₺${p.odenen.toLocaleString("tr-TR")}` : "—"}
+                                      {(p.odeSimsek>0 || p.odeAhy>0) && (
+                                        <div style={{ fontSize:"9.5px", fontWeight:600, marginTop:"2px", whiteSpace:"nowrap" }}>
+                                          {p.odeSimsek>0 && <span style={{ color:"#1d4ed8" }}>🏢 Şimşek ₺{p.odeSimsek.toLocaleString("tr-TR")}</span>}
+                                          {p.odeSimsek>0 && p.odeAhy>0 && <span style={{ color:"#9ca3af" }}> · </span>}
+                                          {p.odeAhy>0 && <span style={{ color:"#b45309" }}>⚡ AHY ₺{p.odeAhy.toLocaleString("tr-TR")}</span>}
+                                        </div>
+                                      )}
                                     </td>
                                     <td style={{ padding:"7px 12px", textAlign:"right" }}>
                                       {p.fazla>0
@@ -15690,7 +15707,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 // Hakedilen: ozet'ten (backend prorated) veya gelmedi kesintisi ile hesaplanan;
                 // AHY görünümünde devir payı (ahyMaasOran) uygulanır
                 const netBase    = Math.round((sp.net_maas||0) - gelmediKesinti);
-                const hakedilen  = Math.round((ozetRowHR ? Number(ozetRowHR.hakedilen_maas||0) : netBase) * ahyMaasOran(sp));
+                const hakedilen  = Math.round(ahyMaasPay(sp, ozetRowHR ? Number(ozetRowHR.hakedilen_maas||0) : netBase));
                 // Banka/elden prorated (hakedilen oranı)
                 const hakRatio   = Number(sp.net_maas||0) > 0 ? hakedilen / Number(sp.net_maas) : 1;
                 const proratedBanka = Math.round(Number(sp.bankadan_gosterilen||0) * hakRatio);
@@ -16056,7 +16073,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <span style={{ background:p.aktif?"#dcfce7":"#f3f4f6", color:p.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{p.aktif?"Aktif":"Pasif"}</span>
                     <div style={{ display:"flex", gap:"6px" }}>
                       <button onClick={()=>handleEditPersonel(p)} style={{ padding:"6px 12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
-                      {!_maasGizli && <button onClick={()=>{ const now=new Date(); const pOzet=ozet.find(o=>String(o.personel_id)===String(p.id)); const hakVal=Math.round((pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0)) * ahyMaasOran(p)); setMaasOdeModal(p); setMaasOdeHak(hakVal); setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih:now.toISOString().split("T")[0], aciklama:"" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>}
+                      {!_maasGizli && <button onClick={()=>{ const now=new Date(); const pOzet=ozet.find(o=>String(o.personel_id)===String(p.id)); const hakVal=Math.round(ahyMaasPay(p, pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0))); setMaasOdeModal(p); setMaasOdeHak(hakVal); setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih:now.toISOString().split("T")[0], aciklama:"", odeyen: _hrMarka==="AHY" ? "AHY" : "SIMSEK" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>}
                       <button onClick={()=>handleToggleAktif(p)} style={{ padding:"6px 12px", background:p.aktif?"#fef3c7":"#f0fdf4", color:p.aktif?"#92400e":"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
                         {p.aktif?"Pasife Al":"Aktif Et"}
                       </button>
@@ -16182,7 +16199,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   {maasOdeEditId ? "✏️ Ödemeyi Düzenle" : "Yeni Ödeme Ekle"}
                 </div>
                 {maasOdeEditId && (
-                  <button type="button" onClick={()=>{ setMaasOdeEditId(null); setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"" }); }}
+                  <button type="button" onClick={()=>{ setMaasOdeEditId(null); setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"", odeyen: _hrMarka==="AHY" ? "AHY" : "SIMSEK" }); }}
                     style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>
                     ✕ İptal
                   </button>
@@ -16204,6 +16221,20 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 <div>
                   <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Elden (₺)</div>
                   <input type="number" value={maasOdeForm.elden} onChange={e=>setMaasOdeForm(f=>({...f,elden:e.target.value}))} placeholder="0" style={{ width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Ödeyen Firma</div>
+                <div style={{ display:"flex", gap:"8px" }}>
+                  {[{ v:"SIMSEK", l:"🏢 ŞİMŞEK", c:"#1d4ed8", bg:"#eff6ff" }, { v:"AHY", l:"⚡ AHY", c:"#b45309", bg:"#fffbeb" }].map(f=>(
+                    <button key={f.v} type="button" onClick={()=>setMaasOdeForm(x=>({...x,odeyen:f.v}))}
+                      style={{ flex:1, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer",
+                        border: maasOdeForm.odeyen===f.v ? `2px solid ${f.c}` : "1.5px solid #e5e7eb",
+                        background: maasOdeForm.odeyen===f.v ? f.bg : "#fff",
+                        color: maasOdeForm.odeyen===f.v ? f.c : "#9ca3af" }}>
+                      {f.l}
+                    </button>
+                  ))}
                 </div>
               </div>
               <div>
@@ -16296,7 +16327,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       <div key={od.id} style={{ background:"#f8fafc", borderRadius:"10px", overflow:"hidden" }}>
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 16px" }}>
                           <div>
-                            <div style={{ fontWeight:700, fontSize:"14px" }}>{od.donem} <span style={{ fontWeight:400, color:"#6b7280", fontSize:"12px" }}>· {new Date(od.tarih).toLocaleDateString("tr-TR")}</span></div>
+                            <div style={{ fontWeight:700, fontSize:"14px" }}>{od.donem} <span style={{ fontWeight:400, color:"#6b7280", fontSize:"12px" }}>· {new Date(od.tarih).toLocaleDateString("tr-TR")}</span>{" "}
+                              <span style={{ fontSize:"10px", fontWeight:800, padding:"2px 8px", borderRadius:"99px", verticalAlign:"1px",
+                                background: od.odeyen==="AHY" ? "#fffbeb" : "#eff6ff",
+                                color: od.odeyen==="AHY" ? "#b45309" : "#1d4ed8",
+                                border: od.odeyen==="AHY" ? "1px solid #fcd34d" : "1px solid #bfdbfe" }}>
+                                {od.odeyen==="AHY" ? "⚡ AHY" : "🏢 ŞİMŞEK"}
+                              </span>
+                            </div>
                             <div style={{ fontSize:"13px", marginTop:"2px" }}>
                               {banka>0 && <span style={{ marginRight:"10px" }}>🏦 {TL(banka)}</span>}
                               {elden>0 && <span>💵 {TL(elden)}</span>}
@@ -16305,7 +16343,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           </div>
                           <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
                             <div style={{ fontWeight:700, color:"#166534", fontSize:"15px" }}>{TL(banka+elden)}</div>
-                            <button onClick={()=>{ setMaasOdeEditId(od.id); setMaasOdeForm({ donem: od.donem, bankadan: String(od.bankadan||""), elden: String(od.elden||""), tarih: (od.tarih||"").split("T")[0], aciklama: od.aciklama||"" }); window.scrollTo({top:0}); }}
+                            <button onClick={()=>{ setMaasOdeEditId(od.id); setMaasOdeForm({ donem: od.donem, bankadan: String(od.bankadan||""), elden: String(od.elden||""), tarih: (od.tarih||"").split("T")[0], aciklama: od.aciklama||"", odeyen: od.odeyen||"SIMSEK" }); window.scrollTo({top:0}); }}
                               style={{ background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>✏️ Düzenle</button>
                             <button onClick={()=>handleDeleteMaasOde(od.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
                           </div>
