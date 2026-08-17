@@ -18752,8 +18752,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     const qs = isRequester && currentUser?.email ? `?email=${encodeURIComponent(currentUser.email)}` : "";
     const r = await fetch(`${API_BASE}/hr/is-avans${qs}`, { headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}` } });
     let data = await r.json();
-    // Alt marka: yalnız onayda kendi firması seçilen avanslar (nakit akışıyla aynı küme)
-    if (_altMarka) data = (Array.isArray(data) ? data : []).filter(t => String(t.firma || "").toUpperCase() === _marka);
+    // Alt marka YÖNETİCİ görünümü: yalnız kendi firması seçilen avanslar.
+    // Personel (requester) kendi TÜM geçmişini görür — bakiye kartıyla tutarlı (17.08.2026).
+    if (_altMarka && !isRequester) data = (Array.isArray(data) ? data : []).filter(t => String(t.firma || "").toUpperCase() === _marka);
     setList(data);
     if (onPendingCount) {
       const email = currentUser?.email;
@@ -19073,7 +19074,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
           {!isMobile && (() => {
             const p = new URLSearchParams();
             if (isRequester) p.set("email", currentUser?.email || "");
-            if (_altMarka) p.set("firma", _marka);
+            if (_altMarka && !isRequester) p.set("firma", _marka);
             if (filterDurum) p.set("durum", filterDurum);
             if (filterGider) p.set("gider_turu", filterGider);
             if (filterBolge) p.set("bolge", filterBolge);
