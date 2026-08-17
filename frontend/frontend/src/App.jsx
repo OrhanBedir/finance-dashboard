@@ -30216,7 +30216,7 @@ function App() {
               </div>
             )}
 
-            {page === "admin" && isAdmin && (
+            {page === "admin" && canOpenAdminPanel && (
               <div style={{maxWidth:"1440px",margin:"24px auto",padding:"0 20px"}}>
                 <div style={{background:"linear-gradient(135deg,#1f2937 0%,#374151 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",gap:"16px",color:"#fff"}}>
                   <div style={{fontSize:"40px"}}>👑</div>

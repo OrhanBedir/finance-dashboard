@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "users-admin-v11" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "users-admin-v12" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -456,6 +456,13 @@ app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   try {
     const { name, password, role = "user" } = req.body;
     const email = String(req.body.email || "").trim().toLowerCase();
+
+    // Kısıtlı yönetici (users_admin) yetki yükseltemez: admin/direktor rolünde
+    // kullanıcı yalnız tam admin oluşturabilir (17.08.2026).
+    const _isFullAdmin = req.user.role === "admin" || req.user.role === "platform_admin";
+    if (!_isFullAdmin && ["admin", "platform_admin", "direktor"].includes(String(role))) {
+      return res.status(403).json({ ok: false, error: "Bu rolde kullanıcıyı yalnız tam yetkili admin oluşturabilir" });
+    }
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -764,6 +771,17 @@ app.put(
         return res.status(400).json({ ok: false, error: "Yeni şifre zorunlu" });
       }
       if (!(await guardUserScope(req, res, id))) return;
+
+      // Kısıtlı yönetici (users_admin) bir admin/direktor hesabının şifresini
+      // değiştirerek yetki devralamaz (17.08.2026).
+      const _reqFullAdmin = req.user.role === "admin" || req.user.role === "platform_admin";
+      if (!_reqFullAdmin) {
+        const t = await pool.query("SELECT role FROM users WHERE id = $1", [id]);
+        const targetRole = t.rows[0] ? String(t.rows[0].role || "") : "";
+        if (["admin", "platform_admin", "direktor"].includes(targetRole)) {
+          return res.status(403).json({ ok: false, error: "Yönetici hesaplarının şifresini yalnız tam yetkili admin değiştirebilir" });
+        }
+      }
 
       const passwordHash = await bcrypt.hash(password, 10);
 
