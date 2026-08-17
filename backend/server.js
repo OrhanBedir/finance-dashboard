@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-gizlilik-v13" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-gizlilik-v14" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -15562,17 +15562,22 @@ app.put("/hr/is-avans/:id/reddet", async (req, res) => {
 
 app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
   try {
-    if (!avansTamGorus(req)) return res.status(403).json({ error: "Yetkiniz yok" });
     const ExcelJS = require("exceljs");
     const wb = new ExcelJS.Workbook();
     wb.creator = "ERC Sistem";
 
     const ws = wb.addWorksheet("İş Avansı Talepleri");
 
-    const { email, durum, gider_turu, bolge, proje, baslangic, bitis, firma } = req.query;
+    let { email, durum, gider_turu, bolge, proje, baslangic, bitis, firma } = req.query;
+    let personelKilidi = null; // personel: yalnız kendi kayıtları (talep eden VEYA adına açılan)
+    if (!avansTamGorus(req)) { email = null; personelKilidi = String(req.user.email || "").toLowerCase(); }
     const conditions = [];
     const params = [];
     if (email) { conditions.push(`t.talep_eden_email = $${params.length+1}`); params.push(email); }
+    if (personelKilidi) {
+      conditions.push(`(LOWER(t.talep_eden_email) = $${params.length+1} OR t.personel_id = (SELECT id FROM personel WHERE LOWER(TRIM(email)) = $${params.length+1} AND aktif = true LIMIT 1))`);
+      params.push(personelKilidi);
+    }
     if (firma) { conditions.push(`UPPER(COALESCE(t.firma,'')) = $${params.length+1}`); params.push(String(firma).toUpperCase()); }
     if (durum) { conditions.push(`t.durum = $${params.length+1}`); params.push(durum); }
     if (gider_turu) { conditions.push(`t.gider_turu = $${params.length+1}`); params.push(gider_turu); }
