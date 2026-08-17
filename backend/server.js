@@ -310,13 +310,22 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-gizlilik-v14" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "users-admin-v15" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
-function requireUserAdmin(req, res, next) {
+async function requireUserAdmin(req, res, next) {
   const r = req.user?.role;
   if (r === "admin" || r === "platform_admin" || req.user?.users_admin === true) return next();
+  // Token bayrak eklenmeden önce alınmış olabilir — güncel değeri DB'den doğrula,
+  // böylece yetki verildikten sonra yeniden giriş gerekmez (17.08.2026).
+  try {
+    const q = await pool.query(
+      "SELECT users_admin FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) ORDER BY id DESC LIMIT 1",
+      [String(req.user?.email || "")],
+    );
+    if (q.rows[0]?.users_admin === true) return next();
+  } catch {}
   return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
 }
 
