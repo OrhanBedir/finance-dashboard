@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "users-admin-v12" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-gizlilik-v13" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -15145,9 +15145,26 @@ app.get("/hr/atanan-arac", async (req, res) => {
 });
 
 // GET iş avansı bakiye for a personel by email
-app.get("/hr/is-avans/bakiye", async (req, res) => {
+// İş avansı verisinde TAM görüş yetkisi: yönetim kadrosu + alt marka yöneticisi.
+// Diğer herkes (personel) yalnız KENDİ kayıtlarını görür — filtre sunucuda,
+// istemcinin gönderdiği email parametresine güvenilmez (17.08.2026).
+const AVANS_TAM_GORUS = [
+  "orhan.bedir@simsektel.com", "duzgun.simsek@simsektel.com",
+  "muhasebe@simsektel.com", "nurcan.kus@simsektel.com",
+  "serdar.altinova@simsektel.com", "murat.istek@simsektel.com",
+  "info@ahyelektrik.com",
+];
+function avansTamGorus(req) {
+  const email = String(req.user?.email || "").toLowerCase().trim();
+  const rol = String(req.user?.role || "").toLowerCase();
+  return ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur", "rollout_mudur", "bolge_mudur", "pm"].includes(rol)
+    || AVANS_TAM_GORUS.includes(email);
+}
+
+app.get("/hr/is-avans/bakiye", authMiddleware, async (req, res) => {
   try {
-    const { email } = req.query;
+    // Personel yalnız kendi bakiyesini sorgulayabilir
+    const email = avansTamGorus(req) ? (req.query.email || req.user.email) : req.user.email;
     if (!email) return res.status(400).json({ error: "email gerekli" });
     // Avans: kişi PERSONEL olarak atandıysa ona göre say (talep eden değil, alıcı)
     const avansRes = await pool.query(
@@ -15180,8 +15197,9 @@ app.get("/hr/is-avans/bakiye", async (req, res) => {
 // bakiye = TAMAMLANDI iş avansları − ARŞİVLENDİ masraf formları.
 // Muhasebe formu arşivleyince tutar avanstan otomatik düşer; personelin
 // avansı yoksa bakiye eksiye iner (şirket personele borçlu).
-app.get("/hr/is-avans/bakiyeler", async (req, res) => {
+app.get("/hr/is-avans/bakiyeler", authMiddleware, async (req, res) => {
   try {
+    if (!avansTamGorus(req)) return res.status(403).json({ error: "Yetkiniz yok" });
     const r = await pool.query(`
       SELECT p.id, p.ad_soyad, p.aktif, COALESCE(p.marka,'ERC') AS marka,
         COALESCE(av.toplam,0) AS avans,
@@ -15207,9 +15225,11 @@ app.get("/hr/is-avans/bakiyeler", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/hr/is-avans", async (req, res) => {
+app.get("/hr/is-avans", authMiddleware, async (req, res) => {
   try {
-    const { email, name } = req.query;
+    let { email, name } = req.query;
+    // Personel görünümü: istemci ne gönderirse göndersin kendi kaydına kilitle
+    if (!avansTamGorus(req)) { email = req.user.email; name = req.user.name || name; }
     let query, params;
     if (email) {
       // personelId bul: önce email ile, sonra name ile (mobil user.email = kullanıcı adı olabilir)
@@ -15540,8 +15560,9 @@ app.put("/hr/is-avans/:id/reddet", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/hr/is-avans/excel", async (req, res) => {
+app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
   try {
+    if (!avansTamGorus(req)) return res.status(403).json({ error: "Yetkiniz yok" });
     const ExcelJS = require("exceljs");
     const wb = new ExcelJS.Workbook();
     wb.creator = "ERC Sistem";

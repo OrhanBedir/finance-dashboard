@@ -18724,18 +18724,21 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   // (nakit akışına yansıyanlarla aynı küme — onay firması seçilenler)
   const _altMarka = currentUser?.hw_yukleme === false;
   const _marka = String(currentUser?.marka || "AHY").toUpperCase();
-  // isRequester: sadece kendi avanslarını görür
-  const isRequester = !_altMarka && !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
+  // isRequester: sadece kendi avanslarını görür.
+  // Alt marka (AHY) panelinde yalnız YÖNETİCİ hesabı tam listeyi görür;
+  // markalı personel (ör. saha ekibi) kendi kayıtlarıyla sınırlıdır (17.08.2026).
+  const _altMarkaYonetici = _altMarka && (["admin","direktor","genel_mudur"].includes(_role) || _email === "info@ahyelektrik.com");
+  const isRequester = !_altMarkaYonetici && !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const loadBakiye = async () => {
     if (!currentUser?.email) return;
-    const r = await fetch(`${API_BASE}/hr/is-avans/bakiye?email=${encodeURIComponent(currentUser.email)}`);
+    const r = await fetch(`${API_BASE}/hr/is-avans/bakiye?email=${encodeURIComponent(currentUser.email)}`, { headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}` } });
     if (r.ok) setAvansBakiye(await r.json());
     // Yönetici görünümü: personel bazlı bakiyeler (avans − arşivlenen masraf)
     if (!isRequester) {
       try {
-        const rb = await fetch(`${API_BASE}/hr/is-avans/bakiyeler`);
+        const rb = await fetch(`${API_BASE}/hr/is-avans/bakiyeler`, { headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}` } });
         const db = await rb.json().catch(() => ({}));
         const rows = db.rows || [];
         // Alt marka yalnız kendi personelinin bakiyelerini görür
@@ -18747,7 +18750,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const load = async () => {
     // Requester kendi avanslarını + kendisi için açılanları görsün; admin tümünü görsün
     const qs = isRequester && currentUser?.email ? `?email=${encodeURIComponent(currentUser.email)}` : "";
-    const r = await fetch(`${API_BASE}/hr/is-avans${qs}`);
+    const r = await fetch(`${API_BASE}/hr/is-avans${qs}`, { headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}` } });
     let data = await r.json();
     // Alt marka: yalnız onayda kendi firması seçilen avanslar (nakit akışıyla aynı küme)
     if (_altMarka) data = (Array.isArray(data) ? data : []).filter(t => String(t.firma || "").toUpperCase() === _marka);
@@ -19077,7 +19080,19 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
             if (filterBaslangic) p.set("baslangic", filterBaslangic);
             if (filterBitis) p.set("bitis", filterBitis);
             const qs = p.toString();
-            return <a href={`${API_BASE}/hr/is-avans/excel${qs ? "?" + qs : ""}`} style={{ padding: "10px 16px", background: "#166534", color: "#fff", borderRadius: "10px", fontWeight: 600, fontSize: "14px", textDecoration: "none" }}>📥 Excel</a>;
+            const indirExcel = async () => {
+              try {
+                const r = await fetch(`${API_BASE}/hr/is-avans/excel${qs ? "?" + qs : ""}`,
+                  { headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}` } });
+                if (!r.ok) { alert("Excel indirilemedi"); return; }
+                const blob = await r.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url; a.download = "is_avanslari.xlsx"; a.click();
+                URL.revokeObjectURL(url);
+              } catch { alert("Excel indirilemedi"); }
+            };
+            return <button onClick={indirExcel} style={{ padding: "10px 16px", background: "#166534", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 600, fontSize: "14px", cursor: "pointer" }}>📥 Excel</button>;
           })()}
           <button onClick={openNew} style={{ padding: isMobile?"10px 16px":"10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 600, fontSize: "14px", cursor: "pointer" }}>
             + Yeni Talep
