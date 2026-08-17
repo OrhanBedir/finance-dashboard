@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "kasa-dekont-v16" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "maas-oran-v17" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -5809,7 +5809,15 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           SUM((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
             CASE WHEN COALESCE(m.donem,'') = '2026-07'
                       AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
-                 THEN 0.5 ELSE 1 END) AS t
+                 THEN CASE
+                        -- Ay ortasi (2-14.07) girisli personelde gun bazli AHY payi:
+                        -- (16-31.07) / (giris-31.07); tam ay calisanlarda %50 (anlasma)
+                        WHEN p.ise_giris_tarihi::date > DATE '2026-07-01'
+                             AND p.ise_giris_tarihi::date < DATE '2026-07-15'
+                        THEN LEAST(1.0, 16.0 / (31 - EXTRACT(DAY FROM p.ise_giris_tarihi)::numeric + 1))
+                        ELSE 0.5
+                      END
+                 ELSE 1 END) AS t
         FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2
           AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07' GROUP BY 1`, [marka, DEVIR]),
@@ -7288,7 +7296,15 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
           SUM((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
             CASE WHEN COALESCE(m.donem,'') = '2026-07'
                       AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
-                 THEN 0.5 ELSE 1 END) AS t
+                 THEN CASE
+                        -- Ay ortasi (2-14.07) girisli personelde gun bazli AHY payi:
+                        -- (16-31.07) / (giris-31.07); tam ay calisanlarda %50 (anlasma)
+                        WHEN p.ise_giris_tarihi::date > DATE '2026-07-01'
+                             AND p.ise_giris_tarihi::date < DATE '2026-07-15'
+                        THEN LEAST(1.0, 16.0 / (31 - EXTRACT(DAY FROM p.ise_giris_tarihi)::numeric + 1))
+                        ELSE 0.5
+                      END
+                 ELSE 1 END) AS t
         FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2
           AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07' GROUP BY 1`, [marka, DEVIR]),

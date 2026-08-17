@@ -14843,7 +14843,16 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     if (ayKey < "2026-07") return 0;
     if (ayKey > "2026-07") return 1;
     const giris = String(p?.ise_giris_tarihi || "").split("T")[0];
-    return giris && giris >= AHY_DEVIR ? 1 : 0.5;
+    if (giris && giris >= AHY_DEVIR) return 1;
+    // Ay ortasında (1-14.07) girenlerde %50 kuralı AHY payını eksik gösterir:
+    // kişinin çalıştığı dönemin yalnız başı Şimşek'e aittir. Gün bazlı bölüşüm:
+    // AHY payı = (16-31.07) / (giriş-31.07). Tam ay çalışanlarda %50 kalır (anlaşma).
+    const g = Number((giris || "").slice(8, 10));
+    if (giris && giris.slice(0, 7) === "2026-07" && g > 1 && g < 15) {
+      const toplamGun = 31 - g + 1;
+      return toplamGun > 0 ? Math.min(1, 16 / toplamGun) : 0.5;
+    }
+    return 0.5;
   };
   // AHY görünümünde yalnız devir sonrası yapılan maaş ödemeleri sayılır;
   // 15.07 öncesi ödemeler ERC'nindir (fazla ödeme hesabını bozmasın).
