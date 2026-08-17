@@ -2248,6 +2248,13 @@ function getEndOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
 }
 
+// Fatura no normalizasyonu: "-cur" gibi ekler ve SIM sonrası sıfır dolgusu
+// tablolar arasında farklı yazılıyor (SIM2026000000803-cur vs SIM2026000000803);
+// eşleşme bu yüzden kaçıyor ve taşeron payı dağılımı kayboluyordu (17.08.2026).
+function normInvNo(v) {
+  return String(v || "").trim().replace(/-.*$/, "").replace(/^(SIM\d{4})0+/, "$1");
+}
+
 async function buildUpcomingCollectionsData() {
   // H01 iade faturaları (negatif remaining_amount) dahil — net ödeme hesabı için
   // TO_CHAR ile due_date her zaman "YYYY-MM-DD" string olarak döner (pg Date object sorununu önler)
@@ -2266,7 +2273,7 @@ async function buildUpcomingCollectionsData() {
   // Fatura → taşeron payı (yalnız 2KX / AHY ayrımı; gerisi Şimşek/diğer).
   // Her fatura satırı: saha+item → master_works taşeronu; ağırlık = po_rows birim fiyat.
   // Aynı fatura birden çok taşerona yayılıyorsa birim fiyat oranıyla bölünür.
-  const invAgg = new Map(); // invoice_no → { total, k2kx, kahy }
+  const invAgg = new Map(); // normalize invoice_no → { total, k2kx, kahy }
   try {
     const subRes = await pool.query(`
       SELECT h.invoice_no,
@@ -2281,11 +2288,12 @@ async function buildUpcomingCollectionsData() {
     for (const r of subRes.rows) {
       const w = Number(r.w || 0);
       const c = canonSub(r.subcon);
-      const a = invAgg.get(r.invoice_no) || { total: 0, k2kx: 0, kahy: 0 };
+      const nk = normInvNo(r.invoice_no);
+      const a = invAgg.get(nk) || { total: 0, k2kx: 0, kahy: 0 };
       a.total += w;
       if (c === "2kx") a.k2kx += w;
       else if (c === "ahy") a.kahy += w;
-      invAgg.set(r.invoice_no, a);
+      invAgg.set(nk, a);
     }
   } catch (e) {
     console.error("upcoming taşeron payı hesaplanamadı:", e.message);
@@ -2389,7 +2397,7 @@ async function buildUpcomingCollectionsData() {
     }
 
     // Taşeron payı: bu faturanın 2KX / AHY oranınca tutarı dağıt
-    const ia = invAgg.get(row.invoice_no);
+    const ia = invAgg.get(normInvNo(row.invoice_no));
     if (ia && ia.total > 0) {
       entry.subcon_2kx += amount * (ia.k2kx / ia.total);
       entry.subcon_ahy += amount * (ia.kahy / ia.total);
@@ -13044,7 +13052,7 @@ app.get("/finance/upcoming-payments", async (req, res) => {
         ? Number(r.amt) * Number(upcomingData.usdRate || 0)
         : Number(r.amt);
       todayReceived += amt;
-      const ia = upcomingData.invAgg?.get?.(r.invoice_no);
+      const ia = upcomingData.invAgg?.get?.(normInvNo(r.invoice_no));
       if (ia && ia.total > 0) {
         todayR2kx += amt * (ia.k2kx / ia.total);
         todayRAhy += amt * (ia.kahy / ia.total);
