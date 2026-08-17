@@ -14859,9 +14859,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     }
     return Number(base || 0) * ahyMaasOran(p);
   };
-  // AHY görünümünde yalnız devir sonrası yapılan maaş ödemeleri sayılır;
-  // 15.07 öncesi ödemeler ERC'nindir (fazla ödeme hesabını bozmasın).
-  const ahyOdemeGor = (o) => _hrMarka === "ERC" || String(o.tarih || "").slice(0, 10) >= AHY_DEVIR;
+  // AHY görünümünde yalnız AHY'nin yaptığı (odeyen='AHY') ödemeler sayılır —
+  // AHY payı hakedişine karşı Şimşek'in ödemesi düşülmez. odeyen boş eski
+  // kayıtlarda tarih kuralı: 15.07 öncesi ödemeler ERC'nindir.
+  // ERC görünümü ana görünümdür: personelin aldığı TÜM ödemeleri sayar.
+  const ahyOdemeGor = (o) => _hrMarka === "ERC"
+    || (o.odeyen ? o.odeyen === "AHY" : String(o.tarih || "").slice(0, 10) >= AHY_DEVIR);
 
   const TR_RESMI_TATIL_HR = [
     "2024-01-01","2024-04-10","2024-04-11","2024-04-12","2024-04-23","2024-05-01","2024-05-19","2024-06-15","2024-06-16","2024-06-17","2024-06-18","2024-07-15","2024-08-30","2024-10-29",

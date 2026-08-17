@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "odeyen-v18" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "odeyen-v19" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -5803,20 +5803,18 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           COALESCE(NULLIF(toplam_tutar,0), tutar, 0) AS t
         FROM invoice_entries
         WHERE fatura_tarihi IS NOT NULL`),
-      // Temmuz 2026 dönem maaşı: devir öncesi girenlerde %50 AHY payı,
-      // 15.07+ girenlerde tamamı; Temmuz öncesi dönemler yansımaz.
+      // Maaş ödemeleri ödeyen firmaya göre (odeyen kolonu, 17.08.2026):
+      // AHY panelinden AHY adına girilen ödeme zaten AHY'nin payıdır, TAM
+      // tutarıyla sayılır — ikinci kez %50 ile çarpılmaz (Hatice Omuş vakası).
+      // odeyen boşsa eski kural: 15.07+ tarihli ödeme AHY'nin sayılır.
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM') AS ay,
-          SUM((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
-            CASE WHEN COALESCE(m.donem,'') = '2026-07'
-                      AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
-                 -- Anlasma (17.08.2026): devir oncesi girenlerde odemenin %50'si
-                 -- AHY'nin — ay ortasi girisliler dahil (tam maasin yarisi,
-                 -- or. Mehmet Bagci 55.000 -> 27.500). Gun bazli oran kaldirildi.
-                 THEN 0.5
-                 ELSE 1 END) AS t
-        FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
-        WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2
-          AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07' GROUP BY 1`, [marka, DEVIR]),
+          SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS t
+        FROM maas_odeme m
+        WHERE COALESCE(NULLIF(m.odeyen,''),
+                CASE WHEN m.tarih >= DATE '2026-07-15' THEN 'AHY' ELSE 'SIMSEK' END) = $1
+          AND m.tarih >= $2
+          AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07' GROUP BY 1`,
+        [marka === "AHY" ? "AHY" : "SIMSEK", DEVIR]),
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
         FROM avans a JOIN personel p ON p.id=a.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
@@ -6000,7 +5998,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           `SELECT personel_id, SUM(COALESCE(bankadan,0)+COALESCE(elden,0)) AS t
              FROM maas_odeme
             WHERE COALESCE(donem, to_char(tarih,'YYYY-MM')) = $1
-              ${marka === "AHY" ? "AND tarih >= '2026-07-15'" : ""}
+              ${marka === "AHY" ? "AND COALESCE(NULLIF(odeyen,''), CASE WHEN tarih >= DATE '2026-07-15' THEN 'AHY' ELSE 'SIMSEK' END) = 'AHY'" : ""}
             GROUP BY personel_id`, [donem]);
         const av = await pool.query(
           `SELECT personel_id, SUM(COALESCE(tutar,0)) AS t
@@ -6028,7 +6026,14 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
             if (donem < "2026-07") oran = 0;
             else if (donem === "2026-07") oran = (gStr && gStr >= "2026-07-15") ? 1 : 0.5;
           }
-          const hak = Math.round(hakedilen * oran);
+          let hak = Math.round(hakedilen * oran);
+          // Ay ortası (2-14.07) girişlilerde anlaşma (17.08.2026): AHY payı tam
+          // maaşın yarısı (ör. 55.000 → 27.500), hakedişi aşamaz — İK ekranıyla aynı.
+          const gGun = gStr ? Number(gStr.slice(8, 10)) : 0;
+          if (marka === "AHY" && donem === "2026-07" && gStr
+              && gStr.slice(0, 7) === "2026-07" && gGun > 1 && gGun < 15) {
+            hak = Math.round(Math.min(hakedilen, net * 0.5));
+          }
           const oden = (odM.get(String(p.id)) || 0) + (avM.get(String(p.id)) || 0);
           const dev = carry[p.id] || 0;
           bekleyenMaas += Math.max(0, hak - oden - dev);
@@ -6242,21 +6247,19 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
     // NOT: Masraf formları nakit çıkışı DEĞİLDİR — iş avansını kapatırlar
     // (para avans ödendiğinde çıkmıştı; çifte sayım olmasın diye listelenmez).
     const [maas, avanslar, kiralar, ofisKiralar, manuel, taseronOdeme] = await Promise.all([
-      // Maaş devri kuralı: Temmuz 2026 dönem maaşı, devir öncesi (15.07) işe
-      // girmiş personelde %50 AHY'ye yansır (ilk yarı Şimşek'in). 15.07 ve
-      // sonrası girenlerde tamamı; Temmuz öncesi dönem maaşları hiç yansımaz.
+      // Maaş ödemeleri ödeyen firmaya göre (odeyen kolonu, 17.08.2026): AHY
+      // panelinden AHY adına girilen ödeme zaten AHY'nin payıdır, TAM tutarıyla
+      // listelenir — ikinci kez %50 ile kırpılmaz (Hatice Omuş vakası).
+      // odeyen boş eski kayıtlarda tarih kuralı: 15.07+ ödemeler AHY'nin.
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
           'MAAS_ODEME' AS tip,
-          ROUND((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
-            CASE WHEN COALESCE(m.donem,'') = '2026-07'
-                      AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
-                 THEN 0.5 ELSE 1 END, 2) AS tutar,
-          (COALESCE(m.donem,'') ||
-            CASE WHEN COALESCE(m.donem,'') = '2026-07'
-                      AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
-                 THEN ' · %50 devir payı' ELSE '' END) AS aciklama
+          (COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS tutar,
+          COALESCE(m.donem,'') AS aciklama
         FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
-        WHERE COALESCE(p.marka,'ERC') = $1 AND m.tarih >= $2
+        WHERE COALESCE(NULLIF(m.odeyen,''),
+                CASE WHEN m.tarih >= DATE '2026-07-15' THEN 'AHY' ELSE 'SIMSEK' END)
+              = CASE WHEN $1 = 'AHY' THEN 'AHY' ELSE 'SIMSEK' END
+          AND m.tarih >= $2
           AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07'`, [marka, baslangic]),
       // Maaş avansları: personel markası bazlı. İş avansları: ONAYDA SEÇİLEN
       // firmaya göre (is_avans_talep.firma) — ödeme/direktör onay tarihiyle.
@@ -6520,13 +6523,15 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
       q(`SELECT COALESCE(SUM(payment_amount),0) t FROM hw_payment_rows
          WHERE COALESCE(currency,'TRY')='TRY' AND payment_date IS NOT NULL
            AND payment_date >= $1::date AND payment_date < CURRENT_DATE`),
-      // Devir (15.07.2026) öncesi dönem maaşları Şimşek borcudur: personel
-      // sonradan AHY'ye geçmiş olsa bile Haziran ve öncesi maaşlar Şimşek
-      // bankasından ödenir — dönem bazlı sayılır (12.08.2026 kuralı)
+      // Şimşek'in ödediği maaşlar (odeyen kolonu, 17.08.2026): ödemeyi kim
+      // yaptıysa onun bankasından çıkar. odeyen boş eski kayıtlarda 12.08
+      // kuralı: AHY personelinin Temmuz+ dönem maaşları AHY'nin, gerisi Şimşek'in.
       q(`SELECT COALESCE(SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)),0) t
          FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
          WHERE m.tarih >= $1::date
-           AND (UPPER(COALESCE(p.marka,'ERC')) <> 'AHY' OR COALESCE(m.donem,'') < '2026-07')`),
+           AND COALESCE(NULLIF(m.odeyen,''),
+             CASE WHEN UPPER(COALESCE(p.marka,'ERC')) <> 'AHY' OR COALESCE(m.donem,'') < '2026-07'
+                  THEN 'SIMSEK' ELSE 'AHY' END) = 'SIMSEK'`),
       q(`SELECT COALESCE(SUM(a.tutar),0) t
          FROM avans a JOIN personel p ON p.id = a.personel_id
          WHERE a.odendi=true AND a.avans_turu='MAAS'
@@ -7286,20 +7291,18 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
           COALESCE(odenen_tutar, 0) AS t
         FROM invoice_entries
         WHERE odeme_tarihi IS NOT NULL AND COALESCE(odenen_tutar,0) > 0`),
-      // Temmuz 2026 dönem maaşı: devir öncesi girenlerde %50 AHY payı,
-      // 15.07+ girenlerde tamamı; Temmuz öncesi dönemler yansımaz.
+      // Maaş ödemeleri ödeyen firmaya göre (odeyen kolonu, 17.08.2026):
+      // AHY panelinden AHY adına girilen ödeme zaten AHY'nin payıdır, TAM
+      // tutarıyla sayılır — ikinci kez %50 ile çarpılmaz (Hatice Omuş vakası).
+      // odeyen boşsa eski kural: 15.07+ tarihli ödeme AHY'nin sayılır.
       pool.query(`SELECT to_char(m.tarih,'YYYY-MM') AS ay,
-          SUM((COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) *
-            CASE WHEN COALESCE(m.donem,'') = '2026-07'
-                      AND (p.ise_giris_tarihi IS NULL OR p.ise_giris_tarihi::date < DATE '2026-07-15')
-                 -- Anlasma (17.08.2026): devir oncesi girenlerde odemenin %50'si
-                 -- AHY'nin — ay ortasi girisliler dahil (tam maasin yarisi,
-                 -- or. Mehmet Bagci 55.000 -> 27.500). Gun bazli oran kaldirildi.
-                 THEN 0.5
-                 ELSE 1 END) AS t
-        FROM maas_odeme m JOIN personel p ON p.id=m.personel_id
-        WHERE COALESCE(p.marka,'ERC')=$1 AND m.tarih >= $2
-          AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07' GROUP BY 1`, [marka, DEVIR]),
+          SUM(COALESCE(m.bankadan,0)+COALESCE(m.elden,0)) AS t
+        FROM maas_odeme m
+        WHERE COALESCE(NULLIF(m.odeyen,''),
+                CASE WHEN m.tarih >= DATE '2026-07-15' THEN 'AHY' ELSE 'SIMSEK' END) = $1
+          AND m.tarih >= $2
+          AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07' GROUP BY 1`,
+        [marka === "AHY" ? "AHY" : "SIMSEK", DEVIR]),
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
         FROM avans a JOIN personel p ON p.id=a.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
@@ -13005,7 +13008,9 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
               m.donem, p.ad_soyad
        FROM maas_odeme m JOIN personel p ON p.id = m.personel_id
        WHERE EXTRACT(YEAR FROM m.tarih)=$1 AND EXTRACT(MONTH FROM m.tarih)=$2
-         AND (COALESCE(p.marka,'ERC')='ERC' OR m.tarih < DATE '2026-07-15')`,
+         AND COALESCE(NULLIF(m.odeyen,''),
+           CASE WHEN COALESCE(p.marka,'ERC')='ERC' OR m.tarih < DATE '2026-07-15'
+                THEN 'SIMSEK' ELSE 'AHY' END) = 'SIMSEK'`,
       [yil, ay]).catch(() => ({ rows: [] }));
     // Maaş avansları: avans tablosu (turu MAAS) — nakit çıkışı ÖDENDİĞİ GÜN
     // gerçekleşir (dönem hangi ayın maaşı olursa olsun), maaş satırına eklenir
