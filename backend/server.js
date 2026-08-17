@@ -53,10 +53,7 @@ const TENANT_CONFIG = {
 
 // Platform sahibi — yeni firma/kullanıcı kayıt taleplerinin onayı buraya gelir.
 const PLATFORM_ADMIN_EMAIL = "orhan.bedir@gmail.com";
-// Kısıtlı kullanıcı yöneticisi: Admin Panel'de YALNIZ kullanıcı ekleme ve şifre
-// belirleme yapabilir; silme, rol/marka değiştirme, pasife alma ve bekleyen
-// kullanıcı onayı kapalıdır (16.08.2026 — Nurcan Kuş talebi).
-pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS users_admin BOOLEAN DEFAULT FALSE`).catch(() => {});
+
 
 function detectTenant(email, subconName) {
   const s = String(subconName || "").toUpperCase();
@@ -301,6 +298,11 @@ function applySubconFilter(req, rows) {
 }
 
 const pool = require("./db");
+
+// Kısıtlı kullanıcı yöneticisi bayrağı: Admin Panel'de YALNIZ kullanıcı ekleme
+// ve şifre belirleme (16.08.2026 — Nurcan Kuş talebi). pool tanımından ÖNCE
+// çağrılınca TDZ hatasıyla açılışta çöküyordu; bu yüzden burada duruyor.
+pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS users_admin BOOLEAN DEFAULT FALSE`).catch(() => {});
 const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant, addIsolatedTenant, removeIsolatedTenant } = pool;
 const app = express();
 
