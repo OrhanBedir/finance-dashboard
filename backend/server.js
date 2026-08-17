@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "users-admin-v15" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "kasa-dekont-v16" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -6349,6 +6349,7 @@ async function ensureMarkaKasaTable() {
       aciklama TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+  await pool.query(`ALTER TABLE marka_kasa ADD COLUMN IF NOT EXISTS belge_yolu TEXT`).catch(() => {});
 }
 const MARKA_KASA_ROLLER = ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"];
 app.get("/finance/marka-kasa", authMiddleware, async (req, res) => {
@@ -6358,7 +6359,8 @@ app.get("/finance/marka-kasa", authMiddleware, async (req, res) => {
     await ensureMarkaKasaTable();
     const marka = String(req.query.marka || "AHY").toUpperCase();
     const r = await pool.query(
-      `SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama
+      `SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama,
+              COALESCE(belge_yolu,'') AS belge_yolu
        FROM marka_kasa WHERE UPPER(marka)=$1 ORDER BY tarih DESC, id DESC`, [marka]);
     const toplam = r.rows.reduce((s, x) => s + Number(x.tutar || 0), 0);
     res.json({ ok: true, rows: r.rows, toplam });
@@ -6385,6 +6387,97 @@ app.delete("/finance/marka-kasa/:id", authMiddleware, async (req, res) => {
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     await pool.query(`DELETE FROM marka_kasa WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Kasa girişine dekont ekle (görsel/PDF) — 17.08.2026 Orhan talebi
+app.post("/finance/marka-kasa/:id/belge", authMiddleware, upload.single("belge"), async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
+    const ext = (req.file.originalname || "").split(".").pop() || "pdf";
+    const fname = `kasa_dekont_${req.params.id}_${Date.now()}.${ext}`;
+    const { url } = await uploadToStorage("kasa-dekontlar", fname, req.file.buffer, req.file.mimetype);
+    const r = await pool.query(`UPDATE marka_kasa SET belge_yolu=$1 WHERE id=$2 RETURNING id, belge_yolu`, [url, req.params.id]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/marka-kasa/:id/belge", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`UPDATE marka_kasa SET belge_yolu=NULL WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Kasa girişleri Excel'i — kurumsal format (başlık bandı + zebra + toplam satırı)
+app.get("/finance/marka-kasa/excel", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureMarkaKasaTable();
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const r = await pool.query(
+      `SELECT to_char(tarih,'DD.MM.YYYY') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama,
+              COALESCE(belge_yolu,'') AS belge
+       FROM marka_kasa WHERE UPPER(marka)=$1 ORDER BY tarih, id`, [marka]);
+    const ExcelJS = require("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Kasa Girişleri");
+    ws.mergeCells("A1:E1");
+    const t = ws.getCell("A1");
+    t.value = `${marka} — KASA NAKİT GİRİŞLERİ (${new Date().toLocaleDateString("tr-TR")})`;
+    t.font = { bold: true, size: 13, color: { argb: "FFFFFFFF" }, name: "Calibri" };
+    t.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
+    t.alignment = { horizontal: "center", vertical: "middle" };
+    ws.getRow(1).height = 26;
+    const cols = [["#",6],["Tarih",14],["Tutar (₺)",16],["Açıklama",50],["Dekont",34]];
+    const hr = ws.getRow(2);
+    cols.forEach((c, i) => {
+      const cell = hr.getCell(i + 1);
+      cell.value = c[0];
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Calibri", size: 11 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF203864" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      ws.getColumn(i + 1).width = c[1];
+    });
+    hr.height = 22;
+    let toplam = 0;
+    r.rows.forEach((row, i) => {
+      toplam += Number(row.tutar || 0);
+      const xr = ws.getRow(i + 3);
+      const bg = i % 2 ? "FFF8FAFC" : "FFFFFFFF";
+      const vals = [i + 1, row.tarih, Number(row.tutar), row.aciklama, row.belge ? "EK VAR" : ""];
+      vals.forEach((v, ci) => {
+        const cell = xr.getCell(ci + 1);
+        cell.value = v;
+        cell.font = { name: "Calibri", size: 11 };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+        cell.alignment = { horizontal: ci === 0 || ci === 1 ? "center" : ci === 2 ? "right" : "left", vertical: "middle" };
+        if (ci === 2) { cell.numFmt = '#,##0.00 ₺'; cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF15803D" } }; }
+      });
+      if (row.belge) {
+        const bc = xr.getCell(5);
+        bc.value = { text: "Dekontu Aç", hyperlink: row.belge };
+        bc.font = { name: "Calibri", size: 11, color: { argb: "FF1D4ED8" }, underline: true };
+      }
+    });
+    const tr = ws.getRow(r.rows.length + 3);
+    tr.getCell(2).value = "TOPLAM";
+    tr.getCell(3).value = toplam;
+    tr.getCell(3).numFmt = '#,##0.00 ₺';
+    [1,2,3,4,5].forEach(ci => {
+      const cell = tr.getCell(ci);
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFCADCFC" } };
+      cell.font = { name: "Calibri", size: 11, bold: true };
+    });
+    ws.views = [{ state: "frozen", ySplit: 2 }];
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=kasa_girisleri_${marka}.xlsx`);
+    await wb.xlsx.write(res);
+    res.end();
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

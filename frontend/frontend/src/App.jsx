@@ -2141,21 +2141,78 @@ function MarkaNakitPanel({ currentUser }) {
         💡 Hücrelerin üzerine gelince kalem detayları görünür. Kasa bakiyesi = manuel nakit girişleri − tüm harcamalar; Temmuz maaşının 15 Temmuz sonrası kısmı Ağustos ortasındaki ödemeyle düşer.
       </div>
 
-      {/* Kasa girişleri modalı */}
+      {/* Kasa girişleri modalı — sıralı liste + dekont + Excel (17.08.2026) */}
       {kasaModal && (
-        <div onClick={() => setKasaModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(480px, 94vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>
-              <div style={{ fontWeight: 800, fontSize: "15px", color: "#111827" }}>💰 Kasa Nakit Girişleri <span style={{ fontWeight: 600, fontSize: "12px", color: "#6b7280" }}>(toplam ₺{fk(kasa.toplam)})</span></div>
-              <button onClick={() => setKasaModal(false)} style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "6px 11px", cursor: "pointer", fontWeight: 700 }}>✕</button>
+        <div onClick={() => setKasaModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: "min(680px, 96vw)", maxHeight: "84vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.35)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", background: "linear-gradient(135deg,#14532d 0%,#166534 60%,#15803d 100%)" }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: "16px", color: "#fff" }}>💰 Kasa Nakit Girişleri</div>
+                <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.75)", marginTop: "2px" }}>{kasa.rows.length} giriş · toplam <b>₺{fk(kasa.toplam)}</b></div>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={async () => {
+                    try {
+                      const rr = await fetch(`${API_BASE}/finance/marka-kasa/excel?marka=${marka}`, { headers: _auth });
+                      if (!rr.ok) { alert("Excel indirilemedi"); return; }
+                      const blob = await rr.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url; a.download = `kasa_girisleri_${marka}.xlsx`; a.click();
+                      URL.revokeObjectURL(url);
+                    } catch { alert("Excel indirilemedi"); }
+                  }}
+                  style={{ background: "rgba(255,255,255,0.92)", border: "none", borderRadius: "9px", padding: "8px 14px", cursor: "pointer", fontWeight: 700, fontSize: "13px", color: "#166534" }}
+                >📥 Excel</button>
+                <button onClick={() => setKasaModal(false)} style={{ background: "rgba(255,255,255,0.2)", border: "none", borderRadius: "9px", padding: "8px 12px", cursor: "pointer", fontWeight: 700, color: "#fff" }}>✕</button>
+              </div>
             </div>
-            <div style={{ overflowY: "auto", padding: "10px 14px" }}>
-              {kasa.rows.map(r => (
-                <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "9px 10px", borderBottom: "1px solid #f1f5f9" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: "14px", color: "#15803d" }}>+₺{fk(r.tutar)}</div>
-                    <div style={{ fontSize: "11.5px", color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.tarih}{r.aciklama ? ` · ${r.aciklama}` : ""}</div>
+            <div style={{ overflowY: "auto", padding: "12px 16px 18px" }}>
+              {kasa.rows.map((r, ri) => (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "11px 12px", borderRadius: "12px", marginBottom: "8px", background: ri % 2 ? "#f8fafc" : "#fff", border: "1px solid #e8edf4" }}>
+                  <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#dcfce7", color: "#166534", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 800, flexShrink: 0 }}>{ri + 1}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 800, fontSize: "15px", color: "#15803d" }}>+₺{fk(r.tutar)}</span>
+                      <span style={{ fontSize: "12px", fontWeight: 700, color: "#334155" }}>{(r.tarih || "").split("-").reverse().join(".")}</span>
+                    </div>
+                    {r.aciklama && <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.aciklama}</div>}
                   </div>
+                  {r.belge_yolu ? (
+                    <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                      <a href={r.belge_yolu} target="_blank" rel="noreferrer"
+                        style={{ background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1d4ed8", borderRadius: "8px", padding: "5px 10px", fontSize: "11.5px", fontWeight: 700, textDecoration: "none" }}
+                      >📎 Dekont</a>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm("Dekont kaldırılsın mı?")) return;
+                          try {
+                            await fetch(`${API_BASE}/finance/marka-kasa/${r.id}/belge`, { method: "DELETE", headers: _auth });
+                            loadKasa();
+                          } catch {}
+                        }}
+                        style={{ background: "#f8fafc", border: "1px solid #e2e8f0", color: "#94a3b8", borderRadius: "8px", padding: "5px 8px", fontSize: "11px", cursor: "pointer" }}
+                      >✕</button>
+                    </div>
+                  ) : (
+                    <label style={{ background: "#fffbeb", border: "1px dashed #fbbf24", color: "#92400e", borderRadius: "8px", padding: "5px 10px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
+                      📎 Dekont Ekle
+                      <input type="file" accept="image/*,application/pdf" style={{ display: "none" }}
+                        onChange={async (ev) => {
+                          const f = ev.target.files?.[0];
+                          if (!f) return;
+                          const fd = new FormData();
+                          fd.append("belge", f);
+                          try {
+                            const rr = await fetch(`${API_BASE}/finance/marka-kasa/${r.id}/belge`, { method: "POST", headers: _auth, body: fd });
+                            const dd = await rr.json();
+                            if (!rr.ok || !dd.ok) throw new Error(dd.error || "Yüklenemedi");
+                            loadKasa();
+                          } catch (e2) { alert(e2.message); }
+                        }} />
+                    </label>
+                  )}
                   <button
                     onClick={async () => {
                       if (!window.confirm(`₺${fk(r.tutar)} tutarındaki kasa girişi silinsin mi?`)) return;
@@ -2166,11 +2223,11 @@ function MarkaNakitPanel({ currentUser }) {
                         loadKasa();
                       } catch (e2) { alert(e2.message); }
                     }}
-                    style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", padding: "4px 10px", fontSize: "11px", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
-                  >🗑 Sil</button>
+                    style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", padding: "5px 10px", fontSize: "11px", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
+                  >🗑</button>
                 </div>
               ))}
-              {kasa.rows.length === 0 && <div style={{ padding: "20px", textAlign: "center", color: "#9ca3af" }}>Henüz nakit girişi yok</div>}
+              {kasa.rows.length === 0 && <div style={{ padding: "24px", textAlign: "center", color: "#9ca3af" }}>Henüz nakit girişi yok</div>}
             </div>
           </div>
         </div>
