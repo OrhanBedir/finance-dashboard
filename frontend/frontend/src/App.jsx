@@ -390,6 +390,11 @@ async function fetchJson(url, options = {}) {
   });
 
   if (response.status === 401) {
+    // Ana token da temizlenmeli: yalnız finance_token silinirse uygulama
+    // kullanıcıyı girişli sanır ve reload sonsuz "Yükleniyor" döngüsüne
+    // girer (19.08.2026 — 7 günlük token doldu, Finans Paneli açılmadı).
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
     localStorage.removeItem("finance_token");
     localStorage.removeItem("finance_user_email");
     window.location.reload();
