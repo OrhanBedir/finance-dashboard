@@ -15582,8 +15582,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           </div>
                         </div>
                         {/* ── Açılır tablo ── */}
+                        {/* maxHeight açıkken çok büyük olmalı: 800px sınırı 20+
+                            personelde alt satırları kırpıyordu (19.08.2026) */}
                         <div style={{
-                          maxHeight: odemeTabloAcik ? "800px" : "0px",
+                          maxHeight: odemeTabloAcik ? "20000px" : "0px",
                           overflow: "hidden",
                           transition: "max-height 0.35s ease",
                         }}>
