@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "simsek-takip-v20" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-geciken-v21" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -6145,17 +6145,24 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
       LEFT JOIN py ON py.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
       LEFT JOIN hd ON hd.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
       WHERE TRIM(COALESCE(i.invoice_no,'')) <> ''
-        AND (py.pd IS NULL OR py.pd >= CURRENT_DATE)
+        AND (py.pd IS NULL OR py.pd > (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Istanbul')::date)
         AND UPPER(COALESCE((SELECT m.subcon_name FROM master_works m
               WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(COALESCE(i.site_id,'')))
                 AND TRIM(COALESCE(m.item_code,'')) = TRIM(COALESCE(i.item_code,''))
               ORDER BY m.done_qty DESC NULLS LAST LIMIT 1),'')) LIKE 'AHY%'
       GROUP BY 1 ORDER BY 1 NULLS LAST`);
-    const gunler = [];
-    let onay = 0, toplam = 0;
+    // Kurgu (19.08.2026, Orhan talebi): gerçekleşen tahsilat invoicePayment
+    // (hw_payment_rows.payment_date) kayıtlarından okunur — BUGÜN dahil.
+    // Ödenmemiş kalemlerde: vade > bugün → Gelecek Bakiye;
+    // vade <= bugün → HW GECİKEN (vadesi geldi, HW henüz ödemedi).
+    const bugunTR = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
+    const bugunStr = `${bugunTR.getFullYear()}-${String(bugunTR.getMonth() + 1).padStart(2, "0")}-${String(bugunTR.getDate()).padStart(2, "0")}`;
+    const gunler = [], gecikenHwGunluk = [];
+    let onay = 0, toplam = 0, gecikenHw = 0;
     for (const x of r.rows) {
       const t = Math.round(Number(x.simsek_haric || 0) * ahyPay * 1.2); // AHY payı, KDV dahil
       if (!x.vade) onay += t;
+      else if (String(x.vade) <= bugunStr) { gecikenHwGunluk.push({ tarih: x.vade, tutar: t, kalem: x.kalem }); gecikenHw += t; }
       else gunler.push({ tarih: x.vade, tutar: t, kalem: x.kalem });
       toplam += t;
     }
@@ -6182,7 +6189,8 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
         LEFT JOIN py ON py.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
         LEFT JOIN hd ON hd.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
         WHERE TRIM(COALESCE(i.invoice_no,'')) <> ''
-          AND py.pd IS NOT NULL AND py.pd < CURRENT_DATE
+          AND py.pd IS NOT NULL
+          AND py.pd <= (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Istanbul')::date
           AND UPPER(COALESCE((SELECT m.subcon_name FROM master_works m
                 WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(COALESCE(i.site_id,'')))
                   AND TRIM(COALESCE(m.item_code,'')) = TRIM(COALESCE(i.item_code,''))
@@ -6232,7 +6240,8 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
 
     res.json({ ok: true, gunler, onay_bekleyen: onay, toplam, pay_yuzde: Math.round(ahyPay * 100),
       gelen_bu_ay: gelenBuAy, hw_gelen_bu_ay: hwGelenBuAy,
-      hw_odenen_toplam: hwOdenen, gonderilen, geciken, gelen_gunluk: gelenGunluk });
+      hw_odenen_toplam: hwOdenen, gonderilen, geciken, gelen_gunluk: gelenGunluk,
+      geciken_hw: gecikenHw, geciken_hw_gunluk: gecikenHwGunluk });
   } catch (e) {
     console.error("MARKA GELECEK TAHSILAT ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });

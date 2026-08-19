@@ -2135,6 +2135,42 @@ function MarkaNakitPanel({ currentUser }) {
                 </tr>
               );
             })()}
+            {/* HW Geciken: vadesi geldi/geçti, invoicePayment'ta ödemesi görünmeyen
+                AHY payı — kırmızı (19.08.2026 kurgusu: gerçekleşen ödeme esas) */}
+            {(() => {
+              const gGun = {};
+              (gelecek.geciken_hw_gunluk || []).forEach(x => {
+                if (String(x.tarih || "").startsWith(ay)) {
+                  const g = Number(String(x.tarih).slice(8, 10));
+                  const c = (gGun[g] = gGun[g] || { t: 0, kalem: 0 });
+                  c.t += Number(x.tutar || 0); c.kalem += Number(x.kalem || 0);
+                }
+              });
+              const aySatirT = Object.values(gGun).reduce((s, c) => s + c.t, 0);
+              if (!aySatirT) return null;
+              return (
+                <tr style={{ borderBottom: "2px solid #fca5a5", background: "#fef2f2" }}>
+                  <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#fef2f2", padding: "9px 14px", borderRight: "1px solid #e5e7eb" }}>
+                    <div style={{ fontWeight: 800, color: "#991b1b", fontSize: "13px", whiteSpace: "nowrap" }}>⚠️ HW Geciken</div>
+                    <div style={{ fontSize: "10px", color: "#b91c1c", marginTop: "2px", whiteSpace: "nowrap" }}>
+                      Vadesi geldi · HW ödemesi henüz gelmedi · AHY payı KDV dahil
+                    </div>
+                  </td>
+                  {gunListesi.map(g => {
+                    const c = gGun[g];
+                    return (
+                      <td key={g} title={c ? `${c.kalem} kalem · vade ${String(g).padStart(2, "0")}.${ay.slice(5, 7)} — HW ödemesi bekleniyor` : ""}
+                        style={{ textAlign: "center", padding: "8px 3px", background: c ? "#fecaca" : (haftaSonu(g) ? "#f8fafc" : "#fef2f2"), color: "#991b1b", fontWeight: 800, fontSize: "11.5px", cursor: c ? "help" : "default", borderLeft: "1px solid #f8fafc", whiteSpace: "nowrap" }}>
+                        {c ? `+${fk(c.t)}` : ""}
+                      </td>
+                    );
+                  })}
+                  <td style={{ position: "sticky", right: 0, zIndex: 2, textAlign: "center", padding: "8px 6px", background: "#fecaca", color: "#991b1b", fontWeight: 900, fontSize: "12px", whiteSpace: "nowrap", borderLeft: "2px solid #fca5a5" }}>
+                    {aySatirT > 0 ? `+${fk(aySatirT)}` : ""}
+                  </td>
+                </tr>
+              );
+            })()}
             {KATEGORILER.map(([tip, ad, aciklamaNot]) => {
               const satirToplam = Object.values(hucre[tip] || {}).reduce((s, m) => s + m.t, 0);
               return (
@@ -25157,8 +25193,9 @@ function CashFlowPanel({ currentUser, onBack }) {
   });
 
   const KATEGORILER = [
-    { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",     type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived },
-    { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",    type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending  },
+    { key:"hw_received", label:"📥 HW Tahsilat (Alınan)",     type:"income",  color:"#bbf7d0", textColor:"#14532d", byDay: hwReceived, note:"Ödeme (invoicePayment) kayıtlarından — gerçekleşen" },
+    { key:"hw_overdue",  label:"⚠️ HW Tahsilat (Geciken)",    type:"income",  color:"#fecaca", textColor:"#991b1b", byDay: hwOverdue,  note:"Vadesi geldi/geçti — HW ödemesi henüz gelmedi" },
+    { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",    type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending,  note:"Vade bazlı projeksiyon (vade > bugün)" },
     { key:"maas",        label:`👥 ${prevAyAdi} Maaşları`,     type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: maasByDay,   tips: maasTips,   note: "Ödendikçe görünür (İK → Öde)" },
     { key:"arac",        label:`🚗 ${prevAyAdi} Araç Kiraları`, type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: aracByDay,   tips: aracTips,   note: "Ödendikçe görünür (+ Ödeme Ekle)" },
     { key:"ticket",      label:"🎫 Ticket'lar",                 type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: ticketByDay, tips: ticketTips, note: "Ödendikçe görünür (+ Ödeme Ekle)" },
