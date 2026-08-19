@@ -1726,6 +1726,39 @@ function MarkaNakitPanel({ currentUser }) {
   // Borç defteri: AHY'den Şimşek'in kendi harcamaları için aldığı borçlar + geri ödemeler
   const [borc, setBorc] = useState({ rows: [], alinan: 0, odenen: 0, kalan: 0 });
   const [borcModal, setBorcModal] = useState(false);
+  // Şimşek → AHY gönderilen bakiye defteri (Bu Ay Gelen Bakiye kartı — 19.08.2026)
+  const [gelenOde, setGelenOde] = useState({ rows: [], toplam: 0, bu_ay: 0 });
+  const [gelenOdeModal, setGelenOdeModal] = useState(false);
+  const loadGelenOde = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/finance/simsek-ahy-odeme`, { headers: _auth });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) setGelenOde({ rows: d.rows || [], toplam: Number(d.toplam || 0), bu_ay: Number(d.bu_ay || 0) });
+    } catch {}
+  };
+  const loadGelecek = () => {
+    fetch(`${API_BASE}/finance/marka-gelecek-tahsilat?marka=${marka}`, { headers: _auth })
+      .then(r2 => r2.json()).then(g => { if (g && g.ok) setGelecek(g); }).catch(() => {});
+  };
+  const gelenOdeEkle = async () => {
+    const t = prompt("Şimşek'ten AHY'ye gönderilen tutar (₺):");
+    if (!t) return;
+    const _s = String(t).trim();
+    const tutarN = /^\d+(\.\d{1,2})?$/.test(_s) ? Number(_s) : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
+    if (tutarN <= 0) { alert("Geçerli tutar giriniz"); return; }
+    const bugunS = new Date().toISOString().slice(0, 10);
+    const tarih = prompt("Tarih (YYYY-AA-GG):", bugunS) || bugunS;
+    const acikl = prompt("Açıklama (opsiyonel):", "") || "";
+    try {
+      const r = await fetch(`${API_BASE}/finance/simsek-ahy-odeme`, {
+        method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ tarih, tutar: tutarN, aciklama: acikl }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
+      loadGelenOde(); loadGelecek();
+    } catch (e2) { alert(e2.message); }
+  };
   const loadBorc = async () => {
     try {
       const r = await fetch(`${API_BASE}/finance/marka-borc?marka=${marka}`, { headers: _auth });
@@ -1772,6 +1805,7 @@ function MarkaNakitPanel({ currentUser }) {
         setData(d);
         loadKasa();
         loadBorc();
+        loadGelenOde();
         fetch(`${API_BASE}/finance/marka-gelecek-tahsilat?marka=${marka}`, { headers: _auth })
           .then(r2 => r2.json()).then(g => { if (g && g.ok) setGelecek(g); }).catch(() => {});
       } catch (e) { setErr(e.message); } finally { setLoading(false); }
@@ -1968,11 +2002,17 @@ function MarkaNakitPanel({ currentUser }) {
           </div>
         ))}
         {/* Hakediş takibi kartları: AHY'ye fiilen gelen ve geciken — en sağda, gradyanlı */}
-        <div title={`ERC panelindeki taşeron ödeme girişleri (AHY) baz alınır.\nKarşılaştırma: HW'den bu ay kesinleşen AHY payı ₺${fk(gelecek.hw_gelen_bu_ay)}`}
-          style={{ marginLeft: "auto", background: "linear-gradient(135deg,#065f46,#10b981)", borderRadius: "12px", padding: "12px 20px", minWidth: "190px", boxShadow: "0 4px 12px rgba(16,185,129,0.30)" }}>
-          <div style={{ fontSize: "11px", color: "#d1fae5", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>💵 Bu Ay Gelen Bakiye</div>
+        <div onClick={() => setGelenOdeModal(true)}
+          title={`Tıkla: Şimşek'in AHY'ye gönderdiği bedelleri gir/gör (dekont + Excel).\nERC panelindeki taşeron ödeme girişleri (AHY) de sayılır.\nKarşılaştırma: HW'den bu ay kesinleşen AHY payı ₺${fk(gelecek.hw_gelen_bu_ay)}`}
+          style={{ marginLeft: "auto", background: "linear-gradient(135deg,#065f46,#10b981)", borderRadius: "12px", padding: "12px 20px", minWidth: "190px", boxShadow: "0 4px 12px rgba(16,185,129,0.30)", cursor: "pointer" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+            <div style={{ fontSize: "11px", color: "#d1fae5", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>💵 Bu Ay Gelen Bakiye</div>
+            {gelenOde.rows.length > 0 && (
+              <span style={{ background: "rgba(255,255,255,0.22)", color: "#fff", borderRadius: "8px", padding: "1px 7px", fontSize: "10.5px", fontWeight: 800 }}>🧾 {gelenOde.rows.length}</span>
+            )}
+          </div>
           <div style={{ fontSize: "20px", fontWeight: 800, color: "#fff", marginTop: "3px" }}>₺{fk(gelecek.gelen_bu_ay)}</div>
-          <div style={{ fontSize: "10px", color: "#a7f3d0", marginTop: "2px" }}>Şimşek'ten yapılan ödemeler</div>
+          <div style={{ fontSize: "10px", color: "#a7f3d0", marginTop: "2px" }}>Şimşek'ten yapılan ödemeler · detay için tıkla</div>
         </div>
         <div onClick={() => setGecikenModal(true)}
           title="Tıkla: gün gün gelen paralar ve aktarım durumu"
@@ -2238,6 +2278,106 @@ function MarkaNakitPanel({ currentUser }) {
         </div>
       )}
 
+      {/* Şimşek → AHY gönderilen bakiye modalı (Bu Ay Gelen Bakiye kartı) */}
+      {gelenOdeModal && (
+        <div onClick={() => setGelenOdeModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: "min(680px, 96vw)", maxHeight: "84vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.35)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", background: "linear-gradient(135deg,#065f46 0%,#0d9488 60%,#10b981 100%)" }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: "16px", color: "#fff" }}>💵 Şimşek → AHY Gönderilen Bakiyeler</div>
+                <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.78)", marginTop: "2px" }}>
+                  {gelenOde.rows.length} kayıt · toplam <b>₺{fk(gelenOde.toplam)}</b> · bu ay <b>₺{fk(gelenOde.bu_ay)}</b>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button onClick={gelenOdeEkle}
+                  style={{ background: "rgba(255,255,255,0.92)", border: "none", borderRadius: "9px", padding: "8px 14px", cursor: "pointer", fontWeight: 700, fontSize: "13px", color: "#065f46" }}
+                >＋ Ödeme Ekle</button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const rr = await fetch(`${API_BASE}/finance/simsek-ahy-odeme/excel`, { headers: _auth });
+                      if (!rr.ok) { alert("Excel indirilemedi"); return; }
+                      const blob = await rr.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url; a.download = "simsek_ahy_gonderilen.xlsx"; a.click();
+                      URL.revokeObjectURL(url);
+                    } catch { alert("Excel indirilemedi"); }
+                  }}
+                  style={{ background: "rgba(255,255,255,0.92)", border: "none", borderRadius: "9px", padding: "8px 14px", cursor: "pointer", fontWeight: 700, fontSize: "13px", color: "#065f46" }}
+                >📥 Excel</button>
+                <button onClick={() => setGelenOdeModal(false)} style={{ background: "rgba(255,255,255,0.2)", border: "none", borderRadius: "9px", padding: "8px 12px", cursor: "pointer", fontWeight: 700, color: "#fff" }}>✕</button>
+              </div>
+            </div>
+            <div style={{ overflowY: "auto", padding: "12px 16px 18px" }}>
+              {gelenOde.rows.map((r, ri) => (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "11px 12px", borderRadius: "12px", marginBottom: "8px", background: ri % 2 ? "#f8fafc" : "#fff", border: "1px solid #e8edf4" }}>
+                  <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#ccfbf1", color: "#0f766e", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 800, flexShrink: 0 }}>{ri + 1}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 800, fontSize: "15px", color: "#0f766e" }}>+₺{fk(r.tutar)}</span>
+                      <span style={{ fontSize: "12px", fontWeight: 700, color: "#334155" }}>{(r.tarih || "").split("-").reverse().join(".")}</span>
+                    </div>
+                    {r.aciklama && <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.aciklama}</div>}
+                  </div>
+                  {r.belge_yolu ? (
+                    <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                      <a href={r.belge_yolu} target="_blank" rel="noreferrer"
+                        style={{ background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1d4ed8", borderRadius: "8px", padding: "5px 10px", fontSize: "11.5px", fontWeight: 700, textDecoration: "none" }}
+                      >📎 Dekont</a>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm("Dekont kaldırılsın mı?")) return;
+                          try {
+                            await fetch(`${API_BASE}/finance/simsek-ahy-odeme/${r.id}/belge`, { method: "DELETE", headers: _auth });
+                            loadGelenOde();
+                          } catch {}
+                        }}
+                        style={{ background: "#f8fafc", border: "1px solid #e2e8f0", color: "#94a3b8", borderRadius: "8px", padding: "5px 8px", fontSize: "11px", cursor: "pointer" }}
+                      >✕</button>
+                    </div>
+                  ) : (
+                    <label style={{ background: "#fffbeb", border: "1px dashed #fbbf24", color: "#92400e", borderRadius: "8px", padding: "5px 10px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
+                      📎 Dekont Ekle
+                      <input type="file" accept="image/*,application/pdf" style={{ display: "none" }}
+                        onChange={async (ev) => {
+                          const f = ev.target.files?.[0];
+                          if (!f) return;
+                          const fd = new FormData();
+                          fd.append("belge", f);
+                          try {
+                            const rr = await fetch(`${API_BASE}/finance/simsek-ahy-odeme/${r.id}/belge`, { method: "POST", headers: _auth, body: fd });
+                            const dd = await rr.json();
+                            if (!rr.ok || !dd.ok) throw new Error(dd.error || "Yüklenemedi");
+                            loadGelenOde();
+                          } catch (e2) { alert(e2.message); }
+                        }} />
+                    </label>
+                  )}
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`₺${fk(r.tutar)} tutarındaki gönderim kaydı silinsin mi?`)) return;
+                      try {
+                        const rr = await fetch(`${API_BASE}/finance/simsek-ahy-odeme/${r.id}`, { method: "DELETE", headers: _auth });
+                        const dd = await rr.json();
+                        if (!rr.ok || !dd.ok) throw new Error(dd.error || "Silinemedi");
+                        loadGelenOde(); loadGelecek();
+                      } catch (e2) { alert(e2.message); }
+                    }}
+                    style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", padding: "5px 10px", fontSize: "11px", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
+                  >🗑</button>
+                </div>
+              ))}
+              {gelenOde.rows.length === 0 && <div style={{ padding: "24px", textAlign: "center", color: "#9ca3af" }}>Henüz gönderim kaydı yok — "＋ Ödeme Ekle" ile Şimşek'in AHY'ye gönderdiği bedelleri girin</div>}
+              <div style={{ fontSize: "11px", color: "#94a3b8", padding: "6px 4px 0" }}>
+                Not: Aynı ödemeyi hem ERC panelindeki taşeron ödemesi (AHY) hem burada girmeyin — ikisi de "gelen" toplamına sayılır.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Borç defteri modalı */}
       {borcModal && (
         <div onClick={() => setBorcModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
@@ -2274,6 +2414,187 @@ function MarkaNakitPanel({ currentUser }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ŞİMŞEK FATURA TAKİP (AHY paneli, 19.08.2026 Orhan talebi): AHY'nin Şimşek'e
+// kestiği faturaların toplamı + fatura bazında detay + Şimşek'ten gelen/kalan
+// + Şimşek'in ödeme planı (HW faturalarının vadesine göre AHY payı — Gelecek
+// Bakiye ile aynı kaynak, HW dosya yüklemeleriyle otomatik güncellenir).
+function SimsekFaturaTakipPanel({ currentUser }) {
+  const marka = String(currentUser?.marka || "AHY").toUpperCase();
+  const markaAd = currentUser?.marka_ad || marka;
+  const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const [data, setData] = useState(null);
+  const [gelecek, setGelecek] = useState(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [detayAcik, setDetayAcik] = useState(false);
+  const fk = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  useEffect(() => {
+    (async () => {
+      try {
+        const [r1, r2] = await Promise.all([
+          fetch(`${API_BASE}/finance/simsek-fatura-takip`, { headers: _auth }),
+          fetch(`${API_BASE}/finance/marka-gelecek-tahsilat?marka=${marka}`, { headers: _auth }),
+        ]);
+        const d1 = await r1.json().catch(() => ({}));
+        const d2 = await r2.json().catch(() => ({}));
+        if (!r1.ok || d1.ok === false) throw new Error(d1.error || "Fatura verisi alınamadı");
+        setData(d1);
+        if (r2.ok && d2.ok) setGelecek(d2);
+      } catch (e) { setErr(e.message); } finally { setLoading(false); }
+    })();
+  }, []);
+  if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
+  if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+  const faturalar = (data && data.faturalar) || [];
+  const kesilen = Number((data && data.toplam_kesilen) || 0);
+  // "Gelen" = Şimşek'in AHY'ye tüm aktarımları (fatura ödemesi + taşeron
+  // ödeme girişi + manuel gönderim kayıtları) — Geciken Bakiye ile aynı kaynak
+  const gelen = Number((gelecek && gelecek.gonderilen) || (data && data.toplam_odenen) || 0);
+  const kalan = Math.max(0, kesilen - gelen);
+  const plan = ((gelecek && gelecek.gunler) || []).slice().sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)));
+  const onayBek = Number((gelecek && gelecek.onay_bekleyen) || 0);
+  const planToplam = plan.reduce((s, g) => s + Number(g.tutar || 0), 0);
+  const fmtT = (t) => (t || "").split("-").reverse().join(".");
+  const bugunS = new Date().toISOString().slice(0, 10);
+  const excelIndir = () => exportStandardExcel({
+    title: `${markaAd} — Şimşek Fatura Takip (${new Date().toLocaleDateString("tr-TR")})`,
+    sheetName: "Faturalar", fileBase: "Simsek_Fatura_Takip",
+    headers: ["Fatura No", "Tarih", "Fatura Tutarı (₺, KDV dahil)", "Şimşek'ten Gelen (₺)", "Kalan (₺)", "Not"],
+    colWidths: [22, 13, 24, 20, 18, 58],
+    numericCols: [2, 3, 4],
+    rows: [
+      ...faturalar.map(f => [f.fatura_no, fmtT(f.tarih), Number(f.toplam || 0), Number(f.odenen || 0), Number(f.kalan || 0), f.note || ""]),
+      { cells: ["TOPLAM", "", kesilen, Number((data && data.toplam_odenen) || 0), faturalar.reduce((s, f) => s + Number(f.kalan || 0), 0), ""], bold: true },
+    ],
+    extraSheets: [{
+      sheetName: "Ödeme Planı",
+      title: "Şimşek'in Ödeme Planı — HW vadelerine göre AHY payı (KDV dahil)",
+      headers: ["Vade Tarihi", "Tutar (₺)", "Kalem Sayısı"],
+      colWidths: [18, 18, 14],
+      numericCols: [1, 2],
+      rows: [
+        ...plan.map(g => [fmtT(g.tarih), Number(g.tutar || 0), Number(g.kalem || 0)]),
+        ...(onayBek > 0 ? [["HW onayında (vadesiz)", onayBek, ""]] : []),
+        { cells: ["TOPLAM", planToplam + onayBek, ""], bold: true },
+      ],
+    }],
+  }).catch(e => alert("Excel indirilemedi: " + e.message));
+  const kartSt = (grad) => ({ flex: "1 1 220px", minWidth: "220px", background: grad, borderRadius: "14px", padding: "16px 20px", color: "#fff", boxShadow: "0 4px 14px rgba(15,23,42,0.18)" });
+  return (
+    <div style={{ padding: "24px", maxWidth: "1200px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
+        <div>
+          <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🧾 Şimşek Fatura Takip</h2>
+          <div style={{ fontSize: "13px", color: "#64748b" }}>
+            {markaAd}'nin Şimşek'e kestiği faturalar · Şimşek'ten gelen bedeller · ödeme planı (HW vadeleri)
+          </div>
+        </div>
+        <button onClick={excelIndir}
+          style={{ padding: "8px 16px", background: "#166534", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 800, cursor: "pointer" }}>📥 Excel İndir</button>
+      </div>
+
+      {/* Özet kartları */}
+      <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "18px" }}>
+        <div onClick={() => setDetayAcik(v => !v)} title="Tıkla: fatura bazında detay"
+          style={{ ...kartSt("linear-gradient(135deg,#1e3a5f,#2563eb)"), cursor: "pointer" }}>
+          <div style={{ fontSize: "11px", fontWeight: 700, opacity: 0.85, textTransform: "uppercase", letterSpacing: "0.04em" }}>🧾 Kesilen Fatura Toplamı</div>
+          <div style={{ fontSize: "24px", fontWeight: 900, marginTop: "4px" }}>₺{fk(kesilen)}</div>
+          <div style={{ fontSize: "10.5px", opacity: 0.75, marginTop: "2px" }}>{faturalar.length} fatura · KDV dahil · detay için tıkla {detayAcik ? "▲" : "▼"}</div>
+        </div>
+        <div style={kartSt("linear-gradient(135deg,#065f46,#10b981)")}>
+          <div style={{ fontSize: "11px", fontWeight: 700, opacity: 0.85, textTransform: "uppercase", letterSpacing: "0.04em" }}>💵 Şimşek'ten Gelen</div>
+          <div style={{ fontSize: "24px", fontWeight: 900, marginTop: "4px" }}>₺{fk(gelen)}</div>
+          <div style={{ fontSize: "10.5px", opacity: 0.75, marginTop: "2px" }}>fatura ödemesi + taşeron girişi + manuel gönderimler</div>
+        </div>
+        <div style={kartSt(kalan > 0 ? "linear-gradient(135deg,#991b1b,#ef4444)" : "linear-gradient(135deg,#374151,#6b7280)")}>
+          <div style={{ fontSize: "11px", fontWeight: 700, opacity: 0.85, textTransform: "uppercase", letterSpacing: "0.04em" }}>⏳ Kalan Bedel</div>
+          <div style={{ fontSize: "24px", fontWeight: 900, marginTop: "4px" }}>₺{fk(kalan)}</div>
+          <div style={{ fontSize: "10.5px", opacity: 0.75, marginTop: "2px" }}>kesilen − gelen</div>
+        </div>
+      </div>
+
+      {/* Fatura bazında detay */}
+      {detayAcik && (
+        <div style={{ background: "#fff", borderRadius: "14px", overflow: "hidden", boxShadow: "0 2px 10px rgba(15,23,42,0.08)", marginBottom: "18px" }}>
+          <div style={{ padding: "12px 16px", background: "#1e3a5f", color: "#fff", fontSize: "14px", fontWeight: 700 }}>🧾 Faturalar ({faturalar.length})</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+              <thead>
+                <tr style={{ background: "#f8fafc" }}>
+                  {["Fatura No", "Tarih", "Tutar (KDV dahil)", "Şimşek'ten Gelen", "Kalan", "Not"].map((h, i) => (
+                    <th key={h} style={{ padding: "9px 12px", fontWeight: 700, color: "#374151", textAlign: i >= 2 && i <= 4 ? "right" : "left", borderBottom: "1.5px solid #e5e7eb", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {faturalar.map((f, i) => (
+                  <tr key={f.id} style={{ background: i % 2 ? "#f9fafb" : "#fff" }}>
+                    <td style={{ padding: "8px 12px", fontWeight: 700, color: "#1e3a5f", whiteSpace: "nowrap" }}>{f.fatura_no || "-"}</td>
+                    <td style={{ padding: "8px 12px", whiteSpace: "nowrap", color: "#475569" }}>{fmtT(f.tarih)}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 700 }}>₺{fk(f.toplam)}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: Number(f.odenen) > 0 ? "#15803d" : "#9ca3af", fontWeight: 600 }}>{Number(f.odenen) > 0 ? `₺${fk(f.odenen)}` : "—"}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: Number(f.kalan) > 0 ? "#b91c1c" : "#15803d", fontWeight: 800 }}>{Number(f.kalan) > 0 ? `₺${fk(f.kalan)}` : "✓ Kapandı"}</td>
+                    <td style={{ padding: "8px 12px", color: "#64748b", maxWidth: "340px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.note}>{f.note}</td>
+                  </tr>
+                ))}
+                {faturalar.length === 0 && (
+                  <tr><td colSpan={6} style={{ padding: "22px", textAlign: "center", color: "#9ca3af" }}>Henüz Şimşek'e kesilmiş fatura yok</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ padding: "8px 16px", fontSize: "11px", color: "#94a3b8", borderTop: "1px solid #f1f5f9" }}>
+            Not: "Şimşek'ten Gelen" kolonundaki tutarlar fatura kaydına işlenen ödemelerdir; taşeron ödeme girişleri ve manuel gönderimler fatura satırına değil üstteki toplam karta yansır.
+          </div>
+        </div>
+      )}
+
+      {/* Şimşek'in ödeme planı — HW vadeleri */}
+      <div style={{ background: "#fff", borderRadius: "14px", overflow: "hidden", boxShadow: "0 2px 10px rgba(15,23,42,0.08)" }}>
+        <div style={{ padding: "12px 16px", background: "linear-gradient(135deg,#14532d,#166534)", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+          <div style={{ fontSize: "14px", fontWeight: 700 }}>📅 Şimşek'in Ödeme Planı <span style={{ fontWeight: 500, fontSize: "12px", opacity: 0.8 }}>— HW fatura vadelerine göre AHY payı (KDV dahil), HW dosya yüklemeleriyle otomatik güncellenir</span></div>
+          <div style={{ fontSize: "13px", fontWeight: 800 }}>Plan toplamı: ₺{fk(planToplam + onayBek)}</div>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+            <thead>
+              <tr style={{ background: "#f8fafc" }}>
+                {["Vade Tarihi", "Tutar", "Kalem"].map((h, i) => (
+                  <th key={h} style={{ padding: "9px 12px", fontWeight: 700, color: "#374151", textAlign: i === 0 ? "left" : "right", borderBottom: "1.5px solid #e5e7eb" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {plan.map((g, i) => {
+                const gecmis = String(g.tarih || "") < bugunS;
+                return (
+                  <tr key={`${g.tarih}-${i}`} style={{ background: gecmis ? "#fef2f2" : i % 2 ? "#f9fafb" : "#fff" }}>
+                    <td style={{ padding: "8px 12px", fontWeight: 700, color: gecmis ? "#b91c1c" : "#1e3a5f", whiteSpace: "nowrap" }}>
+                      {fmtT(g.tarih)}{gecmis && <span style={{ fontSize: "10px", fontWeight: 700, marginLeft: "8px", background: "#fee2e2", color: "#b91c1c", borderRadius: "6px", padding: "1px 6px" }}>vadesi geçti</span>}
+                    </td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 800, color: "#15803d" }}>₺{fk(g.tutar)}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: "#64748b" }}>{g.kalem || "-"}</td>
+                  </tr>
+                );
+              })}
+              {onayBek > 0 && (
+                <tr style={{ background: "#fffbeb" }}>
+                  <td style={{ padding: "8px 12px", fontWeight: 700, color: "#92400e" }}>HW onayında (vade henüz yok)</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 800, color: "#92400e" }}>₺{fk(onayBek)}</td>
+                  <td style={{ padding: "8px 12px" }} />
+                </tr>
+              )}
+              {plan.length === 0 && onayBek === 0 && (
+                <tr><td colSpan={3} style={{ padding: "22px", textAlign: "center", color: "#9ca3af" }}>Bekleyen HW vadesi yok</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -29713,6 +30034,7 @@ function App() {
       case "cashflow": return "Nakit Akışı";
       case "marka_pl": return "Kâr / Zarar (P&L)";
       case "marka_taseron": return "Taşeron Faturaları";
+      case "marka_fatura_takip": return "Şimşek Fatura Takip";
       case "erc_taseron": return "Taşeron Hesabı";
       case "cek_senet": return "Çek & Senet";
       case "admin": return "Admin Panel";
@@ -29913,6 +30235,7 @@ function App() {
                         <>
                           <AltNavItem aktif={page==='marka_nakit'} onClick={()=>setPage('marka_nakit')} ikon="💰" label="Nakit Akışı (Günlük)" />
                           <AltNavItem aktif={page==='marka_taseron'} onClick={()=>setPage('marka_taseron')} ikon="🔧" label="Taşeron Faturaları" />
+                          <AltNavItem aktif={page==='marka_fatura_takip'} onClick={()=>setPage('marka_fatura_takip')} ikon="🧾" label="Şimşek Fatura Takip" />
                         </>
                       )}
                       {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
@@ -30045,6 +30368,7 @@ function App() {
             {page === "marka_pl" && isAltMarka && <MarkaPLPanel currentUser={user} />}
             {page === "marka_nakit" && isAltMarka && <MarkaNakitPanel currentUser={user} />}
             {page === "marka_taseron" && isAltMarka && <MarkaTaseronPanel currentUser={user} />}
+            {page === "marka_fatura_takip" && isAltMarka && <SimsekFaturaTakipPanel currentUser={user} />}
             {page === "erc_taseron" && !isAltMarka && <ErcTaseronPanel />}
             {page === "cek_senet" && !isAltMarka && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","muhasebe@simsektel.com","erencan.simsek@simsektel.com"].includes(_userEmail) && <CekSenetPanel currentUser={user} />}
             {page === "finance" && isFinanceUser && !isAltMarka && (

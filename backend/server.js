@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "odeyen-v19" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "simsek-takip-v20" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -6163,7 +6163,7 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
     // Bu Ay Gelen (HW'den bu ay kesinleşen AHY payı) ve Geciken Bakiye
     // (HW ödedi ama Şimşek AHY'ye henüz göndermedi): geciken = HW'den ödenen
     // kümülatif AHY payı − Şimşek'in AHY'ye yaptığı ödemeler (fatura + doğrudan)
-    const [odn, fatOde, logOde] = await Promise.all([
+    const [odn, fatOde, logOde, manOde] = await Promise.all([
       pool.query(`
         WITH py AS (
           SELECT regexp_replace(regexp_replace(TRIM(invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n,
@@ -6209,6 +6209,12 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
         FROM taseron_odeme_log
         WHERE UPPER(split_part(TRIM(COALESCE(firma,'')),' ',1)) = 'AHY'
           AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`).catch(() => ({ rows: [{ toplam: 0, bu_ay: 0 }] })),
+      // Manuel "Şimşek → AHY gönderilen bakiye" girişleri (Bu Ay Gelen Bakiye
+      // kartından dekontla girilenler) — 19.08.2026
+      pool.query(`SELECT
+          COALESCE(SUM(COALESCE(tutar,0)),0) AS toplam,
+          COALESCE(SUM(COALESCE(tutar,0)) FILTER (WHERE tarih >= date_trunc('month', CURRENT_DATE)),0) AS bu_ay
+        FROM simsek_ahy_odeme`).catch(() => ({ rows: [{ toplam: 0, bu_ay: 0 }] })),
     ]);
     // Günlük gelen dökümü (modal için) + toplamlar — AHY payı, KDV dahil
     const buAyBas = new Date().toISOString().slice(0, 7);
@@ -6220,8 +6226,8 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
     const hwOdenen = gelenGunluk.reduce((s, x) => s + x.tutar, 0);
     const hwGelenBuAy = gelenGunluk.filter(x => String(x.tarih || "").startsWith(buAyBas))
       .reduce((s, x) => s + x.tutar, 0);
-    const gonderilen = Math.round(Number(fatOde.rows[0]?.toplam || 0) + Number(logOde.rows[0]?.toplam || 0));
-    const gelenBuAy = Math.round(Number(fatOde.rows[0]?.bu_ay || 0) + Number(logOde.rows[0]?.bu_ay || 0));
+    const gonderilen = Math.round(Number(fatOde.rows[0]?.toplam || 0) + Number(logOde.rows[0]?.toplam || 0) + Number(manOde.rows[0]?.toplam || 0));
+    const gelenBuAy = Math.round(Number(fatOde.rows[0]?.bu_ay || 0) + Number(logOde.rows[0]?.bu_ay || 0) + Number(manOde.rows[0]?.bu_ay || 0));
     const geciken = Math.max(0, hwOdenen - gonderilen);
 
     res.json({ ok: true, gunler, onay_bekleyen: onay, toplam, pay_yuzde: Math.round(ahyPay * 100),
@@ -6485,6 +6491,173 @@ app.get("/finance/marka-kasa/excel", authMiddleware, async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename=kasa_girisleri_${marka}.xlsx`);
     await wb.xlsx.write(res);
     res.end();
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── ŞİMŞEK → AHY GÖNDERİLEN BAKİYE DEFTERİ (19.08.2026, Orhan talebi) ──
+// AHY panelindeki "Bu Ay Gelen Bakiye" kartının manuel kayıt kaynağı:
+// Şimşek'in AHY tarafına gönderdiği bedeller dekontuyla buraya girilir.
+// Toplamlar marka-gelecek-tahsilat'taki gonderilen/gelen_bu_ay'a dahil edilir.
+async function ensureSimsekAhyOdemeTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS simsek_ahy_odeme (
+      id SERIAL PRIMARY KEY,
+      tarih DATE NOT NULL,
+      tutar NUMERIC NOT NULL,
+      aciklama TEXT,
+      belge_yolu TEXT,
+      created_by TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+}
+app.get("/finance/simsek-ahy-odeme", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureSimsekAhyOdemeTable();
+    const r = await pool.query(
+      `SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama,
+              COALESCE(belge_yolu,'') AS belge_yolu
+       FROM simsek_ahy_odeme ORDER BY tarih DESC, id DESC`);
+    const toplam = r.rows.reduce((s, x) => s + Number(x.tutar || 0), 0);
+    const buAy = new Date().toISOString().slice(0, 7);
+    const bu_ay = r.rows.filter(x => String(x.tarih || "").startsWith(buAy))
+      .reduce((s, x) => s + Number(x.tutar || 0), 0);
+    res.json({ ok: true, rows: r.rows, toplam, bu_ay });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/finance/simsek-ahy-odeme", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureSimsekAhyOdemeTable();
+    const { tarih, tutar, aciklama } = req.body;
+    const t = Number(tutar || 0);
+    if (!tarih || !t) return res.status(400).json({ ok: false, error: "tarih ve tutar zorunlu" });
+    const r = await pool.query(
+      `INSERT INTO simsek_ahy_odeme (tarih, tutar, aciklama, created_by) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [tarih, t, aciklama || null, req.user?.email || null]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/simsek-ahy-odeme/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`DELETE FROM simsek_ahy_odeme WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/finance/simsek-ahy-odeme/:id/belge", authMiddleware, upload.single("belge"), async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
+    const ext = (req.file.originalname || "").split(".").pop() || "pdf";
+    const fname = `simsek_ahy_dekont_${req.params.id}_${Date.now()}.${ext}`;
+    const { url } = await uploadToStorage("kasa-dekontlar", fname, req.file.buffer, req.file.mimetype);
+    const r = await pool.query(`UPDATE simsek_ahy_odeme SET belge_yolu=$1 WHERE id=$2 RETURNING id, belge_yolu`, [url, req.params.id]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/simsek-ahy-odeme/:id/belge", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`UPDATE simsek_ahy_odeme SET belge_yolu=NULL WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get("/finance/simsek-ahy-odeme/excel", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureSimsekAhyOdemeTable();
+    const r = await pool.query(
+      `SELECT to_char(tarih,'DD.MM.YYYY') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama,
+              COALESCE(belge_yolu,'') AS belge
+       FROM simsek_ahy_odeme ORDER BY tarih, id`);
+    const ExcelJS = require("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Gönderilen Bakiye");
+    ws.mergeCells("A1:E1");
+    const t = ws.getCell("A1");
+    t.value = `ŞİMŞEK → AHY GÖNDERİLEN BAKİYELER (${new Date().toLocaleDateString("tr-TR")})`;
+    t.font = { bold: true, size: 13, color: { argb: "FFFFFFFF" }, name: "Calibri" };
+    t.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } };
+    t.alignment = { horizontal: "center", vertical: "middle" };
+    ws.getRow(1).height = 26;
+    const cols = [["#",6],["Tarih",14],["Tutar (₺)",16],["Açıklama",50],["Dekont",34]];
+    const hr = ws.getRow(2);
+    cols.forEach((c, i) => {
+      const cell = hr.getCell(i + 1);
+      cell.value = c[0];
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Calibri", size: 11 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF203864" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      ws.getColumn(i + 1).width = c[1];
+    });
+    hr.height = 22;
+    let toplam = 0;
+    r.rows.forEach((row, i) => {
+      toplam += Number(row.tutar || 0);
+      const xr = ws.getRow(i + 3);
+      const bg = i % 2 ? "FFF8FAFC" : "FFFFFFFF";
+      const vals = [i + 1, row.tarih, Number(row.tutar), row.aciklama, row.belge ? "EK VAR" : ""];
+      vals.forEach((v, ci) => {
+        const cell = xr.getCell(ci + 1);
+        cell.value = v;
+        cell.font = { name: "Calibri", size: 11 };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+        cell.alignment = { horizontal: ci === 0 || ci === 1 ? "center" : ci === 2 ? "right" : "left", vertical: "middle" };
+        if (ci === 2) { cell.numFmt = '#,##0.00 ₺'; cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF15803D" } }; }
+      });
+      if (row.belge) {
+        const bc = xr.getCell(5);
+        bc.value = { text: "Dekontu Aç", hyperlink: row.belge };
+        bc.font = { name: "Calibri", size: 11, color: { argb: "FF1D4ED8" }, underline: true };
+      }
+    });
+    const tr = ws.getRow(r.rows.length + 3);
+    tr.getCell(2).value = "TOPLAM";
+    tr.getCell(3).value = toplam;
+    tr.getCell(3).numFmt = '#,##0.00 ₺';
+    [1,2,3,4,5].forEach(ci => {
+      const cell = tr.getCell(ci);
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFCADCFC" } };
+      cell.font = { name: "Calibri", size: 11, bold: true };
+    });
+    ws.views = [{ state: "frozen", ySplit: 2 }];
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=simsek_ahy_gonderilen.xlsx`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── ŞİMŞEK FATURA TAKİP (19.08.2026, Orhan talebi) ──
+// AHY'nin Şimşek'e kestiği faturalar (fatura bazında) — AHY panelindeki
+// "Şimşek Fatura Takip" sayfasının kaynağı. Gelen/kalan toplamları frontend'de
+// marka-gelecek-tahsilat'ın gonderilen değeriyle birleştirilir.
+app.get("/finance/simsek-fatura-takip", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const r = await pool.query(`
+      SELECT id, COALESCE(fatura_no,'') AS fatura_no,
+             to_char(fatura_tarihi,'YYYY-MM-DD') AS tarih,
+             COALESCE(toplam_tutar,0) AS toplam,
+             COALESCE(odenen_tutar,0) AS odenen,
+             CASE WHEN COALESCE(kalan_borc,0) > 0 THEN COALESCE(kalan_borc,0)
+                  ELSE GREATEST(COALESCE(toplam_tutar,0) - COALESCE(odenen_tutar,0), 0) END AS kalan,
+             COALESCE(note,'') AS note
+      FROM invoice_entries
+      WHERE UPPER(split_part(TRIM(COALESCE(tedarikci,'')),' ',1)) = 'AHY'
+        AND UPPER(COALESCE(firma,'')) <> 'AHY'
+      ORDER BY fatura_tarihi DESC NULLS LAST, id DESC`);
+    const toplam_kesilen = r.rows.reduce((s, x) => s + Number(x.toplam || 0), 0);
+    const toplam_odenen = r.rows.reduce((s, x) => s + Number(x.odenen || 0), 0);
+    res.json({ ok: true, faturalar: r.rows, toplam_kesilen, toplam_odenen });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
