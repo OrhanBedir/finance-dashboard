@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hw-geciken-v21" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "taseron-borc-v22" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -6670,6 +6670,103 @@ app.get("/finance/simsek-fatura-takip", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+
+// ── TAŞERON BORÇ TAKİBİ (20.08.2026, Orhan talebi) ──
+// Devir sonrası kurgu: giderleri AHY yapar, Şimşek'e gelen parayla ESKİ taşeron
+// borçları kapatılır. T0 anında (bugün) taşeron başına açılış borcu girilir;
+// Ödeme Gir'den (taseron_odeme_log) T0 SONRASI yapılan ödemeler borçtan düşer.
+// Eşleştirme ilk kelimeyle (FERRUMX ≈ Ferrumx İletişim..., AHY ≈ AHY ELEKTRİK).
+async function ensureTaseronBorcTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS taseron_borc (
+      id SERIAL PRIMARY KEY,
+      taseron_adi TEXT NOT NULL,
+      tutar NUMERIC NOT NULL,
+      tarih DATE NOT NULL,
+      aciklama TEXT,
+      created_by TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+}
+app.get("/finance/taseron-borc", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureTaseronBorcTable();
+    const borclar = await pool.query(
+      `SELECT id, taseron_adi, tutar, to_char(tarih,'YYYY-MM-DD') AS tarih,
+              COALESCE(aciklama,'') AS aciklama
+       FROM taseron_borc ORDER BY taseron_adi, tarih, id`);
+    // Taşeron bazında grupla, T0 = ilk borç kaydının tarihi
+    const grup = {};
+    for (const b of borclar.rows) {
+      const key = String(b.taseron_adi || "").trim().toUpperCase().split(" ")[0].split("_")[0] || "?";
+      const g = (grup[key] = grup[key] || { taseron_adi: b.taseron_adi, toplam_borc: 0, t0: b.tarih, kayitlar: [] });
+      g.toplam_borc += Number(b.tutar || 0);
+      if (b.tarih < g.t0) g.t0 = b.tarih;
+      g.kayitlar.push(b);
+    }
+    const bugunTR = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
+    const bugunStr = `${bugunTR.getFullYear()}-${String(bugunTR.getMonth() + 1).padStart(2, "0")}-${String(bugunTR.getDate()).padStart(2, "0")}`;
+    const rows = [];
+    for (const key of Object.keys(grup)) {
+      const g = grup[key];
+      const od = await pool.query(
+        `SELECT id, firma, tutar, to_char(tarih,'YYYY-MM-DD') AS tarih, COALESCE(aciklama,'') AS aciklama
+         FROM taseron_odeme_log
+         WHERE tarih >= $1::date
+           AND UPPER(split_part(split_part(TRIM(COALESCE(firma,'')),' ',1),'_',1)) = $2
+         ORDER BY tarih DESC, id DESC LIMIT 200`,
+        [g.t0, key]);
+      const odenen = od.rows.reduce((s, x) => s + Number(x.tutar || 0), 0);
+      const bugunOdenen = od.rows.filter(x => x.tarih === bugunStr).reduce((s, x) => s + Number(x.tutar || 0), 0);
+      rows.push({
+        key, taseron_adi: g.taseron_adi, t0: g.t0,
+        toplam_borc: g.toplam_borc, odenen, kalan: g.toplam_borc - odenen,
+        bugun_odenen: bugunOdenen, kayitlar: g.kayitlar, odemeler: od.rows,
+      });
+    }
+    rows.sort((a, b) => b.kalan - a.kalan);
+    // Borç Gir formundaki öneri listesi: bilinen taşeron/tedarikçi adları
+    const firmalar = await pool.query(`
+      SELECT DISTINCT TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS ad
+      FROM invoice_entries WHERE TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) <> ''
+      UNION SELECT DISTINCT TRIM(firma) FROM taseron_odeme_log WHERE TRIM(COALESCE(firma,'')) <> ''
+      ORDER BY 1`).catch(() => ({ rows: [] }));
+    res.json({
+      ok: true, rows,
+      toplam_borc: rows.reduce((s, r) => s + r.toplam_borc, 0),
+      toplam_odenen: rows.reduce((s, r) => s + r.odenen, 0),
+      toplam_kalan: rows.reduce((s, r) => s + r.kalan, 0),
+      bugun_odenen: rows.reduce((s, r) => s + r.bugun_odenen, 0),
+      firmalar: firmalar.rows.map(x => x.ad),
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/finance/taseron-borc", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureTaseronBorcTable();
+    const { taseron_adi, tutar, tarih, aciklama } = req.body;
+    const t = Number(tutar || 0);
+    if (!taseron_adi || !String(taseron_adi).trim() || !t || !tarih)
+      return res.status(400).json({ ok: false, error: "taşeron adı, tutar ve tarih zorunlu" });
+    const r = await pool.query(
+      `INSERT INTO taseron_borc (taseron_adi, tutar, tarih, aciklama, created_by)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [String(taseron_adi).trim(), t, tarih, aciklama || null, req.user?.email || null]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/taseron-borc/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`DELETE FROM taseron_borc WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 // ── ERC BANKA BAKİYESİ (10.08.2026, Orhan talebi) ──
 // T0: marka_kasa'ya (marka=ERC) elle girilen açılış bakiyesi + sonraki girişler.
