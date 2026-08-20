@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "oneri-haric-v26" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "muadil-v27" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -1576,9 +1576,23 @@ app.get("/po/saha-oneri", authMiddleware, async (req, res) => {
       "8818278836", // Green Site Project survey, per Pcs
     ]);
     const ONERI_HARIC_RE = /\b(LOS|SURVEY|BTK)\b/i;
+    // Muadil kalem grupları (20.08.2026, Orhan): aynı işin varyantları — sahada
+    // biri girilmiş/PO'lanmışsa diğeri ÖNERİLMEZ (ör. AI1105'te 4-6 RRU girildi
+    // diye 1-3 RRU "eksik" gösterilmez; ikisi aynı kurulumun adet bandıdır).
+    const MUADIL_GRUPLAR = [
+      ["8812184591", "8812184592"], // DBS/BTS kurulum: 1-3 RRU ↔ 4-6 RRU
+      ["8812184598", "8812184599"], // Ek RRU kurulum: tüm kablolarla ↔ FO/DC'siz
+      ["8818274542", "8818274543"], // Co-Located: antenna revision'sız ↔ revision'lı
+    ];
+    const sahadaOlan = new Set([...girilenSet, ...poSet]);
+    const muadilHaric = new Set();
+    for (const grup of MUADIL_GRUPLAR) {
+      if (grup.some(k => sahadaOlan.has(k))) grup.forEach(k => muadilHaric.add(k));
+    }
     const oneriler = benzer.rows
       .filter(x => !girilenSet.has(x.item_code) && !poSet.has(x.item_code))
       .filter(x => !ONERI_HARIC_KOD.has(x.item_code) && !ONERI_HARIC_RE.test(x.item_description || ""))
+      .filter(x => !muadilHaric.has(x.item_code))
       .map(x => ({ ...x, yuzde: toplamSaha ? Math.round((100 * x.kac_sahada) / toplamSaha) : 0 }))
       .filter(x => x.yuzde >= 40)
       .sort((a, b) => b.yuzde - a.yuzde);
