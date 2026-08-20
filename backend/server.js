@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "borc-trnorm-v23" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "bordro-30gun-v24" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -5964,7 +5964,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
 
     // Planlı gider (bekleyen maaş): devirden (2026-07) bu yana tahakkuk etmiş
     // dönemlerin kalan net maaşları — İK panelindeki "NET Ödenecek" ile BİREBİR:
-    // puantaj gelmedi kesintisi (net/26 × gün) + işe giriş pro-rata + maaş
+    // puantaj gelmedi kesintisi (net/30 × gün) + işe giriş pro-rata + maaş
     // versiyonu (personel_maas_gecmisi) + AHY devir oranı; fazla ödemeler
     // sonraki döneme devreder.
     let bekleyenMaas = 0;
@@ -6010,14 +6010,14 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         const gmM = new Map(gm.rows.map(r => [String(r.personel_id), Number(r.gelmedi || 0)]));
         const odM = new Map(od.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
         const avM = new Map(av.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
-        const REFERANS_GUN = 26; // İK puantaj hakediş referansı
+        const REFERANS_GUN = 30; // Bordro esası: ay 30 gün (İK ekranıyla aynı)
         for (const p of pr.rows) {
           const gStr = p.ise_giris_tarihi
             ? new Date(p.ise_giris_tarihi).toISOString().slice(0, 10) : null;
           if (gStr && gStr.slice(0, 7) > donem) continue; // henüz işe girmemiş
           let girisF = 1;
           if (gStr && gStr.slice(0, 7) === donem)
-            girisF = (gunSay - Number(gStr.slice(8, 10)) + 1) / gunSay;
+            girisF = Math.min(1, (gunSay - Number(gStr.slice(8, 10)) + 1) / REFERANS_GUN);
           const net = Number(p.net_maas || 0);
           const gelmedi = gmM.get(String(p.id)) || 0;
           const hakedilen = Math.max(0, Math.round(net * girisF - gelmedi * (net / REFERANS_GUN)));
@@ -14699,7 +14699,11 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
        WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2 AND avans_turu='MAAS' GROUP BY personel_id`, [ay, yil]
     );
 
-    const REFERANS_GUN = 26;
+    // Bordro esası (20.08.2026 — Orhan kararı): SGK/bordro pratiğinde ay 30 gün
+    // sayılır. Hem işe giriş pro-rata'sı hem devamsızlık kesintisi AYNI tabandan
+    // (net/30) hesaplanır — eskiden giriş oranı takvim günü (28/30/31), kesinti
+    // 26 gün üzerindendi ve kazanılan gün ile kaybedilen gün eşit değildi.
+    const REFERANS_GUN = 30;
     const totalDays = new Date(yil, ay, 0).getDate();
 
     const ozet = personelList.rows.map(p => {
@@ -14720,11 +14724,14 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
       // İşe giriş bu ayın İÇİNDEYSE giriş öncesi günler hakedişe girmez:
       // taban maaş kalan takvim günü oranıyla kısılır (Ender/Selçuk vakası —
       // puantajda giriş öncesi gün kaydı olmadığından kesinti hiç oluşmuyordu)
+      // Giriş ayında çalışılan gün sayısı (giriş günü dahil) / 30; tam ay
+      // çalışanda 1'i aşmaz (31 günlük aylarda fazla ödeme oluşmasın).
       let girisFactor = 1;
       if (p.ise_giris_tarihi) {
         const g = new Date(p.ise_giris_tarihi);
         if (!Number.isNaN(g.getTime()) && g.getFullYear() === Number(yil) && (g.getMonth() + 1) === Number(ay)) {
-          girisFactor = (totalDays - g.getDate() + 1) / totalDays;
+          const calisilanTakvimGun = totalDays - g.getDate() + 1;
+          girisFactor = Math.min(1, calisilanTakvimGun / REFERANS_GUN);
         }
       }
       // Pazar/resmi tatil bonusu maaşa EKLENMEZ — dinlenme bakiyesine birikir

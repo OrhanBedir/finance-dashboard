@@ -14519,7 +14519,7 @@ function PuantajPanel({ currentUser, onBack }) {
           const row = getPuantaj(sp.id, g);
           return row?.durum === "CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0;
         }).length;
-        const dailyRate = (sp.net_maas||0) / 26;
+        const dailyRate = (sp.net_maas||0) / 30;   // bordro esası: ay 30 gün
         const hak = Math.round((sp.net_maas||0) - gelmedi * dailyRate + pazarCalisdi * dailyRate * 1.5);
         const pazarBonus = Math.round(pazarCalisdi * dailyRate * 1.5);
         const ozetRow = puantajOzet.find(o => o.personel_id === sp.id);
@@ -16225,7 +16225,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   const row = getPuantaj(sp.id, g);
                   return row?.durum === "CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0;
                 }).length;
-                const dailyRateHR = (sp.net_maas||0) / 26;
+                const dailyRateHR = (sp.net_maas||0) / 30;   // bordro esası: ay 30 gün
                 // Gelmedi × extra bakiye mahsuplaşması: önce extra günlerden düşülür, kalan kesilir
                 const ozetRowHR_pre = ozet.find(o => o.personel_id === sp.id);
                 const bakiyeOnceMahsup = ozetRowHR_pre?.dinlenme_bakiye ?? 0;
@@ -17048,7 +17048,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     const row = getPuantaj(p.id, g);
                     return row?.durum==="CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay()===0;
                   }).length;
-                  const dr = (p.net_maas||0) / 26;
+                  const dr = (p.net_maas||0) / 30;   // bordro esası: ay 30 gün
                   const hakedilen = Math.round((p.net_maas||0) - gelmediCount * dr + pazarCalisdiCount * dr * 1.5);
                   const rowBg = pi%2===0?"#fff":"#fafafa";
                   return (
@@ -17124,7 +17124,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 }).map(o => {
                   const tooltipOzet = [
                     `Çalışılan: ${o.calisilan_gun} gün`,
-                    `Gelmedi: ${o.gelmedi_gun||0} gün (kesinti: ₺${Math.round((o.gelmedi_gun||0)*(o.net_maas||0)/26).toLocaleString("tr-TR")})`,
+                    `Gelmedi: ${o.gelmedi_gun||0} gün (kesinti: ₺${Math.round((o.gelmedi_gun||0)*(o.net_maas||0)/30).toLocaleString("tr-TR")})`,
                     `Pazar çalışılan: ${o.pazar_calisdi||0} gün (+₺${(o.pazar_bonus||0).toLocaleString("tr-TR")} prim)`,
                     `Net Maaş: ₺${Number(o.net_maas||0).toLocaleString("tr-TR")}`,
                     `Hakediş: ₺${o.hakedilen_maas.toLocaleString("tr-TR")}`,
