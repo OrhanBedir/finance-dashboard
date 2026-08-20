@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "bordro-30gun-v24" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "saha-oneri-v25" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -1508,6 +1508,79 @@ app.get("/po/eksik-girisler", authMiddleware, async (req, res) => {
     });
   } catch (e) {
     console.error("PO EKSIK GIRISLER ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Saha bazlı akıllı kontrol (20.08.2026 Orhan talebi): Günlük İş Girişi'nde
+// site yazılınca (a) o sahanın eksik kalemleri (PO açık, giriş yok — genel
+// Eksik Kalem kartının sahaya inen hali), (b) benzer tip sahalardan öneri:
+// aynı tipte yaygın girilen ama bu sahada NE PO'su NE girişi olan kalemler
+// ("HW bu tip işlerde bunu da veriyor, talep edilmemiş olabilir" uyarısı).
+app.get("/po/saha-oneri", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.query.site || "").trim().toUpperCase();
+    if (!site || !site.includes("_"))
+      return res.json({ ok: true, site, eksik: [], oneriler: [], toplam_benzer_saha: 0, tip: "" });
+    const tip = site.split("_").slice(1).join("_"); // ES0408_L800_MWA → L800_MWA
+    const [eksik, girilen, poAll, benzer] = await Promise.all([
+      pool.query(`
+        SELECT TRIM(COALESCE(p.item_code,'')) AS item_code,
+               COALESCE(p.item_description,'') AS item_description,
+               COALESCE(p.po_no,'') AS po_no,
+               COALESCE(p.requested_qty,0) AS requested_qty,
+               COALESCE(p.unit_price,0) AS unit_price,
+               COALESCE(p.currency,'TRY') AS currency,
+               to_char(p.acceptance_date,'YYYY-MM-DD') AS acceptance_date
+        FROM po_rows p
+        WHERE UPPER(TRIM(p.site_code)) = $1
+          AND p.acceptance_date >= '2026-07-01'
+          AND UPPER(COALESCE(p.po_status,'OPEN')) = 'OPEN'
+          AND COALESCE(p.requested_qty,0) > 0
+          AND NOT EXISTS (SELECT 1 FROM master_works m
+            WHERE UPPER(TRIM(m.site_code)) = $1
+              AND TRIM(COALESCE(m.item_code,'')) = TRIM(COALESCE(p.item_code,''))
+              AND COALESCE(m.done_qty,0) > 0)
+        ORDER BY 1`, [site]),
+      pool.query(`SELECT DISTINCT TRIM(COALESCE(item_code,'')) AS ic FROM master_works
+        WHERE UPPER(TRIM(site_code)) = $1 AND COALESCE(done_qty,0) > 0`, [site]),
+      pool.query(`SELECT DISTINCT TRIM(COALESCE(item_code,'')) AS ic FROM po_rows
+        WHERE UPPER(TRIM(site_code)) = $1`, [site]),
+      pool.query(`
+        WITH sahalar AS (
+          SELECT DISTINCT UPPER(TRIM(site_code)) AS sc FROM master_works
+          WHERE UPPER(TRIM(site_code)) ~ ('^[A-Z0-9]+_' || $1 || '$')
+            AND UPPER(TRIM(site_code)) <> $2)
+        SELECT TRIM(COALESCE(m.item_code,'')) AS item_code,
+               MAX(COALESCE(m.item_description,'')) AS item_description,
+               COUNT(DISTINCT UPPER(TRIM(m.site_code)))::int AS kac_sahada,
+               (SELECT COUNT(*) FROM sahalar)::int AS toplam_saha,
+               ROUND(AVG(m.done_qty), 1) AS ort_adet
+        FROM master_works m
+        WHERE UPPER(TRIM(m.site_code)) IN (SELECT sc FROM sahalar)
+          AND COALESCE(m.done_qty,0) > 0 AND TRIM(COALESCE(m.item_code,'')) <> ''
+        GROUP BY 1
+        HAVING COUNT(DISTINCT UPPER(TRIM(m.site_code))) >= 3`, [tip, site]),
+    ]);
+    const girilenSet = new Set(girilen.rows.map(x => x.ic));
+    const poSet = new Set(poAll.rows.map(x => x.ic));
+    const toplamSaha = Number(benzer.rows[0]?.toplam_saha || 0);
+    const oneriler = benzer.rows
+      .filter(x => !girilenSet.has(x.item_code) && !poSet.has(x.item_code))
+      .map(x => ({ ...x, yuzde: toplamSaha ? Math.round((100 * x.kac_sahada) / toplamSaha) : 0 }))
+      .filter(x => x.yuzde >= 40)
+      .sort((a, b) => b.yuzde - a.yuzde);
+    // Öneri kalemlerine güncel birim fiyat (son PO satırından)
+    for (const o of oneriler) {
+      const pr = await pool.query(
+        `SELECT unit_price, currency FROM po_rows WHERE TRIM(COALESCE(item_code,'')) = $1
+         ORDER BY id DESC LIMIT 1`, [o.item_code]);
+      o.unit_price = Number(pr.rows[0]?.unit_price || 0);
+      o.currency = pr.rows[0]?.currency || "TRY";
+    }
+    res.json({ ok: true, site, tip, toplam_benzer_saha: toplamSaha, eksik: eksik.rows, oneriler });
+  } catch (e) {
+    console.error("PO SAHA ONERI ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });

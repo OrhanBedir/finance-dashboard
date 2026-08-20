@@ -5688,6 +5688,22 @@ function DailyEntry() {
     }));
   };
 
+  // Akıllı kontrol (20.08.2026): saha yazılınca o sahanın eksik kalemleri +
+  // benzer tip sahalardan "bunu da girmen/talep etmen gerekebilir" önerileri.
+  // Saha girilmediyse hiçbir şey gösterilmez (genel Eksik Kalem kartı yeterli).
+  const [sahaOneri, setSahaOneri] = useState(null);
+  useEffect(() => {
+    const s = String(siteSearchCode || "").trim();
+    if (!s || !s.includes("_") || s.length < 6) { setSahaOneri(null); return; }
+    const t = setTimeout(async () => {
+      try {
+        const d = await fetchJson(`${API_BASE}/po/saha-oneri?site=${encodeURIComponent(s)}`);
+        if (d && d.ok) setSahaOneri(d);
+      } catch { setSahaOneri(null); }
+    }, 700);
+    return () => clearTimeout(t);
+  }, [siteSearchCode]);
+
   const filteredItemCodes = useMemo(() => {
     const q = itemCodeSearch.toLowerCase().trim();
 
@@ -6272,6 +6288,65 @@ function DailyEntry() {
           </table>
         </div>
       </div>
+
+      {/* ═══ AKILLI KONTROL — saha bazlı eksik + benzer saha önerileri ═══ */}
+      {sahaOneri && (sahaOneri.eksik?.length > 0 || sahaOneri.oneriler?.length > 0) && (
+        <div style={{ background:"#fff", borderRadius:14, marginBottom:16, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", overflow:"hidden", border:"1.5px solid #c7d2fe" }}>
+          <div style={{ background:"linear-gradient(135deg,#4338ca,#7c3aed)", padding:"12px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
+            <div style={{ color:"#fff", fontWeight:700, fontSize:14 }}>🤖 Akıllı Kontrol — {sahaOneri.site}</div>
+            <div style={{ color:"rgba(255,255,255,0.8)", fontSize:11.5, fontWeight:600 }}>
+              {sahaOneri.tip} tipi {sahaOneri.toplam_benzer_saha} benzer sahanın verisiyle karşılaştırıldı
+            </div>
+          </div>
+
+          {sahaOneri.eksik?.length > 0 && (
+            <div style={{ padding:"12px 20px", borderBottom:"1px solid #f1f5f9" }}>
+              <div style={{ fontWeight:800, fontSize:13, color:"#b45309", marginBottom:8 }}>
+                ⚠️ Bu sahada PO açılmış ama girilmemiş {sahaOneri.eksik.length} kalem
+                <span style={{ fontWeight:600, color:"#92400e", marginLeft:8, fontSize:12 }}>
+                  (toplam ₺{sahaOneri.eksik.reduce((s,x)=>s+Number(x.requested_qty||0)*Number(x.unit_price||0),0).toLocaleString("tr-TR",{maximumFractionDigits:0})})
+                </span>
+              </div>
+              {sahaOneri.eksik.map((x,i)=>(
+                <div key={`${x.item_code}-${i}`} style={{ display:"flex", justifyContent:"space-between", gap:10, padding:"6px 10px", background: i%2?"#fffbeb":"#fefce8", borderRadius:8, marginBottom:4, fontSize:12.5, flexWrap:"wrap" }}>
+                  <span><b style={{ fontFamily:"monospace" }}>{x.item_code}</b> · {x.item_description}</span>
+                  <span style={{ whiteSpace:"nowrap", color:"#92400e", fontWeight:700 }}>
+                    {Number(x.requested_qty)} adet · PO {x.po_no || "-"} · ₺{(Number(x.requested_qty||0)*Number(x.unit_price||0)).toLocaleString("tr-TR",{maximumFractionDigits:0})}
+                  </span>
+                </div>
+              ))}
+              <div style={{ fontSize:11, color:"#a16207", marginTop:4 }}>Bu kalemler için HW PO açmış — girişini yapmazsan hakedişe dönüşmez.</div>
+            </div>
+          )}
+
+          {sahaOneri.oneriler?.length > 0 && (
+            <div style={{ padding:"12px 20px" }}>
+              <div style={{ fontWeight:800, fontSize:13, color:"#4338ca", marginBottom:8 }}>
+                💡 Benzer sahalara göre bu sahada olmayan kalemler — HW bu tip işlerde bunları da veriyor
+              </div>
+              {sahaOneri.oneriler.map((x,i)=>(
+                <div key={`${x.item_code}-${i}`} style={{ padding:"7px 10px", background: i%2?"#eef2ff":"#f5f3ff", borderRadius:8, marginBottom:4, fontSize:12.5 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", gap:10, flexWrap:"wrap" }}>
+                    <span><b style={{ fontFamily:"monospace" }}>{x.item_code}</b> · {x.item_description}</span>
+                    <span style={{ whiteSpace:"nowrap", fontWeight:800, color:"#4338ca" }}>%{x.yuzde} sahada var</span>
+                  </div>
+                  <div style={{ fontSize:11.5, color:"#6366f1", marginTop:2 }}>
+                    {sahaOneri.tip} sahalarının {x.kac_sahada}/{sahaOneri.toplam_benzer_saha}'inde girilmiş (ort. {Number(x.ort_adet)} adet
+                    {Number(x.unit_price)>0 ? ` · birim ~₺${Number(x.unit_price).toLocaleString("tr-TR",{maximumFractionDigits:0})}` : ""}).
+                    Bu sahada <b>ne PO ne giriş var</b> — iş yapıldıysa girişini, yapılacaksa HW'den PO talebini unutmuş olabilirsin.
+                  </div>
+                </div>
+              ))}
+              <div style={{ fontSize:11, color:"#818cf8", marginTop:4 }}>Öneriler istatistikseldir — her sahada her kalem gerekmeyebilir; saha koşuluna göre değerlendir.</div>
+            </div>
+          )}
+        </div>
+      )}
+      {sahaOneri && sahaOneri.eksik?.length === 0 && sahaOneri.oneriler?.length === 0 && (
+        <div style={{ background:"#f0fdf4", border:"1.5px solid #86efac", borderRadius:12, padding:"10px 18px", marginBottom:16, fontSize:13, fontWeight:700, color:"#15803d" }}>
+          🤖 Akıllı Kontrol: {sahaOneri.site} için eksik giriş yok, benzer saha analizinde de atlanan kalem görünmüyor ✅
+        </div>
+      )}
 
       {/* ═══ GİRİLMİŞ İŞLER CARD ═══ */}
       <div style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", overflow:"hidden", border:"1.5px solid #e2e8f0" }}>
