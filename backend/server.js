@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "taseron-borc-v22" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "borc-trnorm-v23" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -6697,10 +6697,15 @@ app.get("/finance/taseron-borc", authMiddleware, async (req, res) => {
       `SELECT id, taseron_adi, tutar, to_char(tarih,'YYYY-MM-DD') AS tarih,
               COALESCE(aciklama,'') AS aciklama
        FROM taseron_borc ORDER BY taseron_adi, tarih, id`);
-    // Taşeron bazında grupla, T0 = ilk borç kaydının tarihi
+    // Taşeron bazında grupla, T0 = ilk borç kaydının tarihi.
+    // Anahtar Türkçe karakterlerden arındırılır: "HALİL UYAR" ile "HALIL UYAR"
+    // aynı firmadır (20.08.2026 — İ/I farkı iki ayrı taşeron gösteriyordu).
+    const trNorm = (s) => String(s || "").trim().toUpperCase()
+      .replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ğ/g, "G")
+      .replace(/Ü/g, "U").replace(/Ö/g, "O").replace(/Ç/g, "C");
     const grup = {};
     for (const b of borclar.rows) {
-      const key = String(b.taseron_adi || "").trim().toUpperCase().split(" ")[0].split("_")[0] || "?";
+      const key = trNorm(b.taseron_adi).split(/[\s_]/)[0] || "?";
       const g = (grup[key] = grup[key] || { taseron_adi: b.taseron_adi, toplam_borc: 0, t0: b.tarih, kayitlar: [] });
       g.toplam_borc += Number(b.tutar || 0);
       if (b.tarih < g.t0) g.t0 = b.tarih;
@@ -6715,7 +6720,9 @@ app.get("/finance/taseron-borc", authMiddleware, async (req, res) => {
         `SELECT id, firma, tutar, to_char(tarih,'YYYY-MM-DD') AS tarih, COALESCE(aciklama,'') AS aciklama
          FROM taseron_odeme_log
          WHERE tarih >= $1::date
-           AND UPPER(split_part(split_part(TRIM(COALESCE(firma,'')),' ',1),'_',1)) = $2
+           AND split_part(split_part(
+                 UPPER(translate(TRIM(COALESCE(firma,'')),
+                   'İıŞşĞğÜüÖöÇç', 'IISSGGUUOOCC')), ' ', 1), '_', 1) = $2
          ORDER BY tarih DESC, id DESC LIMIT 200`,
         [g.t0, key]);
       const odenen = od.rows.reduce((s, x) => s + Number(x.tutar || 0), 0);
