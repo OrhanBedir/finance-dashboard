@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "saha-oneri-v25" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "oneri-haric-v26" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -1565,8 +1565,20 @@ app.get("/po/saha-oneri", authMiddleware, async (req, res) => {
     const girilenSet = new Set(girilen.rows.map(x => x.ic));
     const poSet = new Set(poAll.rows.map(x => x.ic));
     const toplamSaha = Number(benzer.rows[0]?.toplam_saha || 0);
+    // Yeni süreçte (20.08.2026, Orhan) LOS / Survey / BTK işlerini Huawei
+    // kendisi yapıyor — bu kalemler artık bizde olmadığından öneriye ÇIKMAZ.
+    // Kod listesi + kelime sınırlı regex (dikkat: "closure/closing" içindeki
+    // "los" eşleşmesin diye \b kullanılır).
+    const ONERI_HARIC_KOD = new Set([
+      "8812184870", // Site survey, per Pcs
+      "8812184930", // LOS Site Survey, per Site
+      "8818168525", // EHS Site Survey, per Site
+      "8818278836", // Green Site Project survey, per Pcs
+    ]);
+    const ONERI_HARIC_RE = /\b(LOS|SURVEY|BTK)\b/i;
     const oneriler = benzer.rows
       .filter(x => !girilenSet.has(x.item_code) && !poSet.has(x.item_code))
+      .filter(x => !ONERI_HARIC_KOD.has(x.item_code) && !ONERI_HARIC_RE.test(x.item_description || ""))
       .map(x => ({ ...x, yuzde: toplamSaha ? Math.round((100 * x.kac_sahada) / toplamSaha) : 0 }))
       .filter(x => x.yuzde >= 40)
       .sort((a, b) => b.yuzde - a.yuzde);
