@@ -6617,6 +6617,9 @@ async function ensureSimsekAhyOdemeTable() {
       created_by TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+  // Supabase güvenlik kuralı (20.08.2026 advisory): RLS + service_role policy
+  await pool.query(`ALTER TABLE simsek_ahy_odeme ENABLE ROW LEVEL SECURITY`).catch(() => {});
+  await pool.query(`CREATE POLICY "service_role_all" ON simsek_ahy_odeme TO service_role USING (true) WITH CHECK (true)`).catch(() => {});
 }
 app.get("/finance/simsek-ahy-odeme", authMiddleware, async (req, res) => {
   try {
@@ -6786,6 +6789,10 @@ async function ensureTaseronBorcTable() {
       created_by TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+  // Supabase güvenlik kuralı (20.08.2026 advisory): her yeni tabloda RLS açık
+  // olmalı — yoksa anon key ile REST üzerinden herkes okuyup yazabilir.
+  await pool.query(`ALTER TABLE taseron_borc ENABLE ROW LEVEL SECURITY`).catch(() => {});
+  await pool.query(`CREATE POLICY "service_role_all" ON taseron_borc TO service_role USING (true) WITH CHECK (true)`).catch(() => {});
 }
 app.get("/finance/taseron-borc", authMiddleware, async (req, res) => {
   try {
