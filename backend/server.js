@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "muadil-v27" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-onay-v28" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -15970,6 +15970,31 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
     const today = new Date().toISOString().split("T")[0];
     let updateSql, updateParams;
 
+    // 22.08.2026 (Orhan, mobil şikâyeti): tek tıkta yalnız BİR adım ilerlemesi
+    // mobilde "onayladım ama hâlâ bekliyor" görünüyordu. Çağıran kişi sonraki
+    // adımlar için de yetkiliyse (ör. Orhan hem RM hem PM) zincir, yetkisinin
+    // yettiği en ileri adıma kadar tek seferde ilerletilir. Her adım hâlâ kendi
+    // yetki listesine bağlı — 28.07 kilidi korunur.
+    if (talep.durum === "TALEP" || talep.durum === "ROLLOUT_MUDUR_ONAY") {
+      const pmYetki = avansYetkili(req, "PM");
+      const pdYetki = avansYetkili(req, "PD");
+      if (pmYetki && pdYetki) {
+        const updated = await pool.query(
+          `UPDATE is_avans_talep SET durum='DIREKTOR_ONAY',
+             rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1),
+             pm_onay_tarihi=COALESCE(pm_onay_tarihi,$1), direktor_onay_tarihi=$1
+           WHERE id=$2 RETURNING *`, [today, id]);
+        return res.json(updated.rows[0]);
+      }
+      if (pmYetki) {
+        const updated = await pool.query(
+          `UPDATE is_avans_talep SET durum='PM_ONAY',
+             rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1
+           WHERE id=$2 RETURNING *`, [today, id]);
+        return res.json(updated.rows[0]);
+      }
+    }
+
     if (talep.durum === "TALEP") {
       // Rollout Manager onaylıyor
       updateSql = "UPDATE is_avans_talep SET durum='ROLLOUT_MUDUR_ONAY', rollout_mudur_onay_tarihi=$1 WHERE id=$2 RETURNING *";
@@ -16037,13 +16062,18 @@ app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => 
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
-    if (talep.durum !== "PM_ONAY") {
+    // Mobil pano direktöre TALEP/ROLLOUT/PM_ONAY'ı listeler (mobile-dashboard);
+    // direktör yetkisi PM ve RM adımlarını da kapsadığından hepsi kabul edilir.
+    if (!["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY"].includes(talep.durum)) {
       return res.status(400).json({ error: "Bu durumda direktör onayı yapılamaz" });
     }
     const firmaSecim = normalizeAvansFirma(req.body?.firma);
     const today = new Date().toISOString().split("T")[0];
     const updated = await pool.query(
-      "UPDATE is_avans_talep SET durum='DIREKTOR_ONAY', pm_onay_tarihi=$1, direktor_onay_tarihi=$1, firma=COALESCE($3, firma) WHERE id=$2 RETURNING *",
+      `UPDATE is_avans_talep SET durum='DIREKTOR_ONAY',
+         rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1),
+         pm_onay_tarihi=COALESCE(pm_onay_tarihi,$1), direktor_onay_tarihi=$1,
+         firma=COALESCE($3, firma) WHERE id=$2 RETURNING *`,
       [today, id, firmaSecim]
     );
     res.json(updated.rows[0]);
