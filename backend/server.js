@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-onay-v28" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-detay-v29" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -16484,16 +16484,32 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       const bekleyenDurumlar = isDirektor
         ? ['TALEP', 'ROLLOUT_MUDUR_ONAY', 'PM_ONAY']
         : ['TALEP', 'ROLLOUT_MUDUR_ONAY'];
+      // 22.08.2026 (Orhan): onay ekranında "kim için / not / plaka / KM / firma"
+      // görünmüyordu. Alanlar ayrı gönderilir (yeni mobil build satır satır
+      // gösterir); mevcut build için aciklama metnine de özet eklenir
+      // (aciklama_ham = kullanıcının yazdığı orijinal metin).
       const onayRes = await pool.query(
-        `SELECT id, tutar, aciklama, gider_turu, bolge, proje, durum, tarih, created_at,
-                talep_eden_ad, talep_eden_email
-         FROM is_avans_talep
-         WHERE durum = ANY($1)
-         ORDER BY created_at ASC
+        `SELECT t.id, t.tutar, t.aciklama, t.not_aciklama, t.gider_turu, t.bolge, t.proje,
+                t.durum, t.tarih, t.created_at, t.talep_eden_ad, t.talep_eden_email,
+                t.plaka, t.arac_km, t.firma, p.ad_soyad AS personel_ad, p.unvan AS personel_unvan
+         FROM is_avans_talep t
+         LEFT JOIN personel p ON p.id = t.personel_id
+         WHERE t.durum = ANY($1)
+         ORDER BY t.created_at ASC
          LIMIT 20`,
         [bekleyenDurumlar]
       );
-      onayBekleyenAvanslar = onayRes.rows;
+      onayBekleyenAvanslar = onayRes.rows.map(r => {
+        const parca = [];
+        if (r.personel_ad) parca.push(`Kim için: ${r.personel_ad}${r.personel_unvan ? ` (${r.personel_unvan})` : ""}`);
+        if (r.firma) parca.push(`Firma: ${r.firma}`);
+        if (r.not_aciklama) parca.push(`Not: ${r.not_aciklama}`);
+        if (r.plaka) parca.push(`Plaka: ${r.plaka}`);
+        if (r.arac_km != null && r.arac_km !== "") parca.push(`Araç KM: ${Number(r.arac_km).toLocaleString("tr-TR")}`);
+        const ham = r.aciklama || "";
+        const ozet = parca.join("\n");
+        return { ...r, aciklama_ham: ham, aciklama: [ham, ozet].filter(Boolean).join("\n— — —\n") };
+      });
     }
 
     // 10. PM için onay bekleyen malzeme talepleri (durum='PM_ONAY')
