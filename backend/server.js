@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-yetki-v30" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "fifo-ahy-v31" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -7558,7 +7558,8 @@ app.post("/finance/marka-taseron-odeme", authMiddleware, async (req, res) => {
     // Her iki tipte de taseron_odeme_log'a yazılır (ERC ödeme geçmişi + nakit akışı)
     let dagilim, kalan;
     if (tipNorm === "FATURA_ODEME") {
-      ({ dagilim, kalan } = await fifoTaseronMahsup(client, adi, tutarN, tarih));
+      ({ dagilim, kalan } = await fifoTaseronMahsup(client, adi, tutarN, tarih,
+        String(marka || "AHY").toUpperCase() === "AHY"));
     } else {
       dagilim = [{ fatura_no: "AVANS (fatura bekleniyor)", odeme: tutarN, avans: true }];
       kalan = tutarN;
@@ -7609,7 +7610,8 @@ app.put("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => 
     }
     let dagilim, kalan;
     if (tipNorm === "FATURA_ODEME") {
-      ({ dagilim, kalan } = await fifoTaseronMahsup(client, adi, tutarN, tarih));
+      ({ dagilim, kalan } = await fifoTaseronMahsup(client, adi, tutarN, tarih,
+        String(cur.marka || "AHY").toUpperCase() === "AHY"));
     } else {
       dagilim = [{ fatura_no: "AVANS (fatura bekleniyor)", odeme: tutarN, avans: true }];
       kalan = tutarN;
@@ -20015,13 +20017,20 @@ app.get("/finance/taseron-odeme-excel", requireFinanceAuth, async (req, res) => 
 // FIFO mahsup: firmanın açık faturalarını eskiden yeniye kapatır.
 // Transaction client'ı ile çağrılır; { dagilim, kalan } döner
 // (kalan > 0 → faturaya mahsup edilemeyen kısım = AVANS).
-async function fifoTaseronMahsup(client, firma, odemeAmount, tarih) {
+// 24.08.2026: ahyMi — AHY firmalı faturalar Şimşek ödemeleriyle kapatılmaz
+// (2KX örneği: AHY işine kesilen fatura Şimşek carisine karışıyordu). AHY
+// ödemesi yalnız AHY faturalarını, diğer ödemeler AHY dışını mahsup eder.
+async function fifoTaseronMahsup(client, firma, odemeAmount, tarih, ahyMi = false) {
+  const firmaFiltre = ahyMi
+    ? `AND UPPER(TRIM(COALESCE(firma,''))) = 'AHY'`
+    : `AND UPPER(TRIM(COALESCE(firma,''))) <> 'AHY'`;
   const faturalar = await client.query(`
     SELECT id, fatura_no, toplam_tutar, odenen_tutar,
            COALESCE(kalan_borc, 0) AS kalan_borc
     FROM invoice_entries
     WHERE TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) = $1
       AND COALESCE(kalan_borc, 0) > 0
+      ${firmaFiltre}
     ORDER BY COALESCE(fatura_tarihi, created_at) ASC
     FOR UPDATE
   `, [firma]);
@@ -20077,7 +20086,7 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
     }
 
     // Açık faturalar FIFO kapatılır; kalan kısım AVANS olur
-    const { dagilim, kalan } = await fifoTaseronMahsup(client, firma, odemeAmount, tarih);
+    const { dagilim, kalan } = await fifoTaseronMahsup(client, firma, odemeAmount, tarih, isAhyOdeme);
 
     // Ödeme logu kaydet
     const logIns = await client.query(`
