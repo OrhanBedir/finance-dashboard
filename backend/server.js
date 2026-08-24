@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-detay-v29" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "avans-yetki-v30" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -15940,11 +15940,14 @@ function normalizeAvansFirma(v) {
 
 // İş avansı onay yetkileri — adım bazlı (28.07 olayı: muhasebe/yetkisiz
 // çağrılar zinciri tek başına tamamlayabiliyordu; artık her adım kilitli)
+// 24.08.2026: Orhan'ın iki hesabı var (gmail=platform_admin, simsektel=admin).
+// Mobil gmail ile oturum açınca JWT'deki email listede bulunamıyor ve onay
+// sessizce 403 alıyordu — gmail adresi simsektel ile aynı adımlara eklendi.
 const AVANS_YETKI = {
-  RM:  ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com","orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
-  PM:  ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
+  RM:  ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
+  PM:  ["orhan.bedir@simsektel.com","orhan.bedir@gmail.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
   PD:  ["duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
-  ODE: ["muhasebe@simsektel.com","orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
+  ODE: ["muhasebe@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
 };
 function avansYetkili(req, adim) {
   const email = String(req.user?.email || "").toLowerCase().trim();
