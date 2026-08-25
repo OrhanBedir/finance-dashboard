@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "padmin-koruma-v32" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "nakit-ahy-v33" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -6925,7 +6925,25 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
       // Bugünün ödemeleri sayılmaz (11.08.2026 kuralı): HW aynı günün rakamını
       // ertesi günkü dosyada revize edebiliyor — kart hep kesinleşmiş tahsilatı
       // gösterir, bugün gelen para yarınki yüklemeyle bakiyeye girer.
-      q(`SELECT COALESCE(SUM(payment_amount),0) t FROM hw_payment_rows
+      // 25.08.2026: AHY sahalarına ait pay (kalem bazlı oran × %90) düşülür —
+      // o para AHY panelinde izlenir, Şimşek bankasına yazılmaz.
+      q(`WITH ahyor AS (
+           SELECT regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n,
+                  CASE WHEN SUM(COALESCE(i.invoiced_amount_excl,0)) > 0
+                    THEN 0.9 * SUM(CASE WHEN UPPER(COALESCE((SELECT m.subcon_name FROM master_works m
+                           WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(COALESCE(i.site_id,'')))
+                             AND TRIM(COALESCE(m.item_code,'')) = TRIM(COALESCE(i.item_code,''))
+                           ORDER BY m.done_qty DESC NULLS LAST LIMIT 1),'')) LIKE 'AHY%'
+                         THEN COALESCE(i.invoiced_amount_excl,0) ELSE 0 END)
+                         / SUM(COALESCE(i.invoiced_amount_excl,0))
+                    ELSE 0 END AS oran
+           FROM hw_invoice_items i
+           WHERE TRIM(COALESCE(i.invoice_no,'')) <> ''
+           GROUP BY 1)
+         SELECT COALESCE(SUM(payment_amount * (1 - COALESCE(ao.oran,0))),0) t
+         FROM hw_payment_rows
+         LEFT JOIN ahyor ao ON ao.n =
+           regexp_replace(regexp_replace(TRIM(hw_payment_rows.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
          WHERE COALESCE(currency,'TRY')='TRY' AND payment_date IS NOT NULL
            AND payment_date >= $1::date AND payment_date < CURRENT_DATE`),
       // Şimşek'in ödediği maaşlar (odeyen kolonu, 17.08.2026): ödemeyi kim
@@ -13488,12 +13506,36 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
     const AMT = (col, idx = 2) =>
       `CASE WHEN UPPER(COALESCE(currency,'TRY'))='USD' THEN COALESCE(${col},0) * $${idx} ELSE COALESCE(${col},0) END`;
 
+    // 25.08.2026 (Orhan): 15.07 (T0) sonrası tahsilatlarda AHY sahalarına ait
+    // pay (AHY etiketli kalem tutarı × %90) Şimşek kasasına yazılmaz — o para
+    // AHY panelinde takip edilir. Fatura bazında AHY oranı kalemlerden bulunur,
+    // ödeme/vade tutarı (1 − oran) ile çarpılır. T0 öncesi kayıtlar aynen kalır.
+    const AHY_ORAN_CTE = `
+      ahyor AS (
+        SELECT regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n,
+               CASE WHEN SUM(COALESCE(i.invoiced_amount_excl,0)) > 0
+                 THEN 0.9 * SUM(CASE WHEN UPPER(COALESCE((SELECT m.subcon_name FROM master_works m
+                        WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(COALESCE(i.site_id,'')))
+                          AND TRIM(COALESCE(m.item_code,'')) = TRIM(COALESCE(i.item_code,''))
+                        ORDER BY m.done_qty DESC NULLS LAST LIMIT 1),'')) LIKE 'AHY%'
+                      THEN COALESCE(i.invoiced_amount_excl,0) ELSE 0 END)
+                      / SUM(COALESCE(i.invoiced_amount_excl,0))
+                 ELSE 0 END AS oran
+        FROM hw_invoice_items i
+        WHERE TRIM(COALESCE(i.invoice_no,'')) <> ''
+        GROUP BY 1)`;
+    const AHY_JOIN = `LEFT JOIN ahyor ao ON ao.n =
+      regexp_replace(regexp_replace(TRIM(hw_payment_rows.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')`;
+    const SIMSEK_CARPAN = (dateCol) =>
+      `CASE WHEN ${dateCol} > DATE '2026-07-15' THEN (1 - COALESCE(ao.oran,0)) ELSE 1 END`;
+
     // 1) Gerçekleşen ödemeler — payment_date bu ayda, payment_amount > 0
     const received = await pool.query(`
+      WITH ${AHY_ORAN_CTE}
       SELECT
         EXTRACT(DAY FROM payment_date)::int AS gun,
-        SUM(${AMT("payment_amount")}) AS tutar
-      FROM hw_payment_rows
+        SUM((${AMT("payment_amount")}) * ${SIMSEK_CARPAN("payment_date")}) AS tutar
+      FROM hw_payment_rows ${AHY_JOIN}
       WHERE to_char(payment_date, 'YYYY-MM') = $1
         AND COALESCE(payment_amount, 0) > 0
       GROUP BY gun
@@ -13506,10 +13548,11 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
 
     // 2a) Gelecek bekleyen tahsilat — due_date bu ayda, DUE_DATE > BUGÜN, remaining_amount > 0
     const pending = await pool.query(`
+      WITH ${AHY_ORAN_CTE}
       SELECT
         EXTRACT(DAY FROM due_date)::int AS gun,
-        SUM(${AMT("remaining_amount", 3)}) AS tutar
-      FROM hw_payment_rows
+        SUM((${AMT("remaining_amount", 3)}) * ${SIMSEK_CARPAN("due_date")}) AS tutar
+      FROM hw_payment_rows ${AHY_JOIN}
       WHERE to_char(due_date, 'YYYY-MM') = $1
         AND COALESCE(remaining_amount, 0) > 0
         AND due_date > $2::date
@@ -13519,10 +13562,11 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
 
     // 2b) Geciken/bugün vadeli ödenmemiş — due_date bu ayda, DUE_DATE <= BUGÜN, remaining_amount > 0
     const overdueHw = await pool.query(`
+      WITH ${AHY_ORAN_CTE}
       SELECT
         EXTRACT(DAY FROM due_date)::int AS gun,
-        SUM(${AMT("remaining_amount", 3)}) AS tutar
-      FROM hw_payment_rows
+        SUM((${AMT("remaining_amount", 3)}) * ${SIMSEK_CARPAN("due_date")}) AS tutar
+      FROM hw_payment_rows ${AHY_JOIN}
       WHERE to_char(due_date, 'YYYY-MM') = $1
         AND COALESCE(remaining_amount, 0) > 0
         AND due_date <= $2::date
