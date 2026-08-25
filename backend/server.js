@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hakedis-manuel-v34" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "ahy-oran-hizli-v35" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -6927,17 +6927,23 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
       // gösterir, bugün gelen para yarınki yüklemeyle bakiyeye girer.
       // 25.08.2026: AHY sahalarına ait pay (kalem bazlı oran × %90) düşülür —
       // o para AHY panelinde izlenir, Şimşek bankasına yazılmaz.
-      q(`WITH ahyor AS (
+      q(`WITH ahy_mw AS (
+           SELECT DISTINCT ON (UPPER(TRIM(site_code)), TRIM(COALESCE(item_code,'')))
+                  UPPER(TRIM(site_code)) sc, TRIM(COALESCE(item_code,'')) ic,
+                  (UPPER(COALESCE(subcon_name,'')) LIKE 'AHY%') AS ahy
+           FROM master_works
+           ORDER BY UPPER(TRIM(site_code)), TRIM(COALESCE(item_code,'')), done_qty DESC NULLS LAST
+         ),
+         ahyor AS (
            SELECT regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n,
                   CASE WHEN SUM(COALESCE(i.invoiced_amount_excl,0)) > 0
-                    THEN 0.9 * SUM(CASE WHEN UPPER(COALESCE((SELECT m.subcon_name FROM master_works m
-                           WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(COALESCE(i.site_id,'')))
-                             AND TRIM(COALESCE(m.item_code,'')) = TRIM(COALESCE(i.item_code,''))
-                           ORDER BY m.done_qty DESC NULLS LAST LIMIT 1),'')) LIKE 'AHY%'
+                    THEN 0.9 * SUM(CASE WHEN COALESCE(m.ahy,false)
                          THEN COALESCE(i.invoiced_amount_excl,0) ELSE 0 END)
                          / SUM(COALESCE(i.invoiced_amount_excl,0))
                     ELSE 0 END AS oran
            FROM hw_invoice_items i
+           LEFT JOIN ahy_mw m ON m.sc = UPPER(TRIM(COALESCE(i.site_id,'')))
+                             AND m.ic = TRIM(COALESCE(i.item_code,''))
            WHERE TRIM(COALESCE(i.invoice_no,'')) <> ''
            GROUP BY 1)
          SELECT COALESCE(SUM(payment_amount * (1 - COALESCE(ao.oran,0))),0) t
@@ -13510,18 +13516,27 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
     // pay (AHY etiketli kalem tutarı × %90) Şimşek kasasına yazılmaz — o para
     // AHY panelinde takip edilir. Fatura bazında AHY oranı kalemlerden bulunur,
     // ödeme/vade tutarı (1 − oran) ile çarpılır. T0 öncesi kayıtlar aynen kalır.
+    // 25.08.2026 akşam: kalem başına correlated subquery havuzu kilitliyordu
+    // (100+ sn, "timeout exceeded when trying to connect") — DISTINCT ON +
+    // hash join sürümü ~80 ms, sonuç birebir aynı.
     const AHY_ORAN_CTE = `
+      ahy_mw AS (
+        SELECT DISTINCT ON (UPPER(TRIM(site_code)), TRIM(COALESCE(item_code,'')))
+               UPPER(TRIM(site_code)) sc, TRIM(COALESCE(item_code,'')) ic,
+               (UPPER(COALESCE(subcon_name,'')) LIKE 'AHY%') AS ahy
+        FROM master_works
+        ORDER BY UPPER(TRIM(site_code)), TRIM(COALESCE(item_code,'')), done_qty DESC NULLS LAST
+      ),
       ahyor AS (
         SELECT regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n,
                CASE WHEN SUM(COALESCE(i.invoiced_amount_excl,0)) > 0
-                 THEN 0.9 * SUM(CASE WHEN UPPER(COALESCE((SELECT m.subcon_name FROM master_works m
-                        WHERE UPPER(TRIM(m.site_code)) = UPPER(TRIM(COALESCE(i.site_id,'')))
-                          AND TRIM(COALESCE(m.item_code,'')) = TRIM(COALESCE(i.item_code,''))
-                        ORDER BY m.done_qty DESC NULLS LAST LIMIT 1),'')) LIKE 'AHY%'
+                 THEN 0.9 * SUM(CASE WHEN COALESCE(m.ahy,false)
                       THEN COALESCE(i.invoiced_amount_excl,0) ELSE 0 END)
                       / SUM(COALESCE(i.invoiced_amount_excl,0))
                  ELSE 0 END AS oran
         FROM hw_invoice_items i
+        LEFT JOIN ahy_mw m ON m.sc = UPPER(TRIM(COALESCE(i.site_id,'')))
+                          AND m.ic = TRIM(COALESCE(i.item_code,''))
         WHERE TRIM(COALESCE(i.invoice_no,'')) <> ''
         GROUP BY 1)`;
     const AHY_JOIN = `LEFT JOIN ahyor ao ON ao.n =
