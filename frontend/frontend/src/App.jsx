@@ -15995,6 +15995,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     const allRows = aktifPer.map(p => {
                       const ozO    = ozet.find(o=>String(o.personel_id)===String(p.id));
                       const hakEdis  = Math.round(ahyMaasPay(p, ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0)));
+                      // Manuel hakediş işareti (25.08.2026): hücreye tıklayıp elle girilen tutar
+                      const hakManuel = !!(ozO && ozO.hakedis_manuel);
+                      const hakOto    = ozO ? Math.round(ahyMaasPay(p, Number(ozO.hakedis_otomatik||0))) : null;
                       const avans    = avansMapByPer[p.id]  || 0;
                       const isAvans  = isAvansMapByPer[p.id] || 0;
                       const banka    = bankaByPer[p.id]     || 0;
@@ -16010,7 +16013,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       const fazla    = odenen > 0 ? Math.max(0, odenen - gereken) : 0;
                       const odeSimsek = odeSimsekByPer[p.id] || 0;
                       const odeAhy    = odeAhyByPer[p.id]    || 0;
-                      return { ...p, hakEdis, avans, isAvans, banka, elden, odenen, kalan, fazla, devir, odeSimsek, odeAhy };
+                      return { ...p, hakEdis, hakManuel, hakOto, avans, isAvans, banka, elden, odenen, kalan, fazla, devir, odeSimsek, odeAhy };
                     });
                     // Tablo satırları: filtre seçiliyse sadece o personel
                     const perRows = hrPersonelFilter
@@ -16239,8 +16242,30 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     <td style={{ padding:"7px 12px", color:"#6b7280", whiteSpace:"nowrap" }}>{p.unvan||"-"}</td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color:"#0369a1", fontWeight:600 }}
                                       title="Aylık net maaş (tam ay)">₺{Number(p.net_maas||0).toLocaleString("tr-TR")}</td>
-                                    <td style={{ padding:"7px 12px", textAlign:"right", fontWeight:600 }}
-                                      title="Bu ayki hakediş (işe giriş / puantaj / devir payına göre)">₺{p.hakEdis.toLocaleString("tr-TR")}</td>
+                                    <td
+                                      onClick={async ()=>{
+                                        const mevcut = p.hakManuel ? String(p.hakEdis) : "";
+                                        const otoTxt = p.hakOto!=null ? ` ₺${p.hakOto.toLocaleString("tr-TR")}` : "";
+                                        const giris = window.prompt(`${p.ad_soyad} — ${ayAdi} hakediş tutarı\n(Boş bırak + Tamam = otomatik hesaba dön${otoTxt})`, mevcut);
+                                        if (giris === null) return;
+                                        const temiz = giris.trim().replace(/\./g,"").replace(/\s/g,"").replace(",",".");
+                                        if (temiz !== "" && !Number.isFinite(Number(temiz))) { alert("Geçersiz tutar"); return; }
+                                        try {
+                                          const r = await fetch(`${API_BASE}/hr/hakedis-override`, {
+                                            method:"PUT",
+                                            headers:{ "Content-Type":"application/json", Authorization:`Bearer ${localStorage.getItem("token")||""}` },
+                                            body: JSON.stringify({ personel_id: p.id, donem: puantajAy, tutar: temiz === "" ? null : Number(temiz) }),
+                                          });
+                                          const d = await r.json().catch(()=>({}));
+                                          if (!r.ok || d.error) { alert(d.error || "Kaydedilemedi"); return; }
+                                          loadOzet();
+                                        } catch { alert("Kaydedilemedi"); }
+                                      }}
+                                      style={{ padding:"7px 12px", textAlign:"right", fontWeight:600, cursor:"pointer", color: p.hakManuel ? "#b45309" : undefined, textDecoration:"underline dotted", textUnderlineOffset:"3px" }}
+                                      title={p.hakManuel
+                                        ? `Manuel girildi (otomatik hesap: ₺${(p.hakOto??0).toLocaleString("tr-TR")}). Tıkla: değiştir; boş bırak = otomatiğe dön`
+                                        : "Bu ayki hakediş (işe giriş / puantaj / devir payına göre). Tıkla: manuel tutar gir"}
+                                    >₺{p.hakEdis.toLocaleString("tr-TR")}{p.hakManuel && <span> ✏️</span>}</td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.banka>0?"#1d4ed8":"#9ca3af", fontWeight:600 }}>
                                       {p.banka>0 ? `₺${p.banka.toLocaleString("tr-TR")}` : "—"}
                                     </td>

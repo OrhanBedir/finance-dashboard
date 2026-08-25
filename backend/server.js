@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "nakit-ahy-v33" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "hakedis-manuel-v34" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -14810,6 +14810,49 @@ app.delete("/hr/puantaj/:id/not", async (req, res) => {
 });
 
 // Ay özeti: her personel için hakediş hesabı
+// ── MANUEL HAKEDİŞ (25.08.2026, Orhan) ──
+// İK maaş tablosunda hakediş hücresine tıklanıp elle tutar girilebilir;
+// girilen ay için sistem hesabını ezer, boş kaydedilince otomatiğe döner.
+pool.query(`CREATE TABLE IF NOT EXISTS maas_hakedis_override (
+  id SERIAL PRIMARY KEY,
+  personel_id INTEGER NOT NULL,
+  donem TEXT NOT NULL,
+  tutar NUMERIC NOT NULL,
+  created_by TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(personel_id, donem)
+)`).then(() => Promise.all([
+  pool.query(`ALTER TABLE maas_hakedis_override ENABLE ROW LEVEL SECURITY`).catch(() => {}),
+  pool.query(`DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='maas_hakedis_override' AND policyname='service_role_all') THEN
+      CREATE POLICY service_role_all ON maas_hakedis_override FOR ALL TO service_role USING (true) WITH CHECK (true);
+    END IF; END $$`).catch(() => {}),
+])).catch(() => {});
+
+const HAKEDIS_OVERRIDE_ROLLER = ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"];
+app.put("/hr/hakedis-override", authMiddleware, async (req, res) => {
+  try {
+    if (!HAKEDIS_OVERRIDE_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ error: "Yetkiniz yok" });
+    const { personel_id, donem, tutar } = req.body;
+    if (!personel_id || !/^\d{4}-\d{2}$/.test(String(donem || "")))
+      return res.status(400).json({ error: "personel_id ve donem (YYYY-AA) zorunlu" });
+    if (tutar === null || tutar === undefined || tutar === "") {
+      await pool.query(`DELETE FROM maas_hakedis_override WHERE personel_id=$1 AND donem=$2`, [personel_id, donem]);
+      return res.json({ ok: true, silindi: true });
+    }
+    const t = Number(tutar);
+    if (!Number.isFinite(t) || t < 0) return res.status(400).json({ error: "Geçersiz tutar" });
+    await pool.query(
+      `INSERT INTO maas_hakedis_override (personel_id, donem, tutar, created_by)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (personel_id, donem)
+       DO UPDATE SET tutar=EXCLUDED.tutar, created_by=EXCLUDED.created_by, created_at=CURRENT_TIMESTAMP`,
+      [personel_id, donem, t, req.user?.email || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/hr/puantaj/ozet", async (req, res) => {
   try {
     const { ay, yil } = req.query;
@@ -14864,6 +14907,15 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
        WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2 AND avans_turu='MAAS' GROUP BY personel_id`, [ay, yil]
     );
 
+    // Manuel hakediş (25.08.2026): bu ay için elle girilmiş tutarlar sistem
+    // hesabını ezer (İK tablosunda hakediş hücresine tıklanarak girilir).
+    const donemStr = `${yil}-${String(ay).padStart(2, "0")}`;
+    const overrideMap = {};
+    try {
+      const ov = await pool.query(`SELECT personel_id, tutar FROM maas_hakedis_override WHERE donem=$1`, [donemStr]);
+      ov.rows.forEach(r => { overrideMap[r.personel_id] = Number(r.tutar); });
+    } catch {}
+
     // Bordro esası (20.08.2026 — Orhan kararı): SGK/bordro pratiğinde ay 30 gün
     // sayılır. Hem işe giriş pro-rata'sı hem devamsızlık kesintisi AYNI tabandan
     // (net/30) hesaplanır — eskiden giriş oranı takvim günü (28/30/31), kesinti
@@ -14900,13 +14952,24 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
         }
       }
       // Pazar/resmi tatil bonusu maaşa EKLENMEZ — dinlenme bakiyesine birikir
-      const hakedilen = Math.max(0, Math.round(netMaas * girisFactor - gelmedi * dailyRate));
+      const hakedilenOto = Math.max(0, Math.round(netMaas * girisFactor - gelmedi * dailyRate));
       const pazarBonus = 0; // Artık maaşa yansımıyor, dinlenme hakkı olarak birikiyor
 
       const bankaDailyRate = (Number(p.bankadan_gosterilen) || 0) / REFERANS_GUN;
       const eldenDailyRate = (Number(p.elden_verilen) || 0) / REFERANS_GUN;
-      const bankadan = Math.max(0, Math.round((Number(p.bankadan_gosterilen) || 0) * girisFactor - gelmedi * bankaDailyRate));
-      const elden = Math.max(0, Math.round((Number(p.elden_verilen) || 0) * girisFactor - gelmedi * eldenDailyRate));
+      let bankadan = Math.max(0, Math.round((Number(p.bankadan_gosterilen) || 0) * girisFactor - gelmedi * bankaDailyRate));
+      let elden = Math.max(0, Math.round((Number(p.elden_verilen) || 0) * girisFactor - gelmedi * eldenDailyRate));
+
+      // Manuel hakediş varsa sistem hesabını ezer; banka/elden ayrımı da
+      // manuel tutarın net maaşa oranıyla ölçeklenir
+      const manuelTutar = overrideMap[p.id];
+      const hakedisManuel = manuelTutar != null;
+      const hakedilen = hakedisManuel ? Math.max(0, Math.round(manuelTutar)) : hakedilenOto;
+      if (hakedisManuel) {
+        const oran = netMaas > 0 ? hakedilen / netMaas : 1;
+        bankadan = Math.round((Number(p.bankadan_gosterilen) || 0) * oran);
+        elden = Math.round((Number(p.elden_verilen) || 0) * oran);
+      }
 
       const avansRow = avansList.rows.find(a => a.personel_id === p.id);
       const avans = Number(avansRow?.toplam || 0);
@@ -14927,6 +14990,7 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
         calisilan_gun: calisilan, gelmedi_gun: gelmedi, pazar_calisdi: pazarCalisdi,
         pazar_bonus: pazarBonus, dinlenme_gun: dinlenme, toplam_gun: totalDays,
         hakedilen_maas: hakedilen, bankadan, elden, avans,
+        hakedis_manuel: hakedisManuel, hakedis_otomatik: hakedilenOto,
         kalan: hakedilen - avans,
         dinlenme_bakiye: dinlenmeBakiye,
         toplam_pazar_calisdi: toplamPazarCalisdi,
