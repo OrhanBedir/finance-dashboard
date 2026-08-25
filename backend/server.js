@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "fifo-ahy-v31" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "padmin-koruma-v32" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -367,11 +367,17 @@ function adminCreateTenant(reqUser) {
   return isIsolatedTenant(myTenant) ? myTenant : null;
 }
 // Bir mutasyon ucunda hedef kullanıcıyı görme yetkisini kontrol eder.
+// 25.08.2026: platform_admin (uygulama sahibi) hesabı yalnız platform_admin
+// yönetebilir — firma adminleri şifresini/rolünü/durumunu değiştiremez, silemez.
 async function guardUserScope(req, res, id) {
   try {
-    const r = await pool.query("SELECT tenant FROM users WHERE id=$1", [id]);
+    const r = await pool.query("SELECT tenant, role FROM users WHERE id=$1", [id]);
     if (r.rows.length === 0) {
       res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
+      return false;
+    }
+    if (r.rows[0].role === "platform_admin" && req.user?.role !== "platform_admin") {
+      res.status(403).json({ ok: false, error: "Bu hesap üzerinde işlem yetkiniz yok" });
       return false;
     }
     if (!adminCanSeeUserTenant(req.user, r.rows[0].tenant)) {
@@ -454,7 +460,10 @@ app.get("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
     `);
 
     // Firma-bazlı görünürlük: admin sadece kendi kapsamındaki kullanıcıları görür.
-    const visible = result.rows.filter((u) => adminCanSeeUserTenant(req.user, u.tenant));
+    // platform_admin hesapları listede yalnız platform_admin'e görünür (25.08.2026).
+    const visible = result.rows.filter((u) =>
+      adminCanSeeUserTenant(req.user, u.tenant) &&
+      (u.role !== "platform_admin" || req.user?.role === "platform_admin"));
     res.json({ ok: true, users: visible });
   } catch (err) {
     console.error("ADMIN USERS LIST ERROR:", err);
@@ -471,6 +480,10 @@ app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
     const _isFullAdmin = req.user.role === "admin" || req.user.role === "platform_admin";
     if (!_isFullAdmin && ["admin", "platform_admin", "direktor"].includes(String(role))) {
       return res.status(403).json({ ok: false, error: "Bu rolde kullanıcıyı yalnız tam yetkili admin oluşturabilir" });
+    }
+    // platform_admin hesabını yalnız platform_admin oluşturabilir (25.08.2026)
+    if (String(role) === "platform_admin" && req.user.role !== "platform_admin") {
+      return res.status(403).json({ ok: false, error: "Bu rolde kullanıcı oluşturma yetkiniz yok" });
     }
 
     if (!name || !email || !password) {
