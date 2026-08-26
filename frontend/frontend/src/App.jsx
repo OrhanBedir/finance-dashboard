@@ -11664,16 +11664,31 @@ function FinanceDashboard({
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
                     {[
-                      { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara" },
-                      { label: "Proje", name: "proje", placeholder: "TT / TC" },
-                      { label: "Proje Kodu", name: "proje_kodu", placeholder: "56A0QEF" },
+                      { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara", list: "dl-fatura-bolge" },
+                      { label: "Proje", name: "proje", placeholder: "TT / TC", list: "dl-fatura-proje" },
+                      { label: "Proje Kodu", name: "proje_kodu", placeholder: "56A0QEF", list: "dl-fatura-projekod" },
                     ].map(f => (
                       <div key={f.name}>
                         <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
+                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder} list={f.list}
                           style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
                       </div>
                     ))}
+                    {/* 26.08.2026 (Orhan): Bölge = önce İzmir/Ankara/Antalya, sonra tüm iller;
+                        Proje Kodu = sistemdeki kayıtlı kodlar + faturalardan görülenler */}
+                    <datalist id="dl-fatura-bolge">
+                      {["İzmir","Ankara","Antalya",
+                        "Adana","Adıyaman","Afyonkarahisar","Ağrı","Aksaray","Amasya","Ardahan","Artvin","Aydın","Balıkesir","Bartın","Batman","Bayburt","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum","Denizli","Diyarbakır","Düzce","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun","Gümüşhane","Hakkari","Hatay","Iğdır","Isparta","İstanbul","Kahramanmaraş","Karabük","Karaman","Kars","Kastamonu","Kayseri","Kırıkkale","Kırklareli","Kırşehir","Kilis","Kocaeli","Konya","Kütahya","Malatya","Manisa","Mardin","Mersin","Muğla","Muş","Nevşehir","Niğde","Ordu","Osmaniye","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas","Şanlıurfa","Şırnak","Tekirdağ","Tokat","Trabzon","Tunceli","Uşak","Van","Yalova","Yozgat","Zonguldak"
+                      ].map(s => <option key={s} value={s} />)}
+                    </datalist>
+                    <datalist id="dl-fatura-proje">
+                      {["TT","TC"].map(s => <option key={s} value={s} />)}
+                    </datalist>
+                    <datalist id="dl-fatura-projekod">
+                      {[...new Set(["56A0TCT","56A0QEF","56A0819","56A0NCD","56A0SJC",
+                        ...manualInvoiceRows.map(r => (r.proje_kodu || "").trim()).filter(Boolean)])]
+                        .sort().map(k => <option key={k} value={k} />)}
+                    </datalist>
                   </div>
                 </div>
 
