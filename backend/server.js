@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "tevkifat-v37" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "ahy-taseron-etiket-v38" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -5305,7 +5305,11 @@ app.post("/finance/invoice-entry/add", async (req, res) => {
       return res.status(409).json({ ok: false,
         error: `Bu fatura numarası zaten kayıtlı (${mukerrer.tedarikci} · ${mukerrer.firma === "AHY" ? "AHY" : "Şimşek"} etiketi). Aynı faturayı ikinci kez girmeyin — iki panel de aynı kayıttan beslenir.` });
     }
-    const firmaNorm = String(firma || "").toUpperCase() === "AHY" ? "AHY" : "SIMSEK";
+    // 26.08.2026 (Orhan): taşeron kaydı AHY_ önekli ise (AHY_FERRUMX vb.) iş
+    // AHY dönemine aittir — firma toggle'ı unutulsa bile fatura otomatik AHY
+    // etiketi alır ki AHY yöneticileri panelde iş/fatura durumunu görebilsin.
+    const ahyTaseronMu = /^AHY[_\s]/i.test(String(rf_montaj_firma || "").trim());
+    const firmaNorm = (String(firma || "").toUpperCase() === "AHY" || ahyTaseronMu) ? "AHY" : "SIMSEK";
 
     const result = await pool.query(
       `
@@ -10454,7 +10458,10 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
         note || null,
         currency || 'TRY',
         Number(usd_kur || 1),
-        firma ? (String(firma).toUpperCase() === "AHY" ? "AHY" : "SIMSEK") : null,
+        // AHY_ önekli taşeron kaydı → otomatik AHY etiketi (bkz. invoice-entry/add)
+        (/^AHY[_\s]/i.test(String(rf_montaj_firma || "").trim()))
+          ? "AHY"
+          : (firma ? (String(firma).toUpperCase() === "AHY" ? "AHY" : "SIMSEK") : null),
         id,
       ],
     );

@@ -9370,6 +9370,11 @@ function FinanceDashboard({
         ...prev,
         [name]: value,
       };
+      // AHY_ önekli taşeron kaydı (AHY_FERRUMX vb.) → firma otomatik AHY:
+      // fatura AHY panelindeki Taşeron Faturaları'nda görünür (26.08.2026)
+      if (name === "rf_montaj_firma" && /^AHY[_\s]/i.test(value.trim())) {
+        updated.firma = "AHY";
+      }
 
       const tutar = Number(updated.tutar || 0);
       const kdv = Number(updated.kdv || 0);
