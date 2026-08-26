@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "ahy-oran-hizli-v35" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "pdf-cop-ocr-v36" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -14179,6 +14179,11 @@ function parseTurkishInvoice(rawText) {
   if (!toplam && tutar && kdv) toplam = Math.round((tutar + kdv) * 100) / 100;
   if (!kdv && toplam && tutar && toplam >= tutar) kdv = Math.round((toplam - tutar) * 100) / 100;
   if (!tutar && toplam && kdv && toplam >= kdv) tutar = Math.round((toplam - kdv) * 100) / 100;
+  // 26.08.2026: OCR bazen KDV hücresine toplam tutarı yazıyor (%0 KDV'li
+  // faturalar) — kdv=tutar=toplam tutarsızsa KDV farktan yeniden hesaplanır
+  if (kdv && tutar && toplam && Number(kdv) === Number(toplam) && Number(tutar) === Number(toplam)) {
+    kdv = Math.round((Number(toplam) - Number(tutar)) * 100) / 100;
+  }
 
   return {
     fatura_no,
@@ -14266,12 +14271,24 @@ async function extractPdfText(pdfBuffer, isPDF) {
   // e-fatura PDF'lerinin metni buradan çıkar — OCR'a yalnız taramalılar düşer.
   // OCR bazı etiket hücrelerini ("Hesaplanan KDV", "Ödenecek Tutar") hiç
   // okuyamıyordu ve tutarlar boş kalıyordu (ASY vakası, 11.08.2026).
+  // 26.08.2026 (faturamyolda vakası): Type3/custom-glyph fontlu PDF'lerde
+  // pdf2json harfleri çözemeyip "G G Ş İ D..." çöpü üretiyor; metin "dolu"
+  // göründüğünden OCR'a düşülmüyordu. Çöp tespiti: 3+ harfli kelime yoksa
+  // metin geçersiz sayılır ve OCR'a düşülür.
+  const pdfTextCop = (text) => {
+    const kelime = (text.match(/[A-Za-zÇĞİÖŞÜçğıöşü]{3,}/g) || []).length;
+    const karakter = text.replace(/\s/g, "").length;
+    return karakter > 100 && kelime < karakter / 20;
+  };
   if (isPDF) {
     try {
       const text = await extractPdfTextPdf2json(pdfBuffer);
-      if (text && text.trim().length > 50) {
+      if (text && text.trim().length > 50 && !pdfTextCop(text)) {
         console.log("[invoice-parse] pdf2json snippet:", text.slice(0, 300));
         return text;
+      }
+      if (text && pdfTextCop(text)) {
+        console.warn("[invoice-parse] pdf2json cop metin (Type3 font?), OCR'a dusuluyor");
       }
     } catch (e) {
       console.warn("[invoice-parse] pdf2json failed, falling back to OCR:", e.message);
