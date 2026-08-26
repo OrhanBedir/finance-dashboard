@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "pdf-cop-ocr-v36" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "tevkifat-v37" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -14122,6 +14122,11 @@ function parseTurkishInvoice(rawText) {
   // e-fatura'da etiket ve tutar ayrı satırlarda olabilir.
   // Özel durum: "Hesaplanan GERÇEK USULDE KATMA" + "DEĞER VERGİSİ(%20)" gibi
   // iki satıra bölünmüş etiketler için bitişik satırları da kontrol et.
+  // 26.08.2026: pdfminer bazı e-arşiv PDF'lerini TEK dev satır olarak verir —
+  // etiket satırında sayı ararken satırın başından değil, ETİKETTEN SONRAKİ
+  // kısımdan aranmalı (yoksa "%0,00" iskonto oranı yakalanıyordu, GIB...147
+  // tevkifat vakası). (?<!%) — "%20,00" gibi oran sayıları tutar sanılmasın.
+  const NUM_RE = /(?<!%)([\d.]+,\d{2})/;
   const findAmount = (labelRe) => {
     for (let i = 0; i < lines.length; i++) {
       const matchSingle   = labelRe.test(lines[i]);
@@ -14129,21 +14134,22 @@ function parseTurkishInvoice(rawText) {
       const matchCombined = !matchSingle && i + 1 < lines.length
                             && labelRe.test(lines[i] + " " + lines[i + 1]);
       if (matchSingle || matchCombined) {
-        // Aynı satırda sayı: tek-satır eşleşmesinde kontrol et.
+        // Aynı satırda sayı: etiketin geçtiği konumdan SONRASINI ara.
         if (matchSingle) {
-          const m = lines[i].match(/([\d.]+,\d{2})/);
+          const at = lines[i].search(labelRe);
+          const m = lines[i].slice(at).match(NUM_RE);
           if (m) return m[1];
         }
         // matchCombined: etiket lines[i+1] içinde olabilir, değer de aynı satırda olabilir.
         // Önce lines[i+1]'i kontrol et, sonra i+2'den ileriye bak.
         if (matchCombined) {
-          const mNext = lines[i + 1].match(/([\d.]+,\d{2})/);
+          const mNext = lines[i + 1].match(NUM_RE);
           if (mNext) return mNext[1];
         }
         // Sayıyı sonraki 1-3 satırda ara
         const searchFrom = matchCombined ? i + 2 : i + 1;
         for (let j = searchFrom; j < Math.min(searchFrom + 3, lines.length); j++) {
-          const m2 = lines[j].match(/([\d.]+,\d{2})/);
+          const m2 = lines[j].match(NUM_RE);
           if (m2) return m2[1];
         }
       }
@@ -14154,30 +14160,54 @@ function parseTurkishInvoice(rawText) {
     return "";
   };
 
-  // toplam: "Ödenecek Tutar" veya "Vergiler Dahil Toplam Tutar" — TOPLAM\s*TUTAR yok
-  // (çünkü "Mal Hizmet Toplam Tutarı" da eşleşir ve yanlış değer verir)
-  const toplam_raw  = findAmount(/[ÖO]DENECEK\s*TUTAR|VERGiLER\s*DAHiL\s*TOPLAM|VERGİLER\s*DAHİL\s*TOPLAM|GENEL\s*TOPLAM/i);
+  // toplam — 26.08.2026 (tevkifat vakası): KDV tevkifatlı faturalarda
+  // "Vergiler Dahil Toplam" ile "Ödenecek Tutar" FARKLIDIR — tevkif edilen
+  // KDV satıcıya değil, alıcı tarafından sorumlu sıfatıyla (2 no.lu KDV
+  // beyannamesi) vergi dairesine ödenir. Firmaya ödenecek gerçek borç
+  // "Ödenecek Tutar"dır; bu yüzden önce o aranır, bulunamazsa Vergiler
+  // Dahil / Genel Toplam kullanılır.
+  const odenecek_raw = findAmount(/[ÖO0]DENECEK\s*TUTAR/i);
+  const vergili_raw  = findAmount(/VERGiLER\s*DAHiL\s*TOPLAM|VERGİLER\s*DAHİL\s*TOPLAM|GENEL\s*TOPLAM/i);
+  const toplam_raw   = odenecek_raw || vergili_raw;
+  // KDV tevkifatı (kısmi tevkifat: nakliye 2/10, işgücü 9/10 vb.) — önce
+  // özet bloktaki "Hesaplanan KDV Tevkifat" etiketi (tablo hücresindeki
+  // "KDV TEVKİFAT (%20,00)=..." biçiminden daha güvenilir)
+  const tevkifat_raw = findAmount(/HESAPLANAN\s*KDV\s*TEVK[İIi]FAT/i) || findAmount(/KDV\s*TEVK[İIi]FAT/i);
   // kdv: önce en spesifik "Hesaplanan KDV" etiketini ara (tablo başlığı olan
   // "KDV Tutarı" veya "KDV %20" daha önce yanlış eşleşmesin diye).
-  let kdv_raw = findAmount(/HESAPLANAN\s*KDV|KATMA\s*DE[ĞG]ER\s*VERG|DEĞER\s*VERGİSİ|DEGER\s*VERGISI/i);
+  // (?!\s*Tevk) — "Hesaplanan KDV Tevkifat" satırı KDV sanılmasın.
+  let kdv_raw = findAmount(/HESAPLANAN\s*KDV(?!\s*TEVK)|KATMA\s*DE[ĞG]ER\s*VERG|DEĞER\s*VERGİSİ|DEGER\s*VERGISI/i);
   if (!kdv_raw) kdv_raw = findAmount(/KDV\s*TUTARI|KDV\s*%\d/i);
   // matrah: "Mal Hizmet Toplam Tutarı" + genel TOPLAM\s*TUTAR
   const matrah_raw  = findAmount(/MAL\s*H[İI]ZMET\s*TOPLAM|MATRAH|KDV\s*HAR[İI][ÇC]|ARA\s*TOPLAM|TOPLAM\s*TUTAR/i);
 
-  console.log("[parseTurkishInvoice]", { fatura_no, fatura_tarihi, tedarikci, toplam_raw, kdv_raw, matrah_raw });
+  console.log("[parseTurkishInvoice]", { fatura_no, fatura_tarihi, tedarikci, toplam_raw, kdv_raw, matrah_raw, tevkifat_raw });
 
   let tutar  = parseTRNum(matrah_raw);
   let kdv    = parseTRNum(kdv_raw);
   let toplam = parseTRNum(toplam_raw);
+  const tevkifat = parseTRNum(tevkifat_raw);
+  const vergiliToplam = parseTRNum(vergili_raw);
+  // Ödenecek Tutar okunamadıysa tevkifat düşülerek türetilir
+  if (tevkifat && vergiliToplam && (!toplam || Number(toplam) === Number(vergiliToplam))) {
+    toplam = String(Math.round((Number(vergiliToplam) - Number(tevkifat)) * 100) / 100);
+  }
   // OCR bazı etiketleri okuyamayabilir — "Not: CARI_BAKIYE:13.200,00 TL"
   // dipnotu KDV dahil toplamı verir, boş kalan toplam buradan doldurulur
   if (!toplam) {
     const mB = flat.match(/CARI[_\s]*BAKIYE[:\s]*([\d.]+,\d{2})/i);
     if (mB) toplam = parseTRNum(mB[1]);
   }
-  // Üç değerden ikisi belliyse eksik olan türetilir (tutar+kdv=toplam)
-  if (!toplam && tutar && kdv) toplam = Math.round((tutar + kdv) * 100) / 100;
-  if (!kdv && toplam && tutar && toplam >= tutar) kdv = Math.round((toplam - tutar) * 100) / 100;
+  // Üç değerden ikisi belliyse eksik olan türetilir (tutar+kdv=toplam).
+  // Tevkifatlı faturada KDV, vergiler dahil toplamdan türetilir (ödenecekten değil).
+  if (!toplam && tutar && kdv) {
+    toplam = Math.round((tutar + kdv) * 100) / 100;
+    if (tevkifat) toplam = Math.round((toplam - Number(tevkifat)) * 100) / 100;
+  }
+  if (!kdv && toplam && tutar) {
+    const kdvTaban = Number(vergiliToplam || 0) || (Number(toplam) + Number(tevkifat || 0));
+    if (kdvTaban >= tutar) kdv = Math.round((kdvTaban - tutar) * 100) / 100;
+  }
   if (!tutar && toplam && kdv && toplam >= kdv) tutar = Math.round((toplam - kdv) * 100) / 100;
   // 26.08.2026: OCR bazen KDV hücresine toplam tutarı yazıyor (%0 KDV'li
   // faturalar) — kdv=tutar=toplam tutarsızsa KDV farktan yeniden hesaplanır
@@ -14192,6 +14222,7 @@ function parseTurkishInvoice(rawText) {
     tutar,
     kdv,
     toplam_tutar: toplam,
+    tevkifat: tevkifat || "",
   };
 }
 

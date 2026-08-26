@@ -11598,6 +11598,13 @@ function FinanceDashboard({
                                 if (p.tutar)        { next.tutar = p.tutar;                 filled.push("Tutar"); }
                                 if (p.kdv)          { next.kdv = p.kdv;                     filled.push("KDV"); }
                                 if (p.toplam_tutar) { next.toplam_tutar = p.toplam_tutar;   filled.push("Toplam"); }
+                                // Tevkifatlı fatura: Toplam = Ödenecek Tutar (tevkifat düşülmüş);
+                                // tevkif edilen KDV nota yazılır (sorumlu sıfatıyla beyan edilecek)
+                                if (p.tevkifat && Number(p.tevkifat) > 0) {
+                                  const tvkNot = `KDV Tevkifatı: ₺${Number(p.tevkifat).toLocaleString("tr-TR")} (sorumlu sıfatıyla vergi dairesine beyan edilir; toplam, tevkifat düşülmüş Ödenecek Tutar'dır)`;
+                                  next.note = [prev.note, tvkNot].filter(Boolean).join("\n");
+                                  filled.push("Tevkifat→Not");
+                                }
                                 return next;
                               });
                               setPdfFilled({ count: filled.length || 0, fields: filled.length ? filled : ["Belge yüklendi"] });
