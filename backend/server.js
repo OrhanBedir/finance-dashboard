@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "ahy-onek-fix-v39" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "taseron-grup-v40" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -5964,7 +5964,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
               SELECT 1 FROM marka_taseron_odeme mo
               WHERE UPPER(mo.marka) = $1
                 AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
-                AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+                AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
             )
         ) x GROUP BY ay`, [marka]).catch(() => ({ rows: [] })),
       // Yemek kartı ödemeleri (cashflow kategori TICKET) — kalem dökümü için ayrı
@@ -6178,7 +6178,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
             SELECT 1 FROM marka_taseron_odeme mo
             WHERE UPPER(mo.marka) = $1
               AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
-              AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+              AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
           )`, [marka]).catch(() => ({ rows: [] })),
       ]);
       const grp = {};
@@ -6462,7 +6462,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
             SELECT 1 FROM marka_taseron_odeme mo
             WHERE UPPER(mo.marka) = $1
               AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
-              AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+              AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
           )`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...ofisKiralar.rows, ...manuel.rows, ...taseronOdeme.rows]
@@ -7078,7 +7078,9 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     const marka = String(req.query.marka || "AHY").toUpperCase();
     const [faturalar, odemeler] = await Promise.all([
-      pool.query(`SELECT id, COALESCE(tedarikci,'') AS taseron_adi, fatura_no,
+      // 27.08.2026: taşeron gruplaması RF Montaj Firma etiketini önceler —
+      // fatura yasal ünvanla (MURAT YAZICI) girilse de AHY_MURAT altında toplanır
+      pool.query(`SELECT id, COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '') AS taseron_adi, fatura_no,
           to_char(fatura_tarihi,'YYYY-MM-DD') AS fatura_tarihi,
           COALESCE(tutar,0) AS tutar, COALESCE(kdv,0) AS kdv,
           COALESCE(toplam_tutar,0) AS toplam_tutar, COALESCE(note,'') AS note,
@@ -7097,7 +7099,7 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
     // finans panelinden girilen ödeme AHY panelinde borç bırakmasın
     let faturaOdemeleri = [];
     try {
-      const fo = await pool.query(`SELECT (id * -1) AS id, COALESCE(tedarikci,'') AS taseron_adi,
+      const fo = await pool.query(`SELECT (id * -1) AS id, COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '') AS taseron_adi,
           'FATURA_ODEME' AS tip, COALESCE(odenen_tutar,0) AS tutar,
           to_char(COALESCE(odeme_tarihi, fatura_tarihi),'YYYY-MM-DD') AS tarih,
           ('Fatura girişinde ödendi: ' || COALESCE(fatura_no,'')) AS aciklama,
@@ -7109,7 +7111,7 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
             SELECT 1 FROM marka_taseron_odeme mo
             WHERE UPPER(mo.marka) = $1
               AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
-              AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+              AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
           )`, [marka]);
       faturaOdemeleri = fo.rows;
     } catch {}
@@ -7771,7 +7773,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
               SELECT 1 FROM marka_taseron_odeme mo
               WHERE UPPER(mo.marka) = $1
                 AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
-                AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(i.tedarikci,'')),' ',1))
+                AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
             )
         ) x GROUP BY ay`, [marka]).catch(() => ({ rows: [] })),
     ]);
