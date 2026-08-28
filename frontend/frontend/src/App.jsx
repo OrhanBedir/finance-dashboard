@@ -31363,6 +31363,56 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
 
   const getRolloutRow = (site_code) => rolloutRows.find(r => r.site_code === site_code) || {};
 
+  // ── Filtreler (28.08.2026, Orhan talebi): arama + bölge + site tipi + durum ──
+  const [cuSearch, setCuSearch] = useState("");
+  const [cuBolge, setCuBolge] = useState("ALL");
+  const [cuTip, setCuTip] = useState("ALL");
+  const [cuDurum, setCuDurum] = useState("ALL");
+
+  const cuBolgeler = useMemo(() => {
+    const s = new Set();
+    cleanupRows.forEach(r => {
+      const rr = getRolloutRow(r.site_code);
+      const b = String(rr.bolge || rr.region || "").trim();
+      if (b) s.add(b);
+    });
+    return [...s].sort((a, b) => a.localeCompare(b, "tr"));
+  }, [cleanupRows, rolloutRows]);
+
+  const cuTipler = useMemo(() => {
+    const s = new Set();
+    cleanupRows.forEach(r => {
+      const t = String(getRolloutRow(r.site_code).site_type || "").trim();
+      if (t) s.add(t);
+    });
+    return [...s].sort();
+  }, [cleanupRows, rolloutRows]);
+
+  const cuDurumOf = (r) => {
+    const items = r.items || [];
+    const done = items.filter(i => i.tamamlandi).length;
+    if (items.length === 0) return "YOK";
+    if (done === items.length) return "TAMAM";
+    return done > 0 ? "KISMI" : "BEKLIYOR";
+  };
+
+  const filteredCleanup = useMemo(() => {
+    const q = cuSearch.trim().toLowerCase();
+    return cleanupRows.filter(r => {
+      const rr = getRolloutRow(r.site_code);
+      const bolge = String(rr.bolge || rr.region || "").trim();
+      if (cuBolge !== "ALL" && bolge.toLowerCase() !== cuBolge.toLowerCase()) return false;
+      if (cuTip !== "ALL" && String(rr.site_type || "").trim() !== cuTip) return false;
+      if (cuDurum !== "ALL" && cuDurumOf(r) !== cuDurum) return false;
+      if (!q) return true;
+      const metin = [
+        r.site_code, r.notlar, bolge, rr.site_type,
+        ...(r.items || []).map(i => i.kalem),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return metin.includes(q);
+    });
+  }, [cleanupRows, rolloutRows, cuSearch, cuBolge, cuTip, cuDurum]);
+
   const handleDelete = async (id) => {
     if (!window.confirm("Bu kayıt silinsin mi?")) return;
     const token = localStorage.getItem("token") || "";
@@ -31384,7 +31434,7 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
     const HEADERS = ["Site Code","Site Type","Bölge","Ziyaret Tarihi","Eksik Bildirim Tarihi","Tamamlama Tarihi","Eksik Kalemleri","Tamamlanan","Toplam Kalem","Durum","Notlar"];
     const wsData = [HEADERS.map((h,i) => ({ v:h, s:hdrS(i===0?navy:"2D5A8E") }))];
 
-    cleanupRows.forEach((r, ri) => {
+    filteredCleanup.forEach((r, ri) => {
       const rr = getRolloutRow(r.site_code);
       const items = r.items||[];
       const doneCount = items.filter(i=>i.tamamlandi).length;
@@ -31410,7 +31460,7 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
 
     const ws = XS.utils.aoa_to_sheet(wsData);
     ws["!cols"] = [22,10,10,14,16,14,40,12,12,14,30].map(w=>({wch:w}));
-    ws["!rows"] = [{ hpt:22 }, ...cleanupRows.map(()=>({ hpt:36 }))];
+    ws["!rows"] = [{ hpt:22 }, ...filteredCleanup.map(()=>({ hpt:36 }))];
     XS.utils.book_append_sheet(wb, ws, "Clean Up");
     const buf = XS.write(wb, { bookType:"xlsx", type:"array" });
     const blob = new Blob([buf], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
@@ -31428,7 +31478,9 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
             🧹 Clean Up Kayıtları
           </h2>
           <span style={{ background:"#e0f2fe", color:"#0369a1", borderRadius:"20px", padding:"2px 12px", fontSize:"13px", fontWeight:700 }}>
-            {cleanupRows.length} saha
+            {filteredCleanup.length === cleanupRows.length
+              ? `${cleanupRows.length} saha`
+              : `${filteredCleanup.length} / ${cleanupRows.length} saha`}
           </span>
         </div>
         <div style={{ display:"flex", gap:"8px" }}>
@@ -31441,15 +31493,56 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
         </div>
       </div>
 
-      {cleanupRows.length === 0 ? (
+      {/* ── Filtre çubuğu ── */}
+      {cleanupRows.length > 0 && (
+        <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center", marginBottom:"14px" }}>
+          <input
+            value={cuSearch}
+            onChange={e => setCuSearch(e.target.value)}
+            placeholder="🔍 Saha, eksik kalem, not ara..."
+            style={{ flex:"1 1 280px", minWidth:"220px", padding:"8px 12px", border:"1.5px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", boxSizing:"border-box" }}
+          />
+          <select value={cuBolge} onChange={e => setCuBolge(e.target.value)}
+            style={{ padding:"8px 10px", border:"1.5px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", background:"#fff", fontWeight:600, color:"#1f2937", cursor:"pointer" }}>
+            <option value="ALL">Tüm Bölgeler</option>
+            {cuBolgeler.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
+          <select value={cuTip} onChange={e => setCuTip(e.target.value)}
+            style={{ padding:"8px 10px", border:"1.5px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", background:"#fff", fontWeight:600, color:"#1f2937", cursor:"pointer" }}>
+            <option value="ALL">Tüm Site Tipleri</option>
+            {cuTipler.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <select value={cuDurum} onChange={e => setCuDurum(e.target.value)}
+            style={{ padding:"8px 10px", border:"1.5px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", background:"#fff", fontWeight:600, color:"#1f2937", cursor:"pointer" }}>
+            <option value="ALL">Tüm Durumlar</option>
+            <option value="BEKLIYOR">⭕ Bekliyor</option>
+            <option value="KISMI">🟡 Kısmi Yapıldı</option>
+            <option value="TAMAM">✅ Tamamlandı</option>
+            <option value="YOK">⚪ Kalem Yok</option>
+          </select>
+          {(cuSearch || cuBolge !== "ALL" || cuTip !== "ALL" || cuDurum !== "ALL") && (
+            <button
+              onClick={() => { setCuSearch(""); setCuBolge("ALL"); setCuTip("ALL"); setCuDurum("ALL"); }}
+              style={{ padding:"8px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"12.5px", fontWeight:700, cursor:"pointer" }}>
+              ✕ Filtreyi Temizle
+            </button>
+          )}
+        </div>
+      )}
+
+      {filteredCleanup.length === 0 ? (
         <div style={{ textAlign:"center", padding:"48px", background:"#f8fafc", borderRadius:"16px", border:"2px dashed #cbd5e1" }}>
           <div style={{ fontSize:"48px", marginBottom:"12px" }}>🧹</div>
-          <div style={{ fontSize:"16px", fontWeight:700, color:"#475569" }}>Henüz Clean Up kaydı yok</div>
-          <div style={{ fontSize:"13px", color:"#94a3b8", marginTop:"6px" }}>Yeni kayıt eklemek için butona tıklayın</div>
+          <div style={{ fontSize:"16px", fontWeight:700, color:"#475569" }}>
+            {cleanupRows.length === 0 ? "Henüz Clean Up kaydı yok" : "Filtreye uyan kayıt bulunamadı"}
+          </div>
+          <div style={{ fontSize:"13px", color:"#94a3b8", marginTop:"6px" }}>
+            {cleanupRows.length === 0 ? "Yeni kayıt eklemek için butona tıklayın" : "Filtreleri değiştirin veya temizleyin"}
+          </div>
         </div>
       ) : (
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(340px, 1fr))", gap:"16px" }}>
-          {cleanupRows.map(r => {
+          {filteredCleanup.map(r => {
             const rr = getRolloutRow(r.site_code);
             const items = r.items || [];
             const doneCount = items.filter(i=>i.tamamlandi).length;
