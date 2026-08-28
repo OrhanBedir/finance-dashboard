@@ -4750,7 +4750,10 @@ function RolloutDashboard({ currentUser }) {
         enhFilter === "ALL" ? true :
         enhFilter === "ABONE" ? (enhT === "abone" || enhT === "abone + süzme") :
         enhFilter === "SUZME" ? (enhT === "süzme" || enhT === "abone + süzme") :
-        enhFilter === "ABONE_SUZME" ? enhT === "abone + süzme" :
+        // 28.08.2026: "Abone + Süzme" birleşik görünüm demek — eskiden yalnız
+        // literal "abone + süzme" değerini arıyordu, o değer hiçbir sahada
+        // olmadığı için filtre hep 0 saha döndürüyordu (Orhan bildirdi).
+        enhFilter === "ABONE_SUZME" ? (enhT === "abone" || enhT === "süzme" || enhT === "abone + süzme") :
         true;
 
       const text = `
