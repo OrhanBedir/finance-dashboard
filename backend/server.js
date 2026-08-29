@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "taseron-grup-v40" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "token-90d-v41" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -1007,7 +1007,11 @@ app.post("/auth/login", async (req, res) => {
         users_admin: user.users_admin === true,
       },
       process.env.JWT_SECRET || "simsek_secret_degistir",
-      { expiresIn: "7d" },
+      // 29.08.2026: 7 gün çok kısaydı — mobilde token sessizce süresi dolunca
+      // ana ekran (auth'suz mobile-dashboard) çalışmaya devam ediyor ama onay
+      // uçları 401 dönüyordu; eski build hatayı yutunca "onaylanmıyor" gibi
+      // görünüyordu (Orhan, iş avansı onay vakası). 90 güne çıkarıldı.
+      { expiresIn: "90d" },
     );
 
     return res.json({
