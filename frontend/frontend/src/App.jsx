@@ -17969,6 +17969,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const isPM       = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com" || currentUser?.role === "muhasebe";
+  // 29.08.2026 onay zinciri: Rollout (Nurcan) → Muhasebe (Tuğçe) → PM → Direktör
+  const isRollout  = currentUser?.email === "nurcan.kus@simsektel.com";
+  const isMuhOnay  = currentUser?.email === "tugce.yelmen@simsektel.com" || isMuhasebe;
   const isApprover = isPM || isDirektor || isMuhasebe;
   const isMobile   = typeof window !== "undefined" && window.innerWidth < 768;
 
@@ -18026,7 +18029,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
         let cnt = 0;
         if (isPM)       cnt = safeData.filter(f => f.durum === "PM_BEKLE").length;
         if (isDirektor) cnt = safeData.filter(f => f.durum === "DIREKTOR_BEKLE").length;
-        if (isMuhasebe) cnt = safeData.filter(f => f.durum === "TAMAMLANDI").length;
+        if (isRollout)  cnt = safeData.filter(f => f.durum === "ROLLOUT_BEKLE").length;
+        if (isMuhOnay)  cnt = safeData.filter(f => ["MUHASEBE_BEKLE","TAMAMLANDI"].includes(f.durum)).length;
+        else if (isMuhasebe) cnt = safeData.filter(f => f.durum === "TAMAMLANDI").length;
         onPendingCount(cnt);
       }
     } catch (err) {
@@ -18327,6 +18332,24 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     load();
   };
 
+  const handleRolloutOnayla = async () => {
+    await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/rollout-onayla`, {
+      method:"PUT", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ rollout_not: notText })
+    });
+    setNotModal(null); setNotText(""); load();
+    if (viewForm?.id === notModal.id) loadDetail(notModal.id);
+  };
+
+  const handleMuhasebeOnayla = async () => {
+    await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/muhasebe-onayla`, {
+      method:"PUT", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ muhasebe_not: notText })
+    });
+    setNotModal(null); setNotText(""); load();
+    if (viewForm?.id === notModal.id) loadDetail(notModal.id);
+  };
+
   const handlePMOnayla = async () => {
     await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/pm-onayla`, {
       method:"PUT", headers:{"Content-Type":"application/json"},
@@ -18378,6 +18401,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const durumBadge = (durum) => {
     const map = {
       TASLAK:         { bg:"#f3f4f6", color:"#374151", label:"Taslak" },
+      ROLLOUT_BEKLE:  { bg:"#dbeafe", color:"#1e40af", label:"Rollout Onayı Bekleniyor" },
+      MUHASEBE_BEKLE: { bg:"#e0e7ff", color:"#3730a3", label:"Muhasebe Kontrolünde" },
       PM_BEKLE:       { bg:"#fef9c3", color:"#713f12", label:"PM Onayı Bekleniyor" },
       DIREKTOR_BEKLE: { bg:"#fed7aa", color:"#92400e", label:"Direktör Onayında" },
       TAMAMLANDI:     { bg:"#dcfce7", color:"#166534", label:"Onaylandı ✓" },
@@ -18390,6 +18415,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
 
   const myPending = isPM ? list.filter(f=>f.durum==="PM_BEKLE").length
     : isDirektor ? list.filter(f=>f.durum==="DIREKTOR_BEKLE").length
+    : isRollout ? list.filter(f=>f.durum==="ROLLOUT_BEKLE").length
+    : isMuhOnay ? list.filter(f=>["MUHASEBE_BEKLE","TAMAMLANDI"].includes(f.durum)).length
     : isMuhasebe ? list.filter(f=>f.durum==="TAMAMLANDI").length : 0;
 
   const visibleList = list.filter(f => {
@@ -18414,8 +18441,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     return true;
   }).sort((a, b) => {
     // Onay bekleyen formlar her zaman en üste gelsin
-    const aNeedsAction = (isPM && a.durum==="PM_BEKLE") || (isDirektor && a.durum==="DIREKTOR_BEKLE") || (isMuhasebe && a.durum==="TAMAMLANDI");
-    const bNeedsAction = (isPM && b.durum==="PM_BEKLE") || (isDirektor && b.durum==="DIREKTOR_BEKLE") || (isMuhasebe && b.durum==="TAMAMLANDI");
+    const aNeedsAction = (isPM && a.durum==="PM_BEKLE") || (isDirektor && a.durum==="DIREKTOR_BEKLE") || (isRollout && a.durum==="ROLLOUT_BEKLE") || (isMuhOnay && a.durum==="MUHASEBE_BEKLE") || (isMuhasebe && a.durum==="TAMAMLANDI");
+    const bNeedsAction = (isPM && b.durum==="PM_BEKLE") || (isDirektor && b.durum==="DIREKTOR_BEKLE") || (isRollout && b.durum==="ROLLOUT_BEKLE") || (isMuhOnay && b.durum==="MUHASEBE_BEKLE") || (isMuhasebe && b.durum==="TAMAMLANDI");
     if (aNeedsAction && !bNeedsAction) return -1;
     if (!aNeedsAction && bNeedsAction) return 1;
     // Kalan formlar ID'ye göre azalan sırada (en yeni üstte)
@@ -18442,6 +18469,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
     const vToplam = (viewForm.kalemler||[]).reduce((s,k)=>s+Number(k.tutar),0);
     const needsPMAction = isPM && viewForm.durum === "PM_BEKLE";
     const needsDirektorAction = isDirektor && viewForm.durum === "DIREKTOR_BEKLE";
+    const needsRolloutAction = isRollout && viewForm.durum === "ROLLOUT_BEKLE";
+    const needsMuhasebeAction = isMuhOnay && viewForm.durum === "MUHASEBE_BEKLE";
     const isOwner = currentUser?.email === viewForm.talep_eden_email;
     const canDelete = (isOwner || isPM) && viewForm.durum !== "TAMAMLANDI";
     const canEditCeza = isPM || isDirektor || isOwner;
@@ -18585,11 +18614,11 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
         </div>
 
         {/* Onay aksiyonları */}
-        {(needsPMAction || needsDirektorAction) && (
+        {(needsPMAction || needsDirektorAction || needsRolloutAction || needsMuhasebeAction) && (
           <div style={{ display:"flex", gap:"12px" }}>
-            <button onClick={()=>{ setNotModal({ id: viewForm.id, action: needsPMAction?"pm":"dir" }); setNotText(""); }}
+            <button onClick={()=>{ setNotModal({ id: viewForm.id, action: needsRolloutAction?"rollout":needsMuhasebeAction?"muhasebe":needsPMAction?"pm":"dir" }); setNotText(""); }}
               style={{ padding:"12px 24px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}>
-              ✅ Onayla {needsPMAction?"(PM)":"(Direktör)"}
+              ✅ Onayla {needsRolloutAction?"(Rollout)":needsMuhasebeAction?"(Muhasebe)":needsPMAction?"(PM)":"(Direktör)"}
             </button>
             <button onClick={()=>{ setGeriModal(viewForm.id); setGeriText(""); }}
               style={{ padding:"12px 24px", background:"#b45309", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}
@@ -18633,7 +18662,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
               <textarea value={notText} onChange={e=>setNotText(e.target.value)} rows={3} placeholder="Not eklemek ister misiniz?"
                 style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box", resize:"vertical" }} />
               <div style={{ display:"flex", gap:"10px", marginTop:"14px" }}>
-                <button onClick={notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
+                <button onClick={notModal.action==="rollout"?handleRolloutOnayla:notModal.action==="muhasebe"?handleMuhasebeOnayla:notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
                   style={{ flex:1, padding:"12px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Onayla</button>
                 <button onClick={()=>{setNotModal(null);setNotText("");}}
                   style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
@@ -19196,7 +19225,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
         const total = myForms.reduce((s, f) => s + Number(f.toplam_tutar || 0), 0);
         const counts = {
           TASLAK: myForms.filter(f => f.durum === "TASLAK").length,
-          BEKLEMEDE: myForms.filter(f => ["PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum)).length,
+          BEKLEMEDE: myForms.filter(f => ["ROLLOUT_BEKLE","MUHASEBE_BEKLE","PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum)).length,
           TAMAMLANDI: myForms.filter(f => f.durum === "TAMAMLANDI").length,
           ARSIVLENDI: myForms.filter(f => f.durum === "ARSIVLENDI").length,
           REDDEDILDI: myForms.filter(f => f.durum === "REDDEDILDI").length,
@@ -19227,6 +19256,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
           style={{ padding:"8px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px" }}>
           <option value="">Tüm Durumlar</option>
           {!isApprover && <option value="TASLAK">Taslak</option>}
+          <option value="ROLLOUT_BEKLE">Rollout Onayı Bekleniyor</option>
+          <option value="MUHASEBE_BEKLE">Muhasebe Kontrolünde</option>
           <option value="PM_BEKLE">PM Onayı Bekleniyor</option>
           <option value="DIREKTOR_BEKLE">Direktör Onayında</option>
           <option value="TAMAMLANDI">Onaylandı</option>
@@ -19272,8 +19303,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
           {visibleList.length === 0 && <div style={{ textAlign:"center", color:"#9ca3af", padding:"32px" }}>Kayıt bulunamadı</div>}
           {visibleList.map(f => {
-            const needsMyAction = (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE");
-            const myPendingRow = !isApprover && f.talep_eden_email===currentUser?.email && ["PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum);
+            const needsMyAction = (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE") || (isRollout && f.durum==="ROLLOUT_BEKLE") || (isMuhOnay && f.durum==="MUHASEBE_BEKLE");
+            const myPendingRow = !isApprover && f.talep_eden_email===currentUser?.email && ["ROLLOUT_BEKLE","MUHASEBE_BEKLE","PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum);
             const cardBorder = needsMyAction ? "3px solid #f59e0b" : myPendingRow ? "3px solid #f87171" : "3px solid #e5e7eb";
             const cardBg = needsMyAction ? "#fffbeb" : myPendingRow ? "#fef2f2" : "#fff";
             return (
@@ -19289,7 +19320,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                   </div>
                 </div>
                 {needsMyAction && <div style={{ fontSize:"12px", fontWeight:700, color:"#92400e", marginBottom:"8px" }}>⏳ Onayınızı bekliyor</div>}
-                {myPendingRow && <div style={{ fontSize:"12px", fontWeight:700, color:"#b91c1c", marginBottom:"8px" }}>🕐 {f.durum==="PM_BEKLE"?"PM onayı bekleniyor":"Direktör onayı bekleniyor"}</div>}
+                {myPendingRow && <div style={{ fontSize:"12px", fontWeight:700, color:"#b91c1c", marginBottom:"8px" }}>🕐 {f.durum==="ROLLOUT_BEKLE"?"Rollout onayı bekleniyor":f.durum==="MUHASEBE_BEKLE"?"Muhasebe kontrolünde":f.durum==="PM_BEKLE"?"PM onayı bekleniyor":"Direktör onayı bekleniyor"}</div>}
                 <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
                   <button onClick={()=>loadDetail(f.id)}
                     style={{ padding:"7px 14px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>İncele</button>
@@ -19334,8 +19365,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
               <tr><td colSpan={7} style={{ padding:"40px", textAlign:"center", color:"#9ca3af" }}>Kayıt bulunamadı</td></tr>
             )}
             {visibleList.map((f,i)=>{
-              const needsMyAction = (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE");
-              const myPendingRow = !isApprover && f.talep_eden_email===currentUser?.email && ["PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum);
+              const needsMyAction = (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE") || (isRollout && f.durum==="ROLLOUT_BEKLE") || (isMuhOnay && f.durum==="MUHASEBE_BEKLE");
+              const myPendingRow = !isApprover && f.talep_eden_email===currentUser?.email && ["ROLLOUT_BEKLE","MUHASEBE_BEKLE","PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum);
               return (
                 <tr key={f.id} style={{ borderBottom:"1px solid #f3f4f6", background: needsMyAction?"#fffbeb": myPendingRow?"#fef2f2": i%2===0?"#fff":"#fafafa", borderLeft: needsMyAction?"4px solid #f59e0b": myPendingRow?"4px solid #f87171":"4px solid transparent" }}>
                   <td style={{ padding:"12px 16px", color:"#9ca3af" }}>#{f.id}</td>
@@ -19346,7 +19377,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
                   <td style={{ padding:"12px 16px" }}>
                     {durumBadge(f.durum)}
                     {needsMyAction && <div style={{ fontSize:"10px", fontWeight:700, color:"#92400e", marginTop:"4px" }}>⏳ Onayınızı bekliyor</div>}
-                    {myPendingRow && <div style={{ fontSize:"10px", fontWeight:700, color:"#b91c1c", marginTop:"4px" }}>🕐 {f.durum==="PM_BEKLE"?"PM onayı bekleniyor":"Direktör onayı bekleniyor"}</div>}
+                    {myPendingRow && <div style={{ fontSize:"10px", fontWeight:700, color:"#b91c1c", marginTop:"4px" }}>🕐 {f.durum==="ROLLOUT_BEKLE"?"Rollout onayı bekleniyor":f.durum==="MUHASEBE_BEKLE"?"Muhasebe kontrolünde":f.durum==="PM_BEKLE"?"PM onayı bekleniyor":"Direktör onayı bekleniyor"}</div>}
                   </td>
                   <td style={{ padding:"12px 16px" }}>
                     <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
@@ -29591,6 +29622,8 @@ function App() {
           let mc = 0;
           if (email === "orhan.bedir@simsektel.com") mc = mdata.filter(f => f.durum === "PM_BEKLE").length;
           else if (email === "duzgun.simsek@simsektel.com") mc = mdata.filter(f => f.durum === "DIREKTOR_BEKLE").length;
+          else if (email === "nurcan.kus@simsektel.com") mc = mdata.filter(f => f.durum === "ROLLOUT_BEKLE").length;
+          else if (email === "tugce.yelmen@simsektel.com") mc = mdata.filter(f => ["MUHASEBE_BEKLE","TAMAMLANDI"].includes(f.durum)).length;
           else if (email === "muhasebe@simsektel.com" || (user?.role || "") === "muhasebe") mc = mdata.filter(f => f.durum === "TAMAMLANDI").length;
           setPendingMasrafCount(mc);
         }

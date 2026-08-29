@@ -310,7 +310,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "token-90d-v41" }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42" }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -16657,7 +16657,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const avansKalan           = avansToplamOnaylanan - masrafToplamArsiv;
 
     // 7. Bekleyen masraf toplam tutarı (sadece onaya gönderilmiş formlar — TASLAK hariç)
-    const ONAY_DURUMLAR = ['PM_BEKLE','DIREKTOR_BEKLE'];
+    const ONAY_DURUMLAR = ['ROLLOUT_BEKLE','MUHASEBE_BEKLE','PM_BEKLE','DIREKTOR_BEKLE'];
     const bekleyenMasrafTutar = masraflar
       .filter(f => ONAY_DURUMLAR.includes(f.durum))
       .reduce((s, f) => s + Number(f.toplam_tutar || 0), 0);
@@ -17695,20 +17695,110 @@ app.get("/hr/ofis-belge/file/:filename", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── MASRAF FORMU ONAY ZİNCİRİ (29.08.2026, Orhan kararı) ──────────────────
+// Eski akış: personel → PM → Direktör. Fiş doğruluğu fiilen PM'de kalıyordu.
+// Yeni akış her adıma FARKLI bir soruyu sorar:
+//   1) Rollout (Nurcan)  : iş gerçekten yapıldı mı, onaylı/kapanan işe mi ait
+//   2) Muhasebe (Tuğçe)  : fiş tutarları girilenle uyuyor mu, belge geçerli mi
+//   3) PM (Orhan)        : anormal/fazladan gider var mı
+//   4) Direktör (Düzgün) : nihai onay  → TAMAMLANDI → (muhasebe) ARSIVLENDI
+// Kimse kendi adımını onaylayamaz; ayrıca saha işi kapaması olmayan kadro
+// Rollout adımını atlar (Orhan kararı: Serdar, Kasım, Hatice, Murat İstek).
+pool.query(`ALTER TABLE masraf_form
+  ADD COLUMN IF NOT EXISTS rollout_not TEXT,
+  ADD COLUMN IF NOT EXISTS rollout_onay_tarihi DATE,
+  ADD COLUMN IF NOT EXISTS muhasebe_onay_tarihi DATE`).catch(() => {});
+
+const MASRAF_PM_MAIL   = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com"];
+const MASRAF_PD_MAIL   = ["duzgun.simsek@simsektel.com", "info@ahyelektrik.com"];
+const MASRAF_ROLLOUT_MAIL  = ["nurcan.kus@simsektel.com"];
+const MASRAF_MUHASEBE_MAIL = ["tugce.yelmen@simsektel.com", "muhasebe@simsektel.com"];
+
+const MASRAF_ADIMLAR = [
+  { key: "ROLLOUT_BEKLE",  onaylayan: MASRAF_ROLLOUT_MAIL,
+    // Rollout adımını atlayanlar: kendisi + saha kapaması olmayan kadro + üst yönetim
+    atla: ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com", "kasim.evin@simsektel.com",
+           "hatice.omus@simsektel.com", "murat.istek@simsektel.com",
+           ...MASRAF_MUHASEBE_MAIL, ...MASRAF_PM_MAIL, ...MASRAF_PD_MAIL] },
+  { key: "MUHASEBE_BEKLE", onaylayan: MASRAF_MUHASEBE_MAIL,
+    atla: [...MASRAF_MUHASEBE_MAIL, ...MASRAF_PM_MAIL] },
+  { key: "PM_BEKLE",       onaylayan: MASRAF_PM_MAIL,
+    atla: [...MASRAF_PM_MAIL] },
+  { key: "DIREKTOR_BEKLE", onaylayan: MASRAF_PD_MAIL,
+    atla: [...MASRAF_PD_MAIL] },
+];
+
+// Formu gönderen kişiye göre, verilen adımdan itibaren ilk geçerli durumu bulur
+function masrafSonrakiDurum(talepEdenEmail, baslangicIndex) {
+  const e = String(talepEdenEmail || "").toLowerCase().trim();
+  for (let i = baslangicIndex; i < MASRAF_ADIMLAR.length; i++) {
+    if (!MASRAF_ADIMLAR[i].atla.some(a => a.toLowerCase() === e)) return MASRAF_ADIMLAR[i].key;
+  }
+  return "TAMAMLANDI";
+}
+
+// Form TAMAMLANDI'ya ulaştığında trafik cezası kalemleri personel avansına yazılır
+async function masrafCezaAvansOlustur(formId) {
+  const cezaKalemler = await pool.query(
+    `SELECT * FROM masraf_kalem WHERE form_id=$1 AND kategori='TRAFIK_CEZA' AND ceza_personel_id IS NOT NULL`,
+    [formId]
+  );
+  for (const k of cezaKalemler.rows) {
+    await pool.query(
+      `INSERT INTO avans (personel_id, tarih, tutar, aciklama, avans_turu, odendi) VALUES ($1, NOW(), $2, $3, 'TRAFIK_CEZA', false)`,
+      [k.ceza_personel_id, k.tutar, `Trafik Cezası - ${k.plaka || 'Plaka yok'} (Masraf #${formId})`]
+    );
+  }
+}
+
 // PUT submit for approval (TASLAK → PM_BEKLE)
 app.put("/hr/masraf-form/:id/submit", async (req, res) => {
   try {
-    // PM'in (Orhan Bedir) kendi formu kendi onayına düşmesin: PM adımı
-    // otomatik geçilir, form doğrudan Proje Direktörü (Düzgün Şimşek) onayına gider.
     const f = await pool.query("SELECT talep_eden_email FROM masraf_form WHERE id=$1", [req.params.id]);
-    const isPM = String(f.rows[0]?.talep_eden_email || "").toLowerCase() === "orhan.bedir@simsektel.com";
+    const mail = f.rows[0]?.talep_eden_email || "";
+    const hedef = masrafSonrakiDurum(mail, 0);
     const { rows } = await pool.query(
-      isPM
-        ? `UPDATE masraf_form SET durum='DIREKTOR_BEKLE', pm_onay_tarihi=NOW(), pm_not='PM formu — PM adımı otomatik geçildi' WHERE id=$1 AND durum='TASLAK' RETURNING *`
-        : `UPDATE masraf_form SET durum='PM_BEKLE' WHERE id=$1 AND durum='TASLAK' RETURNING *`,
-      [req.params.id]
+      `UPDATE masraf_form SET durum=$1 WHERE id=$2 AND durum='TASLAK' RETURNING *`,
+      [hedef, req.params.id]
     );
     if (!rows[0]) return res.status(422).json({ error: "Form taslak durumunda değil veya bulunamadı" });
+    if (hedef === "TAMAMLANDI") await masrafCezaAvansOlustur(req.params.id);
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT Rollout Müdürü onayla (ROLLOUT_BEKLE → sonraki adım)
+app.put("/hr/masraf-form/:id/rollout-onayla", async (req, res) => {
+  try {
+    const { rollout_not } = req.body;
+    const f = await pool.query("SELECT talep_eden_email, durum FROM masraf_form WHERE id=$1", [req.params.id]);
+    if (!f.rows[0]) return res.status(404).json({ error: "Form bulunamadı" });
+    if (f.rows[0].durum !== "ROLLOUT_BEKLE")
+      return res.status(422).json({ error: "Form rollout onayında değil" });
+    const hedef = masrafSonrakiDurum(f.rows[0].talep_eden_email, 1);
+    const { rows } = await pool.query(
+      `UPDATE masraf_form SET durum=$1, rollout_not=$2, rollout_onay_tarihi=NOW() WHERE id=$3 RETURNING *`,
+      [hedef, rollout_not || null, req.params.id]
+    );
+    if (hedef === "TAMAMLANDI") await masrafCezaAvansOlustur(req.params.id);
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT Muhasebe onayla (MUHASEBE_BEKLE → sonraki adım) — fiş/tutar doğrulaması
+app.put("/hr/masraf-form/:id/muhasebe-onayla", async (req, res) => {
+  try {
+    const { muhasebe_not } = req.body;
+    const f = await pool.query("SELECT talep_eden_email, durum FROM masraf_form WHERE id=$1", [req.params.id]);
+    if (!f.rows[0]) return res.status(404).json({ error: "Form bulunamadı" });
+    if (f.rows[0].durum !== "MUHASEBE_BEKLE")
+      return res.status(422).json({ error: "Form muhasebe onayında değil" });
+    const hedef = masrafSonrakiDurum(f.rows[0].talep_eden_email, 2);
+    const { rows } = await pool.query(
+      `UPDATE masraf_form SET durum=$1, muhasebe_not=$2, muhasebe_onay_tarihi=NOW() WHERE id=$3 RETURNING *`,
+      [hedef, muhasebe_not || null, req.params.id]
+    );
+    if (hedef === "TAMAMLANDI") await masrafCezaAvansOlustur(req.params.id);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -17717,10 +17807,14 @@ app.put("/hr/masraf-form/:id/submit", async (req, res) => {
 app.put("/hr/masraf-form/:id/pm-onayla", async (req, res) => {
   try {
     const { pm_not } = req.body;
+    const f = await pool.query("SELECT talep_eden_email FROM masraf_form WHERE id=$1", [req.params.id]);
+    if (!f.rows[0]) return res.status(404).json({ error: "Form bulunamadı" });
+    const hedef = masrafSonrakiDurum(f.rows[0].talep_eden_email, 3);
     const { rows } = await pool.query(
-      `UPDATE masraf_form SET durum='DIREKTOR_BEKLE', pm_not=$1, pm_onay_tarihi=NOW() WHERE id=$2 RETURNING *`,
-      [pm_not||null, req.params.id]
+      `UPDATE masraf_form SET durum=$1, pm_not=$2, pm_onay_tarihi=NOW() WHERE id=$3 RETURNING *`,
+      [hedef, pm_not || null, req.params.id]
     );
+    if (hedef === "TAMAMLANDI") await masrafCezaAvansOlustur(req.params.id);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -17749,11 +17843,12 @@ app.put("/hr/masraf-form/:id/geri-gonder", async (req, res) => {
       `UPDATE masraf_form
        SET durum='TASLAK',
            red_aciklama=$1, reddeden_email=$2,
-           pm_not=NULL, pm_onay_tarihi=NULL, direktor_not=NULL, direktor_onay_tarihi=NULL
-       WHERE id=$3 AND durum IN ('PM_BEKLE','DIREKTOR_BEKLE') RETURNING *`,
+           pm_not=NULL, pm_onay_tarihi=NULL, direktor_not=NULL, direktor_onay_tarihi=NULL,
+           rollout_not=NULL, rollout_onay_tarihi=NULL, muhasebe_onay_tarihi=NULL
+       WHERE id=$3 AND durum IN ('ROLLOUT_BEKLE','MUHASEBE_BEKLE','PM_BEKLE','DIREKTOR_BEKLE') RETURNING *`,
       [`↩ GERİ GÖNDERİLDİ: ${String(aciklama).trim()}`, gonderen_email || null, req.params.id]
     );
-    if (!rows[0]) return res.status(400).json({ error: "Form onay aşamasında değil — yalnız PM/Direktör bekleyen formlar geri gönderilebilir" });
+    if (!rows[0]) return res.status(400).json({ error: "Form onay aşamasında değil — yalnız onay bekleyen formlar geri gönderilebilir" });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -17768,19 +17863,7 @@ app.put("/hr/masraf-form/:id/direktor-onayla", async (req, res) => {
       [direktor_not||null, id]
     );
     const form = formRes.rows[0];
-
-    // TRAFIK_CEZA kalemleri için avans oluştur
-    const cezaKalemler = await pool.query(
-      `SELECT * FROM masraf_kalem WHERE form_id=$1 AND kategori='TRAFIK_CEZA' AND ceza_personel_id IS NOT NULL`,
-      [id]
-    );
-    for (const k of cezaKalemler.rows) {
-      await pool.query(
-        `INSERT INTO avans (personel_id, tarih, tutar, aciklama, avans_turu, odendi) VALUES ($1, NOW(), $2, $3, 'TRAFIK_CEZA', false)`,
-        [k.ceza_personel_id, k.tutar, `Trafik Cezası - ${k.plaka || 'Plaka yok'} (Masraf #${id})`]
-      );
-    }
-
+    await masrafCezaAvansOlustur(id);
     res.json(form);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
