@@ -5311,7 +5311,21 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
 
   const rows = useMemo(() => {
     const mevcut = new Set((data.rows || []).map((r) => r.item_code));
-    return [...(data.rows || []), ...ekstraKalemler.filter((e) => !mevcut.has(e.item_code))];
+    const liste = [...(data.rows || []), ...ekstraKalemler.filter((e) => !mevcut.has(e.item_code))];
+    // Sıralama (31.08.2026, Orhan): düzgün kalemler üstte; parçalı/eksik/fazla
+    // olanlar sona, PO hiç açılmamışlar en sona. Kayıtlı (DB) değerlere göre
+    // sıralanır — hücreye yazarken satır zıplamasın diye düzenlemeler sıralamayı
+    // etkilemez, yeni sıra ancak Kaydet sonrası yenilemede oluşur.
+    const grup = (r) => {
+      const pr = r.pr_qty === null || r.pr_qty === undefined ? null : Number(r.pr_qty);
+      const req = Number(r.requested_qty || 0);
+      if (pr !== null && pr > 0 && req === 0) return 2;   // PO açılmamış → en sona
+      if (pr === null) return req > 0 ? 1 : 2;            // PR girilmemiş → sona
+      return Math.abs(pr - req) < 0.001 ? 0 : 1;          // parçalı / eksik / fazla → sona
+    };
+    return liste
+      .map((r) => ({ ...r, _grup: grup(r) }))
+      .sort((a, b) => a._grup - b._grup || String(a.item_code).localeCompare(String(b.item_code)));
   }, [data.rows, ekstraKalemler]);
 
   const ozet = useMemo(() => {
