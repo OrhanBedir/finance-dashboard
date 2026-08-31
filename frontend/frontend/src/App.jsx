@@ -5491,7 +5491,6 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
                       <td style={{ ...S.td, textAlign:"left", fontFamily:"monospace", fontSize:12, color:"#0f172a" }}>
                         {r.item_code}
                         {r.yeni && <span style={{ marginLeft:6, background:"#f3e8ff", color:"#7c3aed", borderRadius:5, padding:"1px 6px", fontSize:9.5, fontWeight:700 }}>YENİ</span>}
-                        {r.po_no && <div style={{ fontSize:10, color:"#94a3b8", fontWeight:400 }}>{String(r.po_no).slice(0, 26)}</div>}
                       </td>
                       <td style={tdTxt} title={r.item_description}>{r.item_description || "-"}</td>
                       <td style={S.td}>
