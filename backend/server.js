@@ -3670,6 +3670,13 @@ app.get("/setup-db", async (req, res) => {
       ADD COLUMN IF NOT EXISTS tamamlanan_qty NUMERIC
     `);
 
+    // PR Qty (31.08.2026): PO açılmadan ÖNCE bizim talep ettiğimiz miktar.
+    // NULL = hiç talep girilmemiş (0 talep ettik demek değil) — grid'de "–".
+    await pool.query(`
+      ALTER TABLE master_works
+      ADD COLUMN IF NOT EXISTS pr_qty NUMERIC
+    `);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS hw_payment_rows (
         id SERIAL PRIMARY KEY,
@@ -4177,6 +4184,180 @@ app.get("/master/by-site", async (req, res) => {
   } catch (err) {
     console.error("MASTER BY SITE ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/* ================== SAHA KALEM GRIDI (31.08.2026) ==================
+   Günlük İş Girişi'nde tek ekranda: bizim PR talebimiz + HW'nin açtığı PO
+   (requested) + aradaki fark + gerçekleşen (done/due/billed/QC/subcon).
+   master_works ile po_rows FULL OUTER JOIN'lenir; iki tarafta da olmayan
+   kalem listede görünmez, tek taraflı olanlar "fark" olarak işaretlenir. */
+app.get("/master/saha-kalemler", async (req, res) => {
+  try {
+    const site = String(req.query.site || "").replace(/\s+/g, "").toUpperCase();
+    if (!site) return res.json({ ok: true, site: "", rows: [], meta: {} });
+
+    const q = `
+      ${COMMON_MATCH_CTES},
+      mw AS (
+        SELECT
+          TRIM(COALESCE(item_code,'')) AS item_code,
+          MAX(id)                              AS master_id,
+          MAX(COALESCE(item_description,''))   AS item_description,
+          MAX(COALESCE(project_code,''))       AS project_code,
+          MAX(COALESCE(site_type,''))          AS site_type,
+          SUM(pr_qty)                          AS pr_qty,
+          SUM(COALESCE(done_qty,0))            AS done_qty,
+          MAX(COALESCE(subcon_name,''))        AS subcon_name,
+          MAX(COALESCE(qc_durum,''))           AS qc_durum,
+          MAX(COALESCE(note,''))               AS note
+        FROM master_works
+        WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) <> ''
+        GROUP BY 1
+      ),
+      po AS (
+        SELECT
+          TRIM(COALESCE(item_code,'')) AS item_code,
+          MAX(COALESCE(item_description,'')) AS item_description,
+          MAX(COALESCE(project_code,''))     AS project_code,
+          MAX(agg_requested_qty)             AS requested_qty,
+          MAX(agg_billed_qty)                AS billed_qty,
+          MAX(agg_due_qty)                   AS due_qty,
+          MAX(COALESCE(agg_po_no,''))        AS po_no,
+          MAX(COALESCE(unit_price,0))        AS unit_price,
+          MAX(COALESCE(currency,'TRY'))      AS currency
+        FROM best_site_po
+        WHERE UPPER(TRIM(site_code)) = $1
+        GROUP BY 1
+      )
+      SELECT
+        COALESCE(mw.item_code, po.item_code) AS item_code,
+        COALESCE(NULLIF(mw.item_description,''), NULLIF(po.item_description,''),
+                 best_boq.boq_items_en, '')  AS item_description,
+        COALESCE(NULLIF(mw.project_code,''), NULLIF(po.project_code,''), '') AS project_code,
+        COALESCE(mw.site_type,'')            AS site_type,
+        mw.master_id,
+        mw.pr_qty,
+        COALESCE(mw.done_qty, 0)             AS done_qty,
+        COALESCE(mw.subcon_name,'')          AS subcon_name,
+        COALESCE(mw.qc_durum,'')             AS qc_durum,
+        COALESCE(mw.note,'')                 AS note,
+        COALESCE(po.requested_qty, 0)        AS requested_qty,
+        COALESCE(po.billed_qty, 0)           AS billed_qty,
+        COALESCE(po.due_qty, 0)              AS due_qty,
+        COALESCE(po.po_no,'')                AS po_no,
+        COALESCE(po.unit_price, 0)           AS unit_price,
+        COALESCE(po.currency,'TRY')          AS currency,
+        (po.item_code IS NOT NULL)           AS po_var,
+        (mw.item_code IS NOT NULL)           AS kayit_var
+      FROM mw
+      FULL OUTER JOIN po ON mw.item_code = po.item_code
+      LEFT JOIN best_boq
+        ON TRIM(COALESCE(best_boq.s_bom_code,'')) = COALESCE(mw.item_code, po.item_code)
+      ORDER BY 1
+    `;
+
+    const [gridRes, metaRes] = await Promise.all([
+      pool.query(q, [site]),
+      pool.query(
+        `SELECT COALESCE(site_type,'') AS site_type, COALESCE(bolge,'') AS bolge,
+                COALESCE(il,'') AS il, COALESCE(project_code,'') AS project_code,
+                COALESCE(rf_subcon,'') AS rf_subcon, COALESCE(tssr_belge_url,'') AS tssr_belge_url
+         FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`,
+        [site],
+      ),
+    ]);
+
+    const rows = (gridRes.rows || []).map((r) => ({
+      ...r,
+      currency: normalizeCurrency(r.currency),
+      pr_qty: r.pr_qty === null || r.pr_qty === undefined ? null : Number(r.pr_qty),
+    }));
+
+    const meta = metaRes.rows[0] || {};
+    // Subcon: rollout'ta yoksa kalemlerde en çok geçen taşeron
+    if (!meta.rf_subcon) {
+      const sayac = {};
+      rows.forEach((r) => { if (r.subcon_name) sayac[r.subcon_name] = (sayac[r.subcon_name] || 0) + 1; });
+      meta.rf_subcon = Object.entries(sayac).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+    }
+    if (!meta.site_type) meta.site_type = rows.find((r) => r.site_type)?.site_type || "";
+    if (!meta.project_code) meta.project_code = rows.find((r) => r.project_code)?.project_code || "";
+
+    res.json({ ok: true, site, rows, meta });
+  } catch (err) {
+    console.error("SAHA KALEMLER ERROR:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/* Grid'deki sarı hücrelerin toplu kaydı — sadece değişen kalemler gönderilir */
+app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const site = String(req.body.site || "").replace(/\s+/g, "").toUpperCase();
+    const kalemler = Array.isArray(req.body.kalemler) ? req.body.kalemler : [];
+    if (!site) return res.status(400).json({ ok: false, error: "Saha kodu zorunlu" });
+    if (!kalemler.length) return res.json({ ok: true, guncellenen: 0, eklenen: 0 });
+
+    await client.query("BEGIN");
+    let guncellenen = 0;
+    let eklenen = 0;
+
+    for (const k of kalemler) {
+      const itemCode = String(k.item_code || "").trim();
+      if (!itemCode) continue;
+      const projectCode = String(k.project_code || "").trim();
+      // Boş bırakılan hücre "değiştirme" demek → COALESCE ile mevcut değer korunur
+      const prQty = k.pr_qty === "" || k.pr_qty === undefined || k.pr_qty === null ? null : parseNumber(k.pr_qty);
+      const doneQty = k.done_qty === "" || k.done_qty === undefined || k.done_qty === null ? null : parseNumber(k.done_qty);
+
+      const mevcut = await client.query(
+        `SELECT id FROM master_works
+         WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) = $2
+         ORDER BY id LIMIT 1`,
+        [site, itemCode],
+      );
+
+      if (mevcut.rows.length) {
+        await client.query(
+          `UPDATE master_works
+             SET pr_qty   = COALESCE($1, pr_qty),
+                 done_qty = COALESCE($2, done_qty)
+           WHERE id = $3`,
+          [prQty, doneQty, mevcut.rows[0].id],
+        );
+        guncellenen++;
+      } else {
+        await client.query(
+          `INSERT INTO master_works
+             (site_type, project_code, site_code, item_code, item_description,
+              pr_qty, done_qty, subcon_name, qc_durum, kabul_durum, note)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'NOK','NOK',$9)`,
+          [
+            String(k.site_type || "").trim() || null,
+            projectCode,
+            site,
+            itemCode,
+            String(k.item_description || "").trim() || null,
+            prQty,
+            doneQty === null ? 0 : doneQty,
+            String(k.subcon_name || "").trim() || null,
+            "Saha kalem gridinden girildi",
+          ],
+        );
+        eklenen++;
+      }
+    }
+
+    await client.query("COMMIT");
+    res.json({ ok: true, guncellenen, eklenen });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("SAHA KALEM KAYDET ERROR:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
   }
 });
 

@@ -5247,6 +5247,344 @@ function useUsdRate() {
   return usdRate;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   SAHA KALEM GRİDİ (31.08.2026)
+   Saha kodu girilince tüm kalemler tek Excel benzeri tabloda: bizim PR
+   talebimiz ↔ HW'nin açtığı PO (Requested) ↔ fark ↔ gerçekleşen
+   (Done/Due/Billed/QC/Subcon). Sarı hücrelere direkt rakam yazılır,
+   Kaydet tek seferde hepsini gönderir. Satırdaki "Veri Gir" eski
+   detay formunu açar (onair/not/kabul gibi alanlar için).
+   ═══════════════════════════════════════════════════════════════════════ */
+function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
+  const [data, setData] = useState({ rows: [], meta: {} });
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [duzenleme, setDuzenleme] = useState({}); // { item_code: { pr_qty, done_qty } }
+  const [kaydediyor, setKaydediyor] = useState(false);
+  const [hata, setHata] = useState("");
+  // Öneri şeridinden eklenen, henüz DB'de olmayan kalemler — tabloya eklenir,
+  // Kaydet'te normal satır gibi gönderilir (0 requested → "PO açılmamış" farkı)
+  const [ekstraKalemler, setEkstraKalemler] = useState([]);
+
+  const yukle = useCallback(async (kod) => {
+    const s = String(kod || "").trim().toUpperCase();
+    if (!s || s.length < 4) { setData({ rows: [], meta: {} }); return; }
+    setYukleniyor(true); setHata("");
+    try {
+      const d = await fetchJson(`${API_BASE}/master/saha-kalemler?site=${encodeURIComponent(s)}`);
+      if (d && d.ok) { setData({ rows: d.rows || [], meta: d.meta || {} }); setDuzenleme({}); setEkstraKalemler([]); }
+      else setHata(d?.error || "Kalemler getirilemedi");
+    } catch (e) { setHata(e.message || "Kalemler getirilemedi"); }
+    finally { setYukleniyor(false); }
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => yukle(siteCode), 500);
+    return () => clearTimeout(t);
+  }, [siteCode, yukle]);
+
+  const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
+  // Ekranda gösterilen değer: düzenleme varsa o, yoksa DB değeri
+  const goster = (row, alan) => {
+    const d = duzenleme[row.item_code];
+    if (d && d[alan] !== undefined) return d[alan];
+    const v = row[alan];
+    return v === null || v === undefined ? "" : String(v);
+  };
+  const degisti = (row, alan) => {
+    const d = duzenleme[row.item_code];
+    if (!d || d[alan] === undefined) return false;
+    const eski = row[alan] === null || row[alan] === undefined ? "" : String(row[alan]);
+    return String(d[alan]) !== eski;
+  };
+  const setHucre = (itemCode, alan, deger) =>
+    setDuzenleme((p) => ({ ...p, [itemCode]: { ...(p[itemCode] || {}), [alan]: deger } }));
+
+  // Fark = PR talebi − açılan PO. Pozitif: talep ettik PO yok. Negatif: PO var PR girilmemiş.
+  const farkHesap = (row) => {
+    const pr = num(goster(row, "pr_qty"));
+    const req = Number(row.requested_qty || 0);
+    if (pr === null) return req > 0 ? { tip: "pr-yok", deger: req } : { tip: "esit", deger: 0 };
+    const f = pr - req;
+    if (Math.abs(f) < 0.001) return { tip: "esit", deger: 0 };
+    return f > 0 ? { tip: "po-yok", deger: f } : { tip: "pr-yok", deger: -f };
+  };
+
+  const rows = useMemo(() => {
+    const mevcut = new Set((data.rows || []).map((r) => r.item_code));
+    return [...(data.rows || []), ...ekstraKalemler.filter((e) => !mevcut.has(e.item_code))];
+  }, [data.rows, ekstraKalemler]);
+
+  const ozet = useMemo(() => {
+    let poAcik = 0, farkli = 0, qcOk = 0, prT = 0, reqT = 0, doneT = 0, dueT = 0, billT = 0;
+    rows.forEach((r) => {
+      if (Number(r.requested_qty || 0) > 0) poAcik++;
+      if (farkHesap(r).tip !== "esit") farkli++;
+      if (String(r.qc_durum || "").toUpperCase() === "OK") qcOk++;
+      prT += num(goster(r, "pr_qty")) || 0;
+      reqT += Number(r.requested_qty || 0);
+      doneT += num(goster(r, "done_qty")) || 0;
+      dueT += Number(r.due_qty || 0);
+      billT += Number(r.billed_qty || 0);
+    });
+    return { poAcik, farkli, qcOk, prT, reqT, doneT, dueT, billT };
+  }, [rows, duzenleme]);
+
+  const bekleyen = useMemo(() => {
+    const liste = [];
+    rows.forEach((r) => {
+      const d = duzenleme[r.item_code];
+      if (!d) return;
+      const kayit = { item_code: r.item_code };
+      let varMi = false;
+      if (degisti(r, "pr_qty"))   { kayit.pr_qty = d.pr_qty; varMi = true; }
+      if (degisti(r, "done_qty")) { kayit.done_qty = d.done_qty; varMi = true; }
+      if (!varMi) return;
+      liste.push({
+        ...kayit,
+        project_code: r.project_code || data.meta?.project_code || "",
+        site_type: r.site_type || data.meta?.site_type || "",
+        item_description: r.item_description || "",
+        subcon_name: r.subcon_name || data.meta?.rf_subcon || "",
+      });
+    });
+    return liste;
+  }, [rows, duzenleme, data.meta]);
+
+  const kaydet = async () => {
+    if (!bekleyen.length) { alert("Değişiklik yok"); return; }
+    setKaydediyor(true);
+    try {
+      const d = await fetchJson(`${API_BASE}/master/saha-kalemler/kaydet`, {
+        method: "POST", withAuth: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site: String(siteCode || "").toUpperCase(), kalemler: bekleyen }),
+      });
+      if (!d?.ok) throw new Error(d?.error || "Kaydedilemedi");
+      window.dispatchEvent(new Event("dataUpdated"));
+      await yukle(siteCode);
+      alert(`Kaydedildi — ${d.guncellenen} güncellendi, ${d.eklenen} yeni kalem eklendi.`);
+    } catch (e) { alert(`Kayıt hatası: ${e.message}`); }
+    finally { setKaydediyor(false); }
+  };
+
+  const excelIndir = () => {
+    const bas = ["Item Code","Item Description","PR Qty","Requested Qty","Fark","Done Qty","Due Qty","Billed Qty","QC Durum","Subcon","PO No"];
+    const satirlar = rows.map((r) => {
+      const f = farkHesap(r);
+      return [
+        r.item_code, r.item_description,
+        goster(r, "pr_qty"), r.requested_qty,
+        f.tip === "esit" ? "" : (f.tip === "po-yok" ? `+${f.deger} (PO yok)` : `-${f.deger} (PR yok)`),
+        goster(r, "done_qty"), r.due_qty, r.billed_qty, r.qc_durum, r.subcon_name, r.po_no,
+      ];
+    });
+    const csv = [bas, ...satirlar]
+      .map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(";"))
+      .join("\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${String(siteCode || "saha").toUpperCase()}_Kalemler.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+
+  const S = {
+    kart:   { background:"#fff", borderRadius:14, marginBottom:16, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", border:"1.5px solid #e2e8f0", overflow:"hidden" },
+    chip:   { display:"inline-flex", alignItems:"center", gap:6, borderRadius:20, padding:"5px 12px", fontSize:11.5, fontWeight:700, background:"#f1f5f9", color:"#475569", border:"1px solid #e2e8f0", whiteSpace:"nowrap" },
+    th:     { fontSize:10.5, textTransform:"uppercase", letterSpacing:"0.06em", fontWeight:700, color:"#475569", padding:"8px 10px", borderBottom:"1px solid #cbd5e1", textAlign:"right", whiteSpace:"nowrap", background:"#f1f5f9" },
+    td:     { padding:"7px 10px", borderBottom:"1px solid #e2e8f0", textAlign:"right", whiteSpace:"nowrap", fontSize:12.5 },
+    hucre:  { width:62, padding:"4px 8px", borderRadius:7, textAlign:"right", background:"#fffbeb", border:"1px dashed #f2d9a4", fontSize:12.5, fontWeight:600, color:"#0f172a", outline:"none" },
+    rozet:  { display:"inline-flex", alignItems:"center", gap:4, borderRadius:7, padding:"3px 8px", fontSize:11, fontWeight:700 },
+  };
+  const thTxt = { ...S.th, textAlign:"left" };
+  const tdTxt = { ...S.td, textAlign:"left", whiteSpace:"normal", color:"#475569", minWidth:230, maxWidth:360 };
+
+  if (!String(siteCode || "").trim()) return null;
+
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={S.kart}>
+        {/* Saha başlığı */}
+        <div style={{ display:"flex", alignItems:"center", gap:14, padding:"12px 16px", borderBottom:"1px solid #e2e8f0", flexWrap:"wrap", background:"#f8fafc" }}>
+          <span style={{ fontFamily:"monospace", fontWeight:700, fontSize:15 }}>{String(siteCode).toUpperCase()}</span>
+          <div style={{ display:"flex", gap:16, color:"#64748b", fontSize:12, flexWrap:"wrap" }}>
+            {data.meta?.site_type   && <span>Tür <b style={{ color:"#0f172a" }}>{data.meta.site_type}</b></span>}
+            {(data.meta?.bolge || data.meta?.il) && <span>Bölge <b style={{ color:"#0f172a" }}>{data.meta.bolge || data.meta.il}</b></span>}
+            {data.meta?.project_code && <span>Proje <b style={{ color:"#0f172a" }}>{data.meta.project_code}</b></span>}
+            {data.meta?.rf_subcon    && <span>Subcon <b style={{ color:"#0f172a" }}>{data.meta.rf_subcon}</b></span>}
+          </div>
+          <div style={{ display:"flex", gap:8, marginLeft:"auto", flexWrap:"wrap", alignItems:"center" }}>
+            <span style={S.chip}>Kalem <b>{rows.length}</b></span>
+            <span style={{ ...S.chip, background:"#dbeafe", color:"#1d4ed8", borderColor:"transparent" }}>PO Açık <b>{ozet.poAcik}</b></span>
+            {ozet.farkli > 0 && <span style={{ ...S.chip, background:"#fef3c7", color:"#b45309", borderColor:"transparent" }}>Farklı Kalem <b>{ozet.farkli}</b></span>}
+            <span style={{ ...S.chip, background:"#d1fae5", color:"#047857", borderColor:"transparent" }}>QC OK <b>{ozet.qcOk}</b></span>
+            {data.meta?.tssr_belge_url && (
+              <a href={data.meta.tssr_belge_url} target="_blank" rel="noreferrer"
+                style={{ ...S.chip, background:"#e0e7ff", color:"#4338ca", borderColor:"transparent", textDecoration:"none" }}>📄 TSSR</a>
+            )}
+            <button type="button" onClick={excelIndir} disabled={!rows.length}
+              style={{ border:"1px solid #e2e8f0", background:"#f8fafc", color:"#475569", borderRadius:9, padding:"7px 14px", fontWeight:700, fontSize:12, cursor:rows.length?"pointer":"not-allowed" }}>
+              Excel İndir
+            </button>
+            <button type="button" onClick={kaydet} disabled={kaydediyor || !bekleyen.length}
+              style={{ border:"none", background: bekleyen.length ? "#2563eb" : "#cbd5e1", color:"#fff", borderRadius:9, padding:"7px 16px", fontWeight:700, fontSize:12, cursor: bekleyen.length && !kaydediyor ? "pointer" : "not-allowed" }}>
+              {kaydediyor ? "Kaydediliyor..." : bekleyen.length ? `Kaydet (${bekleyen.length})` : "Kaydet"}
+            </button>
+          </div>
+        </div>
+
+        {/* Tablo */}
+        <div style={{ overflowX:"auto", maxHeight:"56vh", overflowY:"auto" }}>
+          {yukleniyor ? (
+            <div style={{ padding:"32px", textAlign:"center", color:"#64748b", fontSize:13 }}>Kalemler yükleniyor…</div>
+          ) : hata ? (
+            <div style={{ padding:"32px", textAlign:"center", color:"#dc2626", fontSize:13 }}>{hata}</div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding:"32px", textAlign:"center", color:"#64748b", fontSize:13 }}>
+              Bu saha için kalem bulunamadı — saha kodunu kontrol edin.
+            </div>
+          ) : (
+            <table style={{ borderCollapse:"collapse", width:"100%", minWidth:1080, fontVariantNumeric:"tabular-nums" }}>
+              <thead>
+                <tr>
+                  <th style={{ ...S.th, textAlign:"left", borderBottom:"none", paddingBottom:2, color:"#94a3b8", fontSize:10 }} colSpan={2}></th>
+                  <th style={{ ...S.th, borderBottom:"2px solid #2563eb", paddingBottom:3, color:"#1d4ed8", fontSize:10 }}>Bizim Talep</th>
+                  <th style={{ ...S.th, borderBottom:"2px solid #cbd5e1", paddingBottom:3, color:"#64748b", fontSize:10 }}>Huawei PO</th>
+                  <th style={{ ...S.th, borderBottom:"none", paddingBottom:2 }}></th>
+                  <th style={{ ...S.th, borderBottom:"2px solid #059669", paddingBottom:3, color:"#059669", fontSize:10 }} colSpan={4}>Gerçekleşen</th>
+                  <th style={{ ...S.th, borderBottom:"none", paddingBottom:2 }} colSpan={2}></th>
+                </tr>
+                <tr>
+                  <th style={thTxt}>Item Code</th>
+                  <th style={thTxt}>Item Description</th>
+                  <th style={S.th}>PR Qty ✎</th>
+                  <th style={S.th}>Requested Qty</th>
+                  <th style={S.th}>Fark</th>
+                  <th style={S.th}>Done Qty ✎</th>
+                  <th style={S.th}>Due Qty</th>
+                  <th style={S.th}>Billed Qty</th>
+                  <th style={S.th}>QC Durum</th>
+                  <th style={S.th}>Subcon</th>
+                  <th style={S.th}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const f = farkHesap(r);
+                  const qc = String(r.qc_durum || "").toUpperCase();
+                  const satirDegisti = degisti(r, "pr_qty") || degisti(r, "done_qty");
+                  return (
+                    <tr key={r.item_code} style={{ background: satirDegisti ? "#fffdf5" : "transparent" }}>
+                      <td style={{ ...S.td, textAlign:"left", fontFamily:"monospace", fontSize:12, color:"#0f172a" }}>
+                        {r.item_code}
+                        {r.yeni && <span style={{ marginLeft:6, background:"#f3e8ff", color:"#7c3aed", borderRadius:5, padding:"1px 6px", fontSize:9.5, fontWeight:700 }}>YENİ</span>}
+                        {r.po_no && <div style={{ fontSize:10, color:"#94a3b8", fontWeight:400 }}>{String(r.po_no).slice(0, 26)}</div>}
+                      </td>
+                      <td style={tdTxt} title={r.item_description}>{r.item_description || "-"}</td>
+                      <td style={S.td}>
+                        <input type="number" step="any" min="0"
+                          value={goster(r, "pr_qty")}
+                          placeholder="–"
+                          onChange={(e) => setHucre(r.item_code, "pr_qty", e.target.value)}
+                          style={{ ...S.hucre, ...(degisti(r,"pr_qty") ? { borderStyle:"solid", borderColor:"#2563eb", background:"#fff" } : {}) }} />
+                      </td>
+                      <td style={{ ...S.td, fontWeight:700, color: Number(r.requested_qty||0) ? "#0f172a" : "#94a3b8" }}>{Number(r.requested_qty || 0)}</td>
+                      <td style={S.td}>
+                        {f.tip === "esit" ? (
+                          <span style={{ color:"#94a3b8" }}>—</span>
+                        ) : f.tip === "po-yok" ? (
+                          <span style={{ ...S.rozet, background:"#fef3c7", color:"#b45309" }} title="Talep ettik, Huawei PO açmamış">▲ {f.deger} · PO açılmamış</span>
+                        ) : (
+                          <span style={{ ...S.rozet, background:"#dbeafe", color:"#1d4ed8" }} title="PO açık ama PR talebi girilmemiş">▼ {f.deger} · PR eksik</span>
+                        )}
+                      </td>
+                      <td style={S.td}>
+                        <input type="number" step="any" min="0"
+                          value={goster(r, "done_qty")}
+                          onChange={(e) => setHucre(r.item_code, "done_qty", e.target.value)}
+                          style={{ ...S.hucre, ...(degisti(r,"done_qty") ? { borderStyle:"solid", borderColor:"#2563eb", background:"#fff" } : {}) }} />
+                      </td>
+                      <td style={{ ...S.td, color:"#94a3b8" }}>{Number(r.due_qty || 0)}</td>
+                      <td style={{ ...S.td, fontWeight:600 }}>{Number(r.billed_qty || 0)}</td>
+                      <td style={S.td}>
+                        {qc === "OK"  ? <span style={{ ...S.rozet, background:"#d1fae5", color:"#047857" }}>OK</span>
+                        : qc === "NOK" ? <span style={{ ...S.rozet, background:"#fee2e2", color:"#dc2626" }}>NOK</span>
+                        : <span style={{ color:"#94a3b8" }}>—</span>}
+                      </td>
+                      <td style={{ ...S.td, color:"#64748b", fontSize:11.5 }}>{r.subcon_name || "-"}</td>
+                      <td style={S.td}>
+                        <button type="button" onClick={() => onVeriGir && onVeriGir(r)}
+                          style={{ background:"#f1f5f9", color:"#475569", border:"1px solid #e2e8f0", borderRadius:7, padding:"4px 9px", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+                          Veri Gir
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr style={{ background:"#f1f5f9", fontWeight:700, borderTop:"2px solid #cbd5e1" }}>
+                  <td style={{ ...S.td, textAlign:"left", fontWeight:700 }} colSpan={2}>TOPLAM · {rows.length} kalem</td>
+                  <td style={{ ...S.td, fontWeight:700 }}>{Math.round(ozet.prT * 100) / 100}</td>
+                  <td style={{ ...S.td, fontWeight:700 }}>{Math.round(ozet.reqT * 100) / 100}</td>
+                  <td style={{ ...S.td, fontWeight:700 }}>{ozet.farkli > 0 ? `${ozet.farkli} kalem` : "—"}</td>
+                  <td style={{ ...S.td, fontWeight:700 }}>{Math.round(ozet.doneT * 100) / 100}</td>
+                  <td style={{ ...S.td, fontWeight:700 }}>{Math.round(ozet.dueT * 100) / 100}</td>
+                  <td style={{ ...S.td, fontWeight:700 }}>{Math.round(ozet.billT * 100) / 100}</td>
+                  <td style={S.td} colSpan={3}></td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Yapay zekâ öneri şeridi — hafif, tabloyla yarışmaz */}
+      {rows.length > 0 && oneriler.length > 0 && (
+        <div style={{ background:"#f6f4fd", border:"1px dashed #e4defa", borderRadius:12, padding:"12px 16px", color:"#6d5bb8" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>
+            ✦ Talep edilmesi önerilen kalemler
+            <span style={{ fontWeight:500, textTransform:"none", letterSpacing:0, color:"#94a3b8" }}>
+              · aynı tip sahalarda girilmiş ama burada yok — gözden kaçmasın
+            </span>
+          </div>
+          {oneriler.slice(0, 6).map((o, i) => (
+            <div key={`${o.item_code}-${i}`} style={{ display:"flex", alignItems:"center", gap:10, padding:"5px 0", fontSize:12, flexWrap:"wrap" }}>
+              <span style={{ fontFamily:"monospace", fontSize:11.5 }}>{o.item_code}</span>
+              <span style={{ color:"#475569" }}>{o.item_description}</span>
+              <span style={{ color:"#94a3b8", fontSize:11 }}>
+                benzer sahaların %{o.yuzde}'inde var{o.ort_adet ? ` · ort. ${o.ort_adet} adet` : ""}
+              </span>
+              <button type="button"
+                onClick={() => {
+                  setEkstraKalemler((p) => (p.some((x) => x.item_code === o.item_code) ? p : [...p, {
+                    item_code: o.item_code, item_description: o.item_description || "",
+                    project_code: data.meta?.project_code || "", site_type: data.meta?.site_type || "",
+                    pr_qty: null, done_qty: 0, requested_qty: 0, due_qty: 0, billed_qty: 0,
+                    qc_durum: "", subcon_name: data.meta?.rf_subcon || "", po_no: "", yeni: true,
+                  }]));
+                  setHucre(o.item_code, "pr_qty", String(o.ort_adet || 1));
+                }}
+                style={{ border:"1px solid #e4defa", background:"transparent", color:"#6d5bb8", borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+                + PR'a ekle
+              </button>
+            </div>
+          ))}
+          <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:8 }}>
+            Öneriler bilgilendirme amaçlıdır; PR'a eklemeden önce TSSR ile kontrol edin.
+          </div>
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{ display:"flex", gap:16, marginTop:10, color:"#94a3b8", fontSize:11, flexWrap:"wrap", alignItems:"center" }}>
+          <span><span style={{ display:"inline-block", width:12, height:12, borderRadius:4, background:"#fffbeb", border:"1px dashed #f2d9a4", verticalAlign:-2, marginRight:5 }} />Direkt yazılabilir hücre</span>
+          <span><span style={{ display:"inline-block", width:12, height:12, borderRadius:4, background:"#fef3c7", verticalAlign:-2, marginRight:5 }} />▲ PR var, PO açılmamış</span>
+          <span><span style={{ display:"inline-block", width:12, height:12, borderRadius:4, background:"#dbeafe", verticalAlign:-2, marginRight:5 }} />▼ PO açık, PR girilmemiş</span>
+          <span>Kaydet'e basınca tüm değişen hücreler tek seferde kaydedilir</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DailyEntry() {
   const usdRate = useUsdRate();
   function getTodayTR() {
@@ -6237,7 +6575,29 @@ function DailyEntry() {
         </div>
       </div>
 
-      {/* ═══ PO KALEMLERİ CARD ═══ */}
+      {/* ═══ SAHA KALEM GRİDİ — PR ↔ PO ↔ Gerçekleşen tek tabloda ═══ */}
+      <SahaKalemGridi
+        siteCode={siteSearchCode}
+        oneriler={sahaOneri?.oneriler || []}
+        onVeriGir={(r) => {
+          setForm((prev) => ({
+            ...prev,
+            site_code: String(siteSearchCode || "").toUpperCase(),
+            site_type: r.site_type || detectSiteTypeFromSiteCode(siteSearchCode),
+            project_code: r.project_code || prev.project_code || "",
+            item_code: r.item_code || "",
+            item_description: r.item_description || "",
+            done_qty: r.done_qty ?? "",
+            subcon_name: r.subcon_name || "",
+            qc_durum: r.qc_durum || "NOK",
+          }));
+          setItemCodeSearch(r.item_code || "");
+          setItemDescriptionSearch(r.item_description || "");
+          setShowEntryModal(true);
+        }}
+      />
+
+      {/* ═══ PO KALEMLERİ CARD (fiyat/PO detayı — grid'i tamamlar) ═══ */}
       <div style={{ background:"#fff", borderRadius:14, marginBottom:16, boxShadow:"0 2px 10px rgba(0,0,0,0.07)", overflow:"hidden", border:"1.5px solid #e2e8f0" }}>
         {/* Card header */}
         <div style={{ background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)", padding:"13px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
