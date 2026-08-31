@@ -5057,7 +5057,10 @@ function RolloutDashboard({ currentUser }) {
                     { url: row.emr_belge_url,        ad: "EMR" },
                     { url: row.pac_belge_url,        ad: "PAC" },
                     { url: row.enh_proje_belge_url,  ad: "ENH_Proje" },
-                  ].filter(b => b.url);
+                  ].flatMap(({ url, ad }) =>
+                    String(url || "").split("\n").filter(Boolean)
+                      .map((u, i, arr) => ({ url: u, ad: arr.length > 1 ? `${ad}_${i + 1}` : ad }))
+                  );
                   if (!belgeler.length) { alert("Bu sahaya ait belge bulunamadı."); return; }
                   const JSZip = (await import("jszip")).default;
                   const zip = new JSZip();
@@ -31912,12 +31915,14 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     emr_belge_url: existingRow.emr_belge_url || "",
     pac_belge_url: existingRow.pac_belge_url || "",
   });
-  const [enhProjeBelgeFile, setEnhProjeBelgeFile] = useState(null);
-  const [losBelgeFile, setLosBelgeFile] = useState(null);
-  const [tssrBelgeFile, setTssrBelgeFile] = useState(null);
-  const [btkBelgeFile, setBtkBelgeFile] = useState(null);
-  const [emrBelgeFile, setEmrBelgeFile] = useState(null);
-  const [pacBelgeFile, setPacBelgeFile] = useState(null);
+  // 31.08.2026: Aynı tipten birden fazla belge (2. survey, 2. BTK vb.) yüklenebilsin
+  // diye dosya state'leri dizi; URL'ler aynı kolonda satır sonu (\n) ile ayrılır.
+  const [enhProjeBelgeFile, setEnhProjeBelgeFile] = useState([]);
+  const [losBelgeFile, setLosBelgeFile] = useState([]);
+  const [tssrBelgeFile, setTssrBelgeFile] = useState([]);
+  const [btkBelgeFile, setBtkBelgeFile] = useState([]);
+  const [emrBelgeFile, setEmrBelgeFile] = useState([]);
+  const [pacBelgeFile, setPacBelgeFile] = useState([]);
   const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
   // Subcon HW mi? Huawei, HW, veya "Huawei Turkey" gibi varyantlar dahil
@@ -31985,39 +31990,44 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
 
       console.log("ROLLOUT SAVE RESULT:", result);
 
-      // Belge upload helper
-      const uploadRolloutBelge = async (file, type, field) => {
+      // Belge upload helper — tek dosya yükler, publicUrl döner
+      const uploadRolloutBelge = async (file, type) => {
         const ext = file.name.split(".").pop();
         const signRes = await fetch(`${API_BASE}/rollout/signed-upload-url?rolloutId=${result.row.id}&type=${type}&ext=${ext}`);
         if (!signRes.ok) throw new Error("Signed URL alınamadı");
         const { signedUrl, publicUrl } = await signRes.json();
         const upRes = await fetch(signedUrl, { method:"PUT", body: file, headers:{ "Content-Type": file.type, "x-upsert":"true" } });
         if (!upRes.ok) throw new Error("Supabase yükleme başarısız");
-        await fetchJson(`${API_BASE}/rollout/${result.row.id}/belge-url`, {
-          method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({ field, url: publicUrl })
-        });
         return publicUrl;
       };
 
-      // Tüm belge upload'ları
+      // Tüm belge upload'ları — mevcut URL listesine eklenir, silinenler düşer
       const belgeUploads = [
-        { file: enhProjeBelgeFile, type:"enh_proje", field:"enh_proje_belge_url", setter: setEnhProjeBelgeFile },
-        { file: losBelgeFile,      type:"los",       field:"los_belge_url",       setter: setLosBelgeFile },
-        { file: tssrBelgeFile,     type:"tssr",      field:"tssr_belge_url",      setter: setTssrBelgeFile },
-        { file: btkBelgeFile,      type:"btk",       field:"btk_belge_url",       setter: setBtkBelgeFile },
-        { file: emrBelgeFile,      type:"emr",       field:"emr_belge_url",       setter: setEmrBelgeFile },
-        { file: pacBelgeFile,      type:"pac",       field:"pac_belge_url",       setter: setPacBelgeFile },
+        { files: enhProjeBelgeFile, type:"enh_proje", field:"enh_proje_belge_url", setter: setEnhProjeBelgeFile },
+        { files: losBelgeFile,      type:"los",       field:"los_belge_url",       setter: setLosBelgeFile },
+        { files: tssrBelgeFile,     type:"tssr",      field:"tssr_belge_url",      setter: setTssrBelgeFile },
+        { files: btkBelgeFile,      type:"btk",       field:"btk_belge_url",       setter: setBtkBelgeFile },
+        { files: emrBelgeFile,      type:"emr",       field:"emr_belge_url",       setter: setEmrBelgeFile },
+        { files: pacBelgeFile,      type:"pac",       field:"pac_belge_url",       setter: setPacBelgeFile },
       ];
       if (result.row?.id) {
         setEnhProjeSaving(true);
-        for (const { file, type, field, setter } of belgeUploads) {
-          if (!file) continue;
+        for (const { files, type, field, setter } of belgeUploads) {
+          const mevcut = String(form[field] || "").split("\n").filter(Boolean);
+          const degisti = mevcut.join("\n") !== String(existingRow[field] || "");
+          if (!files.length && !degisti) continue;
           try {
-            const url = await uploadRolloutBelge(file, type, field);
-            setForm(prev => ({ ...prev, [field]: url }));
+            for (const file of files) {
+              mevcut.push(await uploadRolloutBelge(file, type));
+            }
+            const birlesik = mevcut.join("\n");
+            await fetchJson(`${API_BASE}/rollout/${result.row.id}/belge-url`, {
+              method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ field, url: birlesik })
+            });
+            setForm(prev => ({ ...prev, [field]: birlesik }));
           } catch(e) { alert(`${type.toUpperCase()} belgesi yükleme hatası: ${e.message}`); }
-          finally { setter(null); }
+          finally { setter([]); }
         }
         setEnhProjeSaving(false);
       }
@@ -32115,31 +32125,44 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     </label>
   );
 
-  // Belge upload widget
-  const belgeWidget = (urlField, file, setFile) => {
-    const currentUrl = form[urlField];
+  // Belge upload widget — birden fazla dosya seçilebilir, mevcutlara eklenir
+  const belgeWidget = (urlField, files, setFiles) => {
+    const urls = String(form[urlField] || "").split("\n").filter(Boolean);
     const accept = ".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx";
+    const dosyaAdi = (u) => { try { return decodeURIComponent(u.split("?")[0].split("/").pop() || "belge"); } catch { return "belge"; } };
     return (
-      <div style={{ marginTop:"8px" }}>
-        {currentUrl ? (
-          <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
-            <a href={currentUrl} target="_blank" rel="noreferrer"
+      <div style={{ marginTop:"8px", display:"flex", flexDirection:"column", gap:"6px", alignItems:"flex-start" }}>
+        {urls.map((u, i) => (
+          <div key={u} style={{ display:"flex", gap:"6px", alignItems:"center" }}>
+            <a href={u} target="_blank" rel="noreferrer" title={dosyaAdi(u)}
               style={{ background:"#dbeafe", color:"#1d4ed8", padding:"5px 12px", borderRadius:"8px", fontSize:"12px", textDecoration:"none", fontWeight:600 }}>
-              📄 Belgeyi Görüntüle
+              📄 {urls.length > 1 ? `Belge ${i + 1}` : "Belgeyi Görüntüle"}
             </a>
-            <label style={{ background:"#e0e7ff", color:"#4338ca", padding:"5px 12px", borderRadius:"8px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>
-              🔄 Değiştir
-              <input type="file" accept={accept} style={{ display:"none" }} onChange={e=>setFile(e.target.files[0]||null)} />
-            </label>
-            {file && <span style={{ fontSize:"11px", color:"#059669", fontWeight:600 }}>📎 {file.name}</span>}
+            <button type="button" title="Belgeyi kayıttan kaldır"
+              onClick={() => {
+                if (!window.confirm("Bu belge kayıttan kaldırılsın mı? (Kaydet'e basınca kesinleşir)")) return;
+                handleChange(urlField, urls.filter((_, j) => j !== i).join("\n"));
+              }}
+              style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"12px", lineHeight:1 }}>✕</button>
           </div>
-        ) : (
-          <label style={{ display:"inline-flex", alignItems:"center", gap:"6px", background:"#f3f4f6", border:"1px dashed #9ca3af", borderRadius:"8px", padding:"7px 14px", cursor:"pointer", fontSize:"12px" }}>
-            📎 Belge Ekle (PDF, JPG, PNG, DWG, Excel, Word)
-            <input type="file" accept={accept} style={{ display:"none" }} onChange={e=>setFile(e.target.files[0]||null)} />
-            {file && <span style={{ color:"#059669", fontWeight:600 }}>{file.name}</span>}
-          </label>
-        )}
+        ))}
+        {files.map((f, i) => (
+          <div key={`${f.name}-${i}`} style={{ display:"flex", gap:"6px", alignItems:"center", fontSize:"11px", color:"#059669", fontWeight:600 }}>
+            <span>📎 {f.name}</span>
+            <button type="button" title="Seçimi kaldır"
+              onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+              style={{ background:"none", border:"none", color:"#dc2626", cursor:"pointer", fontSize:"12px", lineHeight:1 }}>✕</button>
+          </div>
+        ))}
+        <label style={{ display:"inline-flex", alignItems:"center", gap:"6px", background:"#f3f4f6", border:"1px dashed #9ca3af", borderRadius:"8px", padding:"7px 14px", cursor:"pointer", fontSize:"12px" }}>
+          📎 {urls.length || files.length ? "Belge Ekle" : "Belge Ekle (PDF, JPG, PNG, DWG, Excel, Word)"}
+          <input type="file" multiple accept={accept} style={{ display:"none" }}
+            onChange={e => {
+              const yeni = Array.from(e.target.files || []);
+              if (yeni.length) setFiles(prev => [...prev, ...yeni]);
+              e.target.value = "";
+            }} />
+        </label>
       </div>
     );
   };
@@ -32153,7 +32176,10 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
       { url: form.emr_belge_url,       ad: "EMR" },
       { url: form.pac_belge_url,       ad: "PAC" },
       { url: form.enh_proje_belge_url, ad: "ENH_Proje" },
-    ].filter(b => b.url);
+    ].flatMap(({ url, ad }) =>
+      String(url || "").split("\n").filter(Boolean)
+        .map((u, i, arr) => ({ url: u, ad: arr.length > 1 ? `${ad}_${i + 1}` : ad }))
+    );
     if (belgeler.length === 0) { alert("Bu sahaya ait belge bulunamadı."); return; }
     const JSZip = (await import("jszip")).default;
     const zip = new JSZip();
