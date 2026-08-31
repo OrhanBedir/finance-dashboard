@@ -3670,12 +3670,9 @@ app.get("/setup-db", async (req, res) => {
       ADD COLUMN IF NOT EXISTS tamamlanan_qty NUMERIC
     `);
 
-    // PR Qty (31.08.2026): PO açılmadan ÖNCE bizim talep ettiğimiz miktar.
-    // NULL = hiç talep girilmemiş (0 talep ettik demek değil) — grid'de "–".
-    await pool.query(`
-      ALTER TABLE master_works
-      ADD COLUMN IF NOT EXISTS pr_qty NUMERIC
-    `);
+    // Not (31.08.2026): "PR Qty" için ayrı kolon YOK — done_qty zaten PO
+    // talebine esas miktardır ve grid'de PR Qty olarak gösterilir;
+    // tamamlanan_qty ise grid'in Done Qty'sidir.
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS hw_payment_rows (
@@ -4206,8 +4203,11 @@ app.get("/master/saha-kalemler", async (req, res) => {
           MAX(COALESCE(item_description,''))   AS item_description,
           MAX(COALESCE(project_code,''))       AS project_code,
           MAX(COALESCE(site_type,''))          AS site_type,
-          SUM(pr_qty)                          AS pr_qty,
-          SUM(COALESCE(done_qty,0))            AS done_qty,
+          -- Kolon eşlemesi (31.08.2026, Orhan): master_works.done_qty = PO
+          -- talebine esas miktar → grid'de "PR Qty"; tamamlanan_qty = fiziki
+          -- biten → grid'de "Done Qty" (NULL = done ile aynı, eski kural)
+          SUM(COALESCE(done_qty,0))                    AS pr_qty,
+          SUM(COALESCE(tamamlanan_qty, done_qty, 0))   AS done_qty,
           MAX(COALESCE(subcon_name,''))        AS subcon_name,
           MAX(COALESCE(qc_durum,''))           AS qc_durum,
           MAX(COALESCE(note,''))               AS note
@@ -4320,10 +4320,11 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
       );
 
       if (mevcut.rows.length) {
+        // Grid "PR Qty" → done_qty (PO talebine esas), "Done Qty" → tamamlanan_qty (fiziki)
         await client.query(
           `UPDATE master_works
-             SET pr_qty   = COALESCE($1, pr_qty),
-                 done_qty = COALESCE($2, done_qty)
+             SET done_qty       = COALESCE($1, done_qty),
+                 tamamlanan_qty = COALESCE($2, tamamlanan_qty)
            WHERE id = $3`,
           [prQty, doneQty, mevcut.rows[0].id],
         );
@@ -4332,7 +4333,7 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
         await client.query(
           `INSERT INTO master_works
              (site_type, project_code, site_code, item_code, item_description,
-              pr_qty, done_qty, subcon_name, qc_durum, kabul_durum, note)
+              done_qty, tamamlanan_qty, subcon_name, qc_durum, kabul_durum, note)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'NOK','NOK',$9)`,
           [
             String(k.site_type || "").trim() || null,
@@ -4340,8 +4341,8 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
             site,
             itemCode,
             String(k.item_description || "").trim() || null,
-            prQty,
-            doneQty === null ? 0 : doneQty,
+            prQty === null ? 0 : prQty,
+            doneQty,
             String(k.subcon_name || "").trim() || null,
             "Saha kalem gridinden girildi",
           ],
