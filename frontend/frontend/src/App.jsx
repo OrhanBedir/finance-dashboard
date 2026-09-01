@@ -5283,6 +5283,34 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
     return () => clearTimeout(t);
   }, [siteCode, yukle]);
 
+  // Veri Gir modalından kayıt yapılınca grid anında yenilensin (01.09.2026)
+  useEffect(() => {
+    const f = () => yukle(siteCode);
+    window.addEventListener("dataUpdated", f);
+    return () => window.removeEventListener("dataUpdated", f);
+  }, [siteCode, yukle]);
+
+  // Kalem silme: yalnız Orhan (iki hesap) + Nurcan Kuş (backend de kontrol eder)
+  const silYetkili = useMemo(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem("user") || "null");
+      return ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "nurcan.kus@simsektel.com"]
+        .includes(String(u?.email || "").toLowerCase());
+    } catch { return false; }
+  }, []);
+
+  const kalemSil = async (r) => {
+    if (!window.confirm(`${r.item_code} kalemini bu sahadan silmek istediğine emin misin?\n\nPR ve Done girişleri tamamen silinir (PO kaydına dokunulmaz).`)) return;
+    try {
+      const d = await fetchJson(
+        `${API_BASE}/master/saha-kalem?site=${encodeURIComponent(String(siteCode).toUpperCase())}&item=${encodeURIComponent(r.item_code)}`,
+        { method: "DELETE", withAuth: true },
+      );
+      if (!d?.ok) throw new Error(d?.error || "Silinemedi");
+      window.dispatchEvent(new Event("dataUpdated")); // listener grid'i yeniler
+    } catch (e) { alert(`Silme hatası: ${e.message}`); }
+  };
+
   const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
   // Ekranda gösterilen değer: düzenleme varsa o, yoksa DB değeri
   const goster = (row, alan) => {
@@ -5528,10 +5556,18 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
                       </td>
                       <td style={{ ...S.td, color:"#64748b", fontSize:11.5 }}>{r.subcon_name || "-"}</td>
                       <td style={S.td}>
-                        <button type="button" onClick={() => onVeriGir && onVeriGir(r)}
-                          style={{ background:"#f1f5f9", color:"#475569", border:"1px solid #e2e8f0", borderRadius:7, padding:"4px 9px", fontSize:11, fontWeight:600, cursor:"pointer" }}>
-                          Veri Gir
-                        </button>
+                        <div style={{ display:"inline-flex", gap:5 }}>
+                          <button type="button" onClick={() => onVeriGir && onVeriGir(r)}
+                            style={{ background:"#f1f5f9", color:"#475569", border:"1px solid #e2e8f0", borderRadius:7, padding:"4px 9px", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+                            Veri Gir
+                          </button>
+                          {silYetkili && r.kayit_var && (
+                            <button type="button" onClick={() => kalemSil(r)} title="Yanlış girilen kalemi sil"
+                              style={{ background:"#fff1f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:7, padding:"4px 7px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                              🗑
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

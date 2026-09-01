@@ -4282,11 +4282,45 @@ app.get("/master/saha-kalemler", async (req, res) => {
       meta.rf_subcon = Object.entries(sayac).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
     }
     if (!meta.site_type) meta.site_type = rows.find((r) => r.site_type)?.site_type || "";
-    if (!meta.project_code) meta.project_code = rows.find((r) => r.project_code)?.project_code || "";
+    // Proje kodunda otorite PO'dur (01.09.2026, Orhan): rollout kaydı farklı
+    // yazılmış olabilir (DE1105 vakası) — PO'lu kalemin kodu başlıkta gösterilir
+    const poProje = rows.find((r) => r.po_var && r.project_code)?.project_code || "";
+    if (poProje) meta.project_code = poProje;
+    else if (!meta.project_code) meta.project_code = rows.find((r) => r.project_code)?.project_code || "";
 
     res.json({ ok: true, site, rows, meta });
   } catch (err) {
     console.error("SAHA KALEMLER ERROR:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/* Grid'den kalem silme (01.09.2026): yanlış girilen PR kayıtları için.
+   Yalnız Orhan (iki hesap) ve Nurcan Kuş yetkili — saha+item'ın TÜM
+   master_works kayıtlarını siler (grid satırı toplulaştırılmış olduğundan). */
+const SAHA_KALEM_SIL_YETKI = [
+  "orhan.bedir@simsektel.com",
+  "orhan.bedir@gmail.com",
+  "nurcan.kus@simsektel.com",
+];
+app.delete("/master/saha-kalem", authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || "").toLowerCase();
+    if (!SAHA_KALEM_SIL_YETKI.includes(email)) {
+      return res.status(403).json({ ok: false, error: "Kalem silme yetkiniz yok" });
+    }
+    const site = String(req.query.site || "").replace(/\s+/g, "").toUpperCase();
+    const item = String(req.query.item || "").trim();
+    if (!site || !item) return res.status(400).json({ ok: false, error: "site ve item zorunlu" });
+    const r = await pool.query(
+      `DELETE FROM master_works
+       WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) = $2
+       RETURNING id`,
+      [site, item],
+    );
+    res.json({ ok: true, silinen: r.rowCount });
+  } catch (err) {
+    console.error("SAHA KALEM SIL ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
