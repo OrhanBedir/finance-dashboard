@@ -2837,6 +2837,7 @@ const MT_KATEGORILER = [
   ["VINC", "🏗 Vinç"],
   ["NAKLIYE", "🚚 Nakliye"],
   ["MALZEME", "🧱 Malzeme"],
+  ["DEPO", "📦 Depo"],
   ["DIGER", "📋 Diğer"],
 ];
 const mtKatAdi = (k) => { const f = MT_KATEGORILER.find(x => x[0] === String(k || "").toUpperCase()); return f ? f[1] : (k || "—"); };
@@ -5464,8 +5465,10 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
                   <th style={{ ...S.th, borderBottom:"2px solid #2563eb", paddingBottom:3, color:"#1d4ed8", fontSize:10 }}>Bizim Talep</th>
                   <th style={{ ...S.th, borderBottom:"2px solid #cbd5e1", paddingBottom:3, color:"#64748b", fontSize:10 }}>Huawei PO</th>
                   <th style={{ ...S.th, borderBottom:"none", paddingBottom:2 }}></th>
-                  <th style={{ ...S.th, borderBottom:"2px solid #059669", paddingBottom:3, color:"#059669", fontSize:10 }} colSpan={4}>Gerçekleşen</th>
-                  <th style={{ ...S.th, borderBottom:"none", paddingBottom:2 }} colSpan={2}></th>
+                  <th style={{ ...S.th, borderBottom:"2px solid #059669", paddingBottom:3, color:"#059669", fontSize:10 }}>Fiziki Tamamlanan</th>
+                  <th style={{ ...S.th, borderBottom:"2px solid #d97706", paddingBottom:3, color:"#b45309", fontSize:10 }}>HW'ye Fatura Edilecek</th>
+                  <th style={{ ...S.th, borderBottom:"2px solid #475569", paddingBottom:3, color:"#475569", fontSize:10 }}>HW'ye Fatura Edilen</th>
+                  <th style={{ ...S.th, borderBottom:"none", paddingBottom:2 }} colSpan={3}></th>
                 </tr>
                 <tr>
                   <th style={thTxt}>Item Code</th>
