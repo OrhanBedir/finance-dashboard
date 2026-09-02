@@ -4559,14 +4559,18 @@ app.get("/master/saha-kalemler", async (req, res) => {
         COALESCE(po.billed_qty, 0)           AS billed_qty,
         COALESCE(po.due_qty, 0)              AS due_qty,
         COALESCE(po.po_no,'')                AS po_no,
-        COALESCE(po.unit_price, 0)           AS unit_price,
-        COALESCE(po.currency,'TRY')          AS currency,
+        -- Birim fiyat: sahanın PO'su; PO açılmamışsa kalemin son PO fiyatı (tahmini)
+        COALESCE(NULLIF(po.unit_price,0), item_po.unit_price, 0) AS unit_price,
+        COALESCE(NULLIF(po.currency,''), item_po.currency, best_boq.currency, 'TRY') AS currency,
+        (po.item_code IS NULL AND item_po.unit_price IS NOT NULL) AS fiyat_tahmini,
         (po.item_code IS NOT NULL)           AS po_var,
         (mw.item_code IS NOT NULL)           AS kayit_var
       FROM mw
       FULL OUTER JOIN po ON mw.item_code = po.item_code
       LEFT JOIN best_boq
         ON TRIM(COALESCE(best_boq.s_bom_code,'')) = COALESCE(mw.item_code, po.item_code)
+      LEFT JOIN best_item_po item_po
+        ON TRIM(COALESCE(item_po.item_code,'')) = COALESCE(mw.item_code, po.item_code)
       ORDER BY 1
     `;
 

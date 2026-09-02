@@ -5559,8 +5559,20 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
       dueT += Number(r.due_qty || 0);
       billT += Number(r.billed_qty || 0);
     });
-    return { poAcik, farkli, qcOk, prT, reqT, doneT, dueT, billT };
+    // Tutarlar (02.09.2026): para birimine göre PR / PO / faturalanan; PO'suz kalemde son PO fiyatı (tahmini)
+    const tutar = {}; let tahmini = false;
+    rows.forEach((r) => {
+      const f = Number(r.unit_price || 0); if (!f) return;
+      const c = String(r.currency || "TRY").toUpperCase();
+      tutar[c] = tutar[c] || { pr: 0, po: 0, bill: 0 };
+      tutar[c].pr   += (num(goster(r, "pr_qty")) || 0) * f;
+      tutar[c].po   += Number(r.requested_qty || 0) * f;
+      tutar[c].bill += Number(r.billed_qty || 0) * f;
+      if (r.fiyat_tahmini && (num(goster(r, "pr_qty")) || 0) > 0) tahmini = true;
+    });
+    return { poAcik, farkli, qcOk, prT, reqT, doneT, dueT, billT, tutar, tahmini };
   }, [rows, duzenleme]);
+  const paraFmt = (v, c) => (c === "USD" ? "$" : c === "EUR" ? "€" : "₺") + Math.round(v).toLocaleString("tr-TR");
 
   const bekleyen = useMemo(() => {
     const liste = [];
@@ -5650,6 +5662,13 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
             <span style={{ ...S.chip, background:"#dbeafe", color:"#1d4ed8", borderColor:"transparent" }}>PO Açık <b>{ozet.poAcik}</b></span>
             {ozet.farkli > 0 && <span style={{ ...S.chip, background:"#fef3c7", color:"#b45309", borderColor:"transparent" }}>Farklı Kalem <b>{ozet.farkli}</b></span>}
             <span style={{ ...S.chip, background:"#d1fae5", color:"#047857", borderColor:"transparent" }}>QC OK <b>{ozet.qcOk}</b></span>
+            {Object.keys(ozet.tutar).length > 0 && (
+              <span
+                title={Object.entries(ozet.tutar).map(([c, t]) => `${c}: PR ${paraFmt(t.pr, c)} · PO ${paraFmt(t.po, c)} · Faturalanan ${paraFmt(t.bill, c)}`).join("\n") + (ozet.tahmini ? "\n~ PO açılmamış kalemlerde son PO birim fiyatı kullanıldı" : "")}
+                style={{ ...S.chip, background:"transparent", color:"#94a3b8", borderColor:"#e2e8f0", fontWeight:600, cursor:"help" }}>
+                PR {ozet.tahmini ? "≈ " : ""}{Object.entries(ozet.tutar).map(([c, t]) => paraFmt(t.pr, c)).join(" + ")}
+              </span>
+            )}
             {data.meta?.tssr_belge_url && (
               <a href={data.meta.tssr_belge_url} target="_blank" rel="noreferrer"
                 style={{ ...S.chip, background:"#e0e7ff", color:"#4338ca", borderColor:"transparent", textDecoration:"none" }}>📄 TSSR</a>
