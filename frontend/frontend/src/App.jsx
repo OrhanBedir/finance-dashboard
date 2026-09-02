@@ -32251,9 +32251,9 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
                   {(() => {
                     const D = { ONAY_BEKLE:["Onay bekliyor","#fef3c7","#b45309"], ONAYLANDI:["Onaylandı","#dcfce7","#166534"], RED:["Reddedildi","#fee2e2","#b91c1c"] };
                     const d = D[r.onay_durum];
-                    let yetkili = false;
-                    try { const u = JSON.parse(localStorage.getItem("user")||"null"); yetkili = ["nurcan.kus@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","serdar.altinova@simsektel.com","duzgun.simsek@simsektel.com"].includes(String(u?.email||"").toLowerCase()); } catch {}
+                    const yetkili = !!r.onay_yetkim; // bölgeye göre backend hesaplar (İzmir→Serdar, Ankara→Nurcan, genel→Orhan/Düzgün)
                     const token = localStorage.getItem("token") || "";
+                    const fotoVar = items.some(it => (it.fotolar||[]).length > 0);
                     const islem = async (yol, body) => {
                       try {
                         const resp = await fetch(`${API_BASE}/rollout/cleanup/${encodeURIComponent(r.site_code)}/${yol}`, { method:"PUT", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token}` }, body: JSON.stringify(body||{}) });
@@ -32263,6 +32263,13 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
                     };
                     return (
                       <>
+                        {r.atanan_ad && <span title={r.atanan_email||""} style={{ alignSelf:"center", fontSize:"11px", color:"#475569", fontWeight:600 }}>👤 {r.atanan_ad}</span>}
+                        {/* Huawei'ye gidecek önce/sonra raporu — pdfkit ile backend üretir */}
+                        <a href={fotoVar ? `${API_BASE}/rollout/cleanup/${encodeURIComponent(r.site_code)}/rapor.pdf?token=${encodeURIComponent(token)}` : undefined}
+                           onClick={e=>{ if(!fotoVar) e.preventDefault(); }} title={fotoVar ? "Önce/Sonra fotoğraflı Huawei raporu (PDF)" : "Henüz fotoğraf yok"}
+                           style={{ background: fotoVar?"#7c3aed":"#f1f5f9", color: fotoVar?"#fff":"#94a3b8", border:"1px solid #e2e8f0", borderRadius:"6px", padding:"5px 12px", fontSize:"12px", fontWeight:700, textDecoration:"none", cursor: fotoVar?"pointer":"default" }}>
+                          📄 Huawei Raporu
+                        </a>
                         {d && <span title={r.red_notu ? `Red: ${r.red_notu}` : (r.onaylayan||"")} style={{ alignSelf:"center", background:d[1], color:d[2], borderRadius:"999px", padding:"3px 10px", fontSize:"11px", fontWeight:800 }}>{d[0]}</span>}
                         {yetkili && r.onay_durum === "ONAY_BEKLE" && (
                           <>
@@ -32300,7 +32307,15 @@ function CleanupModal({ record, rolloutRows, onClose, onSaved }) {
     items: record?.items || [],
     notlar: record?.notlar || "",
     screenshot_url: record?.screenshot_url || "",
+    atanan_email: record?.atanan_email || "",
+    atanan_ad: record?.atanan_ad || "",
   });
+  // İş ataması (02.09.2026): personel mobilde "Bana atanan sahalar" listesinde görür
+  const [personelListesi, setPersonelListesi] = useState([]);
+  useEffect(() => {
+    fetch(`${API_BASE}/rollout/cleanup/personel-listesi`, { headers })
+      .then(r => r.json()).then(d => { if (d?.ok) setPersonelListesi(d.rows || []); }).catch(() => {});
+  }, []); // eslint-disable-line
   const [newKalem, setNewKalem] = useState("");
   const [saving, setSaving] = useState(false);
   const [screenshotFile, setScreenshotFile] = useState(null);
@@ -32405,6 +32420,13 @@ function CleanupModal({ record, rolloutRows, onClose, onSaved }) {
           {/* Notlar */}
           <div>
             <label style={lblSt}>📝 Clean Up Not</label>
+            <label style={{...lblSt, marginTop:"10px"}}>👤 Atanan Personel (mobilde bu sahayı görür)</label>
+            <select style={inSt} value={form.atanan_email}
+              onChange={e=>{ const p = personelListesi.find(x=>x.email===e.target.value); setForm(f=>({ ...f, atanan_email: e.target.value, atanan_ad: p?.ad || "" })); }}>
+              <option value="">— Atama yok —</option>
+              {personelListesi.map(p => <option key={p.email} value={p.email}>{p.ad || p.email}{p.ad ? ` (${p.email})` : ""}</option>)}
+            </select>
+            <div style={{ height:"10px" }} />
             <textarea style={{...inSt,minHeight:"80px",resize:"vertical"}} value={form.notlar} onChange={e=>setForm(p=>({...p,notlar:e.target.value}))} placeholder="Notlarınızı buraya yazın..." />
           </div>
 

@@ -3880,7 +3880,9 @@ app.get("/setup-db", async (req, res) => {
       ADD COLUMN IF NOT EXISTS onaya_gonderme_tarihi TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS onaylayan TEXT,
       ADD COLUMN IF NOT EXISTS onay_tarihi TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS red_notu TEXT`).catch(() => {});
+      ADD COLUMN IF NOT EXISTS red_notu TEXT,
+      ADD COLUMN IF NOT EXISTS atanan_email TEXT,
+      ADD COLUMN IF NOT EXISTS atanan_ad TEXT`).catch(() => {});
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS po_rows (
@@ -9812,15 +9814,19 @@ app.get("/rollout/cleanup", authMiddleware, async (req, res) => {
       items JSONB DEFAULT '[]', notlar TEXT, screenshot_url TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    const r = await pool.query("SELECT * FROM rollout_cleanup ORDER BY updated_at DESC");
-    res.json({ ok: true, rows: r.rows });
+    // Bölge (onaycı yönlendirmesi için) rollout_progress'ten; onay_yetkim isteyen kullanıcıya göre
+    const r = await pool.query(`
+      SELECT c.*, (SELECT rp.bolge FROM rollout_progress rp WHERE UPPER(TRIM(rp.site_code)) = UPPER(TRIM(c.site_code)) LIMIT 1) AS bolge
+      FROM rollout_cleanup c ORDER BY c.updated_at DESC`);
+    const email = String(req.user?.email || "").toLowerCase();
+    res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, onay_yetkim: cleanupOnayYetkiliMi(email, x.bolge) })) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // POST /rollout/cleanup - upsert
 app.post("/rollout/cleanup", authMiddleware, async (req, res) => {
   try {
-    const { site_code, visit_date, notification_date, completion_date, items, notlar, screenshot_url } = req.body;
+    const { site_code, visit_date, notification_date, completion_date, items, notlar, screenshot_url, atanan_email, atanan_ad } = req.body;
     if (!site_code) return res.status(400).json({ ok: false, error: "site_code zorunlu" });
     await pool.query(`CREATE TABLE IF NOT EXISTS rollout_cleanup (
       id SERIAL PRIMARY KEY, site_code TEXT NOT NULL UNIQUE,
@@ -9829,16 +9835,18 @@ app.post("/rollout/cleanup", authMiddleware, async (req, res) => {
       created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
     const r = await pool.query(`
-      INSERT INTO rollout_cleanup (site_code, visit_date, notification_date, completion_date, items, notlar, screenshot_url)
-      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      INSERT INTO rollout_cleanup (site_code, visit_date, notification_date, completion_date, items, notlar, screenshot_url, atanan_email, atanan_ad)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       ON CONFLICT (site_code) DO UPDATE SET
         visit_date=EXCLUDED.visit_date, notification_date=EXCLUDED.notification_date,
         completion_date=EXCLUDED.completion_date, items=EXCLUDED.items,
         notlar=EXCLUDED.notlar, screenshot_url=COALESCE(EXCLUDED.screenshot_url, rollout_cleanup.screenshot_url),
+        atanan_email=EXCLUDED.atanan_email, atanan_ad=EXCLUDED.atanan_ad,
         updated_at=NOW()
       RETURNING *
-    `, [site_code, visit_date||null, notification_date||null, completion_date||null,
-        JSON.stringify(items||[]), notlar||null, screenshot_url||null]);
+    `, [String(site_code).replace(/\s+/g, "").toUpperCase(), visit_date||null, notification_date||null, completion_date||null,
+        JSON.stringify(items||[]), notlar||null, screenshot_url||null,
+        atanan_email ? String(atanan_email).toLowerCase() : null, atanan_ad || null]);
     res.json({ ok: true, row: r.rows[0] });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -9851,8 +9859,9 @@ app.post("/rollout/cleanup", authMiddleware, async (req, res) => {
 app.get("/rollout/cleanup/site/:site", authMiddleware, async (req, res) => {
   try {
     const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
-    const r = await pool.query("SELECT * FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1", [site]);
-    res.json({ ok: true, row: r.rows[0] || null });
+    const r = await pool.query(`SELECT c.*, ${cleanupBolgeSorgu} AS bolge FROM rollout_cleanup c WHERE UPPER(TRIM(c.site_code)) = $1 LIMIT 1`, [site]);
+    const row = r.rows[0] ? { ...r.rows[0], onay_yetkim: cleanupOnayYetkiliMi(req.user?.email, r.rows[0].bolge) } : null;
+    res.json({ ok: true, row });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -9911,22 +9920,149 @@ app.delete("/rollout/cleanup/:site/foto", authMiddleware, async (req, res) => {
    Ekip tüm kalemlere "sonra" fotoğrafı çekince "Onaya Gönder" (ONAY_BEKLE);
    yönetici (rollout müdürü / PM / direktör) mobilden veya panelden Onayla
    (ONAYLANDI) ya da not ile Reddet (RED → ekip düzeltip yeniden gönderir). */
-const CLEANUP_ONAY_YETKI = [
-  "nurcan.kus@simsektel.com",
-  "orhan.bedir@simsektel.com", "orhan.bedir@gmail.com",
-  "serdar.altinova@simsektel.com",
-  "duzgun.simsek@simsektel.com",
-];
-const cleanupOnayYetkili = (req) => CLEANUP_ONAY_YETKI.includes(String(req.user?.email || "").toLowerCase());
+// Bölgeye göre onaycı (Orhan, 02.09.2026): İzmir → Serdar Altınova, Ankara → Nurcan Kuş.
+// GENEL listesi her bölgeyi görür (yedek onaycı). Bölgesi listede olmayan saha
+// (Antalya/Konya/DİĞER/boş) yalnız GENEL'e düşer.
+const CLEANUP_ONAY_BOLGE = {
+  "İZMİR":  ["serdar.altinova@simsektel.com"],
+  "ANKARA": ["nurcan.kus@simsektel.com"],
+};
+const CLEANUP_ONAY_GENEL = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "duzgun.simsek@simsektel.com"];
+const bolgeAnahtar = (b) => String(b || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "İ").trim();
+function cleanupOnayYetkiliMi(email, bolge) {
+  const e = String(email || "").toLowerCase();
+  if (!e) return false;
+  if (CLEANUP_ONAY_GENEL.includes(e)) return true;
+  const liste = CLEANUP_ONAY_BOLGE[bolgeAnahtar(bolge)] || [];
+  return liste.includes(e);
+}
+const cleanupBolgeSorgu = `(SELECT rp.bolge FROM rollout_progress rp WHERE UPPER(TRIM(rp.site_code)) = UPPER(TRIM(c.site_code)) LIMIT 1)`;
 
 app.get("/rollout/cleanup/onay-bekleyen", authMiddleware, async (req, res) => {
   try {
-    if (!cleanupOnayYetkili(req)) return res.json({ ok: true, rows: [], yetkili: false });
+    const email = String(req.user?.email || "").toLowerCase();
     const r = await pool.query(
-      `SELECT id, site_code, items, notlar, visit_date, completion_date, onaya_gonderen, onaya_gonderme_tarihi
-       FROM rollout_cleanup WHERE onay_durum = 'ONAY_BEKLE' ORDER BY onaya_gonderme_tarihi ASC NULLS LAST`);
-    res.json({ ok: true, rows: r.rows, yetkili: true });
+      `SELECT c.id, c.site_code, c.items, c.notlar, c.visit_date, c.completion_date, c.onaya_gonderen, c.onaya_gonderme_tarihi,
+              c.atanan_ad, ${cleanupBolgeSorgu} AS bolge
+       FROM rollout_cleanup c WHERE c.onay_durum = 'ONAY_BEKLE' ORDER BY c.onaya_gonderme_tarihi ASC NULLS LAST`);
+    const rows = r.rows.filter((x) => cleanupOnayYetkiliMi(email, x.bolge));
+    res.json({ ok: true, rows, yetkili: rows.length > 0 || CLEANUP_ONAY_GENEL.includes(email) || Object.values(CLEANUP_ONAY_BOLGE).some((l) => l.includes(email)) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Personele atanmış, henüz onaylanmamış sahalar (mobil "Bana atanan sahalar")
+app.get("/rollout/cleanup/atananlarim", authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || "").toLowerCase();
+    const r = await pool.query(
+      `SELECT c.id, c.site_code, c.items, c.onay_durum, c.visit_date, c.red_notu, ${cleanupBolgeSorgu} AS bolge
+       FROM rollout_cleanup c WHERE LOWER(COALESCE(c.atanan_email,'')) = $1 AND COALESCE(c.onay_durum,'TASLAK') <> 'ONAYLANDI'
+       ORDER BY c.updated_at DESC`, [email]);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Atama için personel listesi (aktif kullanıcılar)
+app.get("/rollout/cleanup/personel-listesi", authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT email, COALESCE(name,'') AS ad FROM public.users WHERE COALESCE(is_active,true) AND email IS NOT NULL ORDER BY name`);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Huawei'ye gönderilecek önce/sonra fotoğraf raporu (PDF, pdfkit). Token header ya da ?token=
+app.get("/rollout/cleanup/:site/rapor.pdf", async (req, res) => {
+  try {
+    const token = (req.headers.authorization || "").split(" ")[1] || req.query.token;
+    try { req.user = jwt.verify(token, process.env.JWT_SECRET); } catch { return res.status(401).json({ error: "Geçersiz token" }); }
+    const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    const r = await pool.query(`SELECT c.*, ${cleanupBolgeSorgu} AS bolge FROM rollout_cleanup c WHERE UPPER(TRIM(c.site_code)) = $1 LIMIT 1`, [site]);
+    if (!r.rows[0]) return res.status(404).json({ error: "Kayıt yok" });
+    const row = r.rows[0];
+    const items = Array.isArray(row.items) ? row.items : [];
+    const PDFDocument = require("pdfkit");
+    const fmtD = (d) => d ? new Date(d).toLocaleDateString("tr-TR") : "—";
+
+    // Fotoğrafları önden indir (pdfkit JPEG/PNG buffer ister)
+    const fotoBuf = async (url) => {
+      try { const rs = await fetch(url); if (!rs.ok) return null; const b = Buffer.from(await rs.arrayBuffer()); return b.length > 20 * 1024 * 1024 ? null : b; }
+      catch { return null; }
+    };
+    const hazir = [];
+    for (const it of items) {
+      const once = (it.fotolar || []).filter((f) => f.tip === "once");
+      const sonra = (it.fotolar || []).filter((f) => f.tip === "sonra");
+      hazir.push({
+        ad: String(it.kalem || "").replace(/^[•\s]+/, ""), tamamlandi: !!it.tamamlandi,
+        once: await Promise.all(once.map(async (f) => ({ ...f, buf: await fotoBuf(f.url) }))),
+        sonra: await Promise.all(sonra.map(async (f) => ({ ...f, buf: await fotoBuf(f.url) }))),
+      });
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${site}_CleanUp_Report.pdf"`);
+    const doc = new PDFDocument({ size: "A4", margin: 40, info: { Title: `${site} Clean Up Report` } });
+    doc.pipe(res);
+    const W = doc.page.width - 80;
+    // Türkçe karakter: pdfkit'in Helvetica'sı Latin-1 dışını basamaz. Repo'da
+    // DejaVuSans varsa onu kaydet; yoksa metni ASCII'ye çevir (ş→s, ğ→g …).
+    let unicodeFont = false;
+    try {
+      const fp = path.join(__dirname, "fonts", "DejaVuSans.ttf");
+      const fb = path.join(__dirname, "fonts", "DejaVuSans-Bold.ttf");
+      if (require("fs").existsSync(fp)) {
+        doc.registerFont("Uni", fp);
+        doc.registerFont("Uni-Bold", require("fs").existsSync(fb) ? fb : fp);
+        unicodeFont = true;
+      }
+    } catch {}
+    const TR = { "ş":"s","Ş":"S","ğ":"g","Ğ":"G","ı":"i","İ":"I","ö":"o","Ö":"O","ü":"u","Ü":"U","ç":"c","Ç":"C" };
+    const T = (s) => unicodeFont ? String(s ?? "") : String(s ?? "").replace(/[şŞğĞıİöÖüÜçÇ]/g, (c) => TR[c] || c);
+    const F_REG = unicodeFont ? "Uni" : "Helvetica", F_BOLD = unicodeFont ? "Uni-Bold" : "Helvetica-Bold";
+
+    const baslik = () => {
+      doc.fontSize(16).font(F_BOLD).text("Clean Up Completion Report", { align: "left" });
+      doc.moveDown(0.2);
+      doc.fontSize(10).font(F_REG).fillColor("#334155")
+        .text(T(`Site: ${site}   Region: ${row.bolge || "-"}   Visit: ${fmtD(row.visit_date)}   Notification: ${fmtD(row.notification_date)}   Completion: ${fmtD(row.completion_date)}`));
+      doc.text(T(`Status: ${row.onay_durum === "ONAYLANDI" ? "Approved" : row.onay_durum === "ONAY_BEKLE" ? "Pending approval" : row.onay_durum || "-"}${row.onaylayan ? `  -  Approved by: ${row.onaylayan}` : ""}${row.atanan_ad ? `  -  Field team: ${row.atanan_ad}` : ""}`));
+      doc.fillColor("#000").moveDown(0.6);
+      doc.moveTo(40, doc.y).lineTo(40 + W, doc.y).strokeColor("#cbd5e1").stroke();
+      doc.moveDown(0.5);
+    };
+    baslik();
+
+    const kutuW = (W - 16) / 2, kutuH = 200;
+    hazir.forEach((it, i) => {
+      const gerekli = 22 + kutuH + 34;
+      if (doc.y + gerekli > doc.page.height - 50) { doc.addPage(); baslik(); }
+      doc.fontSize(11).font(F_BOLD).fillColor("#0f172a").text(T(`${i + 1}. ${it.ad}`), { continued: true });
+      doc.font(F_REG).fillColor(it.tamamlandi ? "#166534" : "#b45309").text(it.tamamlandi ? "   [Completed]" : "   [Pending]");
+      doc.fillColor("#000");
+      const y0 = doc.y + 4;
+      const cizKutu = (x, etiket, liste) => {
+        doc.rect(x, y0, kutuW, kutuH).strokeColor("#e2e8f0").stroke();
+        doc.fontSize(9).font(F_BOLD).fillColor("#475569").text(etiket, x + 6, y0 + 5);
+        const f = liste.find((z) => z.buf);
+        if (f) {
+          try { doc.image(f.buf, x + 6, y0 + 20, { fit: [kutuW - 12, kutuH - 40], align: "center", valign: "center" }); } catch {}
+          doc.fontSize(8).font(F_REG).fillColor("#64748b").text(`${fmtD(f.tarih)}${liste.length > 1 ? `  (+${liste.length - 1} more)` : ""}`, x + 6, y0 + kutuH - 14);
+        } else {
+          doc.fontSize(9).font(F_REG).fillColor("#94a3b8").text("No photo", x + 6, y0 + kutuH / 2 - 5, { width: kutuW - 12, align: "center" });
+        }
+        doc.fillColor("#000");
+      };
+      cizKutu(40, "BEFORE", it.once);
+      cizKutu(40 + kutuW + 16, "AFTER", it.sonra);
+      doc.y = y0 + kutuH + 14;
+      doc.x = 40;
+    });
+    if (row.notlar) { doc.moveDown(0.5); doc.fontSize(9).font(F_REG).fillColor("#713f12").text(T(`Note: ${row.notlar}`)); }
+    doc.end();
+  } catch (e) {
+    console.error("CLEANUP RAPOR ERROR:", e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
 });
 
 app.post("/rollout/cleanup/:site/onaya-gonder", authMiddleware, async (req, res) => {
@@ -9946,10 +10082,15 @@ app.post("/rollout/cleanup/:site/onaya-gonder", authMiddleware, async (req, res)
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+async function cleanupOnayKontrol(req, site) {
+  const b = await pool.query(`SELECT ${cleanupBolgeSorgu} AS bolge FROM rollout_cleanup c WHERE UPPER(TRIM(c.site_code)) = $1 LIMIT 1`, [site]);
+  return cleanupOnayYetkiliMi(req.user?.email, b.rows[0]?.bolge);
+}
+
 app.put("/rollout/cleanup/:site/onayla", authMiddleware, async (req, res) => {
   try {
-    if (!cleanupOnayYetkili(req)) return res.status(403).json({ ok: false, error: "Clean Up onay yetkiniz yok" });
     const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    if (!(await cleanupOnayKontrol(req, site))) return res.status(403).json({ ok: false, error: "Bu bölge için Clean Up onay yetkiniz yok" });
     const u = await pool.query(
       `UPDATE rollout_cleanup SET onay_durum='ONAYLANDI', onaylayan=$1, onay_tarihi=NOW(),
          completion_date=COALESCE(completion_date, CURRENT_DATE), updated_at=NOW()
@@ -9961,8 +10102,8 @@ app.put("/rollout/cleanup/:site/onayla", authMiddleware, async (req, res) => {
 
 app.put("/rollout/cleanup/:site/reddet", authMiddleware, async (req, res) => {
   try {
-    if (!cleanupOnayYetkili(req)) return res.status(403).json({ ok: false, error: "Clean Up onay yetkiniz yok" });
     const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    if (!(await cleanupOnayKontrol(req, site))) return res.status(403).json({ ok: false, error: "Bu bölge için Clean Up onay yetkiniz yok" });
     const not = String(req.body?.not || "").trim();
     if (!not) return res.status(400).json({ ok: false, error: "Red gerekçesi zorunlu" });
     const u = await pool.query(
