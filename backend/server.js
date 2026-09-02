@@ -1905,6 +1905,47 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
+/* ── MOBİL APK DAĞITIMI (02.09.2026) ─────────────────────────────────────
+   expo.dev artifact linki 15 dk'lık imzalı S3 adresine yönlendiriyor; WhatsApp
+   içi tarayıcı / bazı Android indirme yöneticileri bunda "İndirirken hata
+   oluştu" veriyordu. Bu uç dosyayı doğru MIME ve Content-Length ile doğrudan
+   akıtır; /mobil ise personele paylaşılacak tek tıkla indirme sayfası.
+   Yeni build çıkınca MOBIL_APK.url ve surum güncellenir. */
+const MOBIL_APK = {
+  surum: 17,
+  ad: "ERC_Operasyon_v17.apk",
+  url: "https://expo.dev/artifacts/eas/GYqSCVAr58CzxrLiaNHZMX6FeqPcvQEgn371mL5QKwI.apk",
+};
+app.get("/mobil/apk", async (req, res) => {
+  try {
+    const r = await fetch(MOBIL_APK.url, { redirect: "follow" });
+    if (!r.ok || !r.body) return res.status(502).send("APK alınamadı (" + r.status + ")");
+    res.setHeader("Content-Type", "application/vnd.android.package-archive");
+    res.setHeader("Content-Disposition", `attachment; filename="${MOBIL_APK.ad}"`);
+    res.setHeader("Cache-Control", "no-store");
+    const len = r.headers.get("content-length");
+    if (len) res.setHeader("Content-Length", len);
+    const { Readable } = require("stream");
+    Readable.fromWeb(r.body).on("error", () => { try { res.end(); } catch {} }).pipe(res);
+  } catch (e) {
+    console.error("MOBIL APK ERROR:", e.message);
+    if (!res.headersSent) res.status(500).send("APK indirilemedi: " + e.message);
+  }
+});
+app.get("/mobil", (req, res) => {
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ERC Operasyon — Android</title>
+<style>body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f1f5f9;color:#0f172a;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:20px}
+.k{background:#fff;border-radius:18px;padding:26px 22px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.08);text-align:center}
+h1{font-size:20px;margin:0 0 4px}.s{color:#64748b;font-size:14px;margin-bottom:18px}
+a.b{display:block;background:#16a34a;color:#fff;text-decoration:none;font-weight:800;font-size:17px;padding:16px;border-radius:14px}
+ol{text-align:left;font-size:13.5px;color:#334155;padding-left:20px;margin-top:18px}li{margin:6px 0}</style></head><body><div class="k">
+<div style="font-size:40px">📡</div><h1>ERC Operasyon</h1><div class="s">Android · sürüm ${MOBIL_APK.surum} · ~60 MB</div>
+<a class="b" href="/mobil/apk">⬇️ Uygulamayı İndir</a>
+<ol><li>İndirme bitince bildirime dokunup <b>Yükle</b> deyin.</li><li>"Bilinmeyen uygulama" uyarısı çıkarsa izin verip geri dönün.</li><li>Play Protect uyarısında <b>Daha fazla bilgi → Yine de yükle</b>.</li><li>Eski sürümü silmeden üstüne kurulur; girişiniz korunur.</li></ol>
+</div></body></html>`);
+});
+
 /* ================== UPLOAD ================== */
 const upload = multer({ storage: multer.memoryStorage() });
 
