@@ -1628,6 +1628,258 @@ app.get("/po/saha-oneri", authMiddleware, async (req, res) => {
   }
 });
 
+/* ================== AKILLI ASİSTAN — PR / PO TUTARLILIK (02.09.2026) ==================
+   Günlük İş Girişi'nde saha açılınca çalışır. Üç kaynaktan bulgu üretir:
+   1) Rollout belge kuralları: TSSR/BTK/EMR/YSB/ENH Proje bölümünde veri varsa
+      ve işi Şimşek yaptıysa ilgili PR kalemi girilmiş olmalı (EKSIK); işi
+      Huawei yaptıysa kalem girilmemeli (UYARI). Veri yoksa bölüm atlanır.
+   2) TSSR içeriği: yüklü TSSR PDF'i okunur, "Vinç kullanılacak mı? Evet",
+      "Yeni pole 7,2m LPRT", "3 adet yeni anten" gibi tespitlerden kalem
+      önerilir (TSSR). Metin site+url bazında önbelleklenir.
+   3) Benzer saha istatistiği (mevcut /po/saha-oneri) — frontend ayrıca alır.
+   Amaç: PO talebinde gözden kaçan kalem kalmasın. */
+const ASISTAN_HW_RX = /huawei|^hw$/i;
+const BELGE_KALEM_KURALLARI = [
+  { tip: "TSSR", etiket: "TSSR", subcon: "tssr_subcon",
+    veri: ["tssr_plan_start_date", "tssr_actual_end_date", "tssr_belge_url"],
+    kalemler: [{ kod: "8812184870", zorunlu: true, adet: 1, ad: "Survey" }] },
+  { tip: "BTK", etiket: "BTK", subcon: "btk_subcon",
+    veri: ["btk_plan_start_date", "btk_actual_end_date", "btk_approved", "btk_belge_url"],
+    kalemler: [{ kod: "8812184919", zorunlu: true, adet: 1, ad: "TK Permission Document" },
+               { kod: "8812184928", zorunlu: false, adet: 1, ad: "TK Certificate plaka" }] },
+  { tip: "EMR", etiket: "EMR", subcon: "emr_subcon",
+    veri: ["emr_plan_start_date", "emr_actual_end_date", "emr_belge_url"],
+    kalemler: [{ kod: "8812184924", zorunlu: true, adet: 1, ad: "EMR ölçümü" },
+               { kod: "8812184925", zorunlu: false, adet: 1, ad: "EMR dosya hazırlama" }] },
+  { tip: "YSB", etiket: "YSB — Yer Seçim Belgesi", subcon: "ysb_subcon",
+    veri: ["ysb_plan_start_date", "ysb_actual_end_date", "ysb_belge_url"],
+    kalemler: [{ kod: "8818278116", zorunlu: true, adet: 1, ad: "Fenni mesul (elektrik mühendisi) belgesi" },
+               { kod: "8812161896", zorunlu: true, adet: 1, ad: "Yapı uygunluk belgesi" }] },
+  { tip: "ENH_PROJE", etiket: "ENH Proje", subcon: "enh_proje_subcon",
+    veri: ["enh_proje_hazir", "enh_proje_belge_url"],
+    kalemler: [{ kod: "8812184675", zorunlu: true, adet: 1, ad: "LV proje & geçici kabul" }] },
+];
+// LPRT pole: yükseklik → [tedarik, montaj]
+const TSSR_LPRT_KODLARI = {
+  "3":   ["8818265083", "8818264126"], "4,3": ["8818265085", "8818264129"],
+  "4,5": ["8818286453", "8818286460"], "6":   ["8818265065", "8818264135"],
+  "7,2": ["8818278098", "8818278108"], "8":   ["8818265076", "8818264132"],
+  "10":  ["8818265081", "8818264127"], "12":  ["8818265067", "8818264125"],
+};
+const TSSR_BACA_KODLARI = { "2": "8812184631", "3": "8812184632", "4": "8812184633", "5": "8812184634", "6": "8812184635", "7": "8818168492", "8": "8818168493" };
+
+function tssrMetinAnaliz(metinHam) {
+  const tumSatirlar = String(metinHam || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  // Guideline şablon metnini (pole/gizleme/akü genel talimatları) analiz dışı bırak
+  let bas = tumSatirlar.findIndex((l) => /GENEL B[İI]LG[İI]LER|GENERAL INFORMATION/i.test(l));
+  if (bas < 0) bas = 0;
+  const satirlar = tumSatirlar.slice(bas);
+  const govde = satirlar.join("\n");
+  const tespitler = [];
+
+  const cevap = (rx, derinlik = 5) => {
+    const i = satirlar.findIndex((l) => rx.test(l));
+    if (i < 0) return { deger: null, satir: null };
+    for (let j = i; j <= Math.min(satirlar.length - 1, i + derinlik); j++) {
+      const l = satirlar[j];
+      if (/\b(evet|yes)\b/i.test(l) && !/hayır|hayir|no\b/i.test(l.replace(/evet\/yes/i, ""))) return { deger: "EVET", satir: l };
+      if (/hayır|hayir|\bno\b/i.test(l)) return { deger: "HAYIR", satir: l };
+    }
+    return { deger: null, satir: satirlar[i] };
+  };
+  const ekle = (anahtar, alinti, kalemler, not) => tespitler.push({ anahtar, alinti: String(alinti || "").slice(0, 160), kalemler, not: not || "" });
+
+  // 1) Vinç
+  const vinc = cevap(/Use Crane|Vinç kullanılacak/i);
+  if (vinc.deger === "EVET") ekle("Vinç", vinc.satir, [{ kod: "8818249053", adet: 1 }]);
+  // 2) Yeni sistem topraklaması
+  const topr = cevap(/New System grounding|Yeni Sistem Topraklaması/i, 6);
+  if (topr.deger === "EVET") ekle("Yeni sistem topraklaması", topr.satir, [{ kod: "8818203933", adet: 1 }]);
+  // 3) Yeni MW / MW swap
+  const mw = cevap(/Need New MW|Yeni MW\s+Gerekli/i);
+  if (mw.deger === "EVET") ekle("Yeni MW", mw.satir, [{ kod: "8818274546", adet: 1 }]);
+  const mws = cevap(/Need MW Swap|MW Swap Gerekli/i);
+  if (mws.deger === "EVET") ekle("MW swap", mws.satir, [], "MW swap gerekli — ilgili MW kalemini seçin");
+  // 4) Yeni pole (LPRT yüksekliği)
+  const yeniPoleEvet = (govde.match(/New Pole\s*Evet/gi) || []).length;
+  const lprt = govde.match(/(\d{1,2}(?:[.,]\d)?)\s*(?:m|mt|metre)?\s*(?:LPRT|lprt)/) || govde.match(/LPRT\s*(?:pole)?\s*(\d{1,2}(?:[.,]\d)?)\s*(?:m|mt)/i);
+  if (lprt) {
+    const h = lprt[1].replace(".", ",").replace(/,0$/, "");
+    const kodlar = TSSR_LPRT_KODLARI[h];
+    const adet = Math.max(1, yeniPoleEvet);
+    if (kodlar) ekle(`${h}m LPRT pole`, lprt[0], kodlar.map((kod) => ({ kod, adet })));
+    else ekle(`${h}m LPRT pole`, lprt[0], [], "Bu yükseklik için kalem eşlemesi yok — LPRT kalemini elle seçin");
+  } else if (yeniPoleEvet > 0) {
+    ekle("Yeni pole", `New Pole Evet ×${yeniPoleEvet}`, [], "Yeni pole işaretli, yükseklik okunamadı — LPRT kalemini elle seçin");
+  }
+  const poleRev = cevap(/Pole Revision Needed|Pole Revizyonu Gerekiyor/i, 4);
+  if (poleRev.deger === "EVET") ekle("Pole revizyonu", poleRev.satir, [], "Pole revizyonu gerekli — offset/revizyon kalemi değerlendirin");
+  // 5) Yeni anten
+  const ant = govde.match(/(\d+)\s*ADET\s*YEN[İI][^\n]{0,60}?ANTEN/i);
+  if (ant) ekle("Yeni anten montajı", ant[0], [{ kod: "8812184597", adet: Number(ant[1]) || 1 }]);
+  // 6) Outdoor kabinet
+  if (/YEN[İI]\s+OUTDOOR\s+KAB[İI]NET/i.test(govde)) {
+    const m = govde.match(/[^\n]*YEN[İI]\s+OUTDOOR\s+KAB[İI]NET[^\n]*/i);
+    ekle("Yeni outdoor kabinet", m && m[0], [{ kod: "8812184600", adet: 1 }]);
+  }
+  // 7) Gizleme (baca yüksekliği varsa kod, yoksa kodsuz tespit)
+  const gizI = satirlar.findIndex((l) => /New Camouflage Type/i.test(l));
+  if (gizI >= 0) {
+    const aday = satirlar.slice(gizI + 1, gizI + 8).find((l) => !/^Type\s*-|N\/A|Hayır|^Yeni|^New|Qty|Adet|Dimension|Ölçü/i.test(l) && /[A-Za-zÇĞİÖŞÜ]{3,}/.test(l));
+    if (aday) {
+      const baca = aday.match(/(\d)\s*m/i);
+      const kod = baca && /baca|chimney/i.test(aday) ? TSSR_BACA_KODLARI[baca[1]] : null;
+      ekle("Yeni gizleme", aday, kod ? [{ kod, adet: 1 }] : [], kod ? "" : "Gizleme tipine göre kalem seçin (baca/panel/non-standard m²)");
+    }
+  }
+  if (/gizleme[^\n]{0,30}sök|camouflage dismantl/i.test(govde)) ekle("Gizleme sökümü", (govde.match(/[^\n]*(gizleme[^\n]{0,30}sök|camouflage dismantl)[^\n]*/i) || [])[0], [{ kod: "8812184640", adet: 1 }]);
+  // 8) Çatı çıkışı / offset'ler
+  // Çatı çıkışı TSSR'da soru olarak geçer ("… Gerekli mi?") — cevap Evet ise öner
+  const cati = cevap(/çatı\s*çık|roof\s*exit/i, 4);
+  if (cati.deger === "EVET") ekle("Çatı çıkış kapağı", cati.satir, [{ kod: "8812184694", adet: 1 }]);
+  if (/star\s*offset|yıldız\s*ofset/i.test(govde)) ekle("Star offset", (govde.match(/[^\n]*(star\s*offset|yıldız\s*ofset)[^\n]*/i) || [])[0], [{ kod: "8812184819", adet: 1 }]);
+  if (/pole[\s-]*offset|pol\s*ofset/i.test(govde)) ekle("Pole offset", (govde.match(/[^\n]*(pole[\s-]*offset|pol\s*ofset)[^\n]*/i) || [])[0], [{ kod: "8818265066", adet: 1 }, { kod: "8818264113", adet: 1 }]);
+  // 9) RRU adedi → DBS kurulum bandı
+  const rruI = satirlar.findIndex((l) => /^RRU\s*Qty/i.test(l));
+  if (rruI >= 0) {
+    const sayilar = satirlar.slice(rruI + 1, rruI + 12).filter((l) => /^\d{1,2}$/.test(l)).map(Number);
+    const toplam = sayilar.reduce((a, b) => a + b, 0);
+    if (toplam > 0) ekle(`RRU adedi ${toplam}`, `RRU Qty: ${sayilar.join("+")}`, [{ kod: toplam <= 3 ? "8812184591" : "8812184592", adet: 1 }], "F.O/DC dahil varsayıldı — sahaya göre kontrol edin");
+  }
+  // 10) Vinç girişi olmayan saha → climber
+  if (/climber|tırman|vinç\s*giri[şs]i\s*(yok|olmayan)/i.test(govde)) ekle("Climber", (govde.match(/[^\n]*(climber|tırman)[^\n]*/i) || [])[0], [{ kod: "8812184657", adet: 1 }]);
+  // 11) TR rack demontajı
+  const trr = cevap(/Existing TR Rack Dismantled|TR Rack demontajı/i, 4);
+  if (trr.deger === "EVET") ekle("TR rack demontajı", trr.satir, [], "Mevcut TR rack sökülecek — demontaj kalemi değerlendirin");
+
+  return tespitler;
+}
+
+let _tssrCacheHazir = false;
+async function tssrCacheTablosu() {
+  if (_tssrCacheHazir) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS tssr_analiz_cache (
+    site_code TEXT PRIMARY KEY, belge_url TEXT, metin TEXT, updated_at TIMESTAMP DEFAULT NOW())`);
+  _tssrCacheHazir = true;
+}
+
+app.get("/po/akilli-asistan", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.query.site || "").replace(/\s+/g, "").toUpperCase();
+    if (!site) return res.json({ ok: true, site, bulgular: [], belge_durumu: [], tssr: { var: false } });
+
+    const [rp, mw, po] = await Promise.all([
+      pool.query(`SELECT * FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [site]),
+      pool.query(`SELECT TRIM(COALESCE(item_code,'')) AS ic, COALESCE(done_qty,0) AS q FROM master_works
+                  WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) <> ''`, [site]),
+      pool.query(`SELECT DISTINCT TRIM(COALESCE(item_code,'')) AS ic FROM po_rows WHERE UPPER(TRIM(site_code)) = $1`, [site]),
+    ]);
+    const rollout = rp.rows[0] || null;
+    const prSet = new Set(mw.rows.filter((r) => Number(r.q) > 0).map((r) => r.ic));
+    const poSet = new Set(po.rows.map((r) => r.ic));
+    const bulgular = [];
+    const belge_durumu = [];
+
+    // ── 1) Belge kuralları ──────────────────────────────────────────────────
+    if (rollout) {
+      for (const k of BELGE_KALEM_KURALLARI) {
+        const subcon = String(rollout[k.subcon] || "").trim();
+        const veriVar = !!subcon || k.veri.some((f) => rollout[f] !== null && rollout[f] !== undefined && String(rollout[f]).trim() !== "");
+        if (!veriVar) { belge_durumu.push({ tip: k.tip, etiket: k.etiket, veri_var: false }); continue; }
+        const hw = ASISTAN_HW_RX.test(subcon);
+        belge_durumu.push({ tip: k.tip, etiket: k.etiket, veri_var: true, subcon: subcon || "(boş — Şimşek varsayıldı)", hw });
+        for (const kal of k.kalemler) {
+          const girildi = prSet.has(kal.kod);
+          if (hw && girildi) {
+            bulgular.push({ tip: "UYARI", kaynak: k.tip, item_code: kal.kod, adet: 0,
+              mesaj: `${k.etiket} işini Huawei yaptı (subcon: ${subcon}) — "${kal.ad}" kalemi PR'da girilmiş, talep edilmemeli.` });
+          } else if (!hw && !girildi) {
+            bulgular.push({ tip: kal.zorunlu ? "EKSIK" : "ONERI", kaynak: k.tip, item_code: kal.kod, adet: kal.adet,
+              mesaj: kal.zorunlu
+                ? `${k.etiket} Şimşek tarafında hazırlanmış${subcon ? ` (${subcon})` : ""} — "${kal.ad}" kalemini talep etmelisin.`
+                : `${k.etiket} Şimşek tarafında — "${kal.ad}" kalemi genelde birlikte açılır, kontrol et.` });
+          }
+        }
+      }
+    }
+
+    // ── 2) TSSR içerik analizi ───────────────────────────────────────────────
+    const tssr = { var: false, okundu: false, kaynak_url: "", hata: "", tespitler: [] };
+    const tssrUrls = String(rollout?.tssr_belge_url || "").split("\n").map((s) => s.trim()).filter(Boolean);
+    if (tssrUrls.length) {
+      tssr.var = true;
+      tssr.kaynak_url = tssrUrls[0];
+      try {
+        await tssrCacheTablosu();
+        const c = await pool.query(`SELECT belge_url, metin FROM tssr_analiz_cache WHERE site_code = $1`, [site]);
+        let metin = c.rows[0] && c.rows[0].belge_url === tssrUrls.join("\n") ? c.rows[0].metin : null;
+        if (metin === null) {
+          const parcalar = [];
+          for (const u of tssrUrls.slice(0, 3)) {
+            const r = await fetch(u);
+            if (!r.ok) continue;
+            const buf = Buffer.from(await r.arrayBuffer());
+            if (buf.length > 30 * 1024 * 1024) continue;
+            const pdfMi = /\.pdf(\?|$)/i.test(u) || buf.slice(0, 5).toString() === "%PDF-";
+            const t = await extractPdfText(buf, pdfMi);
+            if (t) parcalar.push(t);
+          }
+          metin = parcalar.join("\n\n");
+          await pool.query(
+            `INSERT INTO tssr_analiz_cache (site_code, belge_url, metin, updated_at) VALUES ($1,$2,$3,NOW())
+             ON CONFLICT (site_code) DO UPDATE SET belge_url = EXCLUDED.belge_url, metin = EXCLUDED.metin, updated_at = NOW()`,
+            [site, tssrUrls.join("\n"), metin],
+          );
+        }
+        if (metin && metin.trim().length > 200) {
+          tssr.okundu = true;
+          tssr.tespitler = tssrMetinAnaliz(metin).map((t) => ({
+            ...t,
+            kalemler: t.kalemler.map((kl) => ({ ...kl, girildi: prSet.has(kl.kod), po_var: poSet.has(kl.kod) })),
+          }));
+          for (const t of tssr.tespitler) {
+            for (const kl of t.kalemler) {
+              if (!kl.girildi) bulgular.push({ tip: "TSSR", kaynak: "TSSR", item_code: kl.kod, adet: kl.adet,
+                mesaj: `TSSR incelendi: "${t.anahtar}" tespit edildi — bu kalem PR'da yok.`, alinti: t.alinti });
+            }
+            if (!t.kalemler.length) bulgular.push({ tip: "TSSR", kaynak: "TSSR", item_code: "", adet: 0,
+              mesaj: `TSSR incelendi: "${t.anahtar}" — ${t.not}`, alinti: t.alinti });
+          }
+        } else {
+          tssr.hata = "TSSR metni okunamadı (taranmış görüntü olabilir)";
+        }
+      } catch (e) {
+        tssr.hata = `TSSR okunamadı: ${e.message}`;
+      }
+    }
+
+    // ── Açıklama + birim fiyat ───────────────────────────────────────────────
+    const kodlar = [...new Set(bulgular.map((b) => b.item_code).filter(Boolean))];
+    if (kodlar.length) {
+      const [bq, pr] = await Promise.all([
+        pool.query(`SELECT DISTINCT ON (s_bom_code) s_bom_code, boq_items_en, currency FROM boq_items WHERE s_bom_code = ANY($1) ORDER BY s_bom_code, created_at DESC`, [kodlar]),
+        pool.query(`SELECT DISTINCT ON (item_code) item_code, item_description, unit_price, currency FROM po_rows WHERE item_code = ANY($1) ORDER BY item_code, id DESC`, [kodlar]),
+      ]);
+      const desc = {}; const fiyat = {};
+      bq.rows.forEach((r) => { desc[r.s_bom_code] = r.boq_items_en; });
+      pr.rows.forEach((r) => { if (!desc[r.item_code]) desc[r.item_code] = r.item_description; fiyat[r.item_code] = { unit_price: Number(r.unit_price || 0), currency: r.currency || "TRY" }; });
+      bulgular.forEach((b) => {
+        b.item_description = desc[b.item_code] || "";
+        b.unit_price = fiyat[b.item_code]?.unit_price || 0;
+        b.currency = fiyat[b.item_code]?.currency || "TRY";
+        b.po_var = poSet.has(b.item_code);
+      });
+    }
+
+    const sira = { UYARI: 0, EKSIK: 1, TSSR: 2, ONERI: 3 };
+    bulgular.sort((a, b) => (sira[a.tip] ?? 9) - (sira[b.tip] ?? 9));
+    res.json({ ok: true, site, rollout_var: !!rollout, belge_durumu, bulgular, tssr });
+  } catch (e) {
+    console.error("AKILLI ASISTAN ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("/rollout/missing-sites", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(`

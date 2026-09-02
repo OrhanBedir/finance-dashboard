@@ -5378,6 +5378,28 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
   // Öneri şeridinden eklenen, henüz DB'de olmayan kalemler — tabloya eklenir,
   // Kaydet'te normal satır gibi gönderilir (0 requested → "PO açılmamış" farkı)
   const [ekstraKalemler, setEkstraKalemler] = useState([]);
+  // Akıllı Asistan (02.09.2026): rollout belge kuralları + TSSR içerik analizi
+  const [asistan, setAsistan] = useState(null);
+  const [asistanYukleniyor, setAsistanYukleniyor] = useState(false);
+  useEffect(() => {
+    const s = String(siteCode || "").trim().toUpperCase();
+    if (!s || s.length < 4) { setAsistan(null); return; }
+    let iptal = false;
+    const t = setTimeout(async () => {
+      setAsistanYukleniyor(true);
+      try {
+        const d = await fetchJson(`${API_BASE}/po/akilli-asistan?site=${encodeURIComponent(s)}`, { withAuth: true });
+        if (!iptal) setAsistan(d && d.ok ? d : null);
+      } catch { if (!iptal) setAsistan(null); }
+      finally { if (!iptal) setAsistanYukleniyor(false); }
+    }, 600);
+    return () => { iptal = true; clearTimeout(t); };
+  }, [siteCode]);
+  const asistanUyari = useMemo(() => {
+    const m = {};
+    (asistan?.bulgular || []).forEach((b) => { if (b.tip === "UYARI" && b.item_code) m[b.item_code] = b.mesaj; });
+    return m;
+  }, [asistan]);
 
   const yukle = useCallback(async (kod) => {
     const s = String(kod || "").trim().toUpperCase();
@@ -5411,6 +5433,18 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
         .includes(String(u?.email || "").toLowerCase());
     } catch { return false; }
   }, []);
+
+  // Asistan / öneri kalemini tabloya YENİ satır olarak ekle ve PR hücresini doldur
+  const prEkle = (kod, aciklama, adet) => {
+    if (!kod) return;
+    setEkstraKalemler((p) => (p.some((x) => x.item_code === kod) ? p : [...p, {
+      item_code: kod, item_description: aciklama || "",
+      project_code: data.meta?.project_code || "", site_type: data.meta?.site_type || "",
+      pr_qty: null, done_qty: 0, requested_qty: 0, due_qty: 0, billed_qty: 0,
+      qc_durum: "", subcon_name: data.meta?.rf_subcon || "", po_no: "", yeni: true,
+    }]));
+    setHucre(kod, "pr_qty", String(adet || 1));
+  };
 
   const kalemSil = async (r) => {
     if (!window.confirm(`${r.item_code} kalemini bu sahadan silmek istediğine emin misin?\n\nPR ve Done girişleri tamamen silinir (PO kaydına dokunulmaz).`)) return;
@@ -5635,6 +5669,11 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
                       <td style={{ ...S.td, textAlign:"left", fontFamily:"monospace", fontSize:12, color:"#0f172a" }}>
                         {r.item_code}
                         {r.yeni && <span style={{ marginLeft:6, background:"#f3e8ff", color:"#7c3aed", borderRadius:5, padding:"1px 6px", fontSize:9.5, fontWeight:700 }}>YENİ</span>}
+                        {asistanUyari[r.item_code] && (
+                          <div title={asistanUyari[r.item_code]} style={{ marginTop:3, fontSize:10, color:"#dc2626", fontWeight:700, fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                            ⚠ Huawei yaptı — talep etme
+                          </div>
+                        )}
                       </td>
                       <td style={tdTxt} title={r.item_description}>{r.item_description || "-"}</td>
                       <td style={S.td}>
@@ -5701,7 +5740,91 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
         </div>
       </div>
 
-      {/* Yapay zekâ öneri şeridi — hafif, tabloyla yarışmaz */}
+      {/* ═══ AKILLI ASİSTAN — belge kuralları + TSSR analizi (02.09.2026) ═══ */}
+      {rows.length > 0 && (asistan || asistanYukleniyor) && (() => {
+        const B = asistan?.bulgular || [];
+        const uyarilar = B.filter((b) => b.tip === "UYARI");
+        const eksikler = B.filter((b) => b.tip === "EKSIK");
+        const tssrB   = B.filter((b) => b.tip === "TSSR");
+        const oneriB  = B.filter((b) => b.tip === "ONERI");
+        const belge   = (asistan?.belge_durumu || []).filter((x) => x.veri_var);
+        const temiz   = asistan && !uyarilar.length && !eksikler.length && !tssrB.length;
+        const Satir = ({ b, renk, buton }) => (
+          <div style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"7px 10px", borderRadius:9, background:"#fff", border:`1px solid ${renk.cizgi}`, marginBottom:5 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:12.5, color:"#0f172a", fontWeight:600 }}>{b.mesaj}</div>
+              {b.item_code && (
+                <div style={{ fontSize:11.5, color:"#475569", marginTop:2 }}>
+                  <span style={{ fontFamily:"monospace", fontWeight:700, color:renk.ink }}>{b.item_code}</span>
+                  {b.item_description ? ` · ${b.item_description}` : ""}
+                  {b.adet ? ` · ${b.adet} adet` : ""}
+                  {b.po_var ? <span style={{ marginLeft:6, background:"#dbeafe", color:"#1d4ed8", borderRadius:5, padding:"0 6px", fontSize:10, fontWeight:700 }}>PO açık</span> : null}
+                </div>
+              )}
+              {b.alinti && <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:2, fontStyle:"italic" }}>TSSR: “{b.alinti}”</div>}
+            </div>
+            {buton && b.item_code && (
+              <button type="button" onClick={() => prEkle(b.item_code, b.item_description, b.adet)}
+                style={{ border:`1px solid ${renk.cizgi}`, background:renk.ink, color:"#fff", borderRadius:7, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
+                + PR'a ekle
+              </button>
+            )}
+          </div>
+        );
+        const R = {
+          uyari: { cizgi:"#fecaca", ink:"#dc2626", zemin:"#fff1f2" },
+          eksik: { cizgi:"#fde68a", ink:"#b45309", zemin:"#fffbeb" },
+          tssr:  { cizgi:"#e9d5ff", ink:"#7e22ce", zemin:"#faf5ff" },
+          oneri: { cizgi:"#e2e8f0", ink:"#475569", zemin:"#f8fafc" },
+        };
+        const Grup = ({ baslik, liste, renk, buton, not }) => liste.length ? (
+          <div style={{ background:renk.zemin, border:`1px solid ${renk.cizgi}`, borderRadius:10, padding:"10px 10px 5px", marginBottom:8 }}>
+            <div style={{ fontSize:11, fontWeight:800, color:renk.ink, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>{baslik} · {liste.length}</div>
+            {not && <div style={{ fontSize:11, color:"#64748b", marginBottom:6 }}>{not}</div>}
+            {liste.map((b, i) => <Satir key={`${b.tip}-${b.item_code}-${i}`} b={b} renk={renk} buton={buton} />)}
+          </div>
+        ) : null;
+        return (
+          <div style={{ marginBottom:12, background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, padding:"12px 14px" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, flexWrap:"wrap" }}>
+              <div style={{ fontWeight:800, fontSize:13, color:"#0f172a" }}>✦ Akıllı Asistan</div>
+              <div style={{ fontSize:11.5, color:"#64748b" }}>PR / PO tutarlılık kontrolü — rollout belgeleri ve TSSR içeriğine göre</div>
+              {asistanYukleniyor && <span style={{ fontSize:11, color:"#94a3b8" }}>kontrol ediliyor…</span>}
+              <div style={{ marginLeft:"auto", display:"flex", gap:6, flexWrap:"wrap" }}>
+                {belge.map((x) => (
+                  <span key={x.tip} title={`Subcon: ${x.subcon}`}
+                    style={{ fontSize:10.5, fontWeight:700, borderRadius:999, padding:"2px 9px",
+                             background: x.hw ? "#fee2e2" : "#dcfce7", color: x.hw ? "#b91c1c" : "#166534" }}>
+                    {x.tip} · {x.hw ? "Huawei" : "Şimşek"}
+                  </span>
+                ))}
+                {asistan?.tssr?.var && (
+                  <span style={{ fontSize:10.5, fontWeight:700, borderRadius:999, padding:"2px 9px",
+                                 background: asistan.tssr.okundu ? "#ede9fe" : "#f1f5f9", color: asistan.tssr.okundu ? "#6d28d9" : "#64748b" }}
+                        title={asistan.tssr.hata || (asistan.tssr.okundu ? `${asistan.tssr.tespitler.length} tespit` : "")}>
+                    TSSR {asistan.tssr.okundu ? `okundu · ${asistan.tssr.tespitler.length} tespit` : "okunamadı"}
+                  </span>
+                )}
+              </div>
+            </div>
+            {asistan && !asistan.rollout_var && (
+              <div style={{ fontSize:12, color:"#64748b", padding:"4px 0 8px" }}>Bu saha Rollout Data'da yok — belge kuralları uygulanamadı.</div>
+            )}
+            <Grup baslik="Uyarı — Huawei yaptı, talep edilmemeli" liste={uyarilar} renk={R.uyari} buton={false} />
+            <Grup baslik="Eksik — talep edilmeli" liste={eksikler} renk={R.eksik} buton={true} />
+            <Grup baslik="TSSR bulguları" liste={tssrB} renk={R.tssr} buton={true}
+                  not="TSSR'da yazan işler PR listesiyle karşılaştırıldı; PR'da olmayanlar aşağıda." />
+            <Grup baslik="Kontrol et" liste={oneriB} renk={R.oneri} buton={true} />
+            {temiz && (
+              <div style={{ fontSize:12.5, color:"#15803d", fontWeight:700, padding:"4px 0" }}>
+                ✓ Belge kuralları ve TSSR karşılaştırması temiz — gözden kaçan kalem görünmüyor.
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Benzer saha istatistiği (mevcut öneri motoru) */}
       {rows.length > 0 && oneriler.length > 0 && (
         <div style={{ background:"#f6f4fd", border:"1px dashed #e4defa", borderRadius:12, padding:"12px 16px", color:"#6d5bb8" }}>
           <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8 }}>
