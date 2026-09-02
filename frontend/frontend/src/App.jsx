@@ -4508,6 +4508,13 @@ function BelgeSecModal({ siteCode, kaynak, onClose }) {
 
 function RolloutDashboard({ currentUser }) {
   const [belgeSecRow, setBelgeSecRow] = useState(null);
+  const [showCleanupPanel, setShowCleanupPanel] = useState(false);
+  useEffect(() => {
+    if (!showCleanupPanel) return;
+    const f = (e) => { if (e.key === "Escape") setShowCleanupPanel(false); };
+    window.addEventListener("keydown", f);
+    return () => window.removeEventListener("keydown", f);
+  }, [showCleanupPanel]);
   const exportExcel = () => {
     const regionParam =
       selectedRegion && selectedRegion !== "Tüm Bölgeler"
@@ -5064,11 +5071,8 @@ function RolloutDashboard({ currentUser }) {
           {/* Clean Up kısayolu (02.09.2026): arama yapmadan doğrudan Clean Up bölümüne git */}
           <button
             type="button"
-            onClick={() => {
-              const el = document.getElementById("cleanup-bolumu");
-              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            title="Clean Up kayıtlarına git"
+            onClick={() => setShowCleanupPanel(true)}
+            title="Clean Up kayıtlarını aç"
             style={{
               background: "#0f766e",
               color: "#fff",
@@ -5081,7 +5085,7 @@ function RolloutDashboard({ currentUser }) {
               whiteSpace: "nowrap",
             }}
           >
-            🧹 Clean Up
+            🧹 Clean Up{cleanupRows.length ? ` (${cleanupRows.length})` : ""}
           </button>
         </div>
       </div>
@@ -5302,13 +5306,30 @@ function RolloutDashboard({ currentUser }) {
           </tbody>
         </table>
       </div>
-      <RolloutCleanupSection
-        cleanupRows={cleanupRows}
-        rolloutRows={rows}
-        onAdd={() => { setEditingCleanup(null); setShowCleanupModal(true); }}
-        onEdit={(r) => { setEditingCleanup(r); setShowCleanupModal(true); }}
-        onDeleted={() => loadData()}
-      />
+      {/* Clean Up paneli (02.09.2026): sayfa altı yerine büyük modal pencere — üstteki 🧹 Clean Up butonu açar */}
+      {showCleanupPanel && createPortal(
+        <div onClick={() => setShowCleanupPanel(false)}
+          style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", zIndex:9000, display:"flex", alignItems:"center", justifyContent:"center", padding:"18px" }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ background:"#f8fafc", borderRadius:"18px", width:"min(1400px, 96vw)", height:"92vh", display:"flex", flexDirection:"column", boxShadow:"0 30px 80px rgba(0,0,0,0.35)", overflow:"hidden" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 22px", background:"#0f766e", color:"#fff", flexShrink:0 }}>
+              <div style={{ fontWeight:800, fontSize:"16px" }}>🧹 Clean Up Kayıtları <span style={{ opacity:0.8, fontWeight:600, fontSize:"13px", marginLeft:"8px" }}>{cleanupRows.length} saha</span></div>
+              <button type="button" onClick={() => setShowCleanupPanel(false)} title="Kapat (Esc)"
+                style={{ width:"34px", height:"34px", borderRadius:"50%", border:"none", background:"rgba(255,255,255,0.18)", color:"#fff", fontSize:"20px", cursor:"pointer", lineHeight:1 }}>×</button>
+            </div>
+            <div style={{ overflowY:"auto", padding:"0 22px 10px", flex:1 }}>
+              <RolloutCleanupSection
+                cleanupRows={cleanupRows}
+                rolloutRows={rows}
+                onAdd={() => { setEditingCleanup(null); setShowCleanupModal(true); }}
+                onEdit={(r) => { setEditingCleanup(r); setShowCleanupModal(true); }}
+                onDeleted={() => loadData()}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
       {showCleanupModal && (
         <CleanupModal
           record={editingCleanup}
@@ -32094,7 +32115,7 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
   };
 
   return (
-    <div id="cleanup-bolumu" style={{ marginTop:"32px", padding:"0 0 40px", scrollMarginTop:"90px" }}>
+    <div id="cleanup-bolumu" style={{ marginTop:"16px", padding:"0 0 24px" }}>
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"16px", flexWrap:"wrap", gap:"10px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
