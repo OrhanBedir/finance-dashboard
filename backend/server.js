@@ -9942,6 +9942,21 @@ const CLEANUP_ATAMA_YETKI = [
 ];
 // Ofisten (panel) fotoğraf yükleme/silme yetkisi — personelin telefonu arızalandığında (02.09.2026)
 const CLEANUP_FOTO_OFIS = ["nurcan.kus@simsektel.com", "orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "erencan.simsek@simsektel.com"];
+// Karttan hızlı atama (modal açmadan)
+app.put("/rollout/cleanup/:site/atama", authMiddleware, async (req, res) => {
+  try {
+    if (!CLEANUP_ATAMA_YETKI.includes(String(req.user?.email || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "İş atama yetkiniz yok" });
+    const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    const email = req.body?.atanan_email ? String(req.body.atanan_email).toLowerCase() : null;
+    const ad = email ? (req.body?.atanan_ad || null) : null;
+    const u = await pool.query(
+      `UPDATE rollout_cleanup SET atanan_email = $1, atanan_ad = $2, updated_at = NOW() WHERE UPPER(TRIM(site_code)) = $3 RETURNING *`,
+      [email, ad, site]);
+    if (!u.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    res.json({ ok: true, row: u.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 app.get("/rollout/cleanup/atama-yetkim", authMiddleware, (req, res) => {
   const e = String(req.user?.email || "").toLowerCase();
   res.json({ ok: true, yetkili: CLEANUP_ATAMA_YETKI.includes(e), foto_ofis: CLEANUP_FOTO_OFIS.includes(e) });

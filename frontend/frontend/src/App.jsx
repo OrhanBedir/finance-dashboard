@@ -31951,6 +31951,16 @@ function RolloutSummaryCard({ rows, regionFilter, enhFilter }) {
 }
 
 function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDeleted }) {
+  // Karttan hızlı atama (02.09.2026): yetkili "Atama Yap" ile modal açmadan personel seçer
+  const [atamaAcikId, setAtamaAcikId] = useState(null);
+  const [atamaSecim, setAtamaSecim] = useState({});
+  const [personelListesi, setPersonelListesi] = useState([]);
+  const [atamaYetkili, setAtamaYetkili] = useState(false);
+  useEffect(() => {
+    const h = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+    fetch(`${API_BASE}/rollout/cleanup/atama-yetkim`, { headers: h }).then(r => r.json()).then(d => setAtamaYetkili(!!d?.yetkili)).catch(() => {});
+    fetch(`${API_BASE}/rollout/cleanup/personel-listesi`, { headers: h }).then(r => r.json()).then(d => { if (d?.ok) setPersonelListesi(d.rows || []); }).catch(() => {});
+  }, []);
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString("tr-TR") : "—";
 
   const getRolloutRow = (site_code) => rolloutRows.find(r => r.site_code === site_code) || {};
@@ -32261,8 +32271,8 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
                   </div>
                 )}
 
-                {/* Actions */}
-                <div style={{ padding:"10px 16px", borderTop:"1px solid #f1f5f9", display:"flex", gap:"8px", justifyContent:"flex-end", marginTop:"auto" }}>
+                {/* Actions (02.09.2026 yeniden tasarım): üst şerit = atama + onay durumu; alt şerit = indir / düzenle / sil */}
+                <div style={{ borderTop:"1px solid #f1f5f9", marginTop:"auto" }}>
                   {(() => {
                     const fotoSayisi = items.reduce((s,it)=>s+((it.fotolar||[]).length),0);
                     const zipIndir = async () => {
@@ -32287,20 +32297,11 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
                       const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
                       const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${r.site_code}_CleanUp_Fotograflar.zip`; a.click(); URL.revokeObjectURL(a.href);
                     };
-                    return (
-                      <button onClick={zipIndir} disabled={!fotoSayisi} title={fotoSayisi ? "Önce/sonra fotoğraflarını ZIP indir" : "Henüz fotoğraf yok"}
-                        style={{ background: fotoSayisi?"#1e293b":"#f1f5f9", color: fotoSayisi?"#fff":"#94a3b8", border:"1px solid #e2e8f0", borderRadius:"6px", padding:"5px 12px", fontSize:"12px", fontWeight:700, cursor: fotoSayisi?"pointer":"default", marginRight:"auto" }}>
-                        📷 Fotoğraflar{fotoSayisi?` (${fotoSayisi})`:""}
-                      </button>
-                    );
-                  })()}
-                  {/* Clean Up onay zinciri (02.09.2026): mobilden gönderilir, yetkili panelden de onaylayabilir */}
-                  {(() => {
                     const D = { ONAY_BEKLE:["Onay bekliyor","#fef3c7","#b45309"], ONAYLANDI:["Onaylandı","#dcfce7","#166534"], RED:["Reddedildi","#fee2e2","#b91c1c"] };
                     const d = D[r.onay_durum];
                     const yetkili = !!r.onay_yetkim; // bölgeye göre backend hesaplar (İzmir→Serdar, Ankara→Nurcan, genel→Orhan/Düzgün)
                     const token = localStorage.getItem("token") || "";
-                    const fotoVar = items.some(it => (it.fotolar||[]).length > 0);
+                    const fotoVar = fotoSayisi > 0;
                     const islem = async (yol, body) => {
                       try {
                         const resp = await fetch(`${API_BASE}/rollout/cleanup/${encodeURIComponent(r.site_code)}/${yol}`, { method:"PUT", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token}` }, body: JSON.stringify(body||{}) });
@@ -32308,29 +32309,80 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
                         onDeleted && onDeleted();
                       } catch(e) { alert(e.message); }
                     };
+                    const atamaKaydet = async () => {
+                      const email = atamaSecim[r.id] ?? (r.atanan_email || "");
+                      const p = personelListesi.find(x => x.email === email);
+                      await islem("atama", { atanan_email: email || null, atanan_ad: p?.ad || null });
+                      setAtamaAcikId(null);
+                    };
+                    const basHarf = (ad) => String(ad||"").split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0]).join("").toUpperCase();
+                    const arac = (aktif, bg, ink, kenar) => ({
+                      display:"inline-flex", alignItems:"center", gap:"5px", whiteSpace:"nowrap",
+                      background: aktif ? bg : "#f1f5f9", color: aktif ? ink : "#94a3b8",
+                      border:`1px solid ${aktif ? kenar : "#e2e8f0"}`, borderRadius:"8px", padding:"6px 10px",
+                      fontSize:"12px", fontWeight:700, cursor: aktif ? "pointer" : "default", textDecoration:"none",
+                    });
+                    const atamaAcik = atamaAcikId === r.id;
                     return (
                       <>
-                        {r.atanan_ad && <span title={r.atanan_email||""} style={{ alignSelf:"center", fontSize:"11px", color:"#475569", fontWeight:600 }}>👤 {r.atanan_ad}</span>}
-                        {/* Huawei'ye gidecek önce/sonra raporu — pdfkit ile backend üretir */}
-                        <a href={fotoVar ? `${API_BASE}/rollout/cleanup/${encodeURIComponent(r.site_code)}/rapor.pdf?token=${encodeURIComponent(token)}` : undefined}
-                           onClick={e=>{ if(!fotoVar) e.preventDefault(); }} title={fotoVar ? "Önce/Sonra fotoğraflı Huawei raporu (PDF)" : "Henüz fotoğraf yok"}
-                           style={{ background: fotoVar?"#7c3aed":"#f1f5f9", color: fotoVar?"#fff":"#94a3b8", border:"1px solid #e2e8f0", borderRadius:"6px", padding:"5px 12px", fontSize:"12px", fontWeight:700, textDecoration:"none", cursor: fotoVar?"pointer":"default" }}>
-                          📄 Huawei Raporu
-                        </a>
-                        {d && <span title={r.red_notu ? `Red: ${r.red_notu}` : (r.onaylayan||"")} style={{ alignSelf:"center", background:d[1], color:d[2], borderRadius:"999px", padding:"3px 10px", fontSize:"11px", fontWeight:800 }}>{d[0]}</span>}
-                        {yetkili && r.onay_durum === "ONAY_BEKLE" && (
-                          <>
-                            <button onClick={()=>{ const n = window.prompt("Red gerekçesi:"); if (n && n.trim()) islem("reddet", { not: n.trim() }); }}
-                              style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"6px", padding:"5px 12px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✕ Reddet</button>
-                            <button onClick={()=>{ if (window.confirm(`${r.site_code} Clean Up onaylansın mı?`)) islem("onayla"); }}
-                              style={{ background:"#16a34a", color:"#fff", border:"none", borderRadius:"6px", padding:"5px 12px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✓ Onayla</button>
-                          </>
+                        {/* Üst şerit: atanan personel + onay durumu */}
+                        <div style={{ padding:"9px 14px", background:"#f8fafc", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:"8px", flex:1, minWidth:"160px" }}>
+                            <div style={{ width:"30px", height:"30px", borderRadius:"50%", background: r.atanan_ad ? "#1e3a5f" : "#e2e8f0", color: r.atanan_ad ? "#fff" : "#94a3b8", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontWeight:800, flexShrink:0 }}>
+                              {r.atanan_ad ? basHarf(r.atanan_ad) : "?"}
+                            </div>
+                            <div style={{ minWidth:0 }}>
+                              <div style={{ fontSize:"10px", color:"#94a3b8", fontWeight:700, letterSpacing:"0.05em" }}>ATANAN PERSONEL</div>
+                              <div title={r.atanan_email||""} style={{ fontSize:"12.5px", fontWeight:700, color: r.atanan_ad ? "#0f172a" : "#94a3b8", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                {r.atanan_ad || "Atanmadı"}
+                              </div>
+                            </div>
+                            {atamaYetkili && r.onay_durum !== "ONAYLANDI" && (
+                              <button onClick={()=>setAtamaAcikId(atamaAcik ? null : r.id)} title="Sahayı personele ata"
+                                style={{ ...arac(true, atamaAcik ? "#1d4ed8" : "#eff6ff", atamaAcik ? "#fff" : "#1d4ed8", "#bfdbfe"), padding:"5px 10px" }}>
+                                👤 {r.atanan_ad ? "Değiştir" : "Atama Yap"} {atamaAcik ? "▴" : "▾"}
+                              </button>
+                            )}
+                          </div>
+                          {d && <span title={r.red_notu ? `Red: ${r.red_notu}` : (r.onaylayan||"")} style={{ background:d[1], color:d[2], borderRadius:"999px", padding:"4px 11px", fontSize:"11px", fontWeight:800, whiteSpace:"nowrap" }}>{d[0]}</span>}
+                          {yetkili && r.onay_durum === "ONAY_BEKLE" && (
+                            <>
+                              <button onClick={()=>{ const n = window.prompt("Red gerekçesi:"); if (n && n.trim()) islem("reddet", { not: n.trim() }); }}
+                                style={arac(true, "#fef2f2", "#dc2626", "#fecaca")}>✕ Reddet</button>
+                              <button onClick={()=>{ if (window.confirm(`${r.site_code} Clean Up onaylansın mı?`)) islem("onayla"); }}
+                                style={{ ...arac(true, "#16a34a", "#fff", "#16a34a") }}>✓ Onayla</button>
+                            </>
+                          )}
+                        </div>
+
+                        {/* Atama seçici (yalnız yetkili, açılınca) */}
+                        {atamaAcik && (
+                          <div style={{ padding:"8px 14px", background:"#eff6ff", borderTop:"1px solid #dbeafe", display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+                            <select value={atamaSecim[r.id] ?? (r.atanan_email || "")} onChange={e=>setAtamaSecim(p=>({ ...p, [r.id]: e.target.value }))}
+                              style={{ flex:1, minWidth:"180px", padding:"7px 10px", border:"1.5px solid #bfdbfe", borderRadius:"8px", fontSize:"12.5px", background:"#fff" }}>
+                              <option value="">— Atama yok —</option>
+                              {personelListesi.map(p => <option key={p.email} value={p.email}>{p.ad || p.email}</option>)}
+                            </select>
+                            <button onClick={atamaKaydet} style={arac(true, "#1d4ed8", "#fff", "#1d4ed8")}>Kaydet</button>
+                            <button onClick={()=>setAtamaAcikId(null)} style={arac(true, "#fff", "#475569", "#cbd5e1")}>Vazgeç</button>
+                          </div>
                         )}
+
+                        {/* Alt şerit: indirmeler solda, düzenle/sil sağda */}
+                        <div style={{ padding:"8px 14px 10px", display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap" }}>
+                          <button onClick={zipIndir} disabled={!fotoVar} title={fotoVar ? "Ham fotoğrafları ZIP indir" : "Henüz fotoğraf yok"}
+                            style={arac(fotoVar, "#1e293b", "#fff", "#1e293b")}>📷 Fotoğraflar{fotoVar?` (${fotoSayisi})`:""}</button>
+                          {/* Huawei'ye gidecek önce/sonra raporu — pdfkit ile backend üretir */}
+                          <a href={fotoVar ? `${API_BASE}/rollout/cleanup/${encodeURIComponent(r.site_code)}/rapor.pdf?token=${encodeURIComponent(token)}` : undefined}
+                             onClick={e=>{ if(!fotoVar) e.preventDefault(); }} title={fotoVar ? "Önce/Sonra fotoğraflı Huawei raporu (PDF)" : "Henüz fotoğraf yok"}
+                             style={arac(fotoVar, "#7c3aed", "#fff", "#7c3aed")}>📄 Huawei Raporu</a>
+                          <span style={{ flex:1 }} />
+                          <button onClick={()=>onEdit(r)} title="Kaydı düzenle" style={arac(true, "#eff6ff", "#2563eb", "#bfdbfe")}>✏️ Düzenle</button>
+                          <button onClick={()=>handleDelete(r.id)} title="Kaydı sil" style={{ ...arac(true, "#fef2f2", "#dc2626", "#fecaca"), padding:"6px 9px" }}>🗑️</button>
+                        </div>
                       </>
                     );
                   })()}
-                  <button onClick={()=>onEdit(r)} style={{ background:"#eff6ff", color:"#2563eb", border:"1px solid #bfdbfe", borderRadius:"6px", padding:"5px 14px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle</button>
-                  <button onClick={()=>handleDelete(r.id)} style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"6px", padding:"5px 14px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>🗑️ Sil</button>
                 </div>
               </div>
             );
