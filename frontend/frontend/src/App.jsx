@@ -5061,6 +5061,28 @@ function RolloutDashboard({ currentUser }) {
           >
             Excel İndir
           </button>
+          {/* Clean Up kısayolu (02.09.2026): arama yapmadan doğrudan Clean Up bölümüne git */}
+          <button
+            type="button"
+            onClick={() => {
+              const el = document.getElementById("cleanup-bolumu");
+              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            title="Clean Up kayıtlarına git"
+            style={{
+              background: "#0f766e",
+              color: "#fff",
+              border: "none",
+              padding: "10px 16px",
+              borderRadius: "8px",
+              marginLeft: "10px",
+              cursor: "pointer",
+              fontWeight: "700",
+              whiteSpace: "nowrap",
+            }}
+          >
+            🧹 Clean Up
+          </button>
         </div>
       </div>
 
@@ -32072,7 +32094,7 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
   };
 
   return (
-    <div style={{ marginTop:"32px", padding:"0 0 40px" }}>
+    <div id="cleanup-bolumu" style={{ marginTop:"32px", padding:"0 0 40px", scrollMarginTop:"90px" }}>
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"16px", flexWrap:"wrap", gap:"10px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
