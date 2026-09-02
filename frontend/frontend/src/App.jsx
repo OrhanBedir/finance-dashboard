@@ -24896,7 +24896,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         <th style={{ padding: "6px 8px" }}>Site ID</th>
                         <th style={{ padding: "6px 8px" }}>İş Açıklaması</th>
                         <th style={{ padding: "6px 8px" }}>Item Code</th>
-                        <th style={{ padding: "6px 8px", textAlign: "right" }}>Done</th>
+                        <th style={{ padding: "6px 8px", textAlign: "right" }}>PR</th>
                         <th style={{ padding: "6px 8px", textAlign: "right" }}>Request</th>
                         <th style={{ padding: "6px 8px", textAlign: "right" }}>Birim ₺</th>
                         <th style={{ padding: "6px 8px", textAlign: "right" }}>Toplam ₺</th>
