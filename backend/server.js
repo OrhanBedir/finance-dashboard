@@ -1582,6 +1582,12 @@ app.get("/po/saha-oneri", authMiddleware, async (req, res) => {
     const girilenSet = new Set(girilen.rows.map(x => x.ic));
     const poSet = new Set(poAll.rows.map(x => x.ic));
     const toplamSaha = Number(benzer.rows[0]?.toplam_saha || 0);
+    // Kafes kule sahasında vinç önerilmez (Orhan, 02.09.2026) — TSSR metni önbellekteyse bak
+    let kafesKule = false;
+    try {
+      const kc = await pool.query(`SELECT 1 FROM tssr_analiz_cache WHERE site_code = $1 AND metin ~* 'KAFES\\s*KULE|Kafes\\s*/\\s*Tower' LIMIT 1`, [site]);
+      kafesKule = kc.rows.length > 0;
+    } catch {}
     // Yeni süreçte (20.08.2026, Orhan) LOS / Survey / BTK işlerini Huawei
     // kendisi yapıyor — bu kalemler artık bizde olmadığından öneriye ÇIKMAZ.
     // Kod listesi + kelime sınırlı regex (dikkat: "closure/closing" içindeki
@@ -1610,6 +1616,7 @@ app.get("/po/saha-oneri", authMiddleware, async (req, res) => {
       .filter(x => !girilenSet.has(x.item_code) && !poSet.has(x.item_code))
       .filter(x => !ONERI_HARIC_KOD.has(x.item_code) && !ONERI_HARIC_RE.test(x.item_description || ""))
       .filter(x => !muadilHaric.has(x.item_code))
+      .filter(x => !(kafesKule && x.item_code === "8818249053"))
       .map(x => ({ ...x, yuzde: toplamSaha ? Math.round((100 * x.kac_sahada) / toplamSaha) : 0 }))
       .filter(x => x.yuzde >= 40)
       .sort((a, b) => b.yuzde - a.yuzde);
@@ -1677,21 +1684,47 @@ function tssrMetinAnaliz(metinHam) {
   const govde = satirlar.join("\n");
   const tespitler = [];
 
+  // Excel TSSR şablonunda açılır liste seçenekleri de satır olarak gelir
+  // ("Pole Gizleme Kafes", "10 cm POLE OFFSET 20 cm POLE OFFSET …", "Evet/Yes Hayır/No").
+  // Bunlar cevap değil, seçenek listesidir — analiz dışı bırakılır.
+  const secenekMi = (l) =>
+    /Lütfen Seçiniz|Please Choose/i.test(l) ||
+    (/evet\s*\/\s*yes/i.test(l) && /hayır\s*\/\s*no/i.test(l)) ||
+    (l.match(/OFFSET/gi) || []).length >= 3 ||
+    (l.match(/\bTower\b/gi) || []).length >= 3;
+  // Excel'de her satır kendi içinde tam (etiket + cevap aynı satırda); PDF'de cevap
+  // alt satırlara dökülür. Excel modunda alt satırlara bakılmaz (yanlış eşleşme).
+  const excelMod = satirlar.some((l) => /^=== .+ ===$/.test(l));
   const cevap = (rx, derinlik = 5) => {
-    const i = satirlar.findIndex((l) => rx.test(l));
-    if (i < 0) return { deger: null, satir: null };
-    for (let j = i; j <= Math.min(satirlar.length - 1, i + derinlik); j++) {
+    if (excelMod) derinlik = 0;
+    const i = satirlar.findIndex((l) => rx.test(l) && !secenekMi(l));
+    const i0 = i >= 0 ? i : satirlar.findIndex((l) => rx.test(l));
+    if (i0 < 0) return { deger: null, satir: null };
+    for (let j = i0; j <= Math.min(satirlar.length - 1, i0 + derinlik); j++) {
       const l = satirlar[j];
-      if (/\b(evet|yes)\b/i.test(l) && !/hayır|hayir|no\b/i.test(l.replace(/evet\/yes/i, ""))) return { deger: "EVET", satir: l };
-      if (/hayır|hayir|\bno\b/i.test(l)) return { deger: "HAYIR", satir: l };
+      if (secenekMi(l)) continue;
+      const govdeSatir = l.replace(rx, "");
+      if (/\b(EVET|YES)\b/i.test(govdeSatir) && !/\b(HAYIR|HAYİR|NO)\b/i.test(govdeSatir)) return { deger: "EVET", satir: l };
+      if (/\b(HAYIR|HAYİR|NO)\b/i.test(govdeSatir)) return { deger: "HAYIR", satir: l };
     }
-    return { deger: null, satir: satirlar[i] };
+    return { deger: null, satir: satirlar[i0] };
   };
+  const bul = (rx) => satirlar.find((l) => rx.test(l) && !secenekMi(l)) || null;
   const ekle = (anahtar, alinti, kalemler, not) => tespitler.push({ anahtar, alinti: String(alinti || "").slice(0, 160), kalemler, not: not || "" });
 
-  // 1) Vinç
+  // 0) Kafes kule (Orhan, 02.09.2026 — IZ4401 TSSR): kafes kulede VİNÇ TALEP EDİLMEZ,
+  //    antenler pole-offset ile bağlanır → offset kalemleri talep edilir.
+  //    Tespit: "KAFES KULE" ifadesi, ya da Kule Tipi satırında "Kafes", ya da "YENİ … KULE"
+  //    (monopol değilse) — seçenek listesi satırları hariç.
+  const kafesSatir =
+    bul(/KAFES\s*KULE|lattice\s*tower/i) ||
+    bul(/(Kule\s*Tipi|Tower\s*Type|Kule\/Pole)[^\n]*\bKafes\b/i) ||
+    (bul(/YEN[İI]\s+(\d+\s*m\.?\s+)?(KAFES\s+)?KULE/i) && !/MONOPOL/i.test(govde) ? bul(/YEN[İI]\s+(\d+\s*m\.?\s+)?(KAFES\s+)?KULE/i) : null);
+  const kafesKule = !!kafesSatir;
+  if (kafesKule) ekle("Kafes kule", kafesSatir, [], "Kafes kule sahası — vinç talep edilmez; antenler offset ile bağlanır");
+  // 1) Vinç (kafes kulede atlanır)
   const vinc = cevap(/Use Crane|Vinç kullanılacak/i);
-  if (vinc.deger === "EVET") ekle("Vinç", vinc.satir, [{ kod: "8818249053", adet: 1 }]);
+  if (vinc.deger === "EVET" && !kafesKule) ekle("Vinç", vinc.satir, [{ kod: "8818249053", adet: 1 }]);
   // 2) Yeni sistem topraklaması
   const topr = cevap(/New System grounding|Yeni Sistem Topraklaması/i, 6);
   if (topr.deger === "EVET") ekle("Yeni sistem topraklaması", topr.satir, [{ kod: "8818203933", adet: 1 }]);
@@ -1723,9 +1756,10 @@ function tssrMetinAnaliz(metinHam) {
     ekle("Yeni outdoor kabinet", m && m[0], [{ kod: "8812184600", adet: 1 }]);
   }
   // 7) Gizleme (baca yüksekliği varsa kod, yoksa kodsuz tespit)
-  const gizI = satirlar.findIndex((l) => /New Camouflage Type/i.test(l));
+  const gizI = satirlar.findIndex((l) => /New Camouflage Type/i.test(l) && !secenekMi(l));
+  const gizSecenekMi = (l) => (l.match(/Baca|Su Deposu|Klima|Reklam|Panel|Lamppost|Silindir|Chimney|Water Tank/gi) || []).length >= 3;
   if (gizI >= 0) {
-    const aday = satirlar.slice(gizI + 1, gizI + 8).find((l) => !/^Type\s*-|N\/A|Hayır|^Yeni|^New|Qty|Adet|Dimension|Ölçü/i.test(l) && /[A-Za-zÇĞİÖŞÜ]{3,}/.test(l));
+    const aday = satirlar.slice(gizI + 1, gizI + 8).find((l) => !/^Type\s*-|N\/A|Hayır|^Yeni|^New|Qty|Adet|Dimension|Ölçü/i.test(l) && /[A-Za-zÇĞİÖŞÜ]{3,}/.test(l) && !secenekMi(l) && !gizSecenekMi(l));
     if (aday) {
       const baca = aday.match(/(\d)\s*m/i);
       const kod = baca && /baca|chimney/i.test(aday) ? TSSR_BACA_KODLARI[baca[1]] : null;
@@ -1737,8 +1771,15 @@ function tssrMetinAnaliz(metinHam) {
   // Çatı çıkışı TSSR'da soru olarak geçer ("… Gerekli mi?") — cevap Evet ise öner
   const cati = cevap(/çatı\s*çık|roof\s*exit/i, 4);
   if (cati.deger === "EVET") ekle("Çatı çıkış kapağı", cati.satir, [{ kod: "8812184694", adet: 1 }]);
-  if (/star\s*offset|yıldız\s*ofset/i.test(govde)) ekle("Star offset", (govde.match(/[^\n]*(star\s*offset|yıldız\s*ofset)[^\n]*/i) || [])[0], [{ kod: "8812184819", adet: 1 }]);
-  if (/pole[\s-]*offset|pol\s*ofset/i.test(govde)) ekle("Pole offset", (govde.match(/[^\n]*(pole[\s-]*offset|pol\s*ofset)[^\n]*/i) || [])[0], [{ kod: "8818265066", adet: 1 }, { kod: "8818264113", adet: 1 }]);
+  const starSatir = bul(/star\s*offset|yıldız\s*ofset/i);
+  if (starSatir) ekle("Star offset", starSatir, [{ kod: "8812184819", adet: 1 }]);
+  const poleOffsetSatir = bul(/pole[\s-]*offset|pol\s*ofset/i);
+  if (poleOffsetSatir) ekle("Pole offset", poleOffsetSatir, [{ kod: "8818265066", adet: 1 }, { kod: "8818264113", adet: 1 }]);
+  else if (kafesKule) {
+    // Kafes kulede offset TSSR'da açıkça yazmasa da gerekir — anten adedi kadar (bilinmiyorsa 3)
+    const antAdet = ant ? Math.max(1, Number(ant[1]) || 3) : 3;
+    ekle("Kafes kule offset", "Kafes kule — anten bağlantısı için offset", [{ kod: "8818265066", adet: antAdet }, { kod: "8818264113", adet: antAdet }], "Adet anten sayısına göre kontrol edin");
+  }
   // 9) RRU adedi → DBS kurulum bandı
   const rruI = satirlar.findIndex((l) => /^RRU\s*Qty/i.test(l));
   if (rruI >= 0) {
@@ -1820,6 +1861,23 @@ app.get("/po/akilli-asistan", authMiddleware, async (req, res) => {
             if (!r.ok) continue;
             const buf = Buffer.from(await r.arrayBuffer());
             if (buf.length > 30 * 1024 * 1024) continue;
+            // Excel TSSR (HW şablonu .xlsx): her satır tek metin satırı olur ("Etiket ... Hayır/No")
+            if (/\.xlsx?(\?|$)/i.test(u) || buf.slice(0, 2).toString() === "PK") {
+              try {
+                const wb = XLSX.read(buf, { type: "buffer" });
+                const satirlar = [];
+                for (const ad of wb.SheetNames) {
+                  satirlar.push(`=== ${ad} ===`);
+                  const rows = XLSX.utils.sheet_to_json(wb.Sheets[ad], { header: 1, raw: false, defval: "" });
+                  for (const r of rows) {
+                    const l = r.map((c) => String(c ?? "").trim()).filter(Boolean).join(" ");
+                    if (l) satirlar.push(l);
+                  }
+                }
+                parcalar.push(satirlar.join("\n"));
+                continue;
+              } catch (e) { console.warn("[asistan] xlsx TSSR okunamadı:", e.message); }
+            }
             const pdfMi = /\.pdf(\?|$)/i.test(u) || buf.slice(0, 5).toString() === "%PDF-";
             const t = await extractPdfText(buf, pdfMi);
             if (t) parcalar.push(t);
@@ -1837,6 +1895,11 @@ app.get("/po/akilli-asistan", authMiddleware, async (req, res) => {
             ...t,
             kalemler: t.kalemler.map((kl) => ({ ...kl, girildi: prSet.has(kl.kod), po_var: poSet.has(kl.kod) })),
           }));
+          // Kafes kule + PR'da vinç varsa uyar (kafes kulede vinç talep edilmez)
+          if (tssr.tespitler.some((t) => t.anahtar === "Kafes kule") && prSet.has("8818249053")) {
+            bulgular.push({ tip: "UYARI", kaynak: "TSSR", item_code: "8818249053", adet: 0,
+              mesaj: "TSSR'a göre saha KAFES KULE — kafes kulede vinç talep edilmez, PR'daki vinç kalemini kaldır." });
+          }
           for (const t of tssr.tespitler) {
             for (const kl of t.kalemler) {
               if (!kl.girildi) bulgular.push({ tip: "TSSR", kaynak: "TSSR", item_code: kl.kod, adet: kl.adet,
