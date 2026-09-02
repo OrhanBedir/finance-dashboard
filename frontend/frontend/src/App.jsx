@@ -32312,7 +32312,11 @@ function CleanupModal({ record, rolloutRows, onClose, onSaved }) {
   });
   // İş ataması (02.09.2026): personel mobilde "Bana atanan sahalar" listesinde görür
   const [personelListesi, setPersonelListesi] = useState([]);
+  // Atama yetkisi: Nurcan, Orhan, Düzgün, Erencan (backend CLEANUP_ATAMA_YETKI; sunucu da zorlar)
+  const [atamaYetkili, setAtamaYetkili] = useState(false);
   useEffect(() => {
+    fetch(`${API_BASE}/rollout/cleanup/atama-yetkim`, { headers })
+      .then(r => r.json()).then(d => setAtamaYetkili(!!d?.yetkili)).catch(() => {});
     fetch(`${API_BASE}/rollout/cleanup/personel-listesi`, { headers })
       .then(r => r.json()).then(d => { if (d?.ok) setPersonelListesi(d.rows || []); }).catch(() => {});
   }, []); // eslint-disable-line
@@ -32421,11 +32425,17 @@ function CleanupModal({ record, rolloutRows, onClose, onSaved }) {
           <div>
             <label style={lblSt}>📝 Clean Up Not</label>
             <label style={{...lblSt, marginTop:"10px"}}>👤 Atanan Personel (mobilde bu sahayı görür)</label>
-            <select style={inSt} value={form.atanan_email}
-              onChange={e=>{ const p = personelListesi.find(x=>x.email===e.target.value); setForm(f=>({ ...f, atanan_email: e.target.value, atanan_ad: p?.ad || "" })); }}>
-              <option value="">— Atama yok —</option>
-              {personelListesi.map(p => <option key={p.email} value={p.email}>{p.ad || p.email}{p.ad ? ` (${p.email})` : ""}</option>)}
-            </select>
+            {atamaYetkili ? (
+              <select style={inSt} value={form.atanan_email}
+                onChange={e=>{ const p = personelListesi.find(x=>x.email===e.target.value); setForm(f=>({ ...f, atanan_email: e.target.value, atanan_ad: p?.ad || "" })); }}>
+                <option value="">— Atama yok —</option>
+                {personelListesi.map(p => <option key={p.email} value={p.email}>{p.ad || p.email}{p.ad ? ` (${p.email})` : ""}</option>)}
+              </select>
+            ) : (
+              <div style={{ ...inSt, background:"#f8fafc", color: form.atanan_ad ? "#0f172a" : "#94a3b8" }} title="Atamayı yalnız Nurcan Kuş, Orhan Bedir, Düzgün Şimşek ve Erencan Şimşek değiştirebilir">
+                {form.atanan_ad || form.atanan_email || "Atama yapılmamış"} <span style={{ fontSize:"11px", color:"#94a3b8" }}>· atama yetkisi yok</span>
+              </div>
+            )}
             <div style={{ height:"10px" }} />
             <textarea style={{...inSt,minHeight:"80px",resize:"vertical"}} value={form.notlar} onChange={e=>setForm(p=>({...p,notlar:e.target.value}))} placeholder="Notlarınızı buraya yazın..." />
           </div>

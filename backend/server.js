@@ -9836,17 +9836,20 @@ app.post("/rollout/cleanup", authMiddleware, async (req, res) => {
     )`);
     const r = await pool.query(`
       INSERT INTO rollout_cleanup (site_code, visit_date, notification_date, completion_date, items, notlar, screenshot_url, atanan_email, atanan_ad)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      VALUES ($1,$2,$3,$4,$5,$6,$7, CASE WHEN $10::boolean THEN $8::text ELSE NULL END, CASE WHEN $10::boolean THEN $9::text ELSE NULL END)
       ON CONFLICT (site_code) DO UPDATE SET
         visit_date=EXCLUDED.visit_date, notification_date=EXCLUDED.notification_date,
         completion_date=EXCLUDED.completion_date, items=EXCLUDED.items,
         notlar=EXCLUDED.notlar, screenshot_url=COALESCE(EXCLUDED.screenshot_url, rollout_cleanup.screenshot_url),
-        atanan_email=EXCLUDED.atanan_email, atanan_ad=EXCLUDED.atanan_ad,
+        -- İş atamasını yalnız yetkili değiştirebilir (CLEANUP_ATAMA_YETKI); diğerleri mevcut atamayı korur
+        atanan_email = CASE WHEN $10::boolean THEN EXCLUDED.atanan_email ELSE rollout_cleanup.atanan_email END,
+        atanan_ad    = CASE WHEN $10::boolean THEN EXCLUDED.atanan_ad    ELSE rollout_cleanup.atanan_ad    END,
         updated_at=NOW()
       RETURNING *
     `, [String(site_code).replace(/\s+/g, "").toUpperCase(), visit_date||null, notification_date||null, completion_date||null,
         JSON.stringify(items||[]), notlar||null, screenshot_url||null,
-        atanan_email ? String(atanan_email).toLowerCase() : null, atanan_ad || null]);
+        atanan_email ? String(atanan_email).toLowerCase() : null, atanan_ad || null,
+        CLEANUP_ATAMA_YETKI.includes(String(req.user?.email || "").toLowerCase())]);
     res.json({ ok: true, row: r.rows[0] });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -9928,6 +9931,13 @@ const CLEANUP_ONAY_BOLGE = {
   "ANKARA": ["nurcan.kus@simsektel.com"],
 };
 const CLEANUP_ONAY_GENEL = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "duzgun.simsek@simsektel.com"];
+// İş atama yetkisi (Orhan, 02.09.2026): Nurcan, Orhan (2 hesap), Düzgün, Erencan
+const CLEANUP_ATAMA_YETKI = [
+  "nurcan.kus@simsektel.com", "orhan.bedir@simsektel.com", "orhan.bedir@gmail.com",
+  "duzgun.simsek@simsektel.com", "erencan.simsek@simsektel.com",
+];
+app.get("/rollout/cleanup/atama-yetkim", authMiddleware, (req, res) =>
+  res.json({ ok: true, yetkili: CLEANUP_ATAMA_YETKI.includes(String(req.user?.email || "").toLowerCase()) }));
 const bolgeAnahtar = (b) => String(b || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "İ").trim();
 function cleanupOnayYetkiliMi(email, bolge) {
   const e = String(email || "").toLowerCase();
