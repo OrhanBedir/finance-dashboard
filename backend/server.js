@@ -9835,6 +9835,70 @@ app.post("/rollout/cleanup", authMiddleware, async (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+/* ── CLEAN UP FOTOĞRAF KANITI (02.09.2026) ──────────────────────────────
+   Mobil ekip sahada her eksik kalem için "önce" / "sonra" fotoğrafı çeker.
+   items JSON'una kalem başına fotolar:[{url,tip,tarih,kullanici}] eklenir.
+   "sonra" fotoğrafı yüklenince kalem otomatik tamamlanır; tüm kalemler
+   tamamlanınca completion_date (boşsa) bugün olarak yazılır. */
+app.get("/rollout/cleanup/site/:site", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    const r = await pool.query("SELECT * FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1", [site]);
+    res.json({ ok: true, row: r.rows[0] || null });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post("/rollout/cleanup/:site/foto", authMiddleware, upload.single("dosya"), async (req, res) => {
+  try {
+    const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    const itemId = String(req.query.item_id || req.body?.item_id || "");
+    const tip = String(req.query.tip || req.body?.tip || "sonra").toLowerCase() === "once" ? "once" : "sonra";
+    if (!req.file) return res.status(400).json({ ok: false, error: "Fotoğraf gelmedi" });
+    if (!itemId) return res.status(400).json({ ok: false, error: "item_id zorunlu" });
+
+    const r = await pool.query("SELECT * FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1", [site]);
+    if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Bu saha için Clean Up kaydı yok" });
+    const row = r.rows[0];
+    const items = Array.isArray(row.items) ? row.items : [];
+    const idx = items.findIndex((it) => String(it.id) === itemId);
+    if (idx < 0) return res.status(404).json({ ok: false, error: "Kalem bulunamadı" });
+
+    const ext = (path.extname(req.file.originalname || "") || ".jpg").toLowerCase().replace(/[^a-z0-9.]/g, "") || ".jpg";
+    const fname = `cleanup-fotolar/${site}/${itemId}_${tip}_${Date.now()}${ext}`;
+    const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype || "image/jpeg");
+
+    const foto = { url, tip, tarih: new Date().toISOString(), kullanici: req.user?.email || "" };
+    items[idx].fotolar = Array.isArray(items[idx].fotolar) ? [...items[idx].fotolar, foto] : [foto];
+    if (tip === "sonra") items[idx].tamamlandi = true;
+
+    const hepsiTamam = items.length > 0 && items.every((it) => it.tamamlandi);
+    const yeniCompletion = hepsiTamam && !row.completion_date ? new Date().toISOString().slice(0, 10) : row.completion_date;
+
+    const u = await pool.query(
+      `UPDATE rollout_cleanup SET items = $1, completion_date = $2, updated_at = NOW() WHERE id = $3 RETURNING *`,
+      [JSON.stringify(items), yeniCompletion, row.id],
+    );
+    res.json({ ok: true, row: u.rows[0], foto });
+  } catch (e) {
+    console.error("CLEANUP FOTO ERROR:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.delete("/rollout/cleanup/:site/foto", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    const { item_id, url } = req.body || {};
+    const r = await pool.query("SELECT * FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1", [site]);
+    if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    const items = Array.isArray(r.rows[0].items) ? r.rows[0].items : [];
+    const it = items.find((x) => String(x.id) === String(item_id));
+    if (it && Array.isArray(it.fotolar)) it.fotolar = it.fotolar.filter((f) => f.url !== url);
+    const u = await pool.query("UPDATE rollout_cleanup SET items = $1, updated_at = NOW() WHERE id = $2 RETURNING *", [JSON.stringify(items), r.rows[0].id]);
+    res.json({ ok: true, row: u.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // DELETE /rollout/cleanup/:id
 app.delete("/rollout/cleanup/:id", authMiddleware, async (req, res) => {
   try {

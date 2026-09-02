@@ -32171,12 +32171,29 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
                   <div style={{ padding:"12px 16px", borderTop:"1px solid #f1f5f9" }}>
                     <div style={{ fontSize:"11px", fontWeight:700, color:"#475569", marginBottom:"6px", textTransform:"uppercase", letterSpacing:"0.05em" }}>Eksik Kalemleri</div>
                     <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
-                      {items.map((item,idx)=>(
-                        <div key={idx} style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:"12px" }}>
+                      {items.map((item,idx)=>{
+                        const once  = (item.fotolar||[]).filter(f=>f.tip==="once");
+                        const sonra = (item.fotolar||[]).filter(f=>f.tip==="sonra");
+                        return (
+                        <div key={idx} style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:"12px", flexWrap:"wrap" }}>
                           <span style={{ fontSize:"14px" }}>{item.tamamlandi ? "✅" : "⭕"}</span>
-                          <span style={{ color: item.tamamlandi?"#9ca3af":"#374151", textDecoration: item.tamamlandi?"line-through":"none", fontWeight: item.tamamlandi?400:500 }}>{item.kalem}</span>
+                          <span style={{ color: item.tamamlandi?"#9ca3af":"#374151", textDecoration: item.tamamlandi?"line-through":"none", fontWeight: item.tamamlandi?400:500, flex:1, minWidth:120 }}>{item.kalem}</span>
+                          {/* Mobil ekipten gelen önce/sonra kanıt fotoğrafları (02.09.2026) */}
+                          {(once.length>0 || sonra.length>0) && (
+                            <span style={{ display:"inline-flex", gap:"4px" }}>
+                              {once.map((f,i)=>(
+                                <a key={`o${i}`} href={f.url} target="_blank" rel="noreferrer" title={`Önce · ${String(f.tarih||"").slice(0,10)}`}
+                                   style={{ background:"#fef3c7", color:"#b45309", borderRadius:"5px", padding:"1px 6px", fontSize:"10px", fontWeight:700, textDecoration:"none" }}>📷 Önce{once.length>1?` ${i+1}`:""}</a>
+                              ))}
+                              {sonra.map((f,i)=>(
+                                <a key={`s${i}`} href={f.url} target="_blank" rel="noreferrer" title={`Sonra · ${String(f.tarih||"").slice(0,10)}`}
+                                   style={{ background:"#dcfce7", color:"#166534", borderRadius:"5px", padding:"1px 6px", fontSize:"10px", fontWeight:700, textDecoration:"none" }}>📷 Sonra{sonra.length>1?` ${i+1}`:""}</a>
+                              ))}
+                            </span>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -32199,6 +32216,37 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
 
                 {/* Actions */}
                 <div style={{ padding:"10px 16px", borderTop:"1px solid #f1f5f9", display:"flex", gap:"8px", justifyContent:"flex-end", marginTop:"auto" }}>
+                  {(() => {
+                    const fotoSayisi = items.reduce((s,it)=>s+((it.fotolar||[]).length),0);
+                    const zipIndir = async () => {
+                      const JSZip = (await import("jszip")).default;
+                      const zip = new JSZip();
+                      let cnt = 0;
+                      for (let i=0;i<items.length;i++) {
+                        const it = items[i];
+                        const sayac = { once:0, sonra:0 };
+                        for (const f of (it.fotolar||[])) {
+                          try {
+                            const resp = await fetch(f.url); if (!resp.ok) continue;
+                            const buf = await resp.arrayBuffer();
+                            const ext = (f.url.split("?")[0].split(".").pop()||"jpg").toLowerCase();
+                            sayac[f.tip] = (sayac[f.tip]||0)+1;
+                            zip.file(`${r.site_code}_kalem${i+1}_${f.tip}_${sayac[f.tip]}.${ext}`, buf); cnt++;
+                          } catch {}
+                        }
+                      }
+                      if (!cnt) { alert("İndirilebilir fotoğraf yok."); return; }
+                      zip.file(`${r.site_code}_kalemler.txt`, items.map((it,i)=>`${i+1}. ${String(it.kalem||"").replace(/^[•\s]+/,"")} — ${it.tamamlandi?"TAMAMLANDI":"BEKLİYOR"}`).join("\n"));
+                      const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
+                      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${r.site_code}_CleanUp_Fotograflar.zip`; a.click(); URL.revokeObjectURL(a.href);
+                    };
+                    return (
+                      <button onClick={zipIndir} disabled={!fotoSayisi} title={fotoSayisi ? "Önce/sonra fotoğraflarını ZIP indir" : "Henüz fotoğraf yok"}
+                        style={{ background: fotoSayisi?"#1e293b":"#f1f5f9", color: fotoSayisi?"#fff":"#94a3b8", border:"1px solid #e2e8f0", borderRadius:"6px", padding:"5px 12px", fontSize:"12px", fontWeight:700, cursor: fotoSayisi?"pointer":"default", marginRight:"auto" }}>
+                        📷 Fotoğraflar{fotoSayisi?` (${fotoSayisi})`:""}
+                      </button>
+                    );
+                  })()}
                   <button onClick={()=>onEdit(r)} style={{ background:"#eff6ff", color:"#2563eb", border:"1px solid #bfdbfe", borderRadius:"6px", padding:"5px 14px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle</button>
                   <button onClick={()=>handleDelete(r.id)} style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"6px", padding:"5px 14px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>🗑️ Sil</button>
                 </div>
