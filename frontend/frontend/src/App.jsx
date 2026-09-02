@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import "./App.css";
 import * as XLSX from "xlsx";
 import * as XLSXStyle from "xlsx-js-style";
@@ -4444,7 +4445,8 @@ function BelgeSecModal({ siteCode, kaynak, onClose }) {
     } finally { setIndiriyor(false); }
   };
 
-  return (
+  // Portal: tablo hücresi / kaydırma kabı içinde kalmasın, ekranın en önünde açılsın
+  return createPortal(
     <div onClick={(e) => { e.stopPropagation(); onClose(); }}
       style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.45)", zIndex:10050, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
       <div onClick={(e) => e.stopPropagation()}
@@ -4499,7 +4501,8 @@ function BelgeSecModal({ siteCode, kaynak, onClose }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
