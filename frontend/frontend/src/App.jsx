@@ -4387,7 +4387,124 @@ function formatDateTR(date) {
   return d.toLocaleDateString("tr-TR");
 }
 
+/* ═══ SAHA BELGE SEÇİM PENCERESİ (02.09.2026) ═══
+   📦 butonu ve "Saha Belgelerini İndir" aynı pencereyi açar: her belge tipi
+   satır satır, yüklü olanlar yeşil + tiklenebilir (kaç dosya olduğu yazar),
+   yüklü olmayanlar gri + pasif. Kullanıcı tümünü ya da nokta atışı seçer. */
+const ROLLOUT_BELGE_TIPLERI = [
+  ["los_belge_url",       "LOS",       "LOS Survey"],
+  ["tssr_belge_url",      "TSSR",      "TSSR"],
+  ["btk_belge_url",       "BTK",       "BTK / Survey"],
+  ["emr_belge_url",       "EMR",       "EMR"],
+  ["ysb_belge_url",       "YSB",       "YSB — Yer Seçim Belgesi"],
+  ["enh_proje_belge_url", "ENH_Proje", "ENH Proje"],
+  ["pac_belge_url",       "PAC",       "PAC"],
+];
+const rolloutBelgeListesi = (kaynak) => ROLLOUT_BELGE_TIPLERI.map(([alan, ad, etiket]) => ({
+  alan, ad, etiket,
+  urls: String(kaynak?.[alan] || "").split("\n").map((s) => s.trim()).filter(Boolean),
+}));
+
+function BelgeSecModal({ siteCode, kaynak, onClose }) {
+  const liste = useMemo(() => rolloutBelgeListesi(kaynak), [kaynak]);
+  const mevcut = liste.filter((b) => b.urls.length > 0);
+  const [secili, setSecili] = useState(() => new Set(mevcut.map((b) => b.alan)));
+  const [indiriyor, setIndiriyor] = useState(false);
+  const hepsiSecili = mevcut.length > 0 && mevcut.every((b) => secili.has(b.alan));
+  const toggle = (alan) => setSecili((p) => { const n = new Set(p); n.has(alan) ? n.delete(alan) : n.add(alan); return n; });
+  const seciliDosya = mevcut.filter((b) => secili.has(b.alan)).reduce((s, b) => s + b.urls.length, 0);
+
+  const indir = async () => {
+    const hedef = mevcut.filter((b) => secili.has(b.alan));
+    if (!hedef.length) return;
+    setIndiriyor(true);
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      let cnt = 0;
+      for (const b of hedef) {
+        for (let i = 0; i < b.urls.length; i++) {
+          const url = b.urls[i];
+          try {
+            const r = await fetch(url); if (!r.ok) continue;
+            const buf = await r.arrayBuffer();
+            const ext = url.split("?")[0].split(".").pop() || "pdf";
+            const ad = b.urls.length > 1 ? `${b.ad}_${i + 1}` : b.ad;
+            zip.file(`${siteCode}_${ad}.${ext}`, buf); cnt++;
+          } catch {}
+        }
+      }
+      if (!cnt) { alert("Belgeler indirilemedi."); return; }
+      const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${siteCode}_${hepsiSecili ? "Belgeler" : "Secili_Belgeler"}.zip`;
+      a.click(); URL.revokeObjectURL(a.href);
+      onClose();
+    } finally { setIndiriyor(false); }
+  };
+
+  return (
+    <div onClick={(e) => { e.stopPropagation(); onClose(); }}
+      style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.45)", zIndex:10050, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ background:"#fff", borderRadius:14, width:"100%", maxWidth:420, boxShadow:"0 20px 50px rgba(0,0,0,0.3)", overflow:"hidden", fontFamily:"inherit" }}>
+        <div style={{ padding:"14px 18px", borderBottom:"1px solid #e2e8f0", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div>
+            <div style={{ fontWeight:800, fontSize:14, color:"#0f172a" }}>📦 Hangi belgeleri indirmek istersiniz?</div>
+            <div style={{ fontSize:11.5, color:"#64748b", marginTop:2, fontFamily:"monospace" }}>{siteCode}</div>
+          </div>
+          <button type="button" onClick={onClose} style={{ border:"none", background:"#f1f5f9", borderRadius:"50%", width:28, height:28, cursor:"pointer", fontSize:15, color:"#475569" }}>×</button>
+        </div>
+
+        <div style={{ padding:"8px 10px", maxHeight:"50vh", overflowY:"auto" }}>
+          {liste.map((b) => {
+            const var_ = b.urls.length > 0;
+            const isaretli = var_ && secili.has(b.alan);
+            return (
+              <label key={b.alan}
+                style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 10px", borderRadius:9, marginBottom:3,
+                         cursor: var_ ? "pointer" : "not-allowed",
+                         background: isaretli ? "#f0fdf4" : var_ ? "#fff" : "#f8fafc",
+                         border: `1px solid ${isaretli ? "#86efac" : var_ ? "#e2e8f0" : "#f1f5f9"}`,
+                         opacity: var_ ? 1 : 0.55 }}>
+                <input type="checkbox" checked={isaretli} disabled={!var_} onChange={() => toggle(b.alan)}
+                  style={{ width:16, height:16, accentColor:"#16a34a", cursor: var_ ? "pointer" : "not-allowed" }} />
+                <span style={{ fontWeight:700, fontSize:13, color: var_ ? "#0f172a" : "#94a3b8", minWidth:44 }}>{b.ad}</span>
+                <span style={{ fontSize:12, color: var_ ? "#475569" : "#94a3b8", flex:1 }}>{b.etiket}</span>
+                {var_ ? (
+                  <span style={{ background:"#dcfce7", color:"#15803d", borderRadius:999, padding:"2px 9px", fontSize:11, fontWeight:700, whiteSpace:"nowrap" }}>
+                    {b.urls.length} belge
+                  </span>
+                ) : (
+                  <span style={{ color:"#94a3b8", fontSize:11, fontWeight:600 }}>yüklü değil</span>
+                )}
+              </label>
+            );
+          })}
+        </div>
+
+        <div style={{ padding:"12px 18px", borderTop:"1px solid #e2e8f0", display:"flex", alignItems:"center", gap:8, background:"#f8fafc" }}>
+          <button type="button" disabled={!mevcut.length}
+            onClick={() => setSecili(hepsiSecili ? new Set() : new Set(mevcut.map((b) => b.alan)))}
+            style={{ border:"1px solid #cbd5e1", background:"#fff", color:"#475569", borderRadius:8, padding:"7px 12px", fontSize:12, fontWeight:700, cursor: mevcut.length ? "pointer" : "not-allowed" }}>
+            {hepsiSecili ? "Seçimi Temizle" : "Tümünü Seç"}
+          </button>
+          <span style={{ fontSize:11.5, color:"#64748b", flex:1 }}>
+            {mevcut.length ? `${mevcut.length}/${liste.length} tip yüklü` : "Bu sahada yüklü belge yok"}
+          </span>
+          <button type="button" onClick={indir} disabled={!seciliDosya || indiriyor}
+            style={{ border:"none", background: seciliDosya ? "#1e293b" : "#cbd5e1", color:"#fff", borderRadius:8, padding:"8px 16px", fontSize:12.5, fontWeight:700, cursor: seciliDosya && !indiriyor ? "pointer" : "not-allowed" }}>
+            {indiriyor ? "Hazırlanıyor…" : `İndir (${seciliDosya})`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RolloutDashboard({ currentUser }) {
+  const [belgeSecRow, setBelgeSecRow] = useState(null);
   const exportExcel = () => {
     const regionParam =
       selectedRegion && selectedRegion !== "Tüm Bölgeler"
@@ -5065,36 +5182,6 @@ function RolloutDashboard({ currentUser }) {
                 const msTd = (v) => (
                   <td style={{ textAlign:"center", fontSize:"14px", background: v?"#f0fdf4":"#fafafa" }}>{ms(v)}</td>
                 );
-                const handleRowIndir = async () => {
-                  const belgeler = [
-                    { url: row.los_belge_url,       ad: "LOS" },
-                    { url: row.tssr_belge_url,       ad: "TSSR" },
-                    { url: row.btk_belge_url,        ad: "BTK" },
-                    { url: row.emr_belge_url,        ad: "EMR" },
-                    { url: row.ysb_belge_url,        ad: "YSB" },
-                    { url: row.pac_belge_url,        ad: "PAC" },
-                    { url: row.enh_proje_belge_url,  ad: "ENH_Proje" },
-                  ].flatMap(({ url, ad }) =>
-                    String(url || "").split("\n").filter(Boolean)
-                      .map((u, i, arr) => ({ url: u, ad: arr.length > 1 ? `${ad}_${i + 1}` : ad }))
-                  );
-                  if (!belgeler.length) { alert("Bu sahaya ait belge bulunamadı."); return; }
-                  const JSZip = (await import("jszip")).default;
-                  const zip = new JSZip();
-                  let cnt = 0;
-                  for (const { url, ad } of belgeler) {
-                    try {
-                      const r = await fetch(url); if (!r.ok) continue;
-                      const buf = await r.arrayBuffer();
-                      const ext = url.split("?")[0].split(".").pop() || "pdf";
-                      zip.file(`${row.site_code}_${ad}.${ext}`, buf); cnt++;
-                    } catch {}
-                  }
-                  if (!cnt) { alert("Belgeler indirilemedi."); return; }
-                  const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
-                  const a = document.createElement("a");
-                  a.href = URL.createObjectURL(blob); a.download = `${row.site_code}_Belgeler.zip`; a.click(); URL.revokeObjectURL(a.href);
-                };
                 const hasBelge = !!(row.los_belge_url || row.tssr_belge_url || row.btk_belge_url || row.emr_belge_url || row.ysb_belge_url || row.pac_belge_url || row.enh_proje_belge_url);
                 return (
                 <tr key={row.id}>
@@ -5107,10 +5194,13 @@ function RolloutDashboard({ currentUser }) {
                     </button>
                   </td>
                   <td style={{ textAlign:"center" }}>
-                    <button onClick={handleRowIndir} title="Saha belgelerini ZIP indir"
-                      style={{ background: hasBelge?"#1e293b":"#e5e7eb", color: hasBelge?"#fff":"#9ca3af", border:"none", borderRadius:"6px", padding:"4px 8px", cursor: hasBelge?"pointer":"default", fontSize:"13px" }}>
+                    <button onClick={() => setBelgeSecRow(row)} title="Saha belgelerini seç ve ZIP indir"
+                      style={{ background: hasBelge?"#1e293b":"#e5e7eb", color: hasBelge?"#fff":"#9ca3af", border:"none", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"13px" }}>
                       📦
                     </button>
+                    {belgeSecRow?.id === row.id && (
+                      <BelgeSecModal siteCode={row.site_code} kaynak={row} onClose={() => setBelgeSecRow(null)} />
+                    )}
                   </td>
                   {msTd(ms_rfRcv)}
                   {msTd(ms_rfStart)}
@@ -32517,42 +32607,9 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     );
   };
 
-  // Tüm saha belgelerini ZIP olarak indir
-  const handleSahaBelgeleriIndir = async () => {
-    const belgeler = [
-      { url: form.los_belge_url,       ad: "LOS" },
-      { url: form.tssr_belge_url,      ad: "TSSR" },
-      { url: form.btk_belge_url,       ad: "BTK" },
-      { url: form.emr_belge_url,       ad: "EMR" },
-      { url: form.ysb_belge_url,       ad: "YSB" },
-      { url: form.pac_belge_url,       ad: "PAC" },
-      { url: form.enh_proje_belge_url, ad: "ENH_Proje" },
-    ].flatMap(({ url, ad }) =>
-      String(url || "").split("\n").filter(Boolean)
-        .map((u, i, arr) => ({ url: u, ad: arr.length > 1 ? `${ad}_${i + 1}` : ad }))
-    );
-    if (belgeler.length === 0) { alert("Bu sahaya ait belge bulunamadı."); return; }
-    const JSZip = (await import("jszip")).default;
-    const zip = new JSZip();
-    let count = 0;
-    for (const { url, ad } of belgeler) {
-      try {
-        const r = await fetch(url);
-        if (!r.ok) continue;
-        const buf = await r.arrayBuffer();
-        const ext = url.split("?")[0].split(".").pop() || "pdf";
-        zip.file(`${form.site_code}_${ad}.${ext}`, buf);
-        count++;
-      } catch {}
-    }
-    if (count === 0) { alert("Belgeler indirilemedi."); return; }
-    const blob = await zip.generateAsync({ type:"blob", compression:"DEFLATE", compressionOptions:{ level:6 } });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${form.site_code}_Belgeler.zip`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
+  // Saha belgeleri: seçim penceresi (tümü ya da nokta atışı) — BelgeSecModal
+  const [belgeSecAcik, setBelgeSecAcik] = useState(false);
+  const handleSahaBelgeleriIndir = () => setBelgeSecAcik(true);
 
   return (
     <div className="modalOverlay" onClick={onClose}>
@@ -32734,6 +32791,9 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           >
             📦 Saha Belgelerini İndir
           </button>
+          {belgeSecAcik && (
+            <BelgeSecModal siteCode={form.site_code} kaynak={form} onClose={() => setBelgeSecAcik(false)} />
+          )}
 
           <button className="saveButton" onClick={save} disabled={enhProjeSaving}>
             {enhProjeSaving ? "⏳ Yükleniyor..." : "Kaydet"}
