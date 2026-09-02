@@ -3873,6 +3873,14 @@ app.get("/setup-db", async (req, res) => {
     await pool.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS rollout_cleanup_site_code_idx ON rollout_cleanup (site_code);
     `).catch(() => {});
+    // Clean Up onay zinciri (02.09.2026): ekip mobilden "Onaya Gönder" → yönetici Onayla/Reddet
+    await pool.query(`ALTER TABLE rollout_cleanup
+      ADD COLUMN IF NOT EXISTS onay_durum TEXT DEFAULT 'TASLAK',
+      ADD COLUMN IF NOT EXISTS onaya_gonderen TEXT,
+      ADD COLUMN IF NOT EXISTS onaya_gonderme_tarihi TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS onaylayan TEXT,
+      ADD COLUMN IF NOT EXISTS onay_tarihi TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS red_notu TEXT`).catch(() => {});
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS po_rows (
@@ -9895,6 +9903,72 @@ app.delete("/rollout/cleanup/:site/foto", authMiddleware, async (req, res) => {
     const it = items.find((x) => String(x.id) === String(item_id));
     if (it && Array.isArray(it.fotolar)) it.fotolar = it.fotolar.filter((f) => f.url !== url);
     const u = await pool.query("UPDATE rollout_cleanup SET items = $1, updated_at = NOW() WHERE id = $2 RETURNING *", [JSON.stringify(items), r.rows[0].id]);
+    res.json({ ok: true, row: u.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+/* ── CLEAN UP ONAY ZİNCİRİ (02.09.2026) ─────────────────────────────────
+   Ekip tüm kalemlere "sonra" fotoğrafı çekince "Onaya Gönder" (ONAY_BEKLE);
+   yönetici (rollout müdürü / PM / direktör) mobilden veya panelden Onayla
+   (ONAYLANDI) ya da not ile Reddet (RED → ekip düzeltip yeniden gönderir). */
+const CLEANUP_ONAY_YETKI = [
+  "nurcan.kus@simsektel.com",
+  "orhan.bedir@simsektel.com", "orhan.bedir@gmail.com",
+  "serdar.altinova@simsektel.com",
+  "duzgun.simsek@simsektel.com",
+];
+const cleanupOnayYetkili = (req) => CLEANUP_ONAY_YETKI.includes(String(req.user?.email || "").toLowerCase());
+
+app.get("/rollout/cleanup/onay-bekleyen", authMiddleware, async (req, res) => {
+  try {
+    if (!cleanupOnayYetkili(req)) return res.json({ ok: true, rows: [], yetkili: false });
+    const r = await pool.query(
+      `SELECT id, site_code, items, notlar, visit_date, completion_date, onaya_gonderen, onaya_gonderme_tarihi
+       FROM rollout_cleanup WHERE onay_durum = 'ONAY_BEKLE' ORDER BY onaya_gonderme_tarihi ASC NULLS LAST`);
+    res.json({ ok: true, rows: r.rows, yetkili: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post("/rollout/cleanup/:site/onaya-gonder", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    const r = await pool.query("SELECT * FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1", [site]);
+    if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    const items = Array.isArray(r.rows[0].items) ? r.rows[0].items : [];
+    if (!items.length) return res.status(400).json({ ok: false, error: "Eksik kalem listesi boş" });
+    const eksik = items.filter((it) => !(it.fotolar || []).some((f) => f.tip === "sonra"));
+    if (eksik.length) return res.status(400).json({ ok: false, error: `${eksik.length} kalemin "sonra" fotoğrafı yok — önce tamamlayın.` });
+    const u = await pool.query(
+      `UPDATE rollout_cleanup SET onay_durum='ONAY_BEKLE', onaya_gonderen=$1, onaya_gonderme_tarihi=NOW(),
+         red_notu=NULL, onaylayan=NULL, onay_tarihi=NULL, updated_at=NOW() WHERE id=$2 RETURNING *`,
+      [req.user?.email || "", r.rows[0].id]);
+    res.json({ ok: true, row: u.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.put("/rollout/cleanup/:site/onayla", authMiddleware, async (req, res) => {
+  try {
+    if (!cleanupOnayYetkili(req)) return res.status(403).json({ ok: false, error: "Clean Up onay yetkiniz yok" });
+    const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    const u = await pool.query(
+      `UPDATE rollout_cleanup SET onay_durum='ONAYLANDI', onaylayan=$1, onay_tarihi=NOW(),
+         completion_date=COALESCE(completion_date, CURRENT_DATE), updated_at=NOW()
+       WHERE UPPER(TRIM(site_code)) = $2 RETURNING *`, [req.user?.email || "", site]);
+    if (!u.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    res.json({ ok: true, row: u.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.put("/rollout/cleanup/:site/reddet", authMiddleware, async (req, res) => {
+  try {
+    if (!cleanupOnayYetkili(req)) return res.status(403).json({ ok: false, error: "Clean Up onay yetkiniz yok" });
+    const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    const not = String(req.body?.not || "").trim();
+    if (!not) return res.status(400).json({ ok: false, error: "Red gerekçesi zorunlu" });
+    const u = await pool.query(
+      `UPDATE rollout_cleanup SET onay_durum='RED', red_notu=$1, onaylayan=$2, onay_tarihi=NOW(), updated_at=NOW()
+       WHERE UPPER(TRIM(site_code)) = $3 RETURNING *`, [not, req.user?.email || "", site]);
+    if (!u.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
     res.json({ ok: true, row: u.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

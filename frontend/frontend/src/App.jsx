@@ -32247,6 +32247,34 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
                       </button>
                     );
                   })()}
+                  {/* Clean Up onay zinciri (02.09.2026): mobilden gönderilir, yetkili panelden de onaylayabilir */}
+                  {(() => {
+                    const D = { ONAY_BEKLE:["Onay bekliyor","#fef3c7","#b45309"], ONAYLANDI:["Onaylandı","#dcfce7","#166534"], RED:["Reddedildi","#fee2e2","#b91c1c"] };
+                    const d = D[r.onay_durum];
+                    let yetkili = false;
+                    try { const u = JSON.parse(localStorage.getItem("user")||"null"); yetkili = ["nurcan.kus@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","serdar.altinova@simsektel.com","duzgun.simsek@simsektel.com"].includes(String(u?.email||"").toLowerCase()); } catch {}
+                    const token = localStorage.getItem("token") || "";
+                    const islem = async (yol, body) => {
+                      try {
+                        const resp = await fetch(`${API_BASE}/rollout/cleanup/${encodeURIComponent(r.site_code)}/${yol}`, { method:"PUT", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token}` }, body: JSON.stringify(body||{}) });
+                        const j = await resp.json(); if (!j.ok) throw new Error(j.error||"İşlem başarısız");
+                        onDeleted && onDeleted();
+                      } catch(e) { alert(e.message); }
+                    };
+                    return (
+                      <>
+                        {d && <span title={r.red_notu ? `Red: ${r.red_notu}` : (r.onaylayan||"")} style={{ alignSelf:"center", background:d[1], color:d[2], borderRadius:"999px", padding:"3px 10px", fontSize:"11px", fontWeight:800 }}>{d[0]}</span>}
+                        {yetkili && r.onay_durum === "ONAY_BEKLE" && (
+                          <>
+                            <button onClick={()=>{ const n = window.prompt("Red gerekçesi:"); if (n && n.trim()) islem("reddet", { not: n.trim() }); }}
+                              style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"6px", padding:"5px 12px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✕ Reddet</button>
+                            <button onClick={()=>{ if (window.confirm(`${r.site_code} Clean Up onaylansın mı?`)) islem("onayla"); }}
+                              style={{ background:"#16a34a", color:"#fff", border:"none", borderRadius:"6px", padding:"5px 12px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✓ Onayla</button>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                   <button onClick={()=>onEdit(r)} style={{ background:"#eff6ff", color:"#2563eb", border:"1px solid #bfdbfe", borderRadius:"6px", padding:"5px 14px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle</button>
                   <button onClick={()=>handleDelete(r.id)} style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"6px", padding:"5px 14px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>🗑️ Sil</button>
                 </div>
