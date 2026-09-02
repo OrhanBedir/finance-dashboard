@@ -3389,6 +3389,12 @@ app.get("/migrate", async (req, res) => {
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_plan_start_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_actual_end_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_belge_url TEXT",
+    // YSB — Yer Seçim Belgesi (02.09.2026): Fenni Mesul Belgesi / Fenni Mesul
+    // Elektrik Projesi; standalone sahalarda PO'ya konu ayrı iş kalemi
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_subcon TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_plan_start_date DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_actual_end_date DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_subcon TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_plan_start_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS trs_actual_end_date DATE",
@@ -3576,6 +3582,10 @@ app.get("/setup-db", async (req, res) => {
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_belge_url TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_belge_url TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_subcon TEXT",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_plan_start_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_actual_end_date DATE",
+      "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_belge_url TEXT",
     ];
     for (const sql of missingCols) {
       await pool.query(sql).catch(() => {}); // sessizce atla, zaten varsa sorun değil
@@ -9017,7 +9027,9 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         power_subcon, power_plan_start_date, power_actual_end_date,
         abonelik_actual_end_date, tt_horizon_actual_end_date,
         pac_actual_end_date, tamamlanma_tarihi,
-        suzme_date, pac_subcon, pac_plan_date
+        suzme_date, pac_subcon, pac_plan_date,
+        -- YSB
+        ysb_subcon, ysb_plan_start_date, ysb_actual_end_date
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,
         $8,$9,$10,$11,$12,$13,$14,$15,
@@ -9029,7 +9041,8 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         $34,$35,$36,$37,
         $38,$39,$40,$41,$42,
         $43,$44,$45,
-        $46,$47,$48,$49,$50,$51,$52,$53,$54,$55
+        $46,$47,$48,$49,$50,$51,$52,$53,$54,$55,
+        $56,$57,$58
       )
       ON CONFLICT (site_code) DO UPDATE SET
         site_type = EXCLUDED.site_type,
@@ -9086,6 +9099,9 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         suzme_date = EXCLUDED.suzme_date,
         pac_subcon = EXCLUDED.pac_subcon,
         pac_plan_date = EXCLUDED.pac_plan_date,
+        ysb_subcon = EXCLUDED.ysb_subcon,
+        ysb_plan_start_date = EXCLUDED.ysb_plan_start_date,
+        ysb_actual_end_date = EXCLUDED.ysb_actual_end_date,
         updated_at = NOW()
       RETURNING *`,
       [
@@ -9104,6 +9120,7 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
                     vd("abonelik_actual_end_date"), vd("tt_horizon_actual_end_date"),
                     vd("pac_actual_end_date"), vd("tamamlanma_tarihi"), vd("suzme_date"),
                     v("pac_subcon"), vd("pac_plan_date"),
+        /* 56-58 */ v("ysb_subcon"), vd("ysb_plan_start_date"), vd("ysb_actual_end_date"),
       ]
     );
 
@@ -9114,7 +9131,7 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
   }
 });
 // Generic rollout belge signed URL (type: los, tssr, btk, emr, pac, enh_proje)
-const ROLLOUT_BELGE_FIELDS = ["los_belge_url","tssr_belge_url","btk_belge_url","emr_belge_url","pac_belge_url","enh_proje_belge_url"];
+const ROLLOUT_BELGE_FIELDS = ["los_belge_url","tssr_belge_url","btk_belge_url","emr_belge_url","ysb_belge_url","pac_belge_url","enh_proje_belge_url"];
 app.get("/rollout/signed-upload-url", async (req, res) => {
   try {
     const { rolloutId, type, ext } = req.query;

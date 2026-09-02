@@ -4497,7 +4497,8 @@ function RolloutDashboard({ currentUser }) {
         "TSSR Subcon","TSSR Plan Start Date","TSSR Actual End Date",
         "BTK Subcon","BTK Plan Start Date","BTK Actual End Date","BTK Approval Status",
         "GS Status","Atlas Status","Survey Note",
-        "EMR Plan Start Date","EMR Actual End Date"];
+        "EMR Plan Start Date","EMR Actual End Date",
+        "YSB Subcon","YSB Plan Start Date","YSB Actual End Date"];
       rows2export = filteredRows.map(r => ({
         ...base(r),
         "Malzeme Status":           r.malzeme_status || "",
@@ -4519,6 +4520,9 @@ function RolloutDashboard({ currentUser }) {
         "Survey Note":              r.survey_note || "",
         "EMR Plan Start Date":      fdHw(r.emr_plan_start_date, r.emr_subcon),
         "EMR Actual End Date":      fdHw(r.emr_actual_end_date, r.emr_subcon),
+        "YSB Subcon":               r.ysb_subcon || "",
+        "YSB Plan Start Date":      fdHw(r.ysb_plan_start_date, r.ysb_subcon),
+        "YSB Actual End Date":      fdHw(r.ysb_actual_end_date, r.ysb_subcon),
       }));
 
     } else {
@@ -4533,6 +4537,7 @@ function RolloutDashboard({ currentUser }) {
         "BTK Subcon","BTK Plan Start Date","BTK Actual End Date","BTK Approval Status",
         "GS Status","Atlas Status","Survey Note",
         "EMR Plan Start Date","EMR Actual End Date",
+        "YSB Subcon","YSB Plan Start Date","YSB Actual End Date",
         "TRS Subcon","TRS Plan Start Date","TRS Actual End Date","TRS Not",
         "ENH Site Type","ENH Proje Subcon","ENH Proje Hazır Tarihi","ENH Proje Not",
         "ENH Subcon","ENH Plan Start Date","ENH Actual End Date","ENH Not",
@@ -4567,6 +4572,9 @@ function RolloutDashboard({ currentUser }) {
         "Survey Note":              r.survey_note || "",
         "EMR Plan Start Date":      fdHw(r.emr_plan_start_date, r.emr_subcon),
         "EMR Actual End Date":      fdHw(r.emr_actual_end_date, r.emr_subcon),
+        "YSB Subcon":               r.ysb_subcon || "",
+        "YSB Plan Start Date":      fdHw(r.ysb_plan_start_date, r.ysb_subcon),
+        "YSB Actual End Date":      fdHw(r.ysb_actual_end_date, r.ysb_subcon),
         "TRS Subcon":               r.trs_subcon || "",
         "TRS Plan Start Date":      fd(r.trs_plan_start_date),
         "TRS Actual End Date":      fd(r.trs_actual_end_date),
@@ -4658,6 +4666,7 @@ function RolloutDashboard({ currentUser }) {
       "BTK Subcon": 18, "BTK Plan Start Date": 16, "BTK Actual End Date": 16, "BTK Approval Status": 16,
       "GS Status": 12, "Atlas Status": 12, "Survey Note": 28,
       "EMR Plan Start Date": 18, "EMR Actual End Date": 18,
+      "YSB Subcon": 18, "YSB Plan Start Date": 18, "YSB Actual End Date": 18,
       "TRS Subcon": 18, "TRS Plan Start Date": 16, "TRS Actual End Date": 16, "TRS Not": 24,
       "ENH Site Type": 14, "ENH Proje Subcon": 18, "ENH Proje Hazır Tarihi": 18, "ENH Proje Not": 24,
       "ENH Subcon": 18, "ENH Plan Start Date": 18, "ENH Actual End Date": 18, "ENH Not": 24,
@@ -4957,6 +4966,8 @@ function RolloutDashboard({ currentUser }) {
 
               <th colSpan="4">EMR</th>
 
+              <th colSpan="3">YSB</th>
+
               <th colSpan="4">TRS</th>
 
               <th colSpan="5">ENH</th>
@@ -5015,6 +5026,10 @@ function RolloutDashboard({ currentUser }) {
               <th>EMR Plan Start Date</th>
               <th>EMR Actual End Date</th>
 
+              <th>YSB Subcon</th>
+              <th>YSB Plan Start Date</th>
+              <th>YSB Actual End Date</th>
+
               <th>TRS Subcon</th>
               <th>TRS Plan Start Date</th>
               <th>TRS Actual End Date</th>
@@ -5056,6 +5071,7 @@ function RolloutDashboard({ currentUser }) {
                     { url: row.tssr_belge_url,       ad: "TSSR" },
                     { url: row.btk_belge_url,        ad: "BTK" },
                     { url: row.emr_belge_url,        ad: "EMR" },
+                    { url: row.ysb_belge_url,        ad: "YSB" },
                     { url: row.pac_belge_url,        ad: "PAC" },
                     { url: row.enh_proje_belge_url,  ad: "ENH_Proje" },
                   ].flatMap(({ url, ad }) =>
@@ -5079,7 +5095,7 @@ function RolloutDashboard({ currentUser }) {
                   const a = document.createElement("a");
                   a.href = URL.createObjectURL(blob); a.download = `${row.site_code}_Belgeler.zip`; a.click(); URL.revokeObjectURL(a.href);
                 };
-                const hasBelge = !!(row.los_belge_url || row.tssr_belge_url || row.btk_belge_url || row.emr_belge_url || row.pac_belge_url || row.enh_proje_belge_url);
+                const hasBelge = !!(row.los_belge_url || row.tssr_belge_url || row.btk_belge_url || row.emr_belge_url || row.ysb_belge_url || row.pac_belge_url || row.enh_proje_belge_url);
                 return (
                 <tr key={row.id}>
                   <td style={{ textAlign:"center" }}>
@@ -5141,6 +5157,10 @@ function RolloutDashboard({ currentUser }) {
                   <td>{row.emr_subcon}</td>
                   <td>{formatDate(row.emr_plan_start_date)}</td>
                   <td>{formatDate(row.emr_actual_end_date)}</td>
+
+                  <td>{row.ysb_subcon}</td>
+                  <td>{formatDate(row.ysb_plan_start_date)}</td>
+                  <td>{formatDate(row.ysb_actual_end_date)}</td>
 
                   <td>{row.trs_subcon}</td>
                   <td>{renderDate(row.trs_plan_start_date)}</td>
@@ -32134,6 +32154,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
       "tssr_plan_start_date","tssr_actual_end_date",
       "btk_plan_start_date","btk_actual_end_date","btk_approved",
       "emr_plan_start_date","emr_actual_end_date",
+      "ysb_plan_start_date","ysb_actual_end_date",
       "trs_plan_start_date","trs_actual_end_date",
       "enh_plan_start_date","enh_actual_end_date","enh_proje_hazir",
       "power_plan_start_date","power_actual_end_date",
@@ -32193,6 +32214,11 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     emr_plan_start_date: /^h(uawei|w)$/i.test(existingRow.emr_subcon||"") && !existingRow.emr_plan_start_date ? "__NA__" : existingRow.emr_plan_start_date || "",
     emr_actual_end_date: /^h(uawei|w)$/i.test(existingRow.emr_subcon||"") && !existingRow.emr_actual_end_date ? "__NA__" : existingRow.emr_actual_end_date || "",
 
+    // YSB — Yer Seçim Belgesi (Fenni Mesul Belgesi / Elektrik Projesi)
+    ysb_subcon: existingRow.ysb_subcon || "",
+    ysb_plan_start_date: /^h(uawei|w)$/i.test(existingRow.ysb_subcon||"") && !existingRow.ysb_plan_start_date ? "__NA__" : existingRow.ysb_plan_start_date || "",
+    ysb_actual_end_date: /^h(uawei|w)$/i.test(existingRow.ysb_subcon||"") && !existingRow.ysb_actual_end_date ? "__NA__" : existingRow.ysb_actual_end_date || "",
+
     trs_subcon: existingRow.trs_subcon || "",
     trs_plan_start_date: existingRow.trs_plan_start_date || "",
     trs_actual_end_date: existingRow.trs_actual_end_date || "",
@@ -32233,6 +32259,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     tssr_belge_url: existingRow.tssr_belge_url || "",
     btk_belge_url: existingRow.btk_belge_url || "",
     emr_belge_url: existingRow.emr_belge_url || "",
+    ysb_belge_url: existingRow.ysb_belge_url || "",
     pac_belge_url: existingRow.pac_belge_url || "",
   });
   // 31.08.2026: Aynı tipten birden fazla belge (2. survey, 2. BTK vb.) yüklenebilsin
@@ -32242,6 +32269,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   const [tssrBelgeFile, setTssrBelgeFile] = useState([]);
   const [btkBelgeFile, setBtkBelgeFile] = useState([]);
   const [emrBelgeFile, setEmrBelgeFile] = useState([]);
+  const [ysbBelgeFile, setYsbBelgeFile] = useState([]);
   const [pacBelgeFile, setPacBelgeFile] = useState([]);
   const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
@@ -32256,6 +32284,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     tssr_subcon: ["tssr_plan_start_date", "tssr_actual_end_date"],
     btk_subcon:  ["btk_plan_start_date", "btk_actual_end_date", "btk_approved"],
     emr_subcon:  ["emr_plan_start_date", "emr_actual_end_date"],
+    ysb_subcon:  ["ysb_plan_start_date", "ysb_actual_end_date"],
   };
   const NA_MARKER = "__NA__"; // DB'ye göndermeden önce null'a çevrilecek
 
@@ -32328,6 +32357,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         { files: tssrBelgeFile,     type:"tssr",      field:"tssr_belge_url",      setter: setTssrBelgeFile },
         { files: btkBelgeFile,      type:"btk",       field:"btk_belge_url",       setter: setBtkBelgeFile },
         { files: emrBelgeFile,      type:"emr",       field:"emr_belge_url",       setter: setEmrBelgeFile },
+        { files: ysbBelgeFile,      type:"ysb",       field:"ysb_belge_url",       setter: setYsbBelgeFile },
         { files: pacBelgeFile,      type:"pac",       field:"pac_belge_url",       setter: setPacBelgeFile },
       ];
       if (result.row?.id) {
@@ -32494,6 +32524,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
       { url: form.tssr_belge_url,      ad: "TSSR" },
       { url: form.btk_belge_url,       ad: "BTK" },
       { url: form.emr_belge_url,       ad: "EMR" },
+      { url: form.ysb_belge_url,       ad: "YSB" },
       { url: form.pac_belge_url,       ad: "PAC" },
       { url: form.enh_proje_belge_url, ad: "ENH_Proje" },
     ].flatMap(({ url, ad }) =>
@@ -32611,6 +32642,21 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             {input("EMR Actual End Date", "emr_actual_end_date", "date")}
           </div>
           {belgeWidget("emr_belge_url", emrBelgeFile, setEmrBelgeFile)}
+        </div>
+
+        {/* ===== YSB — Yer Seçim Belgesi (02.09.2026) =====
+            Fenni Mesul Belgesi / Fenni Mesul Elektrik Projesi. Standalone
+            sahalarda her sahada en az biri yapılır, PO açılıp hakediş alınır;
+            bir sahada birden fazla belge olabilir (AI4811: 4 belge). */}
+        <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#fdf4ff", borderRadius:"12px", border:"1px solid #e9d5ff" }}>
+          <div style={{ fontWeight:700, fontSize:"13px", color:"#7e22ce", marginBottom:"2px" }}>📑 YSB — Yer Seçim Belgesi</div>
+          <div style={{ fontSize:"11px", color:"#9333ea", marginBottom:"10px" }}>Fenni Mesul Belgesi · Fenni Mesul Elektrik Projesi — birden fazla belge yüklenebilir</div>
+          <div className="modalGrid">
+            {input("YSB Subcon", "ysb_subcon")}
+            {input("YSB Plan Start Date", "ysb_plan_start_date", "date")}
+            {input("YSB Actual End Date", "ysb_actual_end_date", "date")}
+          </div>
+          {belgeWidget("ysb_belge_url", ysbBelgeFile, setYsbBelgeFile)}
         </div>
 
         {/* ===== ENH PROJE (Standalone - Abone) — Montajdan önce ===== */}
