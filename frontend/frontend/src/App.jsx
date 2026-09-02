@@ -22649,7 +22649,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     // PO Açılmamış detayı: modaldaki sade görünümün aynısı — fiyat/fatura kolonu yok
     if (_isPoBeklerDetail) {
       const dateStr = new Date().toLocaleDateString("tr-TR");
-      const headers = ["QC", "Durum", "Project", "Site Code", "Item Code", "Item Description", "Yapılan (Done)", "PO (Requested)", "Not"];
+      const headers = ["QC", "Durum", "Project", "Site Code", "Item Code", "Item Description", "PR (Talep)", "PO (Requested)", "Not"];
       const titleStyle = { fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } }, font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" }, alignment: { horizontal: "center", vertical: "center" } };
       const headerStyle = { fill: { patternType: "solid", fgColor: { rgb: "203864" } }, font: { bold: true, sz: 11, color: { rgb: "FFFFFF" }, name: "Calibri" }, alignment: { horizontal: "center", vertical: "center", wrapText: true } };
       const cellBorder = { top: { style: "hair", color: { rgb: "E5E7EB" } }, bottom: { style: "hair", color: { rgb: "E5E7EB" } }, left: { style: "hair", color: { rgb: "E5E7EB" } }, right: { style: "hair", color: { rgb: "E5E7EB" } } };
@@ -25348,7 +25348,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     <th style={detailThStyle}>Project</th>
                     <th style={detailThStyle}>Site Code</th>
                     <th style={detailThStyle}>Item Description</th>
-                    <th style={detailThStyle}>Yapılan (Done)</th>
+                    <th style={detailThStyle}>PR (Talep)</th>
                     <th style={detailThStyle}>PO (Requested)</th>
                     <th style={detailThStyle}>Not</th>
                   </tr>
