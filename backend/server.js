@@ -9875,6 +9875,10 @@ app.post("/rollout/cleanup/:site/foto", authMiddleware, upload.single("dosya"), 
     const tip = String(req.query.tip || req.body?.tip || "sonra").toLowerCase() === "once" ? "once" : "sonra";
     if (!req.file) return res.status(400).json({ ok: false, error: "Fotoğraf gelmedi" });
     if (!itemId) return res.status(400).json({ ok: false, error: "item_id zorunlu" });
+    // Panelden yükleme yalnız ofis yetkilileri (mobil saha ekibi bu kontrole girmez)
+    if (String(req.query.kaynak || "") === "panel" && !CLEANUP_FOTO_OFIS.includes(String(req.user?.email || "").toLowerCase())) {
+      return res.status(403).json({ ok: false, error: "Panelden fotoğraf yükleme yetkiniz yok" });
+    }
 
     const r = await pool.query("SELECT * FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1", [site]);
     if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Bu saha için Clean Up kaydı yok" });
@@ -9936,8 +9940,12 @@ const CLEANUP_ATAMA_YETKI = [
   "nurcan.kus@simsektel.com", "orhan.bedir@simsektel.com", "orhan.bedir@gmail.com",
   "duzgun.simsek@simsektel.com", "erencan.simsek@simsektel.com",
 ];
-app.get("/rollout/cleanup/atama-yetkim", authMiddleware, (req, res) =>
-  res.json({ ok: true, yetkili: CLEANUP_ATAMA_YETKI.includes(String(req.user?.email || "").toLowerCase()) }));
+// Ofisten (panel) fotoğraf yükleme/silme yetkisi — personelin telefonu arızalandığında (02.09.2026)
+const CLEANUP_FOTO_OFIS = ["nurcan.kus@simsektel.com", "orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "erencan.simsek@simsektel.com"];
+app.get("/rollout/cleanup/atama-yetkim", authMiddleware, (req, res) => {
+  const e = String(req.user?.email || "").toLowerCase();
+  res.json({ ok: true, yetkili: CLEANUP_ATAMA_YETKI.includes(e), foto_ofis: CLEANUP_FOTO_OFIS.includes(e) });
+});
 const bolgeAnahtar = (b) => String(b || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "İ").trim();
 function cleanupOnayYetkiliMi(email, bolge) {
   const e = String(email || "").toLowerCase();

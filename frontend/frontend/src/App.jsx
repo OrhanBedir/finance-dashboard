@@ -32191,6 +32191,53 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
                               ))}
                             </span>
                           )}
+                          {/* Ofisten fotoğraf girişi (02.09.2026): personelin telefonu arızalanırsa —
+                              yalnız Nurcan / Orhan / Erencan; çoklu dosya seçilebilir */}
+                          {(() => {
+                            let ofis = false;
+                            try { const u = JSON.parse(localStorage.getItem("user")||"null"); ofis = ["nurcan.kus@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","erencan.simsek@simsektel.com"].includes(String(u?.email||"").toLowerCase()); } catch {}
+                            if (!ofis || r.onay_durum === "ONAYLANDI") return null;
+                            const tk = localStorage.getItem("token") || "";
+                            const yukle = async (tip, files) => {
+                              const liste = Array.from(files||[]); if (!liste.length) return;
+                              let ok = 0, hata = "";
+                              for (const f of liste) {
+                                const fd = new FormData(); fd.append("dosya", f);
+                                try {
+                                  const resp = await fetch(`${API_BASE}/rollout/cleanup/${encodeURIComponent(r.site_code)}/foto?item_id=${encodeURIComponent(item.id)}&tip=${tip}&kaynak=panel`, { method:"POST", headers:{ Authorization:`Bearer ${tk}` }, body: fd });
+                                  const j = await resp.json(); if (j.ok) ok++; else hata = j.error||"";
+                                } catch(e) { hata = e.message; }
+                              }
+                              if (hata) alert(`${ok} yüklendi, hata: ${hata}`);
+                              onDeleted && onDeleted();
+                            };
+                            const sil = async (f) => {
+                              if (!window.confirm("Bu fotoğraf silinsin mi?")) return;
+                              try {
+                                const resp = await fetch(`${API_BASE}/rollout/cleanup/${encodeURIComponent(r.site_code)}/foto`, { method:"DELETE", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${tk}` }, body: JSON.stringify({ item_id: item.id, url: f.url }) });
+                                const j = await resp.json(); if (!j.ok) throw new Error(j.error||"Silinemedi");
+                                onDeleted && onDeleted();
+                              } catch(e) { alert(e.message); }
+                            };
+                            const btn = (tip, bg, ink) => (
+                              <label title={`Ofisten ${tip==="once"?"önce":"sonra"} fotoğrafı yükle (birden fazla seçilebilir)`}
+                                style={{ background:bg, color:ink, border:`1px dashed ${ink}55`, borderRadius:"5px", padding:"1px 7px", fontSize:"10px", fontWeight:700, cursor:"pointer" }}>
+                                + {tip==="once"?"Önce":"Sonra"}
+                                <input type="file" accept="image/*" multiple style={{ display:"none" }} onChange={e=>{ yukle(tip, e.target.files); e.target.value=""; }} />
+                              </label>
+                            );
+                            return (
+                              <span style={{ display:"inline-flex", gap:"4px", alignItems:"center" }}>
+                                {btn("once", "#fffbeb", "#b45309")}
+                                {btn("sonra", "#f0fdf4", "#166534")}
+                                {(item.fotolar||[]).length > 0 && (
+                                  <button type="button" onClick={()=>{ const f = (item.fotolar||[])[(item.fotolar||[]).length-1]; sil(f); }}
+                                    title="Bu kalemin son fotoğrafını sil"
+                                    style={{ background:"transparent", border:"none", color:"#dc2626", fontSize:"11px", cursor:"pointer", padding:"0 2px" }}>✕</button>
+                                )}
+                              </span>
+                            );
+                          })()}
                         </div>
                         );
                       })}
