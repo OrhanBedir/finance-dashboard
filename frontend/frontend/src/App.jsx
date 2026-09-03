@@ -4445,6 +4445,7 @@ const ROLLOUT_BELGE_TIPLERI = [
   ["kabul_dosya_url",     "Kabul",     "Kabul Dosyası"],
   ["hasarsizlik_belge_url","Hasarsizlik","Hasarsızlık Tutanağı (mal sahibi)"],
   ["memnuniyet_belge_url", "Memnuniyet","Memnuniyet Formu (mal sahibi)"],
+  ["fsc_belge_url",       "FSC",       "FSC — MW Link Formu"],
 ];
 const rolloutBelgeListesi = (kaynak) => ROLLOUT_BELGE_TIPLERI.map(([alan, ad, etiket]) => ({
   alan, ad, etiket,
@@ -32894,7 +32895,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
   const G_GENEL = { ad: "GENEL", renk: "#e8edf5", ink: "#334155", kolon: (r) => [["Bölge", r.bolge], ["Site Type", r.site_type], ["Site Fiziksel Tip", r.site_physical_type], ["Project Code", r.project_code], ["Site Code", <b style={{ fontFamily: "monospace" }}>{r.site_code}</b>], ["Malzeme Status", r.malzeme_status], ["İl", r.il]] };
   const G_RF = { ad: "RF", renk: "#dbeafe", ink: "#1e40af", kolon: (r) => [["RF Subcon", r.rf_subcon], ["Plan Start", fd(r.plan_start_date)], ["Installation Start", fd(r.installation_actual_start_date)], ["Installation End", fd(r.installation_actual_end_date)], ["OnAir", fd(r.onair_date)], ["QC Closed", fd(r.qc_closed_date)], ["RF Not", r.rf_not || r.rf_note]] };
   const G_GIZ = { ad: "GİZLEME KALEMİ", renk: "#f3e8ff", ink: "#6b21a8", kolon: (r, m) => [["Item Description", edit(m, "item_description")], ["Qty", edit(m, "qty", "number")], ["Gizleme Tipi", edit(m, "gizleme_tipi", "text", ["", ...gizlemeTipleri])]] };
-  const G_LOS = { ad: "LOS", renk: "#ccfbf1", ink: "#0f766e", kolon: (r, m) => [["LOS Subcon", r.los_subcon], ["LOS Plan", fd(r.los_plan_date)], ["LOS Actual End", fd(r.los_actual_end_date)], ["LOS Belgesi", belgeChips(r.los_belge_url, "LOS")], ["Karşı uç", edit(m, "karsi_uc")]] };
+  const G_LOS = { ad: "LOS", renk: "#ccfbf1", ink: "#0f766e", kolon: (r, m) => [["LOS Subcon", r.los_subcon], ["LOS Plan", fd(r.los_plan_date)], ["LOS Actual End", fd(r.los_actual_end_date)], ["LOS Belgesi", belgeChips(r.los_belge_url, "LOS")], ["FSC", belgeChips(r.fsc_belge_url, "FSC")], ["Karşı uç", edit(m, "karsi_uc")]] };
   const G_NS = { ad: "TSS · TSSR · BTK · EMR · YSB · KABUL", renk: "#fef3c7", ink: "#92400e", kolon: (r) => [
     ["TSS Plan", fd(r.tss_plan_start_date)], ["TSS Actual End", fd(r.tss_actual_end_date)], ["TSSR Sent", fd(r.tssr_sent_hw_date)], ["TSSR Approved", fd(r.tssr_approved_date)],
     ["BTK Applied", fd(r.btk_applied_date)], ["BTK Approved", fd(r.btk_approved_date)], ["EMR", fd(r.emr_actual_end_date)], ["YSB", fd(r.ysb_actual_end_date)],
@@ -32915,7 +32916,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
   // liste modunda kısa kolon seti
   const LISTE_KOLON = {
     GIZLEME: (r, m) => [["Gizleme Tipi", m.gizleme_tipi], ["Qty", m.qty], ["Install Start", fd(r.installation_actual_start_date)], ["Install End", fd(r.installation_actual_end_date)]],
-    TRS: (r, m) => [["LOS Belgesi", belgeChips(r.los_belge_url, "LOS")], ["LOS Plan", fd(r.los_plan_date)], ["TRS Plan", fd(r.trs_plan_start_date)], ["TRS Bitiş", fd(r.trs_actual_end_date)], ["Karşı uç", m.karsi_uc]],
+    TRS: (r, m) => [["LOS Belgesi", belgeChips(r.los_belge_url, "LOS")], ["FSC", belgeChips(r.fsc_belge_url, "FSC")], ["LOS Plan", fd(r.los_plan_date)], ["TRS Plan", fd(r.trs_plan_start_date)], ["TRS Bitiş", fd(r.trs_actual_end_date)], ["Karşı uç", m.karsi_uc]],
     GPS: (r) => [["Install Start", fd(r.installation_actual_start_date)], ["Install End", fd(r.installation_actual_end_date)], ["OnAir", fd(r.onair_date)]],
     NS_AI: (r) => [["Install Start", fd(r.installation_actual_start_date)], ["Install End", fd(r.installation_actual_end_date)], ["QC Closed", fd(r.qc_closed_date)], ["PAC", fd(r.pac_actual_end_date)]],
     ONE_BAND: (r) => [["Install Start", fd(r.installation_actual_start_date)], ["Install End", fd(r.installation_actual_end_date)], ["QC Closed", fd(r.qc_closed_date)]],
@@ -33678,6 +33679,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     memnuniyet_tarihi: existingRow.memnuniyet_tarihi ? String(existingRow.memnuniyet_tarihi).slice(0, 10) : "",
     memnuniyet_ayni_belge: !!existingRow.memnuniyet_ayni_belge,
     kabul_belge_not: existingRow.kabul_belge_not || "",
+    fsc_belge_url: existingRow.fsc_belge_url || "", // FSC: MW link frekans/konfigürasyon formu (03.09.2026)
   });
   // 31.08.2026: Aynı tipten birden fazla belge (2. survey, 2. BTK vb.) yüklenebilsin
   // diye dosya state'leri dizi; URL'ler aynı kolonda satır sonu (\n) ile ayrılır.
@@ -33691,6 +33693,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   const [kabulDosyaFile, setKabulDosyaFile] = useState([]);
   const [hasarsizlikFile, setHasarsizlikFile] = useState([]);
   const [memnuniyetFile, setMemnuniyetFile] = useState([]);
+  const [fscBelgeFile, setFscBelgeFile] = useState([]);
   const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
   // Subcon HW mi? Huawei, HW, veya "Huawei Turkey" gibi varyantlar dahil
@@ -33782,6 +33785,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         { files: kabulDosyaFile,    type:"kabul",     field:"kabul_dosya_url",     setter: setKabulDosyaFile },
         { files: hasarsizlikFile,   type:"hasarsizlik", field:"hasarsizlik_belge_url", setter: setHasarsizlikFile },
         { files: memnuniyetFile,    type:"memnuniyet",  field:"memnuniyet_belge_url",  setter: setMemnuniyetFile },
+        { files: fscBelgeFile,      type:"fsc",         field:"fsc_belge_url",         setter: setFscBelgeFile },
       ];
       if (result.row?.id) {
         setEnhProjeSaving(true);
@@ -33995,6 +33999,10 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           </div>
           {belgeWidget("los_belge_url", losBelgeFile, setLosBelgeFile)}
         </div>
+          <div style={{ marginTop:"10px" }}>
+            <div style={{ fontSize:"12px", fontWeight:600, color:"#92400e", marginBottom:"4px" }}>📎 FSC — MW Link Formu (frekans / anten / link bütçesi)</div>
+            {belgeWidget("fsc_belge_url", fscBelgeFile, setFscBelgeFile)}
+          </div>
 
         {/* ===== TSS ===== */}
         <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#f8fafc", borderRadius:"12px", border:"1px solid #e2e8f0" }}>

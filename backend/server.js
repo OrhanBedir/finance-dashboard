@@ -3775,6 +3775,7 @@ app.get("/migrate", async (req, res) => {
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_actual_end_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_dosya_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS fsc_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_tarihi DATE",
@@ -3946,6 +3947,7 @@ app.get("/setup-db", async (req, res) => {
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_belge_url TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_dosya_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS fsc_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_tarihi DATE",
@@ -9517,7 +9519,9 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
 // Generic rollout belge signed URL (type: los, tssr, btk, emr, pac, enh_proje)
 const ROLLOUT_BELGE_FIELDS = ["los_belge_url","tssr_belge_url","btk_belge_url","emr_belge_url","ysb_belge_url","pac_belge_url","enh_proje_belge_url",
   // Kabul belgeleri (03.09.2026): kabul dosyası, mal sahibi hasarsızlık tutanağı, memnuniyet formu
-  "kabul_dosya_url","hasarsizlik_belge_url","memnuniyet_belge_url"];
+  "kabul_dosya_url","hasarsizlik_belge_url","memnuniyet_belge_url",
+  // FSC (03.09.2026): MW link frekans/saha konfigürasyon formu — TRS iş kolu, LOS yanında
+  "fsc_belge_url"];
 // Kabul belgeleri ek alanları (tarih / aynı evrak / not) — Rollout Veri Girişi "Kabul Belgeleri" bölümü
 app.post("/rollout/:id/kabul-belgeleri", authMiddleware, async (req, res) => {
   try {
@@ -10170,7 +10174,7 @@ const IS_KATEGORI_SEED = [
   ["ENH_MONTAJ",   "ENH Montaj",              "⚡", true,  "enh_plan_start_date",            "enh_actual_end_date",          false, ["enh_proje_belge_url","tssr_belge_url"], [], 2],
   ["ENH_ABONELIK", "ENH Abonelik",            "📄", false, null,                             "abonelik_actual_end_date",     false, ["enh_proje_belge_url"], [], 3],
   ["SURVEY",       "Site Survey / TSS",       "📐", false, "tss_plan_start_date",            "tss_actual_end_date",          false, ["los_belge_url","ysb_belge_url"], [], 4],
-  ["MW",           "Transmisyon / MW Montaj", "📡", false, "trs_plan_start_date",            "trs_actual_end_date",          false, ["los_belge_url","tssr_belge_url"], [], 5],
+  ["MW",           "Transmisyon / MW Montaj", "📡", false, "trs_plan_start_date",            "trs_actual_end_date",          false, ["los_belge_url","fsc_belge_url","tssr_belge_url"], [], 5],
   ["ONAIR",        "On Air / Data Atma",      "🟢", false, null,                             "onair_date",                   false, [], [], 6],
   ["POWER",        "Enerji / Power",          "🔌", true,  "power_plan_start_date",          "power_actual_end_date",        false, ["tssr_belge_url"], [], 7],
   ["CLEANUP",      "Clean Up",                "🧹", false, null,                             null,                           false, [], [], 8],
@@ -10225,11 +10229,11 @@ async function isAtamaSahaBilgi(siteCodes, belgeAlanlari) {
   if (!siteCodes.length) return [];
   const r = await pool.query(
     `SELECT DISTINCT ON (UPPER(TRIM(site_code))) UPPER(TRIM(site_code)) AS site_code, site_type, bolge, il, project_code,
-            tssr_belge_url, ysb_belge_url, btk_belge_url, los_belge_url, emr_belge_url, enh_proje_belge_url, pac_belge_url, kabul_dosya_url, hasarsizlik_belge_url, memnuniyet_belge_url,
+            tssr_belge_url, ysb_belge_url, btk_belge_url, los_belge_url, emr_belge_url, enh_proje_belge_url, pac_belge_url, kabul_dosya_url, hasarsizlik_belge_url, memnuniyet_belge_url, fsc_belge_url,
             installation_actual_start_date, installation_actual_end_date, qc_durum, general_note, survey_note
      FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[])
      ORDER BY UPPER(TRIM(site_code)), updated_at DESC NULLS LAST`, [siteCodes]);
-  const ETIKET = { tssr_belge_url:"TSSR", ysb_belge_url:"YSB", btk_belge_url:"BTK / Survey", los_belge_url:"LOS", emr_belge_url:"EMR", enh_proje_belge_url:"ENH Proje", pac_belge_url:"PAC", kabul_dosya_url:"Kabul Dosyası", hasarsizlik_belge_url:"Hasarsızlık Tutanağı", memnuniyet_belge_url:"Memnuniyet Formu" };
+  const ETIKET = { tssr_belge_url:"TSSR", ysb_belge_url:"YSB", btk_belge_url:"BTK / Survey", los_belge_url:"LOS", emr_belge_url:"EMR", enh_proje_belge_url:"ENH Proje", pac_belge_url:"PAC", kabul_dosya_url:"Kabul Dosyası", hasarsizlik_belge_url:"Hasarsızlık Tutanağı", memnuniyet_belge_url:"Memnuniyet Formu", fsc_belge_url:"FSC (MW Link)" };
   const oncelik = Array.isArray(belgeAlanlari) ? belgeAlanlari : [];
   return siteCodes.map((sc) => {
     const row = r.rows.find((x) => x.site_code === sc) || { site_code: sc };
@@ -20728,6 +20732,7 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_actual_end_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_dosya_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS fsc_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_tarihi DATE",
