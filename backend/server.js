@@ -17595,6 +17595,18 @@ const AVANS_YETKI = {
   PD:  ["duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
   ODE: ["muhasebe@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
 };
+// Mobil "Kim için" seçimi (03.09.2026): yetkili (RM/PM/PD/muhasebe) başkası adına avans talep edebilir
+app.get("/hr/personel-secim", authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || "").toLowerCase().trim();
+    const rol = String(req.user?.role || "").toLowerCase();
+    const yetkili = ["RM", "PM", "PD", "ODE"].some((k) => (AVANS_YETKI[k] || []).includes(email)) || ["admin", "platform_admin", "muhasebe", "direktor", "pm", "rollout_mudur", "bolge_mudur"].includes(rol);
+    if (!yetkili) return res.json({ ok: true, yetkili: false, rows: [] });
+    const r = await pool.query(`SELECT id, ad_soyad, unvan, bolge, COALESCE(marka,'ERC') AS marka FROM personel
+      WHERE aktif = true AND COALESCE(firma_tipi,'simsek') = 'simsek' AND COALESCE(puantaj_haric,false) = false ORDER BY ad_soyad`);
+    res.json({ ok: true, yetkili: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 function avansYetkili(req, adim) {
   const email = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
@@ -18127,12 +18139,17 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const userEmailLower = (queryEmail || '').toLowerCase().trim();
     const isPM       = userEmailLower === PM_EMAIL_CONST.toLowerCase();
     const isDirektor = userEmailLower === DIREKTOR_EMAIL_CONST.toLowerCase();
+    // Rollout Müdürü aşaması (03.09.2026, Orhan): Nurcan/Serdar/Murat İstek mobilde
+    // TALEP durumundaki avansları görüp onaylar (web ile aynı; /onayla TALEP→ROLLOUT_MUDUR_ONAY)
+    const isRM = !isPM && !isDirektor && (AVANS_YETKI.RM || []).includes(userEmailLower);
+    // Başkası adına avans talebi (web'deki Personel seçimi) — RM/PM/PD/muhasebe
+    const avansBaskasiIcin = isPM || isDirektor || isRM || (AVANS_YETKI.ODE || []).includes(userEmailLower);
 
     let onayBekleyenAvanslar = [];
-    if (isPM || isDirektor) {
+    if (isPM || isDirektor || isRM) {
       const bekleyenDurumlar = isDirektor
         ? ['TALEP', 'ROLLOUT_MUDUR_ONAY', 'PM_ONAY']
-        : ['TALEP', 'ROLLOUT_MUDUR_ONAY'];
+        : isPM ? ['TALEP', 'ROLLOUT_MUDUR_ONAY'] : ['TALEP'];
       // 22.08.2026 (Orhan): onay ekranında "kim için / not / plaka / KM / firma"
       // görünmüyordu. Alanlar ayrı gönderilir (yeni mobil build satır satır
       // gösterir); mevcut build için aciklama metnine de özet eklenir
@@ -18184,7 +18201,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       taslakMasrafTutar, taslakMasrafCount,
       cezalar, toplamCeza, cezaKalemler,
       avansKalan, avansToplamOnaylanan,
-      onayBekleyenAvanslar, isPM, isDirektor,
+      onayBekleyenAvanslar, isPM, isDirektor, isRM, avansBaskasiIcin,
       onayBekleyenMalzemeler,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }

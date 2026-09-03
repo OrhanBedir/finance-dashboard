@@ -33913,7 +33913,26 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   // Belge upload widget — birden fazla dosya seçilebilir, mevcutlara eklenir
   const belgeWidget = (urlField, files, setFiles) => {
     const urls = String(form[urlField] || "").split("\n").filter(Boolean);
-    const accept = ".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx";
+    const accept = ".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx,.zip";
+    // ZIP desteği (03.09.2026, Orhan): fotoğraflar tek tek yükleniyordu — .zip seçilirse
+    // içindeki dosyalar (klasör/__MACOSX hariç) tek tek belge olarak eklenir
+    const zipAc = async (dosyalar) => {
+      const out = [];
+      for (const f of dosyalar) {
+        if (!/\.zip$/i.test(f.name)) { out.push(f); continue; }
+        try {
+          const zip = await JSZip.loadAsync(f);
+          for (const [ad, entry] of Object.entries(zip.files)) {
+            if (entry.dir || /(^|\/)__MACOSX\//.test(ad) || /(^|\/)\./.test(ad)) continue;
+            const ext = (ad.split(".").pop() || "").toLowerCase();
+            const mime = { pdf:"application/pdf", jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", doc:"application/msword", docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document", dwg:"application/acad" }[ext] || "application/octet-stream";
+            const blob = await entry.async("blob");
+            out.push(new File([blob], ad.split("/").pop(), { type: mime }));
+          }
+        } catch (e) { alert(`${f.name} açılamadı: ${e.message}`); }
+      }
+      return out;
+    };
     const dosyaAdi = (u) => { try { return decodeURIComponent(u.split("?")[0].split("/").pop() || "belge"); } catch { return "belge"; } };
     return (
       <div style={{ marginTop:"8px", display:"flex", flexDirection:"column", gap:"6px", alignItems:"flex-start" }}>
@@ -33940,10 +33959,10 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           </div>
         ))}
         <label style={{ display:"inline-flex", alignItems:"center", gap:"6px", background:"#f3f4f6", border:"1px dashed #9ca3af", borderRadius:"8px", padding:"7px 14px", cursor:"pointer", fontSize:"12px" }}>
-          📎 {urls.length || files.length ? "Belge Ekle" : "Belge Ekle (PDF, JPG, PNG, DWG, Excel, Word)"}
+          📎 {urls.length || files.length ? "Belge Ekle" : "Belge Ekle (PDF, JPG, PNG, DWG, Excel, Word, ZIP)"}
           <input type="file" multiple accept={accept} style={{ display:"none" }}
-            onChange={e => {
-              const yeni = Array.from(e.target.files || []);
+            onChange={async e => {
+              const yeni = await zipAc(Array.from(e.target.files || []));
               if (yeni.length) setFiles(prev => [...prev, ...yeni]);
               e.target.value = "";
             }} />
