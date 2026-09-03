@@ -33911,6 +33911,19 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   );
 
   // Belge upload widget — birden fazla dosya seçilebilir, mevcutlara eklenir
+  // Belge kaldırma (03.09.2026): eskiden yalnız form state'i değişiyor, Kaydet'e basılmayınca kalıyordu.
+  // Kayıtlı sahada anında sunucuya yazılır; yeni kayıtta form state'inde kalır.
+  const belgeKaldir = async (urlField, yeniDeger) => {
+    handleChange(urlField, yeniDeger);
+    if (existingRow?.id) {
+      try {
+        await fetchJson(`${API_BASE}/rollout/${existingRow.id}/belge-url`, {
+          method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ field: urlField, url: yeniDeger }) });
+        existingRow[urlField] = yeniDeger;
+      } catch (e) { alert("Belge kaldırılamadı: " + e.message); }
+    }
+  };
   const belgeWidget = (urlField, files, setFiles) => {
     const urls = String(form[urlField] || "").split("\n").filter(Boolean);
     const accept = ".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx,.zip";
@@ -33936,6 +33949,10 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     const dosyaAdi = (u) => { try { return decodeURIComponent(u.split("?")[0].split("/").pop() || "belge"); } catch { return "belge"; } };
     return (
       <div style={{ marginTop:"8px", display:"flex", flexDirection:"column", gap:"6px", alignItems:"flex-start" }}>
+        {urls.length > 1 && (
+          <button type="button" onClick={() => { if (window.confirm(`${urls.length} belgenin tümü bu alandan kaldırılsın mı?`)) belgeKaldir(urlField, ""); }}
+            style={{ background:"#fef2f2", color:"#b91c1c", border:"1px solid #fecaca", borderRadius:"6px", padding:"4px 10px", cursor:"pointer", fontSize:"11px", fontWeight:700 }}>🗑 Tümünü kaldır ({urls.length})</button>
+        )}
         {urls.map((u, i) => (
           <div key={u} style={{ display:"flex", gap:"6px", alignItems:"center" }}>
             <a href={u} target="_blank" rel="noreferrer" title={dosyaAdi(u)}
@@ -33944,8 +33961,8 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             </a>
             <button type="button" title="Belgeyi kayıttan kaldır"
               onClick={() => {
-                if (!window.confirm("Bu belge kayıttan kaldırılsın mı? (Kaydet'e basınca kesinleşir)")) return;
-                handleChange(urlField, urls.filter((_, j) => j !== i).join("\n"));
+                if (!window.confirm("Bu belge kayıttan kaldırılsın mı?")) return;
+                belgeKaldir(urlField, urls.filter((_, j) => j !== i).join("\n"));
               }}
               style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"12px", lineHeight:1 }}>✕</button>
           </div>
