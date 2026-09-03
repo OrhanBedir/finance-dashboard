@@ -31428,28 +31428,8 @@ function App() {
             </div>
           </div>
 
-          {/* Notification bars */}
-          {!(isPlatformAdmin && !firmaMode) && pendingAvansCount > 0 && page !== "is_avans" && (
-            <div className="notification-bar" onClick={()=>setPage("is_avans")} style={{background:"#fef2f2",borderBottom:"2px solid #fca5a5"}}>
-              <span style={{fontSize:"18px"}}>🔔</span>
-              <span style={{fontWeight:700,color:"#991b1b"}}>{pendingAvansCount} adet iş avansı talebi onayınızı bekliyor</span>
-              <span style={{color:"#dc2626",marginLeft:"4px"}}>→ git</span>
-            </div>
-          )}
-          {!(isPlatformAdmin && !firmaMode) && pendingMasrafCount > 0 && page !== "masraf" && (
-            <div className="notification-bar" onClick={()=>setPage("masraf")} style={{background:"#fff7ed",borderBottom:"2px solid #fed7aa"}}>
-              <span style={{fontSize:"18px"}}>🧾</span>
-              <span style={{fontWeight:700,color:"#92400e"}}>{pendingMasrafCount} adet masraf formu onayınızı bekliyor</span>
-              <span style={{color:"#b45309",marginLeft:"4px"}}>→ git</span>
-            </div>
-          )}
-          {!(isPlatformAdmin && !firmaMode) && pendingMalzemeCount > 0 && page !== "malzeme" && (
-            <div className="notification-bar" onClick={()=>setPage("malzeme")} style={{background:"#f0fdf4",borderBottom:"2px solid #86efac"}}>
-              <span style={{fontSize:"18px"}}>📦</span>
-              <span style={{fontWeight:700,color:"#166534"}}>{pendingMalzemeCount} adet malzeme talebi onayınızı bekliyor</span>
-              <span style={{color:"#15803d",marginLeft:"4px"}}>→ git</span>
-            </div>
-          )}
+          {/* Bildirim şeritleri kaldırıldı (03.09.2026): bekleyen onaylar üst menüdeki
+              kırmızı rozetlerde (Muhasebe / Malzeme Yönetimi) ve kullanıcı kartında görünüyor */}
 
           {/* Main content */}
           <div className="main-content" onClick={e=>e.stopPropagation()}>
