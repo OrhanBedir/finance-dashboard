@@ -4045,7 +4045,10 @@ function OrgSemasiPanel({ currentUser }) {
       {ekipDetay && (() => {
         const e = ekipler.find(x => x.ekip_no === ekipDetay.ekip_no) || ekipDetay;
         const uyeler = ekipUyeleri(e.ekip_no);
-        const ekipsizler = personelList.filter(p => p.aktif && !ayrildi(p) && !String(p.ekip_bilgisi || "").trim());
+        // Üye Ekle listesi (03.09.2026, Orhan): yalnız ekipsizler değil, TÜM aktif Şimşek personeli
+        // (başka ekipteki kişi seçilirse o ekibe taşınır); taşeron kayıtları (AHY, FERRUMX vb.) listede yok
+        const ekipsizler = personelList.filter(p => p.aktif && !ayrildi(p) && (p.firma_tipi || "simsek") === "simsek"
+          && String(p.ekip_bilgisi || "").trim() !== String(e.ekip_no));
         const thE = { padding: "9px 14px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" };
         const tdE = { padding: "10px 14px", fontSize: "13.5px", color: "#1f2937", borderBottom: "1px solid #f1f5f9" };
         return (
@@ -4113,10 +4116,13 @@ function OrgSemasiPanel({ currentUser }) {
                     <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#1e3a5f" }}>＋ Üye Ekle:</span>
                     <select value="" onChange={ev => { if (ev.target.value) setPersonelEkip(ev.target.value, String(e.ekip_no)); }}
                       style={{ flex: "1 1 240px", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: "9px", fontSize: "13px", background: "#fff" }}>
-                      <option value="">Aktif personelden seç… (ünvan ve tel otomatik gelir)</option>
-                      {ekipsizler.sort((x, y) => x.ad_soyad.localeCompare(y.ad_soyad, "tr")).map(pr => (
-                        <option key={pr.id} value={pr.id}>{pr.ad_soyad}{pr.unvan ? ` — ${pr.unvan}` : ""}{pr.telefon ? ` · ${pr.telefon}` : ""}</option>
-                      ))}
+                      <option value="">Şimşek personelinden seç… (başka ekipteyse bu ekibe taşınır)</option>
+                      {ekipsizler.sort((x, y) => (String(x.ekip_bilgisi || "").trim() ? 1 : 0) - (String(y.ekip_bilgisi || "").trim() ? 1 : 0) || x.ad_soyad.localeCompare(y.ad_soyad, "tr")).map(pr => {
+                        const mevcutEkip = String(pr.ekip_bilgisi || "").trim();
+                        return (
+                          <option key={pr.id} value={pr.id}>{pr.ad_soyad}{pr.unvan ? ` — ${pr.unvan}` : ""}{pr.telefon ? ` · ${pr.telefon}` : ""}{mevcutEkip ? `  (şu an Ekip ${mevcutEkip})` : ""}</option>
+                        );
+                      })}
                     </select>
                     <span style={{ fontSize: "11px", color: "#94a3b8" }}>seçim anında kaydedilir</span>
                   </div>
