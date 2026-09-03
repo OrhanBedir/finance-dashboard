@@ -4442,6 +4442,9 @@ const ROLLOUT_BELGE_TIPLERI = [
   ["ysb_belge_url",       "YSB",       "YSB — Yer Seçim Belgesi"],
   ["enh_proje_belge_url", "ENH_Proje", "ENH Proje"],
   ["pac_belge_url",       "PAC",       "PAC"],
+  ["kabul_dosya_url",     "Kabul",     "Kabul Dosyası"],
+  ["hasarsizlik_belge_url","Hasarsizlik","Hasarsızlık Tutanağı (mal sahibi)"],
+  ["memnuniyet_belge_url", "Memnuniyet","Memnuniyet Formu (mal sahibi)"],
 ];
 const rolloutBelgeListesi = (kaynak) => ROLLOUT_BELGE_TIPLERI.map(([alan, ad, etiket]) => ({
   alan, ad, etiket,
@@ -33330,6 +33333,14 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     emr_belge_url: existingRow.emr_belge_url || "",
     ysb_belge_url: existingRow.ysb_belge_url || "",
     pac_belge_url: existingRow.pac_belge_url || "",
+    // Kabul belgeleri (03.09.2026): rooftop sahalarda mal sahibinden alınan hasarsızlık tutanağı + memnuniyet formu, kabul dosyası
+    kabul_dosya_url: existingRow.kabul_dosya_url || "",
+    hasarsizlik_belge_url: existingRow.hasarsizlik_belge_url || "",
+    memnuniyet_belge_url: existingRow.memnuniyet_belge_url || "",
+    hasarsizlik_tarihi: existingRow.hasarsizlik_tarihi ? String(existingRow.hasarsizlik_tarihi).slice(0, 10) : "",
+    memnuniyet_tarihi: existingRow.memnuniyet_tarihi ? String(existingRow.memnuniyet_tarihi).slice(0, 10) : "",
+    memnuniyet_ayni_belge: !!existingRow.memnuniyet_ayni_belge,
+    kabul_belge_not: existingRow.kabul_belge_not || "",
   });
   // 31.08.2026: Aynı tipten birden fazla belge (2. survey, 2. BTK vb.) yüklenebilsin
   // diye dosya state'leri dizi; URL'ler aynı kolonda satır sonu (\n) ile ayrılır.
@@ -33340,6 +33351,9 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   const [emrBelgeFile, setEmrBelgeFile] = useState([]);
   const [ysbBelgeFile, setYsbBelgeFile] = useState([]);
   const [pacBelgeFile, setPacBelgeFile] = useState([]);
+  const [kabulDosyaFile, setKabulDosyaFile] = useState([]);
+  const [hasarsizlikFile, setHasarsizlikFile] = useState([]);
+  const [memnuniyetFile, setMemnuniyetFile] = useState([]);
   const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
   // Subcon HW mi? Huawei, HW, veya "Huawei Turkey" gibi varyantlar dahil
@@ -33428,6 +33442,9 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         { files: emrBelgeFile,      type:"emr",       field:"emr_belge_url",       setter: setEmrBelgeFile },
         { files: ysbBelgeFile,      type:"ysb",       field:"ysb_belge_url",       setter: setYsbBelgeFile },
         { files: pacBelgeFile,      type:"pac",       field:"pac_belge_url",       setter: setPacBelgeFile },
+        { files: kabulDosyaFile,    type:"kabul",     field:"kabul_dosya_url",     setter: setKabulDosyaFile },
+        { files: hasarsizlikFile,   type:"hasarsizlik", field:"hasarsizlik_belge_url", setter: setHasarsizlikFile },
+        { files: memnuniyetFile,    type:"memnuniyet",  field:"memnuniyet_belge_url",  setter: setMemnuniyetFile },
       ];
       if (result.row?.id) {
         setEnhProjeSaving(true);
@@ -33449,6 +33466,14 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           finally { setter([]); }
         }
         setEnhProjeSaving(false);
+        // Kabul belgeleri ek alanları (tarih / aynı evrak / not)
+        try {
+          await fetchJson(`${API_BASE}/rollout/${result.row.id}/kabul-belgeleri`, {
+            method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({ hasarsizlik_tarihi: form.hasarsizlik_tarihi || null, memnuniyet_tarihi: form.memnuniyet_tarihi || null,
+              memnuniyet_ayni_belge: !!form.memnuniyet_ayni_belge, kabul_belge_not: form.kabul_belge_not || null })
+          });
+        } catch(e) { alert("Kabul belgeleri bilgisi kaydedilemedi: " + e.message); }
       }
 
       alert("Kayıt başarıyla kaydedildi");
@@ -33746,6 +33771,54 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             <div style={{ fontSize:"12px", fontWeight:600, color:"#7e22ce", marginBottom:"4px" }}>📎 PAC Belgesi</div>
             {belgeWidget("pac_belge_url", pacBelgeFile, setPacBelgeFile)}
           </div>
+        </div>
+
+        {/* ===== KABUL BELGELERİ (03.09.2026) =====
+            Rooftop sahalarda montaj sonrası mal sahibinden hasarsızlık tutanağı ve memnuniyet
+            formu alınır (bazen tek evrak) ve kabul dosyasıyla birlikte Huawei kabulüne sunulur. */}
+        <div style={{ margin:"16px 0 0", padding:"16px", background:"#f0fdf4", borderRadius:"12px", border:"1.5px solid #bbf7d0" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"12px", gap:"10px", flexWrap:"wrap" }}>
+            <div style={{ fontWeight:700, fontSize:"14px", color:"#166534" }}>📑 Kabul Belgeleri</div>
+            <div style={{ fontSize:"11px", color:"#15803d" }}>
+              {["kabul_dosya_url","hasarsizlik_belge_url","memnuniyet_belge_url"].filter(f => String(form[f] || "").trim() || (f === "memnuniyet_belge_url" && form.memnuniyet_ayni_belge && String(form.hasarsizlik_belge_url || "").trim())).length}/3 belge hazır
+            </div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(260px, 1fr))", gap:"12px" }}>
+            <div style={{ background:"#fff", borderRadius:"10px", padding:"12px", border:"1px solid #d1fae5" }}>
+              <div style={{ fontSize:"12px", fontWeight:700, color:"#166534" }}>🏠 Hasarsızlık Tutanağı</div>
+              <div style={{ fontSize:"11px", color:"#6b7280", marginBottom:"6px" }}>Mal sahibi imzalı, montaj sonrası</div>
+              {input("Tutanak Tarihi", "hasarsizlik_tarihi", "date")}
+              {belgeWidget("hasarsizlik_belge_url", hasarsizlikFile, setHasarsizlikFile)}
+            </div>
+            <div style={{ background:"#fff", borderRadius:"10px", padding:"12px", border:"1px solid #d1fae5" }}>
+              <div style={{ fontSize:"12px", fontWeight:700, color:"#166534" }}>🙂 Memnuniyet Formu</div>
+              <div style={{ fontSize:"11px", color:"#6b7280", marginBottom:"6px" }}>Mal sahibi memnuniyet beyanı</div>
+              <label style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:"12px", fontWeight:600, color:"#374151", margin:"4px 0 8px", cursor:"pointer" }}>
+                <input type="checkbox" checked={!!form.memnuniyet_ayni_belge} onChange={e => handleChange("memnuniyet_ayni_belge", e.target.checked)} style={{ width:"15px", height:"15px" }} />
+                Hasarsızlık tutanağı ile aynı evrak
+              </label>
+              {form.memnuniyet_ayni_belge ? (
+                <div style={{ fontSize:"12px", color:"#15803d", background:"#ecfdf5", borderRadius:"8px", padding:"8px 10px" }}>
+                  ✓ Hasarsızlık tutanağındaki belge memnuniyet formu olarak da kabul edilir.
+                </div>
+              ) : (
+                <>
+                  {input("Form Tarihi", "memnuniyet_tarihi", "date")}
+                  {belgeWidget("memnuniyet_belge_url", memnuniyetFile, setMemnuniyetFile)}
+                </>
+              )}
+            </div>
+            <div style={{ background:"#fff", borderRadius:"10px", padding:"12px", border:"1px solid #d1fae5" }}>
+              <div style={{ fontSize:"12px", fontWeight:700, color:"#166534" }}>📁 Kabul Dosyası</div>
+              <div style={{ fontSize:"11px", color:"#6b7280", marginBottom:"6px" }}>Huawei kabulüne sunulan dosya(lar)</div>
+              {belgeWidget("kabul_dosya_url", kabulDosyaFile, setKabulDosyaFile)}
+            </div>
+          </div>
+          <label style={{ display:"block", marginTop:"10px" }}>
+            <span style={{ fontSize:"12px", fontWeight:600, color:"#166534" }}>Not</span>
+            <input value={form.kabul_belge_not || ""} onChange={e => handleChange("kabul_belge_not", e.target.value)} placeholder="Örn: Mal sahibi tutanağı 2. ziyarette imzaladı"
+              style={{ display:"block", width:"100%", boxSizing:"border-box", marginTop:"4px", padding:"8px 10px", border:"1.5px solid #d1fae5", borderRadius:"8px", fontSize:"13px" }} />
+          </label>
         </div>
 
         <div className="modalActions">

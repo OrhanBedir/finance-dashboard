@@ -3774,6 +3774,13 @@ app.get("/migrate", async (req, res) => {
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tt_horizon_actual_end_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_actual_end_date DATE",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_dosya_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_ayni_belge BOOLEAN DEFAULT false",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_belge_not TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tamamlanma_tarihi DATE",
   ];
   const results = [];
@@ -3938,6 +3945,13 @@ app.get("/setup-db", async (req, res) => {
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS btk_belge_url TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS emr_belge_url TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_dosya_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_ayni_belge BOOLEAN DEFAULT false",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_belge_not TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_subcon TEXT",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_plan_start_date DATE",
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS ysb_actual_end_date DATE",
@@ -9501,7 +9515,22 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
   }
 });
 // Generic rollout belge signed URL (type: los, tssr, btk, emr, pac, enh_proje)
-const ROLLOUT_BELGE_FIELDS = ["los_belge_url","tssr_belge_url","btk_belge_url","emr_belge_url","ysb_belge_url","pac_belge_url","enh_proje_belge_url"];
+const ROLLOUT_BELGE_FIELDS = ["los_belge_url","tssr_belge_url","btk_belge_url","emr_belge_url","ysb_belge_url","pac_belge_url","enh_proje_belge_url",
+  // Kabul belgeleri (03.09.2026): kabul dosyası, mal sahibi hasarsızlık tutanağı, memnuniyet formu
+  "kabul_dosya_url","hasarsizlik_belge_url","memnuniyet_belge_url"];
+// Kabul belgeleri ek alanları (tarih / aynı evrak / not) — Rollout Veri Girişi "Kabul Belgeleri" bölümü
+app.post("/rollout/:id/kabul-belgeleri", authMiddleware, async (req, res) => {
+  try {
+    const { hasarsizlik_tarihi, memnuniyet_tarihi, memnuniyet_ayni_belge, kabul_belge_not } = req.body || {};
+    const d = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
+    const r = await pool.query(
+      `UPDATE rollout_progress SET hasarsizlik_tarihi = $1, memnuniyet_tarihi = $2, memnuniyet_ayni_belge = $3, kabul_belge_not = $4, updated_at = NOW()
+       WHERE id = $5 RETURNING id`,
+      [d(hasarsizlik_tarihi), d(memnuniyet_tarihi), memnuniyet_ayni_belge === true || memnuniyet_ayni_belge === "true", kabul_belge_not || null, req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 app.get("/rollout/signed-upload-url", async (req, res) => {
   try {
     const { rolloutId, type, ext } = req.query;
@@ -10193,11 +10222,11 @@ async function isAtamaSahaBilgi(siteCodes, belgeAlanlari) {
   if (!siteCodes.length) return [];
   const r = await pool.query(
     `SELECT DISTINCT ON (UPPER(TRIM(site_code))) UPPER(TRIM(site_code)) AS site_code, site_type, bolge, il, project_code,
-            tssr_belge_url, ysb_belge_url, btk_belge_url, los_belge_url, emr_belge_url, enh_proje_belge_url, pac_belge_url,
+            tssr_belge_url, ysb_belge_url, btk_belge_url, los_belge_url, emr_belge_url, enh_proje_belge_url, pac_belge_url, kabul_dosya_url, hasarsizlik_belge_url, memnuniyet_belge_url,
             installation_actual_start_date, installation_actual_end_date, qc_durum, general_note, survey_note
      FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[])
      ORDER BY UPPER(TRIM(site_code)), updated_at DESC NULLS LAST`, [siteCodes]);
-  const ETIKET = { tssr_belge_url:"TSSR", ysb_belge_url:"YSB", btk_belge_url:"BTK / Survey", los_belge_url:"LOS", emr_belge_url:"EMR", enh_proje_belge_url:"ENH Proje", pac_belge_url:"PAC" };
+  const ETIKET = { tssr_belge_url:"TSSR", ysb_belge_url:"YSB", btk_belge_url:"BTK / Survey", los_belge_url:"LOS", emr_belge_url:"EMR", enh_proje_belge_url:"ENH Proje", pac_belge_url:"PAC", kabul_dosya_url:"Kabul Dosyası", hasarsizlik_belge_url:"Hasarsızlık Tutanağı", memnuniyet_belge_url:"Memnuniyet Formu" };
   const oncelik = Array.isArray(belgeAlanlari) ? belgeAlanlari : [];
   return siteCodes.map((sc) => {
     const row = r.rows.find((x) => x.site_code === sc) || { site_code: sc };
@@ -20524,6 +20553,13 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_plan_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_actual_end_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_dosya_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_ayni_belge BOOLEAN DEFAULT false",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_belge_not TEXT",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS tamamlanma_tarihi DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS qc_closed_date DATE",
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
