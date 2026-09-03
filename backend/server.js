@@ -10590,7 +10590,8 @@ app.get("/rollout/is-kolu", authMiddleware, async (req, res) => {
     const kolu = String(req.query.is_kolu || "").toUpperCase();
     const bolge = String(req.query.bolge || "").trim();
     const params = []; let where = `(site_code ILIKE '%\\_NS\\_%' OR site_type ILIKE 'standalone%')`;
-    if (bolge && bolge !== "ALL") { params.push(bolge.toLowerCase()); where += ` AND LOWER(TRIM(COALESCE(bolge,''))) = $${params.length}`; }
+    // Türkçe İ: LOWER('İzmir') 'i̇zmir' verir, eşleşmez — UPPER ile karşılaştır
+    if (bolge && bolge !== "ALL") { params.push(bolge); where += ` AND UPPER(TRIM(COALESCE(bolge,''))) = UPPER($${params.length})`; }
     const rp = await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS site_code FROM rollout_progress WHERE ${where}`, params);
     const sites = rp.rows.map((x) => x.site_code);
     await isKoluTuret(sites);
@@ -10636,7 +10637,7 @@ app.get("/is-atama/is-yuku", authMiddleware, async (req, res) => {
     const gun = Math.max(1, Math.min(60, Number(req.query.gun || 7)));
     const bolge = String(req.query.bolge || "").trim();
     const params = [gun]; let where = `a.durum <> 'IPTAL' AND (a.durum <> 'TAMAMLANDI' OR a.updated_at > NOW() - ($1::int || ' days')::interval)`;
-    if (bolge && bolge !== "ALL") { params.push(bolge.toLowerCase()); where += ` AND LOWER(TRIM(COALESCE(a.bolge,''))) = $${params.length}`; }
+    if (bolge && bolge !== "ALL") { params.push(bolge); where += ` AND UPPER(TRIM(COALESCE(a.bolge,''))) = UPPER($${params.length})`; }
     const r = await pool.query(`SELECT a.id, a.durum, a.kategori, a.personeller, a.updated_at FROM is_atama a WHERE ${where}`, params);
     const kisi = {};
     r.rows.forEach((a) => (a.personeller || []).forEach((p) => {
