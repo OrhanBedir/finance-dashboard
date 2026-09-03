@@ -30347,11 +30347,14 @@ function App() {
   const [hwUploadFocus, setHwUploadFocus] = useState(null); // HW Yükleme Merkezi'nde hangi kutuya kaydırılsın
   useEffect(() => {
     if (!navOpen) return;
-    const kapat = () => setNavOpen(null);
+    // Sayfa içeriği click'i stopPropagation ile yuttuğundan document 'click' hiç gelmiyordu;
+    // yakalama aşamasında mousedown dinle, hedef üst çubuğun dışındaysa kapat (03.09.2026)
+    const kapat = (e) => { if (!(e.target && e.target.closest && e.target.closest(".topnav"))) setNavOpen(null); };
     const esc = (e) => { if (e.key === "Escape") setNavOpen(null); };
-    document.addEventListener("click", kapat);
+    document.addEventListener("mousedown", kapat, true);
+    document.addEventListener("touchstart", kapat, true);
     document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("click", kapat); document.removeEventListener("keydown", esc); };
+    return () => { document.removeEventListener("mousedown", kapat, true); document.removeEventListener("touchstart", kapat, true); document.removeEventListener("keydown", esc); };
   }, [navOpen]);
 
   useEffect(() => {
