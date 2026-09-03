@@ -10500,6 +10500,16 @@ const IS_KOLU_TANIM = {
   ENH:      { ad: "AG OG Enerji",          ikon: "⚡", aciklama: "ENH",                    kategori: "ENH_MONTAJ", sira: 6 },
 };
 const GIZLEME_TIPLERI = ["Baca gizleme", "Nonstandart", "Panjur", "Diğer"];
+// İş kolu ↔ PR kalemi eşlemesi (Günlük İş Girişi / master_works): iş kolunun taşeronu, PR adedi ve
+// QC durumu kendi kaleminden okunur — TRS'yi AHY_2KX, gizlemeyi UBS yapmış olabilir (03.09.2026, Orhan)
+const IS_KOLU_KALEM_DESEN = {
+  NS_AI:    /dbs\/bts system installation|new site installation/i,
+  ONE_BAND: /one band addition/i,
+  TRS:      /microwave installation|mw antenna|mw rack|site visit for mw/i,
+  GPS:      /gps equipment|gps installation/i,
+  GIZLEME:  /camoufl|kamufl/i,
+  ENH:      /energy line|lv power|power meter|admission for lv|power line|power supply and connection/i,
+};
 let isKoluTabloHazir = false;
 async function isKoluTablo() {
   if (isKoluTabloHazir) return;
@@ -10564,6 +10574,23 @@ async function isKoluZengin(rows) {
     SELECT a.id, a.kategori, a.alt_tip, a.site_codes, a.personeller, a.durum, a.plan_tarihi, a.baslama_ts, a.bitis_ts, a.kapanis_not, a.updated_at,
            (SELECT MAX(COALESCE(g.bitis, g.baslama)) FROM is_atama_gun g WHERE g.is_atama_id = a.id) AS son_hareket
     FROM is_atama a WHERE a.site_codes && $1::text[] AND a.durum <> 'IPTAL' ORDER BY a.updated_at DESC`, [sites]);
+  // PR kalemleri (master_works): iş kolu başına taşeron / adet / QC
+  const mw = await pool.query(`SELECT UPPER(TRIM(site_code)) AS site_code, item_description, subcon_name, COALESCE(done_qty,0) AS done_qty,
+      COALESCE(tamamlanan_qty, done_qty, 0) AS tamamlanan_qty, UPPER(TRIM(COALESCE(qc_durum,''))) AS qc_durum
+    FROM master_works WHERE UPPER(TRIM(site_code)) = ANY($1::text[]) AND COALESCE(TRIM(item_description),'') <> ''`, [sites]);
+  const kalemBul = (site, kolu) => {
+    const re = IS_KOLU_KALEM_DESEN[kolu]; if (!re) return null;
+    const items = mw.rows.filter((x) => x.site_code === site && re.test(String(x.item_description)) && !/dismantl|incentive/i.test(String(x.item_description)));
+    if (!items.length) return null;
+    const taseronlar = [...new Set(items.map((x) => String(x.subcon_name || "").trim()).filter(Boolean))];
+    return {
+      taseronlar, taseron: taseronlar.join(", ") || null,
+      pr_adet: items.reduce((s, x) => s + Number(x.done_qty || 0), 0),
+      tamamlanan: items.reduce((s, x) => s + Number(x.tamamlanan_qty || 0), 0),
+      qc_ok: items.some((x) => x.qc_durum === "OK"),
+      kalemler: items.map((x) => ({ ad: x.item_description, taseron: x.subcon_name, pr: Number(x.done_qty || 0), qc: x.qc_durum })),
+    };
+  };
   return rows.map((r) => {
     const t = IS_KOLU_TANIM[r.is_kolu] || {};
     const adaylar = a.rows.filter((x) => (x.site_codes || []).includes(r.site_code) && x.kategori === t.kategori);
@@ -10571,8 +10598,12 @@ async function isKoluZengin(rows) {
     const at = r.is_kolu === "ONE_BAND" ? (adaylar.find((x) => /one band/i.test(String(x.alt_tip || ""))) || null)
              : r.is_kolu === "NS_AI"   ? (adaylar.find((x) => !/one band/i.test(String(x.alt_tip || ""))) || null)
              : (adaylar[0] || null);
+    const kalem = kalemBul(r.site_code, r.is_kolu);
     return {
       ...r, ad: t.ad, ikon: t.ikon, aciklama: t.aciklama, kategori: t.kategori, sira: t.sira,
+      kalem,
+      // Etkin QC durumu: elle girilen hw_status > PR kaleminin QC OK'u
+      etkin_durum: r.hw_status || (kalem?.qc_ok ? "Closed" : (kalem && kalem.pr_adet > 0 ? "Executing" : null)),
       atama: at ? { id: at.id, durum: at.durum, personeller: at.personeller, plan_tarihi: at.plan_tarihi, baslama_ts: at.baslama_ts, bitis_ts: at.bitis_ts, son_hareket: at.son_hareket, kapanis_not: at.kapanis_not } : null,
     };
   });

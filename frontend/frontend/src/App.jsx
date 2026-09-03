@@ -32912,12 +32912,14 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
   const G_MS = { ad: "MİLESTONE DURUM", renk: "#dcfce7", ink: "#166534", kolon: (r, m) => [
     ["RF Rcv", ikon(String(r.malzeme_status || "").toUpperCase() === "OK" || has(r.installation_actual_start_date))],
     ["RF Start", ikon(has(r.installation_actual_start_date) || has(r.installation_actual_end_date) || has(r.onair_date) || qcOk(r))],
-    ["RF Fin", ikon(has(r.installation_actual_end_date) || qcOk(r))],
-    ["QC Status", <span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(m.hw_status || (qcOk(r) ? "Closed" : ""))}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>],
+    ["RF Fin", ikon(m.is_kolu === "NS_AI" ? (has(r.installation_actual_end_date) || qcOk(r)) : ((m.kalem && m.kalem.pr_adet > 0) || m.hw_status === "Closed"))],
+    ["QC Status", <span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(m.hw_status || m.etkin_durum || (m.is_kolu === "NS_AI" && qcOk(r) ? "Closed" : ""))}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>],
     ["Accept", ikon(has(r.pac_actual_end_date))],
   ] };
   const G_GENEL = { ad: "GENEL", renk: "#e8edf5", ink: "#334155", kolon: (r) => [["Bölge", r.bolge], ["Site Type", r.site_type], ["Site Fiziksel Tip", r.site_physical_type], ["Project Code", r.project_code], ["Site Code", <b style={{ fontFamily: "monospace" }}>{r.site_code}</b>], ["Malzeme Status", r.malzeme_status], ["İl", r.il]] };
-  const G_RF = { ad: "RF", renk: "#dbeafe", ink: "#1e40af", kolon: (r) => [["RF Subcon", r.rf_subcon], ["Plan Start", fd(r.plan_start_date)], ["Installation Start", fd(r.installation_actual_start_date)], ["Installation End", fd(r.installation_actual_end_date)], ["OnAir", fd(r.onair_date)], ["QC Closed", fd(r.qc_closed_date)], ["RF Not", r.rf_not || r.rf_note]] };
+  // Taşeron: iş kolunun kendi PR kaleminden (Günlük İş Girişi); kalem yoksa saha RF Subcon'u
+  const isTaseron = (r, m) => (m?.kalem?.taseron ? <span title={(m.kalem.kalemler || []).map((k) => `${k.ad} · ${k.taseron || "—"} · PR ${k.pr} · QC ${k.qc || "—"}`).join("\n")} style={{ fontWeight: 700 }}>{m.kalem.taseron}</span> : (r.rf_subcon ? <span style={{ color: "#94a3b8" }} title="Kalem taşeronu yok — saha RF Subcon">{r.rf_subcon}</span> : ""));
+  const G_RF = { ad: "RF", renk: "#dbeafe", ink: "#1e40af", kolon: (r, m) => [[m?.is_kolu === "NS_AI" ? "RF Subcon" : "İş Taşeronu (PR)", m?.is_kolu === "NS_AI" ? (r.rf_subcon || (m?.kalem?.taseron ?? "")) : isTaseron(r, m)], ["PR Adet", m?.kalem ? m.kalem.pr_adet : ""], ["Plan Start", fd(r.plan_start_date)], ["Installation Start", fd(r.installation_actual_start_date)], ["Installation End", fd(r.installation_actual_end_date)], ["OnAir", fd(r.onair_date)], ["QC Closed", fd(r.qc_closed_date)], ["RF Not", r.rf_not || r.rf_note]] };
   const G_GIZ = { ad: "GİZLEME KALEMİ", renk: "#f3e8ff", ink: "#6b21a8", kolon: (r, m) => [["Item Description", edit(m, "item_description")], ["Qty", edit(m, "qty", "number")], ["Gizleme Tipi", edit(m, "gizleme_tipi", "text", ["", ...gizlemeTipleri])]] };
   const G_LOS = { ad: "LOS", renk: "#ccfbf1", ink: "#0f766e", kolon: (r, m) => [["LOS Subcon", r.los_subcon], ["LOS Plan", fd(r.los_plan_date)], ["LOS Actual End", fd(r.los_actual_end_date)], ["LOS Belgesi", belgeChips(r.los_belge_url, "LOS")], ["FSC", belgeChips(r.fsc_belge_url, "FSC")], ["Karşı uç", edit(m, "karsi_uc")]] };
   const G_NS = { ad: "TSS · TSSR · BTK · EMR · YSB · KABUL", renk: "#fef3c7", ink: "#92400e", kolon: (r) => [
@@ -32981,7 +32983,8 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
   // ── MOD 1: tek NS saha ──
   if (nsSite) {
     const r = nsSite;
-    const kapali = meta.filter((m) => m.hw_status === "Closed").length, red = meta.filter((m) => m.hw_status === "Rejected").length;
+    const durumu = (m) => m.hw_status || m.etkin_durum || "";
+    const kapali = meta.filter((m) => durumu(m) === "Closed").length, red = meta.filter((m) => durumu(m) === "Rejected").length;
     const sec = meta.find((m) => m.is_kolu === secili) || null;
     const eksikler = Object.keys(tanim).filter((k) => !meta.some((m) => m.is_kolu === k));
     return (
@@ -32994,13 +32997,13 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "8px", margin: "10px 0" }}>
           {meta.map((m) => {
-            const on = secili === m.is_kolu; const st = m.hw_status === "Closed" ? "#16a34a" : m.hw_status === "Rejected" ? "#b91c1c" : m.hw_status === "Executing" ? "#d97706" : "#cbd5e1";
+            const on = secili === m.is_kolu; const d = durumu(m); const st = d === "Closed" ? "#16a34a" : d === "Rejected" ? "#b91c1c" : d === "Executing" ? "#d97706" : "#cbd5e1";
             const a = m.atama;
             return (
               <button key={m.id} type="button" onClick={() => setSecili(m.is_kolu)} style={{ textAlign: "left", border: on ? "2px solid #1d4ed8" : "1.5px solid #e2e8f0", background: on ? "#eff6ff" : "#fff", borderRadius: "12px", padding: "10px 12px", cursor: "pointer", position: "relative" }}>
                 <span style={{ position: "absolute", top: "8px", right: "8px", width: "9px", height: "9px", borderRadius: "50%", background: st }} />
                 <div style={{ fontWeight: 800, fontSize: "12.5px" }}>{m.ikon} {m.ad}</div>
-                <div style={{ fontSize: "10.5px", color: "#64748b" }}>{m.aciklama} · {m.hw_status || "durum yok"}</div>
+                <div style={{ fontSize: "10.5px", color: "#64748b" }}>{m.aciklama} · {durumu(m) || "durum yok"}{m.kalem?.taseron ? ` · ${m.kalem.taseron}` : ""}</div>
                 <div style={{ fontSize: "10.5px", fontWeight: 700, color: a ? "#1d4ed8" : "#94a3b8", marginTop: "3px" }}>{a ? `${(a.personeller || []).map((p) => String(p.ad || "").split(" ")[0]).join(", ")} · ${IS_DURUM[a.durum]?.txt || a.durum}` : "Atanmadı"}</div>
               </button>
             );
@@ -33034,16 +33037,17 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
   // ── MOD 2: iş kolu + bölge listesi ──
   const t = tanim[isKoluFilter] || {};
   const satirlar = meta.map((m) => ({ m, r: rowBySite[m.site_code] || { site_code: m.site_code } }));
-  const kapaliL = satirlar.filter((x) => x.m.hw_status === "Closed").length, redL = satirlar.filter((x) => x.m.hw_status === "Rejected").length;
+  const durumuL = (m) => m.hw_status || m.etkin_durum || "";
+  const kapaliL = satirlar.filter((x) => durumuL(x.m) === "Closed").length, redL = satirlar.filter((x) => durumuL(x.m) === "Rejected").length;
   const toggle = (sc) => setSecim((p) => { const n = new Set(p); n.has(sc) ? n.delete(sc) : n.add(sc); return n; });
   const listeKolon = LISTE_KOLON[isKoluFilter] || LISTE_KOLON.NS_AI;
   const ornekKolon = satirlar[0] ? listeKolon(satirlar[0].r, satirlar[0].m) : [];
   const excel = () => {
-    const headersX = ["Site Code", "İl", "Bölge", "QC Status", ...ornekKolon.map(([k]) => k), "Atanan", "Durum"];
+    const headersX = ["Site Code", "İl", "Bölge", "QC Status", "İş Taşeronu (PR)", "PR Adet", ...ornekKolon.map(([k]) => k), "Atanan", "Durum"];
     const dataX = satirlar.map(({ r, m }) => {
       const a = m.atama; const kim = a ? (a.personeller || []).map((p) => p.ad).join(", ") : "";
       const ozel = listeKolon(r, m).map(([, v]) => (typeof v === "string" || typeof v === "number" ? v : (v ? "var" : "")));
-      return [r.site_code, r.il || "", r.bolge || "", m.hw_status || "", ...ozel, kim, a ? (IS_DURUM[a.durum]?.txt || a.durum) : "Atanmadı"];
+      return [r.site_code, r.il || "", r.bolge || "", durumuL(m), m.kalem?.taseron || r.rf_subcon || "", m.kalem ? m.kalem.pr_adet : "", ...ozel, kim, a ? (IS_DURUM[a.durum]?.txt || a.durum) : "Atanmadı"];
     });
     exportStandardExcel({ title: `${t.ad || isKoluFilter} — ${regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter}`, headers: headersX, rows: dataX, colWidths: headersX.map(() => 18), fileBase: `Rollout_${isKoluFilter}_${regionFilter}`, sheetName: "İş Kolu" });
   };
@@ -33065,12 +33069,12 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
               <tr>
                 <th style={{ background: "#f1f5f9", padding: "6px", fontSize: "11px" }} />
                 <th colSpan={3} style={{ background: "#e8edf5", color: "#334155", padding: "6px", fontSize: "11px", textAlign: "center", borderLeft: "2px solid #fff", borderRight: "2px solid #fff" }}>GENEL</th>
-                <th style={{ background: "#dcfce7", color: "#166534", padding: "6px", fontSize: "11px", textAlign: "center", borderRight: "2px solid #fff" }}>MİLESTONE</th>
+                <th colSpan={2} style={{ background: "#dcfce7", color: "#166534", padding: "6px", fontSize: "11px", textAlign: "center", borderRight: "2px solid #fff" }}>MİLESTONE / TAŞERON</th>
                 <th colSpan={ornekKolon.length} style={{ background: "#fef3c7", color: "#92400e", padding: "6px", fontSize: "11px", textAlign: "center", borderRight: "2px solid #fff" }}>{t.ad}</th>
                 <th colSpan={2} style={{ background: "#f1f5f9", color: "#334155", padding: "6px", fontSize: "11px", textAlign: "center" }}>SAHA (MOBİL)</th>
                 <th style={{ background: "#f1f5f9" }} />
               </tr>
-              <tr>{th("Seç")}{th("Site Code")}{th("İl")}{th("Bölge")}{th("QC Status")}{ornekKolon.map(([k], i) => <React.Fragment key={i}>{th(k)}</React.Fragment>)}{th("Atanan")}{th("Son hareket")}{th("")}</tr>
+              <tr>{th("Seç")}{th("Site Code")}{th("İl")}{th("Bölge")}{th("QC Status")}{th("İş Taşeronu (PR)")}{ornekKolon.map(([k], i) => <React.Fragment key={i}>{th(k)}</React.Fragment>)}{th("Atanan")}{th("Son hareket")}{th("")}</tr>
             </thead>
             <tbody>
               {satirlar.map(({ r, m }) => {
@@ -33079,14 +33083,15 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
                   <tr key={m.id} style={{ background: secim.has(m.site_code) ? "#f8fafc" : "#fff" }}>
                     <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}><input type="checkbox" checked={secim.has(m.site_code)} onChange={() => toggle(m.site_code)} /></td>
                     {td(<b style={{ fontFamily: "monospace" }}>{m.site_code}</b>)}{td(r.il)}{td(r.bolge)}
-                    {td(<span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(m.hw_status)}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>)}
+                    {td(<span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(durumuL(m))}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>)}
+                    {td(isTaseron(r, m))}
                     {listeKolon(r, m).map(([, v], i) => <React.Fragment key={i}>{td(v)}</React.Fragment>)}
                     {td(a)}{td(b, { color: "#64748b" })}
                     {td(<button type="button" onClick={() => onSiteAc(m.site_code)} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>Aç</button>)}
                   </tr>
                 );
               })}
-              {!satirlar.length && <tr><td colSpan={9 + ornekKolon.length} style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>{yukleniyor ? "Yükleniyor…" : "Bu iş kolunda saha yok"}</td></tr>}
+              {!satirlar.length && <tr><td colSpan={10 + ornekKolon.length} style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>{yukleniyor ? "Yükleniyor…" : "Bu iş kolunda saha yok"}</td></tr>}
             </tbody>
           </table>
         </div>
