@@ -8760,6 +8760,149 @@ function formatDonemLabel(value) {
   return `${months[Number(month) - 1]} ${year}`;
 }
 
+/* ───────── Finans Paneli üst şeridi: Tahsilat & Fatura Özeti (yatay çubuklu tek kart) ─────────
+   Eski 3 KPI kartının (Toplam Tahsilat / Bu Ay Tahsilat / Bu Ay Kesilen Fatura) yerine geçer.
+   Tüm değerler /finance/summary verisinden hesaplanır (monthly_received / monthly_invoiced / monthly_upcoming). */
+function FinansOzetSeridi({ summary, thisMonthInvoiced, hwLastUpload }) {
+  const AY_ADI = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+  const AY_KISA = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+  const simdi = new Date();
+  const yil = simdi.getFullYear();
+  const ay = simdi.getMonth() + 1;
+  const dizi = (obj) => AY_ADI.map((_, i) => Number(obj?.[i + 1] || 0));
+  const received = dizi(summary?.monthly_received);
+  const invoiced = dizi(summary?.monthly_invoiced);
+  const upcoming = dizi(summary?.monthly_upcoming);
+  const toplam = Number(summary?.total_collections || 0);
+  const buAy = Number(summary?.this_month_collections || 0);
+  const buAyFatura = Number(thisMonthInvoiced || 0);
+  const yilFatura = invoiced.reduce((a, b) => a + b, 0);
+  const acikVadeli = upcoming.reduce((a, b) => a + b, 0);
+  const buAyVadeli = upcoming[ay - 1] || 0;
+  // Ortalamalar: içinde bulunulan ay hariç, verisi olan tamamlanmış aylar
+  const ortalama = (arr) => {
+    const tamam = arr.slice(0, ay - 1).filter((v) => v > 0);
+    if (!tamam.length) return arr[ay - 1] || 0;
+    return tamam.reduce((a, b) => a + b, 0) / tamam.length;
+  };
+  const ortTahsilat = ortalama(received);
+  const ortFatura = ortalama(invoiced);
+  const oncekiAyAd = ay > 1 ? AY_ADI[ay - 2] : null;
+  const oncekiTahsilat = ay > 1 ? received[ay - 2] : 0;
+  const oncekiFatura = ay > 1 ? invoiced[ay - 2] : 0;
+  const enIyiIdx = received.reduce((best, v, i) => (v > received[best] ? i : best), 0);
+  const enIyi = received[enIyiIdx] || 0;
+  const maxSpark = Math.max(...received, 1);
+
+  const kisa = (v) => {
+    const n = Number(v || 0);
+    if (Math.abs(n) >= 1e6) return `₺${(n / 1e6).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}M`;
+    if (Math.abs(n) >= 1e3) return `₺${Math.round(n / 1e3).toLocaleString("tr-TR")}K`;
+    return formatMoneyByCurrency(n, "TRY");
+  };
+  const yuzde = (pay, payda) => (payda > 0 ? Math.round((pay / payda) * 100) : 0);
+  // Çubuk: referansa oran; %100'ü aşarsa çubuk dolu, referans çizgisi içeri kayar
+  const cubuk = (deger, referans) => {
+    if (!(referans > 0)) return { dolu: deger > 0 ? 100 : 0, ref: null };
+    const oran = deger / referans;
+    return { dolu: Math.max(deger > 0 ? 2 : 0, Math.min(100, oran * 100)), ref: oran > 1 ? 100 / oran : 100 };
+  };
+  const c1 = cubuk(toplam, yilFatura);
+  const c2 = cubuk(buAy, ortTahsilat);
+  const c3 = cubuk(buAyFatura, ortFatura);
+
+  const S = {
+    kart: { background:"#fff", borderRadius:"12px", border:"1px solid #e2e8f0", overflow:"hidden", display:"flex", flexDirection:"column" },
+    head: { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 20px 11px", borderBottom:"1px solid #f1f5f9" },
+    satir: { display:"grid", gridTemplateColumns:"minmax(190px,230px) 1fr minmax(170px,210px)", gap:"20px", alignItems:"center", padding:"13px 0", borderBottom:"1px solid #f1f5f9" },
+    ikon: (bg) => ({ width:"36px", height:"36px", borderRadius:"10px", background:bg, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px", flex:"none" }),
+    track: { height:"13px", borderRadius:"7px", background:"#eef2f7", overflow:"hidden", position:"relative" },
+    fill: (w, grad) => ({ height:"100%", borderRadius:"7px", width:`${w}%`, background:grad, transition:"width .5s ease" }),
+    ref: (left) => ({ position:"absolute", top:"-4px", bottom:"-4px", left:`${left}%`, width:"2px", background:"#334155", opacity:.45, borderRadius:"1px", transform:"translateX(-1px)" }),
+    cap: { display:"flex", justifyContent:"space-between", fontSize:"11px", color:"#64748b", marginTop:"5px", gap:"10px" },
+    deger: { fontSize:"21px", fontWeight:800, color:"#0f172a", letterSpacing:"-0.01em", lineHeight:1.1, fontVariantNumeric:"tabular-nums" },
+    rozet: (bg, fg) => ({ display:"inline-flex", alignItems:"center", gap:"4px", fontSize:"11px", fontWeight:700, padding:"3px 8px", borderRadius:"999px", marginTop:"6px", background:bg, color:fg, whiteSpace:"nowrap" }),
+    foot: { marginTop:"auto", display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1.4fr", borderTop:"1px solid #f1f5f9", background:"#fafbfd" },
+    footCell: { padding:"10px 20px", borderRight:"1px solid #f1f5f9" },
+    k: { fontSize:"10px", fontWeight:700, letterSpacing:".06em", textTransform:"uppercase", color:"#94a3b8" },
+    w: { fontSize:"15px", fontWeight:800, color:"#0f172a", marginTop:"3px", fontVariantNumeric:"tabular-nums" },
+  };
+
+  const Satir = ({ ikon, ikonBg, baslik, alt, cub, grad, solCap, sagCap, deger, rozet, rozetBg, rozetFg, sonSatir }) => (
+    <div style={{ ...S.satir, ...(sonSatir ? { borderBottom:0 } : {}) }}>
+      <div style={{ display:"flex", gap:"11px", alignItems:"center", minWidth:0 }}>
+        <div style={S.ikon(ikonBg)}>{ikon}</div>
+        <div style={{ minWidth:0 }}>
+          <div style={{ fontSize:"13px", fontWeight:700, color:"#0f172a" }}>{baslik}</div>
+          <div style={{ fontSize:"11px", color:"#64748b", marginTop:"2px" }}>{alt}</div>
+        </div>
+      </div>
+      <div style={{ position:"relative", minWidth:0 }}>
+        <div style={S.track}>
+          <div style={S.fill(cub.dolu, grad)} />
+          {cub.ref !== null && cub.ref < 100 && <div style={S.ref(cub.ref)} />}
+        </div>
+        <div style={S.cap}><span>{solCap}</span><span style={{ whiteSpace:"nowrap" }}>{sagCap}</span></div>
+      </div>
+      <div style={{ textAlign:"right" }}>
+        <div style={S.deger}>{formatMoneyByCurrency(deger, "TRY")}</div>
+        {rozet && <span style={S.rozet(rozetBg, rozetFg)}>{rozet}</span>}
+      </div>
+    </div>
+  );
+
+  const B = (t) => <b style={{ color:"#334155", fontWeight:600 }}>{t}</b>;
+
+  return (
+    <div style={S.kart}>
+      <div style={S.head}>
+        <div>
+          <div style={{ fontSize:"14px", fontWeight:700, color:"#0f172a" }}>Tahsilat &amp; Fatura Özeti</div>
+          <div style={{ fontSize:"11px", color:"#64748b", marginTop:"2px" }}>{yil} · {simdi.getDate()} {AY_ADI[ay - 1]} itibarıyla</div>
+        </div>
+        {hwLastUpload?.uploaded_at && (
+          <div style={{ fontSize:"11px", color:"#94a3b8", display:"flex", gap:"6px", alignItems:"center" }}>
+            🕒 Son HW yükleme <b style={{ color:"#64748b", fontWeight:600 }}>{new Date(hwLastUpload.uploaded_at).toLocaleString("tr-TR", { day:"numeric", month:"numeric", year:"numeric", hour:"2-digit", minute:"2-digit" })}</b> · {hwLastUpload.row_count} kayıt
+          </div>
+        )}
+      </div>
+      <div style={{ padding:"4px 20px 2px" }}>
+        <Satir ikon="💰" ikonBg="#eff6ff" baslik={`${yil} Toplam Tahsilat`} alt={`Yıllık kümülatif · Ocak–${AY_ADI[ay - 1]}`}
+          cub={c1} grad="linear-gradient(90deg,#3b82f6,#6366f1)"
+          solCap={yilFatura > 0 ? <>Kesilen faturanın {B(`%${yuzde(toplam, yilFatura)}`)}'i tahsil edildi</> : "Yıl içi kesilen fatura verisi yok"}
+          sagCap={<>Yıllık fatura {B(kisa(yilFatura))}</>}
+          deger={toplam} rozet={`Ay ort. ${kisa(ortTahsilat)}`} rozetBg="#eff6ff" rozetFg="#1d4ed8" />
+        <Satir ikon="📈" ikonBg="#ecfdf5" baslik="Bu Ay Tahsilat" alt={`${AY_ADI[ay - 1]} · kasaya giren`}
+          cub={c2} grad="linear-gradient(90deg,#10b981,#34d399)"
+          solCap={<>Aylık ortalamanın {B(`%${yuzde(buAy, ortTahsilat)}`)}'i</>}
+          sagCap={oncekiAyAd ? <>Geçen ay ({oncekiAyAd}) {B(kisa(oncekiTahsilat))}</> : null}
+          deger={buAy} rozet={buAyVadeli > 0 ? `Bu ay vadesi gelen ${kisa(buAyVadeli)}` : null} rozetBg="#fffbeb" rozetFg="#b45309" />
+        <Satir ikon="🧾" ikonBg="#fffbeb" baslik="Bu Ay Kesilen Fatura" alt={`${AY_ADI[ay - 1]} · KDV dahil`}
+          cub={c3} grad="linear-gradient(90deg,#f59e0b,#fbbf24)"
+          solCap={<>Aylık fatura ortalamasının {B(`%${yuzde(buAyFatura, ortFatura)}`)}'si</>}
+          sagCap={oncekiAyAd ? <>Geçen ay ({oncekiAyAd}) {B(kisa(oncekiFatura))}</> : null}
+          deger={buAyFatura} rozet={`Yıllık fatura ${kisa(yilFatura)}`} rozetBg="#ecfdf5" rozetFg="#047857" sonSatir />
+      </div>
+      <div style={S.foot}>
+        <div style={S.footCell}><div style={S.k}>Aylık ort. tahsilat</div><div style={S.w}>{kisa(ortTahsilat)}</div></div>
+        <div style={S.footCell}><div style={S.k}>En iyi ay</div><div style={S.w}>{kisa(enIyi)} <small style={{ fontSize:"11px", fontWeight:600, color:"#64748b", marginLeft:"4px" }}>{enIyi > 0 ? AY_ADI[enIyiIdx] : ""}</small></div></div>
+        <div style={S.footCell}><div style={S.k}>Açık vadeli (yıl)</div><div style={S.w}>{kisa(acikVadeli)}</div></div>
+        <div style={{ ...S.footCell, borderRight:0 }}>
+          <div style={S.k}>Aylık tahsilat trendi</div>
+          <div style={{ display:"flex", alignItems:"flex-end", gap:"3px", height:"24px", marginTop:"5px" }}>
+            {received.map((v, i) => {
+              const h = Math.max(v > 0 ? 8 : 4, Math.round((v / maxSpark) * 100));
+              const bg = i + 1 === ay ? "#3b82f6" : i + 1 < ay ? "linear-gradient(180deg,#10b981,#059669)" : "#e2e8f0";
+              return <i key={i} title={`${AY_ADI[i]}: ${formatMoneyByCurrency(v, "TRY")}`} style={{ flex:1, height:`${h}%`, background: v > 0 ? bg : "#e2e8f0", borderRadius:"2px 2px 0 0", display:"block" }} />;
+            })}
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:"9px", color:"#94a3b8", marginTop:"3px" }}><span>{AY_KISA[0]}</span><span>{AY_KISA[5]}</span><span>{AY_KISA[11]}</span></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FinanceDashboard({
   user,
   financeToken,
@@ -10899,42 +11042,9 @@ function FinanceDashboard({
         />
       )}
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"16px", marginBottom:"24px" }}>
-        {/* Toplam Tahsilat */}
-        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#3b82f6,#6366f1)" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>{new Date().getFullYear()} Toplam Tahsilat</div>
-            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#eff6ff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>💰</div>
-          </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary?.total_collections || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Yıllık kümülatif</div>
-        </div>
-        {/* Bu Ay Tahsilat */}
-        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#10b981,#34d399)" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Bu Ay Tahsilat</div>
-            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#ecfdf5", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>📈</div>
-          </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(summary?.this_month_collections || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay gerçekleşen</div>
-          {hwLastUpload?.uploaded_at && (
-            <div style={{ fontSize:"10px", color:"#94a3b8", marginTop:"6px", borderTop:"1px solid #f1f5f9", paddingTop:"6px" }}>
-              🕒 Son HW yükleme: {new Date(hwLastUpload.uploaded_at).toLocaleString("tr-TR")} ({hwLastUpload.row_count} kayıt)
-            </div>
-          )}
-        </div>
-        {/* Bu Ay Kesilen Fatura */}
-        <div style={{ background:"#fff", borderRadius:"12px", padding:"20px", border:"1px solid #e2e8f0", position:"relative", overflow:"hidden" }}>
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:"3px", background:"linear-gradient(90deg,#f59e0b,#fbbf24)" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <div style={{ fontSize:"12px", fontWeight:500, color:"#64748b" }}>Bu Ay Kesilen Fatura</div>
-            <div style={{ width:"36px", height:"36px", borderRadius:"8px", background:"#fffbeb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"16px" }}>🧾</div>
-          </div>
-          <div style={{ fontSize:"22px", fontWeight:800, color:"#0f172a", marginBottom:"6px" }}>{formatMoneyByCurrency(thisMonthInvoiced || 0, "TRY")}</div>
-          <div style={{ fontSize:"11px", color:"#64748b" }}>Bu ay faturalanan</div>
-        </div>
+      <div style={{ display:"grid", gridTemplateColumns:"minmax(0,3fr) minmax(320px,1fr)", gap:"16px", marginBottom:"24px", alignItems:"stretch" }}>
+        {/* Tahsilat & Fatura Özeti — eski 3 KPI kartının yerine tek yatay grafik kartı (03.09.2026) */}
+        <FinansOzetSeridi summary={summary} thisMonthInvoiced={thisMonthInvoiced} hwLastUpload={hwLastUpload} />
         {/* HW Fatura Onay Bekler */}
         {(() => {
           const acc = hwAcceptanceSummary;
