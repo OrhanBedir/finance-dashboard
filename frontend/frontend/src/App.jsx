@@ -15860,7 +15860,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     ise_giris_tarihi:"", isten_ayrilma_tarihi:"", net_maas:"", bankadan_gosterilen:"",
     elden_verilen:"", iban:"", banka_adi:"", banka_hesap_no:"", aktif: true,
     // ISG/RFQ alanları
-    ekip_bilgisi:"", alt_yuklenici:"", firma_tipi:"simsek", isdp_account:"", iresource_giris:"",
+    ekip_bilgisi:"", alt_yuklenici:"", firma_tipi:"simsek", marka:"ERC", isdp_account:"", iresource_giris:"",
     kkd_zimmet_tarihi:"", mesleki_yeterlilik_durum:"", mesleki_yeterlilik_tarihi:"",
     elektrik_isi:false, yuksekte_calisma:false, arac_kullanim:false,
   });
@@ -16090,7 +16090,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       kkd_zimmet_tarihi: p.kkd_zimmet_tarihi?.split("T")[0]||"",
       mesleki_yeterlilik_tarihi: p.mesleki_yeterlilik_tarihi?.split("T")[0]||"",
       ekip_bilgisi: p.ekip_bilgisi||"", alt_yuklenici: p.alt_yuklenici||"",
-      firma_tipi: p.firma_tipi||"simsek", isdp_account: p.isdp_account||"",
+      firma_tipi: p.firma_tipi||"simsek", marka: String(p.marka||"ERC").toUpperCase(), isdp_account: p.isdp_account||"",
       iresource_giris: p.iresource_giris||"", mesleki_yeterlilik_durum: p.mesleki_yeterlilik_durum||"",
       elektrik_isi: !!p.elektrik_isi, yuksekte_calisma: !!p.yuksekte_calisma, arac_kullanim: !!p.arac_kullanim,
     });
@@ -17632,6 +17632,16 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           <option value="taseron">Taşeron (sadece ISG)</option>
                         </select>
                       </div>
+                      {/* Bordro şirketi (03.09.2026): Şimşek (ERC) / AHY — listedeki rozet ve AHY maaş payı buradan */}
+                      {_hrMarka === "ERC" && (
+                        <div>
+                          <label style={labelSt}>Bordro Şirketi</label>
+                          <select value={pForm.marka||"ERC"} onChange={e=>setPForm(f=>({...f,marka:e.target.value}))} style={inputSt}>
+                            <option value="ERC">Şimşek</option>
+                            <option value="AHY">AHY</option>
+                          </select>
+                        </div>
+                      )}
                       <div>
                         <label style={labelSt}>KKD Zimmet Tarihi</label>
                         <input type="date" value={pForm.kkd_zimmet_tarihi||""} onChange={e=>setPForm(f=>({...f,kkd_zimmet_tarihi:e.target.value}))} style={inputSt} />
