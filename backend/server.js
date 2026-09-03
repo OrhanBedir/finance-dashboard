@@ -16172,7 +16172,15 @@ app.put("/hr/personel/:id", async (req, res) => {
        elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,
        marka?String(marka).toUpperCase():null,id]
     );
-    res.json(r.rows[0]);
+    // İşten ayrılma tarihi bugün ya da geçmişse kayıt otomatik pasife düşer (03.09.2026, Orhan):
+    // Oğuzhan/Talha çıkış tarihi girilmiş ama aktif kaldığı için org şemasında görünüyordu
+    let son = r.rows[0];
+    if (son && son.isten_ayrilma_tarihi && son.aktif) {
+      const a = await pool.query(
+        `UPDATE personel SET aktif = false WHERE id = $1 AND isten_ayrilma_tarihi <= CURRENT_DATE RETURNING *`, [id]);
+      if (a.rows[0]) son = a.rows[0];
+    }
+    res.json(son);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

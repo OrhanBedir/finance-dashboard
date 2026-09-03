@@ -3854,8 +3854,10 @@ function OrgSemasiPanel({ currentUser }) {
   // Ekip üyeleri: personel.ekip_bilgisi == ekip_no (aktif personel)
   // Ekip üyeleri: ekip şefi/şefler her zaman en üstte, kalanlar ada göre
   const _sefMi = (p) => /şef|sef/i.test(String(p.unvan || ""));
+  // Ayrılmış personel (aktif bayrağı güncellenmemiş olsa bile çıkış tarihi geçmişse) şemada görünmez
+  const ayrildi = (p) => { const t = String(p.isten_ayrilma_tarihi || "").slice(0, 10); return !!t && t <= new Date().toISOString().slice(0, 10); };
   const ekipUyeleri = (no) => personelList
-    .filter(p => p.aktif && String(p.ekip_bilgisi || "").trim() === String(no))
+    .filter(p => p.aktif && !ayrildi(p) && String(p.ekip_bilgisi || "").trim() === String(no))
     .sort((a, b) => (_sefMi(b) - _sefMi(a)) || String(a.ad_soyad || "").localeCompare(String(b.ad_soyad || ""), "tr"));
   const saveEkip = async (e) => {
     try {
