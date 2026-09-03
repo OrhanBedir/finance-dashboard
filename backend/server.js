@@ -10111,6 +10111,341 @@ app.get("/rollout/cleanup/personel-listesi", authMiddleware, async (req, res) =>
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+/* ═══════════════════════════════════════════════════════════════════════
+   ROLLOUT İŞ ATAMA (Faz 1, 03.09.2026)
+   Merkez (panel) bir iş kategorisi + saha(lar) + personel(ler) seçip iş atar;
+   personel mobilde "Rollout · İşlerim" altında görür, sahada "İşe Başla" /
+   "Çıkış Yap" der. Kategori tablosu hangi rollout_progress kolonunun
+   başlangıçta/bitişte dolacağını söyler (kod değil, satır). Clean Up da bu
+   yapının bir kategorisidir: atama rollout_cleanup.atanan_* alanını da yazar,
+   fotoğraf/onay akışı eskisi gibi devam eder.
+   Kararlar (Orhan, 03.09.2026): Başla/Bitir'i atanan personelden herhangi biri
+   yapabilir (lider şartı yok); sarf fotoğrafı şimdilik zorunlu değil;
+   kişi günlük maliyeti = net maaş × 1,35 ÷ 22 (Faz 3'te kullanılacak). */
+const IS_ATAMA_ROLLER = ["admin", "platform_admin", "direktor", "pm", "rollout_mudur", "genel_mudur", "bolge_mudur"];
+function isAtamaYetkiliMi(req) {
+  const e = String(req.user?.email || "").toLowerCase();
+  const rol = String(req.user?.role || "").toLowerCase();
+  return CLEANUP_ATAMA_YETKI.includes(e) || IS_ATAMA_ROLLER.includes(rol);
+}
+// rollout_progress'te tarih yazılmasına izin verilen kolonlar (SQL'e ad gömüldüğü için beyaz liste)
+const IS_ATAMA_KOLON_LISTESI = new Set([
+  "installation_actual_start_date", "installation_actual_end_date", "enh_plan_start_date", "enh_actual_end_date",
+  "abonelik_actual_end_date", "tss_plan_start_date", "tss_actual_end_date", "tss_prepared_date",
+  "trs_plan_start_date", "trs_actual_end_date", "onair_date", "power_plan_start_date", "power_actual_end_date",
+  "pac_plan_date", "pac_actual_end_date", "los_plan_date", "los_actual_end_date", "qc_closed_date",
+]);
+const IS_KATEGORI_SEED = [
+  // kod, ad, ikon, tekil_site, baslangic_kolonu, bitis_kolonu, qc_yazar, belge_alanlari, alt_tipler, sira
+  ["NEW_SITE",     "New Site Montaj",         "🗼", true,  "installation_actual_start_date", "installation_actual_end_date", true,  ["tssr_belge_url","ysb_belge_url","btk_belge_url"], ["Standalone","LTE","NR700","NR3500","TRP"], 1],
+  ["ENH_MONTAJ",   "ENH Montaj",              "⚡", true,  "enh_plan_start_date",            "enh_actual_end_date",          false, ["enh_proje_belge_url","tssr_belge_url"], [], 2],
+  ["ENH_ABONELIK", "ENH Abonelik",            "📄", false, null,                             "abonelik_actual_end_date",     false, ["enh_proje_belge_url"], [], 3],
+  ["SURVEY",       "Site Survey / TSS",       "📐", false, "tss_plan_start_date",            "tss_actual_end_date",          false, ["los_belge_url","ysb_belge_url"], [], 4],
+  ["MW",           "Transmisyon / MW Montaj", "📡", false, "trs_plan_start_date",            "trs_actual_end_date",          false, ["los_belge_url","tssr_belge_url"], [], 5],
+  ["ONAIR",        "On Air / Data Atma",      "🟢", false, null,                             "onair_date",                   false, [], [], 6],
+  ["POWER",        "Enerji / Power",          "🔌", true,  "power_plan_start_date",          "power_actual_end_date",        false, ["tssr_belge_url"], [], 7],
+  ["CLEANUP",      "Clean Up",                "🧹", false, null,                             null,                           false, [], [], 8],
+  ["PAC",          "Kabul Ziyareti / PAC",    "✅", false, "pac_plan_date",                  "pac_actual_end_date",          false, ["pac_belge_url"], [], 9],
+];
+let isAtamaTabloHazir = false;
+async function isAtamaTablolar() {
+  if (isAtamaTabloHazir) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS is_kategori (
+    kod TEXT PRIMARY KEY, ad TEXT NOT NULL, ikon TEXT, tekil_site BOOLEAN DEFAULT true,
+    baslangic_kolonu TEXT, bitis_kolonu TEXT, qc_yazar BOOLEAN DEFAULT false,
+    belge_alanlari TEXT[] DEFAULT '{}', alt_tipler TEXT[] DEFAULT '{}', sira INT DEFAULT 0, aktif BOOLEAN DEFAULT true
+  )`);
+  for (const k of IS_KATEGORI_SEED) {
+    await pool.query(`INSERT INTO is_kategori (kod, ad, ikon, tekil_site, baslangic_kolonu, bitis_kolonu, qc_yazar, belge_alanlari, alt_tipler, sira)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (kod) DO NOTHING`, k);
+  }
+  await pool.query(`CREATE TABLE IF NOT EXISTS is_atama (
+    id SERIAL PRIMARY KEY, kategori TEXT NOT NULL, alt_tip TEXT,
+    site_codes TEXT[] NOT NULL DEFAULT '{}', bolge TEXT,
+    personeller JSONB DEFAULT '[]', plan_tarihi DATE,
+    atayan_email TEXT, atayan_ad TEXT, atayan_not TEXT,
+    durum TEXT DEFAULT 'ATANDI', baslama_ts TIMESTAMPTZ, bitis_ts TIMESTAMPTZ,
+    qc_tamamlandi BOOLEAN, kapanis_not TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS is_atama_gun (
+    id SERIAL PRIMARY KEY, is_atama_id INT REFERENCES is_atama(id) ON DELETE CASCADE,
+    tarih DATE NOT NULL, personel_email TEXT NOT NULL, personel_ad TEXT,
+    baslama TIMESTAMPTZ, bitis TIMESTAMPTZ, notu TEXT, kaydeden_email TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (is_atama_id, tarih, personel_email)
+  )`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS is_atama_personeller_gin ON is_atama USING GIN (personeller)`);
+  await pool.query(`ALTER TABLE rollout_cleanup ADD COLUMN IF NOT EXISTS is_atama_id INT`);
+  isAtamaTabloHazir = true;
+}
+const isAtamaSiteTemizle = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+const isAtamaPersonelIcinde = (row, email) =>
+  (Array.isArray(row?.personeller) ? row.personeller : []).some((p) => String(p?.email || "").toLowerCase() === email);
+// Belirtilen sahalarda tarih kolonunu (boşsa) bugünle doldur — tüm site_type satırları
+async function isAtamaRolloutTarihYaz(siteCodes, kolon) {
+  if (!kolon || !IS_ATAMA_KOLON_LISTESI.has(kolon) || !siteCodes.length) return;
+  await pool.query(
+    `UPDATE rollout_progress SET ${kolon} = COALESCE(${kolon}, CURRENT_DATE), updated_at = NOW()
+     WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [siteCodes]);
+}
+// Sahaların rollout bilgisi + belge linkleri (mobil iş kartı için)
+async function isAtamaSahaBilgi(siteCodes, belgeAlanlari) {
+  if (!siteCodes.length) return [];
+  const r = await pool.query(
+    `SELECT DISTINCT ON (UPPER(TRIM(site_code))) UPPER(TRIM(site_code)) AS site_code, site_type, bolge, il, project_code,
+            tssr_belge_url, ysb_belge_url, btk_belge_url, los_belge_url, emr_belge_url, enh_proje_belge_url, pac_belge_url,
+            installation_actual_start_date, installation_actual_end_date, qc_durum, general_note, survey_note
+     FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[])
+     ORDER BY UPPER(TRIM(site_code)), updated_at DESC NULLS LAST`, [siteCodes]);
+  const ETIKET = { tssr_belge_url:"TSSR", ysb_belge_url:"YSB", btk_belge_url:"BTK / Survey", los_belge_url:"LOS", emr_belge_url:"EMR", enh_proje_belge_url:"ENH Proje", pac_belge_url:"PAC" };
+  const oncelik = Array.isArray(belgeAlanlari) ? belgeAlanlari : [];
+  return siteCodes.map((sc) => {
+    const row = r.rows.find((x) => x.site_code === sc) || { site_code: sc };
+    const belgeler = [];
+    for (const alan of Object.keys(ETIKET)) {
+      const urls = String(row[alan] || "").split("\n").map((s) => s.trim()).filter(Boolean);
+      urls.forEach((url, i) => belgeler.push({ alan, etiket: ETIKET[alan] + (urls.length > 1 ? ` ${i + 1}` : ""), url, oncelikli: oncelik.includes(alan) }));
+    }
+    belgeler.sort((a, b) => Number(b.oncelikli) - Number(a.oncelikli));
+    return {
+      site_code: sc, site_type: row.site_type || null, bolge: row.bolge || null, il: row.il || null, project_code: row.project_code || null,
+      installation_actual_start_date: row.installation_actual_start_date || null, installation_actual_end_date: row.installation_actual_end_date || null,
+      qc_durum: row.qc_durum || null, general_note: row.general_note || null, survey_note: row.survey_note || null, belgeler,
+    };
+  });
+}
+async function isAtamaDetay(id) {
+  const r = await pool.query(`SELECT a.*, k.ad AS kategori_ad, k.ikon AS kategori_ikon, k.tekil_site, k.qc_yazar, k.belge_alanlari, k.baslangic_kolonu, k.bitis_kolonu
+    FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori WHERE a.id = $1`, [id]);
+  const row = r.rows[0];
+  if (!row) return null;
+  const g = await pool.query(`SELECT * FROM is_atama_gun WHERE is_atama_id = $1 ORDER BY tarih, personel_ad`, [id]);
+  row.gunler = g.rows;
+  row.sahalar = await isAtamaSahaBilgi(row.site_codes || [], row.belge_alanlari);
+  if (row.kategori === "CLEANUP") {
+    const c = await pool.query(`SELECT site_code, items, onay_durum, visit_date, completion_date FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [row.site_codes || []]);
+    row.cleanup = c.rows;
+  }
+  return row;
+}
+
+app.get("/is-atama/kategoriler", authMiddleware, async (req, res) => {
+  try {
+    await isAtamaTablolar();
+    const r = await pool.query(`SELECT * FROM is_kategori WHERE aktif ORDER BY sira, ad`);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get("/is-atama/yetkim", authMiddleware, (req, res) => res.json({ ok: true, yetkili: isAtamaYetkiliMi(req) }));
+// Atanabilir personel: aktif kullanıcılar + personel kartından bölge/unvan/ekip
+app.get("/is-atama/personel-listesi", authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT u.email, COALESCE(NULLIF(u.name,''), p.ad_soyad, u.email) AS ad, p.bolge, p.unvan, p.ekip_bilgisi, p.ekip_arac_plaka
+      FROM public.users u
+      LEFT JOIN LATERAL (SELECT ad_soyad, bolge, unvan, ekip_bilgisi, ekip_arac_plaka FROM personel WHERE LOWER(TRIM(email)) = LOWER(TRIM(u.email)) AND COALESCE(aktif,true) LIMIT 1) p ON true
+      WHERE COALESCE(u.is_active,true) AND u.email IS NOT NULL AND COALESCE(u.role,'') <> 'subcon'
+      ORDER BY p.bolge NULLS LAST, ad`);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Yeni iş ataması
+app.post("/is-atama", authMiddleware, async (req, res) => {
+  try {
+    if (!isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "İş atama yetkiniz yok" });
+    await isAtamaTablolar();
+    const { kategori, alt_tip, site_codes, personeller, plan_tarihi, atayan_not } = req.body || {};
+    const k = (await pool.query(`SELECT * FROM is_kategori WHERE kod = $1 AND aktif`, [String(kategori || "")])).rows[0];
+    if (!k) return res.status(400).json({ ok: false, error: "Geçersiz iş kategorisi" });
+    const sites = [...new Set((Array.isArray(site_codes) ? site_codes : [site_codes]).map(isAtamaSiteTemizle).filter(Boolean))];
+    if (!sites.length) return res.status(400).json({ ok: false, error: "En az bir saha seçin" });
+    if (k.tekil_site && sites.length > 1) return res.status(400).json({ ok: false, error: `${k.ad} için tek saha seçilmeli` });
+    const kisiler = (Array.isArray(personeller) ? personeller : [])
+      .map((p) => ({ email: String(p?.email || "").toLowerCase().trim(), ad: String(p?.ad || p?.email || "").trim() }))
+      .filter((p) => p.email);
+    if (!kisiler.length) return res.status(400).json({ ok: false, error: "En az bir personel seçin" });
+    const rp = await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS site_code, bolge FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [sites]);
+    const eksik = sites.filter((s) => !rp.rows.some((x) => x.site_code === s));
+    if (eksik.length) return res.status(400).json({ ok: false, error: `Rollout Data'da bulunamayan saha: ${eksik.join(", ")}` });
+    const bolge = rp.rows.find((x) => x.bolge)?.bolge || null;
+    const ins = await pool.query(
+      `INSERT INTO is_atama (kategori, alt_tip, site_codes, bolge, personeller, plan_tarihi, atayan_email, atayan_ad, atayan_not)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [k.kod, alt_tip || null, sites, bolge, JSON.stringify(kisiler), plan_tarihi || null,
+       String(req.user?.email || "").toLowerCase(), req.user?.name || null, atayan_not || null]);
+    const id = ins.rows[0].id;
+    // Clean Up: mevcut fotoğraf/onay akışı atanan_email üzerinden çalışır → kayıtları oluştur/bağla
+    if (k.kod === "CLEANUP") {
+      for (const sc of sites) {
+        await pool.query(
+          `INSERT INTO rollout_cleanup (site_code, atanan_email, atanan_ad, is_atama_id, notlar)
+           VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (site_code) DO UPDATE SET atanan_email = EXCLUDED.atanan_email, atanan_ad = EXCLUDED.atanan_ad,
+             is_atama_id = EXCLUDED.is_atama_id, notlar = COALESCE(NULLIF(rollout_cleanup.notlar,''), EXCLUDED.notlar), updated_at = NOW()`,
+          [sc, kisiler[0].email, kisiler[0].ad, id, atayan_not || null]);
+      }
+    }
+    res.json({ ok: true, row: await isAtamaDetay(id) });
+  } catch (e) { console.error("IS ATAMA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+// Panel listesi
+app.get("/is-atama/liste", authMiddleware, async (req, res) => {
+  try {
+    await isAtamaTablolar();
+    const { durum, kategori, site, gun } = req.query;
+    const where = []; const params = [];
+    if (durum === "ACIK") where.push(`a.durum NOT IN ('TAMAMLANDI','IPTAL')`);
+    else if (durum) { params.push(String(durum)); where.push(`a.durum = $${params.length}`); }
+    if (kategori) { params.push(String(kategori)); where.push(`a.kategori = $${params.length}`); }
+    if (site) { params.push(isAtamaSiteTemizle(site)); where.push(`$${params.length} = ANY(a.site_codes)`); }
+    if (gun) { params.push(String(gun)); where.push(`a.plan_tarihi = $${params.length}::date`); }
+    const r = await pool.query(`
+      SELECT a.*, k.ad AS kategori_ad, k.ikon AS kategori_ikon, k.qc_yazar,
+             (SELECT COUNT(DISTINCT tarih) FROM is_atama_gun g WHERE g.is_atama_id = a.id) AS gun_sayisi,
+             (SELECT COUNT(*) FROM is_atama_gun g WHERE g.is_atama_id = a.id) AS adam_gun
+      FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori
+      ${where.length ? "WHERE " + where.join(" AND ") : ""}
+      ORDER BY CASE a.durum WHEN 'BASLADI' THEN 0 WHEN 'DEVAM' THEN 1 WHEN 'ATANDI' THEN 2 WHEN 'QC_BEKLE' THEN 3 ELSE 4 END, a.plan_tarihi DESC NULLS LAST, a.id DESC
+      LIMIT 500`, params);
+    res.json({ ok: true, rows: r.rows, yetkili: isAtamaYetkiliMi(req) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Mobil: bana atanan işler (bekleyen + son 60 günün tamamlananları)
+app.get("/is-atama/benim", authMiddleware, async (req, res) => {
+  try {
+    await isAtamaTablolar();
+    const email = String(req.user?.email || "").toLowerCase();
+    const r = await pool.query(`
+      SELECT a.*, k.ad AS kategori_ad, k.ikon AS kategori_ikon, k.tekil_site, k.qc_yazar, k.belge_alanlari
+      FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori
+      WHERE a.personeller @> $1::jsonb
+        AND (a.durum NOT IN ('TAMAMLANDI','IPTAL') OR a.updated_at > NOW() - INTERVAL '60 days')
+      ORDER BY CASE a.durum WHEN 'BASLADI' THEN 0 WHEN 'DEVAM' THEN 1 WHEN 'ATANDI' THEN 2 WHEN 'QC_BEKLE' THEN 3 ELSE 4 END, a.plan_tarihi ASC NULLS LAST, a.id DESC`,
+      [JSON.stringify([{ email }])]);
+    const rows = [];
+    for (const row of r.rows) {
+      row.sahalar = await isAtamaSahaBilgi(row.site_codes || [], row.belge_alanlari);
+      if (row.kategori === "CLEANUP") {
+        const c = await pool.query(`SELECT site_code, items, onay_durum FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [row.site_codes || []]);
+        row.cleanup = c.rows;
+      }
+      rows.push(row);
+    }
+    const bekleyen = rows.filter((x) => !["TAMAMLANDI", "IPTAL"].includes(x.durum));
+    const tamamlanan = rows.filter((x) => ["TAMAMLANDI", "IPTAL"].includes(x.durum));
+    res.json({ ok: true, bekleyen, tamamlanan });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get("/is-atama/:id", authMiddleware, async (req, res) => {
+  try {
+    await isAtamaTablolar();
+    const row = await isAtamaDetay(Number(req.params.id));
+    if (!row) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    res.json({ ok: true, row });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// İşe Başla — atanan personelden herhangi biri (veya atama yetkilisi)
+app.post("/is-atama/:id/basla", authMiddleware, async (req, res) => {
+  try {
+    await isAtamaTablolar();
+    const id = Number(req.params.id);
+    const email = String(req.user?.email || "").toLowerCase();
+    const row = await isAtamaDetay(id);
+    if (!row) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    if (!isAtamaPersonelIcinde(row, email) && !isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Bu iş size atanmamış" });
+    if (["TAMAMLANDI", "IPTAL"].includes(row.durum)) return res.status(400).json({ ok: false, error: "Bu iş kapanmış" });
+    if (row.durum === "BASLADI") return res.json({ ok: true, row, bilgi: "Zaten başlamış" });
+    const ad = (row.personeller || []).find((p) => p.email === email)?.ad || req.user?.name || email;
+    await pool.query(`UPDATE is_atama SET durum = 'BASLADI', baslama_ts = COALESCE(baslama_ts, NOW()), updated_at = NOW() WHERE id = $1`, [id]);
+    await pool.query(
+      `INSERT INTO is_atama_gun (is_atama_id, tarih, personel_email, personel_ad, baslama, kaydeden_email)
+       VALUES ($1, CURRENT_DATE, $2, $3, NOW(), $2)
+       ON CONFLICT (is_atama_id, tarih, personel_email) DO UPDATE SET baslama = COALESCE(is_atama_gun.baslama, NOW())`, [id, email, ad]);
+    await isAtamaRolloutTarihYaz(row.site_codes || [], row.baslangic_kolonu);
+    if (row.kategori === "CLEANUP") {
+      await pool.query(`UPDATE rollout_cleanup SET visit_date = COALESCE(visit_date, CURRENT_DATE), updated_at = NOW() WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [row.site_codes || []]);
+    }
+    res.json({ ok: true, row: await isAtamaDetay(id) });
+  } catch (e) { console.error("IS BASLA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+// Çıkış Yap — günü kapatır; tamamlandıysa işi ve rollout bitiş kolonunu kapatır
+app.post("/is-atama/:id/bitir", authMiddleware, async (req, res) => {
+  try {
+    await isAtamaTablolar();
+    const id = Number(req.params.id);
+    const email = String(req.user?.email || "").toLowerCase();
+    const row = await isAtamaDetay(id);
+    if (!row) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    if (!isAtamaPersonelIcinde(row, email) && !isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Bu iş size atanmamış" });
+    if (["TAMAMLANDI", "IPTAL"].includes(row.durum)) return res.status(400).json({ ok: false, error: "Bu iş zaten kapanmış" });
+    const { tamamlandi, qc_tamamlandi, not: notu, calisanlar } = req.body || {};
+    const bitti = tamamlandi === true || tamamlandi === "true";
+    const qcSoruldu = bitti && row.qc_yazar;
+    const qcOk = qcSoruldu ? (qc_tamamlandi === true || qc_tamamlandi === "true") : null;
+    if (qcSoruldu && !qcOk && !String(notu || "").trim()) return res.status(400).json({ ok: false, error: "QC tamamlanmadıysa not zorunlu" });
+    // Bugün çalışanlar: seçilenler (yoksa çıkış yapan kişi); listedeki herkes atanmış olmalı
+    let kisiler = (Array.isArray(calisanlar) ? calisanlar : []).map((p) => ({ email: String(p?.email || p || "").toLowerCase().trim(), ad: p?.ad || null })).filter((p) => p.email);
+    if (!kisiler.length) kisiler = [{ email, ad: req.user?.name || null }];
+    if (!kisiler.some((p) => p.email === email) && isAtamaPersonelIcinde(row, email)) kisiler.push({ email, ad: req.user?.name || null });
+    for (const p of kisiler) {
+      const ad = p.ad || (row.personeller || []).find((x) => x.email === p.email)?.ad || p.email;
+      await pool.query(
+        `INSERT INTO is_atama_gun (is_atama_id, tarih, personel_email, personel_ad, baslama, bitis, notu, kaydeden_email)
+         VALUES ($1, CURRENT_DATE, $2, $3, NOW(), NOW(), $4, $5)
+         ON CONFLICT (is_atama_id, tarih, personel_email) DO UPDATE SET bitis = NOW(), notu = COALESCE($4, is_atama_gun.notu), kaydeden_email = $5`,
+        [id, p.email, ad, notu || null, email]);
+    }
+    let yeniDurum = "DEVAM";
+    if (bitti) yeniDurum = qcSoruldu && !qcOk ? "QC_BEKLE" : "TAMAMLANDI";
+    const eskiNot = String(row.kapanis_not || "");
+    const yeniNot = String(notu || "").trim() ? `${eskiNot ? eskiNot + "\n" : ""}${new Date().toLocaleDateString("tr-TR")} ${req.user?.name || email}: ${String(notu).trim()}` : eskiNot || null;
+    await pool.query(
+      `UPDATE is_atama SET durum = $2, bitis_ts = CASE WHEN $3::boolean THEN NOW() ELSE bitis_ts END,
+         qc_tamamlandi = CASE WHEN $3::boolean THEN $4::boolean ELSE qc_tamamlandi END, kapanis_not = $5, updated_at = NOW() WHERE id = $1`,
+      [id, yeniDurum, bitti, qcOk, yeniNot]);
+    if (bitti) {
+      await isAtamaRolloutTarihYaz(row.site_codes || [], row.bitis_kolonu);
+      if (row.qc_yazar && qcOk) {
+        await pool.query(`UPDATE rollout_progress SET qc_durum = 'OK', qc_closed_date = COALESCE(qc_closed_date, CURRENT_DATE), updated_at = NOW() WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [row.site_codes || []]);
+      }
+      // Clean Up'ta tamamlanma fotoğraf/onay akışından gelir; burada yalnız iş kaydı kapanır
+    }
+    res.json({ ok: true, row: await isAtamaDetay(id), durum: yeniDurum });
+  } catch (e) { console.error("IS BITIR ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+// Düzenle / iptal (atama yetkilisi)
+app.put("/is-atama/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "İş atama yetkiniz yok" });
+    await isAtamaTablolar();
+    const id = Number(req.params.id);
+    const { personeller, plan_tarihi, atayan_not, durum, alt_tip } = req.body || {};
+    const kisiler = Array.isArray(personeller)
+      ? personeller.map((p) => ({ email: String(p?.email || "").toLowerCase().trim(), ad: String(p?.ad || p?.email || "").trim() })).filter((p) => p.email)
+      : null;
+    const u = await pool.query(
+      `UPDATE is_atama SET
+         personeller = COALESCE($2::jsonb, personeller), plan_tarihi = COALESCE($3::date, plan_tarihi),
+         atayan_not = COALESCE($4, atayan_not), durum = COALESCE($5, durum), alt_tip = COALESCE($6, alt_tip), updated_at = NOW()
+       WHERE id = $1 RETURNING kategori, site_codes, personeller`,
+      [id, kisiler ? JSON.stringify(kisiler) : null, plan_tarihi || null, atayan_not ?? null, durum ? String(durum).toUpperCase() : null, alt_tip || null]);
+    if (!u.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    if (u.rows[0].kategori === "CLEANUP" && kisiler?.length) {
+      await pool.query(`UPDATE rollout_cleanup SET atanan_email = $2, atanan_ad = $3, updated_at = NOW() WHERE is_atama_id = $1`, [id, kisiler[0].email, kisiler[0].ad]);
+    }
+    res.json({ ok: true, row: await isAtamaDetay(id) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/is-atama/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "İş atama yetkiniz yok" });
+    await isAtamaTablolar();
+    await pool.query(`UPDATE rollout_cleanup SET is_atama_id = NULL WHERE is_atama_id = $1`, [Number(req.params.id)]);
+    await pool.query(`DELETE FROM is_atama WHERE id = $1`, [Number(req.params.id)]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // Huawei'ye gönderilecek önce/sonra fotoğraf raporu (PDF, pdfkit). Token header ya da ?token=
 app.get("/rollout/cleanup/:site/rapor.pdf", async (req, res) => {
   try {

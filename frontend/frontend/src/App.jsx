@@ -4612,12 +4612,22 @@ function HwYuklemeMerkezi({ odak, onRejected }) {
 function RolloutDashboard({ currentUser }) {
   const [belgeSecRow, setBelgeSecRow] = useState(null);
   const [showCleanupPanel, setShowCleanupPanel] = useState(false);
+  // İş Atama (Faz 1, 03.09.2026): yetkili görür; açık iş sayısı butonda
+  const [showIsAtama, setShowIsAtama] = useState(false);
+  const [isAtamaYetkili, setIsAtamaYetkili] = useState(false);
+  const [acikIsSayisi, setAcikIsSayisi] = useState(0);
+  const acikIsYukle = () => {
+    const h = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+    fetch(`${API_BASE}/is-atama/liste?durum=ACIK`, { headers: h }).then((r) => r.json())
+      .then((d) => { if (d?.ok) { setAcikIsSayisi((d.rows || []).length); setIsAtamaYetkili(!!d.yetkili); } }).catch(() => {});
+  };
+  useEffect(() => { acikIsYukle(); }, []); // eslint-disable-line
   useEffect(() => {
-    if (!showCleanupPanel) return;
-    const f = (e) => { if (e.key === "Escape") setShowCleanupPanel(false); };
+    if (!showCleanupPanel && !showIsAtama) return;
+    const f = (e) => { if (e.key === "Escape") { setShowCleanupPanel(false); setShowIsAtama(false); } };
     window.addEventListener("keydown", f);
     return () => window.removeEventListener("keydown", f);
-  }, [showCleanupPanel]);
+  }, [showCleanupPanel, showIsAtama]);
   const exportExcel = () => {
     const regionParam =
       selectedRegion && selectedRegion !== "Tüm Bölgeler"
@@ -5190,8 +5200,32 @@ function RolloutDashboard({ currentUser }) {
           >
             🧹 Clean Up{cleanupRows.length ? ` (${cleanupRows.length})` : ""}
           </button>
+          {/* İş Atama (Faz 1, 03.09.2026): kategori + saha + personel → mobil "Rollout · İşlerim" */}
+          {isAtamaYetkili && (
+            <button
+              type="button"
+              onClick={() => setShowIsAtama(true)}
+              title="Ekiplere iş ata / atamaları izle"
+              style={{
+                background: "#0b1a33",
+                color: "#fff",
+                border: "none",
+                padding: "10px 16px",
+                borderRadius: "8px",
+                marginLeft: "10px",
+                cursor: "pointer",
+                fontWeight: "700",
+                whiteSpace: "nowrap",
+              }}
+            >
+              🗂 İş Ata{acikIsSayisi ? ` (${acikIsSayisi})` : ""}
+            </button>
+          )}
         </div>
       </div>
+      {showIsAtama && (
+        <IsAtamaPanel rolloutRows={rows} onClose={() => setShowIsAtama(false)} onChanged={() => { acikIsYukle(); loadData(); }} />
+      )}
 
       <div className="tableWrap">
         <table>
@@ -32619,6 +32653,306 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
         </div>
       )}
     </div>
+  );
+}
+
+/* ═══ ROLLOUT İŞ ATAMA PANELİ (Faz 1, 03.09.2026) ═══════════════════════
+   Rollout Data → "İş Ata" butonu. Kategori (New Site Montaj, ENH, Survey, MW,
+   On Air, Power, Clean Up, PAC…) + saha(lar) + personel(ler) + plan tarihi + not.
+   Atanan iş personelin mobil "Rollout · İşlerim" listesine düşer; sahada
+   Başla/Bitir ile rollout_progress kolonları kendiliğinden dolar. */
+const IS_DURUM = {
+  ATANDI:     { txt: "Atandı",        bg: "#eff6ff", ink: "#1d4ed8" },
+  BASLADI:    { txt: "Sahada",        bg: "#ecfdf5", ink: "#047857" },
+  DEVAM:      { txt: "Devam ediyor",  bg: "#fffbeb", ink: "#b45309" },
+  QC_BEKLE:   { txt: "QC bekliyor",   bg: "#fef3c7", ink: "#92400e" },
+  TAMAMLANDI: { txt: "Tamamlandı",    bg: "#f1f5f9", ink: "#475569" },
+  IPTAL:      { txt: "İptal",         bg: "#fef2f2", ink: "#b91c1c" },
+};
+function IsAtamaPanel({ rolloutRows, onClose, onChanged }) {
+  const token = localStorage.getItem("token") || "";
+  const headers = { Authorization: `Bearer ${token}` };
+  const [sekme, setSekme] = useState("yeni");
+  const [kategoriler, setKategoriler] = useState([]);
+  const [personelListesi, setPersonelListesi] = useState([]);
+  const [atamalar, setAtamalar] = useState([]);
+  const [listeFiltre, setListeFiltre] = useState("ACIK");
+  const [acikDetay, setAcikDetay] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [mesaj, setMesaj] = useState("");
+
+  const yarin = () => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); };
+  const [form, setForm] = useState({ kategori: "", alt_tip: "", site_codes: [], personeller: [], plan_tarihi: yarin(), atayan_not: "" });
+  const [sahaAra, setSahaAra] = useState("");
+  const [personelAra, setPersonelAra] = useState("");
+  const kat = kategoriler.find((k) => k.kod === form.kategori) || null;
+
+  const listeYukle = async () => {
+    try {
+      const d = await fetch(`${API_BASE}/is-atama/liste?durum=${listeFiltre === "ACIK" ? "ACIK" : ""}`, { headers }).then((r) => r.json());
+      if (d?.ok) setAtamalar(d.rows || []);
+    } catch {}
+  };
+  useEffect(() => {
+    fetch(`${API_BASE}/is-atama/kategoriler`, { headers }).then((r) => r.json()).then((d) => { if (d?.ok) setKategoriler(d.rows || []); }).catch(() => {});
+    fetch(`${API_BASE}/is-atama/personel-listesi`, { headers }).then((r) => r.json()).then((d) => { if (d?.ok) setPersonelListesi(d.rows || []); }).catch(() => {});
+  }, []); // eslint-disable-line
+  useEffect(() => { listeYukle(); }, [listeFiltre]); // eslint-disable-line
+
+  // Saha arama: Rollout Data satırlarından tekil site_code
+  const sahaSonuclar = useMemo(() => {
+    const q = sahaAra.trim().toUpperCase();
+    if (q.length < 2) return [];
+    const gorulen = new Set(); const out = [];
+    for (const r of rolloutRows || []) {
+      const sc = String(r.site_code || "").toUpperCase();
+      if (!sc || gorulen.has(sc)) continue;
+      const hay = `${sc} ${r.il || ""} ${r.bolge || ""} ${r.site_type || ""} ${r.project_code || ""}`.toUpperCase();
+      if (hay.includes(q)) { gorulen.add(sc); out.push(r); }
+      if (out.length >= 25) break;
+    }
+    return out;
+  }, [sahaAra, rolloutRows]);
+  const sahaEkle = (sc) => {
+    const kod = String(sc || "").replace(/\s+/g, "").toUpperCase();
+    setForm((p) => ({ ...p, site_codes: kat?.tekil_site ? [kod] : (p.site_codes.includes(kod) ? p.site_codes : [...p.site_codes, kod]) }));
+    setSahaAra("");
+  };
+  const personelSonuclar = useMemo(() => {
+    const q = personelAra.trim().toLocaleLowerCase("tr-TR");
+    return personelListesi.filter((p) => !q || `${p.ad} ${p.email} ${p.bolge || ""} ${p.unvan || ""} ${p.ekip_bilgisi || ""}`.toLocaleLowerCase("tr-TR").includes(q));
+  }, [personelAra, personelListesi]);
+  const personelToggle = (p) => setForm((f) => {
+    const var_ = f.personeller.some((x) => x.email === p.email);
+    return { ...f, personeller: var_ ? f.personeller.filter((x) => x.email !== p.email) : [...f.personeller, { email: p.email, ad: p.ad }] };
+  });
+
+  const ata = async () => {
+    if (!form.kategori) return alert("İş kategorisi seçin");
+    if (!form.site_codes.length) return alert("En az bir saha seçin");
+    if (!form.personeller.length) return alert("En az bir personel seçin");
+    if (kat?.alt_tipler?.length && !form.alt_tip) return alert(`${kat.ad} için tip seçin (${kat.alt_tipler.join(", ")})`);
+    setYukleniyor(true);
+    try {
+      const d = await fetch(`${API_BASE}/is-atama`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(form) }).then((r) => r.json());
+      if (!d?.ok) throw new Error(d?.error || "Atama yapılamadı");
+      setMesaj(`✅ ${kat?.ad} · ${form.site_codes.join(", ")} → ${form.personeller.map((p) => p.ad).join(", ")} atandı`);
+      setForm({ kategori: form.kategori, alt_tip: "", site_codes: [], personeller: [], plan_tarihi: form.plan_tarihi, atayan_not: "" });
+      listeYukle(); onChanged && onChanged();
+      setTimeout(() => setMesaj(""), 6000);
+    } catch (e) { alert("Hata: " + e.message); }
+    finally { setYukleniyor(false); }
+  };
+  const durumDegistir = async (row, durum) => {
+    if (!window.confirm(durum === "IPTAL" ? `${row.site_codes.join(", ")} işi iptal edilsin mi?` : "Kaydedilsin mi?")) return;
+    try {
+      const d = await fetch(`${API_BASE}/is-atama/${row.id}`, { method: "PUT", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ durum }) }).then((r) => r.json());
+      if (!d?.ok) throw new Error(d?.error);
+      listeYukle(); onChanged && onChanged();
+    } catch (e) { alert("Hata: " + e.message); }
+  };
+  const sil = async (row) => {
+    if (!window.confirm(`${row.kategori_ad} · ${row.site_codes.join(", ")} kaydı silinsin mi? (gün kayıtları da silinir)`)) return;
+    try {
+      const d = await fetch(`${API_BASE}/is-atama/${row.id}`, { method: "DELETE", headers }).then((r) => r.json());
+      if (!d?.ok) throw new Error(d?.error);
+      listeYukle(); onChanged && onChanged();
+    } catch (e) { alert("Hata: " + e.message); }
+  };
+  const detayAc = async (row) => {
+    if (acikDetay?.id === row.id) return setAcikDetay(null);
+    try {
+      const d = await fetch(`${API_BASE}/is-atama/${row.id}`, { headers }).then((r) => r.json());
+      if (d?.ok) setAcikDetay(d.row);
+    } catch {}
+  };
+
+  const inSt = { padding:"9px 12px", border:"1.5px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box", background:"#fff" };
+  const lblSt = { fontSize:"11px", fontWeight:800, color:"#475569", letterSpacing:".06em", textTransform:"uppercase", marginBottom:"6px", display:"block" };
+  const chip = (bg, ink) => ({ display:"inline-flex", alignItems:"center", gap:"6px", background:bg, color:ink, borderRadius:"999px", padding:"4px 10px", fontSize:"12px", fontWeight:700 });
+  const fmtT = (v) => v ? new Date(v).toLocaleDateString("tr-TR") : "—";
+  const fmtS = (v) => v ? new Date(v).toLocaleTimeString("tr-TR", { hour:"2-digit", minute:"2-digit" }) : "—";
+  const sekmeBtn = (k, t) => (
+    <button type="button" onClick={() => setSekme(k)} style={{ padding:"8px 16px", border:"none", borderRadius:"8px", cursor:"pointer", fontWeight:800, fontSize:"13px", background: sekme === k ? "#fff" : "transparent", color: sekme === k ? "#0f172a" : "rgba(255,255,255,.85)" }}>{t}</button>
+  );
+
+  return createPortal(
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.55)", zIndex:9000, display:"flex", alignItems:"center", justifyContent:"center", padding:"18px" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background:"#f8fafc", borderRadius:"18px", width:"min(1240px, 96vw)", height:"92vh", display:"flex", flexDirection:"column", boxShadow:"0 30px 80px rgba(0,0,0,0.35)", overflow:"hidden" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 22px", background:"#0b1a33", color:"#fff", flexShrink:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"14px" }}>
+            <div style={{ fontWeight:800, fontSize:"16px" }}>🗂 Rollout İş Atama</div>
+            <div style={{ display:"flex", gap:"4px", background:"rgba(255,255,255,.12)", padding:"3px", borderRadius:"10px" }}>
+              {sekmeBtn("yeni", "Yeni Atama")}
+              {sekmeBtn("liste", `Atamalar (${atamalar.length})`)}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} title="Kapat (Esc)" style={{ width:"34px", height:"34px", borderRadius:"50%", border:"none", background:"rgba(255,255,255,0.18)", color:"#fff", fontSize:"20px", cursor:"pointer", lineHeight:1 }}>×</button>
+        </div>
+
+        {sekme === "yeni" && (
+          <div style={{ overflowY:"auto", padding:"18px 22px", flex:1 }}>
+            {mesaj && <div style={{ background:"#ecfdf5", border:"1px solid #a7f3d0", color:"#065f46", borderRadius:"10px", padding:"10px 14px", fontWeight:700, fontSize:"13px", marginBottom:"14px" }}>{mesaj}</div>}
+            <div style={{ display:"grid", gridTemplateColumns:"1.1fr 1fr", gap:"18px" }}>
+              <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+                <div>
+                  <label style={lblSt}>1 · İş kategorisi</label>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px" }}>
+                    {kategoriler.map((k) => {
+                      const secili = form.kategori === k.kod;
+                      return (
+                        <button key={k.kod} type="button" onClick={() => setForm((p) => ({ ...p, kategori: k.kod, alt_tip: "", site_codes: k.tekil_site ? p.site_codes.slice(0, 1) : p.site_codes }))}
+                          style={{ textAlign:"left", padding:"10px 12px", borderRadius:"10px", cursor:"pointer", border: secili ? "2px solid #1d4ed8" : "1.5px solid #e2e8f0", background: secili ? "#eff6ff" : "#fff" }}>
+                          <div style={{ fontSize:"18px" }}>{k.ikon}</div>
+                          <div style={{ fontSize:"12.5px", fontWeight:800, color:"#0f172a", marginTop:"2px" }}>{k.ad}</div>
+                          <div style={{ fontSize:"10.5px", color:"#64748b" }}>{k.tekil_site ? "tek saha" : "çoklu saha"}{k.qc_yazar ? " · QC sorar" : ""}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {kat?.alt_tipler?.length > 0 && (
+                    <div style={{ display:"flex", gap:"6px", marginTop:"10px", flexWrap:"wrap", alignItems:"center" }}>
+                      <span style={{ fontSize:"12px", fontWeight:700, color:"#475569" }}>Tip:</span>
+                      {kat.alt_tipler.map((t) => (
+                        <button key={t} type="button" onClick={() => setForm((p) => ({ ...p, alt_tip: t }))}
+                          style={{ padding:"5px 12px", borderRadius:"999px", cursor:"pointer", fontWeight:700, fontSize:"12px", border: form.alt_tip === t ? "2px solid #1d4ed8" : "1.5px solid #e2e8f0", background: form.alt_tip === t ? "#eff6ff" : "#fff", color:"#0f172a" }}>{t}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label style={lblSt}>2 · Saha {kat ? (kat.tekil_site ? "(tek)" : "(bir veya daha fazla)") : ""}</label>
+                  <div style={{ position:"relative" }}>
+                    <input style={inSt} value={sahaAra} onChange={(e) => setSahaAra(e.target.value)} placeholder="Site ID, il, bölge veya proje kodu yazın…"
+                      onKeyDown={(e) => { if (e.key === "Enter" && sahaSonuclar[0]) sahaEkle(sahaSonuclar[0].site_code); }} />
+                    {sahaSonuclar.length > 0 && (
+                      <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:"1px solid #e2e8f0", borderRadius:"10px", boxShadow:"0 12px 30px rgba(0,0,0,.12)", zIndex:5, maxHeight:"260px", overflowY:"auto", marginTop:"4px" }}>
+                        {sahaSonuclar.map((r) => (
+                          <div key={r.site_code} onClick={() => sahaEkle(r.site_code)} style={{ padding:"8px 12px", cursor:"pointer", display:"flex", justifyContent:"space-between", gap:"10px", borderBottom:"1px solid #f1f5f9", fontSize:"12.5px" }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "#f8fafc"} onMouseLeave={(e) => e.currentTarget.style.background = "#fff"}>
+                            <span style={{ fontWeight:800, fontFamily:"monospace" }}>{r.site_code}</span>
+                            <span style={{ color:"#64748b" }}>{[r.bolge, r.il, r.site_type, r.project_code].filter(Boolean).join(" · ")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"8px", minHeight:"26px" }}>
+                    {form.site_codes.map((sc) => (
+                      <span key={sc} style={chip("#0b1a33", "#fff")}>{sc}<span onClick={() => setForm((p) => ({ ...p, site_codes: p.site_codes.filter((x) => x !== sc) }))} style={{ cursor:"pointer", opacity:.8 }}>×</span></span>
+                    ))}
+                    {!form.site_codes.length && <span style={{ fontSize:"12px", color:"#94a3b8" }}>Henüz saha seçilmedi</span>}
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"180px 1fr", gap:"12px" }}>
+                  <div><label style={lblSt}>4 · Plan tarihi</label><input type="date" style={inSt} value={form.plan_tarihi} onChange={(e) => setForm((p) => ({ ...p, plan_tarihi: e.target.value }))} /></div>
+                  <div><label style={lblSt}>5 · Atayan notu</label><textarea style={{ ...inSt, minHeight:"64px", resize:"vertical" }} value={form.atayan_not} onChange={(e) => setForm((p) => ({ ...p, atayan_not: e.target.value }))} placeholder="Örn: Kafes kule, vinç yok. 3 sektör 20 cm offset götürün." /></div>
+                </div>
+                <button type="button" onClick={ata} disabled={yukleniyor}
+                  style={{ background:"#1d4ed8", color:"#fff", border:"none", borderRadius:"12px", padding:"14px", fontWeight:800, fontSize:"15px", cursor:"pointer", opacity: yukleniyor ? .6 : 1 }}>
+                  {yukleniyor ? "Atanıyor…" : `İş Ata${form.personeller.length ? ` → ${form.personeller.map((p) => p.ad.split(" ")[0]).join(", ")}` : ""}`}
+                </button>
+              </div>
+              <div>
+                <label style={lblSt}>3 · Personel {form.personeller.length ? `(${form.personeller.length} seçili)` : ""}</label>
+                <input style={inSt} value={personelAra} onChange={(e) => setPersonelAra(e.target.value)} placeholder="Ad, bölge, unvan veya ekip ara…" />
+                <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"8px" }}>
+                  {form.personeller.map((p) => (
+                    <span key={p.email} style={chip("#ecfdf5", "#047857")}>{p.ad}<span onClick={() => personelToggle(p)} style={{ cursor:"pointer", opacity:.8 }}>×</span></span>
+                  ))}
+                </div>
+                <div style={{ border:"1px solid #e2e8f0", borderRadius:"10px", background:"#fff", marginTop:"8px", maxHeight:"calc(92vh - 260px)", overflowY:"auto" }}>
+                  {personelSonuclar.map((p) => {
+                    const secili = form.personeller.some((x) => x.email === p.email);
+                    return (
+                      <label key={p.email} style={{ display:"flex", alignItems:"center", gap:"10px", padding:"8px 12px", borderBottom:"1px solid #f1f5f9", cursor:"pointer", background: secili ? "#f0fdf4" : "#fff" }}>
+                        <input type="checkbox" checked={secili} onChange={() => personelToggle(p)} style={{ width:"16px", height:"16px" }} />
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:"13px", fontWeight:700, color:"#0f172a" }}>{p.ad}</div>
+                          <div style={{ fontSize:"11px", color:"#64748b" }}>{[p.bolge, p.unvan, p.ekip_bilgisi].filter(Boolean).join(" · ") || p.email}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                  {!personelSonuclar.length && <div style={{ padding:"14px", fontSize:"12px", color:"#94a3b8" }}>Eşleşen personel yok</div>}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {sekme === "liste" && (
+          <div style={{ overflowY:"auto", padding:"14px 22px", flex:1 }}>
+            <div style={{ display:"flex", gap:"8px", marginBottom:"12px", alignItems:"center" }}>
+              {[["ACIK", "Açık işler"], ["TUMU", "Tümü"]].map(([k, t]) => (
+                <button key={k} type="button" onClick={() => setListeFiltre(k)} style={{ padding:"6px 14px", borderRadius:"999px", cursor:"pointer", fontWeight:700, fontSize:"12px", border: listeFiltre === k ? "2px solid #1d4ed8" : "1.5px solid #e2e8f0", background: listeFiltre === k ? "#eff6ff" : "#fff" }}>{t}</button>
+              ))}
+              <button type="button" onClick={listeYukle} style={{ marginLeft:"auto", padding:"6px 12px", borderRadius:"8px", border:"1.5px solid #e2e8f0", background:"#fff", cursor:"pointer", fontSize:"12px", fontWeight:700 }}>↻ Yenile</button>
+            </div>
+            <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:"12px", overflow:"hidden" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px" }}>
+                <thead><tr style={{ background:"#f8fafc" }}>
+                  {["Plan", "Kategori", "Saha", "Personel", "Durum", "Gün", "Not", ""].map((h) => <th key={h} style={{ textAlign:"left", padding:"9px 12px", fontSize:"11px", color:"#64748b", letterSpacing:".05em", textTransform:"uppercase", borderBottom:"1px solid #e2e8f0" }}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {atamalar.map((r) => {
+                    const d = IS_DURUM[r.durum] || IS_DURUM.ATANDI;
+                    const acik = acikDetay?.id === r.id;
+                    return (
+                      <React.Fragment key={r.id}>
+                        <tr onClick={() => detayAc(r)} style={{ cursor:"pointer", background: acik ? "#f8fafc" : "#fff" }}>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", whiteSpace:"nowrap" }}>{fmtT(r.plan_tarihi)}</td>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", fontWeight:700 }}>{r.kategori_ikon} {r.kategori_ad}{r.alt_tip ? <span style={{ color:"#64748b", fontWeight:500 }}> · {r.alt_tip}</span> : null}</td>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", fontFamily:"monospace", fontWeight:700 }}>{(r.site_codes || []).join(", ")}</td>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9" }}>{(r.personeller || []).map((p) => p.ad).join(", ")}</td>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9" }}><span style={chip(d.bg, d.ink)}>{d.txt}</span></td>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", textAlign:"center" }}>{Number(r.gun_sayisi || 0) || "—"}{Number(r.adam_gun || 0) > Number(r.gun_sayisi || 0) ? <span style={{ color:"#94a3b8", fontSize:"11px" }}> ({r.adam_gun} adam·gün)</span> : null}</td>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", color:"#475569", maxWidth:"260px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={r.atayan_not || ""}>{r.atayan_not || ""}</td>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", whiteSpace:"nowrap" }} onClick={(e) => e.stopPropagation()}>
+                            {!["TAMAMLANDI", "IPTAL"].includes(r.durum) && <button type="button" onClick={() => durumDegistir(r, "IPTAL")} style={{ background:"#fff7ed", color:"#b45309", border:"1px solid #fed7aa", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>İptal</button>}
+                            <button type="button" onClick={() => sil(r)} style={{ background:"#fef2f2", color:"#b91c1c", border:"1px solid #fecaca", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700 }}>Sil</button>
+                          </td>
+                        </tr>
+                        {acik && (
+                          <tr><td colSpan={8} style={{ padding:"10px 16px 14px", background:"#f8fafc", borderBottom:"1px solid #e2e8f0" }}>
+                            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"14px", fontSize:"12.5px" }}>
+                              <div>
+                                <div style={{ fontWeight:800, marginBottom:"6px" }}>Gün kayıtları</div>
+                                {(acikDetay.gunler || []).length ? acikDetay.gunler.map((g) => (
+                                  <div key={g.id} style={{ display:"flex", gap:"10px", padding:"4px 0", borderBottom:"1px dashed #e2e8f0" }}>
+                                    <span style={{ width:"84px" }}>{fmtT(g.tarih)}</span><span style={{ flex:1, fontWeight:600 }}>{g.personel_ad || g.personel_email}</span>
+                                    <span style={{ color:"#64748b" }}>{fmtS(g.baslama)} – {fmtS(g.bitis)}</span>
+                                  </div>
+                                )) : <div style={{ color:"#94a3b8" }}>Henüz başlanmadı</div>}
+                                {acikDetay.kapanis_not && <div style={{ marginTop:"8px", whiteSpace:"pre-wrap", background:"#fefce8", border:"1px solid #fef08a", borderRadius:"8px", padding:"8px 10px", color:"#713f12" }}>{acikDetay.kapanis_not}</div>}
+                              </div>
+                              <div>
+                                <div style={{ fontWeight:800, marginBottom:"6px" }}>Saha ve belgeler</div>
+                                {(acikDetay.sahalar || []).map((s) => (
+                                  <div key={s.site_code} style={{ marginBottom:"8px" }}>
+                                    <div style={{ fontFamily:"monospace", fontWeight:800 }}>{s.site_code} <span style={{ color:"#64748b", fontFamily:"inherit", fontWeight:500 }}>{[s.bolge, s.il, s.site_type].filter(Boolean).join(" · ")}</span></div>
+                                    <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"4px" }}>
+                                      {s.belgeler.length ? s.belgeler.map((b, i) => <a key={i} href={b.url} target="_blank" rel="noreferrer" style={{ ...chip(b.oncelikli ? "#eff6ff" : "#f1f5f9", b.oncelikli ? "#1d4ed8" : "#475569"), textDecoration:"none" }}>📄 {b.etiket}</a>) : <span style={{ color:"#94a3b8" }}>belge yok</span>}
+                                    </div>
+                                  </div>
+                                ))}
+                                <div style={{ color:"#64748b", marginTop:"6px" }}>Atayan: {acikDetay.atayan_ad || acikDetay.atayan_email} · {fmtT(acikDetay.created_at)}{acikDetay.baslama_ts ? ` · Başlama ${fmtT(acikDetay.baslama_ts)} ${fmtS(acikDetay.baslama_ts)}` : ""}{acikDetay.bitis_ts ? ` · Bitiş ${fmtT(acikDetay.bitis_ts)} ${fmtS(acikDetay.bitis_ts)}` : ""}{acikDetay.qc_tamamlandi != null ? ` · QC ${acikDetay.qc_tamamlandi ? "tamam" : "bekliyor"}` : ""}</div>
+                              </div>
+                            </div>
+                          </td></tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                  {!atamalar.length && <tr><td colSpan={8} style={{ padding:"24px", textAlign:"center", color:"#94a3b8" }}>Kayıt yok</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
   );
 }
 
