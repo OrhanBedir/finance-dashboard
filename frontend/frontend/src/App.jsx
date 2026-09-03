@@ -15827,6 +15827,20 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
   });
   const [hrPersonelFilter, setHrPersonelFilter] = useState("");
+  // Firma filtresi (03.09.2026, Orhan): maaş/personel listesinde Şimşek ve taşeron (AHY vb.)
+  // personeli birlikte görünsün, firma rozetiyle ayrılsın. "TUMU" | "simsek" | "taseron"
+  const [hrFirmaFiltre, setHrFirmaFiltre] = useState("TUMU");
+  const firmaUygun = (p) => {
+    const tip = (p?.firma_tipi || "simsek") === "simsek" ? "simsek" : "taseron";
+    return hrFirmaFiltre === "TUMU" || hrFirmaFiltre === tip;
+  };
+  const FirmaRozet = ({ p, kucuk }) => {
+    const taseron = (p?.firma_tipi || "simsek") !== "simsek";
+    const ad = taseron ? (p.alt_yuklenici || "Taşeron") : "Şimşek";
+    return (
+      <span title={taseron ? "Taşeron personeli" : "Şimşek kadrosu"} style={{ display:"inline-block", marginLeft:"6px", padding: kucuk ? "1px 6px" : "2px 8px", borderRadius:"999px", fontSize: kucuk ? "10px" : "11px", fontWeight:800, letterSpacing:".02em", background: taseron ? "#f3e8ff" : "#eff6ff", color: taseron ? "#6b21a8" : "#1d4ed8", verticalAlign:"middle" }}>{ad}</span>
+    );
+  };
   const [hrSearchText, setHrSearchText]         = useState("");
   const [hrSearchOpen, setHrSearchOpen]         = useState(false);
   const [puantajData, setPuantajData] = useState([]);
@@ -15905,7 +15919,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   };
   // Seçili ayda istihdamda mı? (ayrılan personel ayrıldığı aya kadar puantajda görünür)
   const puantajIstihdam = (p) => {
-    if ((p.firma_tipi || "simsek") !== "simsek") return false;
+    if (!firmaUygun(p)) return false;
     const [py, pm] = puantajAy.split("-");
     const mStart = `${puantajAy}-01`;
     const mEnd = `${puantajAy}-${String(new Date(Number(py), Number(pm), 0).getDate()).padStart(2, "0")}`;
@@ -16775,7 +16789,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     👤 Personel Listesi
                     <span style={{ marginLeft:"10px", fontSize:"13px", fontWeight:500, color:"#6b7280", background:"#f3f4f6", borderRadius:"20px", padding:"2px 10px" }}>
                       {/* Alttaki kart listesiyle aynı küme: aktif Şimşek kadrosu */}
-                      {personelList.filter(p=>(p.firma_tipi||"simsek")==="simsek" && p.aktif).length} aktif
+                      {personelList.filter(p=>firmaUygun(p) && p.aktif).length} aktif
                     </span>
                   </h2>
                   {/* Tam ay tahmini bütçe + an itibariyle — alt alta, aynı format */}
@@ -16964,6 +16978,13 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               {["01","02","03","04","05","06","07","08","09","10","11","12"].map((m,i)=>(
                                 <option key={m} value={m}>{["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][i]}</option>
                               ))}
+                            </select>
+                            {/* Firma filtresi (03.09.2026): Tümü / Şimşek / Taşeron */}
+                            <select value={hrFirmaFiltre} onChange={e=>setHrFirmaFiltre(e.target.value)} title="Firma: Şimşek kadrosu / taşeron personeli"
+                              style={{ padding:"5px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"12px", background:"#fff", color:"#1f2937", fontWeight:600, cursor:"pointer" }}>
+                              <option value="TUMU">🏢 Tümü</option>
+                              <option value="simsek">Şimşek</option>
+                              <option value="taseron">Taşeron (AHY vb.)</option>
                             </select>
                             {/* Arama + dropdown */}
                             <div style={{ position:"relative", minWidth:"180px" }}>
@@ -17162,7 +17183,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               <tbody>
                                 {perRows.map((p,i)=>(
                                   <tr key={p.id} style={{ background: i%2===0?"#fff":"#f9fafb" }}>
-                                    <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}</td>
+                                    <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}<FirmaRozet p={p} kucuk /></td>
                                     <td style={{ padding:"7px 12px", color:"#6b7280", whiteSpace:"nowrap" }}>{p.unvan||"-"}</td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color:"#0369a1", fontWeight:600 }}
                                       title="Aylık net maaş (tam ay)">₺{Number(p.net_maas||0).toLocaleString("tr-TR")}</td>
@@ -17643,13 +17664,13 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       onClick={()=>setPersonelListeModal(true)}>👥 Personel Listesi & Excel</button>
                   </div>
                 )}
-                {personelList.filter(p => (p.firma_tipi||"simsek")==="simsek" && (!hrPersonelFilter || String(p.id) === String(hrPersonelFilter))).map(p => (
+                {personelList.filter(p => firmaUygun(p) && (!hrPersonelFilter || String(p.id) === String(hrPersonelFilter))).map(p => (
                   <div key={p.id} style={{ background:"#fff", borderRadius:"14px", padding:"16px 20px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"grid", gridTemplateColumns:"44px 1fr auto auto auto", alignItems:"center", gap:"16px", opacity: p.aktif?1:0.6 }}>
                     <div style={{ width:44, height:44, borderRadius:"12px", background: p.aktif?"linear-gradient(135deg,#60a5fa,#3b82f6)":"#e5e7eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"18px", fontWeight:700, color:"#fff" }}>
                       {p.ad_soyad.charAt(0)}
                     </div>
                     <div>
-                      <div style={{ fontWeight:700, fontSize:"15px" }}>{p.ad_soyad}</div>
+                      <div style={{ fontWeight:700, fontSize:"15px" }}>{p.ad_soyad}<FirmaRozet p={p} kucuk /></div>
                       <div style={{ fontSize:"12px", color:"#9ca3af" }}>{p.unvan} {p.bolge && `· ${p.bolge}`}</div>
                       {!_maasGizli && <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"2px" }}>Net: <b>₺{Number(p.net_maas||0).toLocaleString("tr-TR")}</b> · Banka: ₺{Number(p.bankadan_gosterilen||0).toLocaleString("tr-TR")} · Elden: ₺{Number(p.elden_verilen||0).toLocaleString("tr-TR")}</div>}
                     </div>
@@ -17673,7 +17694,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       {personelListeModal && (() => {
         const fmtT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "—";
         const liste = personelList
-          .filter(p => p.aktif && (p.firma_tipi || "simsek") === "simsek") // yalnız kendi kadromuz — taşeron ekip kayıtları hariç
+          .filter(p => p.aktif && firmaUygun(p)) // firma filtresine göre (Tümü / Şimşek / Taşeron)
           .slice()
           .sort((x, y) => String(x.ad_soyad||"").localeCompare(String(y.ad_soyad||""), "tr"));
         const thL = { padding: "9px 12px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#fff", background: "#1e3a5f", whiteSpace: "nowrap" };
