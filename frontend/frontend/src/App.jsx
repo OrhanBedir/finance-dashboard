@@ -32173,37 +32173,87 @@ function RolloutSummaryCard({ rows, regionFilter, enhFilter }) {
   const enhLabel =
     enhFilter === "ABONE" ? "Abone" : enhFilter === "SUZME" ? "Süzme" : "Abone + Süzme";
 
+  // Yatay satır tasarımı (03.09.2026, Finans "Tahsilat & Fatura Özeti" ile aynı dil):
+  // solda ikon + aşama adı + alt açıklama, ortada aşama rengiyle dolan çubuk
+  // (ince koyu çizgi = bir önceki aşamanın oranı, huni görünümü), sağda
+  // tamamlanan sayı, bekleyen rozeti ve yüzde.
+  const RENK = {
+    "Malzeme":        "linear-gradient(90deg,#6366f1,#818cf8)",
+    "Montaj Başladı": "linear-gradient(90deg,#3b82f6,#60a5fa)",
+    "Montaj Bitti":   "linear-gradient(90deg,#0ea5e9,#38bdf8)",
+    "QC":             "linear-gradient(90deg,#f59e0b,#fbbf24)",
+    "Acceptance":     "linear-gradient(90deg,#10b981,#34d399)",
+    "ENH Proje":      "linear-gradient(90deg,#6366f1,#818cf8)",
+    "ENH Montaj":     "linear-gradient(90deg,#3b82f6,#60a5fa)",
+    "Power":          "linear-gradient(90deg,#f59e0b,#fbbf24)",
+    "Abonelik":       "linear-gradient(90deg,#0ea5e9,#38bdf8)",
+    "Süzme":          "linear-gradient(90deg,#06b6d4,#22d3ee)",
+    "ENH QC":         "linear-gradient(90deg,#10b981,#34d399)",
+  };
+  const IKON_BG = {
+    "Malzeme": "#eef2ff", "Montaj Başladı": "#eff6ff", "Montaj Bitti": "#f0f9ff", "QC": "#fffbeb", "Acceptance": "#ecfdf5",
+    "ENH Proje": "#eef2ff", "ENH Montaj": "#eff6ff", "Power": "#fffbeb", "Abonelik": "#f0f9ff", "Süzme": "#ecfeff", "ENH QC": "#ecfdf5",
+  };
+  const ACIKLAMA = {
+    "Malzeme": "Sahaya malzeme ulaştı", "Montaj Başladı": "Ekip sahada çalışmaya başladı", "Montaj Bitti": "Kurulum tamamlandı",
+    "QC": "Huawei kalite kontrolü kapandı", "Acceptance": "PAC / kabul tamamlandı",
+    "ENH Proje": "ENH projesi hazır", "ENH Montaj": "ENH kurulumu tamamlandı", "Power": "Enerji bağlandı",
+    "Abonelik": "Abonelik tamamlandı", "Süzme": "Süzme yapıldı", "ENH QC": "ENH kalite kontrolü kapandı",
+  };
+  const hesap = items.map((it) => {
+    const total = it.kapsam.length;
+    const done = it.kapsam.filter(it.done).length;
+    return { ...it, total, done, bekleyen: total - done, pct: total > 0 ? Math.round((done / total) * 100) : 0 };
+  });
+  const sonAsama = hesap[hesap.length - 1];
+
   return (
-    <div style={{ background: "#fff", borderRadius: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.08)", padding: "18px 22px", margin: "12px 0 4px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
-        <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1f2937" }}>
-          📊 {regionTitle} — {isEnhMode ? `${enhLabel} Sahaları (ENH)` : "Genel Durum"}
-        </h3>
-        <span style={{ marginLeft: "auto", background: "#1e293b", color: "#fff", borderRadius: "999px", padding: "5px 14px", fontSize: "14px", fontWeight: 700 }}>
-          {rows.length} saha
-        </span>
+    <div style={{ background: "#fff", borderRadius: "12px", border: "1px solid #e2e8f0", margin: "12px 0 4px", overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", padding: "14px 20px 11px", borderBottom: "1px solid #f1f5f9" }}>
+        <div>
+          <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a" }}>{regionTitle} — {isEnhMode ? `${enhLabel} Sahaları (ENH)` : "Genel Durum"}</div>
+          <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>Aşama bazında ilerleme · {new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" })}</div>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
+          {sonAsama && sonAsama.total > 0 && (
+            <span style={{ fontSize: "11px", color: "#64748b" }}>{sonAsama.label} <b style={{ color: "#334155" }}>%{sonAsama.pct}</b></span>
+          )}
+          <span style={{ background: "#0b1a33", color: "#fff", borderRadius: "999px", padding: "5px 14px", fontSize: "13px", fontWeight: 700 }}>{rows.length} saha</span>
+        </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px" }}>
-        {items.map((it) => {
-          const total = it.kapsam.length;
-          const done = it.kapsam.filter(it.done).length;
-          const bekleyen = total - done;
-          const pctNum = total > 0 ? Math.round((done / total) * 100) : 0;
+      <div style={{ padding: "2px 20px 4px" }}>
+        {hesap.map((it, i) => {
+          const onceki = i > 0 ? hesap[i - 1] : null;
+          const tamam = it.pct >= 100 && it.total > 0;
           return (
-            <div key={it.label} style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "10px 12px" }}>
-              <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "6px" }}>
-                {it.icon} {it.label}
-                {total !== rows.length && (
-                  <span style={{ fontWeight: 500, color: "#94a3b8" }}> ({total} saha)</span>
-                )}
+            <div key={it.label} style={{ display: "grid", gridTemplateColumns: "minmax(190px,230px) 1fr minmax(170px,210px)", gap: "20px", alignItems: "center", padding: "11px 0", borderBottom: i < hesap.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+              <div style={{ display: "flex", gap: "11px", alignItems: "center", minWidth: 0 }}>
+                <div style={{ width: "36px", height: "36px", borderRadius: "10px", background: IKON_BG[it.label] || "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flex: "none" }}>{it.icon}</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>{it.label}{it.total !== rows.length ? <span style={{ fontWeight: 500, color: "#94a3b8" }}> · {it.total} saha</span> : null}</div>
+                  <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>{ACIKLAMA[it.label] || ""}</div>
+                </div>
               </div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
-                <span style={{ fontSize: "18px", fontWeight: 800, color: "#16a34a" }}>✅ {done}</span>
-                <span style={{ fontSize: "13px", fontWeight: 700, color: bekleyen > 0 ? "#d97706" : "#94a3b8" }}>⏳ {bekleyen}</span>
-                <span style={{ marginLeft: "auto", fontSize: "12px", fontWeight: 700, color: "#64748b" }}>{pctNum}%</span>
+              <div style={{ position: "relative", minWidth: 0 }}>
+                <div style={{ height: "13px", borderRadius: "7px", background: "#eef2f7", overflow: "hidden", position: "relative" }}>
+                  <div style={{ height: "100%", borderRadius: "7px", width: `${Math.max(it.done > 0 ? 2 : 0, it.pct)}%`, background: tamam ? "linear-gradient(90deg,#16a34a,#22c55e)" : (RENK[it.label] || "linear-gradient(90deg,#3b82f6,#60a5fa)"), transition: "width .5s ease" }} />
+                  {onceki && onceki.pct > it.pct && (
+                    <div title={`${onceki.label}: %${onceki.pct}`} style={{ position: "absolute", top: "-4px", bottom: "-4px", left: `${onceki.pct}%`, width: "2px", background: "#334155", opacity: .45, borderRadius: "1px", transform: "translateX(-1px)" }} />
+                  )}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b", marginTop: "5px", gap: "10px" }}>
+                  <span>{it.total > 0 ? <>{it.total} sahanın <b style={{ color: "#334155", fontWeight: 600 }}>{it.done}</b>'i tamamlandı</> : "Kapsamda saha yok"}</span>
+                  {onceki && onceki.done > 0 && <span style={{ whiteSpace: "nowrap" }}>{onceki.label} olanın <b style={{ color: "#334155", fontWeight: 600 }}>%{Math.round((it.done / onceki.done) * 100)}</b>'i</span>}
+                </div>
               </div>
-              <div style={{ height: "5px", background: "#e5e7eb", borderRadius: "999px", marginTop: "7px", overflow: "hidden" }}>
-                <div style={{ width: `${pctNum}%`, height: "100%", background: pctNum === 100 ? "#16a34a" : "#3b82f6", borderRadius: "999px" }} />
+              <div style={{ textAlign: "right" }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "flex-end", gap: "8px" }}>
+                  <span style={{ fontSize: "21px", fontWeight: 800, color: tamam ? "#16a34a" : "#0f172a", letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums" }}>{it.done}</span>
+                  <span style={{ fontSize: "12px", fontWeight: 700, color: "#94a3b8" }}>%{it.pct}</span>
+                </div>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "999px", marginTop: "4px", background: it.bekleyen > 0 ? "#fffbeb" : "#ecfdf5", color: it.bekleyen > 0 ? "#b45309" : "#047857", whiteSpace: "nowrap" }}>
+                  {it.bekleyen > 0 ? `⏳ ${it.bekleyen} bekliyor` : "✓ Tamamı bitti"}
+                </span>
               </div>
             </div>
           );
