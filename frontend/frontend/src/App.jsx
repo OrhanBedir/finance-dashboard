@@ -4617,7 +4617,11 @@ function RolloutDashboard({ currentUser }) {
   const [showCleanupPanel, setShowCleanupPanel] = useState(false);
   // İş Atama (Faz 1, 03.09.2026): yetkili görür; açık iş sayısı butonda
   const [showIsAtama, setShowIsAtama] = useState(false);
+  const [isAtamaBaslangic, setIsAtamaBaslangic] = useState(null); // iş kolu görünümünden ön dolu atama
   const [isAtamaYetkili, setIsAtamaYetkili] = useState(false);
+  // İş kolu görünümü (03.09.2026): NS sahalarda saha × iş kolu; filtre seçiliyse liste modu
+  const [isKoluFilter, setIsKoluFilter] = useState("ALL");
+  const [isKoluYenile, setIsKoluYenile] = useState(0);
   const [acikIsSayisi, setAcikIsSayisi] = useState(0);
   const acikIsYukle = () => {
     const h = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
@@ -5126,6 +5130,21 @@ function RolloutDashboard({ currentUser }) {
 
         <select
           className="select"
+          value={isKoluFilter}
+          onChange={(e) => setIsKoluFilter(e.target.value)}
+          title="İş kolu: Standalone sahaların Huawei QC görev başlıkları"
+        >
+          <option value="ALL">İş kolu (Tümü)</option>
+          <option value="GIZLEME">🧱 Gizleme</option>
+          <option value="TRS">📡 TRS Quality CheckList</option>
+          <option value="GPS">🛰 DSS-GPS Readiness</option>
+          <option value="NS_AI">🗼 STANDALONE AI</option>
+          <option value="ONE_BAND">📶 LTE&amp;U900 Kontrol</option>
+          <option value="ENH">⚡ AG OG Enerji</option>
+        </select>
+
+        <select
+          className="select"
           value={enhFilter}
           onChange={(e) => setEnhFilter(e.target.value)}
         >
@@ -5227,10 +5246,25 @@ function RolloutDashboard({ currentUser }) {
         </div>
       </div>
       {showIsAtama && (
-        <IsAtamaPanel rolloutRows={rows} onClose={() => setShowIsAtama(false)} onChanged={() => { acikIsYukle(); loadData(); }} />
+        <IsAtamaPanel rolloutRows={rows} baslangic={isAtamaBaslangic} onClose={() => { setShowIsAtama(false); setIsAtamaBaslangic(null); }} onChanged={() => { acikIsYukle(); loadData(); setIsKoluYenile((k) => k + 1); }} />
       )}
 
-      <div className="tableWrap">
+      {/* İş kolu görünümü (03.09.2026): Site ID yazılan NS saha → iş kolu butonları + Excel satırı;
+          site yok + iş kolu filtresi → bölgedeki tüm sahalar (atama listesi) */}
+      <IsKoluGorunumu
+        rows={rows}
+        search={search}
+        regionFilter={regionFilter}
+        isKoluFilter={isKoluFilter}
+        yenile={isKoluYenile}
+        onGuncelle={(site) => { setSelectedRolloutSite(site); setShowRolloutEntryModal(true); }}
+        onBelgeler={(row) => setBelgeSecRow(row)}
+        onIsAta={(baslangic) => { setIsAtamaBaslangic(baslangic); setShowIsAtama(true); }}
+        onSiteAc={(site) => setSearch(site)}
+        atamaYetkili={isAtamaYetkili}
+      />
+
+      <div className="tableWrap" style={isKoluListeModu(rows, search, isKoluFilter) ? { display: "none" } : undefined}>
         <table>
           <thead>
             <tr>
@@ -32755,7 +32789,305 @@ const IS_DURUM = {
   TAMAMLANDI: { txt: "Tamamlandı",    bg: "#f1f5f9", ink: "#475569" },
   IPTAL:      { txt: "İptal",         bg: "#fef2f2", ink: "#b91c1c" },
 };
-function IsAtamaPanel({ rolloutRows, onClose, onChanged }) {
+/* ═══ ROLLOUT İŞ KOLU GÖRÜNÜMÜ (03.09.2026, Orhan onaylı taslak) ═══════════
+   Standalone (NS) sahalarda Huawei her iş için ayrı QC görevi açar. Site ID
+   yazılınca sahanın iş kolları buton olur; buton yalnız o işin Excel satırını
+   (grup şeridi: Milestone · Genel · RF · işe özel · Belgeler · Saha) gösterir.
+   Site yazılmadan iş kolu (+bölge) seçilirse bölgedeki tüm sahalar listelenir,
+   işaretlenip ekibe atanır; yanda ekip iş yükü. LTE/5G sahaları eski görünüm. */
+const nsSahaMiF = (r) => /_NS_/i.test(String(r?.site_code || "")) || /standalone/i.test(String(r?.site_type || ""));
+const isKoluTekSite = (rows, search) => {
+  const q = String(search || "").replace(/\s+/g, "").toUpperCase();
+  if (q.length < 6) return null;
+  const tam = rows.find((r) => String(r.site_code || "").toUpperCase() === q);
+  if (tam) return tam;
+  const es = rows.filter((r) => String(r.site_code || "").toUpperCase().includes(q));
+  const tekil = [...new Set(es.map((r) => String(r.site_code).toUpperCase()))];
+  return tekil.length === 1 ? es[0] : null;
+};
+const isKoluListeModu = (rows, search, isKoluFilter) => isKoluFilter !== "ALL" && !isKoluTekSite(rows, search);
+const IS_KOLU_HW_DURUM = ["", "To Be Executed", "Executing", "Closed", "Rejected"];
+function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGuncelle, onBelgeler, onIsAta, onSiteAc, atamaYetkili }) {
+  const headers = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const site = useMemo(() => isKoluTekSite(rows, search), [rows, search]);
+  const nsSite = site && nsSahaMiF(site) ? site : null;
+  const listeModu = isKoluFilter !== "ALL" && !site;
+  const [meta, setMeta] = useState([]);          // rollout_is_kolu satırları (site ya da liste)
+  const [tanim, setTanim] = useState({});
+  const [gizlemeTipleri, setGizlemeTipleri] = useState(["Baca gizleme", "Nonstandart", "Panjur", "Diğer"]);
+  const [secili, setSecili] = useState(null);    // seçili iş kolu (site modu)
+  const [secim, setSecim] = useState(new Set()); // liste modunda işaretli site'lar
+  const [isYuku, setIsYuku] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(false);
+
+  const yukleSite = async (sc) => {
+    setYukleniyor(true);
+    try {
+      const d = await fetch(`${API_BASE}/rollout/is-kolu/site/${encodeURIComponent(sc)}`, { headers }).then((r) => r.json());
+      if (d?.ok) { setMeta(d.rows || []); setTanim(d.tanim || {}); if (d.gizleme_tipleri) setGizlemeTipleri(d.gizleme_tipleri);
+        setSecili((p) => (d.rows || []).some((x) => x.is_kolu === p) ? p : ((d.rows || []).find((x) => x.is_kolu === (isKoluFilter !== "ALL" ? isKoluFilter : "NS_AI")) || d.rows?.[0])?.is_kolu || null); }
+    } catch {} finally { setYukleniyor(false); }
+  };
+  const yukleListe = async () => {
+    setYukleniyor(true);
+    try {
+      const d = await fetch(`${API_BASE}/rollout/is-kolu?is_kolu=${encodeURIComponent(isKoluFilter)}&bolge=${encodeURIComponent(regionFilter)}`, { headers }).then((r) => r.json());
+      if (d?.ok) { setMeta(d.rows || []); setTanim(d.tanim || {}); if (d.gizleme_tipleri) setGizlemeTipleri(d.gizleme_tipleri); }
+      const y = await fetch(`${API_BASE}/is-atama/is-yuku?gun=7&bolge=${encodeURIComponent(regionFilter)}`, { headers }).then((r) => r.json());
+      if (y?.ok) setIsYuku(y.rows || []);
+    } catch {} finally { setYukleniyor(false); }
+  };
+  useEffect(() => {
+    if (nsSite) yukleSite(nsSite.site_code);
+    else if (listeModu) { setSecim(new Set()); yukleListe(); }
+    else setMeta([]);
+  }, [nsSite?.site_code, listeModu, isKoluFilter, regionFilter, yenile]); // eslint-disable-line
+
+  const metaGuncelle = async (id, body) => {
+    try {
+      const d = await fetch(`${API_BASE}/rollout/is-kolu/${id}`, { method: "PUT", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+      if (!d?.ok) throw new Error(d?.error);
+      setMeta((p) => p.map((m) => (m.id === id ? { ...m, ...d.row } : m)));
+    } catch (e) { alert("Kaydedilemedi: " + e.message); }
+  };
+  const isKoluEkle = async (sc, kolu) => {
+    try {
+      const d = await fetch(`${API_BASE}/rollout/is-kolu`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ site_code: sc, is_kolu: kolu }) }).then((r) => r.json());
+      if (!d?.ok) throw new Error(d?.error);
+      yukleSite(sc); setSecili(kolu);
+    } catch (e) { alert("Eklenemedi: " + e.message); }
+  };
+
+  // ── yardımcılar ──
+  const has = (v) => { const t = String(v || "").trim(); return t !== "" && t !== "__NA__" && t !== "N/A"; };
+  const fd = (v) => (has(v) ? new Date(v).toLocaleDateString("tr-TR") : "");
+  const urls = (v) => String(v || "").split("\n").map((x) => x.trim()).filter(Boolean);
+  const qcOk = (r) => String(r?.qc_durum || "").toUpperCase() === "OK";
+  const ikon = (ok) => (ok ? "✅" : "⏳");
+  const hwPill = (st) => {
+    const s = st || "";
+    const bg = s === "Closed" ? ["#ecfdf5", "#047857"] : s === "Rejected" ? ["#fef2f2", "#b91c1c"] : s === "Executing" ? ["#fffbeb", "#b45309"] : ["#f1f5f9", "#64748b"];
+    return <span style={{ background: bg[0], color: bg[1], borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 800 }}>{s || "—"}</span>;
+  };
+  const belgeChips = (v, etiket) => { const u = urls(v); return u.length ? u.map((x, i) => <a key={x} href={x} target="_blank" rel="noreferrer" style={{ display: "inline-block", background: "#dbeafe", color: "#1d4ed8", borderRadius: "6px", padding: "2px 7px", fontSize: "11px", fontWeight: 700, textDecoration: "none", marginRight: "4px" }}>📄 {etiket}{u.length > 1 ? ` ${i + 1}` : ""}</a>) : <span style={{ color: "#cbd5e1" }}>—</span>; };
+  const atamaHucre = (m) => {
+    const a = m?.atama; if (!a) return [<span style={{ color: "#94a3b8" }}>Atanmadı</span>, "—"];
+    const d = IS_DURUM[a.durum] || IS_DURUM.ATANDI;
+    const kim = (a.personeller || []).map((p) => String(p.ad || "").split(" ")[0]).join(", ");
+    const son = a.son_hareket ? new Date(a.son_hareket).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : (a.plan_tarihi ? `Plan ${fd(a.plan_tarihi)}` : "");
+    return [<span style={{ background: d.bg, color: d.ink, borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 800 }}>{kim || d.txt}</span>, `${d.txt}${son ? " · " + son : ""}`];
+  };
+  const edit = (m, alan, tip = "text", secenekler = null) => {
+    const st = { border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 6px", fontSize: "12px", minWidth: tip === "number" ? "60px" : "120px", background: "#fff" };
+    if (secenekler) return <select defaultValue={m[alan] || ""} onChange={(e) => metaGuncelle(m.id, { [alan]: e.target.value })} style={st}>{secenekler.map((o) => <option key={o} value={o}>{o || "—"}</option>)}</select>;
+    return <input type={tip} defaultValue={m[alan] ?? ""} onBlur={(e) => { if (String(e.target.value) !== String(m[alan] ?? "")) metaGuncelle(m.id, { [alan]: e.target.value }); }} style={st} />;
+  };
+
+  // ── kolon grupları (Orhan listesi) ──
+  const G_MS = { ad: "MİLESTONE DURUM", renk: "#dcfce7", ink: "#166534", kolon: (r, m) => [
+    ["RF Rcv", ikon(String(r.malzeme_status || "").toUpperCase() === "OK" || has(r.installation_actual_start_date))],
+    ["RF Start", ikon(has(r.installation_actual_start_date) || has(r.installation_actual_end_date) || has(r.onair_date) || qcOk(r))],
+    ["RF Fin", ikon(has(r.installation_actual_end_date) || qcOk(r))],
+    ["QC Status", <span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(m.hw_status || (qcOk(r) ? "Closed" : ""))}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>],
+    ["Accept", ikon(has(r.pac_actual_end_date))],
+  ] };
+  const G_GENEL = { ad: "GENEL", renk: "#e8edf5", ink: "#334155", kolon: (r) => [["Bölge", r.bolge], ["Site Type", r.site_type], ["Site Fiziksel Tip", r.site_physical_type], ["Project Code", r.project_code], ["Site Code", <b style={{ fontFamily: "monospace" }}>{r.site_code}</b>], ["Malzeme Status", r.malzeme_status], ["İl", r.il]] };
+  const G_RF = { ad: "RF", renk: "#dbeafe", ink: "#1e40af", kolon: (r) => [["RF Subcon", r.rf_subcon], ["Plan Start", fd(r.plan_start_date)], ["Installation Start", fd(r.installation_actual_start_date)], ["Installation End", fd(r.installation_actual_end_date)], ["OnAir", fd(r.onair_date)], ["QC Closed", fd(r.qc_closed_date)], ["RF Not", r.rf_not || r.rf_note]] };
+  const G_GIZ = { ad: "GİZLEME KALEMİ", renk: "#f3e8ff", ink: "#6b21a8", kolon: (r, m) => [["Item Description", edit(m, "item_description")], ["Qty", edit(m, "qty", "number")], ["Gizleme Tipi", edit(m, "gizleme_tipi", "text", ["", ...gizlemeTipleri])]] };
+  const G_LOS = { ad: "LOS", renk: "#ccfbf1", ink: "#0f766e", kolon: (r, m) => [["LOS Subcon", r.los_subcon], ["LOS Plan", fd(r.los_plan_date)], ["LOS Actual End", fd(r.los_actual_end_date)], ["LOS Belgesi", belgeChips(r.los_belge_url, "LOS")], ["Karşı uç", edit(m, "karsi_uc")]] };
+  const G_NS = { ad: "TSS · TSSR · BTK · EMR · YSB · KABUL", renk: "#fef3c7", ink: "#92400e", kolon: (r) => [
+    ["TSS Plan", fd(r.tss_plan_start_date)], ["TSS Actual End", fd(r.tss_actual_end_date)], ["TSSR Sent", fd(r.tssr_sent_hw_date)], ["TSSR Approved", fd(r.tssr_approved_date)],
+    ["BTK Applied", fd(r.btk_applied_date)], ["BTK Approved", fd(r.btk_approved_date)], ["EMR", fd(r.emr_actual_end_date)], ["YSB", fd(r.ysb_actual_end_date)],
+    ["PAC Actual End", fd(r.pac_actual_end_date)], ["Hasarsızlık", has(r.hasarsizlik_tarihi) || urls(r.hasarsizlik_belge_url).length ? <span>✓ {fd(r.hasarsizlik_tarihi)} {belgeChips(r.hasarsizlik_belge_url, "Tutanak")}</span> : ""],
+    ["Memnuniyet", r.memnuniyet_ayni_belge ? "✓ aynı evrak" : (urls(r.memnuniyet_belge_url).length ? belgeChips(r.memnuniyet_belge_url, "Form") : "")], ["Kabul Dosyası", belgeChips(r.kabul_dosya_url, "Kabul")],
+  ] };
+  const G_ENH = { ad: "ENH", renk: "#dbeafe", ink: "#1e40af", kolon: (r) => [["ENH Tipi", r.enh_site_type], ["ENH Subcon", r.enh_subcon], ["ENH Plan Start", fd(r.enh_plan_start_date)], ["ENH Actual End", fd(r.enh_actual_end_date)], ["Abonelik", fd(r.abonelik_actual_end_date)], ["Süzme", fd(r.suzme_date)], ["ENH QC", fd(r.enh_qc_closed_date)], ["ENH Proje", has(r.enh_proje_hazir) ? r.enh_proje_hazir : belgeChips(r.enh_proje_belge_url, "Proje")]] };
+  const G_BELGE = { ad: "BELGELER", renk: "#e0f2fe", ink: "#075985", kolon: (r) => [["TSSR", belgeChips(r.tssr_belge_url, "TSSR")], ["BTK", belgeChips(r.btk_belge_url, "BTK")], ["EMR", belgeChips(r.emr_belge_url, "EMR")], ["YSB", belgeChips(r.ysb_belge_url, "YSB")], ["PAC", belgeChips(r.pac_belge_url, "PAC")]] };
+  const G_SAHA = { ad: "SAHA (MOBİL)", renk: "#f1f5f9", ink: "#334155", kolon: (r, m) => { const [a, b] = atamaHucre(m); return [["Atanan", a], ["Son hareket", b]]; } };
+  const GRUPLAR = {
+    GIZLEME: [G_MS, G_GENEL, G_RF, G_GIZ, G_BELGE, G_SAHA],
+    TRS: [G_MS, G_GENEL, G_RF, G_LOS, G_BELGE, G_SAHA],
+    GPS: [G_MS, G_GENEL, G_RF, G_BELGE, G_SAHA],
+    NS_AI: [G_MS, G_GENEL, G_RF, G_NS, G_BELGE, G_SAHA],
+    ONE_BAND: [G_MS, G_GENEL, G_RF, G_NS, G_BELGE, G_SAHA],
+    ENH: [G_MS, G_GENEL, G_ENH, G_BELGE, G_SAHA],
+  };
+  // liste modunda kısa kolon seti
+  const LISTE_KOLON = {
+    GIZLEME: (r, m) => [["Gizleme Tipi", m.gizleme_tipi], ["Qty", m.qty], ["Install Start", fd(r.installation_actual_start_date)], ["Install End", fd(r.installation_actual_end_date)]],
+    TRS: (r, m) => [["LOS Belgesi", belgeChips(r.los_belge_url, "LOS")], ["LOS Plan", fd(r.los_plan_date)], ["TRS Plan", fd(r.trs_plan_start_date)], ["TRS Bitiş", fd(r.trs_actual_end_date)], ["Karşı uç", m.karsi_uc]],
+    GPS: (r) => [["Install Start", fd(r.installation_actual_start_date)], ["Install End", fd(r.installation_actual_end_date)], ["OnAir", fd(r.onair_date)]],
+    NS_AI: (r) => [["Install Start", fd(r.installation_actual_start_date)], ["Install End", fd(r.installation_actual_end_date)], ["QC Closed", fd(r.qc_closed_date)], ["PAC", fd(r.pac_actual_end_date)]],
+    ONE_BAND: (r) => [["Install Start", fd(r.installation_actual_start_date)], ["Install End", fd(r.installation_actual_end_date)], ["QC Closed", fd(r.qc_closed_date)]],
+    ENH: (r) => [["ENH Tipi", r.enh_site_type], ["ENH Plan", fd(r.enh_plan_start_date)], ["ENH Bitiş", fd(r.enh_actual_end_date)], ["Abonelik", fd(r.abonelik_actual_end_date)]],
+  };
+  const rowBySite = useMemo(() => { const m = {}; rows.forEach((r) => { const k = String(r.site_code || "").toUpperCase(); if (!m[k]) m[k] = r; }); return m; }, [rows]);
+  const th = (t, extra = {}) => <th style={{ textAlign: "left", padding: "7px 10px", fontSize: "10.5px", color: "#64748b", letterSpacing: ".05em", textTransform: "uppercase", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", background: "#f8fafc", ...extra }}>{t}</th>;
+  const td = (v, extra = {}) => <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap", fontSize: "12.5px", ...extra }}>{v === "" || v === null || v === undefined ? <span style={{ color: "#cbd5e1" }}>—</span> : v}</td>;
+  const kolluTablo = (kolu, satirlar) => {
+    const gruplar = GRUPLAR[kolu] || GRUPLAR.NS_AI;
+    const ornek = satirlar[0]; const kolonlar = gruplar.map((g) => g.kolon(ornek.r, ornek.m));
+    return (
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ borderCollapse: "collapse", minWidth: "1400px", width: "100%" }}>
+          <thead>
+            <tr>
+              <th colSpan={2} style={{ background: "#f1f5f9", padding: "6px", fontSize: "11px", textAlign: "center", borderRight: "2px solid #fff" }}>✏️ / 📦</th>
+              {gruplar.map((g, i) => <th key={g.ad} colSpan={kolonlar[i].length} style={{ background: g.renk, color: g.ink, padding: "6px", fontSize: "11px", letterSpacing: ".06em", textAlign: "center", borderLeft: "2px solid #fff", borderRight: "2px solid #fff" }}>{g.ad}</th>)}
+            </tr>
+            <tr>{th("Güncelle")}{th("Belgeler")}{kolonlar.flat().map(([k], i) => <React.Fragment key={i}>{th(k)}</React.Fragment>)}</tr>
+          </thead>
+          <tbody>
+            {satirlar.map(({ r, m }) => (
+              <tr key={m.id}>
+                <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}><button type="button" onClick={() => onGuncelle(r.site_code)} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: "6px", padding: "4px 8px", cursor: "pointer" }}>✏️</button></td>
+                <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}><button type="button" onClick={() => onBelgeler(r)} style={{ background: "#0b1a33", color: "#fff", border: "none", borderRadius: "6px", padding: "4px 8px", cursor: "pointer" }}>📦</button></td>
+                {gruplar.flatMap((g) => g.kolon(r, m)).map(([k, v], i) => <React.Fragment key={i}>{td(v)}</React.Fragment>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  if (!nsSite && !listeModu) return null;
+
+  // ── MOD 1: tek NS saha ──
+  if (nsSite) {
+    const r = nsSite;
+    const kapali = meta.filter((m) => m.hw_status === "Closed").length, red = meta.filter((m) => m.hw_status === "Rejected").length;
+    const sec = meta.find((m) => m.is_kolu === secili) || null;
+    const eksikler = Object.keys(tanim).filter((k) => !meta.some((m) => m.is_kolu === k));
+    return (
+      <div style={{ margin: "12px 0 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "monospace", fontWeight: 900, fontSize: "16px" }}>{r.site_code}</span>
+          <span style={{ background: "#fdf4ff", color: "#7e22ce", borderRadius: "999px", padding: "3px 9px", fontSize: "11px", fontWeight: 800 }}>🗼 STANDALONE</span>
+          <span style={{ color: "#64748b", fontSize: "12px" }}>{[r.bolge, r.il, r.project_code, r.malzeme_status ? `Malzeme ${r.malzeme_status}` : null, r.rf_subcon ? `RF Subcon: ${r.rf_subcon}` : null].filter(Boolean).join(" · ")}</span>
+          <span style={{ marginLeft: "auto", color: "#64748b", fontSize: "12px" }}>İş kolu: {meta.length} · <b style={{ color: "#16a34a" }}>{kapali} Closed</b> · <b style={{ color: "#b45309" }}>{meta.length - kapali - red} açık</b>{red ? <> · <b style={{ color: "#b91c1c" }}>{red} Rejected</b></> : null}</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "8px", margin: "10px 0" }}>
+          {meta.map((m) => {
+            const on = secili === m.is_kolu; const st = m.hw_status === "Closed" ? "#16a34a" : m.hw_status === "Rejected" ? "#b91c1c" : m.hw_status === "Executing" ? "#d97706" : "#cbd5e1";
+            const a = m.atama;
+            return (
+              <button key={m.id} type="button" onClick={() => setSecili(m.is_kolu)} style={{ textAlign: "left", border: on ? "2px solid #1d4ed8" : "1.5px solid #e2e8f0", background: on ? "#eff6ff" : "#fff", borderRadius: "12px", padding: "10px 12px", cursor: "pointer", position: "relative" }}>
+                <span style={{ position: "absolute", top: "8px", right: "8px", width: "9px", height: "9px", borderRadius: "50%", background: st }} />
+                <div style={{ fontWeight: 800, fontSize: "12.5px" }}>{m.ikon} {m.ad}</div>
+                <div style={{ fontSize: "10.5px", color: "#64748b" }}>{m.aciklama} · {m.hw_status || "durum yok"}</div>
+                <div style={{ fontSize: "10.5px", fontWeight: 700, color: a ? "#1d4ed8" : "#94a3b8", marginTop: "3px" }}>{a ? `${(a.personeller || []).map((p) => String(p.ad || "").split(" ")[0]).join(", ")} · ${IS_DURUM[a.durum]?.txt || a.durum}` : "Atanmadı"}</div>
+              </button>
+            );
+          })}
+          {eksikler.length > 0 && (
+            <select defaultValue="" onChange={(e) => { if (e.target.value) isKoluEkle(r.site_code, e.target.value); e.target.value = ""; }} style={{ border: "1.5px dashed #cbd5e1", borderRadius: "12px", padding: "10px 12px", background: "#fff", color: "#64748b", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>
+              <option value="">＋ İş kolu ekle…</option>
+              {eksikler.map((k) => <option key={k} value={k}>{tanim[k]?.ikon} {tanim[k]?.ad}</option>)}
+            </select>
+          )}
+        </div>
+        {sec && (
+          <div style={{ border: "1px solid #e2e8f0", borderRadius: "12px", overflow: "hidden", background: "#fff" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", gap: "10px", flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 800, fontSize: "14px" }}>{sec.ikon} {sec.ad} — {sec.aciklama}</div>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                <button type="button" onClick={() => onGuncelle(r.site_code)} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>✏️ Güncelle</button>
+                <button type="button" onClick={() => onBelgeler(r)} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>📦 Belgeler</button>
+                {atamaYetkili && <button type="button" onClick={() => onIsAta({ kategori: sec.kategori, alt_tip: sec.is_kolu === "ONE_BAND" ? "One Band" : (sec.is_kolu === "NS_AI" ? "Standalone" : ""), site_codes: [r.site_code], atayan_not: sec.hw_status === "Rejected" && sec.notu ? `HW red: ${sec.notu}` : "" })} style={{ background: "#0b1a33", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>🗂 İş Ata</button>}
+                <input defaultValue={sec.notu || ""} placeholder="İş kolu notu (HW red gerekçesi vb.)" onBlur={(e) => { if (e.target.value !== (sec.notu || "")) metaGuncelle(sec.id, { notu: e.target.value }); }} style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", minWidth: "260px" }} />
+              </div>
+            </div>
+            {kolluTablo(sec.is_kolu, [{ r, m: sec }])}
+          </div>
+        )}
+        {yukleniyor && <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "6px" }}>Yükleniyor…</div>}
+      </div>
+    );
+  }
+
+  // ── MOD 2: iş kolu + bölge listesi ──
+  const t = tanim[isKoluFilter] || {};
+  const satirlar = meta.map((m) => ({ m, r: rowBySite[m.site_code] || { site_code: m.site_code } }));
+  const kapaliL = satirlar.filter((x) => x.m.hw_status === "Closed").length, redL = satirlar.filter((x) => x.m.hw_status === "Rejected").length;
+  const toggle = (sc) => setSecim((p) => { const n = new Set(p); n.has(sc) ? n.delete(sc) : n.add(sc); return n; });
+  const listeKolon = LISTE_KOLON[isKoluFilter] || LISTE_KOLON.NS_AI;
+  const ornekKolon = satirlar[0] ? listeKolon(satirlar[0].r, satirlar[0].m) : [];
+  const excel = () => {
+    const headersX = ["Site Code", "İl", "Bölge", "QC Status", ...ornekKolon.map(([k]) => k), "Atanan", "Durum"];
+    const dataX = satirlar.map(({ r, m }) => {
+      const a = m.atama; const kim = a ? (a.personeller || []).map((p) => p.ad).join(", ") : "";
+      const ozel = listeKolon(r, m).map(([, v]) => (typeof v === "string" || typeof v === "number" ? v : (v ? "var" : "")));
+      return [r.site_code, r.il || "", r.bolge || "", m.hw_status || "", ...ozel, kim, a ? (IS_DURUM[a.durum]?.txt || a.durum) : "Atanmadı"];
+    });
+    exportStandardExcel({ title: `${t.ad || isKoluFilter} — ${regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter}`, headers: headersX, rows: dataX, colWidths: headersX.map(() => 18), fileBase: `Rollout_${isKoluFilter}_${regionFilter}`, sheetName: "İş Kolu" });
+  };
+  const maxYuk = Math.max(1, ...isYuku.map((k) => k.tamamlanan + k.acik));
+  return (
+    <div style={{ margin: "12px 0 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", flexWrap: "wrap" }}>
+        <span style={{ background: "#f0fdfa", color: "#0f766e", borderRadius: "999px", padding: "3px 9px", fontSize: "12px", fontWeight: 800 }}>{t.ikon} {t.ad || isKoluFilter}</span>
+        <span style={{ color: "#64748b", fontSize: "12px" }}>{regionFilter === "ALL" ? "Tüm bölgeler" : regionFilter} · {satirlar.length} saha · <b style={{ color: "#b91c1c" }}>{redL} Rejected</b> · <b style={{ color: "#b45309" }}>{satirlar.length - kapaliL - redL} açık</b> · <b style={{ color: "#16a34a" }}>{kapaliL} Closed</b></span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: "8px", alignItems: "center" }}>
+          <button type="button" onClick={excel} style={{ background: "#2e7d32", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>Excel İndir</button>
+          {atamaYetkili && <button type="button" disabled={!secim.size} onClick={() => onIsAta({ kategori: t.kategori, alt_tip: isKoluFilter === "ONE_BAND" ? "One Band" : (isKoluFilter === "NS_AI" ? "Standalone" : ""), site_codes: [...secim] })} style={{ background: secim.size ? "#0b1a33" : "#cbd5e1", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 12px", fontSize: "12px", fontWeight: 800, cursor: secim.size ? "pointer" : "default" }}>🗂 Seçili {secim.size} sahayı ekibe ata</button>}
+        </span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "12px", marginTop: "10px", alignItems: "start" }}>
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: "12px", overflow: "auto", background: "#fff" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr>
+                <th style={{ background: "#f1f5f9", padding: "6px", fontSize: "11px" }} />
+                <th colSpan={3} style={{ background: "#e8edf5", color: "#334155", padding: "6px", fontSize: "11px", textAlign: "center", borderLeft: "2px solid #fff", borderRight: "2px solid #fff" }}>GENEL</th>
+                <th style={{ background: "#dcfce7", color: "#166534", padding: "6px", fontSize: "11px", textAlign: "center", borderRight: "2px solid #fff" }}>MİLESTONE</th>
+                <th colSpan={ornekKolon.length} style={{ background: "#fef3c7", color: "#92400e", padding: "6px", fontSize: "11px", textAlign: "center", borderRight: "2px solid #fff" }}>{t.ad}</th>
+                <th colSpan={2} style={{ background: "#f1f5f9", color: "#334155", padding: "6px", fontSize: "11px", textAlign: "center" }}>SAHA (MOBİL)</th>
+                <th style={{ background: "#f1f5f9" }} />
+              </tr>
+              <tr>{th("Seç")}{th("Site Code")}{th("İl")}{th("Bölge")}{th("QC Status")}{ornekKolon.map(([k], i) => <React.Fragment key={i}>{th(k)}</React.Fragment>)}{th("Atanan")}{th("Son hareket")}{th("")}</tr>
+            </thead>
+            <tbody>
+              {satirlar.map(({ r, m }) => {
+                const [a, b] = atamaHucre(m);
+                return (
+                  <tr key={m.id} style={{ background: secim.has(m.site_code) ? "#f8fafc" : "#fff" }}>
+                    <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}><input type="checkbox" checked={secim.has(m.site_code)} onChange={() => toggle(m.site_code)} /></td>
+                    {td(<b style={{ fontFamily: "monospace" }}>{m.site_code}</b>)}{td(r.il)}{td(r.bolge)}
+                    {td(<span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(m.hw_status)}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>)}
+                    {listeKolon(r, m).map(([, v], i) => <React.Fragment key={i}>{td(v)}</React.Fragment>)}
+                    {td(a)}{td(b, { color: "#64748b" })}
+                    {td(<button type="button" onClick={() => onSiteAc(m.site_code)} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "3px 8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>Aç</button>)}
+                  </tr>
+                );
+              })}
+              {!satirlar.length && <tr><td colSpan={9 + ornekKolon.length} style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>{yukleniyor ? "Yükleniyor…" : "Bu iş kolunda saha yok"}</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px", background: "#fff" }}>
+          <div style={{ fontWeight: 800, fontSize: "13px", marginBottom: "10px" }}>👥 Ekip iş yükü · son 7 gün{regionFilter !== "ALL" ? ` (${regionFilter})` : ""}</div>
+          {isYuku.length ? isYuku.slice(0, 12).map((k) => (
+            <div key={k.email} style={{ display: "grid", gridTemplateColumns: "110px 1fr 52px", gap: "8px", alignItems: "center", fontSize: "12px", marginBottom: "7px" }}>
+              <span title={k.email} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.ad}</span>
+              <div style={{ height: "9px", borderRadius: "5px", background: "#eef2f7", position: "relative", overflow: "hidden" }}>
+                <i style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${(k.tamamlanan / maxYuk) * 100}%`, background: "linear-gradient(90deg,#10b981,#34d399)" }} />
+                <em style={{ position: "absolute", left: `${(k.tamamlanan / maxYuk) * 100}%`, top: 0, bottom: 0, width: `${(k.acik / maxYuk) * 100}%`, background: "linear-gradient(90deg,#3b82f6,#60a5fa)" }} />
+              </div>
+              <span style={{ fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{k.tamamlanan} / {k.acik}</span>
+            </div>
+          )) : <div style={{ fontSize: "12px", color: "#94a3b8" }}>Henüz iş ataması yok</div>}
+          <div style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "flex", gap: "12px" }}><span><i style={{ display: "inline-block", width: 10, height: 10, background: "#10b981", borderRadius: 2, marginRight: 4, verticalAlign: -1 }} />Tamamlanan</span><span><i style={{ display: "inline-block", width: 10, height: 10, background: "#3b82f6", borderRadius: 2, marginRight: 4, verticalAlign: -1 }} />Açık</span><span>sayı = tamam / açık</span></div>
+          <div style={{ marginTop: "12px", background: "#fefce8", border: "1px solid #fef08a", borderRadius: "8px", padding: "8px 10px", color: "#713f12", fontSize: "12px" }}>
+            Saha işaretle → "Seçili sahayı ekibe ata". İş ekibin mobil <b>Rollout · İşlerim</b> listesine düşer; sahada Başla/Çıkış yapılınca buradaki tarihler ve durum güncellenir.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
   const token = localStorage.getItem("token") || "";
   const headers = { Authorization: `Bearer ${token}` };
   const [sekme, setSekme] = useState("yeni");
@@ -32768,7 +33100,7 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged }) {
   const [mesaj, setMesaj] = useState("");
 
   const yarin = () => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); };
-  const [form, setForm] = useState({ kategori: "", alt_tip: "", site_codes: [], personeller: [], plan_tarihi: yarin(), atayan_not: "" });
+  const [form, setForm] = useState({ kategori: baslangic?.kategori || "", alt_tip: baslangic?.alt_tip || "", site_codes: baslangic?.site_codes || [], personeller: [], plan_tarihi: yarin(), atayan_not: baslangic?.atayan_not || "" });
   const [sahaAra, setSahaAra] = useState("");
   const [personelAra, setPersonelAra] = useState("");
   const kat = kategoriler.find((k) => k.kod === form.kategori) || null;
@@ -32820,8 +33152,13 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged }) {
     if (kat?.alt_tipler?.length && !form.alt_tip) return alert(`${kat.ad} için tip seçin (${kat.alt_tipler.join(", ")})`);
     setYukleniyor(true);
     try {
-      const d = await fetch(`${API_BASE}/is-atama`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(form) }).then((r) => r.json());
-      if (!d?.ok) throw new Error(d?.error || "Atama yapılamadı");
+      // Tek sahalık kategoride birden çok saha seçildiyse (iş kolu liste modundan toplu atama) saha başına ayrı iş açılır
+      const paketler = kat?.tekil_site && form.site_codes.length > 1 ? form.site_codes.map((sc) => ({ ...form, site_codes: [sc] })) : [form];
+      let d = null;
+      for (const body of paketler) {
+        d = await fetch(`${API_BASE}/is-atama`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+        if (!d?.ok) throw new Error(d?.error || "Atama yapılamadı");
+      }
       setMesaj(`✅ ${kat?.ad} · ${form.site_codes.join(", ")} → ${form.personeller.map((p) => p.ad).join(", ")} atandı`);
       setForm({ kategori: form.kategori, alt_tip: "", site_codes: [], personeller: [], plan_tarihi: form.plan_tarihi, atayan_not: "" });
       listeYukle(); onChanged && onChanged();

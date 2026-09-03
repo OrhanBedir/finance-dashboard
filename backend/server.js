@@ -10166,7 +10166,7 @@ const IS_ATAMA_KOLON_LISTESI = new Set([
 ]);
 const IS_KATEGORI_SEED = [
   // kod, ad, ikon, tekil_site, baslangic_kolonu, bitis_kolonu, qc_yazar, belge_alanlari, alt_tipler, sira
-  ["NEW_SITE",     "New Site Montaj",         "🗼", true,  "installation_actual_start_date", "installation_actual_end_date", true,  ["tssr_belge_url","ysb_belge_url","btk_belge_url"], ["Standalone","LTE","NR700","NR3500","TRP"], 1],
+  ["NEW_SITE",     "New Site Montaj",         "🗼", true,  "installation_actual_start_date", "installation_actual_end_date", true,  ["tssr_belge_url","ysb_belge_url","btk_belge_url"], ["Standalone","LTE","NR700","NR3500","TRP","One Band"], 1],
   ["ENH_MONTAJ",   "ENH Montaj",              "⚡", true,  "enh_plan_start_date",            "enh_actual_end_date",          false, ["enh_proje_belge_url","tssr_belge_url"], [], 2],
   ["ENH_ABONELIK", "ENH Abonelik",            "📄", false, null,                             "abonelik_actual_end_date",     false, ["enh_proje_belge_url"], [], 3],
   ["SURVEY",       "Site Survey / TSS",       "📐", false, "tss_plan_start_date",            "tss_actual_end_date",          false, ["los_belge_url","ysb_belge_url"], [], 4],
@@ -10175,6 +10175,9 @@ const IS_KATEGORI_SEED = [
   ["POWER",        "Enerji / Power",          "🔌", true,  "power_plan_start_date",          "power_actual_end_date",        false, ["tssr_belge_url"], [], 7],
   ["CLEANUP",      "Clean Up",                "🧹", false, null,                             null,                           false, [], [], 8],
   ["PAC",          "Kabul Ziyareti / PAC",    "✅", false, "pac_plan_date",                  "pac_actual_end_date",          false, ["pac_belge_url"], [], 9],
+  // Rollout iş kolu görünümü (03.09.2026): Gizleme ve GPS ayrı iş kolu
+  ["GIZLEME",      "Gizleme / Kamuflaj",      "🧱", true,  "installation_actual_start_date", null,                           false, ["tssr_belge_url"], ["Baca gizleme","Nonstandart","Panjur"], 10],
+  ["GPS",          "DSS-GPS Readiness",       "🛰", true,  null,                             null,                           false, [], [], 11],
 ];
 let isAtamaTabloHazir = false;
 async function isAtamaTablolar() {
@@ -10472,6 +10475,176 @@ app.delete("/is-atama/:id", authMiddleware, async (req, res) => {
     await pool.query(`UPDATE rollout_cleanup SET is_atama_id = NULL WHERE is_atama_id = $1`, [Number(req.params.id)]);
     await pool.query(`DELETE FROM is_atama WHERE id = $1`, [Number(req.params.id)]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ROLLOUT İŞ KOLU GÖRÜNÜMÜ (03.09.2026, Orhan onayı)
+   Standalone (NS) sahalarda Huawei her iş için ayrı QC görevi açar:
+   Gizleme · TRS Quality CheckList · DSS-GPS Readiness · STANDALONE AI ·
+   LTE&U900 Kontrol (One Band aynı ziyaret) · AG OG Enerji.
+   rollout_is_kolu tablosu saha × iş kolu satırlarını tutar; tarih/belge
+   alanları rollout_progress'te kalır. Satırlar PO/PR kalemlerinden otomatik
+   türetilir (kaynak=OTOMATIK), elle de eklenebilir. hw_status Huawei Smart QC
+   durumu (To Be Executed / Executing / Closed / Rejected) — şimdilik elle. */
+const IS_KOLU_TANIM = {
+  GIZLEME:  { ad: "Gizleme",               ikon: "🧱", aciklama: "Kamuflaj / CW",          kategori: "GIZLEME",    sira: 1 },
+  TRS:      { ad: "TRS Quality CheckList", ikon: "📡", aciklama: "Transmisyon / MW",       kategori: "MW",         sira: 2 },
+  GPS:      { ad: "DSS-GPS Readiness",     ikon: "🛰", aciklama: "GPS",                    kategori: "GPS",        sira: 3 },
+  NS_AI:    { ad: "STANDALONE AI",         ikon: "🗼", aciklama: "RF montaj (ana iş)",     kategori: "NEW_SITE",   sira: 4 },
+  ONE_BAND: { ad: "LTE&U900 Kontrol",      ikon: "📶", aciklama: "One Band aynı ziyaret",  kategori: "NEW_SITE",   sira: 5 },
+  ENH:      { ad: "AG OG Enerji",          ikon: "⚡", aciklama: "ENH",                    kategori: "ENH_MONTAJ", sira: 6 },
+};
+const GIZLEME_TIPLERI = ["Baca gizleme", "Nonstandart", "Panjur", "Diğer"];
+let isKoluTabloHazir = false;
+async function isKoluTablo() {
+  if (isKoluTabloHazir) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS rollout_is_kolu (
+    id SERIAL PRIMARY KEY, site_code TEXT NOT NULL, is_kolu TEXT NOT NULL,
+    kaynak TEXT DEFAULT 'OTOMATIK', item_description TEXT, qty NUMERIC, gizleme_tipi TEXT, karsi_uc TEXT,
+    hw_task_id TEXT, hw_status TEXT, notu TEXT, aktif BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (site_code, is_kolu)
+  )`);
+  isKoluTabloHazir = true;
+}
+const nsSahaMi = (r) => /_NS_/i.test(String(r?.site_code || "")) || /standalone/i.test(String(r?.site_type || ""));
+function gizlemeTipiTahmin(desc) {
+  const d = String(desc || "").toLowerCase();
+  if (/chimney|baca/.test(d)) return "Baca gizleme";
+  if (/non-?standar|nonstandar/.test(d)) return "Nonstandart";
+  if (/panjur|shutter/.test(d)) return "Panjur";
+  return null;
+}
+// Verilen NS sahaları için eksik iş kolu satırlarını kalemlerden türet (idempotent)
+async function isKoluTuret(siteCodes) {
+  const sites = [...new Set((siteCodes || []).map((s) => String(s || "").replace(/\s+/g, "").toUpperCase()).filter(Boolean))];
+  if (!sites.length) return;
+  await isKoluTablo();
+  const rp = await pool.query(`SELECT DISTINCT ON (UPPER(TRIM(site_code))) UPPER(TRIM(site_code)) AS site_code, site_type, enh_site_type
+    FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[]) ORDER BY UPPER(TRIM(site_code)), updated_at DESC NULLS LAST`, [sites]);
+  const ns = rp.rows.filter(nsSahaMi);
+  if (!ns.length) return;
+  const nsCodes = ns.map((r) => r.site_code);
+  const it = await pool.query(`
+    SELECT UPPER(TRIM(site_code)) AS site_code, item_description, SUM(qty) AS qty FROM (
+      SELECT site_code, item_description, COALESCE(done_qty,0) AS qty FROM master_works WHERE UPPER(TRIM(site_code)) = ANY($1::text[])
+      UNION ALL
+      SELECT site_code, item_description, COALESCE(requested_qty,0) AS qty FROM po_rows WHERE UPPER(TRIM(site_code)) = ANY($1::text[])
+    ) x WHERE COALESCE(TRIM(item_description),'') <> '' GROUP BY 1, 2`, [nsCodes]);
+  const itemsBySite = {};
+  it.rows.forEach((r) => { (itemsBySite[r.site_code] = itemsBySite[r.site_code] || []).push({ d: r.item_description, q: Number(r.qty || 0) }); });
+  const bul = (list, re) => list.find((x) => re.test(String(x.d)));
+  for (const r of ns) {
+    const items = itemsBySite[r.site_code] || [];
+    const satirlar = [
+      { kolu: "NS_AI" }, { kolu: "GPS" },
+    ];
+    const ob = bul(items, /one band addition/i); if (ob) satirlar.push({ kolu: "ONE_BAND", item: ob.d, qty: ob.q });
+    const cam = items.filter((x) => /camoufl|kamufl/i.test(String(x.d)) && !/dismantl|incentive/i.test(String(x.d)));
+    if (cam.length) satirlar.push({ kolu: "GIZLEME", item: cam[0].d, qty: cam.reduce((s, x) => s + x.q, 0), gizleme: gizlemeTipiTahmin(cam.map((x) => x.d).join(" ")) });
+    const mw = bul(items, /microwave installation|mw antenna|mw rack|los site survey/i); if (mw) satirlar.push({ kolu: "TRS", item: mw.d, qty: mw.q });
+    const enh = String(r.enh_site_type || "").trim() || bul(items, /energy line|lv power|power meter|admission for lv|power line/i);
+    if (enh) satirlar.push({ kolu: "ENH", item: typeof enh === "object" ? enh.d : null });
+    for (const s of satirlar) {
+      await pool.query(`INSERT INTO rollout_is_kolu (site_code, is_kolu, kaynak, item_description, qty, gizleme_tipi)
+        VALUES ($1,$2,'OTOMATIK',$3,$4,$5) ON CONFLICT (site_code, is_kolu) DO NOTHING`,
+        [r.site_code, s.kolu, s.item || null, s.qty ?? null, s.gizleme || null]);
+    }
+  }
+}
+// Satırları iş atama bilgisiyle zenginleştir (kategori eşlemesi üzerinden)
+async function isKoluZengin(rows) {
+  if (!rows.length) return rows;
+  const sites = [...new Set(rows.map((r) => r.site_code))];
+  const a = await pool.query(`
+    SELECT a.id, a.kategori, a.alt_tip, a.site_codes, a.personeller, a.durum, a.plan_tarihi, a.baslama_ts, a.bitis_ts, a.kapanis_not, a.updated_at,
+           (SELECT MAX(COALESCE(g.bitis, g.baslama)) FROM is_atama_gun g WHERE g.is_atama_id = a.id) AS son_hareket
+    FROM is_atama a WHERE a.site_codes && $1::text[] AND a.durum <> 'IPTAL' ORDER BY a.updated_at DESC`, [sites]);
+  return rows.map((r) => {
+    const t = IS_KOLU_TANIM[r.is_kolu] || {};
+    const adaylar = a.rows.filter((x) => (x.site_codes || []).includes(r.site_code) && x.kategori === t.kategori);
+    // NEW_SITE kategorisi iki iş kolunu (NS_AI, ONE_BAND) karşılar: alt_tip "One Band" ise ONE_BAND'a, değilse NS_AI'ya
+    const at = r.is_kolu === "ONE_BAND" ? (adaylar.find((x) => /one band/i.test(String(x.alt_tip || ""))) || null)
+             : r.is_kolu === "NS_AI"   ? (adaylar.find((x) => !/one band/i.test(String(x.alt_tip || ""))) || null)
+             : (adaylar[0] || null);
+    return {
+      ...r, ad: t.ad, ikon: t.ikon, aciklama: t.aciklama, kategori: t.kategori, sira: t.sira,
+      atama: at ? { id: at.id, durum: at.durum, personeller: at.personeller, plan_tarihi: at.plan_tarihi, baslama_ts: at.baslama_ts, bitis_ts: at.bitis_ts, son_hareket: at.son_hareket, kapanis_not: at.kapanis_not } : null,
+    };
+  });
+}
+app.get("/rollout/is-kolu/tanim", authMiddleware, (req, res) => res.json({ ok: true, tanim: IS_KOLU_TANIM, gizleme_tipleri: GIZLEME_TIPLERI }));
+// Tek saha: türet + listele
+app.get("/rollout/is-kolu/site/:site", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    await isKoluTuret([site]);
+    const r = await pool.query(`SELECT * FROM rollout_is_kolu WHERE site_code = $1 AND aktif ORDER BY id`, [site]);
+    const rows = (await isKoluZengin(r.rows)).sort((x, y) => (x.sira || 9) - (y.sira || 9));
+    res.json({ ok: true, rows, tanim: IS_KOLU_TANIM, gizleme_tipleri: GIZLEME_TIPLERI });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Liste modu: iş kolu (+ bölge) → tüm NS sahaları
+app.get("/rollout/is-kolu", authMiddleware, async (req, res) => {
+  try {
+    const kolu = String(req.query.is_kolu || "").toUpperCase();
+    const bolge = String(req.query.bolge || "").trim();
+    const params = []; let where = `(site_code ILIKE '%\\_NS\\_%' OR site_type ILIKE 'standalone%')`;
+    if (bolge && bolge !== "ALL") { params.push(bolge.toLowerCase()); where += ` AND LOWER(TRIM(COALESCE(bolge,''))) = $${params.length}`; }
+    const rp = await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS site_code FROM rollout_progress WHERE ${where}`, params);
+    const sites = rp.rows.map((x) => x.site_code);
+    await isKoluTuret(sites);
+    const q = [sites]; let w2 = `site_code = ANY($1::text[]) AND aktif`;
+    if (kolu && kolu !== "ALL") { q.push(kolu); w2 += ` AND is_kolu = $2`; }
+    const r = await pool.query(`SELECT * FROM rollout_is_kolu WHERE ${w2} ORDER BY site_code`, q);
+    res.json({ ok: true, rows: await isKoluZengin(r.rows), tanim: IS_KOLU_TANIM, gizleme_tipleri: GIZLEME_TIPLERI });
+  } catch (e) { console.error("IS KOLU LISTE:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/rollout/is-kolu", authMiddleware, async (req, res) => {
+  try {
+    await isKoluTablo();
+    const site = String(req.body?.site_code || "").replace(/\s+/g, "").toUpperCase();
+    const kolu = String(req.body?.is_kolu || "").toUpperCase();
+    if (!site || !IS_KOLU_TANIM[kolu]) return res.status(400).json({ ok: false, error: "site_code ve geçerli is_kolu zorunlu" });
+    const r = await pool.query(`INSERT INTO rollout_is_kolu (site_code, is_kolu, kaynak) VALUES ($1,$2,'MANUEL')
+      ON CONFLICT (site_code, is_kolu) DO UPDATE SET aktif = true, updated_at = NOW() RETURNING *`, [site, kolu]);
+    res.json({ ok: true, row: (await isKoluZengin(r.rows))[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.put("/rollout/is-kolu/:id", authMiddleware, async (req, res) => {
+  try {
+    await isKoluTablo();
+    const { hw_status, hw_task_id, gizleme_tipi, qty, item_description, karsi_uc, notu, aktif } = req.body || {};
+    const r = await pool.query(`UPDATE rollout_is_kolu SET
+        hw_status = COALESCE($2, hw_status), hw_task_id = COALESCE($3, hw_task_id), gizleme_tipi = COALESCE($4, gizleme_tipi),
+        qty = COALESCE($5::numeric, qty), item_description = COALESCE($6, item_description), karsi_uc = COALESCE($7, karsi_uc),
+        notu = COALESCE($8, notu), aktif = COALESCE($9::boolean, aktif), updated_at = NOW()
+      WHERE id = $1 RETURNING *`,
+      [Number(req.params.id), hw_status ?? null, hw_task_id ?? null, gizleme_tipi ?? null, qty === "" ? null : (qty ?? null), item_description ?? null, karsi_uc ?? null, notu ?? null, typeof aktif === "boolean" ? aktif : null]);
+    if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    // QC Closed → rollout qc_durum OK (yalnız ana montaj iş kolları)
+    if (hw_status === "Closed" && ["NS_AI", "ONE_BAND"].includes(r.rows[0].is_kolu)) {
+      await pool.query(`UPDATE rollout_progress SET qc_durum = 'OK', qc_closed_date = COALESCE(qc_closed_date, CURRENT_DATE), updated_at = NOW() WHERE UPPER(TRIM(site_code)) = $1`, [r.rows[0].site_code]);
+    }
+    res.json({ ok: true, row: (await isKoluZengin(r.rows))[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Ekip iş yükü: son N günde personel bazında tamamlanan / açık iş
+app.get("/is-atama/is-yuku", authMiddleware, async (req, res) => {
+  try {
+    await isAtamaTablolar();
+    const gun = Math.max(1, Math.min(60, Number(req.query.gun || 7)));
+    const bolge = String(req.query.bolge || "").trim();
+    const params = [gun]; let where = `a.durum <> 'IPTAL' AND (a.durum <> 'TAMAMLANDI' OR a.updated_at > NOW() - ($1::int || ' days')::interval)`;
+    if (bolge && bolge !== "ALL") { params.push(bolge.toLowerCase()); where += ` AND LOWER(TRIM(COALESCE(a.bolge,''))) = $${params.length}`; }
+    const r = await pool.query(`SELECT a.id, a.durum, a.kategori, a.personeller, a.updated_at FROM is_atama a WHERE ${where}`, params);
+    const kisi = {};
+    r.rows.forEach((a) => (a.personeller || []).forEach((p) => {
+      const k = String(p.email || "").toLowerCase(); if (!k) return;
+      const o = (kisi[k] = kisi[k] || { email: k, ad: p.ad || k, tamamlanan: 0, acik: 0, sahada: 0 });
+      if (a.durum === "TAMAMLANDI") o.tamamlanan += 1; else { o.acik += 1; if (a.durum === "BASLADI") o.sahada += 1; }
+    }));
+    res.json({ ok: true, gun, rows: Object.values(kisi).sort((x, y) => (y.acik + y.tamamlanan) - (x.acik + x.tamamlanan)) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
