@@ -20459,6 +20459,18 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: ""
   });
   const [searchText, setSearchText] = useState("");
+  // Arama kapsamı (03.09.2026, Orhan): varsayılan "Kime" = avansın üzerinde olduğu kişi
+  // (Personel seçilmişse o, seçilmemişse talep eden). "Nurcan" yazınca Nurcan'ın
+  // başkaları için açtığı talepler değil, Nurcan'ın ÜZERİNDEKİ avanslar gelir.
+  const [searchKapsam, setSearchKapsam] = useState("KIME"); // KIME | TALEP_EDEN | HEPSI
+  const aramaEslesir = (t) => {
+    if (!searchText) return true;
+    const s = searchText.toLowerCase().trim();
+    const kime = String(t.personel_ad || t.talep_eden_ad || "").toLowerCase();
+    if (searchKapsam === "KIME") return kime.includes(s);
+    if (searchKapsam === "TALEP_EDEN") return String(t.talep_eden_ad || "").toLowerCase().includes(s);
+    return kime.includes(s) || String(t.talep_eden_ad || "").toLowerCase().includes(s) || String(t.aciklama || "").toLowerCase().includes(s);
+  };
   const [filterDurum, setFilterDurum] = useState("");
   const [filterGider, setFilterGider] = useState("");
   const [filterBolge, setFilterBolge] = useState("");
@@ -20586,10 +20598,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
     // Backend zaten email filtreliyor; burada ekstra kısıtlama yok
     // (Admin için hepsi gelir, requester için sadece kendi + adına açılanlar)
     if (false) return false; // placeholder
-    if (searchText) {
-      const s = searchText.toLowerCase();
-      if (!t.talep_eden_ad?.toLowerCase().includes(s) && !t.personel_ad?.toLowerCase().includes(s) && !t.aciklama?.toLowerCase().includes(s)) return false;
-    }
+    if (!aramaEslesir(t)) return false;
     if (filterDurum && t.durum !== filterDurum) return false;
     if (filterGider && t.gider_turu !== filterGider) return false;
     if (filterBolge && t.bolge !== filterBolge) return false;
@@ -20893,12 +20902,22 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
       {/* Filter bar */}
       <div style={{ ...cardSt, padding: "16px 20px", marginBottom: "16px", display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
-        <input
-          placeholder="Ara (isim, personel, açıklama...)"
-          value={searchText}
-          onChange={e => setSearchText(e.target.value)}
-          style={{ padding: "8px 14px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", minWidth: "200px" }}
-        />
+        <div style={{ display: "flex", alignItems: "center", border: "1.5px solid #e5e7eb", borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+          <select value={searchKapsam} onChange={e => setSearchKapsam(e.target.value)} title="Arama kapsamı"
+            style={{ padding: "8px 8px", border: "none", borderRight: "1.5px solid #e5e7eb", fontSize: "12.5px", fontWeight: 700, background: "#f8fafc", color: "#334155", cursor: "pointer" }}>
+            <option value="KIME">👤 Kime (üzerindeki)</option>
+            <option value="TALEP_EDEN">✍️ Talep eden</option>
+            <option value="HEPSI">🔍 Her yerde</option>
+          </select>
+          <input
+            placeholder={searchKapsam === "KIME" ? "Avans kimin üzerinde? (ad yaz)" : searchKapsam === "TALEP_EDEN" ? "Talep edenin adı" : "Ad, personel, açıklama…"}
+            value={searchText}
+            autoComplete="off"
+            name="avans_ara"
+            onChange={e => setSearchText(e.target.value)}
+            style={{ padding: "8px 14px", border: "none", fontSize: "14px", minWidth: "220px", outline: "none" }}
+          />
+        </div>
         <input type="date" value={filterBaslangic} onChange={e => setFilterBaslangic(e.target.value)}
           style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px" }} />
         <span style={{ color: "#9ca3af" }}>—</span>
@@ -20951,10 +20970,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
           if (!g) return false;
           if (filterBaslangic && g < filterBaslangic) return false;
           if (filterBitis && g > filterBitis) return false;
-          if (searchText) {
-            const s = searchText.toLowerCase();
-            if (!t.talep_eden_ad?.toLowerCase().includes(s) && !t.personel_ad?.toLowerCase().includes(s) && !t.aciklama?.toLowerCase().includes(s)) return false;
-          }
+          if (!aramaEslesir(t)) return false;
           if (filterDurum && t.durum !== filterDurum) return false;
           if (filterGider && t.gider_turu !== filterGider) return false;
           if (filterBolge && t.bolge !== filterBolge) return false;
