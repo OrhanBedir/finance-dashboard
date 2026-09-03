@@ -12,6 +12,46 @@ import towerIcon from "./assets/tower.svg";
 
 // Kenar menü alt kalemi — İK Paneli alt menüsüyle aynı görsel dil
 // (küçük font, sağa girintili, aktifken mavi ray + vurgu)
+/* ═══ ÜST MENÜ (02.09.2026) — Huawei eSupplier tarzı çubuk: başlık tıklanınca
+   kart açılır, tekrar tıklanınca ya da dışarı tıklanınca kapanır ═══ */
+function TopNavMenu({ id, label, badge, open, onToggle, items, wide, cols, baslik }) {
+  const acik = open === id;
+  const gorunur = (items || []).filter(Boolean);
+  if (!gorunur.length) return null;
+  const aktif = gorunur.some((it) => it.aktif);
+  return (
+    <div className={`topnav-item ${acik ? "open" : ""} ${aktif ? "active" : ""}`} onClick={() => onToggle(acik ? null : id)}>
+      {label}
+      {badge > 0 && <span className="topnav-badge">{badge}</span>}
+      <span className="topnav-caret">{acik ? "▲" : "▼"}</span>
+      {acik && (
+        <div className={`topnav-drop ${wide ? "wide" : ""}`} style={cols ? { gridTemplateColumns: `repeat(${cols}, 1fr)`, minWidth: `${cols * 215}px` } : undefined} onClick={(e) => e.stopPropagation()}>
+          <div className="topnav-drop-hd">{baslik || label}</div>
+          {gorunur.map((it, i) => (
+            <div key={i} className={`topnav-drop-item ${it.aktif ? "aktif" : ""} ${it.alt ? "alt" : ""}`}
+              onClick={() => { onToggle(null); it.onClick && it.onClick(); }}>
+              <span className="ic">{it.ikon}</span>
+              <div>{it.label}{it.sub && <span className="sub">{it.sub}</span>}</div>
+              {it.badge > 0 && <span className="bd">{it.badge}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* HW yükleme pencereleri: eSupplier dosya adı kuralı (02.09.2026, Orhan).
+   Beklenen önek uymuyorsa dosya reddedilir; kullanıcıya hangi dosyanın
+   yükleneceği söylenir. */
+function hwDosyaAdiKontrol(files, onek, beklenen) {
+  const liste = Array.from(files || []);
+  const yanlis = liste.filter((f) => !new RegExp("^" + onek, "i").test(String(f.name || "")));
+  if (!yanlis.length) return true;
+  alert(`Bu pencere yalnız ${beklenen} dosyasını kabul eder.\n\nSeçilen: ${yanlis.map((f) => f.name).join(", ")}\n\nLütfen eSupplier'dan indirdiğiniz "${onek}…" adlı Excel'i seçin.`);
+  return false;
+}
+
 function AltNavItem({ aktif, onClick, ikon, label, badge }) {
   return (
     <div onClick={onClick}
@@ -940,12 +980,12 @@ function HWPoUploadInline({ onClose, onUploaded }) {
 
         <div className="formGrid">
           <div className="formGroup formGroupWide">
-            <label>Huawei PO Excel Dosyası</label>
+            <label>eSupplier <b>PURCHASE_ORDER_….xlsx</b> dosyasını yükleyiniz (farklı adlı dosya kabul edilmez)</label>
             <input
               id="inline-hwpo-upload-input"
               type="file"
               accept=".xlsx,.xls"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              onChange={(e) => { if (!hwDosyaAdiKontrol(e.target.files, "PURCHASE_ORDER", "PURCHASE_ORDER_….xlsx")) { e.target.value = ""; setFile(null); return; } setFile(e.target.files?.[0] || null); }}
             />
           </div>
         </div>
@@ -999,14 +1039,14 @@ function HWAcceptanceUploadInline({ onClose, onUploaded }) {
     <div className="entryPanel" style={{ marginBottom: "18px" }}>
       <div className="entryForm">
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px", gap:"12px", flexWrap:"wrap" }}>
-          <h3 className="listTitle" style={{ margin: 0 }}>📋 HW Acceptance Yükle</h3>
+          <h3 className="listTitle" style={{ margin: 0 }}>📋 HW Acceptance Upload</h3>
           <button type="button" className="tab" onClick={onClose} style={{ padding:"10px 14px" }}>Kapat</button>
         </div>
         <div className="formGrid">
           <div className="formGroup formGroupWide">
-            <label>Huawei Acceptance Excel Dosyası</label>
+            <label>eSupplier <b>ACCEPTANCE_….xlsx</b> dosyasını yükleyiniz (farklı adlı dosya kabul edilmez)</label>
             <input id="hw-acceptance-upload-input" type="file" accept=".xlsx,.xls"
-              onChange={(e) => setFile(e.target.files?.[0] || null)} />
+              onChange={(e) => { if (!hwDosyaAdiKontrol(e.target.files, "ACCEPTANCE", "ACCEPTANCE_….xlsx")) { e.target.value = ""; setFile(null); return; } setFile(e.target.files?.[0] || null); }} />
           </div>
         </div>
         <div className="entryActions">
@@ -5944,7 +5984,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
   );
 }
 
-function DailyEntry() {
+function DailyEntry({ actionTrigger, onActionHandled } = {}) {
   const usdRate = useUsdRate();
   function getTodayTR() {
     const d = new Date();
@@ -6072,6 +6112,14 @@ function DailyEntry() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [showBoqUpload, setShowBoqUpload] = useState(false);
+  // Üst menü "Daha Fazla" → HW QC / BoQ / Rollout yüklemeleri (02.09.2026)
+  useEffect(() => {
+    if (!actionTrigger) return;
+    if (actionTrigger === "hw_qc")      { setShowQcUpload(true); setShowBoqUpload(false); }
+    else if (actionTrigger === "hw_boq") { setShowBoqUpload(true); setShowQcUpload(false); }
+    else if (actionTrigger === "hw_rollout") { setShowRolloutUpload(true); }
+    onActionHandled && onActionHandled();
+  }, [actionTrigger]); // eslint-disable-line
   const [showHwPoUpload, setShowHwPoUpload] = useState(false);
   const [showDailyIslemlerMenu, setShowDailyIslemlerMenu] = useState(false);
   // Eksik kalem kartı: PO'su açık ama iş girişi yapılmamış kalemler (01.07.2026 sonrası PO'lar)
@@ -7518,12 +7566,12 @@ function FinanceUploadInline({ onClose, onUploaded }) {
 
         <div className="formGrid">
           <div className="formGroup formGroupWide">
-            <label>HW Payment Excel Dosyası</label>
+            <label>eSupplier <b>invoicePayment_….xlsx</b> dosyasını yükleyiniz (farklı adlı dosya kabul edilmez)</label>
             <input
               id="finance-hw-payment-upload-input"
               type="file"
               accept=".xlsx,.xls"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              onChange={(e) => { if (!hwDosyaAdiKontrol(e.target.files, "invoicePayment", "invoicePayment_….xlsx")) { e.target.value = ""; setFile(null); return; } setFile(e.target.files?.[0] || null); }}
             />
           </div>
         </div>
@@ -7626,13 +7674,13 @@ function FinanceInvoiceUploadInline({ onClose, onUploaded }) {
 
         <div className="formGrid">
           <div className="formGroup formGroupWide">
-            <label>HW Fatura Excel Dosyaları (500'lük sayfa exportlarını birlikte seçebilirsin)</label>
+            <label>eSupplier <b>ap_invoiceHeadTemplate_….xlsx</b> dosyalarını yükleyiniz (500'lük sayfa exportlarını birlikte seçebilirsin; farklı adlı dosya kabul edilmez)</label>
             <input
               id="finance-hw-invoice-upload-input"
               type="file"
               accept=".xlsx,.xls"
               multiple
-              onChange={(e) => setFile(Array.from(e.target.files || []))}
+              onChange={(e) => { if (!hwDosyaAdiKontrol(e.target.files, "ap_invoiceHeadTem", "ap_invoiceHeadTemplate_….xlsx")) { e.target.value = ""; setFile([]); return; } setFile(Array.from(e.target.files || [])); }}
             />
             {Array.isArray(file) && file.length > 1 && (
               <span style={{ fontSize: "12px", color: "#0e7490", fontWeight: 700 }}>{file.length} dosya seçildi</span>
@@ -8080,8 +8128,11 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
           }}
         >
           <h4 style={{ margin: "0 0 4px", fontSize: "16px", color: "#1e3a5f" }}>
-            📊 eSupplier Invoice Line Excel'ini Yükle
+            📑 HW Fatura Item Upload
           </h4>
+          <div style={{ fontSize: "12.5px", color: "#b45309", fontWeight: 700, marginBottom: "6px" }}>
+            eSupplier <b>invoiceLine_….xlsx</b> dosyasını yükleyiniz — farklı adlı dosya kabul edilmez.
+          </div>
           <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>
             eSupplier → Finance → Invoice Inquiry ekranında <b>Export Invoice Line</b> ile
             indirdiğin dosyaları seç (birden çok olabilir) — fatura no, tarih ve
@@ -8095,7 +8146,7 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
                 type="file"
                 accept=".xlsx,.xls,.xlsm"
                 multiple
-                onChange={(e) => setLineFiles(Array.from(e.target.files || []))}
+                onChange={(e) => { if (!hwDosyaAdiKontrol(e.target.files, "invoiceLine", "invoiceLine_….xlsx")) { e.target.value = ""; setLineFiles([]); return; } setLineFiles(Array.from(e.target.files || [])); }}
               />
               {lineFiles.length > 0 && (
                 <span style={{ fontSize: "12px", color: "#64748b" }}>
@@ -9902,6 +9953,8 @@ function FinanceDashboard({
       setShowFinanceHwPoUpload(true); setShowUpload(false); setShowInvoiceUpload(false); setShowFinanceHwAcceptanceUpload(false);
     } else if (actionTrigger === 'hw_acceptance') {
       setShowFinanceHwAcceptanceUpload(true); setShowUpload(false); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false);
+    } else if (actionTrigger === 'hw_rejected') {
+      openRejectedModal();
     }
     onActionHandled?.();
   }, [actionTrigger]);
@@ -30221,6 +30274,17 @@ function App() {
     } catch { return false; }
   });
   const [financeActionTrigger, setFinanceActionTrigger] = useState(null);
+  // Üst menü (02.09.2026): hangi kart açık (ana/ik/muhasebe/depo/daha/user) + Günlük İş Girişi yükleme tetikleyicisi
+  const [navOpen, setNavOpen] = useState(null);
+  const [entryActionTrigger, setEntryActionTrigger] = useState(null);
+  useEffect(() => {
+    if (!navOpen) return;
+    const kapat = () => setNavOpen(null);
+    const esc = (e) => { if (e.key === "Escape") setNavOpen(null); };
+    document.addEventListener("click", kapat);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("click", kapat); document.removeEventListener("keydown", esc); };
+  }, [navOpen]);
 
   useEffect(() => {
     if (!user) return;
@@ -31094,273 +31158,188 @@ function App() {
         .topbar { background: #fff; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
         .main-content { flex: 1; overflow-y: auto; padding: 0; }
         .notification-bar { padding: 10px 24px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 13px; flex-shrink: 0; }
+
+        /* ── ÜST MENÜ (02.09.2026) ── */
+        .app-layout { flex-direction: column; }
+        .main-area { width: 100%; }
+        .topnav { height: 58px; flex-shrink: 0; display: flex; align-items: stretch; background: linear-gradient(90deg,#0b1730 0%,#122a52 100%); color:#dbe6f7; border-bottom:1px solid #233d6b; position: relative; z-index: 500; }
+        .topnav-brand { display:flex; align-items:center; gap:11px; padding:0 18px 0 16px; border-right:1px solid #233d6b; min-width:262px; cursor:pointer; }
+        .topnav-brand:hover { background: rgba(255,255,255,.04); }
+        .topnav-mark { width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,#3b82f6,#6366f1); display:flex; align-items:center; justify-content:center; font-size:17px; box-shadow:0 4px 12px rgba(59,130,246,.35); flex-shrink:0; }
+        .topnav-brand-name { font-weight:800; font-size:15px; letter-spacing:-.01em; line-height:1.1; color:#fff; white-space:nowrap; }
+        .topnav-brand-sub { font-size:11px; color:#8fa4c6; font-weight:600; white-space:nowrap; }
+        .topnav-menu { display:flex; align-items:stretch; flex:1; }
+        .topnav-item { display:flex; align-items:center; gap:6px; padding:0 16px; font-weight:700; font-size:13.5px; color:#dbe6f7; cursor:pointer; position:relative; white-space:nowrap; user-select:none; }
+        .topnav-item:hover { background:rgba(255,255,255,.06); }
+        .topnav-item.open { background:rgba(255,255,255,.10); }
+        .topnav-item.open::after, .topnav-item.active::after { content:""; position:absolute; left:12px; right:12px; bottom:0; height:3px; background:#2f6fed; border-radius:3px 3px 0 0; }
+        .topnav-caret { font-size:9px; color:#8fa4c6; margin-top:1px; }
+        .topnav-badge { background:#ef4444; color:#fff; font-size:10px; font-weight:800; border-radius:999px; padding:1px 6px; margin-left:2px; }
+        .topnav-drop { position:absolute; top:calc(100% + 8px); left:0; min-width:300px; background:#fff; border:1px solid #dde3ec; border-radius:14px; box-shadow:0 24px 60px rgba(10,20,40,.22); padding:10px; color:#0f1b2d; cursor:default; z-index:600; text-align:left; }
+        .topnav-drop.wide { min-width:560px; display:grid; grid-template-columns:1fr 1fr; gap:2px 8px; }
+        .topnav-drop::before { content:""; position:absolute; top:-7px; left:26px; width:12px; height:12px; background:#fff; border-left:1px solid #dde3ec; border-top:1px solid #dde3ec; transform:rotate(45deg); }
+        .topnav-drop-hd { grid-column:1/-1; font-size:10.5px; font-weight:800; letter-spacing:.08em; color:#8b97a9; text-transform:uppercase; padding:4px 8px 6px; }
+        .topnav-drop-item { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:9px; cursor:pointer; color:#0f1b2d; font-weight:600; font-size:13px; white-space:nowrap; }
+        .topnav-drop-item:hover { background:#e7efff; color:#2f6fed; }
+        .topnav-drop-item.aktif { background:#e7efff; color:#2f6fed; }
+        .topnav-drop-item.alt { padding-left:26px; font-weight:500; font-size:12.5px; }
+        .topnav-drop-item .ic { width:28px; height:28px; border-radius:8px; background:#eef1f6; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+        .topnav-drop-item .sub { display:block; font-size:11px; color:#8b97a9; font-weight:500; }
+        .topnav-drop-item .bd { margin-left:auto; background:#fee2e2; color:#b91c1c; border-radius:999px; font-size:10.5px; font-weight:800; padding:1px 7px; }
+        .topnav-drop-item.out { color:#b91c1c; }
+        .topnav-right { display:flex; align-items:stretch; border-left:1px solid #233d6b; }
+        .topnav-icon { display:flex; align-items:center; justify-content:center; width:52px; cursor:pointer; font-size:20px; color:#dbe6f7; }
+        .topnav-icon:hover { background:rgba(255,255,255,.06); }
+        .topnav-user { display:flex; align-items:center; gap:10px; padding:0 16px 0 12px; border-left:1px solid #233d6b; cursor:pointer; position:relative; user-select:none; }
+        .topnav-user:hover, .topnav-user.open { background:rgba(255,255,255,.08); }
+        .topnav-avatar { width:30px; height:30px; border-radius:50%; background:linear-gradient(135deg,#f59e0b,#ef4444); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:12px; color:#fff; flex-shrink:0; }
+        .topnav-user-name { font-weight:700; font-size:13px; line-height:1.1; color:#fff; white-space:nowrap; }
+        .topnav-user-role { font-size:10.5px; color:#8fa4c6; font-weight:600; white-space:nowrap; }
+        .topnav-drop-user { left:auto; right:0; min-width:250px; }
+        .topnav-drop-user::before { left:auto; right:30px; }
+        .topnav-drop-who { padding:8px 10px 10px; border-bottom:1px solid #dde3ec; margin-bottom:4px; white-space:normal; }
+        .topnav-drop-who b { display:block; }
+        .topnav-drop-who span { font-size:12px; color:#8b97a9; }
+        .topbar { height:44px; }
+        @media (max-width: 1180px) { .topnav-brand { min-width:auto; } .topnav-brand-sub { display:none; } .topnav-item { padding:0 10px; font-size:12.5px; } .topnav-user-txt { display:none; } }
       `}</style>
 
       <div className="app-layout">
-        {/* ── SIDEBAR ── */}
-        <div className={`sidebar${sidebarCollapsed?' collapsed':''}`}>
-          {/* Logo */}
-          <div className="sidebar-logo">
-            <div className="sidebar-logo-icon">🏗</div>
+        {/* ── ÜST MENÜ (02.09.2026): sol menü yerine Huawei eSupplier tarzı üst çubuk + açılır kartlar ── */}
+        <div className="topnav" onClick={(e)=>e.stopPropagation()}>
+          <div className="topnav-brand" title="Ana sayfa"
+            onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka) setPage('marka_finans'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) setPage('finance'); else setPage('region'); }}>
+            <div className="topnav-mark">🏗</div>
             <div>
-              <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>{isPlatformAdmin ? 'Omnix' : (user?.marka_ad || user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</div>
-              <div style={{fontSize:11,color:'#64748b'}}>{isPlatformAdmin ? 'Operasyon & Hakediş Platformu' : (user?.tenant === '2kx' ? '2KX Takip Sistemi' : 'Operasyon & Hakediş')}</div>
+              <div className="topnav-brand-name">{isPlatformAdmin ? 'Omnix' : (user?.marka_ad || user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</div>
+              <div className="topnav-brand-sub">{isPlatformAdmin ? 'Operasyon & Hakediş Platformu' : (user?.tenant === '2kx' ? '2KX Takip Sistemi' : 'Operasyon ve Hakediş Takip')}</div>
             </div>
           </div>
 
-          {/* Navigation */}
-          {isPlatformAdmin && !firmaMode ? (
-            <>
-              {/* ── PLATFORM SAHİBİ KONSOLU — sadece yönetim menüleri ── */}
-              <div className="sidebar-section-title"><span>Platform Yönetimi</span></div>
-              <div className={`sidebar-nav-item ${page==='platform'?'active':''}`} onClick={()=>{setPage('platform');fetchPlatformOverview();}}>
-                <span>🌐</span> Genel Bakış
+          <div className="topnav-menu">
+            {isPlatformAdmin && !firmaMode ? (
+              <>
+                <TopNavMenu id="platform" label="Platform Yönetimi" open={navOpen} onToggle={setNavOpen} items={[
+                  { ikon:'🌐', label:'Genel Bakış', aktif: page==='platform', onClick:()=>{ setPage('platform'); fetchPlatformOverview(); } },
+                  { ikon:'👑', label:'Kullanıcı Yönetimi', aktif: page==='admin', onClick:()=>{ setPage('admin'); loadAdminUsers(); } },
+                  { ikon:'👥', label:'Bekleyen Kayıtlar', aktif: page==='pending-users', badge: pendingUsers.length, onClick:()=>{ setPage('pending-users'); fetchPendingUsers(); } },
+                ]} />
+                <TopNavMenu id="firmalar" label="Firmalar" open={navOpen} onToggle={setNavOpen} items={[
+                  { ikon:'🏗', label:'ERC Paneline Gir →', onClick:()=>{ setFirmaMode(true); setPage('finance'); } },
+                ]} />
+              </>
+            ) : isSubconUser ? (
+              <TopNavMenu id="menu" label="Menü" open={navOpen} onToggle={setNavOpen} items={[
+                ...(is2KXUser ? [{ ikon:'📊', label:'2KX Paneli', aktif: page==='2kx', onClick:()=>setPage('2kx') }] : []),
+                { ikon:'📍', label:'Bölge Analizi', aktif: page==='region', onClick:()=>setPage('region') },
+              ]} />
+            ) : (
+              <>
+                <TopNavMenu id="ana" label="Ana Menü" open={navOpen} onToggle={setNavOpen} wide items={[
+                  ...(isPlatformAdmin ? [{ ikon:'←', label:'Platform Konsolu', onClick:()=>{ setFirmaMode(false); setPage('platform'); fetchPlatformOverview(); } }] : []),
+                  ...(isFinanceUser && !isAltMarka ? [{ ikon:'📊', label:'Finans Paneli', sub:'Özet, PO / hakediş durumu', aktif: page==='finance', onClick:()=>setPage('finance') }] : []),
+                  ...(isAltMarka && isAdmin ? [{ ikon:'📈', label:'Kâr / Zarar (P&L)', sub:'Marka bazlı gelir tablosu', aktif: page==='marka_pl', onClick:()=>setPage('marka_pl') }] : []),
+                  { ikon:'🗺', label:'Bölge Analizi', sub:'PO açılmamış / eksik işler', aktif: page==='region', onClick:()=>setPage('region') },
+                  ...(!isAltMarka ? [{ ikon:'📡', label:'Rollout Data', sub:'Saha ilerleme, belgeler, Clean Up', aktif: page==='executive', onClick:()=>setPage('executive') }] : []),
+                  ...(!isAltMarka ? [{ ikon:'✏️', label:'Günlük İş Girişi', sub:'PR / PO / Akıllı Asistan', aktif: page==='entry', onClick:()=>setPage('entry') }] : []),
+                  ...(canSeePuantaj && !(isAdmin || user?.role === "muhasebe" || _userEmail === "nurcan.kus@simsektel.com") ? [{ ikon:'⏱', label:'Puantaj', aktif: page==='puantaj', onClick:()=>setPage('puantaj') }] : []),
+                  ...(canOpenAdminPanel && !isAltMarka ? [{ ikon:'👑', label:'Admin Panel', sub:'Kullanıcı ve yetki yönetimi', aktif: page==='admin', onClick:()=>{ setPage('admin'); loadAdminUsers(); } }] : []),
+                  ...(isAdmin ? [{ ikon:'👥', label:'Bekleyen Kullanıcılar', aktif: page==='pending-users', badge: pendingUsers.length, onClick:()=>{ setPage('pending-users'); fetchPendingUsers(); } }] : []),
+                ]} />
+
+                <TopNavMenu id="ik" label="İnsan Kaynakları" open={navOpen} onToggle={setNavOpen} badge={pendingAvansCount + pendingMasrafCount} items={[
+                  ...((isAdmin || user?.role === "muhasebe" || _userEmail === "nurcan.kus@simsektel.com") ? [
+                    { ikon:'👥', label:'İK Paneli', sub:'Personel, maaş, puantaj, ISG', aktif: page==='hr', onClick:()=>setPage('hr') },
+                    ...[["personel","👤","Personel Maaş"],["maas_avans","💰","Maaş Avansı"],["puantaj","📋","Puantaj"],["isg","🎓","ISG / Belgeler"]]
+                      .filter(([k]) => !(user?.role === "muhasebe" && ["personel","maas_avans"].includes(k)))
+                      .map(([k, ic, l]) => ({ ikon: ic, label: l, alt: true, aktif: page==='hr' && hrTab===k, onClick:()=>{ setPage('hr'); setHrTab(k); } })),
+                  ] : []),
+                  { ikon:'🏢', label:'Organizasyon Şeması', aktif: page==='orgsema', onClick:()=>setPage('orgsema') },
+                  ...((isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) ? [
+                    { ikon:'💳', label:'İş Avansı', sub:'Talep ve onay zinciri', aktif: page==='is_avans', badge: pendingAvansCount, onClick:()=>setPage('is_avans') },
+                    { ikon:'📄', label:'Masraf Formu', sub:'Fiş / harcama onayları', aktif: page==='masraf', badge: pendingMasrafCount, onClick:()=>setPage('masraf') },
+                  ] : []),
+                ]} />
+
+                {(isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
+                  <TopNavMenu id="muhasebe" label="Muhasebe" open={navOpen} onToggle={setNavOpen} items={[
+                    ...(isFinanceUser && !isAltMarka ? [
+                      { ikon:'🧾', label:'Fatura Girişi', sub:'Gelen / giden fatura kaydı', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); } },
+                      { ikon:'📐', label:'Taşeron Hesabı', aktif: page==='erc_taseron', onClick:()=>setPage('erc_taseron') },
+                      { ikon:'💳', label:'Taşeron Borçlar', aktif: page==='taseron_borc', onClick:()=>setPage('taseron_borc') },
+                    ] : []),
+                    ...(isAltMarka && isAdmin ? [
+                      { ikon:'💰', label:'Nakit Akışı (Günlük)', aktif: page==='marka_nakit', onClick:()=>setPage('marka_nakit') },
+                      { ikon:'🔧', label:'Taşeron Faturaları', aktif: page==='marka_taseron', onClick:()=>setPage('marka_taseron') },
+                      { ikon:'🧾', label:'Şimşek Fatura Takip', aktif: page==='marka_fatura_takip', onClick:()=>setPage('marka_fatura_takip') },
+                    ] : []),
+                    ...(["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) ? [{ ikon:'🏦', label:'Nakit Akışı', aktif: page==='cashflow', onClick:()=>setPage('cashflow') }] : []),
+                    ...((!isAltMarka && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","muhasebe@simsektel.com","erencan.simsek@simsektel.com"].includes(_userEmail)) ? [{ ikon:'📝', label:'Çek & Senet', aktif: page==='cek_senet', onClick:()=>setPage('cek_senet') }] : []),
+                  ]} />
+                )}
+
+                {(isAdmin || ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"].includes(_userEmail)) && (
+                  <TopNavMenu id="depo" label="Araç & Depo" open={navOpen} onToggle={setNavOpen} items={[
+                    { ikon:'🚗', label:'Araç Yönetimi', sub:'Filo, KM, yakıt', aktif: page==='araclar', onClick:()=>setPage('araclar') },
+                    ...(isAdmin ? [{ ikon:'🏢', label:'Depo & Ofis Kiraları', aktif: page==='ofis', onClick:()=>setPage('ofis') }] : []),
+                  ]} />
+                )}
+
+                {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
+                  <div className={`topnav-item ${page==='malzeme' ? 'active' : ''}`} onClick={()=>{ setNavOpen(null); setPage('malzeme'); }}>
+                    Malzeme Yönetimi{pendingMalzemeCount > 0 && <span className="topnav-badge">{pendingMalzemeCount}</span>}
+                  </div>
+                )}
+
+                {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && canHwUpload && !isAltMarka && (
+                  <TopNavMenu id="daha" label="Daha Fazla" open={navOpen} onToggle={setNavOpen} wide cols={3} baslik="HW Dosya Yükle · eSupplier çıktıları" items={[
+                    { ikon:'📤', label:'HW Payment', sub:'invoicePayment_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); } },
+                    { ikon:'🧾', label:'HW Fatura', sub:'ap_invoiceHeadTemplate_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura'); } },
+                    { ikon:'📑', label:'HW Fatura Item', sub:'invoiceLine_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura_item'); } },
+                    { ikon:'🔩', label:'HW PO', sub:'PURCHASE_ORDER_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); } },
+                    { ikon:'📋', label:'HW Acceptance', sub:'ACCEPTANCE_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); } },
+                    { ikon:'⛔', label:'HW Rejected', sub:'Reddedilen kalemler', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_rejected'); } },
+                    { ikon:'🛡', label:'HW QC', sub:'QC durum Excel', onClick:()=>{ setPage('entry'); setEntryActionTrigger('hw_qc'); } },
+                    { ikon:'📚', label:'HW BoQ', sub:'Kalem / fiyat listesi', onClick:()=>{ setPage('entry'); setEntryActionTrigger('hw_boq'); } },
+                    { ikon:'🚀', label:'HW Rollout', sub:'Rollout takip Excel', onClick:()=>{ setPage('entry'); setEntryActionTrigger('hw_rollout'); } },
+                  ]} />
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="topnav-right">
+            <div className="topnav-icon" title="Ana sayfa"
+              onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka) setPage('marka_finans'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) setPage('finance'); else setPage('region'); }}>⌂</div>
+            <div className={`topnav-user ${navOpen==='user' ? 'open' : ''}`} onClick={()=>setNavOpen(navOpen==='user' ? null : 'user')}>
+              <div className="topnav-avatar">{String(user?.name || user?.email || '?').split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0]).join('').toUpperCase()}</div>
+              <div className="topnav-user-txt">
+                <div className="topnav-user-name">{user?.name || user?.email}</div>
+                <div className="topnav-user-role">{getUserTitle(user)}</div>
               </div>
-              <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
-                <span>👑</span> Kullanıcı Yönetimi
-              </div>
-              <div className={`sidebar-nav-item ${page==='pending-users'?'active':''}`} onClick={()=>{setPage('pending-users');fetchPendingUsers();}}>
-                <span>👥</span> Bekleyen Kayıtlar {pendingUsers.length > 0 && <span style={{background:'#ef4444',color:'#fff',borderRadius:'10px',padding:'1px 7px',fontSize:'11px',marginLeft:'4px'}}>{pendingUsers.length}</span>}
-              </div>
-              <div className="sidebar-section-title" style={{marginTop:'12px'}}><span>Firmalar</span></div>
-              <div className="sidebar-nav-item" onClick={()=>{ setFirmaMode(true); setPage('finance'); }}>
-                <span>🏗</span> ERC Paneline Gir →
-              </div>
-            </>
-          ) : isSubconUser ? (
-            <>
-              <div className="sidebar-section-title">Menü</div>
-              {is2KXUser && (
-                <div className={`sidebar-nav-item ${page==='2kx'?'active':''}`} onClick={()=>setPage('2kx')}>
-                  <span>📊</span> 2KX Paneli
+              <span className="topnav-caret">{navOpen==='user' ? '▲' : '▼'}</span>
+              {navOpen==='user' && (
+                <div className="topnav-drop topnav-drop-user" onClick={(e)=>e.stopPropagation()}>
+                  <div className="topnav-drop-who"><b>{user?.name || '—'}</b><span>{user?.email}{getUserTitle(user) ? ` · ${getUserTitle(user)}` : ''}</span></div>
+                  {(pendingAvansCount + pendingMasrafCount + pendingMalzemeCount) > 0 && (
+                    <div className="topnav-drop-item" onClick={()=>{ setNavOpen(null); setPage(pendingAvansCount ? 'is_avans' : pendingMasrafCount ? 'masraf' : 'malzeme'); }}>
+                      <span className="ic">🔔</span><div>Bekleyen Onaylarım</div><span className="bd">{pendingAvansCount + pendingMasrafCount + pendingMalzemeCount}</span>
+                    </div>
+                  )}
+                  <div className="topnav-drop-item out" onClick={handleLogout}><span className="ic">⏻</span><div>Çıkış Yap</div></div>
                 </div>
               )}
-              <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
-                <span>📍</span> Bölge Analizi
-              </div>
-              {/* Organizasyon şeması iç yapıdır — taşeron kullanıcılara gösterilmez */}
-            </>
-          ) : (
-            <>
-              {/* ── ANA MENÜ ── */}
-              <div className="sidebar-section-title" onClick={()=>toggleSection('anaMeny')}>
-                <span>Ana Menü</span>
-                <span className={`sidebar-section-chevron ${openSections.anaMeny?'open':'closed'}`}>▾</span>
-              </div>
-              {openSections.anaMeny && (
-                <div>
-                  {isPlatformAdmin && (
-                    <div className="sidebar-nav-item" style={{background:'#0f172a',border:'1px solid #2d3f55',borderRadius:'8px',marginBottom:'6px'}} onClick={()=>{ setFirmaMode(false); setPage('platform'); fetchPlatformOverview(); }}>
-                      <span>←</span> Platform Konsolu
-                    </div>
-                  )}
-                  {isFinanceUser && !isAltMarka && (
-                    <div className={`sidebar-nav-item ${page==='finance'?'active':''}`} onClick={()=>setPage('finance')}>
-                      <span>📊</span> Finans Paneli
-                    </div>
-                  )}
-                  {isAltMarka && isAdmin && (
-                    <div className={`sidebar-nav-item ${page==='marka_pl'?'active':''}`} onClick={()=>setPage('marka_pl')}>
-                      <span>📈</span> Kâr / Zarar (P&L)
-                    </div>
-                  )}
-                  <div className={`sidebar-nav-item ${page==='region'?'active':''}`} onClick={()=>setPage('region')}>
-                    <span>🗺</span> Bölge Analizi
-                  </div>
-                  {!isAltMarka && (
-                    <div className={`sidebar-nav-item ${page==='executive'?'active':''}`} onClick={()=>setPage('executive')}>
-                      <span>📡</span> Rollout Data
-                    </div>
-                  )}
-                  {!isAltMarka && (
-                    <div className={`sidebar-nav-item ${page==='entry'?'active':''}`} onClick={()=>setPage('entry')}>
-                      <span>✏️</span> Günlük İş Girişi
-                    </div>
-                  )}
-                  {/* Puantaj İK Paneli altında mevcut — ana menüde yalnız İK'ya
-                      erişimi OLMAYAN puantaj kullanıcılarına gösterilir (bölge müdürleri) */}
-                  {canSeePuantaj && !(isAdmin || user?.role === "muhasebe" || _userEmail === "nurcan.kus@simsektel.com") && (
-                    <div className={`sidebar-nav-item ${page==='puantaj'?'active':''}`} onClick={()=>setPage('puantaj')}>
-                      <span>⏱</span> Puantaj
-                    </div>
-                  )}
-                  {canOpenAdminPanel && !isAltMarka && (
-                    <div className={`sidebar-nav-item ${page==='admin'?'active':''}`} onClick={()=>{ setPage('admin'); loadAdminUsers(); }}>
-                      <span>👑</span> Admin Panel
-                    </div>
-                  )}
-                  {isAdmin && (
-                    <div className={`sidebar-nav-item ${page==='pending-users'?'active':''}`} onClick={()=>{setPage('pending-users');fetchPendingUsers();}}>
-                      <span>👥</span> Bekleyen Kullanıcılar {pendingUsers.length > 0 && <span style={{background:'#ef4444',color:'#fff',borderRadius:'10px',padding:'1px 7px',fontSize:'11px',marginLeft:'4px'}}>{pendingUsers.length}</span>}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ── İNSAN KAYNAKLARI ── */}
-              <div className="sidebar-section-title" onClick={()=>toggleSection('ik')}>
-                <span>İnsan Kaynakları</span>
-                <span className={`sidebar-section-chevron ${openSections.ik?'open':'closed'}`}>▾</span>
-              </div>
-              {openSections.ik && (
-                <div>
-                  {(isAdmin || user?.role === "muhasebe" || (user?.email || "").toLowerCase() === "nurcan.kus@simsektel.com") && (
-                    <>
-                      <div className={`sidebar-nav-item ${page==='hr'?'active':''}`}
-                        onClick={()=>{ if (page !== 'hr') { setPage('hr'); setHrMenuAcik(true); } else setHrMenuAcik(v => !v); }}>
-                        <span>👥</span> İK Paneli
-                        <span style={{ marginLeft:"auto", fontSize:"10px", opacity:0.6 }}>{page==='hr' && hrMenuAcik ? "▾" : "▸"}</span>
-                      </div>
-                      {/* ERP tarzı alt menü: İK açıkken modül sekmeleri kenar menüde (tekrar tıklayınca kapanır) */}
-                      {page==='hr' && hrMenuAcik && (
-                        <div style={{ margin:"2px 0 6px", borderLeft:"1px solid rgba(148,163,184,0.15)", marginLeft:"22px" }}>
-                          {[["personel","👤","Personel Maaş"],["maas_avans","💰","Maaş Avansı"],["puantaj","📋","Puantaj"],["isg","🎓","ISG / Belgeler"]]
-                            .filter(([k]) => !(user?.role === "muhasebe" && ["personel","maas_avans"].includes(k)))
-                            .map(([k, ic, l]) => (
-                            <div key={k} onClick={()=>{ setPage('hr'); setHrTab(k); }}
-                              style={{ padding:"7px 10px 7px 16px", cursor:"pointer", fontSize:"12.5px", display:"flex", alignItems:"center", gap:"7px",
-                                color: hrTab===k ? "#fff" : "#94a3b8", fontWeight: hrTab===k ? 700 : 500,
-                                background: hrTab===k ? "rgba(59,130,246,0.22)" : "transparent",
-                                borderLeft: hrTab===k ? "3px solid #3b82f6" : "3px solid transparent",
-                                borderRadius:"0 8px 8px 0", transition:"background 0.15s" }}>
-                              <span style={{ fontSize:"13px" }}>{ic}</span> {l}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-                  <div className={`sidebar-nav-item ${page==='orgsema'?'active':''}`} onClick={()=>setPage('orgsema')}>
-                    <span>🏢</span> Organizasyon Şeması
-                  </div>
-                </div>
-              )}
-
-              {/* ── MUHASEBE ── */}
-              {(isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
-                <>
-                  <div className="sidebar-section-title" onClick={()=>toggleSection('muhasebe')}>
-                    <span>Muhasebe</span>
-                    <span className={`sidebar-section-chevron ${openSections.muhasebe?'open':'closed'}`}>▾</span>
-                  </div>
-                  {openSections.muhasebe && (
-                    <div style={altNavGrup}>
-                      {isFinanceUser && !isAltMarka && (
-                        <>
-                          <AltNavItem aktif={page==='finance'} onClick={()=>setPage('finance')} ikon="📊" label="Finans Paneli" />
-                          <AltNavItem onClick={()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); }} ikon="🧾" label="Fatura Girişi" />
-                          <AltNavItem aktif={page==='erc_taseron'} onClick={()=>setPage('erc_taseron')} ikon="📐" label="Taşeron Hesabı" />
-                          <AltNavItem aktif={page==='taseron_borc'} onClick={()=>setPage('taseron_borc')} ikon="💳" label="Taşeron Borçlar" />
-                        </>
-                      )}
-                      <AltNavItem aktif={page==='is_avans'} onClick={()=>setPage('is_avans')} ikon="💳" label="İş Avansı" badge={pendingAvansCount} />
-                      <AltNavItem aktif={page==='masraf'} onClick={()=>setPage('masraf')} ikon="📄" label="Masraf Formu" badge={pendingMasrafCount} />
-                      {isAltMarka && isAdmin && (
-                        <>
-                          <AltNavItem aktif={page==='marka_nakit'} onClick={()=>setPage('marka_nakit')} ikon="💰" label="Nakit Akışı (Günlük)" />
-                          <AltNavItem aktif={page==='marka_taseron'} onClick={()=>setPage('marka_taseron')} ikon="🔧" label="Taşeron Faturaları" />
-                          <AltNavItem aktif={page==='marka_fatura_takip'} onClick={()=>setPage('marka_fatura_takip')} ikon="🧾" label="Şimşek Fatura Takip" />
-                        </>
-                      )}
-                      {["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && (
-                        <AltNavItem aktif={page==='cashflow'} onClick={()=>setPage('cashflow')} ikon="🏦" label="Nakit Akışı" />
-                      )}
-                      {/* Çek & Senet — kısıtlı: yalnız bu 4 kişiye görünür, diğerleri menüde hiç görmez */}
-                      {!isAltMarka && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com","muhasebe@simsektel.com","erencan.simsek@simsektel.com"].includes(_userEmail) && (
-                        <AltNavItem aktif={page==='cek_senet'} onClick={()=>setPage('cek_senet')} ikon="📝" label="Çek & Senet" />
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* ── DEPO & ENVANTER ── */}
-              {(canSeeMalzeme || isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
-                <>
-                  <div className="sidebar-section-title" onClick={()=>toggleSection('depo')}>
-                    <span>Araç & Depo & Envanter</span>
-                    <span className={`sidebar-section-chevron ${openSections.depo?'open':'closed'}`}>▾</span>
-                  </div>
-                  {openSections.depo && (
-                    <div style={altNavGrup}>
-                      <AltNavItem aktif={page==='malzeme'} onClick={()=>setPage('malzeme')} ikon="📦" label="Malzeme Yönetimi" badge={pendingMalzemeCount} />
-                      {(isAdmin || ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com"].includes(_userEmail)) && (
-                        <AltNavItem aktif={page==='araclar'} onClick={()=>setPage('araclar')} ikon="🚗" label="Araç Yönetimi" />
-                      )}
-                      {isAdmin && (
-                        <AltNavItem aktif={page==='ofis'} onClick={()=>setPage('ofis')} ikon="🏢" label="Depo & Ofis Kiraları" />
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* ── HW DOSYA YÜKLE (katlanır grup) ── */}
-              {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && canHwUpload && !isAltMarka && (
-                <>
-                  <div className="sidebar-section-title" onClick={()=>toggleSection('hwYukle')}>
-                    <span>HW Dosya Yükle</span>
-                    <span className={`sidebar-section-chevron ${openSections.hwYukle?'open':'closed'}`}>▾</span>
-                  </div>
-                  {openSections.hwYukle && (
-                    <div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); }}>
-                        <span>📤</span> HW Payment Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura'); }}>
-                        <span>🧾</span> HW Fatura Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura_item'); }}>
-                        <span>📑</span> Huawei Fatura Item Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); }}>
-                        <span>🔩</span> HW PO Yükle
-                      </div>
-                      <div className="sidebar-nav-item" onClick={()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); }}>
-                        <span>📋</span> HW Acceptance Yükle
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-
-            </>
-          )}
-
-          {/* User info + Logout */}
-          <div className="sidebar-user">
-            <div className="sidebar-user-card">
-              <div className="sidebar-user-avatar">{user?.name?.charAt(0) || '?'}</div>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:13,fontWeight:600,color:'#e2e8f0',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user?.name || user?.email}</div>
-                <div style={{fontSize:11,color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{getUserTitle(user)}</div>
-              </div>
             </div>
-            <button
-              onClick={handleLogout}
-              style={{marginTop:8,width:'100%',padding:'8px',background:'#1e2a3a',border:'1px solid #2d3f55',borderRadius:'8px',color:'#94a3b8',fontSize:12,fontWeight:600,cursor:'pointer'}}
-            >
-              Çıkış Yap
-            </button>
           </div>
         </div>
-
         {/* ── MAIN AREA ── */}
-        <div className="main-area" onClick={()=>{ if(!sidebarCollapsed) setSidebarCollapsed(true); }}>
-          {/* Topbar */}
+        <div className="main-area" onClick={()=>{ if (navOpen) setNavOpen(null); }}>
+          {/* Sayfa başlığı şeridi (menü üst çubuğa taşındı) */}
           <div className="topbar" onClick={e=>e.stopPropagation()}>
             <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
-              <button
-                className="topbar-toggle"
-                onClick={()=>setSidebarCollapsed(v=>!v)}
-                title={sidebarCollapsed?"Menüyü aç":"Menüyü kapat"}
-              >
-                {sidebarCollapsed ? '☰' : '✕'}
-              </button>
-              <div style={{fontSize:16,fontWeight:700,color:'#0f172a'}}>{getPageTitle()}</div>
+              <div style={{fontSize:15,fontWeight:800,color:'#0f172a'}}>{getPageTitle()}</div>
               <div style={{fontSize:12,color:'#94a3b8'}}>{new Date().toLocaleDateString('tr-TR',{day:'numeric',month:'long',year:'numeric'})}</div>
             </div>
-            <div style={{fontSize:13,color:'#64748b'}}>{user?.name || user?.email}</div>
           </div>
 
           {/* Notification bars */}
@@ -31469,7 +31448,7 @@ function App() {
                 }}
               />
             )}
-            {page === "entry" && !isAltMarka && <DailyEntry />}
+            {page === "entry" && !isAltMarka && <DailyEntry actionTrigger={entryActionTrigger} onActionHandled={() => setEntryActionTrigger(null)} />}
             {page === "platform" && isPlatformAdmin && (
               <div style={{maxWidth:'1100px',margin:'0 auto',padding:'24px 16px'}}>
                 <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 60%,#1e3a5f 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",justifyContent:"space-between",color:"#fff"}}>
