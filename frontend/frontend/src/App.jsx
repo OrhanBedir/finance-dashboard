@@ -3990,7 +3990,7 @@ function OrgSemasiPanel({ currentUser }) {
       if (!uyeler.length) { eRows.push([ekipAdi(e), e.bolge || "", "— üye atanmadı —", "", "", ""]); return; }
       uyeler.forEach(p => eRows.push([ekipAdi(e), e.bolge || "", p.ad_soyad, p.unvan || "", p.telefon || "", p.ekip_arac_plaka || ""]));
     });
-    const atanmamis = personelList.filter(p => p.aktif && !String(p.ekip_bilgisi || "").trim());
+    const atanmamis = personelList.filter(p => p.aktif && !ayrildi(p) && !String(p.ekip_bilgisi || "").trim());
     atanmamis.forEach(p => eRows.push(["— Ekipsiz —", "", p.ad_soyad, p.unvan || "", p.telefon || "", ""]));
     const eData = [eHead, ...eRows];
     const ws3 = XLSXStyle.utils.aoa_to_sheet(eData);
@@ -4045,7 +4045,7 @@ function OrgSemasiPanel({ currentUser }) {
       {ekipDetay && (() => {
         const e = ekipler.find(x => x.ekip_no === ekipDetay.ekip_no) || ekipDetay;
         const uyeler = ekipUyeleri(e.ekip_no);
-        const ekipsizler = personelList.filter(p => p.aktif && !String(p.ekip_bilgisi || "").trim());
+        const ekipsizler = personelList.filter(p => p.aktif && !ayrildi(p) && !String(p.ekip_bilgisi || "").trim());
         const thE = { padding: "9px 14px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" };
         const tdE = { padding: "10px 14px", fontSize: "13.5px", color: "#1f2937", borderBottom: "1px solid #f1f5f9" };
         return (
@@ -4174,7 +4174,7 @@ function OrgSemasiPanel({ currentUser }) {
               {/* Personel → ekip ataması */}
               <div style={{ fontSize: "13px", fontWeight: 800, color: "#1e3a5f", marginBottom: "8px" }}>PERSONEL ATAMALARI <span style={{ fontWeight: 500, fontSize: "11px", color: "#94a3b8" }}>seçim anında kaydedilir</span></div>
               <div style={{ display: "grid", gap: "4px" }}>
-                {personelList.filter(p => p.aktif).sort((a, b) => a.ad_soyad.localeCompare(b.ad_soyad, "tr")).map(p => (
+                {personelList.filter(p => p.aktif && !ayrildi(p)).sort((a, b) => a.ad_soyad.localeCompare(b.ad_soyad, "tr")).map(p => (
                   <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "6px 10px", borderBottom: "1px solid #f8fafc" }}>
                     <div style={{ minWidth: 0 }}>
                       <span style={{ fontWeight: 600, fontSize: "13px", color: "#111827" }}>{p.ad_soyad}</span>
