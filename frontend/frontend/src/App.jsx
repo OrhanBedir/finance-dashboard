@@ -31908,9 +31908,9 @@ function App() {
                       <span style={{background:"#f3f4f6",borderRadius:"8px",padding:"6px 8px"}}>➕</span> Yeni Kullanıcı
                     </h3>
                     <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-                      <input placeholder="Ad Soyad" value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
-                      <input placeholder="E-posta adresi" value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
-                      <input placeholder="Şifre" type="password" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
+                      <input placeholder="Ad Soyad" autoComplete="off" name="yeni_kullanici_ad" value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
+                      <input placeholder="E-posta adresi" autoComplete="off" name="yeni_kullanici_eposta" inputMode="email" value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
+                      <input placeholder="Şifre" type="password" autoComplete="new-password" name="yeni_kullanici_sifre" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
                       <select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",background:"#fff",cursor:"pointer"}}>
                         <option value="user">👤 Personel</option>
                         <option value="subcon">🔧 Taşeron</option>
