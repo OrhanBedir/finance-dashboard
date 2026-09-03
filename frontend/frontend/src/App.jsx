@@ -14,7 +14,7 @@ import towerIcon from "./assets/tower.svg";
 // (küçük font, sağa girintili, aktifken mavi ray + vurgu)
 /* ═══ ÜST MENÜ (02.09.2026) — Huawei eSupplier tarzı çubuk: başlık tıklanınca
    kart açılır, tekrar tıklanınca ya da dışarı tıklanınca kapanır ═══ */
-function TopNavMenu({ id, label, badge, open, onToggle, items, wide, cols, baslik }) {
+function TopNavMenu({ id, label, badge, open, onToggle, items, wide, cols, baslik, align }) {
   const acik = open === id;
   const gorunur = (items || []).filter(Boolean);
   if (!gorunur.length) return null;
@@ -25,7 +25,7 @@ function TopNavMenu({ id, label, badge, open, onToggle, items, wide, cols, basli
       {badge > 0 && <span className="topnav-badge">{badge}</span>}
       <span className="topnav-caret">{acik ? "▲" : "▼"}</span>
       {acik && (
-        <div className={`topnav-drop ${wide ? "wide" : ""}`} style={cols ? { gridTemplateColumns: `repeat(${cols}, 1fr)`, minWidth: `${cols * 215}px` } : undefined} onClick={(e) => e.stopPropagation()}>
+        <div className={`topnav-drop ${wide ? "wide" : ""} ${align === "right" ? "right" : ""}`} style={cols ? { gridTemplateColumns: `repeat(${cols}, 1fr)`, minWidth: `${cols * 215}px` } : undefined} onClick={(e) => e.stopPropagation()}>
           <div className="topnav-drop-hd">{baslik || label}</div>
           {gorunur.map((it, i) => (
             <div key={i} className={`topnav-drop-item ${it.aktif ? "aktif" : ""} ${it.alt ? "alt" : ""}`}
@@ -4545,6 +4545,67 @@ function BelgeSecModal({ siteCode, kaynak, onClose }) {
       </div>
     </div>,
     document.body
+  );
+}
+
+/* ═══ HW DOSYA YÜKLEME MERKEZİ (03.09.2026, Orhan) ═══
+   eSupplier'dan indirilen tüm dosyalar tek sayfada, sırayla, alt alta yüklenir;
+   her kutu kendi dosya adı kuralını uygular. Kutular kapatılıp açılabilir,
+   yüklenen kutu "✓ Yüklendi" olur. */
+function HwYuklemeMerkezi({ odak, onRejected }) {
+  const PANELLER = [
+    { key: "payment",     ad: "HW Payment",     dosya: "invoicePayment_….xlsx",          ikon: "📤", C: FinanceUploadInline },
+    { key: "fatura",      ad: "HW Fatura",      dosya: "ap_invoiceHeadTemplate_….xlsx",  ikon: "🧾", C: FinanceInvoiceUploadInline },
+    { key: "fatura_item", ad: "HW Fatura Item", dosya: "invoiceLine_….xlsx",             ikon: "📑", C: FinanceHwInvoiceItemsUploadInline },
+    { key: "po",          ad: "HW PO",          dosya: "PURCHASE_ORDER_….xlsx",          ikon: "🔩", C: HWPoUploadInline },
+    { key: "acceptance",  ad: "HW Acceptance",  dosya: "ACCEPTANCE_….xlsx",              ikon: "📋", C: HWAcceptanceUploadInline },
+    { key: "qc",          ad: "HW QC",          dosya: "QC durum Excel",                 ikon: "🛡", C: QCUploadInline },
+    { key: "boq",         ad: "HW BoQ",         dosya: "BoQ / kalem fiyat listesi",      ikon: "📚", C: BoQUploadInline },
+    { key: "rollout",     ad: "HW Rollout",     dosya: "Rollout takip Excel",            ikon: "🚀", C: RolloutUploadInline },
+  ];
+  const [acik, setAcik] = useState(() => Object.fromEntries(PANELLER.map((p) => [p.key, true])));
+  const [bitti, setBitti] = useState({});
+  useEffect(() => {
+    if (!odak) return;
+    setAcik((a) => ({ ...a, [odak]: true }));
+    const t = setTimeout(() => { const el = document.getElementById(`hwup-${odak}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 80);
+    return () => clearTimeout(t);
+  }, [odak]);
+  const tamam = Object.values(bitti).filter(Boolean).length;
+  return (
+    <div style={{ padding: "22px 28px 60px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>📥 HW Dosya Yükleme Merkezi</div>
+          <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 2 }}>eSupplier'dan indirdiğin dosyaları sırayla yükle — her kutu yalnız kendi dosyasını kabul eder.</div>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ background: tamam === PANELLER.length ? "#dcfce7" : "#eff6ff", color: tamam === PANELLER.length ? "#166534" : "#1d4ed8", borderRadius: 999, padding: "5px 12px", fontSize: 12, fontWeight: 800 }}>
+            {tamam}/{PANELLER.length} yüklendi
+          </span>
+          <button type="button" onClick={onRejected} style={{ border: "1px solid #fecaca", background: "#fef2f2", color: "#dc2626", borderRadius: 9, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>⛔ Reddedilenleri Gör</button>
+        </div>
+      </div>
+      {PANELLER.map((p, i) => (
+        <div id={`hwup-${p.key}`} key={p.key} className="hwup-card" style={{ scrollMarginTop: 80 }}>
+          <div className="hwup-head" onClick={() => setAcik((a) => ({ ...a, [p.key]: !a[p.key] }))}>
+            <span className="hwup-no">{i + 1}</span>
+            <span className="hwup-ikon">{p.ikon}</span>
+            <div><div className="hwup-ad">{p.ad} Upload</div><div className="hwup-dosya">{p.dosya}</div></div>
+            <span className={`hwup-durum ${bitti[p.key] ? "ok" : ""}`}>{bitti[p.key] ? "✓ Yüklendi" : "Bekliyor"}</span>
+            <span className="hwup-car">{acik[p.key] ? "▲" : "▼"}</span>
+          </div>
+          {acik[p.key] && (
+            <div className="hwup-body">
+              <p.C
+                onClose={() => setAcik((a) => ({ ...a, [p.key]: false }))}
+                onUploaded={() => { setBitti((b) => ({ ...b, [p.key]: true })); window.dispatchEvent(new Event("dataUpdated")); }}
+              />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -9955,6 +10016,12 @@ function FinanceDashboard({
       setShowFinanceHwAcceptanceUpload(true); setShowUpload(false); setShowInvoiceUpload(false); setShowFinanceHwPoUpload(false);
     } else if (actionTrigger === 'hw_rejected') {
       openRejectedModal();
+    } else if (actionTrigger === 'home') {
+      // ⌂ Ana sayfa: açık yükleme panelleri/modalları kapat, temiz Finans Paneli
+      setShowUpload(false); setShowInvoiceUpload(false); setShowHwInvoiceItemsUpload(false);
+      setShowFinanceHwPoUpload(false); setShowFinanceHwAcceptanceUpload(false);
+      setShowInvoiceEntryModal(false); setRejectedModal(false);
+      try { window.scrollTo({ top: 0 }); document.querySelector(".main-content")?.scrollTo({ top: 0 }); } catch {}
     }
     onActionHandled?.();
   }, [actionTrigger]);
@@ -30277,6 +30344,7 @@ function App() {
   // Üst menü (02.09.2026): hangi kart açık (ana/ik/muhasebe/depo/daha/user) + Günlük İş Girişi yükleme tetikleyicisi
   const [navOpen, setNavOpen] = useState(null);
   const [entryActionTrigger, setEntryActionTrigger] = useState(null);
+  const [hwUploadFocus, setHwUploadFocus] = useState(null); // HW Yükleme Merkezi'nde hangi kutuya kaydırılsın
   useEffect(() => {
     if (!navOpen) return;
     const kapat = () => setNavOpen(null);
@@ -31105,6 +31173,7 @@ function App() {
 
   // Sidebar layout için sayfa başlığı helper
   const getPageTitle = () => {
+    if (page === 'hw_upload') return 'HW Dosya Yükleme Merkezi';
     switch(page) {
       case "finance": return "Finans Paneli";
       case "region": return "Bölge Analizi";
@@ -31195,7 +31264,22 @@ function App() {
         .topnav-avatar { width:30px; height:30px; border-radius:50%; background:linear-gradient(135deg,#f59e0b,#ef4444); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:12px; color:#fff; flex-shrink:0; }
         .topnav-user-name { font-weight:700; font-size:13px; line-height:1.1; color:#fff; white-space:nowrap; }
         .topnav-user-role { font-size:10.5px; color:#8fa4c6; font-weight:600; white-space:nowrap; }
+        .topnav-drop.right { left:auto; right:0; }
+        .topnav-drop.right::before { left:auto; right:30px; }
         .topnav-drop-user { left:auto; right:0; min-width:250px; }
+        /* HW Yükleme Merkezi */
+        .hwup-card { background:#fff; border:1px solid #e2e8f0; border-radius:14px; margin-bottom:14px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.05); }
+        .hwup-head { display:flex; align-items:center; gap:12px; padding:12px 16px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #eef2f7; user-select:none; }
+        .hwup-head:hover { background:#f1f5f9; }
+        .hwup-no { width:28px; height:28px; border-radius:50%; background:#1e3a5f; color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; }
+        .hwup-ikon { font-size:18px; }
+        .hwup-ad { font-weight:800; color:#0f172a; font-size:14px; }
+        .hwup-dosya { font-size:12px; color:#64748b; }
+        .hwup-durum { margin-left:auto; font-size:11.5px; font-weight:800; border-radius:999px; padding:3px 10px; background:#f1f5f9; color:#64748b; white-space:nowrap; }
+        .hwup-durum.ok { background:#dcfce7; color:#166534; }
+        .hwup-car { color:#94a3b8; font-size:11px; }
+        .hwup-body { padding:6px 12px 12px; }
+        .hwup-body .entryForm { box-shadow:none; border:none; margin:0; }
         .topnav-drop-user::before { left:auto; right:30px; }
         .topnav-drop-who { padding:8px 10px 10px; border-bottom:1px solid #dde3ec; margin-bottom:4px; white-space:normal; }
         .topnav-drop-who b { display:block; }
@@ -31208,7 +31292,7 @@ function App() {
         {/* ── ÜST MENÜ (02.09.2026): sol menü yerine Huawei eSupplier tarzı üst çubuk + açılır kartlar ── */}
         <div className="topnav" onClick={(e)=>e.stopPropagation()}>
           <div className="topnav-brand" title="Ana sayfa"
-            onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka) setPage('marka_finans'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) setPage('finance'); else setPage('region'); }}>
+            onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka) setPage('marka_finans'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) { setPage('finance'); setFinanceActionTrigger('home'); } else setPage('region'); }}>
             <div className="topnav-mark">🏗</div>
             <div>
               <div className="topnav-brand-name">{isPlatformAdmin ? 'Omnix' : (user?.marka_ad || user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</div>
@@ -31247,7 +31331,7 @@ function App() {
                   ...(isAdmin ? [{ ikon:'👥', label:'Bekleyen Kullanıcılar', aktif: page==='pending-users', badge: pendingUsers.length, onClick:()=>{ setPage('pending-users'); fetchPendingUsers(); } }] : []),
                 ]} />
 
-                <TopNavMenu id="ik" label="İnsan Kaynakları" open={navOpen} onToggle={setNavOpen} badge={pendingAvansCount + pendingMasrafCount} items={[
+                <TopNavMenu id="ik" label="İnsan Kaynakları" open={navOpen} onToggle={setNavOpen} items={[
                   ...((isAdmin || user?.role === "muhasebe" || _userEmail === "nurcan.kus@simsektel.com") ? [
                     { ikon:'👥', label:'İK Paneli', sub:'Personel, maaş, puantaj, ISG', aktif: page==='hr', onClick:()=>setPage('hr') },
                     ...[["personel","👤","Personel Maaş"],["maas_avans","💰","Maaş Avansı"],["puantaj","📋","Puantaj"],["isg","🎓","ISG / Belgeler"]]
@@ -31255,14 +31339,12 @@ function App() {
                       .map(([k, ic, l]) => ({ ikon: ic, label: l, alt: true, aktif: page==='hr' && hrTab===k, onClick:()=>{ setPage('hr'); setHrTab(k); } })),
                   ] : []),
                   { ikon:'🏢', label:'Organizasyon Şeması', aktif: page==='orgsema', onClick:()=>setPage('orgsema') },
-                  ...((isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) ? [
-                    { ikon:'💳', label:'İş Avansı', sub:'Talep ve onay zinciri', aktif: page==='is_avans', badge: pendingAvansCount, onClick:()=>setPage('is_avans') },
-                    { ikon:'📄', label:'Masraf Formu', sub:'Fiş / harcama onayları', aktif: page==='masraf', badge: pendingMasrafCount, onClick:()=>setPage('masraf') },
-                  ] : []),
                 ]} />
 
                 {(isAdmin || _isBolgeMudur || ["rollout_mudur","pm","muhasebe"].includes(user?.role)) && (
-                  <TopNavMenu id="muhasebe" label="Muhasebe" open={navOpen} onToggle={setNavOpen} items={[
+                  <TopNavMenu id="muhasebe" label="Muhasebe" open={navOpen} onToggle={setNavOpen} badge={pendingAvansCount + pendingMasrafCount} items={[
+                    { ikon:'💳', label:'İş Avansı', sub:'Talep ve onay zinciri', aktif: page==='is_avans', badge: pendingAvansCount, onClick:()=>setPage('is_avans') },
+                    { ikon:'📄', label:'Masraf Formu', sub:'Fiş / harcama onayları', aktif: page==='masraf', badge: pendingMasrafCount, onClick:()=>setPage('masraf') },
                     ...(isFinanceUser && !isAltMarka ? [
                       { ikon:'🧾', label:'Fatura Girişi', sub:'Gelen / giden fatura kaydı', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); } },
                       { ikon:'📐', label:'Taşeron Hesabı', aktif: page==='erc_taseron', onClick:()=>setPage('erc_taseron') },
@@ -31292,16 +31374,17 @@ function App() {
                 )}
 
                 {(isAdmin || _userEmail === "nurcan.kus@simsektel.com") && canHwUpload && !isAltMarka && (
-                  <TopNavMenu id="daha" label="Daha Fazla" open={navOpen} onToggle={setNavOpen} wide cols={3} baslik="HW Dosya Yükle · eSupplier çıktıları" items={[
-                    { ikon:'📤', label:'HW Payment', sub:'invoicePayment_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_payment'); } },
-                    { ikon:'🧾', label:'HW Fatura', sub:'ap_invoiceHeadTemplate_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura'); } },
-                    { ikon:'📑', label:'HW Fatura Item', sub:'invoiceLine_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_fatura_item'); } },
-                    { ikon:'🔩', label:'HW PO', sub:'PURCHASE_ORDER_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_po'); } },
-                    { ikon:'📋', label:'HW Acceptance', sub:'ACCEPTANCE_….xlsx', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_acceptance'); } },
-                    { ikon:'⛔', label:'HW Rejected', sub:'Reddedilen kalemler', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_rejected'); } },
-                    { ikon:'🛡', label:'HW QC', sub:'QC durum Excel', onClick:()=>{ setPage('entry'); setEntryActionTrigger('hw_qc'); } },
-                    { ikon:'📚', label:'HW BoQ', sub:'Kalem / fiyat listesi', onClick:()=>{ setPage('entry'); setEntryActionTrigger('hw_boq'); } },
-                    { ikon:'🚀', label:'HW Rollout', sub:'Rollout takip Excel', onClick:()=>{ setPage('entry'); setEntryActionTrigger('hw_rollout'); } },
+                  <TopNavMenu id="daha" label="Daha Fazla" open={navOpen} onToggle={setNavOpen} wide cols={3} align="right" baslik="HW Dosya Yükle · eSupplier çıktıları — tıkla, hepsi sırayla açılır" items={[
+                    { ikon:'📥', label:'Tüm Dosyaları Yükle', sub:'8 yükleme tek sayfada, sırayla', aktif: page==='hw_upload', onClick:()=>{ setHwUploadFocus(null); setPage('hw_upload'); } },
+                    { ikon:'📤', label:'HW Payment', sub:'invoicePayment_….xlsx', onClick:()=>{ setHwUploadFocus('payment'); setPage('hw_upload'); } },
+                    { ikon:'🧾', label:'HW Fatura', sub:'ap_invoiceHeadTemplate_….xlsx', onClick:()=>{ setHwUploadFocus('fatura'); setPage('hw_upload'); } },
+                    { ikon:'📑', label:'HW Fatura Item', sub:'invoiceLine_….xlsx', onClick:()=>{ setHwUploadFocus('fatura_item'); setPage('hw_upload'); } },
+                    { ikon:'🔩', label:'HW PO', sub:'PURCHASE_ORDER_….xlsx', onClick:()=>{ setHwUploadFocus('po'); setPage('hw_upload'); } },
+                    { ikon:'📋', label:'HW Acceptance', sub:'ACCEPTANCE_….xlsx', onClick:()=>{ setHwUploadFocus('acceptance'); setPage('hw_upload'); } },
+                    { ikon:'🛡', label:'HW QC', sub:'QC durum Excel', onClick:()=>{ setHwUploadFocus('qc'); setPage('hw_upload'); } },
+                    { ikon:'📚', label:'HW BoQ', sub:'Kalem / fiyat listesi', onClick:()=>{ setHwUploadFocus('boq'); setPage('hw_upload'); } },
+                    { ikon:'🚀', label:'HW Rollout', sub:'Rollout takip Excel', onClick:()=>{ setHwUploadFocus('rollout'); setPage('hw_upload'); } },
+                    { ikon:'⛔', label:'HW Rejected', sub:'Reddedilen kalemleri gör', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('hw_rejected'); } },
                   ]} />
                 )}
               </>
@@ -31310,7 +31393,7 @@ function App() {
 
           <div className="topnav-right">
             <div className="topnav-icon" title="Ana sayfa"
-              onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka) setPage('marka_finans'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) setPage('finance'); else setPage('region'); }}>⌂</div>
+              onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka) setPage('marka_finans'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) { setPage('finance'); setFinanceActionTrigger('home'); } else setPage('region'); }}>⌂</div>
             <div className={`topnav-user ${navOpen==='user' ? 'open' : ''}`} onClick={()=>setNavOpen(navOpen==='user' ? null : 'user')}>
               <div className="topnav-avatar">{String(user?.name || user?.email || '?').split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0]).join('').toUpperCase()}</div>
               <div className="topnav-user-txt">
@@ -31449,6 +31532,9 @@ function App() {
               />
             )}
             {page === "entry" && !isAltMarka && <DailyEntry actionTrigger={entryActionTrigger} onActionHandled={() => setEntryActionTrigger(null)} />}
+            {page === "hw_upload" && !isAltMarka && (isAdmin || _userEmail === "nurcan.kus@simsektel.com") && (
+              <HwYuklemeMerkezi odak={hwUploadFocus} onRejected={() => { setPage('finance'); setFinanceActionTrigger('hw_rejected'); }} />
+            )}
             {page === "platform" && isPlatformAdmin && (
               <div style={{maxWidth:'1100px',margin:'0 auto',padding:'24px 16px'}}>
                 <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 60%,#1e3a5f 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",justifyContent:"space-between",color:"#fff"}}>
