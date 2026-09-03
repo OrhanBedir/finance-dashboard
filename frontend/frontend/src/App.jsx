@@ -481,7 +481,7 @@ function getQtyAnalysis(doneQty, requestedQty) {
 // Tüm indirmelerin tek tip olması için: Bölge Analizi formatı (lacivert başlık,
 // koyu header + autofilter + dondurulmuş üst satırlar, zebra satırlar, gridsiz).
 // rows: dizi dizisi; numericCols: sağa yaslanacak kolon indexleri (Set/dizi).
-async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, sheetName = "Rapor", numericCols = [], extraSheets = [] }) {
+async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, sheetName = "Rapor", numericCols = [], intCols = [], extraSheets = [] }) {
   const titleStyle = {
     fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
     font: { bold: true, sz: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
@@ -517,6 +517,7 @@ async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, 
   // Tek sayfa kurulumunu extraSheets için de aynen kullanan yardımcı
   const buildSheet = (sh) => {
     const numSet = new Set(sh.numericCols || []);
+    const intSet = new Set(sh.intCols || []); // adet kolonları: ondalıksız (02.09.2026)
     const NCOLS = sh.headers.length;
     const aoa = [];
     const titleRow = Array(NCOLS).fill({ v: "", s: titleStyle });
@@ -534,7 +535,8 @@ async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, 
       aoa.push(cells.map((v, ci) => {
         const s2 = cellStyle(isEven, numSet.has(ci));
         // Sayısal hücreler binlik ayraç + 2 ondalıkla, tek satırda okunur
-        if (numSet.has(ci) && typeof v === "number") s2.numFmt = "#,##0.00";
+        if (intSet.has(ci) && typeof v === "number") s2.numFmt = Number.isInteger(v) ? "#,##0" : "#,##0.##";
+        else if (numSet.has(ci) && typeof v === "number") s2.numFmt = "#,##0.00";
         if (rowObj?.bold) {
           s2.font = { ...s2.font, bold: true, color: { rgb: "000000" } };
           s2.fill = { patternType: "solid", fgColor: { rgb: "E8EEF7" } };
@@ -562,7 +564,7 @@ async function exportStandardExcel({ title, headers, rows, colWidths, fileBase, 
   };
 
   const wb = XLSXStyle.utils.book_new();
-  const sheets = [{ sheetName, title, headers, rows, colWidths, numericCols }, ...extraSheets];
+  const sheets = [{ sheetName, title, headers, rows, colWidths, numericCols, intCols }, ...extraSheets];
   const ncolsList = [];
   sheets.forEach((sh, i) => {
     const { ws, NCOLS } = buildSheet(sh);
@@ -5629,11 +5631,12 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
       ];
     });
     exportStandardExcel({
-      title: `${kod} — Saha Kalemleri · PR / PO / Gerçekleşen (${new Date().toLocaleDateString("tr-TR")})`,
+      title: `${kod} — Saha Kalemleri · PR / PO / Gerçekleşen`,
       sheetName: "Kalemler", fileBase: `${kod}_Kalemler`,
       headers: ["Item Code", "Item Description", "PR (Talep)", "PO (Requested)", "Fark", "Done (Fiziki)", "Due (Fatura Edilecek)", "Billed (Fatura Edilen)", "QC", "Subcon", "PO No", "Birim Fiyat", "Para Birimi", "PR Tutarı", "Fiyat Notu"],
       colWidths: [13, 58, 11, 14, 20, 13, 18, 18, 8, 22, 22, 13, 11, 14, 16],
-      numericCols: [2, 3, 5, 6, 7, 11, 13],
+      intCols: [2, 3, 5, 6, 7],   // adetler: ondalıksız (Due 0,2 gibi kesirli değerler kendiliğinden ondalıklı kalır)
+      numericCols: [11, 13],      // fiyat ve tutar: 2 ondalık
       rows: satirlar,
     });
   };
