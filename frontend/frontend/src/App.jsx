@@ -5611,25 +5611,31 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
     finally { setKaydediyor(false); }
   };
 
+  // Excel (02.09.2026): CSV yerine biçimli .xlsx — gridlines kapalı, başlık dondurulmuş, filtreli
   const excelIndir = () => {
-    const bas = ["Item Code","Item Description","PR Qty","Requested Qty","Fark","Done Qty","Due Qty","Billed Qty","QC Durum","Subcon","PO No"];
+    const kod = String(siteCode || "saha").toUpperCase();
     const satirlar = rows.map((r) => {
       const f = farkHesap(r);
+      const fiyat = Number(r.unit_price || 0);
+      const pr = num(goster(r, "pr_qty"));
       return [
-        r.item_code, r.item_description,
-        goster(r, "pr_qty"), r.requested_qty,
-        f.tip === "esit" ? "" : (f.tip === "po-yok" ? `+${f.deger} (PO yok)` : `-${f.deger} (PR yok)`),
-        goster(r, "done_qty"), r.due_qty, r.billed_qty, r.qc_durum, r.subcon_name, r.po_no,
+        r.item_code, r.item_description || "",
+        pr === null ? "" : pr, Number(r.requested_qty || 0),
+        f.tip === "esit" ? "" : (f.tip === "po-yok" ? `PO açılmamış (+${f.deger})` : `PR eksik (−${f.deger})`),
+        num(goster(r, "done_qty")) ?? "", Number(r.due_qty || 0), Number(r.billed_qty || 0),
+        r.qc_durum || "", r.subcon_name || "", r.po_no || "",
+        fiyat ? fiyat : "", r.currency || "", fiyat && pr ? Math.round(pr * fiyat * 100) / 100 : "",
+        r.fiyat_tahmini && fiyat ? "tahmini (son PO)" : "",
       ];
     });
-    const csv = [bas, ...satirlar]
-      .map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(";"))
-      .join("\n");
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${String(siteCode || "saha").toUpperCase()}_Kalemler.csv`;
-    a.click(); URL.revokeObjectURL(a.href);
+    exportStandardExcel({
+      title: `${kod} — Saha Kalemleri · PR / PO / Gerçekleşen (${new Date().toLocaleDateString("tr-TR")})`,
+      sheetName: "Kalemler", fileBase: `${kod}_Kalemler`,
+      headers: ["Item Code", "Item Description", "PR (Talep)", "PO (Requested)", "Fark", "Done (Fiziki)", "Due (Fatura Edilecek)", "Billed (Fatura Edilen)", "QC", "Subcon", "PO No", "Birim Fiyat", "Para Birimi", "PR Tutarı", "Fiyat Notu"],
+      colWidths: [13, 58, 11, 14, 20, 13, 18, 18, 8, 22, 22, 13, 11, 14, 16],
+      numericCols: [2, 3, 5, 6, 7, 11, 13],
+      rows: satirlar,
+    });
   };
 
   const S = {
