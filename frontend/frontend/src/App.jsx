@@ -966,7 +966,7 @@ function HWPoUploadInline({ onClose, onUploaded }) {
           }}
         >
           <h3 className="listTitle" style={{ margin: 0 }}>
-            📄 HW_PO Upload
+            🔩 HW PO Upload
           </h3>
           <button
             type="button"
