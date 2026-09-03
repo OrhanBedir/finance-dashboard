@@ -4574,6 +4574,7 @@ function HwYuklemeMerkezi({ odak, onRejected }) {
     { key: "qc",          ad: "HW QC",          dosya: "QC durum Excel",                 ikon: "🛡", C: QCUploadInline },
     { key: "boq",         ad: "HW BoQ",         dosya: "BoQ / kalem fiyat listesi",      ikon: "📚", C: BoQUploadInline },
     { key: "rollout",     ad: "HW Rollout",     dosya: "Rollout takip Excel",            ikon: "🚀", C: RolloutUploadInline },
+    { key: "smartqc",     ad: "HW Smart QC Görevleri", dosya: "ISDP Task Explorer · Export Search Result", ikon: "✅", C: SmartQcUploadInline },
   ];
   const [acik, setAcik] = useState(() => Object.fromEntries(PANELLER.map((p) => [p.key, true])));
   const [bitti, setBitti] = useState({});
@@ -32163,6 +32164,44 @@ function App() {
   );
 }
 
+/* Huawei ISDP Smart QC görev listesi yüklemesi (03.09.2026): Task Explorer → "Export Search Result" Excel'i.
+   Template → iş kolu, Site ID → NS saha, Task Status → iş kolu QC durumu (Rollout Data iş kolu görünümü). */
+function SmartQcUploadInline({ onClose, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [sonuc, setSonuc] = useState(null);
+  const handleUpload = async () => {
+    if (!file) { alert("Dosya seç"); return; }
+    try {
+      setLoading(true);
+      const formData = new FormData(); formData.append("file", file);
+      const res = await fetch(`${API_BASE}/rollout/is-kolu/smartqc`, { method: "POST", headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` }, body: formData });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Upload hatası");
+      setSonuc(data);
+      if (onUploaded) onUploaded();
+    } catch (err) { alert(`❌ ${err.message}`); }
+    finally { setLoading(false); }
+  };
+  return (
+    <div className="uploadBox">
+      <h3>Huawei Smart QC Görev Listesi</h3>
+      <div style={{ fontSize: "12px", color: "#64748b", margin: "4px 0 10px" }}>ISDP → Smart QC → Task Explorer → <b>Export Search Result</b> (Excel). Gizleme / TRS / DSS-GPS / STANDALONE AI / LTE&amp;U900 / AG OG Enerji görevlerinin <b>Task Status</b>'u iş kolu QC'sine yazılır.</div>
+      <input type="file" accept=".xlsx, .xls" onChange={(e) => setFile(e.target.files[0])} />
+      <div style={{ marginTop: "10px", display: "flex", gap: "10px" }}>
+        <button onClick={handleUpload} className="saveButton">{loading ? "Yükleniyor..." : "Yükle"}</button>
+        <button onClick={onClose} className="tab">Kapat</button>
+      </div>
+      {sonuc && (
+        <div style={{ marginTop: "10px", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", color: "#065f46" }}>
+          ✅ {sonuc.islenen} görev okundu · {sonuc.guncellenen} iş kolu güncellendi
+          {sonuc.eslesmeyen_saha_sayisi ? <div style={{ color: "#b45309", marginTop: "4px" }}>⚠ Rollout Data'da NS sahası bulunmayan {sonuc.eslesmeyen_saha_sayisi} Site ID: {sonuc.eslesmeyen_saha.join(", ")}</div> : null}
+          {sonuc.atlanan_sablon?.length ? <div style={{ color: "#64748b", marginTop: "4px" }}>Atlanan şablonlar: {sonuc.atlanan_sablon.join(", ")}</div> : null}
+        </div>
+      )}
+    </div>
+  );
+}
 function QCUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -32831,7 +32870,7 @@ const isKoluTekSite = (rows, search) => {
   return tekil.length === 1 ? es[0] : null;
 };
 const isKoluListeModu = (rows, search, isKoluFilter) => isKoluFilter !== "ALL" && !isKoluTekSite(rows, search);
-const IS_KOLU_HW_DURUM = ["", "To Be Executed", "Executing", "Closed", "Rejected"];
+const IS_KOLU_HW_DURUM = ["", "To Be Executed", "Executing", "To Be Reviewed", "Reviewing", "Rejected", "Pass With Issues", "Closed"];
 function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGuncelle, onBelgeler, onIsAta, onSiteAc, atamaYetkili }) {
   const headers = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
   const site = useMemo(() => isKoluTekSite(rows, search), [rows, search]);
@@ -32889,10 +32928,11 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
   const urls = (v) => String(v || "").split("\n").map((x) => x.trim()).filter(Boolean);
   const qcOk = (r) => String(r?.qc_durum || "").toUpperCase() === "OK";
   const ikon = (ok) => (ok ? "✅" : "⏳");
-  const hwPill = (st) => {
+  const hwPill = (st, pr) => {
     const s = st || "";
-    const bg = s === "Closed" ? ["#ecfdf5", "#047857"] : s === "Rejected" ? ["#fef2f2", "#b91c1c"] : s === "Executing" ? ["#fffbeb", "#b45309"] : ["#f1f5f9", "#64748b"];
-    return <span style={{ background: bg[0], color: bg[1], borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 800 }}>{s || "—"}</span>;
+    if (!s) return <span title="Huawei Smart QC durumu yok — Daha Fazla → HW Dosya Yükleme → Smart QC ile yükleyin" style={{ background: "#f1f5f9", color: "#94a3b8", borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 700 }}>{pr ? pr : "HW QC yok"}</span>;
+    const bg = s === "Closed" ? ["#ecfdf5", "#047857"] : s === "Rejected" ? ["#fef2f2", "#b91c1c"] : /Executing|Reviewing|To Be Reviewed/.test(s) ? ["#fffbeb", "#b45309"] : s === "Pass With Issues" ? ["#fef3c7", "#92400e"] : ["#f1f5f9", "#64748b"];
+    return <span style={{ background: bg[0], color: bg[1], borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 800 }}>{s}</span>;
   };
   const belgeChips = (v, etiket) => { const u = urls(v); return u.length ? u.map((x, i) => <a key={x} href={x} target="_blank" rel="noreferrer" style={{ display: "inline-block", background: "#dbeafe", color: "#1d4ed8", borderRadius: "6px", padding: "2px 7px", fontSize: "11px", fontWeight: 700, textDecoration: "none", marginRight: "4px" }}>📄 {etiket}{u.length > 1 ? ` ${i + 1}` : ""}</a>) : <span style={{ color: "#cbd5e1" }}>—</span>; };
   const atamaHucre = (m) => {
@@ -32913,7 +32953,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
     ["RF Rcv", ikon(String(r.malzeme_status || "").toUpperCase() === "OK" || has(r.installation_actual_start_date))],
     ["RF Start", ikon(has(r.installation_actual_start_date) || has(r.installation_actual_end_date) || has(r.onair_date) || qcOk(r))],
     ["RF Fin", ikon(m.is_kolu === "NS_AI" ? (has(r.installation_actual_end_date) || qcOk(r)) : ((m.kalem && m.kalem.pr_adet > 0) || m.hw_status === "Closed"))],
-    ["QC Status", <span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(m.hw_status || m.etkin_durum || (m.is_kolu === "NS_AI" && qcOk(r) ? "Closed" : ""))}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>],
+    ["QC Status", <span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(m.hw_status, m.pr_durum)}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>],
     ["Accept", ikon(has(r.pac_actual_end_date))],
   ] };
   const G_GENEL = { ad: "GENEL", renk: "#e8edf5", ink: "#334155", kolon: (r) => [["Bölge", r.bolge], ["Site Type", r.site_type], ["Site Fiziksel Tip", r.site_physical_type], ["Project Code", r.project_code], ["Site Code", <b style={{ fontFamily: "monospace" }}>{r.site_code}</b>], ["Malzeme Status", r.malzeme_status], ["İl", r.il]] };
@@ -33003,7 +33043,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
               <button key={m.id} type="button" onClick={() => setSecili(m.is_kolu)} style={{ textAlign: "left", border: on ? "2px solid #1d4ed8" : "1.5px solid #e2e8f0", background: on ? "#eff6ff" : "#fff", borderRadius: "12px", padding: "10px 12px", cursor: "pointer", position: "relative" }}>
                 <span style={{ position: "absolute", top: "8px", right: "8px", width: "9px", height: "9px", borderRadius: "50%", background: st }} />
                 <div style={{ fontWeight: 800, fontSize: "12.5px" }}>{m.ikon} {m.ad}</div>
-                <div style={{ fontSize: "10.5px", color: "#64748b" }}>{m.aciklama} · {durumu(m) || "durum yok"}{m.kalem?.taseron ? ` · ${m.kalem.taseron}` : ""}</div>
+                <div style={{ fontSize: "10.5px", color: "#64748b" }}>{m.aciklama} · {durumu(m) || m.pr_durum || "HW QC yok"}{m.kalem?.taseron ? ` · ${m.kalem.taseron}` : ""}</div>
                 <div style={{ fontSize: "10.5px", fontWeight: 700, color: a ? "#1d4ed8" : "#94a3b8", marginTop: "3px" }}>{a ? `${(a.personeller || []).map((p) => String(p.ad || "").split(" ")[0]).join(", ")} · ${IS_DURUM[a.durum]?.txt || a.durum}` : "Atanmadı"}</div>
               </button>
             );
@@ -33083,7 +33123,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
                   <tr key={m.id} style={{ background: secim.has(m.site_code) ? "#f8fafc" : "#fff" }}>
                     <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}><input type="checkbox" checked={secim.has(m.site_code)} onChange={() => toggle(m.site_code)} /></td>
                     {td(<b style={{ fontFamily: "monospace" }}>{m.site_code}</b>)}{td(r.il)}{td(r.bolge)}
-                    {td(<span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(durumuL(m))}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>)}
+                    {td(<span style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{hwPill(m.hw_status, m.pr_durum)}{edit(m, "hw_status", "text", IS_KOLU_HW_DURUM)}</span>)}
                     {td(isTaseron(r, m))}
                     {listeKolon(r, m).map(([, v], i) => <React.Fragment key={i}>{td(v)}</React.Fragment>)}
                     {td(a)}{td(b, { color: "#64748b" })}

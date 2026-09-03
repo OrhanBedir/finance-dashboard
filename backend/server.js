@@ -10211,6 +10211,7 @@ async function isAtamaTablolar() {
     created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (is_atama_id, tarih, personel_email)
   )`);
   await pool.query(`CREATE INDEX IF NOT EXISTS is_atama_personeller_gin ON is_atama USING GIN (personeller)`);
+  await pool.query(`ALTER TABLE rollout_is_kolu ADD COLUMN IF NOT EXISTS hw_review_time TEXT, ADD COLUMN IF NOT EXISTS hw_yukleme_ts TIMESTAMPTZ`).catch(() => {});
   await pool.query(`ALTER TABLE rollout_cleanup ADD COLUMN IF NOT EXISTS is_atama_id INT`);
   isAtamaTabloHazir = true;
 }
@@ -10602,13 +10603,64 @@ async function isKoluZengin(rows) {
     return {
       ...r, ad: t.ad, ikon: t.ikon, aciklama: t.aciklama, kategori: t.kategori, sira: t.sira,
       kalem,
-      // Etkin QC durumu: elle girilen hw_status > PR kaleminin QC OK'u
-      etkin_durum: r.hw_status || (kalem?.qc_ok ? "Closed" : (kalem && kalem.pr_adet > 0 ? "Executing" : null)),
+      // QC durumu = Huawei Smart QC görev durumu (yükleme ya da elle). PR kaleminin QC'si ayrı gösterilir,
+      // Huawei durumunun yerine geçmez (03.09.2026: BO0193 TRS PR'da OK, Smart QC'de Rejected idi)
+      etkin_durum: r.hw_status || null,
+      pr_durum: kalem ? (kalem.qc_ok ? "PR QC OK" : (kalem.pr_adet > 0 ? "PR girildi" : null)) : null,
       atama: at ? { id: at.id, durum: at.durum, personeller: at.personeller, plan_tarihi: at.plan_tarihi, baslama_ts: at.baslama_ts, bitis_ts: at.bitis_ts, son_hareket: at.son_hareket, kapanis_not: at.kapanis_not } : null,
     };
   });
 }
 app.get("/rollout/is-kolu/tanim", authMiddleware, (req, res) => res.json({ ok: true, tanim: IS_KOLU_TANIM, gizleme_tipleri: GIZLEME_TIPLERI }));
+/* Huawei ISDP Smart QC "Export Search Result" Excel'i (03.09.2026): Task ID · Business Type · Template ·
+   Site ID/Node ID · Task Status · Review Start Time. Template → iş kolu, Site ID → NS saha (BO0193 → BO0193_NS_MWA),
+   Task Status → rollout_is_kolu.hw_status. Hangi iş dalıysa QC o görevin durumunu gösterir. */
+const SMARTQC_TEMPLATE_KOLU = [
+  [/gizleme|camoufl/i, "GIZLEME"], [/trs quality/i, "TRS"], [/gps/i, "GPS"], [/standalone ai/i, "NS_AI"],
+  [/lte\s*&\s*u900|u900 kontrol/i, "ONE_BAND"], [/ag og enerji|enerji template/i, "ENH"],
+];
+app.post("/rollout/is-kolu/smartqc", authMiddleware, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
+    await isKoluTablo();
+    const wb = XLSX.read(req.file.buffer);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    const norm = (v) => String(v || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const hIdx = rows.findIndex((r) => r.some((c) => /task id/i.test(String(c))) && r.some((c) => /template/i.test(String(c))));
+    if (hIdx < 0) return res.status(400).json({ ok: false, error: "Başlık satırı bulunamadı (Task ID / Template / Site ID / Task Status bekleniyor)" });
+    const H = rows[hIdx].map(norm);
+    const col = (re) => H.findIndex((h) => re.test(h));
+    const cTask = col(/^task id/), cTpl = col(/template/), cSite = col(/site id|node id/), cSt = col(/task status/), cRev = col(/review start/), cBiz = col(/business type/);
+    if (cTpl < 0 || cSite < 0 || cSt < 0) return res.status(400).json({ ok: false, error: "Template / Site ID / Task Status kolonları eksik" });
+    const nsSites = (await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS site_code FROM rollout_progress WHERE site_code ILIKE '%\\_NS\\_%' OR site_type ILIKE 'standalone%'`)).rows.map((x) => x.site_code);
+    let islenen = 0, eslesmeyenSaha = new Set(), atlananSablon = new Set(), guncellenen = 0;
+    const simdi = new Date();
+    for (const r of rows.slice(hIdx + 1)) {
+      const tpl = String(r[cTpl] || "").trim(); const siteId = String(r[cSite] || "").replace(/\s+/g, "").toUpperCase(); const st = String(r[cSt] || "").trim();
+      if (!tpl || !siteId || !st) continue;
+      if (cBiz >= 0 && /^QA$/i.test(String(r[cBiz] || "").trim())) continue;
+      const kolu = (SMARTQC_TEMPLATE_KOLU.find(([re]) => re.test(tpl)) || [])[1];
+      if (!kolu) { atlananSablon.add(tpl); continue; }
+      islenen++;
+      const hedefler = nsSites.filter((sc) => sc === siteId || sc.startsWith(siteId + "_"));
+      if (!hedefler.length) { eslesmeyenSaha.add(siteId); continue; }
+      for (const sc of hedefler) {
+        await pool.query(`INSERT INTO rollout_is_kolu (site_code, is_kolu, kaynak, hw_task_id, hw_status, hw_review_time, hw_yukleme_ts)
+          VALUES ($1,$2,'SMARTQC',$3,$4,$5,$6)
+          ON CONFLICT (site_code, is_kolu) DO UPDATE SET hw_task_id = EXCLUDED.hw_task_id, hw_status = EXCLUDED.hw_status,
+            hw_review_time = EXCLUDED.hw_review_time, hw_yukleme_ts = EXCLUDED.hw_yukleme_ts, aktif = true, updated_at = NOW()`,
+          [sc, kolu, cTask >= 0 ? String(r[cTask] || "") : null, st, cRev >= 0 ? String(r[cRev] || "") : null, simdi]);
+        guncellenen++;
+        // Smart QC "Closed" ana montaj görevlerinde rollout qc_durum'u da kapatır
+        if (st === "Closed" && ["NS_AI", "ONE_BAND"].includes(kolu)) {
+          await pool.query(`UPDATE rollout_progress SET qc_durum = 'OK', qc_closed_date = COALESCE(qc_closed_date, CURRENT_DATE), updated_at = NOW() WHERE UPPER(TRIM(site_code)) = $1`, [sc]);
+        }
+      }
+    }
+    res.json({ ok: true, islenen, guncellenen, eslesmeyen_saha: [...eslesmeyenSaha].slice(0, 50), eslesmeyen_saha_sayisi: eslesmeyenSaha.size, atlanan_sablon: [...atlananSablon] });
+  } catch (e) { console.error("SMARTQC UPLOAD:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
 // Tek saha: türet + listele
 app.get("/rollout/is-kolu/site/:site", authMiddleware, async (req, res) => {
   try {
