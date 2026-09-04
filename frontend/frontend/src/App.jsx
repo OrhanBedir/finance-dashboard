@@ -32547,7 +32547,7 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
       </div>
 
       {/* ── Filtre çubuğu ── */}
-      {cleanupRows.length > 0 && (
+      {cleanupRows.length > 0 && (<>
         <div style={{ display:"flex", gap:"6px", marginBottom:"10px" }}>
           {(() => {
             const bitti = (r) => cuDurumOf(r) === "TAMAM" || r.onay_durum === "ONAYLANDI";
@@ -32593,7 +32593,7 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
             </button>
           )}
         </div>
-      )}
+      </>)}
 
       {filteredCleanup.length === 0 ? (
         <div style={{ textAlign:"center", padding:"48px", background:"#f8fafc", borderRadius:"16px", border:"2px dashed #cbd5e1" }}>
