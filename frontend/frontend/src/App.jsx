@@ -32417,6 +32417,8 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
   const [cuBolge, setCuBolge] = useState("ALL");
   const [cuTip, setCuTip] = useState("ALL");
   const [cuDurum, setCuDurum] = useState("ALL");
+  // Hızlı filtre (04.09.2026, Orhan): Tüm Liste / Bekleyen (kalemi bitmemiş) / Tamamlanan (tüm kalemler + onay)
+  const [cuHizli, setCuHizli] = useState("ALL");
 
   const cuBolgeler = useMemo(() => {
     const s = new Set();
@@ -32453,6 +32455,8 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
       if (cuBolge !== "ALL" && bolge.toLowerCase() !== cuBolge.toLowerCase()) return false;
       if (cuTip !== "ALL" && String(rr.site_type || "").trim() !== cuTip) return false;
       if (cuDurum !== "ALL" && cuDurumOf(r) !== cuDurum) return false;
+      if (cuHizli === "BEKLEYEN" && (cuDurumOf(r) === "TAMAM" || r.onay_durum === "ONAYLANDI")) return false;
+      if (cuHizli === "TAMAM" && !(cuDurumOf(r) === "TAMAM" || r.onay_durum === "ONAYLANDI")) return false;
       if (!q) return true;
       const metin = [
         r.site_code, r.notlar, bolge, rr.site_type,
@@ -32460,7 +32464,7 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
       ].filter(Boolean).join(" ").toLowerCase();
       return metin.includes(q);
     });
-  }, [cleanupRows, rolloutRows, cuSearch, cuBolge, cuTip, cuDurum]);
+  }, [cleanupRows, rolloutRows, cuSearch, cuBolge, cuTip, cuDurum, cuHizli]);
 
   const handleDelete = async (id) => {
     if (!window.confirm("Bu kayıt silinsin mi?")) return;
@@ -32544,6 +32548,18 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
 
       {/* ── Filtre çubuğu ── */}
       {cleanupRows.length > 0 && (
+        <div style={{ display:"flex", gap:"6px", marginBottom:"10px" }}>
+          {(() => {
+            const bitti = (r) => cuDurumOf(r) === "TAMAM" || r.onay_durum === "ONAYLANDI";
+            const say = { ALL: cleanupRows.length, BEKLEYEN: cleanupRows.filter(r => !bitti(r)).length, TAMAM: cleanupRows.filter(bitti).length };
+            return [["ALL", "📋 Tüm Liste"], ["BEKLEYEN", "⏳ Bekleyen"], ["TAMAM", "✅ Tamamlanan"]].map(([k, t]) => (
+              <button key={k} type="button" onClick={() => setCuHizli(k)}
+                style={{ padding:"8px 16px", borderRadius:"999px", cursor:"pointer", fontWeight:800, fontSize:"13px", border: cuHizli === k ? "2px solid #0f766e" : "1.5px solid #e2e8f0", background: cuHizli === k ? "#0f766e" : "#fff", color: cuHizli === k ? "#fff" : "#1f2937" }}>
+                {t} <span style={{ opacity:.75, fontWeight:600 }}>({say[k]})</span>
+              </button>
+            ));
+          })()}
+        </div>
         <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center", marginBottom:"14px" }}>
           <input
             value={cuSearch}
@@ -33291,6 +33307,13 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
               {sekmeBtn("yeni", "Yeni Atama")}
               {sekmeBtn("liste", `Atamalar (${atamalar.length})`)}
             </div>
+            {sekme === "liste" && (
+              <button type="button" onClick={() => {
+                const headersX = ["Plan", "Kategori", "Tip", "Saha", "Bölge", "Personel", "Durum", "Gün", "Adam·Gün", "Ara verme sebebi", "Atayan", "Atayan notu", "Saha notları", "Başlama", "Bitiş", "QC"];
+                const dataX = atamalar.map((r) => [fmtT(r.plan_tarihi), r.kategori_ad || r.kategori, r.alt_tip || "", (r.site_codes || []).join(", "), r.bolge || "", (r.personeller || []).map((p) => p.ad).join(", "), (IS_DURUM[r.durum] || {}).txt || r.durum, Number(r.gun_sayisi || 0), Number(r.adam_gun || 0), r.durdurma_sebebi || "", r.atayan_ad || r.atayan_email || "", r.atayan_not || "", r.kapanis_not || "", r.baslama_ts ? `${fmtT(r.baslama_ts)} ${fmtS(r.baslama_ts)}` : "", r.bitis_ts ? `${fmtT(r.bitis_ts)} ${fmtS(r.bitis_ts)}` : "", r.qc_tamamlandi == null ? "" : (r.qc_tamamlandi ? "Tamam" : "Bekliyor")]);
+                exportStandardExcel({ title: `Rollout İş Atamaları — ${listeFiltre === "ACIK" ? "Açık işler" : "Tümü"}`, headers: headersX, rows: dataX, colWidths: [11, 22, 12, 24, 10, 26, 13, 6, 9, 20, 18, 34, 40, 16, 16, 9], fileBase: `Is_Atamalari_${listeFiltre === "ACIK" ? "Acik" : "Tumu"}`, sheetName: "İş Atamaları", intCols: [7, 8] });
+              }} style={{ background:"#2e7d32", color:"#fff", border:"none", borderRadius:"8px", padding:"7px 12px", fontSize:"12px", fontWeight:800, cursor:"pointer" }}>📥 Excel İndir</button>
+            )}
           </div>
           <button type="button" onClick={onClose} title="Kapat (Esc)" style={{ width:"34px", height:"34px", borderRadius:"50%", border:"none", background:"rgba(255,255,255,0.18)", color:"#fff", fontSize:"20px", cursor:"pointer", lineHeight:1 }}>×</button>
         </div>
