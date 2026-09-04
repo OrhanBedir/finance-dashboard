@@ -32852,7 +32852,9 @@ const IS_DURUM = {
   QC_BEKLE:   { txt: "QC bekliyor",   bg: "#fef3c7", ink: "#92400e" },
   TAMAMLANDI: { txt: "Tamamlandı",    bg: "#f1f5f9", ink: "#475569" },
   IPTAL:      { txt: "İptal",         bg: "#fef2f2", ink: "#b91c1c" },
+  ARA_VERILDI:{ txt: "Ara verildi",   bg: "#fee2e2", ink: "#b91c1c" },
 };
+const IS_DURDURMA_SEBEPLERI = ["Yarın devam", "Halk tepkisi", "Farklı sahaya yönlendirildi", "Eksik malzeme", "Hava / erişim sorunu", "Huawei / müşteri kaynaklı bekleme", "Diğer"];
 /* ═══ ROLLOUT İŞ KOLU GÖRÜNÜMÜ (03.09.2026, Orhan onaylı taslak) ═══════════
    Standalone (NS) sahalarda Huawei her iş için ayrı QC görevi açar. Site ID
    yazılınca sahanın iş kolları buton olur; buton yalnız o işin Excel satırını
@@ -33236,6 +33238,16 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
     } catch (e) { alert("Hata: " + e.message); }
     finally { setYukleniyor(false); }
   };
+  // Ara ver / devam (04.09.2026): sebep + not → ARA_VERILDI, rollout notuna işlenir
+  const [araVer, setAraVer] = useState(null); // { row, sebep, not }
+  const araVerGonder = async (devam) => {
+    if (!araVer) return;
+    try {
+      const d = await fetch(`${API_BASE}/is-atama/${araVer.row.id}/ara-ver`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ sebep: araVer.sebep, not: araVer.not, devam }) }).then((r) => r.json());
+      if (!d?.ok) throw new Error(d?.error);
+      setAraVer(null); listeYukle(); onChanged && onChanged();
+    } catch (e) { alert("Hata: " + e.message); }
+  };
   const durumDegistir = async (row, durum) => {
     if (!window.confirm(durum === "IPTAL" ? `${row.site_codes.join(", ")} işi iptal edilsin mi?` : "Kaydedilsin mi?")) return;
     try {
@@ -33400,8 +33412,9 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                           <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9" }}>{(r.personeller || []).map((p) => p.ad).join(", ")}</td>
                           <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9" }}><span style={chip(d.bg, d.ink)}>{d.txt}</span></td>
                           <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", textAlign:"center" }}>{Number(r.gun_sayisi || 0) || "—"}{Number(r.adam_gun || 0) > Number(r.gun_sayisi || 0) ? <span style={{ color:"#94a3b8", fontSize:"11px" }}> ({r.adam_gun} adam·gün)</span> : null}</td>
-                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", color:"#475569", maxWidth:"260px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={r.atayan_not || ""}>{r.atayan_not || ""}</td>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", color:"#475569", maxWidth:"260px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={[r.durdurma_sebebi ? `Ara verme: ${r.durdurma_sebebi}` : "", r.atayan_not || ""].filter(Boolean).join("\n")}>{r.durdurma_sebebi ? <span style={{ color:"#b91c1c", fontWeight:700 }}>⏸ {r.durdurma_sebebi} · </span> : null}{r.atayan_not || ""}</td>
                           <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", whiteSpace:"nowrap" }} onClick={(e) => e.stopPropagation()}>
+                            {!["TAMAMLANDI", "IPTAL"].includes(r.durum) && <button type="button" onClick={() => setAraVer({ row: r, sebep: r.durum === "ARA_VERILDI" ? "" : "Halk tepkisi", not: "" })} title="Sahada yarım kaldı / ara verildi" style={{ background: r.durum === "ARA_VERILDI" ? "#ecfdf5" : "#fef2f2", color: r.durum === "ARA_VERILDI" ? "#047857" : "#b91c1c", border: "1px solid " + (r.durum === "ARA_VERILDI" ? "#a7f3d0" : "#fecaca"), borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>{r.durum === "ARA_VERILDI" ? "▶ Devam" : "⏸ Ara ver"}</button>}
                             {!["TAMAMLANDI", "IPTAL"].includes(r.durum) && <button type="button" onClick={() => durumDegistir(r, "IPTAL")} style={{ background:"#fff7ed", color:"#b45309", border:"1px solid #fed7aa", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>İptal</button>}
                             <button type="button" onClick={() => sil(r)} style={{ background:"#fef2f2", color:"#b91c1c", border:"1px solid #fecaca", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700 }}>Sil</button>
                           </td>
@@ -33441,6 +33454,26 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                 </tbody>
               </table>
             </div>
+            {araVer && (
+              <div onClick={() => setAraVer(null)} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.5)", zIndex:9500, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}>
+                <div onClick={(e) => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", padding:"20px", width:"min(520px, 96vw)", boxShadow:"0 20px 60px rgba(0,0,0,.3)" }}>
+                  <div style={{ fontWeight:800, fontSize:"15px", marginBottom:"4px" }}>{araVer.row.durum === "ARA_VERILDI" ? "▶ İşe devam" : "⏸ Ara ver"} · {araVer.row.kategori_ad} · {(araVer.row.site_codes || []).join(", ")}</div>
+                  <div style={{ fontSize:"12px", color:"#64748b", marginBottom:"12px" }}>{araVer.row.durum === "ARA_VERILDI" ? `Şu an: ${araVer.row.durdurma_sebebi || "ara verildi"}. Devam edince iş yeniden ekibin bekleyen listesine düşer.` : "Sebep ve not iş kaydına ve Rollout Data'daki saha notuna işlenir (saha hafızası)."}</div>
+                  {araVer.row.durum !== "ARA_VERILDI" && (
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginBottom:"10px" }}>
+                      {IS_DURDURMA_SEBEPLERI.map((sb) => (
+                        <button key={sb} type="button" onClick={() => setAraVer((p) => ({ ...p, sebep: sb }))} style={{ padding:"6px 12px", borderRadius:"999px", cursor:"pointer", fontWeight:700, fontSize:"12px", border: araVer.sebep === sb ? "2px solid #b91c1c" : "1.5px solid #e2e8f0", background: araVer.sebep === sb ? "#fef2f2" : "#fff", color:"#0f172a" }}>{sb}</button>
+                      ))}
+                    </div>
+                  )}
+                  <textarea value={araVer.not} onChange={(e) => setAraVer((p) => ({ ...p, not: e.target.value }))} placeholder={araVer.row.durum === "ARA_VERILDI" ? "Devam notu (isteğe bağlı)" : "Ne oldu? (Yarın devam dışında zorunlu)"} style={{ width:"100%", minHeight:"70px", boxSizing:"border-box", border:"1.5px solid #e2e8f0", borderRadius:"10px", padding:"10px", fontSize:"13px", resize:"vertical" }} />
+                  <div style={{ display:"flex", justifyContent:"flex-end", gap:"8px", marginTop:"12px" }}>
+                    <button type="button" onClick={() => setAraVer(null)} style={{ background:"#f1f5f9", border:"none", borderRadius:"8px", padding:"8px 14px", cursor:"pointer", fontWeight:700 }}>Vazgeç</button>
+                    <button type="button" onClick={() => araVerGonder(araVer.row.durum === "ARA_VERILDI")} style={{ background: araVer.row.durum === "ARA_VERILDI" ? "#16a34a" : "#b91c1c", color:"#fff", border:"none", borderRadius:"8px", padding:"8px 14px", cursor:"pointer", fontWeight:800 }}>{araVer.row.durum === "ARA_VERILDI" ? "▶ Devam et" : "⏸ Ara ver"}</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

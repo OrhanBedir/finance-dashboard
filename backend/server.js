@@ -10212,10 +10212,20 @@ async function isAtamaTablolar() {
   )`);
   await pool.query(`CREATE INDEX IF NOT EXISTS is_atama_personeller_gin ON is_atama USING GIN (personeller)`);
   await pool.query(`ALTER TABLE rollout_is_kolu ADD COLUMN IF NOT EXISTS hw_review_time TEXT, ADD COLUMN IF NOT EXISTS hw_yukleme_ts TIMESTAMPTZ`).catch(() => {});
+  await pool.query(`ALTER TABLE is_atama ADD COLUMN IF NOT EXISTS durdurma_sebebi TEXT`).catch(() => {});
   await pool.query(`ALTER TABLE rollout_cleanup ADD COLUMN IF NOT EXISTS is_atama_id INT`);
   isAtamaTabloHazir = true;
 }
 const isAtamaSiteTemizle = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+/* Sahada iş yarım kalma sebepleri (04.09.2026, Orhan): mobil Çıkış sihirbazında ve panelde seçilir,
+   iş "ARA_VERILDI" olur, not Rollout Data'daki sahanın genel notuna işlenir (saha hafızası). */
+const IS_DURDURMA_SEBEPLERI = ["Yarın devam", "Halk tepkisi", "Farklı sahaya yönlendirildi", "Eksik malzeme", "Hava / erişim sorunu", "Huawei / müşteri kaynaklı bekleme", "Diğer"];
+async function isAtamaRolloutNotYaz(siteCodes, satir) {
+  if (!siteCodes?.length || !satir) return;
+  await pool.query(
+    `UPDATE rollout_progress SET general_note = CONCAT_WS(E'\n', NULLIF(general_note,''), $2::text), updated_at = NOW()
+     WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [siteCodes, satir]).catch((e) => console.error("ROLLOUT NOT:", e.message));
+}
 const isAtamaPersonelIcinde = (row, email) =>
   (Array.isArray(row?.personeller) ? row.personeller : []).some((p) => String(p?.email || "").toLowerCase() === email);
 // Belirtilen sahalarda tarih kolonunu (boşsa) bugünle doldur — tüm site_type satırları
@@ -10342,7 +10352,7 @@ app.get("/is-atama/liste", authMiddleware, async (req, res) => {
              (SELECT COUNT(*) FROM is_atama_gun g WHERE g.is_atama_id = a.id) AS adam_gun
       FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori
       ${where.length ? "WHERE " + where.join(" AND ") : ""}
-      ORDER BY CASE a.durum WHEN 'BASLADI' THEN 0 WHEN 'DEVAM' THEN 1 WHEN 'ATANDI' THEN 2 WHEN 'QC_BEKLE' THEN 3 ELSE 4 END, a.plan_tarihi DESC NULLS LAST, a.id DESC
+      ORDER BY CASE a.durum WHEN 'BASLADI' THEN 0 WHEN 'ARA_VERILDI' THEN 1 WHEN 'DEVAM' THEN 1 WHEN 'ATANDI' THEN 2 WHEN 'QC_BEKLE' THEN 3 ELSE 4 END, a.plan_tarihi DESC NULLS LAST, a.id DESC
       LIMIT 500`, params);
     res.json({ ok: true, rows: r.rows, yetkili: isAtamaYetkiliMi(req) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -10357,7 +10367,7 @@ app.get("/is-atama/benim", authMiddleware, async (req, res) => {
       FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori
       WHERE a.personeller @> $1::jsonb
         AND (a.durum NOT IN ('TAMAMLANDI','IPTAL') OR a.updated_at > NOW() - INTERVAL '60 days')
-      ORDER BY CASE a.durum WHEN 'BASLADI' THEN 0 WHEN 'DEVAM' THEN 1 WHEN 'ATANDI' THEN 2 WHEN 'QC_BEKLE' THEN 3 ELSE 4 END, a.plan_tarihi ASC NULLS LAST, a.id DESC`,
+      ORDER BY CASE a.durum WHEN 'BASLADI' THEN 0 WHEN 'ARA_VERILDI' THEN 1 WHEN 'DEVAM' THEN 1 WHEN 'ATANDI' THEN 2 WHEN 'QC_BEKLE' THEN 3 ELSE 4 END, a.plan_tarihi ASC NULLS LAST, a.id DESC`,
       [JSON.stringify([{ email }])]);
     const rows = [];
     for (const row of r.rows) {
@@ -10415,8 +10425,10 @@ app.post("/is-atama/:id/bitir", authMiddleware, async (req, res) => {
     if (!row) return res.status(404).json({ ok: false, error: "Kayıt yok" });
     if (!isAtamaPersonelIcinde(row, email) && !isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Bu iş size atanmamış" });
     if (["TAMAMLANDI", "IPTAL"].includes(row.durum)) return res.status(400).json({ ok: false, error: "Bu iş zaten kapanmış" });
-    const { tamamlandi, qc_tamamlandi, not: notu, calisanlar } = req.body || {};
+    const { tamamlandi, qc_tamamlandi, not: notu, calisanlar, sebep } = req.body || {};
     const bitti = tamamlandi === true || tamamlandi === "true";
+    const sebepTxt = !bitti && sebep ? String(sebep).trim() : "";
+    if (sebepTxt && sebepTxt !== "Yarın devam" && !String(notu || "").trim()) return res.status(400).json({ ok: false, error: "Ara verme sebebi için kısa bir not yazın" });
     const qcSoruldu = bitti && row.qc_yazar;
     const qcOk = qcSoruldu ? (qc_tamamlandi === true || qc_tamamlandi === "true") : null;
     if (qcSoruldu && !qcOk && !String(notu || "").trim()) return res.status(400).json({ ok: false, error: "QC tamamlanmadıysa not zorunlu" });
@@ -10434,12 +10446,19 @@ app.post("/is-atama/:id/bitir", authMiddleware, async (req, res) => {
     }
     let yeniDurum = "DEVAM";
     if (bitti) yeniDurum = qcSoruldu && !qcOk ? "QC_BEKLE" : "TAMAMLANDI";
+    else if (sebepTxt && sebepTxt !== "Yarın devam") yeniDurum = "ARA_VERILDI";
     const eskiNot = String(row.kapanis_not || "");
-    const yeniNot = String(notu || "").trim() ? `${eskiNot ? eskiNot + "\n" : ""}${new Date().toLocaleDateString("tr-TR")} ${req.user?.name || email}: ${String(notu).trim()}` : eskiNot || null;
+    const notSatiri = `${new Date().toLocaleDateString("tr-TR")} ${req.user?.name || email}${sebepTxt ? ` [${sebepTxt}]` : ""}: ${String(notu || "").trim()}`.trim();
+    const yeniNot = (String(notu || "").trim() || sebepTxt) ? `${eskiNot ? eskiNot + "\n" : ""}${notSatiri}` : eskiNot || null;
     await pool.query(
       `UPDATE is_atama SET durum = $2, bitis_ts = CASE WHEN $3::boolean THEN NOW() ELSE bitis_ts END,
-         qc_tamamlandi = CASE WHEN $3::boolean THEN $4::boolean ELSE qc_tamamlandi END, kapanis_not = $5, updated_at = NOW() WHERE id = $1`,
-      [id, yeniDurum, bitti, qcOk, yeniNot]);
+         qc_tamamlandi = CASE WHEN $3::boolean THEN $4::boolean ELSE qc_tamamlandi END, kapanis_not = $5,
+         durdurma_sebebi = CASE WHEN $3::boolean THEN NULL ELSE COALESCE($6, durdurma_sebebi) END, updated_at = NOW() WHERE id = $1`,
+      [id, yeniDurum, bitti, qcOk, yeniNot, sebepTxt || null]);
+    // Saha hafızası: ara verme / tamamlanma notu Rollout Data genel notuna
+    if (yeniDurum === "ARA_VERILDI" || (bitti && String(notu || "").trim())) {
+      await isAtamaRolloutNotYaz(row.site_codes || [], `${new Date().toLocaleDateString("tr-TR")} ${row.kategori_ad || row.kategori} ${yeniDurum === "ARA_VERILDI" ? "ARA VERİLDİ" : "tamamlandı"}${sebepTxt ? ` — ${sebepTxt}` : ""}${String(notu || "").trim() ? `: ${String(notu).trim()}` : ""} (${req.user?.name || email})`);
+    }
     if (bitti) {
       await isAtamaRolloutTarihYaz(row.site_codes || [], row.bitis_kolonu);
       if (row.qc_yazar && qcOk) {
@@ -10449,6 +10468,29 @@ app.post("/is-atama/:id/bitir", authMiddleware, async (req, res) => {
     }
     res.json({ ok: true, row: await isAtamaDetay(id), durum: yeniDurum });
   } catch (e) { console.error("IS BITIR ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get("/is-atama/durdurma-sebepleri", authMiddleware, (req, res) => res.json({ ok: true, sebepler: IS_DURDURMA_SEBEPLERI }));
+// Panelden ara ver / devam ettir (atama yetkilisi): mobil Çıkış ile aynı kayıt + rollout notu
+app.post("/is-atama/:id/ara-ver", authMiddleware, async (req, res) => {
+  try {
+    if (!isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "İş atama yetkiniz yok" });
+    await isAtamaTablolar();
+    const id = Number(req.params.id);
+    const row = await isAtamaDetay(id);
+    if (!row) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    if (["TAMAMLANDI", "IPTAL"].includes(row.durum)) return res.status(400).json({ ok: false, error: "Bu iş kapanmış" });
+    const sebep = String(req.body?.sebep || "").trim(); const notu = String(req.body?.not || "").trim();
+    const devamEt = req.body?.devam === true;
+    if (!devamEt && !sebep) return res.status(400).json({ ok: false, error: "Sebep seçin" });
+    if (!devamEt && sebep !== "Yarın devam" && !notu) return res.status(400).json({ ok: false, error: "Kısa bir not yazın" });
+    const yeniDurum = devamEt ? "DEVAM" : (sebep === "Yarın devam" ? "DEVAM" : "ARA_VERILDI");
+    const eskiNot = String(row.kapanis_not || "");
+    const satir = `${new Date().toLocaleDateString("tr-TR")} ${req.user?.name || req.user?.email} (panel)${sebep ? ` [${sebep}]` : " [Devam]"}: ${notu}`.trim();
+    await pool.query(`UPDATE is_atama SET durum = $2, durdurma_sebebi = $3, kapanis_not = $4, updated_at = NOW() WHERE id = $1`,
+      [id, yeniDurum, devamEt ? null : sebep, `${eskiNot ? eskiNot + "\n" : ""}${satir}`]);
+    if (yeniDurum === "ARA_VERILDI") await isAtamaRolloutNotYaz(row.site_codes || [], `${new Date().toLocaleDateString("tr-TR")} ${row.kategori_ad || row.kategori} ARA VERİLDİ — ${sebep}${notu ? `: ${notu}` : ""} (${req.user?.name || req.user?.email}, panel)`);
+    res.json({ ok: true, row: await isAtamaDetay(id), durum: yeniDurum });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // Düzenle / iptal (atama yetkilisi)
 app.put("/is-atama/:id", authMiddleware, async (req, res) => {
