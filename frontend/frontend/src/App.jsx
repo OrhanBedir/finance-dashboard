@@ -4454,6 +4454,8 @@ const ROLLOUT_BELGE_TIPLERI = [
   ["hasarsizlik_belge_url","Hasarsizlik","Hasarsızlık Tutanağı (mal sahibi)"],
   ["memnuniyet_belge_url", "Memnuniyet","Memnuniyet Formu (mal sahibi)"],
   ["fsc_belge_url",       "FSC",       "FSC — MW Link Formu"],
+  ["enh_perakende_sozlesme_url", "ENH_Perakende", "ENH Perakende Sözleşmesi (imzalı)"],
+  ["enh_perakende_dekont_url",   "ENH_Dekont",    "ENH Abonelik Dekontu"],
 ];
 const rolloutBelgeListesi = (kaynak) => ROLLOUT_BELGE_TIPLERI.map(([alan, ad, etiket]) => ({
   alan, ad, etiket,
@@ -32986,7 +32988,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
     ["PAC Actual End", fd(r.pac_actual_end_date)], ["Hasarsızlık", has(r.hasarsizlik_tarihi) || urls(r.hasarsizlik_belge_url).length ? <span>✓ {fd(r.hasarsizlik_tarihi)} {belgeChips(r.hasarsizlik_belge_url, "Tutanak")}</span> : ""],
     ["Memnuniyet", r.memnuniyet_ayni_belge ? "✓ aynı evrak" : (urls(r.memnuniyet_belge_url).length ? belgeChips(r.memnuniyet_belge_url, "Form") : "")], ["Kabul Dosyası", belgeChips(r.kabul_dosya_url, "Kabul")],
   ] };
-  const G_ENH = { ad: "ENH", renk: "#dbeafe", ink: "#1e40af", kolon: (r) => [["ENH Tipi", r.enh_site_type], ["ENH Subcon", r.enh_subcon], ["ENH Plan Start", fd(r.enh_plan_start_date)], ["ENH Actual End", fd(r.enh_actual_end_date)], ["Abonelik", fd(r.abonelik_actual_end_date)], ["Süzme", fd(r.suzme_date)], ["ENH QC", fd(r.enh_qc_closed_date)], ["ENH Proje", has(r.enh_proje_hazir) ? r.enh_proje_hazir : belgeChips(r.enh_proje_belge_url, "Proje")]] };
+  const G_ENH = { ad: "ENH", renk: "#dbeafe", ink: "#1e40af", kolon: (r) => [["ENH Tipi", r.enh_site_type], ["ENH Subcon", r.enh_subcon], ["ENH Plan Start", fd(r.enh_plan_start_date)], ["ENH Actual End", fd(r.enh_actual_end_date)], ["Abonelik", fd(r.abonelik_actual_end_date)], ["Süzme", fd(r.suzme_date)], ["ENH QC", fd(r.enh_qc_closed_date)], ["ENH Proje", has(r.enh_proje_hazir) ? r.enh_proje_hazir : belgeChips(r.enh_proje_belge_url, "Proje")], ["Tesisat No", r.enh_tesisat_no], ["Perakende Ödeme", r.enh_perakende_odeme_tarihi ? `${fd(r.enh_perakende_odeme_tarihi)}${r.enh_perakende_tutar ? ` · ₺${Number(r.enh_perakende_tutar).toLocaleString("tr-TR")}` : ""}` : ""], ["Sözleşme", belgeChips(r.enh_perakende_sozlesme_url, "Sözleşme")], ["Dekont", belgeChips(r.enh_perakende_dekont_url, "Dekont")]] };
   const G_BELGE = { ad: "BELGELER", renk: "#e0f2fe", ink: "#075985", kolon: (r) => [["TSSR", belgeChips(r.tssr_belge_url, "TSSR")], ["BTK", belgeChips(r.btk_belge_url, "BTK")], ["EMR", belgeChips(r.emr_belge_url, "EMR")], ["YSB", belgeChips(r.ysb_belge_url, "YSB")], ["PAC", belgeChips(r.pac_belge_url, "PAC")]] };
   const G_SAHA = { ad: "SAHA (MOBİL)", renk: "#f1f5f9", ink: "#334155", kolon: (r, m) => { const [a, b] = atamaHucre(m); return [["Atanan", a], ["Son hareket", b]]; } };
   const GRUPLAR = {
@@ -33805,6 +33807,14 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     memnuniyet_ayni_belge: !!existingRow.memnuniyet_ayni_belge,
     kabul_belge_not: existingRow.kabul_belge_not || "",
     fsc_belge_url: existingRow.fsc_belge_url || "", // FSC: MW link frekans/konfigürasyon formu (03.09.2026)
+    // ENH Perakende (04.09.2026): abonelik ödemesi + imzalı perakende sözleşmesi + dekont → Huawei tahsilat belgesi
+    enh_perakende_sozlesme_url: existingRow.enh_perakende_sozlesme_url || "",
+    enh_perakende_dekont_url: existingRow.enh_perakende_dekont_url || "",
+    enh_perakende_tarihi: existingRow.enh_perakende_tarihi ? String(existingRow.enh_perakende_tarihi).slice(0, 10) : "",
+    enh_perakende_odeme_tarihi: existingRow.enh_perakende_odeme_tarihi ? String(existingRow.enh_perakende_odeme_tarihi).slice(0, 10) : "",
+    enh_perakende_tutar: existingRow.enh_perakende_tutar ?? "",
+    enh_tesisat_no: existingRow.enh_tesisat_no || "",
+    enh_perakende_not: existingRow.enh_perakende_not || "",
   });
   // 31.08.2026: Aynı tipten birden fazla belge (2. survey, 2. BTK vb.) yüklenebilsin
   // diye dosya state'leri dizi; URL'ler aynı kolonda satır sonu (\n) ile ayrılır.
@@ -33819,6 +33829,8 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   const [hasarsizlikFile, setHasarsizlikFile] = useState([]);
   const [memnuniyetFile, setMemnuniyetFile] = useState([]);
   const [fscBelgeFile, setFscBelgeFile] = useState([]);
+  const [enhPerakendeFile, setEnhPerakendeFile] = useState([]);
+  const [enhDekontFile, setEnhDekontFile] = useState([]);
   const [enhProjeSaving, setEnhProjeSaving] = useState(false);
 
   // Subcon HW mi? Huawei, HW, veya "Huawei Turkey" gibi varyantlar dahil
@@ -33911,6 +33923,8 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         { files: hasarsizlikFile,   type:"hasarsizlik", field:"hasarsizlik_belge_url", setter: setHasarsizlikFile },
         { files: memnuniyetFile,    type:"memnuniyet",  field:"memnuniyet_belge_url",  setter: setMemnuniyetFile },
         { files: fscBelgeFile,      type:"fsc",         field:"fsc_belge_url",         setter: setFscBelgeFile },
+        { files: enhPerakendeFile,  type:"enh_perakende", field:"enh_perakende_sozlesme_url", setter: setEnhPerakendeFile },
+        { files: enhDekontFile,     type:"enh_dekont",    field:"enh_perakende_dekont_url",   setter: setEnhDekontFile },
       ];
       if (result.row?.id) {
         setEnhProjeSaving(true);
@@ -33940,6 +33954,14 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
               memnuniyet_ayni_belge: !!form.memnuniyet_ayni_belge, kabul_belge_not: form.kabul_belge_not || null })
           });
         } catch(e) { alert("Kabul belgeleri bilgisi kaydedilemedi: " + e.message); }
+        // ENH Perakende ek alanları
+        try {
+          await fetchJson(`${API_BASE}/rollout/${result.row.id}/enh-perakende`, {
+            method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({ enh_perakende_tarihi: form.enh_perakende_tarihi || null, enh_perakende_odeme_tarihi: form.enh_perakende_odeme_tarihi || null,
+              enh_perakende_tutar: form.enh_perakende_tutar === "" ? null : form.enh_perakende_tutar, enh_tesisat_no: form.enh_tesisat_no || null, enh_perakende_not: form.enh_perakende_not || null })
+          });
+        } catch(e) { alert("ENH Perakende bilgisi kaydedilemedi: " + e.message); }
       }
 
       alert("Kayıt başarıyla kaydedildi");
@@ -34250,6 +34272,41 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             {input("ENH Actual End Date", "enh_actual_end_date", "date")}
             {input("ENH Not", "enh_not")}
           </div>
+        </div>
+
+        {/* ===== ENH PERAKENDE (04.09.2026) =====
+            ENH montajı sonrası abonelik ücreti ödenip saha bağlatılır; imzalı perakende sözleşmesi ve dekont
+            buraya yüklenir — Huawei'den abonelik bedelinin tahsili bu belgelerle yapılır. */}
+        <div style={{ margin:"16px 0 0", padding:"16px", background:"#fff7ed", borderRadius:"12px", border:"1.5px solid #fed7aa" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"12px", gap:"10px", flexWrap:"wrap" }}>
+            <div style={{ fontWeight:700, fontSize:"14px", color:"#9a3412" }}>🧾 ENH Perakende (Abonelik)</div>
+            <div style={{ fontSize:"11px", color:"#c2410c" }}>
+              {String(form.enh_perakende_sozlesme_url || "").trim() && String(form.enh_perakende_dekont_url || "").trim() ? "✓ Sözleşme + dekont yüklü — Huawei'ye faturalanabilir" : `${[form.enh_perakende_sozlesme_url, form.enh_perakende_dekont_url].filter(v => String(v || "").trim()).length}/2 belge`}
+            </div>
+          </div>
+          <div className="modalGrid">
+            {input("Tesisat No", "enh_tesisat_no")}
+            {input("Sözleşme Tarihi", "enh_perakende_tarihi", "date")}
+            {input("Ödeme Tarihi", "enh_perakende_odeme_tarihi", "date")}
+            <label className="modalField">
+              <span>Ödenen Tutar (₺)</span>
+              <input type="number" step="0.01" value={form.enh_perakende_tutar ?? ""} onChange={e => handleChange("enh_perakende_tutar", e.target.value)} placeholder="Abonelik / bağlantı bedeli" />
+            </label>
+            {input("Perakende Notu", "enh_perakende_not")}
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(260px, 1fr))", gap:"12px", marginTop:"10px" }}>
+            <div style={{ background:"#fff", borderRadius:"10px", padding:"12px", border:"1px solid #fed7aa" }}>
+              <div style={{ fontSize:"12px", fontWeight:700, color:"#9a3412" }}>📄 Perakende Sözleşmesi (imzalı)</div>
+              <div style={{ fontSize:"11px", color:"#6b7280", marginBottom:"6px" }}>Bağlantı anlaşması / EK-11 tesisat listesi</div>
+              {belgeWidget("enh_perakende_sozlesme_url", enhPerakendeFile, setEnhPerakendeFile)}
+            </div>
+            <div style={{ background:"#fff", borderRadius:"10px", padding:"12px", border:"1px solid #fed7aa" }}>
+              <div style={{ fontSize:"12px", fontWeight:700, color:"#9a3412" }}>🏦 Ödeme Dekontu</div>
+              <div style={{ fontSize:"11px", color:"#6b7280", marginBottom:"6px" }}>Abonelik ücretinin banka dekontu</div>
+              {belgeWidget("enh_perakende_dekont_url", enhDekontFile, setEnhDekontFile)}
+            </div>
+          </div>
+          <div style={{ fontSize:"11px", color:"#9a3412", marginTop:"8px" }}>Ödeme tarihi girilince "Abonelik Actual End Date" boşsa otomatik aynı tarihle dolar.</div>
         </div>
 
         {/* Power */}

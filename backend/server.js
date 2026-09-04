@@ -3776,6 +3776,13 @@ app.get("/migrate", async (req, res) => {
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_dosya_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS fsc_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_sozlesme_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_dekont_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_odeme_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_tutar NUMERIC",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_tesisat_no TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_not TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_tarihi DATE",
@@ -3948,6 +3955,13 @@ app.get("/setup-db", async (req, res) => {
       "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_dosya_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS fsc_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_sozlesme_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_dekont_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_odeme_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_tutar NUMERIC",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_tesisat_no TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_not TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_tarihi DATE",
@@ -9521,7 +9535,23 @@ const ROLLOUT_BELGE_FIELDS = ["los_belge_url","tssr_belge_url","btk_belge_url","
   // Kabul belgeleri (03.09.2026): kabul dosyası, mal sahibi hasarsızlık tutanağı, memnuniyet formu
   "kabul_dosya_url","hasarsizlik_belge_url","memnuniyet_belge_url",
   // FSC (03.09.2026): MW link frekans/saha konfigürasyon formu — TRS iş kolu, LOS yanında
-  "fsc_belge_url"];
+  "fsc_belge_url",
+  // ENH Perakende (04.09.2026): abonelik ödemesi sonrası imzalı perakende sözleşmesi + dekont (Huawei'den tahsilat belgesi)
+  "enh_perakende_sozlesme_url","enh_perakende_dekont_url"];
+app.post("/rollout/:id/enh-perakende", authMiddleware, async (req, res) => {
+  try {
+    const { enh_perakende_tarihi, enh_perakende_odeme_tarihi, enh_perakende_tutar, enh_tesisat_no, enh_perakende_not } = req.body || {};
+    const d = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
+    const tutar = enh_perakende_tutar === "" || enh_perakende_tutar == null ? null : Number(String(enh_perakende_tutar).replace(/\./g, "").replace(",", "."));
+    const r = await pool.query(
+      `UPDATE rollout_progress SET enh_perakende_tarihi = $1, enh_perakende_odeme_tarihi = $2, enh_perakende_tutar = $3, enh_tesisat_no = $4, enh_perakende_not = $5,
+         abonelik_actual_end_date = COALESCE(abonelik_actual_end_date, $2::date), updated_at = NOW()
+       WHERE id = $6 RETURNING id`,
+      [d(enh_perakende_tarihi), d(enh_perakende_odeme_tarihi), Number.isFinite(tutar) ? tutar : null, enh_tesisat_no || null, enh_perakende_not || null, req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 // Kabul belgeleri ek alanları (tarih / aynı evrak / not) — Rollout Veri Girişi "Kabul Belgeleri" bölümü
 app.post("/rollout/:id/kabul-belgeleri", authMiddleware, async (req, res) => {
   try {
@@ -10171,7 +10201,7 @@ const IS_ATAMA_KOLON_LISTESI = new Set([
 const IS_KATEGORI_SEED = [
   // kod, ad, ikon, tekil_site, baslangic_kolonu, bitis_kolonu, qc_yazar, belge_alanlari, alt_tipler, sira
   ["NEW_SITE",     "New Site Montaj",         "🗼", true,  "installation_actual_start_date", "installation_actual_end_date", true,  ["tssr_belge_url","ysb_belge_url","btk_belge_url"], ["Standalone","LTE","NR700","NR3500","TRP","One Band"], 1],
-  ["ENH_MONTAJ",   "ENH Montaj",              "⚡", true,  "enh_plan_start_date",            "enh_actual_end_date",          false, ["enh_proje_belge_url","tssr_belge_url"], [], 2],
+  ["ENH_MONTAJ",   "ENH Montaj",              "⚡", true,  "enh_plan_start_date",            "enh_actual_end_date",          false, ["enh_proje_belge_url","enh_perakende_sozlesme_url","tssr_belge_url"], [], 2],
   ["ENH_ABONELIK", "ENH Abonelik",            "📄", false, null,                             "abonelik_actual_end_date",     false, ["enh_proje_belge_url"], [], 3],
   ["SURVEY",       "Site Survey / TSS",       "📐", false, "tss_plan_start_date",            "tss_actual_end_date",          false, ["los_belge_url","ysb_belge_url"], [], 4],
   ["MW",           "Transmisyon / MW Montaj", "📡", false, "trs_plan_start_date",            "trs_actual_end_date",          false, ["los_belge_url","fsc_belge_url","tssr_belge_url"], [], 5],
@@ -10240,11 +10270,11 @@ async function isAtamaSahaBilgi(siteCodes, belgeAlanlari) {
   if (!siteCodes.length) return [];
   const r = await pool.query(
     `SELECT DISTINCT ON (UPPER(TRIM(site_code))) UPPER(TRIM(site_code)) AS site_code, site_type, bolge, il, project_code,
-            tssr_belge_url, ysb_belge_url, btk_belge_url, los_belge_url, emr_belge_url, enh_proje_belge_url, pac_belge_url, kabul_dosya_url, hasarsizlik_belge_url, memnuniyet_belge_url, fsc_belge_url,
+            tssr_belge_url, ysb_belge_url, btk_belge_url, los_belge_url, emr_belge_url, enh_proje_belge_url, pac_belge_url, kabul_dosya_url, hasarsizlik_belge_url, memnuniyet_belge_url, fsc_belge_url, enh_perakende_sozlesme_url, enh_perakende_dekont_url,
             installation_actual_start_date, installation_actual_end_date, qc_durum, general_note, survey_note
      FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[])
      ORDER BY UPPER(TRIM(site_code)), updated_at DESC NULLS LAST`, [siteCodes]);
-  const ETIKET = { tssr_belge_url:"TSSR", ysb_belge_url:"YSB", btk_belge_url:"BTK / Survey", los_belge_url:"LOS", emr_belge_url:"EMR", enh_proje_belge_url:"ENH Proje", pac_belge_url:"PAC", kabul_dosya_url:"Kabul Dosyası", hasarsizlik_belge_url:"Hasarsızlık Tutanağı", memnuniyet_belge_url:"Memnuniyet Formu", fsc_belge_url:"FSC (MW Link)" };
+  const ETIKET = { tssr_belge_url:"TSSR", ysb_belge_url:"YSB", btk_belge_url:"BTK / Survey", los_belge_url:"LOS", emr_belge_url:"EMR", enh_proje_belge_url:"ENH Proje", pac_belge_url:"PAC", kabul_dosya_url:"Kabul Dosyası", hasarsizlik_belge_url:"Hasarsızlık Tutanağı", memnuniyet_belge_url:"Memnuniyet Formu", fsc_belge_url:"FSC (MW Link)", enh_perakende_sozlesme_url:"ENH Perakende Sözleşmesi", enh_perakende_dekont_url:"ENH Abonelik Dekontu" };
   const oncelik = Array.isArray(belgeAlanlari) ? belgeAlanlari : [];
   return siteCodes.map((sc) => {
     const row = r.rows.find((x) => x.site_code === sc) || { site_code: sc };
@@ -20883,6 +20913,13 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS pac_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS kabul_dosya_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS fsc_belge_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_sozlesme_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_dekont_url TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_odeme_tarihi DATE",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_tutar NUMERIC",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_tesisat_no TEXT",
+    "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS enh_perakende_not TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS memnuniyet_belge_url TEXT",
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS hasarsizlik_tarihi DATE",
