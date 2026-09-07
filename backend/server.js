@@ -10333,13 +10333,19 @@ app.get("/is-atama/saha-ara", authMiddleware, async (req, res) => {
     if (q.length < 3) return res.json({ ok: true, rows: [] });
     const r = await pool.query(`
       SELECT site_code, MAX(bolge) AS bolge, MAX(il) AS il, MAX(site_type) AS site_type, MAX(project_code) AS project_code,
-             BOOL_OR(k = 'ROLLOUT') AS rollout, BOOL_OR(k = 'PR') AS pr, BOOL_OR(k = 'PO') AS po
+             BOOL_OR(k = 'ROLLOUT') AS rollout, BOOL_OR(k = 'PR') AS pr, BOOL_OR(k = 'PO') AS po,
+             COUNT(*) FILTER (WHERE k = 'PO') AS po_kalem, COUNT(*) FILTER (WHERE k = 'PR') AS pr_kalem,
+             BOOL_OR(k IN ('PO','PR') AND ana) AS ana_is,
+             STRING_AGG(DISTINCT CASE WHEN k IN ('PO','PR') THEN LEFT(item_description, 40) END, ' · ') AS kalemler
       FROM (
-        SELECT UPPER(TRIM(site_code)) AS site_code, bolge, il, site_type, project_code, 'ROLLOUT' AS k FROM rollout_progress WHERE UPPER(TRIM(site_code)) LIKE $1
-        UNION ALL SELECT UPPER(TRIM(site_code)), NULL, NULL, site_type, project_code, 'PR' FROM master_works WHERE UPPER(TRIM(site_code)) LIKE $1
-        UNION ALL SELECT UPPER(TRIM(site_code)), NULL, NULL, NULL, project_code, 'PO' FROM po_rows WHERE UPPER(TRIM(site_code)) LIKE $1
+        SELECT UPPER(TRIM(site_code)) AS site_code, bolge, il, site_type, project_code, 'ROLLOUT' AS k, NULL::text AS item_description, false AS ana FROM rollout_progress WHERE UPPER(TRIM(site_code)) LIKE $1
+        UNION ALL SELECT UPPER(TRIM(site_code)), NULL, NULL, site_type, project_code, 'PR', item_description,
+          item_description ~* 'installation|addition|moderniz|microwave|camoufl|kamufl|energy line|lv power|survey|dismantl' FROM master_works WHERE UPPER(TRIM(site_code)) LIKE $1
+        UNION ALL SELECT UPPER(TRIM(site_code)), NULL, NULL, NULL, project_code, 'PO', item_description,
+          item_description ~* 'installation|addition|moderniz|microwave|camoufl|kamufl|energy line|lv power|survey|dismantl' FROM po_rows WHERE UPPER(TRIM(site_code)) LIKE $1
       ) x GROUP BY site_code ORDER BY site_code LIMIT 30`, [`%${q}%`]);
-    res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, bolge: x.bolge || detectRegion(x.site_code) || null })) });
+    // ana_is: PO/PR'da montaj/iş kalemi var mı (yalnız etiket/plaka gibi sarf kalemleri "iş" sayılmaz)
+    res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, po_kalem: Number(x.po_kalem || 0), pr_kalem: Number(x.pr_kalem || 0), bolge: x.bolge || detectRegion(x.site_code) || null })) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // Yeni iş ataması

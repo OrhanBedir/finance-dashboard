@@ -33236,7 +33236,7 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
       for (const r of uzakSonuc.rows) {
         if (gorulen.has(r.site_code) || !r.site_code.includes(q)) continue;
         if (r.rollout) continue;
-        gorulen.add(r.site_code); out.push({ site_code: r.site_code, bolge: r.bolge, il: r.il, site_type: r.site_type, project_code: r.project_code, _kaynak: r.pr ? "PR" : "PO" });
+        gorulen.add(r.site_code); out.push({ site_code: r.site_code, bolge: r.bolge, il: r.il, site_type: r.site_type, project_code: r.project_code, _kaynak: r.pr ? "PR" : "PO", _anaIs: !!r.ana_is, _kalem: (r.po_kalem || 0) + (r.pr_kalem || 0), _kalemler: r.kalemler || "" });
       }
     }
     return out;
@@ -33380,7 +33380,11 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                         {sahaSonuclar.map((r) => (
                           <div key={r.site_code} onClick={() => sahaEkle(r.site_code)} style={{ padding:"8px 12px", cursor:"pointer", display:"flex", justifyContent:"space-between", gap:"10px", borderBottom:"1px solid #f1f5f9", fontSize:"12.5px" }}
                             onMouseEnter={(e) => e.currentTarget.style.background = "#f8fafc"} onMouseLeave={(e) => e.currentTarget.style.background = "#fff"}>
-                            <span style={{ fontWeight:800, fontFamily:"monospace" }}>{r.site_code}{r._kaynak && r._kaynak !== "Rollout" ? <span title={r._kaynak === "PR" ? "Rollout Data'da yok — PR talebinden geliyor (PO açılmamış)" : "Rollout Data'da yok — PO listesinden geliyor"} style={{ marginLeft:"8px", background: r._kaynak === "PR" ? "#fef3c7" : "#eff6ff", color: r._kaynak === "PR" ? "#92400e" : "#1d4ed8", borderRadius:"999px", padding:"1px 7px", fontSize:"10px", fontWeight:800, fontFamily:"inherit" }}>{r._kaynak === "PR" ? "PR · PO yok" : "PO"}</span> : null}</span>
+                            <span style={{ fontWeight:800, fontFamily:"monospace" }}>{r.site_code}{r._kaynak && r._kaynak !== "Rollout" ? (
+                              r._anaIs
+                                ? <span title={`${r._kaynak === "PR" ? "PR talebinden (PO açılmamış)" : "PO listesinden"} · ${r._kalem} kalem: ${r._kalemler}`} style={{ marginLeft:"8px", background: r._kaynak === "PR" ? "#fef3c7" : "#eff6ff", color: r._kaynak === "PR" ? "#92400e" : "#1d4ed8", borderRadius:"999px", padding:"1px 7px", fontSize:"10px", fontWeight:800, fontFamily:"inherit" }}>{r._kaynak === "PR" ? "PR · PO yok" : "PO"} · {r._kalem} kalem</span>
+                                : <span title={`Yalnız sarf/etiket kalemi var, montaj kalemi yok: ${r._kalemler}`} style={{ marginLeft:"8px", background:"#fef2f2", color:"#b91c1c", borderRadius:"999px", padding:"1px 7px", fontSize:"10px", fontWeight:800, fontFamily:"inherit" }}>⚠ montaj PR/PO yok ({r._kalem} sarf kalemi)</span>
+                            ) : null}</span>
                             <span style={{ color:"#64748b" }}>{[r.bolge, r.il, r.site_type, r.project_code].filter(Boolean).join(" · ")}</span>
                           </div>
                         ))}
@@ -33390,6 +33394,11 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                   {sahaAra.replace(/\s+/g, "").length >= 4 && !sahaSonuclar.length && uzakSonuc.yok && uzakSonuc.q === sahaAra.replace(/\s+/g, "").toUpperCase() && (
                     <div style={{ marginTop:"8px", background:"#fef2f2", border:"1px solid #fecaca", color:"#b91c1c", borderRadius:"10px", padding:"8px 12px", fontSize:"12.5px", fontWeight:600 }}>
                       ⚠ "{sahaAra.trim().toUpperCase()}" Rollout Data, PO ve PR listesinde yok. Ekibi göndermeden önce Günlük İş Girişi'nden bu saha için PR talebi oluşturun.
+                    </div>
+                  )}
+                  {form.site_codes.some((sc) => uzakSonuc.rows.some((r) => r.site_code === sc && !r.rollout && !r.ana_is)) && (
+                    <div style={{ marginTop:"8px", background:"#fef2f2", border:"1px solid #fecaca", color:"#b91c1c", borderRadius:"10px", padding:"8px 12px", fontSize:"12.5px", fontWeight:600 }}>
+                      ⚠ Seçilen sahada montaj/iş kalemi için PR veya PO yok (yalnız etiket/plaka gibi sarf kalemleri var). Ekibi göndermeden önce Günlük İş Girişi'nden PR talebi oluşturun.
                     </div>
                   )}
                   <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"8px", minHeight:"26px" }}>
