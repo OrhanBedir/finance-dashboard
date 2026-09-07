@@ -10110,9 +10110,10 @@ const CLEANUP_ONAY_GENEL = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com"
 const CLEANUP_ATAMA_YETKI = [
   "nurcan.kus@simsektel.com", "orhan.bedir@simsektel.com", "orhan.bedir@gmail.com",
   "duzgun.simsek@simsektel.com", "erencan.simsek@simsektel.com",
+  "eren.simsek@simsektel.com", // Erencan'ın gerçek panel girişi (07.09.2026)
 ];
 // Ofisten (panel) fotoğraf yükleme/silme yetkisi — personelin telefonu arızalandığında (02.09.2026)
-const CLEANUP_FOTO_OFIS = ["nurcan.kus@simsektel.com", "orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "erencan.simsek@simsektel.com"];
+const CLEANUP_FOTO_OFIS = ["nurcan.kus@simsektel.com", "orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "erencan.simsek@simsektel.com", "eren.simsek@simsektel.com"];
 // Karttan hızlı atama (modal açmadan)
 app.put("/rollout/cleanup/:site/atama", authMiddleware, async (req, res) => {
   try {
