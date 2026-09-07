@@ -32407,9 +32407,10 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
   const [atamaSecim, setAtamaSecim] = useState({});
   const [personelListesi, setPersonelListesi] = useState([]);
   const [atamaYetkili, setAtamaYetkili] = useState(false);
+  const [fotoOfis, setFotoOfis] = useState(false); // panelden Önce/Sonra fotoğraf yükleme yetkisi (sunucu listesi)
   useEffect(() => {
     const h = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
-    fetch(`${API_BASE}/rollout/cleanup/atama-yetkim`, { headers: h }).then(r => r.json()).then(d => setAtamaYetkili(!!d?.yetkili)).catch(() => {});
+    fetch(`${API_BASE}/rollout/cleanup/atama-yetkim`, { headers: h }).then(r => r.json()).then(d => { setAtamaYetkili(!!d?.yetkili); setFotoOfis(!!d?.foto_ofis); }).catch(() => {});
     fetch(`${API_BASE}/rollout/cleanup/personel-listesi`, { headers: h }).then(r => r.json()).then(d => { if (d?.ok) setPersonelListesi(d.rows || []); }).catch(() => {});
   }, []);
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString("tr-TR") : "—";
@@ -32671,9 +32672,8 @@ function RolloutCleanupSection({ cleanupRows, rolloutRows, onAdd, onEdit, onDele
                           {/* Ofisten fotoğraf girişi (02.09.2026): personelin telefonu arızalanırsa —
                               yalnız Nurcan / Orhan / Erencan; çoklu dosya seçilebilir */}
                           {(() => {
-                            let ofis = false;
-                            try { const u = JSON.parse(localStorage.getItem("user")||"null"); ofis = ["nurcan.kus@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","erencan.simsek@simsektel.com"].includes(String(u?.email||"").toLowerCase()); } catch {}
-                            if (!ofis || r.onay_durum === "ONAYLANDI") return null;
+                            // 07.09.2026: yetki sunucudan (CLEANUP_FOTO_OFIS) — sabit liste Erencan/Hatice'yi dışarıda bırakıyordu
+                            if (!fotoOfis || r.onay_durum === "ONAYLANDI") return null;
                             const tk = localStorage.getItem("token") || "";
                             const yukle = async (tip, files) => {
                               const liste = Array.from(files||[]); if (!liste.length) return;
