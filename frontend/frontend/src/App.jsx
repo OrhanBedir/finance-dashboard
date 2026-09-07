@@ -5516,13 +5516,15 @@ function RolloutDashboard({ currentUser }) {
         </div>,
         document.body
       )}
-      {showCleanupModal && (
+      {/* 07.09.2026: Düzenle modalı Clean Up panelinin (portal, z 9000) ARKASINDA kalıyordu — body'ye portal ile açılır */}
+      {showCleanupModal && createPortal(
         <CleanupModal
           record={editingCleanup}
           rolloutRows={rows}
           onClose={() => setShowCleanupModal(false)}
           onSaved={() => { setShowCleanupModal(false); loadData(); }}
-        />
+        />,
+        document.body
       )}
       {showRolloutEntryModal && (
         <RolloutEntryModal
