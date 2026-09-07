@@ -4715,7 +4715,7 @@ const SAHA_KALEM_SIL_YETKI = [
 ];
 app.delete("/master/saha-kalem", authMiddleware, async (req, res) => {
   try {
-    const email = String(req.user?.email || "").toLowerCase();
+    const email = String(req.user?.email || "").toLowerCase().trim();
     if (!SAHA_KALEM_SIL_YETKI.includes(email)) {
       return res.status(403).json({ ok: false, error: "Kalem silme yetkiniz yok" });
     }
@@ -9989,7 +9989,7 @@ app.get("/rollout/cleanup", authMiddleware, async (req, res) => {
     const r = await pool.query(`
       SELECT c.*, (SELECT rp.bolge FROM rollout_progress rp WHERE UPPER(TRIM(rp.site_code)) = UPPER(TRIM(c.site_code)) LIMIT 1) AS bolge
       FROM rollout_cleanup c ORDER BY c.updated_at DESC`);
-    const email = String(req.user?.email || "").toLowerCase();
+    const email = String(req.user?.email || "").toLowerCase().trim();
     res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, onay_yetkim: cleanupOnayYetkiliMi(email, x.bolge) })) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -10020,7 +10020,7 @@ app.post("/rollout/cleanup", authMiddleware, async (req, res) => {
     `, [String(site_code).replace(/\s+/g, "").toUpperCase(), visit_date||null, notification_date||null, completion_date||null,
         JSON.stringify(items||[]), notlar||null, screenshot_url||null,
         atanan_email ? String(atanan_email).toLowerCase() : null, atanan_ad || null,
-        CLEANUP_ATAMA_YETKI.includes(String(req.user?.email || "").toLowerCase())]);
+        CLEANUP_ATAMA_YETKI.includes(String(req.user?.email || "").toLowerCase().trim())]);
     res.json({ ok: true, row: r.rows[0] });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -10047,7 +10047,7 @@ app.post("/rollout/cleanup/:site/foto", authMiddleware, upload.single("dosya"), 
     if (!req.file) return res.status(400).json({ ok: false, error: "Fotoğraf gelmedi" });
     if (!itemId) return res.status(400).json({ ok: false, error: "item_id zorunlu" });
     // Panelden yükleme yalnız ofis yetkilileri (mobil saha ekibi bu kontrole girmez)
-    if (String(req.query.kaynak || "") === "panel" && !CLEANUP_FOTO_OFIS.includes(String(req.user?.email || "").toLowerCase())) {
+    if (String(req.query.kaynak || "") === "panel" && !CLEANUP_FOTO_OFIS.includes(String(req.user?.email || "").toLowerCase().trim())) {
       return res.status(403).json({ ok: false, error: "Panelden fotoğraf yükleme yetkiniz yok" });
     }
 
@@ -10118,7 +10118,7 @@ const CLEANUP_FOTO_OFIS = ["nurcan.kus@simsektel.com", "orhan.bedir@simsektel.co
 // Karttan hızlı atama (modal açmadan)
 app.put("/rollout/cleanup/:site/atama", authMiddleware, async (req, res) => {
   try {
-    if (!CLEANUP_ATAMA_YETKI.includes(String(req.user?.email || "").toLowerCase()))
+    if (!CLEANUP_ATAMA_YETKI.includes(String(req.user?.email || "").toLowerCase().trim()))
       return res.status(403).json({ ok: false, error: "İş atama yetkiniz yok" });
     const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
     const email = req.body?.atanan_email ? String(req.body.atanan_email).toLowerCase() : null;
@@ -10131,7 +10131,7 @@ app.put("/rollout/cleanup/:site/atama", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 app.get("/rollout/cleanup/atama-yetkim", authMiddleware, (req, res) => {
-  const e = String(req.user?.email || "").toLowerCase();
+  const e = String(req.user?.email || "").toLowerCase().trim();
   res.json({ ok: true, yetkili: CLEANUP_ATAMA_YETKI.includes(e), foto_ofis: CLEANUP_FOTO_OFIS.includes(e) });
 });
 const bolgeAnahtar = (b) => String(b || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "İ").trim();
@@ -10146,7 +10146,7 @@ const cleanupBolgeSorgu = `(SELECT rp.bolge FROM rollout_progress rp WHERE UPPER
 
 app.get("/rollout/cleanup/onay-bekleyen", authMiddleware, async (req, res) => {
   try {
-    const email = String(req.user?.email || "").toLowerCase();
+    const email = String(req.user?.email || "").toLowerCase().trim();
     const r = await pool.query(
       `SELECT c.id, c.site_code, c.items, c.notlar, c.visit_date, c.completion_date, c.onaya_gonderen, c.onaya_gonderme_tarihi,
               c.atanan_ad, ${cleanupBolgeSorgu} AS bolge
@@ -10159,7 +10159,7 @@ app.get("/rollout/cleanup/onay-bekleyen", authMiddleware, async (req, res) => {
 // Personele atanmış, henüz onaylanmamış sahalar (mobil "Bana atanan sahalar")
 app.get("/rollout/cleanup/atananlarim", authMiddleware, async (req, res) => {
   try {
-    const email = String(req.user?.email || "").toLowerCase();
+    const email = String(req.user?.email || "").toLowerCase().trim();
     const r = await pool.query(
       `SELECT c.id, c.site_code, c.items, c.onay_durum, c.visit_date, c.red_notu, ${cleanupBolgeSorgu} AS bolge
        FROM rollout_cleanup c WHERE LOWER(COALESCE(c.atanan_email,'')) = $1 AND COALESCE(c.onay_durum,'TASLAK') <> 'ONAYLANDI'
@@ -10189,7 +10189,7 @@ app.get("/rollout/cleanup/personel-listesi", authMiddleware, async (req, res) =>
    kişi günlük maliyeti = net maaş × 1,35 ÷ 22 (Faz 3'te kullanılacak). */
 const IS_ATAMA_ROLLER = ["admin", "platform_admin", "direktor", "pm", "rollout_mudur", "genel_mudur", "bolge_mudur"];
 function isAtamaYetkiliMi(req) {
-  const e = String(req.user?.email || "").toLowerCase();
+  const e = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
   return CLEANUP_ATAMA_YETKI.includes(e) || IS_ATAMA_ROLLER.includes(rol);
 }
@@ -10380,7 +10380,7 @@ app.post("/is-atama", authMiddleware, async (req, res) => {
       `INSERT INTO is_atama (kategori, alt_tip, site_codes, bolge, personeller, plan_tarihi, atayan_email, atayan_ad, atayan_not)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
       [k.kod, alt_tip || null, sites, bolge, JSON.stringify(kisiler), plan_tarihi || null,
-       String(req.user?.email || "").toLowerCase(), req.user?.name || null, atayan_not || null]);
+       String(req.user?.email || "").toLowerCase().trim(), req.user?.name || null, atayan_not || null]);
     const id = ins.rows[0].id;
     // Clean Up: mevcut fotoğraf/onay akışı atanan_email üzerinden çalışır → kayıtları oluştur/bağla
     if (k.kod === "CLEANUP") {
@@ -10422,7 +10422,7 @@ app.get("/is-atama/liste", authMiddleware, async (req, res) => {
 app.get("/is-atama/benim", authMiddleware, async (req, res) => {
   try {
     await isAtamaTablolar();
-    const email = String(req.user?.email || "").toLowerCase();
+    const email = String(req.user?.email || "").toLowerCase().trim();
     const r = await pool.query(`
       SELECT a.*, k.ad AS kategori_ad, k.ikon AS kategori_ikon, k.tekil_site, k.qc_yazar, k.belge_alanlari
       FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori
@@ -10457,7 +10457,7 @@ app.post("/is-atama/:id/basla", authMiddleware, async (req, res) => {
   try {
     await isAtamaTablolar();
     const id = Number(req.params.id);
-    const email = String(req.user?.email || "").toLowerCase();
+    const email = String(req.user?.email || "").toLowerCase().trim();
     const row = await isAtamaDetay(id);
     if (!row) return res.status(404).json({ ok: false, error: "Kayıt yok" });
     if (!isAtamaPersonelIcinde(row, email) && !isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Bu iş size atanmamış" });
@@ -10481,7 +10481,7 @@ app.post("/is-atama/:id/bitir", authMiddleware, async (req, res) => {
   try {
     await isAtamaTablolar();
     const id = Number(req.params.id);
-    const email = String(req.user?.email || "").toLowerCase();
+    const email = String(req.user?.email || "").toLowerCase().trim();
     const row = await isAtamaDetay(id);
     if (!row) return res.status(404).json({ ok: false, error: "Kayıt yok" });
     if (!isAtamaPersonelIcinde(row, email) && !isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Bu iş size atanmamış" });
