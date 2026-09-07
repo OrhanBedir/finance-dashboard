@@ -33207,6 +33207,18 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
   }, []); // eslint-disable-line
   useEffect(() => { listeYukle(); }, [listeFiltre]); // eslint-disable-line
 
+  // Uzak arama (07.09.2026): Rollout Data'da olmayan ama PR/PO'da olan sahalar da bulunsun
+  const [uzakSonuc, setUzakSonuc] = useState({ q: "", rows: [], yok: false });
+  useEffect(() => {
+    const q = sahaAra.replace(/\s+/g, "").toUpperCase();
+    if (q.length < 3) { setUzakSonuc({ q: "", rows: [], yok: false }); return; }
+    const t = setTimeout(() => {
+      fetch(`${API_BASE}/is-atama/saha-ara?q=${encodeURIComponent(q)}`, { headers }).then((r) => r.json())
+        .then((d) => setUzakSonuc({ q, rows: d?.ok ? d.rows || [] : [], yok: d?.ok && !(d.rows || []).length }))
+        .catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [sahaAra]); // eslint-disable-line
   // Saha arama: Rollout Data satırlarından tekil site_code
   const sahaSonuclar = useMemo(() => {
     const q = sahaAra.trim().toUpperCase();
@@ -33216,11 +33228,19 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
       const sc = String(r.site_code || "").toUpperCase();
       if (!sc || gorulen.has(sc)) continue;
       const hay = `${sc} ${r.il || ""} ${r.bolge || ""} ${r.site_type || ""} ${r.project_code || ""}`.toUpperCase();
-      if (hay.includes(q)) { gorulen.add(sc); out.push(r); }
+      if (hay.includes(q)) { gorulen.add(sc); out.push({ ...r, _kaynak: "Rollout" }); }
       if (out.length >= 25) break;
     }
+    // PR/PO'da olup Rollout Data'da olmayanlar (uzak sonuç)
+    if (uzakSonuc.q && q.startsWith(uzakSonuc.q.slice(0, 3))) {
+      for (const r of uzakSonuc.rows) {
+        if (gorulen.has(r.site_code) || !r.site_code.includes(q)) continue;
+        if (r.rollout) continue;
+        gorulen.add(r.site_code); out.push({ site_code: r.site_code, bolge: r.bolge, il: r.il, site_type: r.site_type, project_code: r.project_code, _kaynak: r.pr ? "PR" : "PO" });
+      }
+    }
     return out;
-  }, [sahaAra, rolloutRows]);
+  }, [sahaAra, rolloutRows, uzakSonuc]);
   const sahaEkle = (sc) => {
     const kod = String(sc || "").replace(/\s+/g, "").toUpperCase();
     setForm((p) => ({ ...p, site_codes: kat?.tekil_site ? [kod] : (p.site_codes.includes(kod) ? p.site_codes : [...p.site_codes, kod]) }));
@@ -33360,13 +33380,18 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                         {sahaSonuclar.map((r) => (
                           <div key={r.site_code} onClick={() => sahaEkle(r.site_code)} style={{ padding:"8px 12px", cursor:"pointer", display:"flex", justifyContent:"space-between", gap:"10px", borderBottom:"1px solid #f1f5f9", fontSize:"12.5px" }}
                             onMouseEnter={(e) => e.currentTarget.style.background = "#f8fafc"} onMouseLeave={(e) => e.currentTarget.style.background = "#fff"}>
-                            <span style={{ fontWeight:800, fontFamily:"monospace" }}>{r.site_code}</span>
+                            <span style={{ fontWeight:800, fontFamily:"monospace" }}>{r.site_code}{r._kaynak && r._kaynak !== "Rollout" ? <span title={r._kaynak === "PR" ? "Rollout Data'da yok — PR talebinden geliyor (PO açılmamış)" : "Rollout Data'da yok — PO listesinden geliyor"} style={{ marginLeft:"8px", background: r._kaynak === "PR" ? "#fef3c7" : "#eff6ff", color: r._kaynak === "PR" ? "#92400e" : "#1d4ed8", borderRadius:"999px", padding:"1px 7px", fontSize:"10px", fontWeight:800, fontFamily:"inherit" }}>{r._kaynak === "PR" ? "PR · PO yok" : "PO"}</span> : null}</span>
                             <span style={{ color:"#64748b" }}>{[r.bolge, r.il, r.site_type, r.project_code].filter(Boolean).join(" · ")}</span>
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
+                  {sahaAra.replace(/\s+/g, "").length >= 4 && !sahaSonuclar.length && uzakSonuc.yok && uzakSonuc.q === sahaAra.replace(/\s+/g, "").toUpperCase() && (
+                    <div style={{ marginTop:"8px", background:"#fef2f2", border:"1px solid #fecaca", color:"#b91c1c", borderRadius:"10px", padding:"8px 12px", fontSize:"12.5px", fontWeight:600 }}>
+                      ⚠ "{sahaAra.trim().toUpperCase()}" Rollout Data, PO ve PR listesinde yok. Ekibi göndermeden önce Günlük İş Girişi'nden bu saha için PR talebi oluşturun.
+                    </div>
+                  )}
                   <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"8px", minHeight:"26px" }}>
                     {form.site_codes.map((sc) => (
                       <span key={sc} style={chip("#0b1a33", "#fff")}>{sc}<span onClick={() => setForm((p) => ({ ...p, site_codes: p.site_codes.filter((x) => x !== sc) }))} style={{ cursor:"pointer", opacity:.8 }}>×</span></span>

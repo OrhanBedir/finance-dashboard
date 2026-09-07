@@ -10326,6 +10326,22 @@ app.get("/is-atama/personel-listesi", authMiddleware, async (req, res) => {
     res.json({ ok: true, rows: r.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// Saha arama: Rollout Data + PR (master_works) + PO (po_rows) — kaynak etiketiyle
+app.get("/is-atama/saha-ara", authMiddleware, async (req, res) => {
+  try {
+    const q = String(req.query.q || "").replace(/\s+/g, "").toUpperCase();
+    if (q.length < 3) return res.json({ ok: true, rows: [] });
+    const r = await pool.query(`
+      SELECT site_code, MAX(bolge) AS bolge, MAX(il) AS il, MAX(site_type) AS site_type, MAX(project_code) AS project_code,
+             BOOL_OR(k = 'ROLLOUT') AS rollout, BOOL_OR(k = 'PR') AS pr, BOOL_OR(k = 'PO') AS po
+      FROM (
+        SELECT UPPER(TRIM(site_code)) AS site_code, bolge, il, site_type, project_code, 'ROLLOUT' AS k FROM rollout_progress WHERE UPPER(TRIM(site_code)) LIKE $1
+        UNION ALL SELECT UPPER(TRIM(site_code)), NULL, NULL, site_type, project_code, 'PR' FROM master_works WHERE UPPER(TRIM(site_code)) LIKE $1
+        UNION ALL SELECT UPPER(TRIM(site_code)), NULL, NULL, NULL, project_code, 'PO' FROM po_rows WHERE UPPER(TRIM(site_code)) LIKE $1
+      ) x GROUP BY site_code ORDER BY site_code LIMIT 30`, [`%${q}%`]);
+    res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, bolge: x.bolge || detectRegion(x.site_code) || null })) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 // Yeni iş ataması
 app.post("/is-atama", authMiddleware, async (req, res) => {
   try {
@@ -10341,10 +10357,17 @@ app.post("/is-atama", authMiddleware, async (req, res) => {
       .map((p) => ({ email: String(p?.email || "").toLowerCase().trim(), ad: String(p?.ad || p?.email || "").trim() }))
       .filter((p) => p.email);
     if (!kisiler.length) return res.status(400).json({ ok: false, error: "En az bir personel seçin" });
+    // Saha Rollout Data'da yoksa PR (master_works) ya da PO'da olması yeterli (07.09.2026, Orhan):
+    // PO açılmamış ama ekip aksiyon alacak sahalar atanabilsin; hiçbirinde yoksa önce PR talebi
     const rp = await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS site_code, bolge FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [sites]);
-    const eksik = sites.filter((s) => !rp.rows.some((x) => x.site_code === s));
-    if (eksik.length) return res.status(400).json({ ok: false, error: `Rollout Data'da bulunamayan saha: ${eksik.join(", ")}` });
-    const bolge = rp.rows.find((x) => x.bolge)?.bolge || null;
+    let eksik = sites.filter((s) => !rp.rows.some((x) => x.site_code === s));
+    if (eksik.length) {
+      const pr = await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS site_code FROM master_works WHERE UPPER(TRIM(site_code)) = ANY($1::text[])
+        UNION SELECT DISTINCT UPPER(TRIM(site_code)) FROM po_rows WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [eksik]);
+      eksik = eksik.filter((s) => !pr.rows.some((x) => x.site_code === s));
+    }
+    if (eksik.length) return res.status(400).json({ ok: false, error: `Bu saha Rollout Data, PO ve PR listesinde yok: ${eksik.join(", ")} — önce Günlük İş Girişi'nden PR talebi oluşturun.` });
+    const bolge = rp.rows.find((x) => x.bolge)?.bolge || (detectRegion(sites[0]) || null);
     const ins = await pool.query(
       `INSERT INTO is_atama (kategori, alt_tip, site_codes, bolge, personeller, plan_tarihi, atayan_email, atayan_ad, atayan_not)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
