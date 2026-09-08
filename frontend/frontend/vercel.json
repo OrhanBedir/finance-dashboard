@@ -30,5 +30,17 @@
         }
       ]
     }
+  ],
+  "redirects": [
+    {
+      "source": "/mobil",
+      "destination": "https://erc-backend-zz5s.onrender.com/mobil",
+      "permanent": false
+    },
+    {
+      "source": "/mobil/apk",
+      "destination": "https://erc-backend-zz5s.onrender.com/mobil/apk",
+      "permanent": false
+    }
   ]
 }
