@@ -7747,7 +7747,45 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
     } catch {}
     const tumOdemeler = [...odemeler.rows, ...faturaOdemeleri]
       .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || '')));
-    res.json({ ok: true, faturalar: faturalar.rows, odemeler: tumOdemeler });
+    /* 09.09.2026: Şimşek'e kesilen ama kalemlerinin bir kısmı marka (AHY) işi olan
+       faturalar — ör. FERRUMX 100k keser, 70k'sı AHY_FERRUMX işleri. Kalem eşleşmesi
+       bolge_fatura'da taseron_adi='AHY_FERRUMX' olarak durur. Marka panelinde fatura
+       yalnız o payıyla görünür (salt okunur); Taşeron Hesabı "Kestiği Fatura"ya da girer.
+       Aynı numara AHY etiketiyle ayrıca girildiyse (invoice_entries.firma=AHY) tekrar eklenmez. */
+    let payFaturalar = [];
+    try {
+      const pf = await pool.query(`
+        SELECT TRIM(b.fatura_no) AS fatura_no,
+               to_char(MAX(b.fatura_tarihi),'YYYY-MM-DD') AS fatura_tarihi,
+               MAX(b.taseron_adi) AS bf_ad, COUNT(*) AS kalem,
+               SUM(COALESCE(b.fatura_miktari,0)) AS dahil,
+               MAX(ie.tedarikci) AS tedarikci, MAX(ie.toplam_tutar) AS fatura_toplam
+        FROM bolge_fatura b
+        LEFT JOIN invoice_entries ie
+          ON TRIM(ie.fatura_no) = TRIM(b.fatura_no) AND UPPER(COALESCE(ie.firma,'')) <> $1
+        WHERE UPPER(TRIM(COALESCE(b.taseron_adi,''))) LIKE $1 || '\\_%'
+          AND COALESCE(TRIM(b.fatura_no),'') <> ''
+          AND NOT EXISTS (SELECT 1 FROM invoice_entries x
+                          WHERE TRIM(x.fatura_no) = TRIM(b.fatura_no) AND UPPER(COALESCE(x.firma,'')) = $1)
+        GROUP BY TRIM(b.fatura_no)
+        ORDER BY MAX(b.fatura_tarihi) DESC`, [marka]);
+      const tl = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+      payFaturalar = pf.rows.map(r => {
+        const dahil = Math.round(Number(r.dahil || 0) * 100) / 100;
+        const haric = Math.round(dahil / 1.2 * 100) / 100;
+        return {
+          id: `pay-${r.fatura_no}`, salt_okunur: true, kaynak: "PAY",
+          taseron_adi: r.tedarikci || String(r.bf_ad || "").replace(/^[A-Z0-9]+[_\s-]+/i, ""),
+          fatura_no: r.fatura_no, fatura_tarihi: r.fatura_tarihi,
+          tutar: haric, kdv: Math.round((dahil - haric) * 100) / 100, toplam_tutar: dahil,
+          kategori: "RF MONTAJ",
+          note: `${marka} payı · ${r.kalem} kalem` + (r.fatura_toplam ? ` · faturanın tamamı ₺${tl(r.fatura_toplam)} (Şimşek'e kesildi)` : ""),
+        };
+      });
+    } catch (e) { console.error("[marka-taseron pay]", e.message); }
+    const tumFaturalar = [...faturalar.rows, ...payFaturalar]
+      .sort((a, b) => String(b.fatura_tarihi || '').localeCompare(String(a.fatura_tarihi || '')));
+    res.json({ ok: true, faturalar: tumFaturalar, odemeler: tumOdemeler });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // ── AHY taşeron bedeli hesap kuralı (2026-08 anlaşması) ──

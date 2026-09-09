@@ -3397,10 +3397,18 @@ function MarkaTaseronPanel({ currentUser }) {
         );
       })()}
 
-      {/* Fatura listesi */}
+      {/* Fatura listesi — Taşeron Hesabı'ndaki taşeron filtresi bu listeye de uygulanır (09.09.2026) */}
+      {(() => {
+        const _canonF = mtHesapFiltre ? mtCanon(mtHesapFiltre) : "";
+        const fatF = _canonF ? data.faturalar.filter(f => mtCanon(f.taseron_adi) === _canonF) : data.faturalar;
+        const odF = _canonF ? data.odemeler.filter(o => mtCanon(o.taseron_adi) === _canonF) : data.odemeler;
+        return (<>
       <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
-        <div style={{ padding: "12px 16px", background: "#1e3a5f", color: "#fff", fontSize: "14px", fontWeight: 700 }}>🧾 Taşeron Faturaları ({data.faturalar.length})</div>
-        <div style={tabloScrollS("fatura", data.faturalar.length)}>
+        <div style={{ padding: "12px 16px", background: "#1e3a5f", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+          <span>🧾 Taşeron Faturaları ({fatF.length}{mtHesapFiltre ? ` · ${mtHesapFiltre}` : ""})</span>
+          {mtHesapFiltre && <button onClick={() => setMtHesapFiltre("")} style={{ background: "rgba(255,255,255,.15)", color: "#fff", border: "1px solid rgba(255,255,255,.35)", borderRadius: "8px", padding: "4px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>Filtreyi kaldır ✕</button>}
+        </div>
+        <div style={tabloScrollS("fatura", fatF.length)}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ background: "#f8fafc" }}>
               <th style={thF}>Taşeron</th><th style={thF}>Kategori</th><th style={thF}>Fatura No</th><th style={thF}>Tarih</th>
@@ -3408,11 +3416,11 @@ function MarkaTaseronPanel({ currentUser }) {
               <th style={{ ...thF, textAlign: "right" }}>Toplam (KDV Dahil)</th><th style={thF}>Not</th><th style={thF}></th>
             </tr></thead>
             <tbody>
-              {data.faturalar.length === 0 ? (
-                <tr><td colSpan={9} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz fatura girilmemiş — ERC fatura girişinde {markaAd} seçilenler de burada görünür</td></tr>
-              ) : tabloKes("fatura", data.faturalar).map(f => (
-                <tr key={f.id}>
-                  <td style={{ ...tdS, fontWeight: 700 }}>{f.taseron_adi}</td>
+              {fatF.length === 0 ? (
+                <tr><td colSpan={9} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>{mtHesapFiltre ? "Bu taşerona ait fatura yok" : `Henüz fatura girilmemiş — ERC fatura girişinde ${markaAd} seçilenler de burada görünür`}</td></tr>
+              ) : tabloKes("fatura", fatF).map(f => (
+                <tr key={f.id} style={f.salt_okunur ? { background: "#fffbeb" } : undefined}>
+                  <td style={{ ...tdS, fontWeight: 700 }}>{f.taseron_adi}{f.salt_okunur && <span title="Fatura Şimşek'e kesildi; burada yalnız bu markaya ait kalemlerin tutarı görünür" style={{ marginLeft: "6px", fontSize: "10px", fontWeight: 800, padding: "2px 6px", borderRadius: "6px", background: "#fef3c7", color: "#b45309", whiteSpace: "nowrap" }}>{marka} PAYI</span>}</td>
                   <td style={tdS}><span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px", background: "#eef2ff", color: "#3730a3", whiteSpace: "nowrap" }}>{mtKatAdi(f.kategori)}</span></td>
                   <td style={tdS}>{f.fatura_no}</td>
                   <td style={tdS}>{f.fatura_tarihi || "—"}</td>
@@ -3421,30 +3429,32 @@ function MarkaTaseronPanel({ currentUser }) {
                   <td style={{ ...tdS, textAlign: "right", fontWeight: 800, color: "#1e3a5f" }}>₺{fmt(f.toplam_tutar || f.tutar)}</td>
                   <td style={{ ...tdS, fontSize: "12px", color: "#6b7280" }}>{f.note || ""}</td>
                   <td style={{ ...tdS, whiteSpace: "nowrap" }}>
+                    {f.salt_okunur ? <span title="Kalem eşleşmesi ERC fatura girişinden (bolge_fatura) gelir; düzenleme oradan yapılır" style={{ fontSize: "11px", color: "#94a3b8" }}>ERC'den</span> : <>
                     <button onClick={() => duzeltFatura(f)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", marginRight: "4px" }} title="Düzelt">✏️</button>
                     <button onClick={() => silFatura(f.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px" }} title="Sil">🗑</button>
+                    </>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <TabloAcKapa id="fatura" count={data.faturalar.length} />
+        <TabloAcKapa id="fatura" count={fatF.length} />
       </div>
 
       {/* Ödeme listesi */}
       <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden" }}>
-        <div style={{ padding: "12px 16px", background: "#9d174d", color: "#fff", fontSize: "14px", fontWeight: 700 }}>💸 Avans & Ödemeler ({data.odemeler.length}) — nakit akışına düşer</div>
-        <div style={tabloScrollS("odeme", data.odemeler.length)}>
+        <div style={{ padding: "12px 16px", background: "#9d174d", color: "#fff", fontSize: "14px", fontWeight: 700 }}>💸 Avans & Ödemeler ({odF.length}{mtHesapFiltre ? ` · ${mtHesapFiltre}` : ""}) — nakit akışına düşer</div>
+        <div style={tabloScrollS("odeme", odF.length)}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ background: "#f8fafc" }}>
               <th style={thF}>Tarih</th><th style={thF}>Taşeron</th><th style={thF}>Tip</th>
               <th style={{ ...thF, textAlign: "right" }}>Tutar</th><th style={thF}>Açıklama</th><th style={thF}></th>
             </tr></thead>
             <tbody>
-              {data.odemeler.length === 0 ? (
+              {odF.length === 0 ? (
                 <tr><td colSpan={6} style={{ padding: "26px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz ödeme girilmemiş</td></tr>
-              ) : tabloKes("odeme", data.odemeler).map(o => (
+              ) : tabloKes("odeme", odF).map(o => (
                 <tr key={o.id}>
                   <td style={tdS}>{o.tarih}</td>
                   <td style={{ ...tdS, fontWeight: 700 }}>{o.taseron_adi}</td>
@@ -3468,8 +3478,10 @@ function MarkaTaseronPanel({ currentUser }) {
             </tbody>
           </table>
         </div>
-        <TabloAcKapa id="odeme" count={data.odemeler.length} />
+        <TabloAcKapa id="odeme" count={odF.length} />
       </div>
+        </>);
+      })()}
 
       {/* Taşeron bedeli hesap dökümü modalı */}
       {bedelDetay && (
