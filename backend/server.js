@@ -21678,6 +21678,21 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
   console.log("[startup] Firma adı standartilaştırma tamamlandı.");
 })();
 
+/* 09.09.2026: Supabase "Table publicly accessible" uyarısı — yeni açılan tablolarda
+   (is_atama, rollout_is_kolu vb.) RLS unutuluyordu; anon/authenticated rolleri
+   PostgREST üzerinden okuyabilirdi. Backend `postgres` rolü BYPASSRLS olduğu için
+   RLS açmak uygulamayı etkilemez. Tüm tablolar hazır olsun diye 60 sn sonra
+   public şemada RLS'i kapalı olan her tabloda açar. */
+setTimeout(async () => {
+  try {
+    const r = await pool.query(`SELECT tablename FROM pg_tables WHERE schemaname='public' AND NOT rowsecurity`);
+    for (const { tablename } of r.rows) {
+      await pool.query(`ALTER TABLE "${tablename}" ENABLE ROW LEVEL SECURITY`).catch(e => console.error("[rls]", tablename, e.message));
+    }
+    if (r.rows.length) console.log(`[rls] ${r.rows.length} tabloda RLS açıldı: ${r.rows.map(x => x.tablename).join(", ")}`);
+  } catch (e) { console.error("[rls] tarama hatası:", e.message); }
+}, 60_000);
+
 // Firmalar listesi (kalan borcu olanlar — Ödeme Gir dropdown)
 app.get("/finance/taseron-firmalar", requireFinanceAuth, async (req, res) => {
   try {
