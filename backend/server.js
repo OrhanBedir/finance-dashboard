@@ -18957,6 +18957,11 @@ async function ensureAracKmTable() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
   await pool.query(`ALTER TABLE arac_gecmis ENABLE ROW LEVEL SECURITY`).catch(() => {});
+  /* 09.09.2026: Kira ödeme modeli — kiralık araçlar ayın 15'inden 15'ine PEŞİN ödenir
+     (dönem başında), Orhan Bedir'in aracı dönem sonunda (SONRADAN). odeme_tipi + donem_gunu
+     ile borç hesabı vade tarihine göre yapılır; vadesi gelmemiş dönem borç sayılmaz. */
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS odeme_tipi TEXT DEFAULT 'PESIN'`).catch(() => {});
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS donem_gunu INTEGER DEFAULT 15`).catch(() => {});
 }
 
 // Eski araç satırını geçmişe yazar (olay: PLAKA_DEGISTI / SURUCU_DEGISTI / KIRA_DEGISTI / PASIFE_ALINDI)
@@ -19011,21 +19016,23 @@ app.post("/hr/araclar", async (req, res) => {
   try {
     const { plaka, marka, model, yil, tip, kiralama_firmasi, sozlesme_no,
             kira_baslangic, kira_bitis, aylik_kira, bolge, surucu,
-            sigorta_bitis, muayene_bitis, durum, notlar } = req.body;
+            sigorta_bitis, muayene_bitis, durum, notlar, odeme_tipi, donem_gunu } = req.body;
+    await ensureAracKmTable().catch(() => {});
     const norm = (plaka || "").replace(/\s+/g, "").toUpperCase();
     const { rows } = await pool.query(
       `INSERT INTO araclar (plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
-        kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,sigorta_bitis,muayene_bitis,durum,notlar,aktif)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true)
+        kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18)
        ON CONFLICT (plaka) DO UPDATE SET
          marka=$2,model=$3,yil=$4,tip=$5,kiralama_firmasi=$6,sozlesme_no=$7,
          kira_baslangic=$8,kira_bitis=$9,aylik_kira=$10,bolge=$11,surucu=$12,
-         sigorta_bitis=$13,muayene_bitis=$14,durum=$15,notlar=$16,aktif=true
+         sigorta_bitis=$13,muayene_bitis=$14,durum=$15,notlar=$16,aktif=true,odeme_tipi=$17,donem_gunu=$18
        RETURNING *`,
       // yil integer kolonu: boş string "" gelirse null'a çevrilir (form "Seçin" kalabilir)
       [norm,marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
-       sigorta_bitis||null,muayene_bitis||null,durum||'AKTİF',notlar]
+       sigorta_bitis||null,muayene_bitis||null,durum||'AKTİF',notlar,
+       odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN', Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : 15]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -19035,7 +19042,7 @@ app.put("/hr/araclar/:id", async (req, res) => {
   try {
     const { plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
             kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,
-            sigorta_bitis,muayene_bitis,durum,notlar,aktif } = req.body;
+            sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu } = req.body;
     // Geçmiş kaydı: plaka / sürücü / kira / aktiflik değişiyorsa eski hâli sakla
     try {
       await ensureAracKmTable();
@@ -19059,11 +19066,14 @@ app.put("/hr/araclar/:id", async (req, res) => {
       `UPDATE araclar SET plaka=COALESCE($2,plaka),marka=$3,model=$4,yil=$5,tip=$6,
         kiralama_firmasi=$7,sozlesme_no=$8,kira_baslangic=$9,kira_bitis=$10,
         aylik_kira=$11,bolge=$12,surucu=$13,sigorta_bitis=$14,muayene_bitis=$15,
-        durum=$16,notlar=$17,aktif=COALESCE($18,aktif) WHERE id=$1 RETURNING *`,
+        durum=$16,notlar=$17,aktif=COALESCE($18,aktif),
+        odeme_tipi=COALESCE($19,odeme_tipi),donem_gunu=COALESCE($20,donem_gunu) WHERE id=$1 RETURNING *`,
       [req.params.id,plaka?plaka.replace(/\s+/g,"").toUpperCase():null,
        marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
-       sigorta_bitis||null,muayene_bitis||null,durum,notlar,aktif??null]
+       sigorta_bitis||null,muayene_bitis||null,durum,notlar,aktif??null,
+       odeme_tipi ? (odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN') : null,
+       Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }

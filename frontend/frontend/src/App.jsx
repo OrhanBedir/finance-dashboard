@@ -34494,7 +34494,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     plaka:"", marka:"", model:"", yil:"", tip:"Binek",
     kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
     aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
-    durum:"AKTİF", notlar:""
+    durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15
   });
   const [belgeUpload, setBelgeUpload] = useState({ turu:null, file:null }); // {turu, file}
   const [filter, setFilter] = useState("TUMU"); // TUMU | AKTİF | PASİF
@@ -34532,23 +34532,6 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   const today = new Date();
   const dayDiff = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
 
-  // Borç takibi: devir ayından (2026-07, kira başlangıcı daha yeniyse o) bu aya
-  // kadar ödenmeyen aylar × aylık kira. Pasif (iade edilmiş) araç borç üretmez.
-  const borcHesap = (a) => {
-    if (!a.aktif || Number(a.aylik_kira || 0) <= 0) return { aylar: [], tutar: 0 };
-    const simdi = new Date().toISOString().slice(0, 7);
-    let bas = "2026-07";
-    if (a.kira_baslangic) { const kb = String(a.kira_baslangic).slice(0, 7); if (kb > bas) bas = kb; }
-    const aylar = [];
-    let [y, m] = bas.split("-").map(Number);
-    while (`${y}-${String(m).padStart(2, "0")}` <= simdi) {
-      const ay = `${y}-${String(m).padStart(2, "0")}`;
-      if (!kiraOdemeler.some(o => String(o.arac_id) === String(a.id) && o.donem === ay)) aylar.push(ay);
-      m++; if (m > 12) { m = 1; y++; }
-    }
-    return { aylar, tutar: aylar.length * Number(a.aylik_kira || 0) };
-  };
-
   const expiryColor = (d) => {
     const diff = dayDiff(d);
     if (diff === null) return "#9ca3af";
@@ -34568,7 +34551,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     setForm({ plaka:"", marka:"", model:"", yil:"", tip:"Binek",
       kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
       aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
-      durum:"AKTİF", notlar:"" });
+      durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15 });
     setSelected(null);
     setShowForm(true);
   };
@@ -34582,7 +34565,8 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       kira_baslangic: fmt(a.kira_baslangic), kira_bitis: fmt(a.kira_bitis),
       aylik_kira: a.aylik_kira||"", bolge: a.bolge||"", surucu: a.surucu||"",
       sigorta_bitis: fmt(a.sigorta_bitis), muayene_bitis: fmt(a.muayene_bitis),
-      durum: a.durum||"AKTİF", notlar: a.notlar||""
+      durum: a.durum||"AKTİF", notlar: a.notlar||"",
+      odeme_tipi: a.odeme_tipi||"PESIN", donem_gunu: a.donem_gunu||15
     });
     setSelected(a);
     setShowForm(true);
@@ -34624,9 +34608,6 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   // AHY görünümü (alt marka): yalnız aktif araçlar — iade edilmiş/pasif filo görünmez
   const _altMarkaGorunum = currentUser?.hw_yukleme === false;
   const _aracBaz = _altMarkaGorunum ? araclar.filter(a => a.durum === "AKTİF") : araclar;
-  // TÜMÜ görünümü pasif (iade edilmiş) araçları gizler — kayıtlar DB'de durur,
-  // PASİF filtresiyle hâlâ görüntülenebilir
-  const filtered = _aracBaz.filter(a => filter === "TUMU" ? a.durum !== "PASİF" : a.durum === filter);
 
   const TIPLER = ["Binek","Pickup","Minibüs","Panelvan","Kamyon","Motosiklet","Diğer"];
   const DURUMLAR = ["AKTİF","PASİF","SERVİSTE"];
@@ -34643,332 +34624,488 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
 
   const detailArac = selected && araclar.find(a => a.id === selected.id);
 
+  /* ── 09.09.2026 Yeni panel: satır görünümü, KPI şeridi, toplu Kira Öde, Geçmiş Araçlar ── */
+  const fT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "";
+  const AY_KISA = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const bugunStr = new Date().toISOString().slice(0, 10);
+  const buDonem = bugunStr.slice(0, 7);
+  const [arama, setArama] = useState("");
+  const [acikSatir, setAcikSatir] = useState(null);
+  const [payOpen, setPayOpen] = useState(false);
+  const [payDonem, setPayDonem] = useState(buDonem);
+  const [payRows, setPayRows] = useState([]);
+  const [payBusy, setPayBusy] = useState(false);
+  const [gecmisOpen, setGecmisOpen] = useState(false);
+  const [gecmisListe, setGecmisListe] = useState([]);
+  const [gecmisYukleniyor, setGecmisYukleniyor] = useState(false);
+
+  // Dönem listesi: başlangıç (2026-07 ya da kira başlangıç ayı) → vadesi gelmiş son dönem + sıradaki.
+  // Peşin: vade = dönem başı (ayın donem_gunu'sü). Sonradan: vade = bir sonraki dönem başı.
+  const donemListesi = (a) => {
+    const gun = Number(a.donem_gunu || 15);
+    const pesin = (a.odeme_tipi || "PESIN") !== "SONRADAN";
+    let bas = "2026-07";
+    if (a.kira_baslangic) { const kb = String(a.kira_baslangic).slice(0, 7); if (kb > bas) bas = kb; }
+    let [y, m] = bas.split("-").map(Number);
+    const out = [];
+    for (let i = 0; i < 40; i++) {
+      const donem = `${y}-${pad2(m)}`;
+      let vy = y, vm = m; if (!pesin) { vm++; if (vm > 12) { vm = 1; vy++; } }
+      const vade = `${vy}-${pad2(vm)}-${pad2(gun)}`;
+      const odeme = kiraOdemeler.find(o => String(o.arac_id) === String(a.id) && o.donem === donem);
+      const vadesiGeldi = vade <= bugunStr;
+      out.push({ donem, vade, odeme, durum: odeme ? "ODENDI" : vadesiGeldi ? "GECIKTI" : "BEKLIYOR" });
+      if (!vadesiGeldi) break;
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    return out;
+  };
+  const borcHesap = (a) => {
+    const kira = Number(a.aylik_kira || 0);
+    if (!a.aktif || kira <= 0) return { aylar: [], tutar: 0, siradaki: null, liste: [] };
+    const liste = donemListesi(a);
+    const aylar = liste.filter(x => x.durum === "GECIKTI").map(x => x.donem);
+    return { aylar, tutar: aylar.length * kira, siradaki: liste.find(x => x.durum === "BEKLIYOR") || null, liste };
+  };
+
+  const aktifAraclar = araclar.filter(a => a.durum === "AKTİF");
+  const kiralikAraclar = aktifAraclar.filter(a => Number(a.aylik_kira || 0) > 0);
+  const aylikToplam = aktifAraclar.reduce((s, a) => s + Number(a.aylik_kira || 0), 0);
+  const toplamBorc = araclar.reduce((s, a) => s + borcHesap(a).tutar, 0);
+  const borcluAraclar = aktifAraclar.filter(a => borcHesap(a).tutar > 0);
+  const bolgeOzet = (() => { const m = {}; aktifAraclar.forEach(a => { const b = (a.bolge || "—").trim(); m[b] = (m[b] || 0) + 1; }); return Object.entries(m).map(([b, n]) => `${n} ${b}`).join(" · "); })();
+  const buDonemOdenen = (() => { const list = kiraOdemeler.filter(o => o.donem === buDonem && aktifAraclar.some(a => String(a.id) === String(o.arac_id))); return { adet: list.length, toplam: list.reduce((s, o) => s + Number(o.tutar || 0), 0) }; })();
+  const siradakiler = kiralikAraclar.map(a => ({ a, s: borcHesap(a).siradaki })).filter(x => x.s);
+  const siradakiVade = siradakiler.length ? siradakiler.map(x => x.s.vade).sort()[0] : null;
+  const siradakiAdet = siradakiler.filter(x => x.s.vade === siradakiVade).length;
+  const siradakiTutar = siradakiler.filter(x => x.s.vade === siradakiVade).reduce((s, x) => s + Number(x.a.aylik_kira || 0), 0);
+  const belgeUyari = aktifAraclar.map(a => {
+    const sd = dayDiff(a.sigorta_bitis), md = dayDiff(a.muayene_bitis), kd = dayDiff(a.kira_bitis);
+    const u = [];
+    if (sd === null) u.push("sigorta tarihi yok"); else if (sd < 0) u.push("sigorta GEÇTİ"); else if (sd <= 30) u.push(`sigorta ${sd} gün`);
+    if (md === null) u.push("muayene tarihi yok"); else if (md < 0) u.push("muayene GEÇTİ"); else if (md <= 30) u.push(`muayene ${md} gün`);
+    if (kd !== null && kd <= 30) u.push(kd < 0 ? "kira süresi GEÇTİ" : `kira ${kd} gün`);
+    return u.length ? { ...a, uyari: u.join(", ") } : null;
+  }).filter(Boolean);
+
+  // Stil sabitleri
+  const btnBase = { display:"inline-flex", alignItems:"center", gap:"8px", borderRadius:"10px", padding:"9px 15px", fontWeight:700, fontSize:"13px", border:"1px solid transparent", cursor:"pointer", whiteSpace:"nowrap" };
+  const btnGhost = { ...btnBase, background:"rgba(255,255,255,.1)", color:"#fff", border:"1px solid rgba(255,255,255,.28)" };
+  const chip = { display:"inline-flex", alignItems:"center", gap:"6px", borderRadius:"999px", padding:"5px 11px", fontSize:"12px", fontWeight:700 };
+  const pill = { display:"inline-flex", alignItems:"center", borderRadius:"999px", padding:"4px 10px", fontSize:"12px", fontWeight:700, whiteSpace:"nowrap" };
+  const thSt = { fontSize:"11px", textTransform:"uppercase", letterSpacing:".06em", color:"#6b7a90", fontWeight:700, padding:"9px 13px", borderBottom:"1px solid #e3e8ef", background:"#f8fafc", whiteSpace:"nowrap" };
+  const tdSt = { padding:"11px 13px", borderBottom:"1px solid #eef1f5", verticalAlign:"middle", fontSize:"13px", color:"#0f1c2e" };
+  const icoBtn = { background:"#fff", border:"1px solid #cfd7e2", borderRadius:"8px", width:"30px", height:"30px", cursor:"pointer", color:"#3c4a5d", fontSize:"13px" };
+  const detayKutu = { background:"#fff", border:"1px solid #e3e8ef", borderRadius:"12px", padding:"12px 14px" };
+  const detayBaslik = { fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700, marginBottom:"6px" };
+  const plateSt = (durum) => ({ display:"inline-block", fontFamily:"ui-monospace, Menlo, monospace", fontWeight:700, fontSize:"13px", letterSpacing:".06em", background:"#f8fafc", border:"1.5px solid #cfd7e2", borderLeft:`6px solid ${durum === "AKTİF" ? "#1e3a5f" : durum === "SERVİSTE" ? "#b45309" : "#9ca3af"}`, borderRadius:"6px", padding:"4px 10px", whiteSpace:"nowrap" });
+
+  const excelIndir = async () => {
+    const liste = araclar.filter(a => a.aktif).slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka)));
+    let gecmis = [];
+    try { const g = await fetch(`${API_BASE}/hr/arac-gecmis`); const gd = await g.json(); gecmis = Array.isArray(gd) ? gd : []; } catch { gecmis = []; }
+    const OLAY = { PLAKA_DEGISTI: "Araç değişti", SURUCU_DEGISTI: "Sürücü değişti", KIRA_DEGISTI: "Kira değişti", PASIFE_ALINDI: "İade / pasif" };
+    const pasifler = araclar.filter(a => !a.aktif).map(a => ({ plaka: a.plaka, marka: a.marka, model: a.model, yil: a.yil, tip: a.tip, bolge: a.bolge, surucu: a.surucu, aylik_kira: a.aylik_kira, kiralama_firmasi: a.kiralama_firmasi, kira_baslangic: a.kira_baslangic, kira_bitis: a.kira_bitis, olay: "PASİF", aciklama: a.notlar || "", _sira: a.kira_bitis || a.kira_baslangic || "" }));
+    const gecmisRows = gecmis.map(g => ({ ...g, olay: OLAY[g.olay] || g.olay || "", aciklama: g.aciklama || "", _sira: g.kira_bitis || g.created_at || "" }));
+    const hepsi = [...gecmisRows, ...pasifler].sort((x, y) => String(y._sira).localeCompare(String(x._sira)));
+    exportStandardExcel({
+      title: "Araç Filosu — Aktif Araçlar", sheetName: "Araçlar", fileBase: "Arac_Filosu",
+      headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira (₺)", "Ödeme", "Kiralama Firması", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
+      colWidths: [12, 12, 14, 8, 10, 12, 26, 14, 14, 20, 13, 13, 13, 13, 10], numericCols: [7],
+      rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", a.bolge || "", a.surucu || "", Number(a.aylik_kira || 0),
+        (a.odeme_tipi || "PESIN") === "SONRADAN" ? `Ay sonu (${a.donem_gunu || 1})` : `Peşin (${a.donem_gunu || 15})`, a.kiralama_firmasi || "",
+        fT(a.kira_baslangic), fT(a.kira_bitis), fT(a.sigorta_bitis), fT(a.muayene_bitis), a.durum || ""]),
+      extraSheets: [{
+        sheetName: "Geçmiş Araçlar", title: "Geçmiş Araçlar — Kim, Hangi Aracı, Ne Zaman Kullandı",
+        headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Bölge", "Kullanan Personel", "Aylık Kira (₺)", "Kiralama Firması", "Kira Başlangıç", "Kira Bitiş", "Olay", "Açıklama"],
+        colWidths: [12, 12, 14, 8, 10, 12, 26, 14, 20, 13, 13, 16, 44], numericCols: [7],
+        rows: hepsi.map(g => [g.plaka || "", g.marka || "", g.model || "", g.yil || "", g.tip || "", g.bolge || "", g.surucu || "", Number(g.aylik_kira || 0), g.kiralama_firmasi || "", fT(g.kira_baslangic), fT(g.kira_bitis), g.olay || "", g.aciklama || ""]),
+      }],
+    }).catch(e => alert("Excel indirilemedi: " + e.message));
+  };
+
+  const gecmisAc = async () => {
+    setGecmisOpen(true); setGecmisYukleniyor(true);
+    try {
+      const g = await fetch(`${API_BASE}/hr/arac-gecmis`); const gd = await g.json();
+      const OLAY = { PLAKA_DEGISTI: "Araç değişti", SURUCU_DEGISTI: "Sürücü değişti", KIRA_DEGISTI: "Kira değişti", PASIFE_ALINDI: "İade / pasif" };
+      const rows = (Array.isArray(gd) ? gd : []).map(x => ({ ...x, olay: OLAY[x.olay] || x.olay || "", _sira: x.kira_bitis || x.created_at || "" }));
+      const pasifler = araclar.filter(a => !a.aktif).map(a => ({ ...a, olay: "Pasif / iade", aciklama: a.notlar || "", _sira: a.kira_bitis || a.kira_baslangic || "" }));
+      setGecmisListe([...rows, ...pasifler].sort((x, y) => String(y._sira).localeCompare(String(x._sira))));
+    } catch { setGecmisListe([]); }
+    setGecmisYukleniyor(false);
+  };
+
+  // Kira Öde: her kiralık aktif araç için seçili dönem + vadesi geçmiş ödenmemiş dönemler
+  const payRowsOlustur = (donemSec) => {
+    const rows = [];
+    kiralikAraclar.slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka))).forEach(a => {
+      const liste = donemListesi(a);
+      const donemler = new Set(liste.filter(x => x.durum === "GECIKTI").map(x => x.donem));
+      donemler.add(donemSec);
+      [...donemler].sort().forEach(donem => {
+        const d = liste.find(x => x.donem === donem);
+        const gun = Number(a.donem_gunu || 15); const pesin = (a.odeme_tipi || "PESIN") !== "SONRADAN";
+        let [y, m] = donem.split("-").map(Number); if (!pesin) { m++; if (m > 12) { m = 1; y++; } }
+        const vade = d ? d.vade : `${y}-${pad2(m)}-${pad2(gun)}`;
+        const odeme = d ? d.odeme : kiraOdemeler.find(o => String(o.arac_id) === String(a.id) && o.donem === donem);
+        rows.push({ key: `${a.id}_${donem}`, arac_id: a.id, plaka: a.plaka, arac: `${a.marka || ""} ${a.model || ""}`.trim(), surucu: a.surucu, donem, vade,
+          kira: Number(a.aylik_kira || 0), odendi: !!odeme, odeme, gecikti: !odeme && vade <= bugunStr,
+          sec: !odeme && vade <= bugunStr, tutar: Math.round(Number(a.aylik_kira || 0)).toLocaleString("tr-TR"), kasadan: false, tarih: bugunStr });
+      });
+    });
+    return rows;
+  };
+  const kiraOdeAc = () => { setPayDonem(buDonem); setPayRows(payRowsOlustur(buDonem)); setPayOpen(true); };
+  const payDonemKaydir = (delta) => { let [y, m] = payDonem.split("-").map(Number); m += delta; if (m > 12) { m = 1; y++; } if (m < 1) { m = 12; y--; } const d = `${y}-${pad2(m)}`; setPayDonem(d); setPayRows(payRowsOlustur(d)); };
+  const payRowSet = (i, patch) => setPayRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r));
+  const tutarSayi = (t) => { const s = String(t ?? "").trim(); return /^\d+(\.\d{1,2})?$/.test(s) ? Number(s) : Number(s.replace(/\./g, "").replace(",", ".")) || 0; };
+  const paySecili = payRows.filter(r => r.sec && !r.odendi && tutarSayi(r.tutar) > 0);
+  const paySeciliToplam = paySecili.reduce((s, r) => s + tutarSayi(r.tutar), 0);
+  const odemeleriKaydet = async () => {
+    if (!paySecili.length) return;
+    setPayBusy(true);
+    let hata = 0;
+    for (const r of paySecili) {
+      try {
+        const res = await fetch(`${API_BASE}/hr/araclar/${r.arac_id}/kira-ode`, { method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ donem: r.donem, tutar: tutarSayi(r.tutar), kasadan_dus: !!r.kasadan, tarih: r.tarih || null,
+            aciklama: tutarSayi(r.tutar) < r.kira ? `Fark ödemesi (kira ₺${r.kira.toLocaleString("tr-TR")})` : null }) });
+        if (!res.ok) hata++;
+      } catch { hata++; }
+    }
+    await load();
+    setPayBusy(false);
+    if (hata) alert(`${hata} ödeme kaydedilemedi, listeyi kontrol edin.`);
+    else setPayOpen(false);
+  };
+  const odemeGeriAl = async (a, donem, odeme, modalIci) => {
+    if (!window.confirm(`${a.plaka} — ${donem} kira ödemesi (₺${Number(odeme?.tutar || 0).toLocaleString("tr-TR")}) geri alınsın mı?\n\nKayıt silinir, dönem yeniden "ödenmedi" olur.`)) return;
+    try {
+      const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/kira-ode?donem=${donem}`, { method:"DELETE" });
+      if (!r.ok) throw new Error("Geri alınamadı");
+      await load();
+      if (modalIci) setPayRows(rs => rs.map(x => x.key === `${a.id}_${donem}` ? { ...x, odendi:false, odeme:null, sec:true, gecikti: x.vade <= bugunStr } : x));
+    } catch (err) { alert(err.message || "Ödeme geri alınamadı"); }
+  };
+
+  const filtered = _aracBaz.filter(a => filter === "TUMU" ? a.durum !== "PASİF" : a.durum === filter)
+    .filter(a => { const q = arama.trim().toLowerCase(); if (!q) return true; return [a.plaka, a.surucu, a.bolge, a.marka, a.model].some(x => String(x || "").toLowerCase().includes(q)); })
+    .slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka)));
+
   return (
-    <div style={{ maxWidth:"1100px", margin:"0 auto", padding:"24px 16px" }}>
-      {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"24px" }}>
+    <div style={{ maxWidth:"1360px", margin:"0 auto", padding:"22px 18px 60px", fontFamily:"-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" }}>
+      {/* ── Başlık şeridi ─────────────────────────────────────────── */}
+      <div style={{ background:"#1e3a5f", color:"#fff", borderRadius:"16px", padding:"20px 24px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"16px", flexWrap:"wrap", boxShadow:"0 8px 24px -12px rgba(15,28,46,.35)" }}>
         <div style={{ display:"flex", alignItems:"center", gap:"14px" }}>
-          {onBack && <button onClick={onBack} style={{ background:"#f3f4f6", border:"none", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>←</button>}
+          {onBack && <button onClick={onBack} style={{ background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.25)", color:"#fff", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer" }}>←</button>}
           <div>
-            <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>🚗 Araç Filosu</h2>
-            <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>{araclar.filter(a=>a.durum==="AKTİF").length} aktif araç</p>
-            <div style={{ marginTop:"5px", display:"flex", alignItems:"center", gap:"14px", flexWrap:"wrap" }}>
-              <span style={{ display:"inline-flex", alignItems:"center", gap:"7px", whiteSpace:"nowrap" }}>
-                <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💰 Aylık Toplam Kira:</span>
-                <span style={{ fontSize:"15px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 10px" }}>
-                  ₺{araclar.filter(a=>a.durum==="AKTİF").reduce((s,a)=>s+Number(a.aylik_kira||0),0).toLocaleString("tr-TR")}
-                </span>
-              </span>
-              {(() => {
-                const toplamBorc = araclar.reduce((s, a) => s + borcHesap(a).tutar, 0);
-                return (
-                  <span style={{ display:"inline-flex", alignItems:"center", gap:"7px", whiteSpace:"nowrap" }}>
-                    <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💳 Toplam Borç:</span>
-                    <span title="Aktif araçlarda ödenmemiş kira ayları toplamı (Temmuz 2026'dan itibaren)"
-                      style={{ fontSize:"15px", fontWeight:800, color: toplamBorc > 0 ? "#b91c1c" : "#166534", background: toplamBorc > 0 ? "#fee2e2" : "#dcfce7", borderRadius:"8px", padding:"2px 10px" }}>
-                      ₺{toplamBorc.toLocaleString("tr-TR")}
-                    </span>
-                  </span>
-                );
-              })()}
-            </div>
+            <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, letterSpacing:"-.01em" }}>Araç Filosu</h2>
+            <div style={{ opacity:.75, fontSize:"13px", marginTop:"3px" }}>{aktifAraclar.length} aktif araç · {new Date().toLocaleDateString("tr-TR", { day:"numeric", month:"long", year:"numeric" })}</div>
           </div>
         </div>
-        <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"8px" }}>
-          {/* Üst sıra: ufak aksiyon butonları */}
-          <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-            {canEdit && (
-              <button onClick={openNew}
-                style={{ padding:"6px 14px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontWeight:700, cursor:"pointer", fontSize:"12.5px", whiteSpace:"nowrap" }}>
-                ＋ Araç Ekle
-              </button>
-            )}
-            {onGoOfis && (
-              <button onClick={onGoOfis} title="Ofis & Depo yönetimine geç"
-                style={{ padding:"6px 12px", background:"#f8fafc", color:"#1e3a5f", border:"1.5px solid #cbd5e1", borderRadius:"9px", fontWeight:700, cursor:"pointer", fontSize:"12.5px", whiteSpace:"nowrap" }}>
-                🏢 Ofis & Depo →
-              </button>
-            )}
-          </div>
-          {/* Alt sıra: rozet + Excel + filtreler */}
-          <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end" }}>
-          {/* Excel: aktif filo listesi (sürücü adı soyadı dahil) */}
-          <span style={{ fontSize:"12px", fontWeight:800, color:"#166534", background:"#dcfce7", borderRadius:"20px", padding:"5px 12px", whiteSpace:"nowrap" }}>
-            🚗 {araclar.filter(a => a.aktif).length} aktif araç
-          </span>
-          <button onClick={async () => {
-            const fT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "";
-            const liste = araclar.filter(a => a.aktif).slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka)));
-            /* 09.09.2026: 2. sayfa "Geçmiş Araçlar" — iade edilen/pasif araçlar + plaka/sürücü/kira
-               değişiklik geçmişi (arac_gecmis). Bir yıl sonra ceza gelince "o tarihte kim kullanıyordu" için. */
-            let gecmis = [];
-            try { const g = await fetch(`${API_BASE}/hr/arac-gecmis`); const gd = await g.json(); gecmis = Array.isArray(gd) ? gd : []; } catch { gecmis = []; }
-            const OLAY = { PLAKA_DEGISTI: "Araç değişti", SURUCU_DEGISTI: "Sürücü değişti", KIRA_DEGISTI: "Kira değişti", PASIFE_ALINDI: "İade / pasif" };
-            const pasifler = araclar.filter(a => !a.aktif).map(a => ({
-              plaka: a.plaka, marka: a.marka, model: a.model, yil: a.yil, tip: a.tip, bolge: a.bolge, surucu: a.surucu,
-              aylik_kira: a.aylik_kira, kiralama_firmasi: a.kiralama_firmasi, kira_baslangic: a.kira_baslangic, kira_bitis: a.kira_bitis,
-              olay: "PASİF", aciklama: a.notlar || "", _sira: a.kira_bitis || a.kira_baslangic || "" }));
-            const gecmisRows = gecmis.map(g => ({ ...g, olay: OLAY[g.olay] || g.olay || "", aciklama: g.aciklama || "", _sira: g.kira_bitis || g.created_at || "" }));
-            const hepsi = [...gecmisRows, ...pasifler].sort((x, y) => String(y._sira).localeCompare(String(x._sira)));
-            exportStandardExcel({
-              title: "Araç Filosu — Aktif Araçlar",
-              sheetName: "Araçlar", fileBase: "Arac_Filosu",
-              headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira (₺)", "Kiralama Firması", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
-              colWidths: [12, 12, 14, 8, 10, 12, 26, 14, 20, 13, 13, 13, 13, 10],
-              numericCols: [7],
-              rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", a.bolge || "",
-                a.surucu || "", Number(a.aylik_kira || 0), a.kiralama_firmasi || "",
-                fT(a.kira_baslangic), fT(a.kira_bitis), fT(a.sigorta_bitis), fT(a.muayene_bitis), a.durum || ""]),
-              extraSheets: [{
-                sheetName: "Geçmiş Araçlar",
-                title: "Geçmiş Araçlar — Kim, Hangi Aracı, Ne Zaman Kullandı",
-                headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Bölge", "Kullanan Personel", "Aylık Kira (₺)", "Kiralama Firması", "Kira Başlangıç", "Kira Bitiş", "Olay", "Açıklama"],
-                colWidths: [12, 12, 14, 8, 10, 12, 26, 14, 20, 13, 13, 16, 44],
-                numericCols: [7],
-                rows: hepsi.map(g => [g.plaka || "", g.marka || "", g.model || "", g.yil || "", g.tip || "", g.bolge || "",
-                  g.surucu || "", Number(g.aylik_kira || 0), g.kiralama_firmasi || "",
-                  fT(g.kira_baslangic), fT(g.kira_bitis), g.olay || "", g.aciklama || ""]),
-              }],
-            }).catch(e => alert("Excel indirilemedi: " + e.message));
-          }} style={{ padding:"7px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>📥 Excel İndir</button>
-          {["TUMU","AKTİF","PASİF","SERVİSTE"].map(f => (
-            <button key={f} onClick={()=>setFilter(f)}
-              style={{ padding:"6px 14px", borderRadius:"20px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:600,
-                background: filter===f ? "#1e3a5f" : "#f3f4f6", color: filter===f ? "#fff" : "#374151" }}>
-              {f}
-            </button>
-          ))}
-          </div>
+        <div style={{ display:"flex", gap:"10px", flexWrap:"wrap", justifyContent:"flex-end" }}>
+          <button onClick={excelIndir} style={btnGhost}>📥 Excel (2 sayfa)</button>
+          <button onClick={gecmisAc} style={btnGhost}>🕘 Geçmiş Araçlar</button>
+          {onGoOfis && <button onClick={onGoOfis} style={btnGhost}>🏢 Ofis & Depo</button>}
+          {canEdit && <button onClick={kiraOdeAc} style={{ ...btnBase, background:"#f59e0b", color:"#1a1200" }}>💳 Kira Öde</button>}
+          {canEdit && <button onClick={openNew} style={{ ...btnBase, background:"#0f766e", color:"#fff" }}>＋ Araç Ekle</button>}
         </div>
       </div>
 
-      {/* Expiry warnings summary */}
-      {(() => {
-        // İade edilmiş/pasif araçlar bitiş uyarısı ÜRETMEZ — sadece aktif filo izlenir
-        const expiring = araclar.filter(a => {
-          if (!a.aktif) return false;
-          const sd = dayDiff(a.sigorta_bitis);
-          const md = dayDiff(a.muayene_bitis);
-          const kd = dayDiff(a.kira_bitis);
-          return (sd !== null && sd <= 30) || (md !== null && md <= 30) || (kd !== null && kd <= 30);
-        });
-        if (!expiring.length) return null;
-        return (
-          <div style={{ background:"#fef9c3", border:"1px solid #fde047", borderRadius:"12px", padding:"12px 16px", marginBottom:"20px" }}>
-            <strong style={{ color:"#713f12", fontSize:"13px" }}>⚠️ Yaklaşan Bitiş Tarihleri ({expiring.length} araç)</strong>
-            <div style={{ marginTop:"6px", display:"flex", flexWrap:"wrap", gap:"6px" }}>
-              {expiring.map(a => (
-                <span key={a.id} onClick={()=>openEdit(a)} style={{ background:"#fff", border:"1px solid #fde047", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", color:"#92400e", fontWeight:600 }}>
-                  {a.plaka}
-                </span>
+      {/* ── KPI şeridi ─────────────────────────────────────────────── */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))", gap:"12px", marginTop:"14px" }}>
+        {[
+          { l:"Aktif araç", v:String(aktifAraclar.length), d:bolgeOzet, c:"#0f1c2e" },
+          { l:"Aylık toplam kira", v:`₺${aylikToplam.toLocaleString("tr-TR")}`, d:"KDV dahil", c:"#0f1c2e" },
+          { l:"Ödenmemiş kira", v:`₺${toplamBorc.toLocaleString("tr-TR")}`, d: toplamBorc > 0 ? `${borcluAraclar.length} araç · vadesi geçen dönemler` : "Vadesi geçen ödeme yok", c: toplamBorc > 0 ? "#b91c1c" : "#15803d" },
+          { l:"Bu dönem ödenen", v:`₺${buDonemOdenen.toplam.toLocaleString("tr-TR")}`, d:`${buDonemOdenen.adet} / ${kiralikAraclar.length} araç · ${buDonem}`, c:"#15803d" },
+          { l:"Sıradaki vade", v: siradakiVade ? siradakiVade.split("-").reverse().join(".") : "—", d: siradakiVade ? `${siradakiAdet} araç · ₺${siradakiTutar.toLocaleString("tr-TR")}` : "Tanımlı vade yok", c:"#b45309" },
+          { l:"Belge uyarısı", v:String(belgeUyari.length), d:"Sigorta / muayene tarihi yok veya 30 gün içinde", c: belgeUyari.length ? "#b45309" : "#15803d" },
+        ].map(k => (
+          <div key={k.l} style={{ background:"#fff", border:"1px solid #e3e8ef", borderRadius:"14px", padding:"13px 16px", boxShadow:"0 1px 2px rgba(15,28,46,.05)" }}>
+            <div style={{ fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700 }}>{k.l}</div>
+            <div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color:k.c, fontVariantNumeric:"tabular-nums" }}>{k.v}</div>
+            <div style={{ fontSize:"12px", color:"#6b7a90", marginTop:"2px" }}>{k.d}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Uyarı çipleri ───────────────────────────────────────────── */}
+      {(borcluAraclar.length > 0 || belgeUyari.length > 0) && (
+        <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginTop:"12px" }}>
+          {borcluAraclar.map(a => (
+            <span key={"b"+a.id} onClick={() => setAcikSatir(a.id)} style={{ ...chip, background:"#fee2e2", color:"#b91c1c", cursor:"pointer" }}>● {a.plaka} · {borcHesap(a).aylar.length} dönem ödenmedi</span>
+          ))}
+          {belgeUyari.slice(0, 6).map(a => (
+            <span key={"d"+a.id} onClick={() => openEdit(a)} style={{ ...chip, background:"#fef3c7", color:"#b45309", cursor:"pointer" }}>● {a.plaka} · {a.uyari}</span>
+          ))}
+        </div>
+      )}
+
+      {/* ── Araç tablosu ────────────────────────────────────────────── */}
+      <div style={{ background:"#fff", border:"1px solid #e3e8ef", borderRadius:"16px", marginTop:"14px", overflow:"hidden", boxShadow:"0 8px 24px -12px rgba(15,28,46,.15)" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", padding:"12px 16px", borderBottom:"1px solid #e3e8ef", flexWrap:"wrap" }}>
+          <h3 style={{ margin:0, fontSize:"15px", fontWeight:800, color:"#0f1c2e" }}>Araçlar</h3>
+          <div style={{ display:"flex", gap:"10px", alignItems:"center", flexWrap:"wrap" }}>
+            <div style={{ display:"flex", gap:"4px", background:"#f3f5f8", padding:"4px", borderRadius:"10px" }}>
+              {[["AKTİF", `Aktif (${_aracBaz.filter(a => a.durum === "AKTİF").length})`], ["PASİF", `Pasif (${_aracBaz.filter(a => a.durum === "PASİF").length})`], ["SERVİSTE", `Serviste (${_aracBaz.filter(a => a.durum === "SERVİSTE").length})`], ["TUMU", "Tümü"]].map(([f, l]) => (
+                <button key={f} onClick={() => setFilter(f)} style={{ padding:"6px 12px", borderRadius:"7px", border:"none", fontSize:"12.5px", fontWeight:700, cursor:"pointer", background: filter === f ? "#1e3a5f" : "transparent", color: filter === f ? "#fff" : "#6b7a90" }}>{l}</button>
               ))}
             </div>
+            <input value={arama} onChange={e => setArama(e.target.value)} placeholder="🔍 Plaka, sürücü, bölge…" style={{ border:"1px solid #cfd7e2", borderRadius:"9px", padding:"7px 11px", fontSize:"13px", minWidth:"220px" }} />
           </div>
-        );
-      })()}
+        </div>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"1120px" }}>
+            <thead>
+              <tr>
+                {["Plaka", "Araç", "Kullanan", "Bölge", "Aylık kira", "Kira takibi", "Durum", "Son KM", "Belgeler", ""].map((h, i) => (
+                  <th key={h + i} style={{ ...thSt, textAlign: (i === 4 || i === 7) ? "right" : "left" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(a => {
+                const borc = borcHesap(a);
+                const acik = acikSatir === a.id;
+                const kira = Number(a.aylik_kira || 0);
+                const sonKm = (a.km_log || [])[0];
+                const initials = String(a.surucu || "?").split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join("").toUpperCase();
+                const durumPill = !a.aktif
+                  ? { bg:"#f3f5f8", c:"#6b7a90", t: a.durum === "SERVİSTE" ? "Serviste" : "Pasif / iade" }
+                  : kira <= 0 ? { bg:"#f3f5f8", c:"#6b7a90", t:"Kira yok" }
+                  : borc.tutar > 0 ? { bg:"#fee2e2", c:"#b91c1c", t:`Borç ₺${borc.tutar.toLocaleString("tr-TR")} · ${borc.aylar.length} dönem` }
+                  : borc.siradaki ? { bg:"#dcfce7", c:"#15803d", t:`Ödendi · sıradaki ${borc.siradaki.vade.split("-").reverse().slice(0, 2).join(".")}` }
+                  : { bg:"#dcfce7", c:"#15803d", t:"Ödendi" };
+                return (
+                  <React.Fragment key={a.id}>
+                    <tr onClick={() => setAcikSatir(acik ? null : a.id)} style={{ cursor:"pointer", background: acik ? "#eefaf8" : "transparent" }}>
+                      <td style={tdSt}><span style={plateSt(a.durum)}>{a.plaka}</span></td>
+                      <td style={tdSt}><div style={{ fontWeight:700, color:"#0f1c2e" }}>{a.marka} {a.model}</div><div style={{ fontSize:"12px", color:"#6b7a90" }}>{[a.yil, a.tip, a.kiralama_firmasi].filter(Boolean).join(" · ")}</div></td>
+                      <td style={tdSt}>
+                        <div style={{ display:"flex", alignItems:"center", gap:"9px" }}>
+                          <span style={{ width:"30px", height:"30px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", fontWeight:800, fontSize:"11.5px", display:"grid", placeItems:"center", flex:"none" }}>{initials}</span>
+                          <div><div style={{ fontWeight:600, color:"#0f1c2e" }}>{a.surucu || "—"}</div><div style={{ fontSize:"12px", color:"#6b7a90" }}>{a.kira_baslangic ? `${fT(a.kira_baslangic)}'den beri` : ""}</div></div>
+                        </div>
+                      </td>
+                      <td style={tdSt}>{a.bolge || "—"}</td>
+                      <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums", fontWeight:700 }}>{kira > 0 ? `₺${kira.toLocaleString("tr-TR")}` : "—"}<div style={{ fontSize:"11px", color:"#6b7a90", fontWeight:500 }}>{kira > 0 ? ((a.odeme_tipi || "PESIN") === "SONRADAN" ? `ay sonu · ${a.donem_gunu || 1}'i` : `peşin · ${a.donem_gunu || 15}'i`) : ""}</div></td>
+                      <td style={tdSt}>
+                        {a.aktif && kira > 0 ? (
+                          <div style={{ display:"flex", gap:"4px" }}>
+                            {borc.liste.slice(-5).map(d => (
+                              <span key={d.donem} title={`${d.donem} · vade ${fT(d.vade)} · ${d.durum === "ODENDI" ? `ödendi ₺${Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} (${fT(d.odeme.tarih)})` : d.durum === "GECIKTI" ? "ÖDENMEDİ" : "vadesi gelmedi"}`}
+                                style={{ width:"24px", height:"24px", borderRadius:"6px", display:"grid", placeItems:"center", fontSize:"10px", fontWeight:800,
+                                  background: d.durum === "ODENDI" ? "#dcfce7" : d.durum === "GECIKTI" ? "#fee2e2" : "#fff",
+                                  color: d.durum === "ODENDI" ? "#15803d" : d.durum === "GECIKTI" ? "#b91c1c" : "#6b7a90",
+                                  border: d.durum === "BEKLIYOR" ? "1px dashed #cfd7e2" : "1px solid transparent" }}>
+                                {AY_KISA[Number(d.donem.slice(5, 7)) - 1]}
+                              </span>
+                            ))}
+                          </div>
+                        ) : <span style={{ color:"#9ca3af" }}>—</span>}
+                      </td>
+                      <td style={tdSt}><span style={{ ...pill, background:durumPill.bg, color:durumPill.c }}>{durumPill.t}</span></td>
+                      <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>{sonKm ? <>{Number(sonKm.km).toLocaleString("tr-TR")}<div style={{ fontSize:"11px", color:"#6b7a90" }}>{fT(sonKm.tarih)}</div></> : <span style={{ color:"#9ca3af" }}>—</span>}</td>
+                      <td style={tdSt}>
+                        <div style={{ display:"flex", gap:"5px" }}>
+                          {BELGE_YUVALARI.map(({ turu, label }) => {
+                            const b = getBelge(a, turu);
+                            const harf = label.replace(/^[^ ]+ /, "")[0];
+                            return b
+                              ? <a key={turu} onClick={e => e.stopPropagation()} href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`} title={label} style={{ width:"26px", height:"26px", borderRadius:"7px", background:"#d9f2ee", color:"#0f766e", display:"grid", placeItems:"center", fontSize:"11px", fontWeight:800, textDecoration:"none" }}>{harf}</a>
+                              : <span key={turu} title={`${label} yüklenmedi`} style={{ width:"26px", height:"26px", borderRadius:"7px", border:"1px dashed #cfd7e2", color:"#9ca3af", display:"grid", placeItems:"center", fontSize:"11px" }}>{harf}</span>;
+                          })}
+                        </div>
+                      </td>
+                      <td style={{ ...tdSt, textAlign:"right" }}>
+                        {canEdit && <button onClick={e => { e.stopPropagation(); openEdit(a); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}
+                      </td>
+                    </tr>
+                    {acik && (
+                      <tr>
+                        <td colSpan={10} style={{ padding:"0 14px 16px", background:"#eefaf8", borderBottom:"1px solid #e3e8ef" }}>
+                          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(260px, 1fr))", gap:"12px", paddingTop:"12px" }}>
+                            {/* Ödeme geçmişi */}
+                            <div style={detayKutu}>
+                              <div style={detayBaslik}>Kira ödemeleri</div>
+                              {kira > 0 && a.aktif ? borc.liste.slice().reverse().map(d => (
+                                <div key={d.donem} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"12.5px", padding:"4px 0", borderBottom:"1px dashed #e3e8ef" }}>
+                                  <span style={{ fontFamily:"ui-monospace, Menlo, monospace" }}>{d.donem} <span style={{ color:"#6b7a90" }}>· vade {fT(d.vade)}</span></span>
+                                  {d.durum === "ODENDI"
+                                    ? <span style={{ color:"#15803d", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)}{d.odeme.kasadan_dus === false ? " · AHY" : ""}
+                                        {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
+                                      </span>
+                                    : d.durum === "GECIKTI"
+                                      ? <span style={{ color:"#b91c1c", fontWeight:700 }}>Ödenmedi</span>
+                                      : <span style={{ color:"#6b7a90" }}>Vadesi gelmedi</span>}
+                                </div>
+                              )) : <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Kira takibi yok</div>}
+                            </div>
+                            {/* KM */}
+                            <div style={detayKutu}>
+                              <div style={detayBaslik}>KM geçmişi</div>
+                              {(a.km_log || []).slice(0, 6).map(k => (
+                                <div key={k.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"12.5px", padding:"3px 0", borderBottom:"1px dashed #e3e8ef", fontVariantNumeric:"tabular-nums" }}><span>{fT(k.tarih)}</span><b>{Number(k.km).toLocaleString("tr-TR")} km</b></div>
+                              ))}
+                              {!(a.km_log || []).length && <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Kayıt yok</div>}
+                              {canEdit && a.aktif && (
+                                <div style={{ display:"flex", gap:"6px", marginTop:"8px", flexWrap:"wrap" }} onClick={e => e.stopPropagation()}>
+                                  <input type="number" placeholder="KM" value={(kmGiris[a.id]?.km) || ""} onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), km: e.target.value } }))} style={{ width:"90px", padding:"5px 8px", border:"1px solid #cfd7e2", borderRadius:"7px", fontSize:"12px" }} />
+                                  <input type="date" value={(kmGiris[a.id]?.tarih) || new Date().toISOString().slice(0, 10)} onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), tarih: e.target.value } }))} style={{ padding:"5px 6px", border:"1px solid #cfd7e2", borderRadius:"7px", fontSize:"12px" }} />
+                                  <button onClick={() => kmKaydet(a.id)} style={{ padding:"5px 10px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>KM Kaydet</button>
+                                </div>
+                              )}
+                            </div>
+                            {/* Bilgi + işlemler */}
+                            <div style={detayKutu}>
+                              <div style={detayBaslik}>Araç bilgisi</div>
+                              <div style={{ fontSize:"12.5px", lineHeight:1.7 }}>
+                                <div>Kira: {fT(a.kira_baslangic) || "—"} → {fT(a.kira_bitis) || "süresiz"}</div>
+                                <div>Sigorta: <span style={{ color: expiryColor(a.sigorta_bitis), fontWeight:600 }}>{fT(a.sigorta_bitis) || "girilmedi"}</span> · Muayene: <span style={{ color: expiryColor(a.muayene_bitis), fontWeight:600 }}>{fT(a.muayene_bitis) || "girilmedi"}</span></div>
+                                {a.sozlesme_no && <div>Sözleşme: {a.sozlesme_no}</div>}
+                                {a.notlar && <div style={{ color:"#3c4a5d" }}>{a.notlar}</div>}
+                              </div>
+                              {canEdit && (
+                                <div style={{ display:"flex", gap:"6px", marginTop:"8px", alignItems:"center" }} onClick={e => e.stopPropagation()}>
+                                  <select value={a.durum || "AKTİF"} onChange={async (e) => {
+                                    const yeni = e.target.value;
+                                    if (yeni === "PASİF" && !window.confirm(`${a.plaka} pasife alınsın mı? Araç iade edilmiş sayılır, kaydı "Geçmiş Araçlar"a düşer.`)) return;
+                                    try { const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/durum`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ durum: yeni }) }); if (!r.ok) throw new Error("Durum güncellenemedi"); load(); } catch (err) { alert(err.message); }
+                                  }} style={{ padding:"6px 10px", borderRadius:"8px", border:"1px solid #cfd7e2", fontSize:"12px", fontWeight:700 }}>
+                                    <option value="AKTİF">🟢 Aktif</option><option value="PASİF">⚪ Pasif / iade</option><option value="SERVİSTE">🔧 Serviste</option>
+                                  </select>
+                                  <button onClick={() => openEdit(a)} style={{ padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle / Belge</button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+              {filtered.length === 0 && <tr><td colSpan={10} style={{ textAlign:"center", padding:"50px 0", color:"#9ca3af" }}>Bu filtrede araç yok</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div style={{ display:"flex", gap:"14px", flexWrap:"wrap", color:"#6b7a90", fontSize:"12px", marginTop:"10px" }}>
+        <span><span style={{ display:"inline-block", width:"12px", height:"12px", borderRadius:"3px", background:"#dcfce7", verticalAlign:"-2px" }}></span> ödendi</span>
+        <span><span style={{ display:"inline-block", width:"12px", height:"12px", borderRadius:"3px", background:"#fee2e2", verticalAlign:"-2px" }}></span> vadesi geçti, ödenmedi</span>
+        <span><span style={{ display:"inline-block", width:"12px", height:"12px", borderRadius:"3px", border:"1px dashed #cfd7e2", verticalAlign:"-2px" }}></span> sıradaki dönem</span>
+        <span>Belgeler: K sözleşme · R ruhsat · S sigorta · M muayene · Satıra tıklayınca detay açılır</span>
+      </div>
 
-      {/* Araç kartları */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(320px, 1fr))", gap:"16px" }}>
-        {filtered.map(a => {
-          const sd = dayDiff(a.sigorta_bitis);
-          const md = dayDiff(a.muayene_bitis);
-          const kd = dayDiff(a.kira_bitis);
-          const borc = borcHesap(a);
-          const borcTitle = !a.aktif
-            ? undefined
-            : borc.tutar > 0
-              ? `💳 Kira borcu: ₺${borc.tutar.toLocaleString("tr-TR")} — ödenmeyen aylar: ${borc.aylar.join(", ")}`
-              : Number(a.aylik_kira || 0) > 0
-                ? "✅ Kira borcu yok — tüm aylar ödendi"
-                : undefined;
-          return (
-            <div key={a.id} title={borcTitle} style={{ background:"#fff", borderRadius:"14px", boxShadow:"0 1px 6px rgba(0,0,0,0.08)", overflow:"hidden" }}>
-              {/* Card header */}
-              <div style={{ background: a.durum==="AKTİF" ? "#1e3a5f" : a.durum==="SERVİSTE" ? "#92400e" : "#6b7280", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <div>
-                  <div style={{ color:"#fff", fontWeight:900, fontSize:"20px", letterSpacing:"1px" }}>{a.plaka}</div>
-                  <div style={{ color:"#bfdbfe", fontSize:"13px" }}>{a.marka} {a.model} {a.yil ? `(${a.yil})` : ""} · {a.tip}</div>
-                </div>
-                <span style={{ background:"rgba(255,255,255,0.15)", color:"#fff", borderRadius:"20px", padding:"4px 10px", fontSize:"12px", fontWeight:700 }}>{a.durum}</span>
+      {/* ── Kira Öde penceresi ─────────────────────────────────────── */}
+      {payOpen && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(10,20,35,.55)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:600, overflowY:"auto", padding:"24px 14px" }} onClick={() => !payBusy && setPayOpen(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"1080px", boxShadow:"0 30px 60px -20px rgba(0,0,0,.45)", overflow:"hidden" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 20px", borderBottom:"1px solid #e3e8ef", gap:"12px", flexWrap:"wrap" }}>
+              <div>
+                <h3 style={{ margin:0, fontSize:"16px", fontWeight:800, color:"#0f1c2e" }}>Kira Ödemesi Gir</h3>
+                <div style={{ color:"#6b7a90", fontSize:"12.5px", marginTop:"2px" }}>Tüm araçlar tek listede · ödenenleri işaretleyin · tek seferde kaydedin. Vadesi geçmiş dönemler de listede.</div>
               </div>
-              {/* Card body */}
-              <div style={{ padding:"14px 16px" }}>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"10px" }}>
-                  {a.kiralama_firmasi && <div style={{ fontSize:"12px", color:"#6b7280" }}>🏢 {a.kiralama_firmasi}</div>}
-                  {a.bolge && <div style={{ fontSize:"12px", color:"#6b7280" }}>📍 {a.bolge}</div>}
-                  {a.surucu && <div style={{ fontSize:"13px", fontWeight:800, color:"#1e3a5f", background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:"8px", padding:"3px 10px", display:"inline-flex", alignItems:"center", gap:"5px", width:"fit-content" }}>👤 {a.surucu}</div>}
-                  {a.aylik_kira && <div style={{ fontSize:"12px", color:"#6b7280" }}>💰 ₺{Number(a.aylik_kira).toLocaleString("tr-TR")}/ay</div>}
-                </div>
-                {/* Expiry badges — pasif (iade edilmiş) araçta nötr gri, GEÇTİ uyarısı yok */}
-                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginBottom:"10px" }}>
-                  {a.kira_bitis && (
-                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background: a.aktif ? expiryBg(a.kira_bitis) : "#f3f4f6", color: a.aktif ? expiryColor(a.kira_bitis) : "#6b7280" }}>
-                      📅 Kira: {new Date(a.kira_bitis).toLocaleDateString("tr-TR")}
-                      {a.aktif ? (kd !== null && kd <= 60 ? ` (${kd < 0 ? "GEÇTİ" : kd+" gün"})` : "") : " (iade edildi)"}
-                    </span>
-                  )}
-                  {a.sigorta_bitis && (
-                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background: a.aktif ? expiryBg(a.sigorta_bitis) : "#f3f4f6", color: a.aktif ? expiryColor(a.sigorta_bitis) : "#6b7280" }}>
-                      🛡 Sigorta: {new Date(a.sigorta_bitis).toLocaleDateString("tr-TR")}
-                      {a.aktif && sd !== null && sd <= 60 && ` (${sd < 0 ? "GEÇTİ" : sd+" gün"})`}
-                    </span>
-                  )}
-                  {a.muayene_bitis && (
-                    <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background: a.aktif ? expiryBg(a.muayene_bitis) : "#f3f4f6", color: a.aktif ? expiryColor(a.muayene_bitis) : "#6b7280" }}>
-                      🔧 Muayene: {new Date(a.muayene_bitis).toLocaleDateString("tr-TR")}
-                      {a.aktif && md !== null && md <= 60 && ` (${md < 0 ? "GEÇTİ" : md+" gün"})`}
-                    </span>
-                  )}
-                </div>
-                {/* KM takibi: son okuma rozeti (geçmiş fare üzerinde) + hızlı giriş */}
-                {a.aktif && (
-                  <div style={{ display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap", marginBottom:"10px" }}>
-                    {(a.km_log || []).length > 0 && (
-                      <span title={(a.km_log || []).slice(0, 8).map(k => `${k.tarih.split("-").reverse().join(".")}: ${Number(k.km).toLocaleString("tr-TR")} km`).join("\n")}
-                        style={{ fontSize:"11px", fontWeight:700, padding:"3px 8px", borderRadius:"6px", background:"#eef2ff", color:"#3730a3", whiteSpace:"nowrap" }}>
-                        📏 Son KM: {Number(a.km_log[0].km).toLocaleString("tr-TR")} · {a.km_log[0].tarih.split("-").reverse().join(".")}
-                      </span>
-                    )}
-                    {canEdit && (
-                      <>
-                        <input type="number" placeholder="KM" value={(kmGiris[a.id]?.km) || ""}
-                          onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), km: e.target.value } }))}
-                          style={{ width:"88px", padding:"4px 8px", border:"1px solid #d1d5db", borderRadius:"6px", fontSize:"12px" }} />
-                        <input type="date" value={(kmGiris[a.id]?.tarih) || new Date().toISOString().slice(0, 10)}
-                          onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), tarih: e.target.value } }))}
-                          style={{ padding:"4px 6px", border:"1px solid #d1d5db", borderRadius:"6px", fontSize:"12px", color:"#374151" }} />
-                        <button onClick={() => kmKaydet(a.id)}
-                          style={{ padding:"4px 10px", background:"#3730a3", color:"#fff", border:"none", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
-                          📏 KM Kaydet
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
-                {/* Kira ödeme durumu — sadece aktif kiralık araçlarda */}
-                {a.aktif && Number(a.aylik_kira || 0) > 0 && (() => {
-                  const _buAy = new Date().toISOString().slice(0, 7);
-                  const odeme = kiraOdemeler.find(o => String(o.arac_id) === String(a.id) && o.donem === _buAy);
-                  const odendi = !!odeme;
-                  return (
-                    <div style={{ display:"flex", gap:"6px", alignItems:"center", marginBottom:"10px", flexWrap:"wrap" }}>
-                      {odendi
-                        ? <span style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#dcfce7", color:"#166534" }}>✅ Bu ay kira ödendi (₺{Number(odeme.tutar || 0).toLocaleString("tr-TR")})</span>
-                        : <span style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#fee2e2", color:"#991b1b" }}>💳 Kira bekliyor</span>}
-                      {canEdit && odendi && (
-                        <>
-                          <button title="Ödeme tutarını düzelt" onClick={async (e) => {
-                            e.stopPropagation();
-                            const t = prompt(`${_buAy} kirası için doğru tutarı yazın (₺):`, String(Math.round(Number(odeme.tutar || 0))));
-                            if (!t) return;
-                            const _s = String(t).trim();
-                            const _num = /^\d+(\.\d{1,2})?$/.test(_s) ? Number(_s) : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
-                            if (_num <= 0) { alert("Geçerli tutar giriniz"); return; }
-                            try {
-                              const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/kira-ode`, {
-                                method: "POST", headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ donem: _buAy, tutar: _num }),
-                              });
-                              if (!r.ok) throw new Error("Güncellenemedi");
-                              await load();
-                            } catch (err) { alert(err.message || "Ödeme güncellenemedi"); }
-                          }} style={{ padding:"3px 8px", background:"#eff6ff", color:"#1e40af", border:"1px solid #bfdbfe", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>✏️ Düzelt</button>
-                          <button title="Ödemeyi geri al (kira bekliyor durumuna döner)" onClick={async (e) => {
-                            e.stopPropagation();
-                            if (!window.confirm(`${a.plaka} — ${_buAy} kira ödemesi (₺${Number(odeme.tutar || 0).toLocaleString("tr-TR")}) geri alınsın mı?\n\nKayıt silinir, araç yeniden "Kira bekliyor" olur.`)) return;
-                            try {
-                              const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/kira-ode?donem=${_buAy}`, { method: "DELETE" });
-                              if (!r.ok) throw new Error("Geri alınamadı");
-                              await load();
-                            } catch (err) { alert(err.message || "Ödeme geri alınamadı"); }
-                          }} style={{ padding:"3px 8px", background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>↩︎ Geri Al</button>
-                        </>
-                      )}
-                      {borc.tutar > 0 && (
-                        <span title={`Ödenmeyen aylar: ${borc.aylar.join(", ")}`}
-                          style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#fee2e2", color:"#b91c1c" }}>
-                          💳 Borç: ₺{borc.tutar.toLocaleString("tr-TR")} ({borc.aylar.length} ay)
-                        </span>
-                      )}
-                      {canEdit && !odendi && (
-                        <button onClick={async (e) => {
-                          e.stopPropagation();
-                          const donem = prompt("Hangi dönemin kirası? (YYYY-AA)", _buAy);
-                          if (!donem) return;
-                          const tutar = prompt("Ödenen tutar (₺):", String(Math.round(Number(a.aylik_kira || 0)) || ""));
-                          if (!tutar) return;
-                          // Hem "40000" / "40000.00" (makine) hem "40.000,00" (Türkçe) formatını doğru çöz
-                          const _s = String(tutar).trim();
-                          const _tutarNum = /^\d+(\.\d{1,2})?$/.test(_s)
-                            ? Number(_s)
-                            : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
-                          // Kasa sorusu: AHY kendi cebinden ödediyse nakit akışında görünür ama kasadan düşmez
-                          const _kasadan = window.confirm("Bu ödeme kasadaki nakitten mi yapıldı?\n\n✔ Tamam = Kasadan düş\n✘ İptal = AHY kendi ödedi (kasadan düşme, sadece gider)");
-                          try {
-                            const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/kira-ode`, {
-                              method: "POST", headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ donem, tutar: _tutarNum, kasadan_dus: _kasadan }),
-                            });
-                            if (!r.ok) throw new Error("Kaydedilemedi");
-                            await load();
-                          } catch (err) { alert(err.message || "Kira ödemesi kaydedilemedi"); }
-                        }} style={{ padding:"3px 10px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>💸 Kira Öde</button>
-                      )}
-                    </div>
-                  );
-                })()}
-                {/* Belge durumu */}
-                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-                  {BELGE_YUVALARI.map(({ turu, label }) => {
-                    const b = getBelge(a, turu);
-                    return b ? (
-                      <a key={turu} href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
-                        style={{ fontSize:"11px", background:"#dcfce7", color:"#166534", padding:"3px 8px", borderRadius:"6px", textDecoration:"none", fontWeight:600 }}>
-                        ✓ {label.replace(/^[^ ]+ /,"")}
-                      </a>
-                    ) : (
-                      <span key={turu} style={{ fontSize:"11px", background:"#f3f4f6", color:"#9ca3af", padding:"3px 8px", borderRadius:"6px" }}>
-                        — {label.replace(/^[^ ]+ /,"")}
-                      </span>
-                    );
-                  })}
-                </div>
-                {/* Actions */}
-                {canEdit && (
-                  <div style={{ marginTop:"12px", display:"flex", gap:"6px", alignItems:"center" }}>
-                    <select value={a.durum||"AKTİF"}
-                      onChange={async(e)=>{
-                        const yeni = e.target.value;
-                        try {
-                          const r = await fetch(`${API_BASE}/hr/araclar/${a.id}/durum`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ durum: yeni }) });
-                          if(!r.ok) throw new Error("Durum güncellenemedi");
-                          load();
-                        } catch(err){ alert(err.message); }
-                      }}
-                      onClick={(e)=>e.stopPropagation()}
-                      style={{ padding:"8px 10px", borderRadius:"8px", border:"1px solid #d1d5db", fontSize:"12px", fontWeight:700, cursor:"pointer",
-                        background: a.durum==="AKTİF" ? "#dcfce7" : a.durum==="SERVİSTE" ? "#fef3c7" : "#f3f4f6",
-                        color: a.durum==="AKTİF" ? "#166534" : a.durum==="SERVİSTE" ? "#92400e" : "#6b7280" }}>
-                      <option value="AKTİF">🟢 Aktif</option>
-                      <option value="PASİF">⚪ Pasif</option>
-                      <option value="SERVİSTE">🔧 Serviste</option>
-                    </select>
-                    <button onClick={()=>openEdit(a)}
-                      style={{ flex:1, padding:"8px", background:"#f3f4f6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer", color:"#374151" }}>
-                      ✏️ Düzenle / Belge
-                    </button>
-                  </div>
-                )}
+              <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                <span style={{ display:"inline-flex", alignItems:"center", gap:"6px", border:"1px solid #cfd7e2", borderRadius:"9px", padding:"4px 8px", fontWeight:700, fontSize:"13px", background:"#f8fafc" }}>
+                  <button onClick={() => payDonemKaydir(-1)} style={icoBtn}>◀</button>
+                  <span style={{ fontFamily:"ui-monospace, Menlo, monospace" }}>{payDonem}</span>
+                  <button onClick={() => payDonemKaydir(1)} style={icoBtn}>▶</button>
+                </span>
+                <button onClick={() => setPayOpen(false)} style={icoBtn}>✕</button>
               </div>
             </div>
-          );
-        })}
-        {filtered.length === 0 && (
-          <div style={{ gridColumn:"1/-1", textAlign:"center", padding:"60px 0", color:"#9ca3af" }}>
-            Henüz araç kaydı yok
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"960px" }}>
+                <thead><tr>
+                  <th style={{ ...thSt, width:"40px" }}><input type="checkbox" checked={payRows.length > 0 && payRows.filter(r => !r.odendi).every(r => r.sec)} onChange={e => setPayRows(rs => rs.map(r => r.odendi ? r : { ...r, sec: e.target.checked }))} /></th>
+                  {["Plaka", "Araç", "Kullanan", "Dönem", "Kira", "Ödenen tutar", "Ödeme kaynağı", "Tarih", "Durum"].map((h, i) => <th key={h} style={{ ...thSt, textAlign: (i === 4 || i === 5) ? "right" : "left" }}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {payRows.map((r, i) => (
+                    <tr key={r.key} style={{ background: r.odendi ? "#f8fafc" : "transparent" }}>
+                      <td style={tdSt}>{!r.odendi && <input type="checkbox" checked={!!r.sec} onChange={e => payRowSet(i, { sec: e.target.checked })} />}</td>
+                      <td style={tdSt}><span style={plateSt("AKTİF")}>{r.plaka}</span></td>
+                      <td style={tdSt}>{r.arac}</td>
+                      <td style={tdSt}>{r.surucu || "—"}</td>
+                      <td style={{ ...tdSt, fontFamily:"ui-monospace, Menlo, monospace" }}>{r.donem}<div style={{ fontSize:"11px", color:"#6b7a90" }}>vade {fT(r.vade)}</div></td>
+                      <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>₺{Number(r.kira).toLocaleString("tr-TR")}</td>
+                      <td style={{ ...tdSt, textAlign:"right" }}>
+                        {r.odendi
+                          ? <b style={{ fontVariantNumeric:"tabular-nums" }}>₺{Number(r.odeme.tutar || 0).toLocaleString("tr-TR")}</b>
+                          : <input value={r.tutar} onChange={e => payRowSet(i, { tutar: e.target.value, sec: true })} style={{ width:"110px", border:"1px solid #cfd7e2", borderRadius:"8px", padding:"6px 8px", fontFamily:"ui-monospace, Menlo, monospace", fontSize:"13px", textAlign:"right" }} />}
+                      </td>
+                      <td style={tdSt}>
+                        {r.odendi
+                          ? <span style={{ fontSize:"12.5px" }}>{r.odeme.kasadan_dus === false ? "AHY ödedi" : "Kasadan"}</span>
+                          : <select value={r.kasadan ? "KASA" : "AHY"} onChange={e => payRowSet(i, { kasadan: e.target.value === "KASA" })} style={{ border:"1px solid #cfd7e2", borderRadius:"8px", padding:"6px 8px", fontSize:"12.5px" }}><option value="AHY">AHY ödedi</option><option value="KASA">Kasadan</option></select>}
+                      </td>
+                      <td style={tdSt}>
+                        {r.odendi
+                          ? <span style={{ fontSize:"12.5px", color:"#6b7a90" }}>{fT(r.odeme.tarih)}</span>
+                          : <input type="date" value={r.tarih} onChange={e => payRowSet(i, { tarih: e.target.value })} style={{ border:"1px solid #cfd7e2", borderRadius:"8px", padding:"5px 8px", fontSize:"12.5px" }} />}
+                      </td>
+                      <td style={tdSt}>
+                        {r.odendi
+                          ? <span style={{ display:"inline-flex", gap:"6px", alignItems:"center" }}><span style={{ ...pill, background:"#dcfce7", color:"#15803d" }}>Ödendi</span>{canEdit && <button onClick={() => odemeGeriAl({ id:r.arac_id, plaka:r.plaka }, r.donem, r.odeme, true)} title="Geri al" style={{ ...icoBtn, width:"24px", height:"24px", fontSize:"11px" }}>↩︎</button>}</span>
+                          : r.gecikti
+                            ? <span style={{ ...pill, background:"#fee2e2", color:"#b91c1c" }}>Vadesi geçti</span>
+                            : Number(String(r.tutar).replace(/\./g, "").replace(",", ".")) > 0 && Number(String(r.tutar).replace(/\./g, "").replace(",", ".")) < Number(r.kira)
+                              ? <span style={{ ...pill, background:"#fef3c7", color:"#b45309" }}>Fark ödemesi</span>
+                              : <span style={{ ...pill, background:"#f3f5f8", color:"#6b7a90", border:"1px solid #e3e8ef" }}>Bekliyor</span>}
+                      </td>
+                    </tr>
+                  ))}
+                  {payRows.length === 0 && <tr><td colSpan={10} style={{ textAlign:"center", padding:"30px", color:"#9ca3af" }}>Kiralık aktif araç yok</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", padding:"14px 20px", borderTop:"1px solid #e3e8ef", background:"#f8fafc", flexWrap:"wrap" }}>
+              <div style={{ fontSize:"13px", color:"#3c4a5d" }}>Seçili <b>{paySecili.length} ödeme</b> · toplam <b style={{ fontSize:"16px" }}>₺{paySeciliToplam.toLocaleString("tr-TR")}</b>{paySecili.length ? ` · ${paySecili.filter(r => !r.kasadan).length} AHY, ${paySecili.filter(r => r.kasadan).length} kasadan` : ""}</div>
+              <div style={{ display:"flex", gap:"10px" }}>
+                <button onClick={() => setPayOpen(false)} disabled={payBusy} style={{ ...btnBase, background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>Vazgeç</button>
+                <button onClick={odemeleriKaydet} disabled={payBusy || !paySecili.length} style={{ ...btnBase, background: paySecili.length ? "#0f766e" : "#9ca3af", color:"#fff" }}>{payBusy ? "Kaydediliyor…" : "✓ Ödemeleri Kaydet"}</button>
+              </div>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* ── Geçmiş Araçlar penceresi ────────────────────────────────── */}
+      {gecmisOpen && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(10,20,35,.55)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:600, overflowY:"auto", padding:"24px 14px" }} onClick={() => setGecmisOpen(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"1080px", boxShadow:"0 30px 60px -20px rgba(0,0,0,.45)", overflow:"hidden" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 20px", borderBottom:"1px solid #e3e8ef" }}>
+              <div><h3 style={{ margin:0, fontSize:"16px", fontWeight:800, color:"#0f1c2e" }}>Geçmiş Araçlar</h3><div style={{ color:"#6b7a90", fontSize:"12.5px", marginTop:"2px" }}>Kim, hangi aracı, ne zaman kullandı · iade edilen araçlar ve plaka/sürücü/kira değişiklikleri</div></div>
+              <button onClick={() => setGecmisOpen(false)} style={icoBtn}>✕</button>
+            </div>
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"900px" }}>
+                <thead><tr>{["Plaka", "Araç", "Kullanan", "Bölge", "Aylık kira", "Kira başlangıç", "Kira bitiş", "Olay", "Açıklama"].map((h, i) => <th key={h} style={{ ...thSt, textAlign: i === 4 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {gecmisListe.map((g, i) => (
+                    <tr key={i}>
+                      <td style={tdSt}><span style={plateSt("PASİF")}>{g.plaka}</span></td>
+                      <td style={tdSt}>{[g.marka, g.model].filter(Boolean).join(" ")}{g.yil ? <span style={{ color:"#6b7a90" }}> · {g.yil}</span> : ""}</td>
+                      <td style={{ ...tdSt, fontWeight:600 }}>{g.surucu || "—"}</td>
+                      <td style={tdSt}>{g.bolge || "—"}</td>
+                      <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>{g.aylik_kira ? `₺${Number(g.aylik_kira).toLocaleString("tr-TR")}` : "—"}</td>
+                      <td style={tdSt}>{fT(g.kira_baslangic) || "—"}</td>
+                      <td style={tdSt}>{fT(g.kira_bitis) || "—"}</td>
+                      <td style={tdSt}><span style={{ ...pill, background:"#f3f5f8", color:"#3c4a5d", border:"1px solid #e3e8ef" }}>{g.olay}</span></td>
+                      <td style={{ ...tdSt, fontSize:"12px", color:"#3c4a5d", maxWidth:"320px" }}>{g.aciklama}</td>
+                    </tr>
+                  ))}
+                  {gecmisListe.length === 0 && <tr><td colSpan={9} style={{ textAlign:"center", padding:"30px", color:"#9ca3af" }}>{gecmisYukleniyor ? "Yükleniyor…" : "Geçmiş kayıt yok"}</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Form / Detail Modal */}
       {showForm && (
@@ -35021,6 +35158,17 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
               <div>
                 <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Aylık Kira (₺)</label>
                 <input type="number" value={form.aylik_kira||""} onChange={e=>setForm(f=>({...f,aylik_kira:e.target.value}))} style={aInpSt} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Kira Ödeme Şekli</label>
+                <select value={form.odeme_tipi||"PESIN"} onChange={e=>setForm(f=>({...f,odeme_tipi:e.target.value}))} style={aSelSt}>
+                  <option value="PESIN">Peşin — dönem başında ödenir</option>
+                  <option value="SONRADAN">Sonradan — dönem sonunda ödenir</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Dönem Günü (ayın kaçı)</label>
+                <input type="number" min="1" max="28" value={form.donem_gunu||15} onChange={e=>setForm(f=>({...f,donem_gunu:e.target.value}))} style={aInpSt} />
               </div>
               <div>
                 <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Sürücü / Kullanan</label>
