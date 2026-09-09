@@ -18942,6 +18942,34 @@ async function ensureAracKmTable() {
       tarih DATE NOT NULL DEFAULT CURRENT_DATE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+  /* 09.09.2026: Araç geçmişi — plaka/sürücü/kira değişince ya da araç pasife
+     alınınca ESKİ değerler buraya yazılır. Amaç: bir yıl sonra ceza/hasar
+     gelince "bu aracı o tarihte kim kullanıyordu" sorusuna cevap. Araç kartı
+     yerinde düzenlendiği için (ör. 34MVB691 → 34PAE656) geçmiş kaybolmasın. */
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS arac_gecmis (
+      id SERIAL PRIMARY KEY,
+      arac_id INTEGER,
+      plaka TEXT, marka TEXT, model TEXT, yil INTEGER, tip TEXT, bolge TEXT,
+      surucu TEXT, aylik_kira NUMERIC, kiralama_firmasi TEXT,
+      kira_baslangic DATE, kira_bitis DATE,
+      olay TEXT, aciklama TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+  await pool.query(`ALTER TABLE arac_gecmis ENABLE ROW LEVEL SECURITY`).catch(() => {});
+}
+
+// Eski araç satırını geçmişe yazar (olay: PLAKA_DEGISTI / SURUCU_DEGISTI / KIRA_DEGISTI / PASIFE_ALINDI)
+async function aracGecmisYaz(eski, olay, aciklama, bitis) {
+  if (!eski) return;
+  await pool.query(
+    `INSERT INTO arac_gecmis (arac_id, plaka, marka, model, yil, tip, bolge, surucu, aylik_kira, kiralama_firmasi,
+       kira_baslangic, kira_bitis, olay, aciklama)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+    [eski.id, eski.plaka, eski.marka, eski.model, eski.yil || null, eski.tip, eski.bolge, eski.surucu,
+     eski.aylik_kira || null, eski.kiralama_firmasi, eski.kira_baslangic || null,
+     bitis || eski.kira_bitis || new Date().toISOString().slice(0, 10), olay, aciklama || null]
+  ).catch(e => console.error("[arac-gecmis]", e.message));
 }
 
 app.get("/hr/araclar", async (req, res) => {
@@ -19008,6 +19036,25 @@ app.put("/hr/araclar/:id", async (req, res) => {
     const { plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
             kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,
             sigorta_bitis,muayene_bitis,durum,notlar,aktif } = req.body;
+    // Geçmiş kaydı: plaka / sürücü / kira / aktiflik değişiyorsa eski hâli sakla
+    try {
+      await ensureAracKmTable();
+      const eskiR = await pool.query(`SELECT * FROM araclar WHERE id=$1`, [req.params.id]);
+      const eski = eskiR.rows[0];
+      if (eski) {
+        const yeniPlaka = plaka ? plaka.replace(/\s+/g, "").toUpperCase() : eski.plaka;
+        const norm = (v) => String(v ?? "").trim().toLowerCase();
+        const kiraE = Number(eski.aylik_kira || 0), kiraY = Number(aylik_kira || 0);
+        if (yeniPlaka !== eski.plaka)
+          await aracGecmisYaz(eski, "PLAKA_DEGISTI", `Araç değişti → ${yeniPlaka}${surucu ? ` (${surucu})` : ""}`);
+        else if (norm(surucu) !== norm(eski.surucu))
+          await aracGecmisYaz(eski, "SURUCU_DEGISTI", `Sürücü değişti → ${surucu || "—"}`);
+        else if (aylik_kira != null && kiraE !== kiraY && kiraE > 0)
+          await aracGecmisYaz(eski, "KIRA_DEGISTI", `Aylık kira ${kiraE} → ${kiraY}`);
+        else if (eski.aktif && aktif === false)
+          await aracGecmisYaz(eski, "PASIFE_ALINDI", notlar || null);
+      }
+    } catch (e) { console.error("[arac-gecmis put]", e.message); }
     const { rows } = await pool.query(
       `UPDATE araclar SET plaka=COALESCE($2,plaka),marka=$3,model=$4,yil=$5,tip=$6,
         kiralama_firmasi=$7,sozlesme_no=$8,kira_baslangic=$9,kira_bitis=$10,
@@ -19028,6 +19075,13 @@ app.put("/hr/araclar/:id/durum", async (req, res) => {
     const { durum } = req.body;
     if (!["AKTİF", "PASİF", "SERVİSTE"].includes(durum))
       return res.status(400).json({ error: "Geçersiz durum" });
+    if (durum === "PASİF") {
+      try {
+        await ensureAracKmTable();
+        const e = await pool.query(`SELECT * FROM araclar WHERE id=$1 AND aktif=true`, [req.params.id]);
+        if (e.rows[0]) await aracGecmisYaz(e.rows[0], "PASIFE_ALINDI", "Araç pasife alındı");
+      } catch (err) { console.error("[arac-gecmis durum]", err.message); }
+    }
     const { rows } = await pool.query(
       `UPDATE araclar SET durum=$1, aktif=$2 WHERE id=$3 RETURNING *`,
       [durum, durum === "AKTİF", req.params.id]);
@@ -19069,6 +19123,15 @@ app.delete("/hr/araclar/:id/kira-ode", async (req, res) => {
     );
     if (!r.rows.length) return res.status(404).json({ error: "Bu dönem için ödeme kaydı yok" });
     res.json({ ok: true, silinen: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Araç geçmişi: eski plaka/sürücü/kira kayıtları (Excel "Geçmiş Araçlar" sayfası)
+app.get("/hr/arac-gecmis", async (req, res) => {
+  try {
+    await ensureAracKmTable();
+    const { rows } = await pool.query(`SELECT * FROM arac_gecmis ORDER BY COALESCE(kira_bitis, created_at::date) DESC, id DESC`);
+    res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

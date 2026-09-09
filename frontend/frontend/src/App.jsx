@@ -34696,9 +34696,20 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
           <span style={{ fontSize:"12px", fontWeight:800, color:"#166534", background:"#dcfce7", borderRadius:"20px", padding:"5px 12px", whiteSpace:"nowrap" }}>
             🚗 {araclar.filter(a => a.aktif).length} aktif araç
           </span>
-          <button onClick={() => {
+          <button onClick={async () => {
             const fT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "";
             const liste = araclar.filter(a => a.aktif).slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka)));
+            /* 09.09.2026: 2. sayfa "Geçmiş Araçlar" — iade edilen/pasif araçlar + plaka/sürücü/kira
+               değişiklik geçmişi (arac_gecmis). Bir yıl sonra ceza gelince "o tarihte kim kullanıyordu" için. */
+            let gecmis = [];
+            try { const g = await fetch(`${API_BASE}/hr/arac-gecmis`); const gd = await g.json(); gecmis = Array.isArray(gd) ? gd : []; } catch { gecmis = []; }
+            const OLAY = { PLAKA_DEGISTI: "Araç değişti", SURUCU_DEGISTI: "Sürücü değişti", KIRA_DEGISTI: "Kira değişti", PASIFE_ALINDI: "İade / pasif" };
+            const pasifler = araclar.filter(a => !a.aktif).map(a => ({
+              plaka: a.plaka, marka: a.marka, model: a.model, yil: a.yil, tip: a.tip, bolge: a.bolge, surucu: a.surucu,
+              aylik_kira: a.aylik_kira, kiralama_firmasi: a.kiralama_firmasi, kira_baslangic: a.kira_baslangic, kira_bitis: a.kira_bitis,
+              olay: "PASİF", aciklama: a.notlar || "", _sira: a.kira_bitis || a.kira_baslangic || "" }));
+            const gecmisRows = gecmis.map(g => ({ ...g, olay: OLAY[g.olay] || g.olay || "", aciklama: g.aciklama || "", _sira: g.kira_bitis || g.created_at || "" }));
+            const hepsi = [...gecmisRows, ...pasifler].sort((x, y) => String(y._sira).localeCompare(String(x._sira)));
             exportStandardExcel({
               title: "Araç Filosu — Aktif Araçlar",
               sheetName: "Araçlar", fileBase: "Arac_Filosu",
@@ -34708,6 +34719,16 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
               rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", a.bolge || "",
                 a.surucu || "", Number(a.aylik_kira || 0), a.kiralama_firmasi || "",
                 fT(a.kira_baslangic), fT(a.kira_bitis), fT(a.sigorta_bitis), fT(a.muayene_bitis), a.durum || ""]),
+              extraSheets: [{
+                sheetName: "Geçmiş Araçlar",
+                title: "Geçmiş Araçlar — Kim, Hangi Aracı, Ne Zaman Kullandı",
+                headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Bölge", "Kullanan Personel", "Aylık Kira (₺)", "Kiralama Firması", "Kira Başlangıç", "Kira Bitiş", "Olay", "Açıklama"],
+                colWidths: [12, 12, 14, 8, 10, 12, 26, 14, 20, 13, 13, 16, 44],
+                numericCols: [7],
+                rows: hepsi.map(g => [g.plaka || "", g.marka || "", g.model || "", g.yil || "", g.tip || "", g.bolge || "",
+                  g.surucu || "", Number(g.aylik_kira || 0), g.kiralama_firmasi || "",
+                  fT(g.kira_baslangic), fT(g.kira_bitis), g.olay || "", g.aciklama || ""]),
+              }],
             }).catch(e => alert("Excel indirilemedi: " + e.message));
           }} style={{ padding:"7px 14px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>📥 Excel İndir</button>
           {["TUMU","AKTİF","PASİF","SERVİSTE"].map(f => (
