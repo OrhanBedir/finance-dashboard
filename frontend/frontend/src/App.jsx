@@ -34454,6 +34454,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     </div>
   );
 }
+const ARAC_BOLGELER = ["İzmir", "Ankara", "Bursa", "Antalya", "Eskişehir", "İstanbul", "Muğla", "Aydın", "Manisa", "Denizli", "Balıkesir", "Diğer"];
 const ARAC_MARKALAR = {
   "Dacia":         ["Duster","Sandero","Logan","Jogger","Spring"],
   "Fiat":          ["Doblo","Fiorino","Egea","Tipo","Panda","500","Ducato","Scudo"],
@@ -35175,8 +35176,14 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                 <input value={form.surucu||""} onChange={e=>setForm(f=>({...f,surucu:e.target.value}))} style={aInpSt} />
               </div>
               <div style={{ gridColumn:"1/-1" }}>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Atandığı Bölge / Saha</label>
-                <input value={form.bolge||""} onChange={e=>setForm(f=>({...f,bolge:e.target.value}))} style={aInpSt} />
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Atandığı Bölge</label>
+                {/* 09.09.2026: serbest metin yerine liste — ilk üçü ana bölgeler (İzmir, Ankara, Bursa) */}
+                <select value={(() => { const v = String(form.bolge || "").trim(); const m = ARAC_BOLGELER.find(b => b.toLocaleLowerCase("tr") === v.toLocaleLowerCase("tr")); return m || v; })()}
+                  onChange={e=>setForm(f=>({...f,bolge:e.target.value}))} style={aSelSt}>
+                  <option value="">Seçin</option>
+                  {ARAC_BOLGELER.map(b => <option key={b} value={b}>{b}</option>)}
+                  {form.bolge && !ARAC_BOLGELER.some(b => b.toLocaleLowerCase("tr") === String(form.bolge).trim().toLocaleLowerCase("tr")) && <option value={form.bolge}>{form.bolge}</option>}
+                </select>
               </div>
               <div>
                 <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Kira Başlangıç</label>
