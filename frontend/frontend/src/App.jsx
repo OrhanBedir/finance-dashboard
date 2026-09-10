@@ -31982,7 +31982,7 @@ function App() {
           {/* Top header bar */}
           <div style={{background:'#fff',borderBottom:'1px solid #dde3ec',padding:'0 40px',height:'60px',display:'flex',alignItems:'center',justifyContent:'space-between',boxShadow:'0 1px 4px rgba(0,0,0,0.06)'}}>
             <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
-              <img src="/omnix-logo.svg" alt="Omnix" width="36" height="36" style={{borderRadius:'8px'}} />
+              <img src="/omnix-logo.svg" alt="Omnix" width="36" height="36" />
               <span style={{fontSize:'20px',fontWeight:800,color:'#1e3a5f',letterSpacing:'-0.5px'}}>Omnix</span>
             </div>
             <span style={{fontSize:'13px',color:'#94a3b8'}}>Operations &amp; Project Platform</span>
@@ -31995,7 +31995,7 @@ function App() {
               /* ── Şifre sıfırlama (email linkinden) ── */
               <div style={{background:'#fff',borderRadius:'4px',padding:'40px 44px',width:'100%',maxWidth:'420px',boxShadow:'0 2px 16px rgba(0,0,0,0.10)'}}>
                 <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'28px'}}>
-                  <img src="/omnix-logo.svg" alt="" width="28" height="28" style={{borderRadius:'6px'}} />
+                  <img src="/omnix-logo.svg" alt="" width="28" height="28" />
                   <span style={{fontSize:'17px',fontWeight:700,color:'#1e3a5f'}}>Şifre Sıfırlama</span>
                 </div>
                 <div style={{marginBottom:'14px'}}>
@@ -32557,7 +32557,7 @@ function App() {
               <div style={{maxWidth:'1100px',margin:'0 auto',padding:'24px 16px'}}>
                 <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 60%,#1e3a5f 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",justifyContent:"space-between",color:"#fff"}}>
                   <div style={{display:"flex",alignItems:"center",gap:"16px"}}>
-                    <img src="/omnix-logo.svg" alt="Omnix" width="46" height="46" style={{borderRadius:'12px',background:'rgba(255,255,255,.1)',padding:'4px'}} />
+                    <img src="/omnix-logo-light.svg" alt="Omnix" width="46" height="46" />
                     <div>
                       <div style={{fontSize:"12px",fontWeight:700,letterSpacing:"0.12em",color:"#93c5fd",textTransform:"uppercase"}}>Omnix Platform Konsolu</div>
                       <h2 style={{margin:"2px 0 0",fontSize:"22px",fontWeight:800}}>Hoş geldin, {user?.name?.split(" ")[0] || "Platform Sahibi"} 👋</h2>
