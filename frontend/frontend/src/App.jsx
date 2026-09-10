@@ -20511,6 +20511,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
   const [yukleniyor, setYukleniyor] = useState(true);
   const [firmaSec, setFirmaSec] = useState(null); // {id, path}
   const [inceleFormId, setInceleFormId] = useState(null); // kuyruktan "İncele" ile açılan masraf formu
+  const [bekleyenAcik, setBekleyenAcik] = useState(false); // "Başkasında bekleyen" tam liste
   const [formModal, setFormModal] = useState(null);       // {id} — Genel Bakış'ta açılan masraf formu detay penceresi
   const [formDetay, setFormDetay] = useState(null);
   const [formIslem, setFormIslem] = useState(false);
@@ -20688,9 +20689,17 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
     ...avBana.map(t => ({ tip:"AVANS", id:t.id, ad: t.personel_ad || t.talep_eden_ad, alt: [t.bolge, t.proje].filter(Boolean).join(" · "), ne: [t.gider_turu, t.plaka, t.aciklama].filter(Boolean).join(" · "), tutar: t.tutar, adim: AV_ADIM[t.durum] ?? 0, et: AV_ET, tarih: t.tarih, obj: t })),
     ...mfBana.map(f => ({ tip:"MASRAF", id:f.id, ad: f.talep_eden_ad, alt: `Form #${f.form_no || f.id} · ${f.donem || ""}`, ne: `${f.kalem_sayisi || 0} kalem`, tutar: f.toplam_tutar, adim: MF_ADIM[f.durum] ?? 0, et: MF_ET, tarih: f.created_at, obj: f, arsiv: f.durum === "TAMAMLANDI" })),
   ].sort((a, b) => gun(b.tarih) - gun(a.tarih));
+  /* Bir kayıt hangi adımdaysa onayı kimde bekliyor (10.09.2026) — "başkasında
+     bekleyen" listesi bunu isimle gösterir, kimseyi aramaya gerek kalmaz. */
+  const KIMDE_AVANS = { TALEP:"Rollout müdürü", ROLLOUT_MUDUR_ONAY:"Orhan Bedir (PM)", PM_ONAY:"Düzgün Şimşek (PD)", DIREKTOR_ONAY:"Muhasebe", MUHASEBE_ONAY:"Muhasebe" };
+  const KIMDE_MASRAF = { ROLLOUT_BEKLE:"Nurcan Kuş (Rollout)", MUHASEBE_BEKLE:"Muhasebe kontrolü", PM_BEKLE:"Orhan Bedir (PM)", DIREKTOR_BEKLE:"Düzgün Şimşek (PD)", TAMAMLANDI:"Muhasebe (ödeme)" };
   const digerleri = [
-    ...avBekleyen.filter(t => !avansBana(t)).map(t => ({ tip:"AVANS", ad: t.personel_ad || t.talep_eden_ad, ne: t.gider_turu, tutar: t.tutar, durum: t.durum, adim: AV_ADIM[t.durum] ?? 0, et: AV_ET, tarih: t.tarih })),
-    ...mfBekleyen.filter(f => !masrafBana(f)).map(f => ({ tip:"MASRAF", ad: f.talep_eden_ad, ne: `Form #${f.form_no || f.id}`, tutar: f.toplam_tutar, durum: f.durum, adim: MF_ADIM[f.durum] ?? 0, et: MF_ET, tarih: f.created_at })),
+    ...avBekleyen.filter(t => !avansBana(t)).map(t => ({ tip:"AVANS", id: t.id, ad: t.personel_ad || t.talep_eden_ad,
+      alt: [t.bolge, t.proje].filter(Boolean).join(" · "), ne: [t.gider_turu, t.plaka, t.aciklama].filter(Boolean).join(" · "),
+      tutar: t.tutar, durum: t.durum, adim: AV_ADIM[t.durum] ?? 0, et: AV_ET, tarih: t.tarih, kimde: KIMDE_AVANS[t.durum] || "—" })),
+    ...mfBekleyen.filter(f => !masrafBana(f)).map(f => ({ tip:"MASRAF", id: f.id, ad: f.talep_eden_ad,
+      alt: `Form #${f.form_no || f.id} · ${f.donem || ""}`, ne: `${f.kalem_sayisi || 0} kalem`,
+      tutar: f.toplam_tutar, durum: f.durum, adim: MF_ADIM[f.durum] ?? 0, et: MF_ET, tarih: f.created_at, kimde: KIMDE_MASRAF[f.durum] || "—" })),
   ].sort((a, b) => gun(b.tarih) - gun(a.tarih));
   const DURUM_AD = { TALEP:"Rollout onayı", ROLLOUT_MUDUR_ONAY:"PM onayı", PM_ONAY:"Direktör onayı", DIREKTOR_ONAY:"Muhasebe", MUHASEBE_ONAY:"Muhasebe", ROLLOUT_BEKLE:"Rollout onayı", MUHASEBE_BEKLE:"Muhasebe kontrolü", PM_BEKLE:"PM onayı", DIREKTOR_BEKLE:"Direktör onayı", TAMAMLANDI:"Ödeme / arşiv" };
 
@@ -20762,12 +20771,38 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
                 </table>
               </div>
               {!isRequester && digerleri.length > 0 && (
-                <div style={{ borderTop:"1px solid #e3e8ef", padding:"10px 16px", background:"#f8fafc" }}>
-                  <div style={{ fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700, marginBottom:"6px" }}>Başkasında bekleyen ({digerleri.length})</div>
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
-                    {digerleri.slice(0, 12).map((r, i) => <span key={i} title={`${r.ne || ""} · ${gun(r.tarih)} gün`} style={pill("#fff", "#3c4a5d")}>{r.tip === "AVANS" ? "💳" : "🧾"} {String(r.ad || "").split(" ")[0]} · ₺{fmt(r.tutar)} · <span style={{ color:"#6b7a90", fontWeight:600 }}>{DURUM_AD[r.durum] || r.durum}</span></span>)}
-                    {digerleri.length > 12 && <span style={pill("#fff", "#6b7a90")}>+{digerleri.length - 12}</span>}
+                <div style={{ borderTop:"1px solid #e3e8ef", background:"#f8fafc" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", padding:"10px 16px", flexWrap:"wrap" }}>
+                    <div style={{ fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700 }}>Başkasında bekleyen ({digerleri.length})</div>
+                    <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", alignItems:"center" }}>
+                      {Object.entries(digerleri.reduce((a, r) => { a[r.kimde] = (a[r.kimde] || 0) + 1; return a; }, {}))
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([k, n]) => <span key={k} style={pill("#fff", "#3c4a5d")}>{k} <b style={{ marginLeft:"4px" }}>{n}</b></span>)}
+                    </div>
                   </div>
+                  <div style={{ overflowX:"auto", background:"#fff", borderTop:"1px solid #e3e8ef" }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"760px" }}>
+                      <thead><tr>{["Talep", "Personel", "Ne", "Tutar", "Akış", "Kimde bekliyor", "Bekleme"].map((h, i) => <th key={h} style={{ ...th, textAlign: i === 3 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {(bekleyenAcik ? digerleri : digerleri.slice(0, 8)).map((r, i) => (
+                          <tr key={r.tip + r.id + i}>
+                            <td style={td}>{r.tip === "AVANS" ? <span style={pill("#fef3c7", "#b45309")}>İş avansı</span> : <span style={pill("#ede9fe", "#6d28d9")}>Masraf formu</span>}</td>
+                            <td style={td}><div style={{ display:"flex", alignItems:"center", gap:"8px" }}><span style={{ width:"26px", height:"26px", borderRadius:"50%", background:"#cfd7e2", color:"#3c4a5d", fontWeight:800, fontSize:"10px", display:"grid", placeItems:"center", flex:"none" }}>{initials(r.ad)}</span><div><div style={{ fontWeight:600 }}>{r.ad}</div><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{r.alt}</div></div></div></td>
+                            <td style={{ ...td, maxWidth:"220px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={r.ne}>{r.ne || "—"}</td>
+                            <td style={{ ...td, textAlign:"right", fontWeight:700, fontVariantNumeric:"tabular-nums" }}>₺{fmt(r.tutar)}</td>
+                            <td style={td}><Adimlar idx={r.adim} etiketler={r.et} /></td>
+                            <td style={td}><span style={pill("#dbeafe", "#1d4ed8")}>{r.kimde}</span></td>
+                            <td style={td}>{(() => { const g = gun(r.tarih); return <span style={pill(g >= 5 ? "#fee2e2" : g >= 3 ? "#fef3c7" : "#f3f5f8", g >= 5 ? "#b91c1c" : g >= 3 ? "#b45309" : "#6b7a90")}>{g === 0 ? "bugün" : `${g} gün`}</span>; })()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {digerleri.length > 8 && (
+                    <div onClick={() => setBekleyenAcik(v => !v)} style={{ padding:"9px", textAlign:"center", fontSize:"12px", fontWeight:800, color:"#1e3a5f", background:"#f8fafc", borderTop:"1px solid #e3e8ef", cursor:"pointer", userSelect:"none" }}>
+                      {bekleyenAcik ? "▲ Daralt — ilk 8 kayıt" : `▼ ${digerleri.length - 8} kayıt daha göster (toplam ${digerleri.length})`}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
