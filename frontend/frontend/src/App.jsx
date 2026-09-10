@@ -18955,7 +18955,7 @@ const MASRAF_KATEGORILER = [
   { key: "TRAFIK_CEZA", label: "🚔 Trafik Cezası",        aciklamaPlaceholder: "Ceza detayı",                    belgeAciklamaPlaceholder: "Ceza belgesi açıklaması...", isTrafikCeza: true },
 ];
 
-function MasrafFormuPanel({ currentUser, onPendingCount }) {
+function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initialDurum = "" }) {
   const isPM       = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com" || currentUser?.role === "muhasebe";
@@ -18970,7 +18970,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   const [bakiye, setBakiye]       = useState(null);
   const [viewForm, setViewForm]   = useState(null); // form detail view
   const [showNewForm, setShowNewForm] = useState(false);
-  const [filterDurum, setFilterDurum] = useState("");
+  const [filterDurum, setFilterDurum] = useState(initialDurum || "");
   // Personel + tarih aralığı filtreleri (oluşturma tarihine göre)
   const [filterKisi, setFilterKisi] = useState("");
   const [filterBas, setFilterBas] = useState("");
@@ -20192,15 +20192,17 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   // ── List view ──
   return (
     <div style={{ maxWidth:"1400px", margin:"24px auto" }}>
-      {myPending > 0 && (
+      {!embedded && myPending > 0 && (
         <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:"12px", padding:"12px 18px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
           <span style={{ fontSize:"20px" }}>⏳</span>
           <span style={{ fontWeight:700, color:"#92400e", fontSize:"14px" }}>{myPending} adet masraf formu onayınızı bekliyor</span>
           <span style={{ fontSize:"12px", color:"#78350f" }}>— Aşağıdaki listeden inceleyebilirsiniz</span>
         </div>
       )}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"20px" }}>
-        <h2 style={{ margin:0, fontSize:"22px", fontWeight:700 }}>🧾 Masraf Formları</h2>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: embedded ? "12px" : "20px" }}>
+        {embedded
+          ? <div style={{ fontSize:"13px", color:"#6b7a90" }}>{initialDurum === "ARSIVLENDI" ? "Arşivlenen masraf formları · muhasebe tarafından ödenip kapatılanlar" : "Personelin mobilden gönderdiği masraf formları · onay zinciri: Rollout → Muhasebe → PM → Direktör"}</div>
+          : <h2 style={{ margin:0, fontSize:"22px", fontWeight:700 }}>🧾 Masraf Formları</h2>}
         {!isMuhasebe && (
           <button onClick={()=>setShowNewForm(true)} style={{ padding:"10px 18px", background:"#1f2937", color:"#fff", border:"none", borderRadius:"10px", fontWeight:600, fontSize:"14px", cursor:"pointer" }}>
             + Yeni Masraf Formu
@@ -20474,7 +20476,310 @@ function MasrafFormuPanel({ currentUser, onPendingCount }) {
   );
 }
 
-function IsAvansPanel({ currentUser, onPendingCount }) {
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PERSONEL HARCAMALARI (10.09.2026) — İş Avansı + Masraf Formu + Ödemeler
+   tek çalışma alanında. Mevcut paneller sekmelere gömülür (veri ve onay
+   zinciri aynen); bu bileşen üstte ortak başlık, KPI şeridi, onay kuyruğu
+   ve bakiye özetini verir. Mobil akışlar değişmez.
+   ═══════════════════════════════════════════════════════════════════════ */
+function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPendingAvans, onPendingMasraf }) {
+  const [tab, setTab] = useState(initialTab);
+  useEffect(() => { setTab(initialTab); }, [initialTab]);
+  const _email = String(currentUser?.email || "").toLowerCase().trim();
+  const _role = String(currentUser?.role || "").toLowerCase();
+  const isPM = _email === "orhan.bedir@simsektel.com";
+  const isDirektor = _email === "duzgun.simsek@simsektel.com";
+  const isMuhasebe = _email === "muhasebe@simsektel.com" || _role === "muhasebe";
+  const isMuhOnay = _email === "tugce.yelmen@simsektel.com" || isMuhasebe;
+  const isNurcan = _email === "nurcan.kus@simsektel.com";
+  const isRolloutMudur = _role === "rollout_mudur" || _role === "bolge_mudur";
+  const _altMarka = currentUser?.hw_yukleme === false;
+  const _marka = String(currentUser?.marka || "AHY").toUpperCase();
+  const _altMarkaYonetici = _altMarka && (["admin", "direktor", "genel_mudur"].includes(_role) || _email === "info@ahyelektrik.com");
+  const isRequester = !_altMarkaYonetici && !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
+  const canPay = isMuhasebe || isPM || isDirektor || isNurcan || _altMarkaYonetici;
+  const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const [avanslar, setAvanslar] = useState([]);
+  const [formlar, setFormlar] = useState([]);
+  const [bakiyeler, setBakiyeler] = useState([]);
+  const [bakiye, setBakiye] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [firmaSec, setFirmaSec] = useState(null); // {id, path}
+  const [tazele, setTazele] = useState(0);
+  const bugun = new Date().toISOString().slice(0, 10);
+  const buAy = bugun.slice(0, 7);
+  const fmt = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  const fT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "";
+  const gun = (d) => d ? Math.max(0, Math.floor((new Date() - new Date(String(d).slice(0, 10))) / 86400000)) : 0;
+
+  const yukle = async () => {
+    try {
+      const qs = isRequester && _email ? `?email=${encodeURIComponent(_email)}` : "";
+      const [ra, rf] = await Promise.all([
+        fetch(`${API_BASE}/hr/is-avans${qs}`, { headers: _auth }).then(r => r.json()).catch(() => []),
+        fetch(`${API_BASE}/hr/masraf-formlari${qs}`).then(r => r.json()).catch(() => []),
+      ]);
+      let av = Array.isArray(ra) ? ra : [];
+      if (_altMarka && !isRequester) av = av.filter(t => String(t.firma || "").toUpperCase() === _marka);
+      setAvanslar(av);
+      setFormlar(Array.isArray(rf) ? rf : []);
+      if (!isRequester) {
+        const rb = await fetch(`${API_BASE}/hr/is-avans/bakiyeler`, { headers: _auth }).then(r => r.json()).catch(() => ({}));
+        const rows = Array.isArray(rb.rows) ? rb.rows : [];
+        setBakiyeler(_altMarka ? rows.filter(b => String(b.marka || "ERC").toUpperCase() === _marka) : rows);
+      }
+      if (_email) {
+        const rk = await fetch(`${API_BASE}/hr/is-avans/bakiye?email=${encodeURIComponent(_email)}`, { headers: _auth }).then(r => r.json()).catch(() => null);
+        if (rk && typeof rk.bakiye !== "undefined") setBakiye(rk);
+      }
+    } finally { setYukleniyor(false); }
+  };
+  useEffect(() => { yukle(); }, [tazele]);
+
+  // Kuyruk: bana düşenler
+  const avansBana = (t) => isRolloutMudur || isNurcan ? t.durum === "TALEP"
+    : isPM ? (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY")
+    : isDirektor ? t.durum === "PM_ONAY"
+    : isMuhasebe ? t.durum === "DIREKTOR_ONAY" : false;
+  const masrafBana = (f) => isPM ? f.durum === "PM_BEKLE"
+    : isDirektor ? f.durum === "DIREKTOR_BEKLE"
+    : isNurcan ? f.durum === "ROLLOUT_BEKLE"
+    : isMuhOnay ? ["MUHASEBE_BEKLE", "TAMAMLANDI"].includes(f.durum)
+    : isMuhasebe ? f.durum === "TAMAMLANDI" : false;
+  const AV_BEKLEYEN = ["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY", "DIREKTOR_ONAY", "MUHASEBE_ONAY"];
+  const MF_BEKLEYEN = ["ROLLOUT_BEKLE", "MUHASEBE_BEKLE", "PM_BEKLE", "DIREKTOR_BEKLE", "TAMAMLANDI"];
+  const avBekleyen = avanslar.filter(t => AV_BEKLEYEN.includes(t.durum));
+  const mfBekleyen = formlar.filter(f => MF_BEKLEYEN.includes(f.durum));
+  const avBana = avBekleyen.filter(avansBana);
+  const mfBana = mfBekleyen.filter(masrafBana);
+  useEffect(() => { onPendingAvans && onPendingAvans(avBana.length); onPendingMasraf && onPendingMasraf(mfBana.length); }, [avanslar, formlar]);
+  const buAyOdenen = avanslar.filter(t => t.durum === "TAMAMLANDI" && String(t.odeme_tarihi || t.muhasebe_onay_tarihi || "").slice(0, 7) === buAy);
+  const alacakli = bakiyeler.filter(b => Number(b.bakiye) < 0);
+  const acikAvans = bakiyeler.filter(b => Number(b.bakiye) > 0);
+  const alacakToplam = alacakli.reduce((sm, b) => sm + Math.abs(Number(b.bakiye)), 0);
+  const acikToplam = acikAvans.reduce((sm, b) => sm + Number(b.bakiye), 0);
+  const kuyrukSayi = avBana.length + mfBana.length;
+
+  // Adım göstergesi
+  const AV_ADIM = { TALEP: 0, ROLLOUT_MUDUR_ONAY: 1, PM_ONAY: 2, DIREKTOR_ONAY: 3, MUHASEBE_ONAY: 3, TAMAMLANDI: 4, REDDEDILDI: -1 };
+  const MF_ADIM = { TASLAK: 0, ROLLOUT_BEKLE: 0, MUHASEBE_BEKLE: 1, PM_BEKLE: 2, DIREKTOR_BEKLE: 3, TAMAMLANDI: 4, ARSIVLENDI: 5, REDDEDILDI: -1 };
+  const Adimlar = ({ idx, etiketler }) => (
+    <div style={{ display:"flex", alignItems:"center" }}>
+      {etiketler.map((e, i) => (
+        <React.Fragment key={e}>
+          {i > 0 && <span style={{ width:"10px", height:"2px", background:"#cfd7e2", margin:"0 2px" }} />}
+          <span title={e.title} style={{ width:"20px", height:"20px", borderRadius:"50%", display:"grid", placeItems:"center", fontSize:"9px", fontWeight:800,
+            border: `2px solid ${i < idx ? "#15803d" : i === idx ? "#f59e0b" : "#cfd7e2"}`,
+            background: i < idx ? "#15803d" : i === idx ? "#fef3c7" : "#fff", color: i < idx ? "#fff" : i === idx ? "#b45309" : "#6b7a90" }}>{e.k}</span>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+  const AV_ET = [{ k:"R", title:"Rollout müdürü" }, { k:"PM", title:"Proje müdürü" }, { k:"PD", title:"Direktör" }, { k:"M", title:"Muhasebe" }];
+  const MF_ET = [{ k:"R", title:"Rollout" }, { k:"M", title:"Muhasebe kontrolü" }, { k:"PM", title:"Proje müdürü" }, { k:"PD", title:"Direktör" }, { k:"A", title:"Arşiv (ödeme)" }];
+
+  // İşlemler
+  const avansOnayla = async (t) => {
+    const path = (isPM ? "pm-onayla" : isDirektor ? "direktor-onayla" : "onayla");
+    const firmaGerek = isPM || (isDirektor && !t.firma);
+    if (firmaGerek && !_altMarka) { setFirmaSec({ id: t.id, path }); return; }
+    await avansGonder(t.id, path, _altMarka ? _marka : undefined);
+  };
+  const avansGonder = async (id, path, firma) => {
+    const r = await fetch(`${API_BASE}/hr/is-avans/${id}/${path}`, { method:"PUT", headers:{ "Content-Type":"application/json", ..._auth }, body: JSON.stringify(firma ? { firma } : {}) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Onay yapılamadı"); }
+    setFirmaSec(null); setTazele(x => x + 1);
+  };
+  const avansReddet = async (t) => {
+    const sebep = window.prompt(`${t.personel_ad || t.talep_eden_ad} · ₺${fmt(t.tutar)} — red açıklaması:`);
+    if (!sebep || !sebep.trim()) return;
+    const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/reddet`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
+    if (!r.ok) alert("Reddedilemedi");
+    setTazele(x => x + 1);
+  };
+  const masrafOnayla = async (f) => {
+    const map = { ROLLOUT_BEKLE: ["rollout-onayla", "rollout_not"], MUHASEBE_BEKLE: ["muhasebe-onayla", "muhasebe_not"], PM_BEKLE: ["pm-onayla", "pm_not"], DIREKTOR_BEKLE: ["direktor-onayla", "direktor_not"] };
+    if (f.durum === "TAMAMLANDI") {
+      if (!window.confirm(`Form #${f.form_no || f.id} (${f.talep_eden_ad}, ₺${fmt(f.toplam_tutar)}) ödendi ve arşivlensin mi? Tutar personelin avans bakiyesinden düşer.`)) return;
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`, { method:"PUT" });
+      if (!r.ok) alert("Arşivlenemedi");
+      setTazele(x => x + 1); return;
+    }
+    const m = map[f.durum]; if (!m) return;
+    const not = window.prompt(`Form #${f.form_no || f.id} onayı — not (isteğe bağlı):`, "");
+    if (not === null) return;
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/${m[0]}`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ [m[1]]: not }) });
+    if (!r.ok) alert("Onaylanamadı");
+    setTazele(x => x + 1);
+  };
+  const masrafReddet = async (f) => {
+    if (!(isPM || isDirektor)) { alert("Red yetkisi PM ve Direktör'de; 'Masraf Formları' sekmesinden geri gönderebilirsiniz."); return; }
+    const sebep = window.prompt(`Form #${f.form_no || f.id} — red açıklaması:`);
+    if (!sebep || !sebep.trim()) return;
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/${isPM ? "pm-reddet" : "direktor-reddet"}`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
+    if (!r.ok) alert("Reddedilemedi");
+    setTazele(x => x + 1);
+  };
+
+  // Stil
+  const navy = "#1e3a5f";
+  const btn = { display:"inline-flex", alignItems:"center", gap:"8px", borderRadius:"10px", padding:"9px 15px", fontWeight:700, fontSize:"13px", border:"1px solid transparent", cursor:"pointer", whiteSpace:"nowrap" };
+  const ghost = { ...btn, background:"rgba(255,255,255,.1)", color:"#fff", border:"1px solid rgba(255,255,255,.28)" };
+  const kpi = { background:"#fff", border:"1px solid #e3e8ef", borderRadius:"14px", padding:"13px 16px", boxShadow:"0 1px 2px rgba(15,28,46,.05)" };
+  const kpiL = { fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700 };
+  const kpiD = { fontSize:"12px", color:"#6b7a90", marginTop:"2px" };
+  const panel = { background:"#fff", border:"1px solid #e3e8ef", borderRadius:"16px", boxShadow:"0 8px 24px -12px rgba(15,28,46,.15)", overflow:"hidden" };
+  const panelH = { display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", padding:"12px 16px", borderBottom:"1px solid #e3e8ef", flexWrap:"wrap" };
+  const th = { fontSize:"11px", textTransform:"uppercase", letterSpacing:".06em", color:"#6b7a90", fontWeight:700, padding:"9px 13px", borderBottom:"1px solid #e3e8ef", background:"#f8fafc", whiteSpace:"nowrap", textAlign:"left" };
+  const td = { padding:"10px 13px", borderBottom:"1px solid #eef1f5", verticalAlign:"middle", fontSize:"13px", color:"#0f1c2e" };
+  const pill = (bg, c) => ({ display:"inline-flex", alignItems:"center", borderRadius:"999px", padding:"3px 9px", fontSize:"11.5px", fontWeight:700, whiteSpace:"nowrap", background:bg, color:c });
+  const initials = (ad) => String(ad || "?").split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join("").toUpperCase();
+  const TABS = [
+    ["genel", "Genel Bakış", kuyrukSayi],
+    ["avans", "İş Avansları", avBana.length],
+    ["masraf", "Masraf Formları", mfBana.length],
+    ...(!isRequester ? [["odemeler", "Ödemeler & Bakiyeler", alacakli.length]] : []),
+    ["arsiv", "Arşiv", 0],
+  ];
+  const kuyruk = [
+    ...avBana.map(t => ({ tip:"AVANS", id:t.id, ad: t.personel_ad || t.talep_eden_ad, alt: [t.bolge, t.proje].filter(Boolean).join(" · "), ne: [t.gider_turu, t.plaka, t.aciklama].filter(Boolean).join(" · "), tutar: t.tutar, adim: AV_ADIM[t.durum] ?? 0, et: AV_ET, tarih: t.tarih, obj: t })),
+    ...mfBana.map(f => ({ tip:"MASRAF", id:f.id, ad: f.talep_eden_ad, alt: `Form #${f.form_no || f.id} · ${f.donem || ""}`, ne: `${f.kalem_sayisi || 0} kalem`, tutar: f.toplam_tutar, adim: MF_ADIM[f.durum] ?? 0, et: MF_ET, tarih: f.created_at, obj: f, arsiv: f.durum === "TAMAMLANDI" })),
+  ].sort((a, b) => gun(b.tarih) - gun(a.tarih));
+  const digerleri = [
+    ...avBekleyen.filter(t => !avansBana(t)).map(t => ({ tip:"AVANS", ad: t.personel_ad || t.talep_eden_ad, ne: t.gider_turu, tutar: t.tutar, durum: t.durum, adim: AV_ADIM[t.durum] ?? 0, et: AV_ET, tarih: t.tarih })),
+    ...mfBekleyen.filter(f => !masrafBana(f)).map(f => ({ tip:"MASRAF", ad: f.talep_eden_ad, ne: `Form #${f.form_no || f.id}`, tutar: f.toplam_tutar, durum: f.durum, adim: MF_ADIM[f.durum] ?? 0, et: MF_ET, tarih: f.created_at })),
+  ].sort((a, b) => gun(b.tarih) - gun(a.tarih));
+  const DURUM_AD = { TALEP:"Rollout onayı", ROLLOUT_MUDUR_ONAY:"PM onayı", PM_ONAY:"Direktör onayı", DIREKTOR_ONAY:"Muhasebe", MUHASEBE_ONAY:"Muhasebe", ROLLOUT_BEKLE:"Rollout onayı", MUHASEBE_BEKLE:"Muhasebe kontrolü", PM_BEKLE:"PM onayı", DIREKTOR_BEKLE:"Direktör onayı", TAMAMLANDI:"Ödeme / arşiv" };
+
+  return (
+    <div style={{ maxWidth:"1380px", margin:"0 auto", padding:"22px 18px 60px", fontFamily:"-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" }}>
+      <style>{`.ph-embed table th{background:#f8fafc!important;font-size:11px!important;text-transform:uppercase!important;letter-spacing:.06em!important;color:#6b7a90!important;font-weight:700!important}
+        .ph-embed table td{font-size:13px!important}
+        .ph-embed h3{letter-spacing:-.01em}`}</style>
+      {/* Başlık şeridi */}
+      <div style={{ background:navy, color:"#fff", borderRadius:"16px", padding:"18px 24px", boxShadow:"0 8px 24px -12px rgba(15,28,46,.35)" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"16px", flexWrap:"wrap" }}>
+          <div>
+            <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, letterSpacing:"-.01em" }}>Personel Harcamaları</h2>
+            <div style={{ opacity:.75, fontSize:"13px", marginTop:"3px" }}>İş avansı · masraf formu · ödemeler ve bakiyeler · {new Date().toLocaleDateString("tr-TR", { day:"numeric", month:"long", year:"numeric" })} · {currentUser?.name || _email}</div>
+          </div>
+          <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
+            {canPay && <button onClick={() => setTab("odemeler")} style={{ ...btn, background:"#f59e0b", color:"#1a1200" }}>💸 Ödeme Gir</button>}
+            <button onClick={() => setTab("avans")} style={{ ...btn, background:"#0f766e", color:"#fff" }}>＋ Yeni Avans Talebi</button>
+            <button onClick={() => setTab("masraf")} style={ghost}>🧾 Yeni Masraf Formu</button>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:"4px", marginTop:"14px", borderTop:"1px solid rgba(255,255,255,.15)", paddingTop:"12px", flexWrap:"wrap" }}>
+          {TABS.map(([k, l, n]) => (
+            <button key={k} onClick={() => setTab(k)} style={{ padding:"8px 14px", borderRadius:"9px", fontSize:"13px", fontWeight:700, color: tab === k ? "#fff" : "rgba(255,255,255,.7)", background: tab === k ? "rgba(255,255,255,.14)" : "transparent", border:"none", cursor:"pointer", display:"inline-flex", gap:"8px", alignItems:"center" }}>
+              {l}{n > 0 && <span style={{ background:"#f59e0b", color:"#1a1200", borderRadius:"999px", padding:"1px 7px", fontSize:"11px", fontWeight:800 }}>{n}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === "genel" && (
+        <>
+          {/* KPI şeridi */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))", gap:"12px", marginTop:"14px" }}>
+            <div style={kpi}><div style={kpiL}>{isRequester ? "Bekleyen taleplerim" : "Onayınızı bekleyen"}</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color: kuyrukSayi ? "#b45309" : "#15803d" }}>{isRequester ? avBekleyen.length + mfBekleyen.length : kuyrukSayi} kayıt</div><div style={kpiD}>{avBana.length} avans · {mfBana.length} masraf formu{kuyruk.length ? ` · en eskisi ${gun(kuyruk[0].tarih)} gün` : ""}</div></div>
+            <div style={kpi}><div style={kpiL}>Masraf formu kuyruğu</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color:"#6d28d9" }}>{mfBekleyen.length} form</div><div style={kpiD}>{["ROLLOUT_BEKLE", "MUHASEBE_BEKLE", "PM_BEKLE", "DIREKTOR_BEKLE", "TAMAMLANDI"].map(d => `${formlar.filter(f => f.durum === d).length} ${DURUM_AD[d].toLowerCase()}`).filter(x => !x.startsWith("0 ")).join(" · ") || "boş"}</div></div>
+            <div style={kpi}><div style={kpiL}>Bu ay ödenen avans</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color:"#15803d" }}>₺{fmt(buAyOdenen.reduce((sm, t) => sm + Number(t.tutar || 0), 0))}</div><div style={kpiD}>{buAyOdenen.length} avans · {buAy.split("-").reverse().join(".")}</div></div>
+            {!isRequester && <div style={kpi}><div style={kpiL}>Personel alacağı</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color: alacakToplam ? "#b91c1c" : "#15803d" }}>₺{fmt(alacakToplam)}</div><div style={kpiD}>{alacakli.length} personel alacaklı · "Öde" ile kapanır</div></div>}
+            {!isRequester && <div style={kpi}><div style={kpiL}>Açık avans (personelde)</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color:"#0f1c2e" }}>₺{fmt(acikToplam)}</div><div style={kpiD}>{acikAvans.length} personel · masraf formu bekleniyor</div></div>}
+            {isRequester && bakiye && <div style={kpi}><div style={kpiL}>Avans bakiyem</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color: Number(bakiye.bakiye) < 0 ? "#b91c1c" : "#15803d" }}>{Number(bakiye.bakiye) < 0 ? "−" : ""}₺{Math.abs(Number(bakiye.bakiye)).toLocaleString("tr-TR", { minimumFractionDigits:2 })}</div><div style={kpiD}>{Number(bakiye.bakiye) < 0 ? "şirket size borçlu" : Number(bakiye.bakiye) > 0 ? "masraf formuyla kapatın" : "kapalı"}</div></div>}
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns: isRequester ? "1fr" : "2fr 1fr", gap:"14px", marginTop:"14px" }}>
+            {/* Onay kuyruğu */}
+            <div style={panel}>
+              <div style={panelH}><h3 style={{ margin:0, fontSize:"14.5px", fontWeight:800 }}>{isRequester ? "Bekleyen taleplerim" : "Onay Kuyruğu"}</h3><span style={{ fontSize:"12px", color:"#6b7a90" }}>{isRequester ? "Talebiniz hangi adımda" : "Sırada ne var, kim bekliyor, kaç gündür"}</span></div>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"720px" }}>
+                  <thead><tr>{["Talep", "Personel", "Ne", "Tutar", "Akış", "Bekleme", ""].map((h, i) => <th key={h + i} style={{ ...th, textAlign: i === 3 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {yukleniyor && <tr><td colSpan={7} style={{ ...td, textAlign:"center", color:"#9ca3af", padding:"30px" }}>Yükleniyor…</td></tr>}
+                    {!yukleniyor && kuyruk.length === 0 && !isRequester && <tr><td colSpan={7} style={{ ...td, textAlign:"center", color:"#15803d", padding:"26px", fontWeight:700 }}>✓ Onayınızı bekleyen kayıt yok</td></tr>}
+                    {(isRequester ? digerleri : kuyruk).map(r => (
+                      <tr key={r.tip + r.id + (r.durum || "")}>
+                        <td style={td}>{r.tip === "AVANS" ? <span style={pill("#fef3c7", "#b45309")}>İş avansı</span> : <span style={pill("#ede9fe", "#6d28d9")}>Masraf formu</span>}</td>
+                        <td style={td}><div style={{ display:"flex", alignItems:"center", gap:"8px" }}><span style={{ width:"28px", height:"28px", borderRadius:"50%", background:navy, color:"#fff", fontWeight:800, fontSize:"11px", display:"grid", placeItems:"center", flex:"none" }}>{initials(r.ad)}</span><div><div style={{ fontWeight:700 }}>{r.ad}</div><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{r.alt || DURUM_AD[r.durum] || ""}</div></div></div></td>
+                        <td style={{ ...td, maxWidth:"260px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={r.ne}>{r.ne || "—"}</td>
+                        <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums" }}>₺{fmt(r.tutar)}</td>
+                        <td style={td}><Adimlar idx={r.adim} etiketler={r.et} /></td>
+                        <td style={td}>{(() => { const g = gun(r.tarih); return <span style={pill(g >= 5 ? "#fee2e2" : g >= 3 ? "#fef3c7" : "#f3f5f8", g >= 5 ? "#b91c1c" : g >= 3 ? "#b45309" : "#6b7a90")}>{g === 0 ? "bugün" : `${g} gün`}</span>; })()}</td>
+                        <td style={{ ...td, whiteSpace:"nowrap", textAlign:"right" }}>
+                          {!isRequester && r.tip === "AVANS" && <><button onClick={() => avansOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>✓ Onayla</button> <button onClick={() => avansReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}
+                          {!isRequester && r.tip === "MASRAF" && <><button onClick={() => setTab("masraf")} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>İncele</button> <button onClick={() => masrafOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.arsiv ? "💸 Ödendi · Arşivle" : "✓ Onayla"}</button>{(isPM || isDirektor) && !r.arsiv && <> <button onClick={() => masrafReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
+                          {isRequester && <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[r.durum] || r.durum}</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {!isRequester && digerleri.length > 0 && (
+                <div style={{ borderTop:"1px solid #e3e8ef", padding:"10px 16px", background:"#f8fafc" }}>
+                  <div style={{ fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700, marginBottom:"6px" }}>Başkasında bekleyen ({digerleri.length})</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
+                    {digerleri.slice(0, 12).map((r, i) => <span key={i} title={`${r.ne || ""} · ${gun(r.tarih)} gün`} style={pill("#fff", "#3c4a5d")}>{r.tip === "AVANS" ? "💳" : "🧾"} {String(r.ad || "").split(" ")[0]} · ₺{fmt(r.tutar)} · <span style={{ color:"#6b7a90", fontWeight:600 }}>{DURUM_AD[r.durum] || r.durum}</span></span>)}
+                    {digerleri.length > 12 && <span style={pill("#fff", "#6b7a90")}>+{digerleri.length - 12}</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Bakiyeler */}
+            {!isRequester && (
+              <div style={panel}>
+                <div style={panelH}><h3 style={{ margin:0, fontSize:"14.5px", fontWeight:800 }}>Personel Bakiyeleri</h3><span style={{ fontSize:"12px", color:"#6b7a90" }}>avans + ödeme − masraf − iade</span></div>
+                <div style={{ padding:"6px 16px" }}>
+                  {bakiyeler.slice().sort((a, b) => Math.abs(Number(b.bakiye)) - Math.abs(Number(a.bakiye))).slice(0, 8).map(b => {
+                    const bk = Number(b.bakiye || 0);
+                    return (
+                      <div key={b.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px dashed #e3e8ef" }}>
+                        <div><b style={{ fontSize:"13px" }}>{b.ad_soyad}</b><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{fmt(b.avans)} avans{Number(b.odeme) > 0 ? ` · ${fmt(b.odeme)} ödeme` : ""} · {fmt(b.masraf)} masraf</div></div>
+                        <div style={{ textAlign:"right" }}>
+                          <b style={{ color: bk < 0 ? "#b91c1c" : bk > 0 ? "#15803d" : "#6b7a90", fontVariantNumeric:"tabular-nums" }}>{bk < 0 ? "−" : bk > 0 ? "+" : ""}₺{fmt(Math.abs(bk))}</b>
+                          {canPay && bk < 0 && <div><button onClick={() => setTab("odemeler")} style={{ ...btn, padding:"3px 8px", fontSize:"11px", background:"#fff", color:"#0f766e", border:"1px solid #cfd7e2", marginTop:"3px" }}>💸 Öde</button></div>}
+                          {bk > 0 && <div style={{ fontSize:"11px", color:"#6b7a90" }}>avans açık</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {bakiyeler.length === 0 && <div style={{ padding:"18px 0", color:"#9ca3af", fontSize:"13px" }}>Bakiye kaydı yok</div>}
+                  <div style={{ padding:"10px 0 6px", fontSize:"12px", color:"#6b7a90" }}>Kırmızı = şirket personele borçlu · Yeşil = personelde açık avans, masraf formu bekleniyor · <span onClick={() => setTab("odemeler")} style={{ color:"#0f766e", fontWeight:700, cursor:"pointer" }}>tümü →</span></div>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === "avans" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={onPendingAvans} embedded mode="liste" /></div>}
+      {tab === "masraf" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={onPendingMasraf} embedded /></div>}
+      {tab === "odemeler" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={() => {}} embedded mode="odemeler" /></div>}
+      {tab === "arsiv" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={() => {}} embedded initialDurum="ARSIVLENDI" /></div>}
+
+      {/* Firma seçimi (PM / Direktör onayında nakit akışı yönlendirmesi) */}
+      {firmaSec && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(10,20,35,.55)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:700, padding:"16px" }} onClick={() => setFirmaSec(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"420px", padding:"22px" }}>
+            <h3 style={{ margin:"0 0 6px", fontSize:"16px", fontWeight:800 }}>Bu avans hangi firmanın nakit akışına düşecek?</h3>
+            <div style={{ fontSize:"12.5px", color:"#6b7a90", marginBottom:"14px" }}>Seçim ödemeyi ve gideri o firmaya yazar.</div>
+            <div style={{ display:"flex", gap:"10px" }}>
+              <button onClick={() => avansGonder(firmaSec.id, firmaSec.path, "ERC")} style={{ ...btn, flex:1, justifyContent:"center", background:navy, color:"#fff" }}>ŞİMŞEK</button>
+              <button onClick={() => avansGonder(firmaSec.id, firmaSec.path, "AHY")} style={{ ...btn, flex:1, justifyContent:"center", background:"#f59e0b", color:"#1a1200" }}>AHY</button>
+            </div>
+            <button onClick={() => setFirmaSec(null)} style={{ ...btn, width:"100%", justifyContent:"center", marginTop:"10px", background:"#f3f5f8", color:"#3c4a5d" }}>Vazgeç</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = "" }) {
   const [list, setList] = useState([]);
   const [personelList, setPersonelList] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -20844,7 +21149,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   return (
     <div style={{ maxWidth: "1400px", margin: "24px auto" }}>
       {NotTooltipEl}
-      {myPendingCount > 0 && (
+      {!embedded && myPendingCount > 0 && (
         <div style={{ background:"#fffbeb", border:"2px solid #f59e0b", borderRadius:"12px", padding:"12px 18px", marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
           <span style={{ fontSize:"20px" }}>⏳</span>
           <span style={{ fontWeight:700, color:"#92400e", fontSize:"14px" }}>
@@ -20856,7 +21161,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
       {/* Bakiye kutusu — kişisel avans bakiyesi. Alt marka YÖNETİCİSİ izleme
           amaçlı girdiği için gösterilmez; markalı PERSONEL (requester) kendi
           bakiyesini her zaman görür (17.08.2026). */}
-      {avansBakiye !== null && (isRequester || !_altMarka) && (
+      {avansBakiye !== null && (isRequester || !_altMarka) && mode !== "liste" && (
         <div style={{ display:"flex", gap:"10px", marginBottom:"16px", flexWrap:"wrap" }}>
           <div style={{ flex:1, minWidth:"140px", background: avansBakiye.bakiye >= 0 ? "#f0fdf4" : "#fef2f2", border:`2px solid ${avansBakiye.bakiye >= 0 ? "#16a34a" : "#dc2626"}`, borderRadius:"14px", padding:"14px 20px" }}>
             <div style={{ fontSize:"11px", fontWeight:700, color: avansBakiye.bakiye >= 0 ? "#15803d" : "#b91c1c", letterSpacing:"0.5px", marginBottom:"4px" }}>İŞ AVANSI BAKİYE</div>
@@ -20872,7 +21177,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
 
       {/* Personel bazlı avans bakiyeleri (yönetici): arşivlenen masraf formu
           avanstan düşer; avans yoksa bakiye eksiye iner (şirket personele borçlu) */}
-      {!isRequester && bakiyeler.length > 0 && (
+      {!isRequester && bakiyeler.length > 0 && mode !== "liste" && (
         <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:"14px", marginBottom:"16px", overflow:"hidden" }}>
           <div
             onClick={() => setBakiyelerAcik(v => !v)}
@@ -20945,7 +21250,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
       )}
 
       {/* Personel ödemeleri: masraf alacağı ödemesi / avans iadesi (10.09.2026) */}
-      {!isRequester && (
+      {!isRequester && mode !== "liste" && (
         <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:"14px", marginBottom:"16px", overflow:"hidden" }}>
           <div onClick={() => setOdemelerAcik(v => !v)}
             style={{ padding:"13px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", background:"#f0fdfa", borderBottom: odemelerAcik ? "1px solid #e5e7eb" : "none" }}>
@@ -21049,8 +21354,11 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
         </div>
       )}
 
+      {mode !== "odemeler" && (<>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-        <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı</h2>
+        {embedded
+          ? <div style={{ fontSize:"13px", color:"#6b7a90" }}>Talep ve onay zinciri: Rollout müdürü → PM → Direktör → Muhasebe · ödenen avans personelin üzerine yazılır, masraf formuyla kapanır</div>
+          : <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı</h2>}
         <div style={{ display: "flex", gap: "8px" }}>
           {!isMobile && (() => {
             const p = new URLSearchParams();
@@ -21449,6 +21757,8 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
         </div>
       </div>
       )}
+
+      </>)}
 
       {/* New/Edit Modal */}
       {showModal && (
@@ -31897,8 +32207,7 @@ function App() {
             )}
 
             {page === "hr" && <HrDashboard onBack={()=>setPage("finance")} currentUser={user} initialTab={hrTab} onTabChange={setHrTab} />}
-            {page === "is_avans" && <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />}
-            {page === "masraf" && <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />}
+            {(page === "is_avans" || page === "masraf") && <PersonelHarcamalariPanel currentUser={user} initialTab={page === "masraf" ? "masraf" : "genel"} onPendingAvans={setPendingAvansCount} onPendingMasraf={setPendingMasrafCount} />}
             {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} onGoOfis={isAdmin ? () => setPage("ofis") : undefined} />}
             {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
