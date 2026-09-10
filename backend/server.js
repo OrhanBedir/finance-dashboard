@@ -17688,6 +17688,72 @@ pool.query(`CREATE TABLE IF NOT EXISTS personel_odeme (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`).then(() => pool.query(`ALTER TABLE personel_odeme ENABLE ROW LEVEL SECURITY`).catch(() => {})).catch(() => {});
 
+/* Kişisel hesap ekstresi (10.09.2026): bir personelin avans/masraf/ödeme
+   hareketleri kronolojik + koşan bakiye. "Üzerimde ne kadar açık avans var,
+   hangi masraf formu bunu kapattı" sorusunun tek cevabı. Bekleyen kayıtlar
+   (henüz ödenmemiş avans, henüz arşivlenmemiş form) ayrı döner: bakiyeye
+   girmez ama "yolda" olarak gösterilir. */
+app.get("/hr/is-avans/hesap", authMiddleware, async (req, res) => {
+  try {
+    const email = (avansTamGorus(req) ? (req.query.email || req.user.email) : req.user.email || "").toLowerCase().trim();
+    if (!email) return res.status(400).json({ ok: false, error: "email gerekli" });
+    const [av, mf, po, avBek, mfBek] = await Promise.all([
+      pool.query(`SELECT t.id, COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi, t.direktor_onay_tarihi, t.tarih)::date AS tarih,
+          t.tutar, COALESCE(t.gider_turu,'') AS gider_turu, COALESCE(t.aciklama,'') AS aciklama,
+          COALESCE(t.bolge,'') AS bolge, COALESCE(t.proje,'') AS proje, COALESCE(t.firma,'') AS firma, t.talep_eden_ad
+        FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
+        WHERE t.durum='TAMAMLANDI' AND (LOWER(COALESCE(p.email,''))=$1 OR (t.personel_id IS NULL AND LOWER(t.talep_eden_email)=$1))
+        ORDER BY 2, t.id`, [email]),
+      pool.query(`SELECT mf.id, mf.arsiv_tarihi::date AS tarih, mf.form_no, COALESCE(mf.donem,'') AS donem,
+          COALESCE(SUM(mk.tutar),0) AS tutar, COUNT(mk.id)::int AS kalem
+        FROM masraf_form mf LEFT JOIN masraf_kalem mk ON mk.form_id=mf.id
+        WHERE LOWER(mf.talep_eden_email)=$1 AND mf.durum='ARSIVLENDI'
+        GROUP BY mf.id ORDER BY 2, mf.id`, [email]),
+      pool.query(`SELECT o.id, o.tarih::date AS tarih, o.tip, o.tutar, COALESCE(o.aciklama,'') AS aciklama,
+          COALESCE(o.firma,'') AS firma, COALESCE(o.yontem,'') AS yontem
+        FROM personel_odeme o LEFT JOIN personel p ON p.id=o.personel_id
+        WHERE LOWER(COALESCE(o.email,''))=$1 OR LOWER(COALESCE(p.email,''))=$1
+        ORDER BY 2, o.id`, [email]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT t.id, t.tarih::date AS tarih, t.tutar, t.durum, COALESCE(t.gider_turu,'') AS gider_turu, COALESCE(t.aciklama,'') AS aciklama
+        FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
+        WHERE t.durum NOT IN ('TAMAMLANDI','REDDEDILDI')
+          AND (LOWER(COALESCE(p.email,''))=$1 OR (t.personel_id IS NULL AND LOWER(t.talep_eden_email)=$1))
+        ORDER BY 2`, [email]),
+      pool.query(`SELECT mf.id, mf.created_at::date AS tarih, mf.form_no, COALESCE(mf.donem,'') AS donem, mf.durum,
+          COALESCE(SUM(mk.tutar),0) AS tutar, COUNT(mk.id)::int AS kalem
+        FROM masraf_form mf LEFT JOIN masraf_kalem mk ON mk.form_id=mf.id
+        WHERE LOWER(mf.talep_eden_email)=$1 AND mf.durum NOT IN ('ARSIVLENDI','REDDEDILDI')
+        GROUP BY mf.id ORDER BY 2`, [email]),
+    ]);
+    const hareketler = [
+      ...av.rows.map(r => ({ tarih: r.tarih, tip: "AVANS", yon: 1, tutar: Number(r.tutar),
+        baslik: `İş avansı alındı${r.gider_turu ? ` · ${r.gider_turu}` : ""}`,
+        detay: [r.aciklama, r.bolge, r.proje].filter(Boolean).join(" · "), ref: `#${r.id}`, firma: r.firma })),
+      ...mf.rows.map(r => ({ tarih: r.tarih, tip: "MASRAF", yon: -1, tutar: Number(r.tutar),
+        baslik: `Masraf formu arşivlendi · Form #${r.form_no || r.id}`,
+        detay: `${r.donem} · ${r.kalem} kalem`, ref: `#${r.form_no || r.id}` })),
+      ...po.rows.map(r => ({ tarih: r.tarih, tip: r.tip === "AVANS_IADE" ? "IADE" : "ODEME", yon: r.tip === "AVANS_IADE" ? -1 : 1,
+        tutar: Number(r.tutar),
+        baslik: r.tip === "AVANS_IADE" ? "Avans iadesi (kasaya)" : "Masraf ödemesi (şirket → personel)",
+        detay: [r.aciklama, r.yontem === "NAKIT" ? "nakit" : "havale"].filter(Boolean).join(" · "), ref: `Ö${r.id}`, firma: r.firma })),
+    ].sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)) || (a.tip === "AVANS" ? -1 : 1));
+    let bakiye = 0;
+    hareketler.forEach(h => { bakiye += h.yon * h.tutar; h.bakiye = Math.round(bakiye * 100) / 100; });
+    res.json({ ok: true, email, hareketler,
+      bekleyen: {
+        avanslar: avBek.rows.map(r => ({ ...r, tutar: Number(r.tutar) })),
+        formlar: mfBek.rows.map(r => ({ ...r, tutar: Number(r.tutar) })),
+      },
+      ozet: {
+        avans: av.rows.reduce((t, r) => t + Number(r.tutar), 0),
+        masraf: mf.rows.reduce((t, r) => t + Number(r.tutar), 0),
+        odeme: po.rows.filter(r => r.tip !== "AVANS_IADE").reduce((t, r) => t + Number(r.tutar), 0),
+        iade: po.rows.filter(r => r.tip === "AVANS_IADE").reduce((t, r) => t + Number(r.tutar), 0),
+        bakiye: Math.round(bakiye * 100) / 100,
+      } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.get("/hr/personel-odeme", authMiddleware, async (req, res) => {
   try {
     const tam = avansTamGorus(req);

@@ -20506,6 +20506,8 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
   const [bakiye, setBakiye] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [firmaSec, setFirmaSec] = useState(null); // {id, path}
+  const [hesap, setHesap] = useState(null);        // kişisel ekstre (/hr/is-avans/hesap)
+  const [hesapKisi, setHesapKisi] = useState("");  // yönetici başka personelin ekstresine bakabilir
   const [tazele, setTazele] = useState(0);
   const bugun = new Date().toISOString().slice(0, 10);
   const buAy = bugun.slice(0, 7);
@@ -20536,6 +20538,16 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
     } finally { setYukleniyor(false); }
   };
   useEffect(() => { yukle(); }, [tazele]);
+  // Hesabım sekmesi: kişisel ekstre
+  useEffect(() => {
+    if (tab !== "hesabim") return;
+    const q = hesapKisi || _email;
+    if (!q) return;
+    setHesap(null);
+    fetch(`${API_BASE}/hr/is-avans/hesap?email=${encodeURIComponent(q)}`, { headers: _auth })
+      .then(r => r.json()).then(d => setHesap(d && d.ok ? d : { ok: false, hareketler: [], ozet: {}, bekleyen: { avanslar: [], formlar: [] } }))
+      .catch(() => setHesap({ ok: false, hareketler: [], ozet: {}, bekleyen: { avanslar: [], formlar: [] } }));
+  }, [tab, hesapKisi, tazele]);
 
   // Kuyruk: bana düşenler
   const avansBana = (t) => isRolloutMudur || isNurcan ? t.durum === "TALEP"
@@ -20637,6 +20649,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
   const initials = (ad) => String(ad || "?").split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join("").toUpperCase();
   const TABS = [
     ["genel", "Genel Bakış", kuyrukSayi],
+    ["hesabim", "Hesabım", 0],
     ["avans", "İş Avansları", avBana.length],
     ["masraf", "Masraf Formları", mfBana.length],
     ...(!isRequester ? [["odemeler", "Ödemeler & Bakiyeler", alacakli.length]] : []),
@@ -20756,6 +20769,109 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
         </>
       )}
 
+      {tab === "hesabim" && (() => {
+        const oz = hesap?.ozet || {};
+        const bk = Number(oz.bakiye || 0);
+        const bek = hesap?.bekleyen || { avanslar: [], formlar: [] };
+        const bekAvans = (bek.avanslar || []).reduce((t, r) => t + Number(r.tutar || 0), 0);
+        const bekForm = (bek.formlar || []).reduce((t, r) => t + Number(r.tutar || 0), 0);
+        const kisiAd = hesapKisi ? (bakiyeler.find(b => String(b.email || "").toLowerCase() === hesapKisi) || {}).ad_soyad || hesapKisi : (currentUser?.name || _email);
+        const TIP_ST = { AVANS: ["#fef3c7", "#b45309", "Avans alındı"], MASRAF: ["#ede9fe", "#6d28d9", "Masraf formu"], ODEME: ["#ccfbf1", "#0f766e", "Ödeme alındı"], IADE: ["#f3f5f8", "#3c4a5d", "Avans iadesi"] };
+        return (
+          <div style={{ marginTop:"14px" }}>
+            {/* Bakiye özeti — hangi rakam ne demek, açıkça */}
+            <div style={{ ...panel, padding:"18px 22px", background: bk < 0 ? "#fff7f7" : bk > 0 ? "#f7fdf9" : "#fff", borderColor: bk < 0 ? "#fecaca" : bk > 0 ? "#bbf7d0" : "#e3e8ef" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"18px", flexWrap:"wrap" }}>
+                <div>
+                  <div style={kpiL}>{hesapKisi ? `${kisiAd} · hesap durumu` : "Hesap durumum"}</div>
+                  <div style={{ fontSize:"32px", fontWeight:800, color: bk < 0 ? "#b91c1c" : bk > 0 ? "#15803d" : "#0f1c2e", marginTop:"2px" }}>
+                    {bk < 0 ? "−" : bk > 0 ? "+" : ""}₺{Math.abs(bk).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+                  </div>
+                  <div style={{ fontSize:"13.5px", fontWeight:700, color: bk < 0 ? "#b91c1c" : bk > 0 ? "#15803d" : "#6b7a90", marginTop:"4px" }}>
+                    {bk < 0 ? "Şirket size borçlu — bu tutar ödenmeyi bekliyor"
+                      : bk > 0 ? "Üzerinizde açık avans var — masraf formu ile kapatmanız bekleniyor"
+                      : "Hesap kapalı — açık avans ya da alacak yok"}
+                  </div>
+                </div>
+                {!isRequester && bakiyeler.length > 0 && (
+                  <select value={hesapKisi} onChange={e => setHesapKisi(e.target.value)} style={{ padding:"8px 12px", borderRadius:"9px", border:"1px solid #cfd7e2", fontSize:"13px", fontWeight:700, background:"#fff" }}>
+                    <option value="">Kendi hesabım</option>
+                    {bakiyeler.filter(b => b.email).map(b => <option key={b.id} value={String(b.email).toLowerCase()}>{b.ad_soyad}</option>)}
+                  </select>
+                )}
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))", gap:"10px", marginTop:"16px" }}>
+                {[["Aldığım avans", oz.avans, "#b45309", "şirketin size ödediği iş avansları"],
+                  ["Ödenen masraf alacağı", oz.odeme, "#0f766e", "avanssız yaptığınız masraflar için yapılan ödemeler"],
+                  ["Sunduğum masraf", oz.masraf, "#6d28d9", "arşivlenen (muhasebece kapatılan) masraf formları"],
+                  ["Avans iadesi", oz.iade, "#3c4a5d", "kasaya geri verdiğiniz avans"]].map(([l, v, c, t]) => (
+                  <div key={l} title={t} style={{ background:"#fff", border:"1px solid #e3e8ef", borderRadius:"12px", padding:"10px 13px" }}>
+                    <div style={{ fontSize:"11px", color:"#6b7a90", fontWeight:700 }}>{l}</div>
+                    <div style={{ fontSize:"18px", fontWeight:800, color:c, marginTop:"2px", fontVariantNumeric:"tabular-nums" }}>₺{fmt(v)}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize:"12px", color:"#6b7a90", marginTop:"10px" }}>
+                Bakiye = aldığım avans + ödenen masraf alacağı − sunduğum masraf − avans iadesi
+              </div>
+            </div>
+
+            {/* Yolda olanlar */}
+            {(bek.avanslar?.length > 0 || bek.formlar?.length > 0) && (
+              <div style={{ ...panel, marginTop:"14px" }}>
+                <div style={panelH}><h3 style={{ margin:0, fontSize:"14.5px", fontWeight:800 }}>Yolda olanlar</h3><span style={{ fontSize:"12px", color:"#6b7a90" }}>Onay sürecinde · bakiyeye henüz işlemedi</span></div>
+                <div style={{ padding:"6px 16px 12px" }}>
+                  {(bek.avanslar || []).map(r => (
+                    <div key={"a" + r.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0", borderBottom:"1px dashed #e3e8ef" }}>
+                      <div><span style={pill("#fef3c7", "#b45309")}>Avans talebi</span> <b style={{ marginLeft:"8px" }}>₺{fmt(r.tutar)}</b><div style={{ fontSize:"12px", color:"#6b7a90", marginTop:"2px" }}>{fT(r.tarih)} · {[r.gider_turu, r.aciklama].filter(Boolean).join(" · ")}</div></div>
+                      <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[r.durum] || r.durum}</span>
+                    </div>
+                  ))}
+                  {(bek.formlar || []).map(r => (
+                    <div key={"f" + r.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0", borderBottom:"1px dashed #e3e8ef" }}>
+                      <div><span style={pill("#ede9fe", "#6d28d9")}>Masraf formu #{r.form_no || r.id}</span> <b style={{ marginLeft:"8px" }}>₺{fmt(r.tutar)}</b><div style={{ fontSize:"12px", color:"#6b7a90", marginTop:"2px" }}>{r.donem} · {r.kalem} kalem · {fT(r.tarih)}</div></div>
+                      <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[r.durum] || r.durum}</span>
+                    </div>
+                  ))}
+                  <div style={{ fontSize:"12px", color:"#6b7a90", paddingTop:"10px" }}>
+                    {bekAvans > 0 && <>Onaylanırsa bakiyeniz <b>₺{fmt(bekAvans)}</b> artar. </>}
+                    {bekForm > 0 && <>Formlar arşivlenince bakiyeniz <b>₺{fmt(bekForm)}</b> azalır.</>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Ekstre */}
+            <div style={{ ...panel, marginTop:"14px" }}>
+              <div style={panelH}><h3 style={{ margin:0, fontSize:"14.5px", fontWeight:800 }}>Hesap Hareketleri</h3><span style={{ fontSize:"12px", color:"#6b7a90" }}>Kronolojik · her satırdan sonraki bakiye sağda</span></div>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"760px" }}>
+                  <thead><tr>{["Tarih", "İşlem", "Açıklama", "Tutar", "Bakiye"].map((h, i) => <th key={h} style={{ ...th, textAlign: i >= 3 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {!hesap && <tr><td colSpan={5} style={{ ...td, textAlign:"center", color:"#9ca3af", padding:"30px" }}>Yükleniyor…</td></tr>}
+                    {hesap && (hesap.hareketler || []).length === 0 && <tr><td colSpan={5} style={{ ...td, textAlign:"center", color:"#9ca3af", padding:"30px" }}>Hareket yok</td></tr>}
+                    {hesap && (hesap.hareketler || []).slice().reverse().map((h, i) => {
+                      const st = TIP_ST[h.tip] || ["#f3f5f8", "#3c4a5d", h.tip];
+                      return (
+                        <tr key={i}>
+                          <td style={{ ...td, whiteSpace:"nowrap" }}>{fT(h.tarih)}</td>
+                          <td style={td}><span style={pill(st[0], st[1])}>{st[2]}</span> <span style={{ fontSize:"11.5px", color:"#9ca3af", marginLeft:"4px" }}>{h.ref}</span></td>
+                          <td style={{ ...td, color:"#3c4a5d" }}>{h.baslik}{h.detay ? <div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{h.detay}</div> : null}</td>
+                          <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums", color: h.yon > 0 ? "#b45309" : "#15803d" }}>{h.yon > 0 ? "+" : "−"}₺{fmt(h.tutar)}</td>
+                          <td style={{ ...td, textAlign:"right", fontVariantNumeric:"tabular-nums", fontWeight:700, color: Number(h.bakiye) < 0 ? "#b91c1c" : "#0f1c2e" }}>{Number(h.bakiye) < 0 ? "−" : ""}₺{fmt(Math.abs(Number(h.bakiye)))}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ padding:"10px 16px", background:"#f8fafc", borderTop:"1px solid #e3e8ef", fontSize:"12px", color:"#6b7a90" }}>
+                Turuncu (+) hesabınıza para girişi: avans ya da masraf ödemesi · Yeşil (−) kapanış: arşivlenen masraf formu ya da avans iadesi
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {tab === "avans" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={onPendingAvans} embedded mode="liste" /></div>}
       {tab === "masraf" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={onPendingMasraf} embedded /></div>}
       {tab === "odemeler" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={() => {}} embedded mode="odemeler" /></div>}
