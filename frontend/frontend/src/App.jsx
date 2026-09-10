@@ -20512,6 +20512,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
   const [firmaSec, setFirmaSec] = useState(null); // {id, path}
   const [inceleFormId, setInceleFormId] = useState(null); // kuyruktan "İncele" ile açılan masraf formu
   const [bekleyenAcik, setBekleyenAcik] = useState(false); // "Başkasında bekleyen" tam liste
+  const [bakiyeModal, setBakiyeModal] = useState(false);   // Personel Bakiyeleri penceresi (10.09.2026: sekme şeridinden açılır)
   const [formModal, setFormModal] = useState(null);       // {id} — Genel Bakış'ta açılan masraf formu detay penceresi
   const [formDetay, setFormDetay] = useState(null);
   const [formIslem, setFormIslem] = useState(false);
@@ -20727,6 +20728,12 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
               {l}{n > 0 && <span style={{ background:"#f59e0b", color:"#1a1200", borderRadius:"999px", padding:"1px 7px", fontSize:"11px", fontWeight:800 }}>{n}</span>}
             </button>
           ))}
+          {!isRequester && (
+            <button onClick={() => setBakiyeModal(true)} title="Personel bazlı avans / masraf bakiyeleri"
+              style={{ padding:"8px 14px", borderRadius:"9px", fontSize:"13px", fontWeight:700, color:"rgba(255,255,255,.85)", background:"transparent", border:"1px solid rgba(255,255,255,.28)", cursor:"pointer", display:"inline-flex", gap:"8px", alignItems:"center", marginLeft:"6px" }}>
+              👥 Personel Bakiyeleri{alacakli.length > 0 && <span style={{ background:"#fee2e2", color:"#b91c1c", borderRadius:"999px", padding:"1px 7px", fontSize:"11px", fontWeight:800 }}>{alacakli.length}</span>}
+            </button>
+          )}
         </div>
       </div>
 
@@ -20742,7 +20749,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
             {isRequester && bakiye && <div style={kpi}><div style={kpiL}>Avans bakiyem</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color: Number(bakiye.bakiye) < 0 ? "#b91c1c" : "#15803d" }}>{Number(bakiye.bakiye) < 0 ? "−" : ""}₺{Math.abs(Number(bakiye.bakiye)).toLocaleString("tr-TR", { minimumFractionDigits:2 })}</div><div style={kpiD}>{Number(bakiye.bakiye) < 0 ? "şirket size borçlu" : Number(bakiye.bakiye) > 0 ? "masraf formuyla kapatın" : "kapalı"}</div></div>}
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns: isRequester ? "1fr" : "2fr 1fr", gap:"14px", marginTop:"14px" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:"14px", marginTop:"14px" }}>
             {/* Onay kuyruğu */}
             <div style={panel}>
               <div style={panelH}><h3 style={{ margin:0, fontSize:"14.5px", fontWeight:800 }}>{isRequester ? "Bekleyen taleplerim" : "Onay Kuyruğu"}</h3><span style={{ fontSize:"12px", color:"#6b7a90" }}>{isRequester ? "Talebiniz hangi adımda" : "Sırada ne var, kim bekliyor, kaç gündür"}</span></div>
@@ -20806,29 +20813,6 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
                 </div>
               )}
             </div>
-            {/* Bakiyeler */}
-            {!isRequester && (
-              <div style={panel}>
-                <div style={panelH}><h3 style={{ margin:0, fontSize:"14.5px", fontWeight:800 }}>Personel Bakiyeleri</h3><span style={{ fontSize:"12px", color:"#6b7a90" }}>avans + ödeme − masraf − iade</span></div>
-                <div style={{ padding:"6px 16px" }}>
-                  {bakiyeler.slice().sort((a, b) => Math.abs(Number(b.bakiye)) - Math.abs(Number(a.bakiye))).slice(0, 8).map(b => {
-                    const bk = Number(b.bakiye || 0);
-                    return (
-                      <div key={b.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px dashed #e3e8ef" }}>
-                        <div><b style={{ fontSize:"13px" }}>{b.ad_soyad}</b><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{fmt(b.avans)} avans{Number(b.odeme) > 0 ? ` · ${fmt(b.odeme)} ödeme` : ""} · {fmt(b.masraf)} masraf</div></div>
-                        <div style={{ textAlign:"right" }}>
-                          <b style={{ color: bk < 0 ? "#b91c1c" : bk > 0 ? "#15803d" : "#6b7a90", fontVariantNumeric:"tabular-nums" }}>{bk < 0 ? "−" : bk > 0 ? "+" : ""}₺{fmt(Math.abs(bk))}</b>
-                          {canPay && bk < 0 && <div><button onClick={() => setTab("odemeler")} style={{ ...btn, padding:"3px 8px", fontSize:"11px", background:"#fff", color:"#0f766e", border:"1px solid #cfd7e2", marginTop:"3px" }}>💸 Öde</button></div>}
-                          {bk > 0 && <div style={{ fontSize:"11px", color:"#6b7a90" }}>avans açık</div>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {bakiyeler.length === 0 && <div style={{ padding:"18px 0", color:"#9ca3af", fontSize:"13px" }}>Bakiye kaydı yok</div>}
-                  <div style={{ padding:"10px 0 6px", fontSize:"12px", color:"#6b7a90" }}>Kırmızı = şirket personele borçlu · Yeşil = personelde açık avans, masraf formu bekleniyor · <span onClick={() => setTab("odemeler")} style={{ color:"#0f766e", fontWeight:700, cursor:"pointer" }}>tümü →</span></div>
-                </div>
-              </div>
-            )}
           </div>
         </>
       )}
@@ -20941,6 +20925,50 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
       {tab === "masraf" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={onPendingMasraf} embedded initialFormId={inceleFormId} /></div>}
       {tab === "odemeler" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={() => {}} embedded mode="odemeler" /></div>}
       {tab === "arsiv" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={() => {}} embedded initialDurum="ARSIVLENDI" /></div>}
+
+      {/* Personel Bakiyeleri penceresi (10.09.2026: Genel Bakış'ta yer kaplamasın diye sekme şeridine taşındı) */}
+      {bakiyeModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(10,20,35,.55)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:700, overflowY:"auto", padding:"24px 14px" }} onClick={() => setBakiyeModal(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"900px", boxShadow:"0 30px 60px -20px rgba(0,0,0,.45)", overflow:"hidden" }}>
+            <div style={panelH}>
+              <div>
+                <h3 style={{ margin:0, fontSize:"16px", fontWeight:800 }}>👥 Personel Bakiyeleri</h3>
+                <div style={{ fontSize:"12.5px", color:"#6b7a90", marginTop:"2px" }}>Bakiye = avans + masraf ödemesi − arşivlenen masraf − avans iadesi · yemek avansı hariç</div>
+              </div>
+              <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+                <span style={pill("#fee2e2", "#b91c1c")}>{alacakli.length} alacaklı · ₺{fmt(alacakToplam)}</span>
+                <span style={pill("#dcfce7", "#15803d")}>{acikAvans.length} açık avans · ₺{fmt(acikToplam)}</span>
+                {canPay && <button onClick={() => { setBakiyeModal(false); setTab("odemeler"); }} style={{ ...btn, padding:"6px 12px", fontSize:"12.5px", background:"#0f766e", color:"#fff" }}>💸 Ödeme Gir</button>}
+                <button onClick={() => setBakiyeModal(false)} style={{ ...btn, padding:"6px 10px", fontSize:"13px", background:"#fff", color:"#3c4a5d", border:"1px solid #cfd7e2" }}>✕</button>
+              </div>
+            </div>
+            <div style={{ maxHeight:"64vh", overflowY:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                <thead><tr>{["Personel", "Avans", "Masraf ödemesi", "Arşivlenen masraf", "Bakiye", ""].map((h, i) => <th key={h + i} style={{ ...th, textAlign: i >= 1 && i <= 4 ? "right" : "left", position:"sticky", top:0, zIndex:1 }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {bakiyeler.length === 0 && <tr><td colSpan={6} style={{ ...td, textAlign:"center", padding:"30px", color:"#9ca3af" }}>Bakiye kaydı yok</td></tr>}
+                  {bakiyeler.slice().sort((a, b) => Number(a.bakiye) - Number(b.bakiye)).map(b => {
+                    const bk = Number(b.bakiye || 0);
+                    return (
+                      <tr key={b.id}>
+                        <td style={{ ...td, fontWeight:700 }}>{b.ad_soyad}{b.aktif === false && <span style={{ fontSize:"10.5px", color:"#9ca3af", marginLeft:"6px" }}>(ayrıldı)</span>}</td>
+                        <td style={{ ...td, textAlign:"right", fontVariantNumeric:"tabular-nums", color: Number(b.avans) > 0 ? "#b45309" : "#9ca3af" }}>{Number(b.avans) > 0 ? `₺${fmt(b.avans)}` : "—"}</td>
+                        <td style={{ ...td, textAlign:"right", fontVariantNumeric:"tabular-nums", color: Number(b.odeme) > 0 ? "#0f766e" : "#9ca3af" }}>{Number(b.odeme) > 0 ? `₺${fmt(b.odeme)}` : "—"}{Number(b.iade) > 0 ? <span style={{ fontSize:"10.5px", color:"#6b7a90" }}> (iade ₺{fmt(b.iade)})</span> : null}</td>
+                        <td style={{ ...td, textAlign:"right", fontVariantNumeric:"tabular-nums", color: Number(b.masraf) > 0 ? "#6d28d9" : "#9ca3af" }}>{Number(b.masraf) > 0 ? `₺${fmt(b.masraf)}` : "—"}</td>
+                        <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums", color: bk < 0 ? "#b91c1c" : bk > 0 ? "#15803d" : "#6b7a90" }}>{bk < 0 ? "−" : bk > 0 ? "+" : ""}₺{fmt(Math.abs(bk))}<div style={{ fontSize:"10.5px", fontWeight:600, color:"#6b7a90" }}>{bk < 0 ? "şirket borçlu" : bk > 0 ? "avans açık" : "kapalı"}</div></td>
+                        <td style={{ ...td, textAlign:"right", whiteSpace:"nowrap" }}>
+                          <button onClick={() => { setBakiyeModal(false); setHesapKisi(String(b.email || "").toLowerCase()); setTab("hesabim"); }} style={{ ...btn, padding:"4px 9px", fontSize:"11.5px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>Ekstre</button>
+                          {canPay && bk !== 0 && <button onClick={() => { setBakiyeModal(false); setTab("odemeler"); }} style={{ ...btn, padding:"4px 9px", fontSize:"11.5px", marginLeft:"5px", background: bk < 0 ? "#0f766e" : "#f3f5f8", color: bk < 0 ? "#fff" : "#374151", border: bk < 0 ? "none" : "1px solid #cfd7e2" }}>{bk < 0 ? "💸 Öde" : "↩ İade"}</button>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Masraf formu detay penceresi — kuyruktan İncele ile açılır, işlem sonrası kuyruğa döner */}
       {formModal && (() => {
