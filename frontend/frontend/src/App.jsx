@@ -20511,6 +20511,10 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
   const [yukleniyor, setYukleniyor] = useState(true);
   const [firmaSec, setFirmaSec] = useState(null); // {id, path}
   const [inceleFormId, setInceleFormId] = useState(null); // kuyruktan "İncele" ile açılan masraf formu
+  const [formModal, setFormModal] = useState(null);       // {id} — Genel Bakış'ta açılan masraf formu detay penceresi
+  const [formDetay, setFormDetay] = useState(null);
+  const [formIslem, setFormIslem] = useState(false);
+  const [formNot, setFormNot] = useState("");
   const [hesap, setHesap] = useState(null);        // kişisel ekstre (/hr/is-avans/hesap)
   const [hesapKisi, setHesapKisi] = useState("");  // yönetici başka personelin ekstresine bakabilir
   const [tazele, setTazele] = useState(0);
@@ -20543,6 +20547,26 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
     } finally { setYukleniyor(false); }
   };
   useEffect(() => { yukle(); }, [tazele]);
+  /* 10.09.2026: Genel Bakış kuyruğundaki "İncele" sekme değiştirmesin — form
+     detayı burada pencerede açılsın, onay/red/geri gönder aynı yerden yapılıp
+     kuyruğa dönülsün (Nurcan geri butonuyla uğraşmasın). */
+  useEffect(() => {
+    if (!formModal?.id) { setFormDetay(null); return; }
+    setFormDetay(null); setFormNot("");
+    fetch(`${API_BASE}/hr/masraf-form/${formModal.id}`).then(r => r.json())
+      .then(d => setFormDetay(d && !d.error ? d : null)).catch(() => setFormDetay(null));
+  }, [formModal]);
+  const formAksiyon = async (yol, govde, onayMetni) => {
+    if (onayMetni && !window.confirm(onayMetni)) return;
+    setFormIslem(true);
+    try {
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${formModal.id}/${yol}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(govde || {}) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `Sunucu hatası (${r.status})`); }
+      setFormModal(null); setTazele(x => x + 1);
+    } catch (e) { alert(e.message); }
+    setFormIslem(false);
+  };
   // Hesabım sekmesi: kişisel ekstre
   useEffect(() => {
     if (tab !== "hesabim") return;
@@ -20729,7 +20753,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
                         <td style={td}>{(() => { const g = gun(r.tarih); return <span style={pill(g >= 5 ? "#fee2e2" : g >= 3 ? "#fef3c7" : "#f3f5f8", g >= 5 ? "#b91c1c" : g >= 3 ? "#b45309" : "#6b7a90")}>{g === 0 ? "bugün" : `${g} gün`}</span>; })()}</td>
                         <td style={{ ...td, whiteSpace:"nowrap", textAlign:"right" }}>
                           {!isRequester && r.tip === "AVANS" && <><button onClick={() => avansOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>✓ Onayla</button> <button onClick={() => avansReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}
-                          {!isRequester && r.tip === "MASRAF" && <><button onClick={() => { setInceleFormId(r.id); setTab("masraf"); }} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>İncele</button> <button onClick={() => masrafOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.arsiv ? "💸 Ödendi · Arşivle" : "✓ Onayla"}</button>{(isPM || isDirektor) && !r.arsiv && <> <button onClick={() => masrafReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
+                          {!isRequester && r.tip === "MASRAF" && <><button onClick={() => setFormModal({ id: r.id })} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>İncele</button> <button onClick={() => masrafOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.arsiv ? "💸 Ödendi · Arşivle" : "✓ Onayla"}</button>{(isPM || isDirektor) && !r.arsiv && <> <button onClick={() => masrafReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
                           {isRequester && <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[r.durum] || r.durum}</span>}
                         </td>
                       </tr>
@@ -20881,6 +20905,109 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
       {tab === "masraf" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={onPendingMasraf} embedded initialFormId={inceleFormId} /></div>}
       {tab === "odemeler" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={() => {}} embedded mode="odemeler" /></div>}
       {tab === "arsiv" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={() => {}} embedded initialDurum="ARSIVLENDI" /></div>}
+
+      {/* Masraf formu detay penceresi — kuyruktan İncele ile açılır, işlem sonrası kuyruğa döner */}
+      {formModal && (() => {
+        const f = formDetay;
+        const kal = f?.kalemler || [];
+        const toplam = kal.reduce((t, k) => t + Number(k.tutar || 0), 0);
+        const d = f?.durum;
+        const rolloutAdim = d === "ROLLOUT_BEKLE" && (isNurcan || isPM || isDirektor);
+        const muhasebeAdim = d === "MUHASEBE_BEKLE" && (isMuhOnay || isPM || isDirektor);
+        const pmAdim = d === "PM_BEKLE" && isPM;
+        const direktorAdim = d === "DIREKTOR_BEKLE" && isDirektor;
+        const arsivAdim = d === "TAMAMLANDI" && (isMuhOnay || isMuhasebe);
+        const onayVar = rolloutAdim || muhasebeAdim || pmAdim || direktorAdim;
+        const KAT_IKON = { YAKIT:"⛽", KONAKLAMA:"🏨", YEMEK:"🍽", NAKLIYE:"🚚", MALZEME:"🔧", TRAFIK_CEZA:"🚨", KOPRU_OTOYOL:"🛣", KIRTASIYE:"📎", DIGER:"📋" };
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(10,20,35,.55)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:700, overflowY:"auto", padding:"24px 14px" }} onClick={() => !formIslem && setFormModal(null)}>
+            <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"920px", boxShadow:"0 30px 60px -20px rgba(0,0,0,.45)", overflow:"hidden" }}>
+              <div style={{ ...panelH, borderBottom:"1px solid #e3e8ef" }}>
+                <div>
+                  <h3 style={{ margin:0, fontSize:"16px", fontWeight:800 }}>Masraf Formu #{f?.form_no || formModal.id}</h3>
+                  <div style={{ fontSize:"12.5px", color:"#6b7a90", marginTop:"2px" }}>{f ? `${f.talep_eden_ad || f.personel_ad || ""} · ${f.donem || ""} · ${kal.length} kalem` : "Yükleniyor…"}</div>
+                </div>
+                <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                  {f && <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[d] || d}</span>}
+                  {f && <a href={`${API_BASE}/hr/masraf-form/${formModal.id}/pdf`} target="_blank" rel="noreferrer" style={{ ...btn, padding:"6px 11px", fontSize:"12px", background:"#f3f5f8", color:"#0f1c2e", border:"1px solid #cfd7e2", textDecoration:"none" }}>📄 PDF Fişler</a>}
+                  <button onClick={() => setFormModal(null)} style={{ ...btn, padding:"6px 10px", fontSize:"13px", background:"#fff", color:"#3c4a5d", border:"1px solid #cfd7e2" }}>✕</button>
+                </div>
+              </div>
+              <div style={{ maxHeight:"58vh", overflowY:"auto" }}>
+                {!f && <div style={{ padding:"40px", textAlign:"center", color:"#9ca3af" }}>Yükleniyor…</div>}
+                {f && kal.length === 0 && <div style={{ padding:"40px", textAlign:"center", color:"#9ca3af" }}>Bu formda kalem yok</div>}
+                {f && kal.length > 0 && (
+                  <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                    <thead><tr>{["Kategori", "Tarih", "Belge No", "Açıklama", "Tutar", "Fiş"].map((h, i) => <th key={h} style={{ ...th, textAlign: i === 4 ? "right" : "left", position:"sticky", top:0, zIndex:1 }}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {kal.map(k => {
+                        const bel = Array.isArray(k.belgeler) ? k.belgeler : [];
+                        return (
+                          <tr key={k.id}>
+                            <td style={td}><span style={{ marginRight:"6px" }}>{KAT_IKON[String(k.kategori || "").toUpperCase()] || "📋"}</span>{String(k.kategori || "").replace(/_/g, " ")}</td>
+                            <td style={{ ...td, whiteSpace:"nowrap" }}>{fT(k.tarih)}</td>
+                            <td style={td}>{k.belge_no || "—"}</td>
+                            <td style={{ ...td, color:"#3c4a5d" }}>{k.aciklama || k.belge_aciklama || "—"}{k.plaka ? <span style={{ fontSize:"11.5px", color:"#6b7a90" }}> · {k.plaka}</span> : null}{k.fis_olmadan_aciklama ? <div style={{ fontSize:"11.5px", color:"#b91c1c" }}>Fişsiz: {k.fis_olmadan_aciklama}</div> : null}</td>
+                            <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums" }}>₺{Number(k.tutar || 0).toLocaleString("tr-TR", { minimumFractionDigits:2 })}</td>
+                            <td style={td}>{bel.length > 0
+                              ? bel.map((b, i) => <a key={b.id || i} href={String(b.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`} target="_blank" rel="noreferrer" style={{ display:"inline-block", marginRight:"5px", padding:"3px 8px", borderRadius:"7px", background:"#d9f2ee", color:"#0f766e", fontSize:"11.5px", fontWeight:700, textDecoration:"none" }}>📷 Fiş{bel.length > 1 ? ` ${i + 1}` : ""}</a>)
+                              : <span style={{ padding:"3px 8px", borderRadius:"7px", background:"#fee2e2", color:"#b91c1c", fontSize:"11.5px", fontWeight:700 }}>Fiş yok</span>}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr style={{ background:"#1e3a5f", color:"#fff" }}>
+                        <td colSpan={4} style={{ ...td, color:"#fff", textAlign:"right", fontWeight:800, borderBottom:"none" }}>TOPLAM</td>
+                        <td style={{ ...td, color:"#fff", textAlign:"right", fontWeight:800, borderBottom:"none", fontVariantNumeric:"tabular-nums" }}>₺{toplam.toLocaleString("tr-TR", { minimumFractionDigits:2 })}</td>
+                        <td style={{ ...td, borderBottom:"none" }}></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
+                {f && (f.rollout_not || f.muhasebe_not || f.pm_not || f.direktor_not || f.red_aciklama) && (
+                  <div style={{ padding:"12px 16px", borderTop:"1px solid #e3e8ef", background:"#f8fafc", fontSize:"12.5px" }}>
+                    {[["Rollout", f.rollout_not], ["Muhasebe", f.muhasebe_not], ["PM", f.pm_not], ["Direktör", f.direktor_not], ["Red", f.red_aciklama]].filter(x => x[1]).map(([l, v]) => (
+                      <div key={l} style={{ marginBottom:"4px" }}><b style={{ color:"#6b7a90" }}>{l} notu:</b> {v}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {f && (
+                <div style={{ padding:"12px 16px", borderTop:"1px solid #e3e8ef", background:"#f8fafc" }}>
+                  {onayVar && (
+                    <input value={formNot} onChange={e => setFormNot(e.target.value)} placeholder="Onay notu (isteğe bağlı)"
+                      style={{ width:"100%", padding:"8px 12px", border:"1px solid #cfd7e2", borderRadius:"9px", fontSize:"13px", marginBottom:"10px", boxSizing:"border-box" }} />
+                  )}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+                    <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Akış: Rollout → Muhasebe → PM → Direktör → Ödeme/Arşiv</div>
+                    <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+                      <button onClick={() => { setInceleFormId(formModal.id); setFormModal(null); setTab("masraf"); }} style={{ ...btn, background:"#fff", color:"#3c4a5d", border:"1px solid #cfd7e2" }}>Tam sayfada aç</button>
+                      {(isPM || isDirektor || isNurcan || isMuhOnay) && !arsivAdim && (
+                        <button disabled={formIslem} onClick={() => {
+                          const t = window.prompt("Personele geri gönderme açıklaması (neyi düzeltecek?):");
+                          if (!t || !t.trim()) return;
+                          formAksiyon("geri-gonder", { aciklama: t, gonderen_email: _email });
+                        }} style={{ ...btn, background:"#fff", color:"#b45309", border:"1px solid #fed7aa" }}>↩ Geri Gönder</button>
+                      )}
+                      {(isPM || isDirektor) && !arsivAdim && (
+                        <button disabled={formIslem} onClick={() => {
+                          const t = window.prompt("Red açıklaması:");
+                          if (!t || !t.trim()) return;
+                          formAksiyon(isPM ? "pm-reddet" : "direktor-reddet", { red_aciklama: t, reddeden_email: _email });
+                        }} style={{ ...btn, background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>✕ Reddet</button>
+                      )}
+                      {rolloutAdim && <button disabled={formIslem} onClick={() => formAksiyon("rollout-onayla", { rollout_not: formNot })} style={{ ...btn, background:"#15803d", color:"#fff" }}>✓ Onayla (Rollout)</button>}
+                      {muhasebeAdim && <button disabled={formIslem} onClick={() => formAksiyon("muhasebe-onayla", { muhasebe_not: formNot })} style={{ ...btn, background:"#15803d", color:"#fff" }}>✓ Onayla (Muhasebe)</button>}
+                      {pmAdim && <button disabled={formIslem} onClick={() => formAksiyon("pm-onayla", { pm_not: formNot })} style={{ ...btn, background:"#15803d", color:"#fff" }}>✓ Onayla (PM)</button>}
+                      {direktorAdim && <button disabled={formIslem} onClick={() => formAksiyon("direktor-onayla", { direktor_not: formNot })} style={{ ...btn, background:"#15803d", color:"#fff" }}>✓ Onayla (Direktör)</button>}
+                      {arsivAdim && <button disabled={formIslem} onClick={() => formAksiyon("arsivle", {}, `Form #${f.form_no || formModal.id} (${f.talep_eden_ad}, ₺${fmt(toplam)}) ödendi ve arşivlensin mi? Tutar personelin avans bakiyesinden düşer.`)} style={{ ...btn, background:"#0f766e", color:"#fff" }}>💸 Ödendi · Arşivle</button>}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Firma seçimi (PM / Direktör onayında nakit akışı yönlendirmesi) */}
       {firmaSec && (
