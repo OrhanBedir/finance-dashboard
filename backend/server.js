@@ -17579,6 +17579,20 @@ const AVANS_TAM_GORUS = [
    listesindeki kuralla aynı: kendisi, direktör ve muhasebe görür; rollout
    müdürü dahil alt kademeler görmez. Bakiye, ödeme ve hesap ekstresi için. */
 const PM_KISISEL_EMAIL = "orhan.bedir@simsektel.com";
+/* 10.09.2026 (Nurcan duyurusu): Yemek fişlerinin kapaması artık yapılmıyor —
+   fişler elden muhasebeye gidiyor. Bu tarihten İTİBAREN verilen yemek/kahvaltı
+   avansları personelin bakiyesinde açık avans olarak durmasın; simetri için
+   aynı tarihten sonra arşivlenen formlardaki YEMEK kalemleri de düşülmesin.
+   Eski kayıtlar (masraf formu ile kapatılmış olanlar) olduğu gibi kalır. */
+const YEMEK_HARIC_TARIH = "2026-09-10";
+// "Akşam Yemeği" içinde "yemek" GEÇMEZ (yemeği) — kök olarak "yeme" alınır
+const YEMEK_AVANS_RX = "(yeme|kahvalt)";
+// is_avans_talep alias'ı verilir; bakiyeye SAYILACAK avansların koşulu
+const yemekHaricAvans = (a) => `NOT (COALESCE(${a}.gider_turu,'') ~* '${YEMEK_AVANS_RX}'
+  AND COALESCE(${a}.odeme_tarihi, ${a}.muhasebe_onay_tarihi, ${a}.direktor_onay_tarihi, ${a}.tarih)::date >= DATE '${YEMEK_HARIC_TARIH}')`;
+// masraf_kalem + masraf_form alias'ları; bakiyeden DÜŞÜLECEK kalemlerin koşulu
+const yemekHaricKalem = (k, f) => `NOT (UPPER(COALESCE(${k}.kategori,'')) = 'YEMEK'
+  AND COALESCE(${f}.arsiv_tarihi, ${f}.created_at)::date >= DATE '${YEMEK_HARIC_TARIH}')`;
 function pmKisiselGorur(req) {
   const email = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
@@ -17608,20 +17622,21 @@ app.get("/hr/is-avans/bakiye", authMiddleware, async (req, res) => {
       `SELECT COALESCE(SUM(t.tutar),0) as toplam
        FROM is_avans_talep t
        JOIN personel p ON p.id = t.personel_id
-       WHERE LOWER(p.email)=LOWER($1) AND t.durum='TAMAMLANDI'`,
+       WHERE LOWER(p.email)=LOWER($1) AND t.durum='TAMAMLANDI' AND ${yemekHaricAvans("t")}`,
       [email]
     );
     // Eğer personel kaydı yoksa talep_eden_email ile fallback
     const avansResFallback = await pool.query(
-      `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep
-       WHERE LOWER(talep_eden_email)=LOWER($1) AND durum='TAMAMLANDI'
-       AND personel_id IS NULL`,
+      `SELECT COALESCE(SUM(t.tutar),0) as toplam FROM is_avans_talep t
+       WHERE LOWER(t.talep_eden_email)=LOWER($1) AND t.durum='TAMAMLANDI'
+       AND t.personel_id IS NULL AND ${yemekHaricAvans("t")}`,
       [email]
     );
     const masrafRes = await pool.query(
       `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
-       WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mf.durum='ARSIVLENDI'`,
+       WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mf.durum='ARSIVLENDI'
+       AND ${yemekHaricKalem("mk", "mf")}`,
       [email]
     );
     const avans = Number(avansRes.rows[0].toplam) + Number(avansResFallback.rows[0].toplam);
@@ -17663,15 +17678,15 @@ app.get("/hr/is-avans/bakiyeler", authMiddleware, async (req, res) => {
         GROUP BY 1
       ) po ON po.pid = p.id
       LEFT JOIN (
-        SELECT personel_id, SUM(tutar) AS toplam
-        FROM is_avans_talep
-        WHERE durum='TAMAMLANDI' AND personel_id IS NOT NULL
-        GROUP BY personel_id
+        SELECT t.personel_id, SUM(t.tutar) AS toplam
+        FROM is_avans_talep t
+        WHERE t.durum='TAMAMLANDI' AND t.personel_id IS NOT NULL AND ${yemekHaricAvans("t")}
+        GROUP BY t.personel_id
       ) av ON av.personel_id = p.id
       LEFT JOIN (
         SELECT LOWER(mf.talep_eden_email) AS email, SUM(mk.tutar) AS toplam
         FROM masraf_kalem mk JOIN masraf_form mf ON mf.id = mk.form_id
-        WHERE mf.durum='ARSIVLENDI'
+        WHERE mf.durum='ARSIVLENDI' AND ${yemekHaricKalem("mk", "mf")}
         GROUP BY 1
       ) ms ON ms.email = LOWER(COALESCE(p.email,''))
       WHERE (COALESCE(av.toplam,0) <> 0 OR COALESCE(ms.toplam,0) <> 0 OR COALESCE(po.odeme,0) <> 0 OR COALESCE(po.iade,0) <> 0)
@@ -17719,7 +17734,8 @@ app.get("/hr/is-avans/hesap", authMiddleware, async (req, res) => {
     const [av, mf, po, avBek, mfBek] = await Promise.all([
       pool.query(`SELECT t.id, COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi, t.direktor_onay_tarihi, t.tarih)::date AS tarih,
           t.tutar, COALESCE(t.gider_turu,'') AS gider_turu, COALESCE(t.aciklama,'') AS aciklama,
-          COALESCE(t.bolge,'') AS bolge, COALESCE(t.proje,'') AS proje, COALESCE(t.firma,'') AS firma, t.talep_eden_ad
+          COALESCE(t.bolge,'') AS bolge, COALESCE(t.proje,'') AS proje, COALESCE(t.firma,'') AS firma, t.talep_eden_ad,
+          NOT (${yemekHaricAvans("t")}) AS yemek_haric
         FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
         WHERE t.durum='TAMAMLANDI' AND (LOWER(COALESCE(p.email,''))=$1 OR (t.personel_id IS NULL AND LOWER(t.talep_eden_email)=$1))
         ORDER BY 2, t.id`, [email]),
@@ -17745,9 +17761,12 @@ app.get("/hr/is-avans/hesap", authMiddleware, async (req, res) => {
         GROUP BY mf.id ORDER BY 2`, [email]),
     ]);
     const hareketler = [
-      ...av.rows.map(r => ({ tarih: r.tarih, tip: "AVANS", yon: 1, tutar: Number(r.tutar),
+      ...av.rows.filter(r => !r.yemek_haric).map(r => ({ tarih: r.tarih, tip: "AVANS", yon: 1, tutar: Number(r.tutar),
         baslik: `İş avansı alındı${r.gider_turu ? ` · ${r.gider_turu}` : ""}`,
         detay: [r.aciklama, r.bolge, r.proje].filter(Boolean).join(" · "), ref: `#${r.id}`, firma: r.firma })),
+      ...av.rows.filter(r => r.yemek_haric).map(r => ({ tarih: r.tarih, tip: "YEMEK", yon: 0, tutar: Number(r.tutar),
+        baslik: `Yemek avansı${r.gider_turu ? ` · ${r.gider_turu}` : ""} — bakiyeye işlemez`,
+        detay: `${[r.aciklama, r.bolge].filter(Boolean).join(" · ")}${r.aciklama || r.bolge ? " · " : ""}10.09.2026 kararı: yemek fişi kapaması yapılmıyor`, ref: `#${r.id}`, firma: r.firma })),
       ...mf.rows.map(r => ({ tarih: r.tarih, tip: "MASRAF", yon: -1, tutar: Number(r.tutar),
         baslik: `Masraf formu arşivlendi · Form #${r.form_no || r.id}`,
         detay: `${r.donem} · ${r.kalem} kalem`, ref: `#${r.form_no || r.id}` })),
@@ -17764,7 +17783,8 @@ app.get("/hr/is-avans/hesap", authMiddleware, async (req, res) => {
         formlar: mfBek.rows.map(r => ({ ...r, tutar: Number(r.tutar) })),
       },
       ozet: {
-        avans: av.rows.reduce((t, r) => t + Number(r.tutar), 0),
+        avans: av.rows.filter(r => !r.yemek_haric).reduce((t, r) => t + Number(r.tutar), 0),
+        yemek_haric: av.rows.filter(r => r.yemek_haric).reduce((t, r) => t + Number(r.tutar), 0),
         masraf: mf.rows.reduce((t, r) => t + Number(r.tutar), 0),
         odeme: po.rows.filter(r => r.tip !== "AVANS_IADE").reduce((t, r) => t + Number(r.tutar), 0),
         iade: po.rows.filter(r => r.tip === "AVANS_IADE").reduce((t, r) => t + Number(r.tutar), 0),
@@ -18528,13 +18548,13 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
         `SELECT COALESCE(SUM(t.tutar),0) as toplam
          FROM is_avans_talep t
          JOIN personel p ON p.id = t.personel_id
-         WHERE LOWER(p.email)=LOWER($1) AND t.durum='TAMAMLANDI'`,
+         WHERE LOWER(p.email)=LOWER($1) AND t.durum='TAMAMLANDI' AND ${yemekHaricAvans("t")}`,
         [queryEmail]
       );
       const bakiyeFallbackRes = await pool.query(
-        `SELECT COALESCE(SUM(tutar),0) as toplam FROM is_avans_talep
-         WHERE LOWER(talep_eden_email)=LOWER($1) AND durum='TAMAMLANDI'
-         AND personel_id IS NULL`,
+        `SELECT COALESCE(SUM(t.tutar),0) as toplam FROM is_avans_talep t
+         WHERE LOWER(t.talep_eden_email)=LOWER($1) AND t.durum='TAMAMLANDI'
+         AND t.personel_id IS NULL AND ${yemekHaricAvans("t")}`,
         [queryEmail]
       );
       avansToplamOnaylanan = Number(bakiyeAvansRes.rows[0].toplam) + Number(bakiyeFallbackRes.rows[0].toplam);
@@ -18542,7 +18562,8 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const bakiyeMasrafRes = await pool.query(
       `SELECT COALESCE(SUM(mk.tutar),0) as toplam FROM masraf_kalem mk
        JOIN masraf_form mf ON mf.id = mk.form_id
-       WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mf.durum='ARSIVLENDI'`,
+       WHERE LOWER(mf.talep_eden_email)=LOWER($1) AND mf.durum='ARSIVLENDI'
+       AND ${yemekHaricKalem("mk", "mf")}`,
       [queryEmail]
     );
     const masrafToplamArsiv    = Number(bakiyeMasrafRes.rows[0].toplam);

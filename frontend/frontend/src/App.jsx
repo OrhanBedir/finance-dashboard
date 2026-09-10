@@ -20738,7 +20738,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
             <div style={kpi}><div style={kpiL}>Masraf formu kuyruğu</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color:"#6d28d9" }}>{mfBekleyen.length} form</div><div style={kpiD}>{["ROLLOUT_BEKLE", "MUHASEBE_BEKLE", "PM_BEKLE", "DIREKTOR_BEKLE", "TAMAMLANDI"].map(d => `${formlar.filter(f => f.durum === d).length} ${DURUM_AD[d].toLowerCase()}`).filter(x => !x.startsWith("0 ")).join(" · ") || "boş"}</div></div>
             <div style={kpi}><div style={kpiL}>Bu ay ödenen avans</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color:"#15803d" }}>₺{fmt(buAyOdenen.reduce((sm, t) => sm + Number(t.tutar || 0), 0))}</div><div style={kpiD}>{buAyOdenen.length} avans · {buAy.split("-").reverse().join(".")}</div></div>
             {!isRequester && <div style={kpi}><div style={kpiL}>Personel alacağı</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color: alacakToplam ? "#b91c1c" : "#15803d" }}>₺{fmt(alacakToplam)}</div><div style={kpiD}>{alacakli.length} personel alacaklı · "Öde" ile kapanır</div></div>}
-            {!isRequester && <div style={kpi}><div style={kpiL}>Açık avans (personelde)</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color:"#0f1c2e" }}>₺{fmt(acikToplam)}</div><div style={kpiD}>{acikAvans.length} personel · masraf formu bekleniyor</div></div>}
+            {!isRequester && <div style={kpi}><div style={kpiL}>Açık avans (personelde)</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color:"#0f1c2e" }}>₺{fmt(acikToplam)}</div><div style={kpiD}>{acikAvans.length} personel · masraf formu bekleniyor · yemek avansı hariç</div></div>}
             {isRequester && bakiye && <div style={kpi}><div style={kpiL}>Avans bakiyem</div><div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color: Number(bakiye.bakiye) < 0 ? "#b91c1c" : "#15803d" }}>{Number(bakiye.bakiye) < 0 ? "−" : ""}₺{Math.abs(Number(bakiye.bakiye)).toLocaleString("tr-TR", { minimumFractionDigits:2 })}</div><div style={kpiD}>{Number(bakiye.bakiye) < 0 ? "şirket size borçlu" : Number(bakiye.bakiye) > 0 ? "masraf formuyla kapatın" : "kapalı"}</div></div>}
           </div>
 
@@ -20840,7 +20840,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
         const bekAvans = (bek.avanslar || []).reduce((t, r) => t + Number(r.tutar || 0), 0);
         const bekForm = (bek.formlar || []).reduce((t, r) => t + Number(r.tutar || 0), 0);
         const kisiAd = hesapKisi ? (bakiyeler.find(b => String(b.email || "").toLowerCase() === hesapKisi) || {}).ad_soyad || hesapKisi : (currentUser?.name || _email);
-        const TIP_ST = { AVANS: ["#fef3c7", "#b45309", "Avans alındı"], MASRAF: ["#ede9fe", "#6d28d9", "Masraf formu"], ODEME: ["#ccfbf1", "#0f766e", "Ödeme alındı"], IADE: ["#f3f5f8", "#3c4a5d", "Avans iadesi"] };
+        const TIP_ST = { AVANS: ["#fef3c7", "#b45309", "Avans alındı"], MASRAF: ["#ede9fe", "#6d28d9", "Masraf formu"], ODEME: ["#ccfbf1", "#0f766e", "Ödeme alındı"], IADE: ["#f3f5f8", "#3c4a5d", "Avans iadesi"], YEMEK: ["#f3f5f8", "#9ca3af", "Yemek (hariç)"] };
         return (
           <div style={{ marginTop:"14px" }}>
             {/* Bakiye özeti — hangi rakam ne demek, açıkça */}
@@ -20877,6 +20877,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
               </div>
               <div style={{ fontSize:"12px", color:"#6b7a90", marginTop:"10px" }}>
                 Bakiye = aldığım avans + ödenen masraf alacağı − sunduğum masraf − avans iadesi
+                {Number(oz.yemek_haric || 0) > 0 && <> · <b>₺{fmt(oz.yemek_haric)}</b> yemek avansı bakiye dışı (10.09.2026'dan itibaren yemek fişi kapaması yapılmıyor)</>}
               </div>
             </div>
 
@@ -20921,8 +20922,8 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
                           <td style={{ ...td, whiteSpace:"nowrap" }}>{fT(h.tarih)}</td>
                           <td style={td}><span style={pill(st[0], st[1])}>{st[2]}</span> <span style={{ fontSize:"11.5px", color:"#9ca3af", marginLeft:"4px" }}>{h.ref}</span></td>
                           <td style={{ ...td, color:"#3c4a5d" }}>{h.baslik}{h.detay ? <div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{h.detay}</div> : null}</td>
-                          <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums", color: h.yon > 0 ? "#b45309" : "#15803d" }}>{h.yon > 0 ? "+" : "−"}₺{fmt(h.tutar)}</td>
-                          <td style={{ ...td, textAlign:"right", fontVariantNumeric:"tabular-nums", fontWeight:700, color: Number(h.bakiye) < 0 ? "#b91c1c" : "#0f1c2e" }}>{Number(h.bakiye) < 0 ? "−" : ""}₺{fmt(Math.abs(Number(h.bakiye)))}</td>
+                          <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums", color: h.yon === 0 ? "#9ca3af" : h.yon > 0 ? "#b45309" : "#15803d" }}>{h.yon === 0 ? "" : h.yon > 0 ? "+" : "−"}₺{fmt(h.tutar)}</td>
+                          <td style={{ ...td, textAlign:"right", fontVariantNumeric:"tabular-nums", fontWeight:700, color: h.yon === 0 ? "#cbd5e1" : Number(h.bakiye) < 0 ? "#b91c1c" : "#0f1c2e" }}>{h.yon === 0 ? "değişmez" : `${Number(h.bakiye) < 0 ? "−" : ""}₺${fmt(Math.abs(Number(h.bakiye)))}`}</td>
                         </tr>
                       );
                     })}
