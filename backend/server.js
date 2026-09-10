@@ -6565,11 +6565,18 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         FROM avans a JOIN personel p ON p.id=a.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
           AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`, [marka, DEVIR]),
-      pool.query(`SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, SUM(t.tutar) AS t
-        FROM is_avans_talep t
-        WHERE UPPER(COALESCE(t.firma,'ERC'))=$1
-          AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
-          AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2 GROUP BY 1`, [marka, DEVIR]),
+      // İş avansları + personel masraf ödemeleri (10.09.2026: avanssız masrafın ödemesi de giderdir)
+      pool.query(`SELECT ay, SUM(t) AS t FROM (
+          SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, t.tutar AS t
+          FROM is_avans_talep t
+          WHERE UPPER(COALESCE(t.firma,'ERC'))=$1
+            AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
+            AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2
+          UNION ALL
+          SELECT to_char(o.tarih,'YYYY-MM') AS ay, o.tutar AS t
+          FROM personel_odeme o
+          WHERE UPPER(COALESCE(o.firma,'ERC'))=$1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2
+        ) x GROUP BY 1`, [marka, DEVIR]),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
         FROM arac_kira_odemeler o
         WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
@@ -7046,7 +7053,14 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         LEFT JOIN personel hp ON hp.id = t.personel_id
         WHERE UPPER(COALESCE(t.firma,'ERC')) = $1
           AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
-          AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2`, [marka, baslangic]),
+          AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2
+        UNION ALL
+        SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih,
+          COALESCE(NULLIF(pp.ad_soyad,''), o.ad, o.email) AS ad_soyad,
+          'MASRAF_ODEME' AS tip, o.tutar,
+          ('Masraf alacağı ödemesi' || COALESCE(' · '||NULLIF(o.aciklama,''),'')) AS aciklama
+        FROM personel_odeme o LEFT JOIN personel pp ON pp.id = o.personel_id
+        WHERE UPPER(COALESCE(o.firma,'ERC')) = $1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2`, [marka, baslangic]),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad,
           'ARAC_KIRA' AS tip, o.tutar,
           (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama,
@@ -7600,9 +7614,14 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
          WHERE a.odendi=true AND a.avans_turu='MAAS'
            AND COALESCE(a.odeme_tarihi, a.tarih) >= $1::date
            AND UPPER(COALESCE(p.marka,'ERC')) <> 'AHY'`),
-      q(`SELECT COALESCE(SUM(tutar),0) t FROM is_avans_talep
-         WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date
-           AND UPPER(COALESCE(firma,'ERC')) <> 'AHY'`),
+      q(`SELECT COALESCE(SUM(t),0) t FROM (
+           SELECT tutar AS t FROM is_avans_talep
+           WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date
+             AND UPPER(COALESCE(firma,'ERC')) <> 'AHY'
+           UNION ALL
+           SELECT tutar AS t FROM personel_odeme
+           WHERE tip='MASRAF_ODEME' AND tarih >= $1::date AND UPPER(COALESCE(firma,'ERC')) <> 'AHY'
+         ) x`),
       // Ölçüt ödeme TARİHİDİR, dönem değil: dönem giderin ait olduğu ayı söyler,
       // para tarih günü bankadan çıkar (12.08.2026 — Etas/Meriç cari ödemeleri
       // Temmuz dönemli girildiği için kartta görünmüyordu). T0 öncesi yapılmış
@@ -8412,11 +8431,18 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
         FROM avans a JOIN personel p ON p.id=a.personel_id
         WHERE COALESCE(p.marka,'ERC')=$1 AND a.tarih >= $2
           AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`, [marka, DEVIR]),
-      pool.query(`SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, SUM(t.tutar) AS t
-        FROM is_avans_talep t
-        WHERE UPPER(COALESCE(t.firma,'ERC'))=$1
-          AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
-          AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2 GROUP BY 1`, [marka, DEVIR]),
+      // İş avansları + personel masraf ödemeleri (10.09.2026: avanssız masrafın ödemesi de giderdir)
+      pool.query(`SELECT ay, SUM(t) AS t FROM (
+          SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, t.tutar AS t
+          FROM is_avans_talep t
+          WHERE UPPER(COALESCE(t.firma,'ERC'))=$1
+            AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
+            AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2
+          UNION ALL
+          SELECT to_char(o.tarih,'YYYY-MM') AS ay, o.tutar AS t
+          FROM personel_odeme o
+          WHERE UPPER(COALESCE(o.firma,'ERC'))=$1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2
+        ) x GROUP BY 1`, [marka, DEVIR]),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
         FROM arac_kira_odemeler o
         WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
@@ -17584,7 +17610,17 @@ app.get("/hr/is-avans/bakiye", authMiddleware, async (req, res) => {
     );
     const avans = Number(avansRes.rows[0].toplam) + Number(avansResFallback.rows[0].toplam);
     const masraf = Number(masrafRes.rows[0].toplam);
-    res.json({ avans, masraf, bakiye: avans - masraf });
+    // Personel ödemeleri: şirketin masraf alacağını ödemesi (+) / avans iadesi (−)
+    let odeme = 0, iade = 0;
+    try {
+      const po = await pool.query(
+        `SELECT COALESCE(SUM(CASE WHEN tip='MASRAF_ODEME' THEN tutar ELSE 0 END),0) AS odeme,
+                COALESCE(SUM(CASE WHEN tip='AVANS_IADE' THEN tutar ELSE 0 END),0) AS iade
+         FROM personel_odeme o LEFT JOIN personel p ON p.id=o.personel_id
+         WHERE LOWER(COALESCE(o.email,''))=LOWER($1) OR LOWER(COALESCE(p.email,''))=LOWER($1)`, [email]);
+      odeme = Number(po.rows[0].odeme); iade = Number(po.rows[0].iade);
+    } catch {}
+    res.json({ avans, masraf, odeme, iade, bakiye: avans + odeme - masraf - iade });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -17599,8 +17635,17 @@ app.get("/hr/is-avans/bakiyeler", authMiddleware, async (req, res) => {
       SELECT p.id, p.ad_soyad, p.aktif, COALESCE(p.marka,'ERC') AS marka,
         COALESCE(av.toplam,0) AS avans,
         COALESCE(ms.toplam,0) AS masraf,
-        COALESCE(av.toplam,0) - COALESCE(ms.toplam,0) AS bakiye
+        COALESCE(po.odeme,0) AS odeme,
+        COALESCE(po.iade,0) AS iade,
+        COALESCE(av.toplam,0) + COALESCE(po.odeme,0) - COALESCE(ms.toplam,0) - COALESCE(po.iade,0) AS bakiye
       FROM personel p
+      LEFT JOIN (
+        SELECT COALESCE(o.personel_id, p2.id) AS pid,
+               SUM(CASE WHEN o.tip='MASRAF_ODEME' THEN o.tutar ELSE 0 END) AS odeme,
+               SUM(CASE WHEN o.tip='AVANS_IADE' THEN o.tutar ELSE 0 END) AS iade
+        FROM personel_odeme o LEFT JOIN personel p2 ON LOWER(p2.email)=LOWER(COALESCE(o.email,''))
+        GROUP BY 1
+      ) po ON po.pid = p.id
       LEFT JOIN (
         SELECT personel_id, SUM(tutar) AS toplam
         FROM is_avans_talep
@@ -17613,11 +17658,79 @@ app.get("/hr/is-avans/bakiyeler", authMiddleware, async (req, res) => {
         WHERE mf.durum='ARSIVLENDI'
         GROUP BY 1
       ) ms ON ms.email = LOWER(COALESCE(p.email,''))
-      WHERE COALESCE(av.toplam,0) <> 0 OR COALESCE(ms.toplam,0) <> 0
+      WHERE COALESCE(av.toplam,0) <> 0 OR COALESCE(ms.toplam,0) <> 0 OR COALESCE(po.odeme,0) <> 0 OR COALESCE(po.iade,0) <> 0
       ORDER BY bakiye ASC, p.ad_soyad ASC
     `);
     res.json({ ok: true, rows: r.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── Personel ödemeleri (10.09.2026) ──────────────────────────────────────
+   İş avansı olmadan yapılan masrafların ödenmesi (MASRAF_ODEME): personel
+   masraf formunu doldurur, arşivlenince bakiyesi eksiye iner (şirket borçlu);
+   muhasebe buradan ödeme girer, bakiye kapanır. AVANS_IADE: personel artan
+   avansı kasaya geri verir. Bakiye kuralı her yerde aynı:
+   bakiye = TAMAMLANDI avans + MASRAF_ODEME − ARSIVLENDI masraf − AVANS_IADE.
+   MASRAF_ODEME nakit akışında iş avansıyla aynı yerde gider yazılır. */
+pool.query(`CREATE TABLE IF NOT EXISTS personel_odeme (
+  id SERIAL PRIMARY KEY,
+  personel_id INTEGER,
+  email TEXT,
+  ad TEXT,
+  tip TEXT NOT NULL DEFAULT 'MASRAF_ODEME',
+  tutar NUMERIC NOT NULL,
+  tarih DATE NOT NULL DEFAULT CURRENT_DATE,
+  aciklama TEXT,
+  firma TEXT,
+  yontem TEXT DEFAULT 'HAVALE',
+  masraf_form_id INTEGER,
+  created_by TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`).then(() => pool.query(`ALTER TABLE personel_odeme ENABLE ROW LEVEL SECURITY`).catch(() => {})).catch(() => {});
+
+app.get("/hr/personel-odeme", authMiddleware, async (req, res) => {
+  try {
+    const tam = avansTamGorus(req);
+    const email = tam ? String(req.query.email || "").toLowerCase().trim() : String(req.user?.email || "").toLowerCase().trim();
+    const r = await pool.query(
+      `SELECT o.*, to_char(o.tarih,'YYYY-MM-DD') AS tarih_str, p.ad_soyad, p.marka AS personel_marka
+       FROM personel_odeme o LEFT JOIN personel p ON p.id = o.personel_id
+       WHERE ($1 = '' OR LOWER(COALESCE(o.email,'')) = $1 OR LOWER(COALESCE(p.email,'')) = $1)
+       ORDER BY o.tarih DESC, o.id DESC`, [email]);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/hr/personel-odeme", authMiddleware, async (req, res) => {
+  try {
+    if (!avansTamGorus(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const { personel_id, email, tip, tutar, tarih, aciklama, firma, yontem, masraf_form_id } = req.body || {};
+    const t = Number(tutar || 0);
+    if (!(t > 0)) return res.status(400).json({ ok: false, error: "Geçerli tutar girin" });
+    const tipN = String(tip || "MASRAF_ODEME").toUpperCase() === "AVANS_IADE" ? "AVANS_IADE" : "MASRAF_ODEME";
+    let pid = personel_id ? Number(personel_id) : null, em = String(email || "").toLowerCase().trim(), ad = null, fir = firma;
+    if (pid) {
+      const pr = await pool.query(`SELECT id, ad_soyad, email, marka FROM personel WHERE id=$1`, [pid]);
+      if (!pr.rows[0]) return res.status(400).json({ ok: false, error: "Personel bulunamadı" });
+      em = String(pr.rows[0].email || em || "").toLowerCase().trim(); ad = pr.rows[0].ad_soyad;
+      if (!fir) fir = String(pr.rows[0].marka || "ERC").toUpperCase() === "AHY" ? "AHY" : "ERC";
+    }
+    if (!pid && !em) return res.status(400).json({ ok: false, error: "Personel seçin" });
+    const r = await pool.query(
+      `INSERT INTO personel_odeme (personel_id, email, ad, tip, tutar, tarih, aciklama, firma, yontem, masraf_form_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),$7,$8,$9,$10,$11) RETURNING *`,
+      [pid, em || null, ad, tipN, t, tarih || null, aciklama || null,
+       String(fir || "ERC").toUpperCase() === "AHY" ? "AHY" : "ERC",
+       String(yontem || "HAVALE").toUpperCase() === "NAKIT" ? "NAKIT" : "HAVALE",
+       masraf_form_id ? Number(masraf_form_id) : null, String(req.user?.email || "")]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/hr/personel-odeme/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!avansTamGorus(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const r = await pool.query(`DELETE FROM personel_odeme WHERE id=$1 RETURNING *`, [req.params.id]);
+    res.json({ ok: true, silinen: r.rows[0] || null });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.get("/hr/is-avans", authMiddleware, async (req, res) => {
@@ -18345,7 +18458,16 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       [queryEmail]
     );
     const masrafToplamArsiv    = Number(bakiyeMasrafRes.rows[0].toplam);
-    const avansKalan           = avansToplamOnaylanan - masrafToplamArsiv;
+    // Personel ödemeleri (masraf alacağı ödemesi + / avans iadesi −) — web bakiyesiyle aynı kural
+    let personelOdemeNet = 0;
+    try {
+      const po = await pool.query(
+        `SELECT COALESCE(SUM(CASE WHEN tip='MASRAF_ODEME' THEN tutar ELSE -tutar END),0) AS net
+         FROM personel_odeme o LEFT JOIN personel p ON p.id=o.personel_id
+         WHERE LOWER(COALESCE(o.email,''))=LOWER($1) OR LOWER(COALESCE(p.email,''))=LOWER($1)`, [queryEmail]);
+      personelOdemeNet = Number(po.rows[0].net || 0);
+    } catch {}
+    const avansKalan           = avansToplamOnaylanan + personelOdemeNet - masrafToplamArsiv;
 
     // 7. Bekleyen masraf toplam tutarı (sadece onaya gönderilmiş formlar — TASLAK hariç)
     const ONAY_DURUMLAR = ['ROLLOUT_BEKLE','MUHASEBE_BEKLE','PM_BEKLE','DIREKTOR_BEKLE'];

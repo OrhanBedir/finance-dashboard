@@ -20509,6 +20509,11 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
   const [avansBakiye, setAvansBakiye] = useState(null);
   const [bakiyeler, setBakiyeler] = useState([]); // personel bazlı avans−masraf bakiyeleri (yönetici)
   const [bakiyelerAcik, setBakiyelerAcik] = useState(false);
+  // 10.09.2026: personel ödemeleri (masraf alacağı ödemesi / avans iadesi)
+  const [odemeler, setOdemeler] = useState([]);
+  const [odemelerAcik, setOdemelerAcik] = useState(false);
+  const [odemeModal, setOdemeModal] = useState(null); // {personel_id, tip, tutar, tarih, aciklama, firma, yontem}
+  const [odemeSaving, setOdemeSaving] = useState(false);
   const [aracPlakalari, setAracPlakalari] = useState([]); // plaka alanı için öneri listesi
   const [notTooltip, setNotTooltip] = useState({ visible: false, x: 0, y: 0, aciklama: "", not_aciklama: "" });
   const [editAvansModal, setEditAvansModal] = useState(null); // { id, tutar, orijinalTutar }
@@ -20570,8 +20575,45 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
         // Alt marka yalnız kendi personelinin bakiyelerini görür
         if (rb.ok) setBakiyeler(_altMarka ? rows.filter(b => String(b.marka || "ERC").toUpperCase() === _marka) : rows);
       } catch {}
+      try {
+        const ro = await fetch(`${API_BASE}/hr/personel-odeme`, { headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}` } });
+        const dor = await ro.json().catch(() => ({}));
+        const orows = Array.isArray(dor.rows) ? dor.rows : [];
+        if (ro.ok) setOdemeler(_altMarka ? orows.filter(o => String(o.firma || "ERC").toUpperCase() === _marka) : orows);
+      } catch {}
     }
   };
+  const odemeAc = (b, tipOn) => {
+    const bk = Number(b?.bakiye || 0);
+    const tip = tipOn || (bk > 0 ? "AVANS_IADE" : "MASRAF_ODEME");
+    setOdemeModal({ personel_id: b?.id ? String(b.id) : "", tip, tutar: bk !== 0 ? String(Math.round(Math.abs(bk) * 100) / 100) : "",
+      tarih: new Date().toISOString().slice(0, 10), aciklama: "", firma: _altMarka ? _marka : (String(b?.marka || "ERC").toUpperCase() === "AHY" ? "AHY" : "ERC"), yontem: "HAVALE" });
+  };
+  const odemeKaydet = async () => {
+    const m = odemeModal; if (!m) return;
+    const t = Number(String(m.tutar).replace(/\./g, "").replace(",", ".")) || Number(m.tutar) || 0;
+    if (!m.personel_id) { alert("Personel seçin"); return; }
+    if (!(t > 0)) { alert("Geçerli tutar girin"); return; }
+    setOdemeSaving(true);
+    try {
+      const r = await fetch(`${API_BASE}/hr/personel-odeme`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")||""}` },
+        body: JSON.stringify({ ...m, tutar: t }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Kaydedilemedi");
+      setOdemeModal(null); setOdemelerAcik(true);
+      await loadBakiye();
+    } catch (e) { alert(e.message); }
+    setOdemeSaving(false);
+  };
+  const odemeSil = async (o) => {
+    if (!window.confirm(`${o.ad_soyad || o.ad || o.email} — ₺${Number(o.tutar).toLocaleString("tr-TR")} (${o.tip === "AVANS_IADE" ? "avans iadesi" : "masraf ödemesi"}) silinsin mi?`)) return;
+    try {
+      const r = await fetch(`${API_BASE}/hr/personel-odeme/${o.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}` } });
+      if (!r.ok) throw new Error("Silinemedi");
+      await loadBakiye();
+    } catch (e) { alert(e.message); }
+  };
+  const canPay = isMuhasebe || isPM || isDirektor || isNurcan || _altMarkaYonetici;
 
   const load = async () => {
     // Requester kendi avanslarını + kendisi için açılanları görsün; admin tümünü görsün
@@ -20822,7 +20864,7 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
               {avansBakiye.bakiye < 0 ? "-" : ""}₺{Math.abs(avansBakiye.bakiye).toLocaleString("tr-TR", { minimumFractionDigits:2, maximumFractionDigits:2 })}
             </div>
             <div style={{ fontSize:"11px", color:"#6b7280", marginTop:"4px" }}>
-              Toplam avans: ₺{Number(avansBakiye.avans).toLocaleString("tr-TR")} · Arşivlenen masraf: ₺{Number(avansBakiye.masraf).toLocaleString("tr-TR")}
+              Toplam avans: ₺{Number(avansBakiye.avans).toLocaleString("tr-TR")}{Number(avansBakiye.odeme || 0) > 0 ? ` · Masraf ödemesi: ₺${Number(avansBakiye.odeme).toLocaleString("tr-TR")}` : ""} · Arşivlenen masraf: ₺{Number(avansBakiye.masraf).toLocaleString("tr-TR")}{Number(avansBakiye.iade || 0) > 0 ? ` · Avans iadesi: ₺${Number(avansBakiye.iade).toLocaleString("tr-TR")}` : ""}
             </div>
           </div>
         </div>
@@ -20858,8 +20900,10 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                   <tr style={{ background:"#f8fafc" }}>
                     <th style={{ padding:"8px 14px", textAlign:"left", fontWeight:700, color:"#374151", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>Personel</th>
                     <th style={{ padding:"8px 14px", textAlign:"right", fontWeight:700, color:"#b45309", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>🏗 Toplam İş Avansı</th>
+                    <th style={{ padding:"8px 14px", textAlign:"right", fontWeight:700, color:"#0f766e", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>💸 Masraf Ödemesi</th>
                     <th style={{ padding:"8px 14px", textAlign:"right", fontWeight:700, color:"#7c3aed", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>🗂 Arşivlenen Masraf</th>
                     <th style={{ padding:"8px 14px", textAlign:"right", fontWeight:700, color:"#374151", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>Kalan Bakiye</th>
+                    {canPay && <th style={{ padding:"8px 14px", borderBottom:"1.5px solid #e5e7eb" }}></th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -20873,6 +20917,9 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                         <td style={{ padding:"7px 14px", textAlign:"right", color: Number(b.avans) > 0 ? "#b45309" : "#9ca3af", fontWeight:600 }}>
                           {Number(b.avans) > 0 ? `₺${Number(b.avans).toLocaleString("tr-TR")}` : "—"}
                         </td>
+                        <td style={{ padding:"7px 14px", textAlign:"right", color: Number(b.odeme) > 0 ? "#0f766e" : "#9ca3af", fontWeight:600 }}>
+                          {Number(b.odeme) > 0 ? `₺${Number(b.odeme).toLocaleString("tr-TR")}` : "—"}{Number(b.iade) > 0 ? <span title="Avans iadesi" style={{ fontSize:"10px", color:"#6b7280", marginLeft:"4px" }}>(iade ₺{Number(b.iade).toLocaleString("tr-TR")})</span> : null}
+                        </td>
                         <td style={{ padding:"7px 14px", textAlign:"right", color: Number(b.masraf) > 0 ? "#7c3aed" : "#9ca3af", fontWeight:600 }}>
                           {Number(b.masraf) > 0 ? `₺${Number(b.masraf).toLocaleString("tr-TR")}` : "—"}
                         </td>
@@ -20881,6 +20928,12 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
                           {bk < 0 && <span style={{ marginLeft:"6px", background:"#fef2f2", color:"#b91c1c", border:"1px solid #fecaca", borderRadius:"6px", padding:"1px 6px", fontSize:"10px", fontWeight:700 }}>personel alacaklı</span>}
                           {bk > 0 && <span style={{ marginLeft:"6px", background:"#f0fdf4", color:"#15803d", border:"1px solid #bbf7d0", borderRadius:"6px", padding:"1px 6px", fontSize:"10px", fontWeight:700 }}>avans açık</span>}
                         </td>
+                        {canPay && (
+                          <td style={{ padding:"7px 14px", textAlign:"right", whiteSpace:"nowrap" }}>
+                            {bk < 0 && <button onClick={() => odemeAc(b, "MASRAF_ODEME")} title="Şirketin personele masraf alacağını ödemesi" style={{ padding:"4px 10px", background:"#0f766e", color:"#fff", border:"none", borderRadius:"8px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>💸 Öde</button>}
+                            {bk > 0 && <button onClick={() => odemeAc(b, "AVANS_IADE")} title="Personelin artan avansı kasaya iade etmesi" style={{ padding:"4px 10px", background:"#f3f4f6", color:"#374151", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>↩ İade al</button>}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -20888,6 +20941,111 @@ function IsAvansPanel({ currentUser, onPendingCount }) {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Personel ödemeleri: masraf alacağı ödemesi / avans iadesi (10.09.2026) */}
+      {!isRequester && (
+        <div style={{ background:"#fff", border:"1px solid #e5e7eb", borderRadius:"14px", marginBottom:"16px", overflow:"hidden" }}>
+          <div onClick={() => setOdemelerAcik(v => !v)}
+            style={{ padding:"13px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", background:"#f0fdfa", borderBottom: odemelerAcik ? "1px solid #e5e7eb" : "none" }}>
+            <div>
+              <span style={{ fontWeight:800, fontSize:"14px", color:"#111827" }}>💸 Personel Ödemeleri</span>
+              <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"10px" }}>Avanssız masrafların ödemesi ve avans iadeleri · bakiyeye ve nakit akışına işler</span>
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:"10px" }} onClick={e => e.stopPropagation()}>
+              <span style={{ fontSize:"12px", color:"#0f766e", fontWeight:700 }}>{odemeler.length} kayıt · ₺{odemeler.filter(o => o.tip !== "AVANS_IADE").reduce((sm, o) => sm + Number(o.tutar || 0), 0).toLocaleString("tr-TR")}</span>
+              {canPay && <button onClick={() => odemeAc(null, "MASRAF_ODEME")} style={{ padding:"6px 12px", background:"#0f766e", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>+ Ödeme Gir</button>}
+              <span onClick={() => setOdemelerAcik(v => !v)} style={{ fontSize:"13px", color:"#6b7280", cursor:"pointer" }}>{odemelerAcik ? "▲" : "▼"}</span>
+            </div>
+          </div>
+          {odemelerAcik && (
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px" }}>
+                <thead><tr style={{ background:"#f8fafc" }}>
+                  {["Tarih", "Personel", "Tür", "Tutar", "Firma", "Yöntem", "Açıklama", "Giren", ""].map((h, i) => (
+                    <th key={h + i} style={{ padding:"8px 14px", textAlign: i === 3 ? "right" : "left", fontWeight:700, color:"#374151", borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {odemeler.length === 0 && <tr><td colSpan={9} style={{ padding:"18px", textAlign:"center", color:"#9ca3af" }}>Henüz kayıt yok</td></tr>}
+                  {odemeler.map((o, i) => (
+                    <tr key={o.id} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                      <td style={{ padding:"7px 14px", whiteSpace:"nowrap" }}>{String(o.tarih_str || o.tarih || "").slice(0, 10).split("-").reverse().join(".")}</td>
+                      <td style={{ padding:"7px 14px", fontWeight:600 }}>{o.ad_soyad || o.ad || o.email}</td>
+                      <td style={{ padding:"7px 14px" }}>{o.tip === "AVANS_IADE"
+                        ? <span style={{ background:"#f3f4f6", color:"#374151", borderRadius:"6px", padding:"2px 8px", fontSize:"11px", fontWeight:700 }}>Avans iadesi</span>
+                        : <span style={{ background:"#ccfbf1", color:"#0f766e", borderRadius:"6px", padding:"2px 8px", fontSize:"11px", fontWeight:700 }}>Masraf ödemesi</span>}</td>
+                      <td style={{ padding:"7px 14px", textAlign:"right", fontWeight:800, color: o.tip === "AVANS_IADE" ? "#374151" : "#0f766e" }}>{o.tip === "AVANS_IADE" ? "−" : ""}₺{Number(o.tutar).toLocaleString("tr-TR")}</td>
+                      <td style={{ padding:"7px 14px" }}>{String(o.firma || "ERC").toUpperCase() === "AHY" ? "AHY" : "ŞİMŞEK"}</td>
+                      <td style={{ padding:"7px 14px" }}>{o.yontem === "NAKIT" ? "Nakit" : "Havale"}</td>
+                      <td style={{ padding:"7px 14px", color:"#6b7280" }}>{o.aciklama || ""}</td>
+                      <td style={{ padding:"7px 14px", color:"#9ca3af", fontSize:"11px" }}>{String(o.created_by || "").split("@")[0]}</td>
+                      <td style={{ padding:"7px 14px", textAlign:"right" }}>{canPay && <button onClick={() => odemeSil(o)} title="Sil" style={{ background:"none", border:"none", cursor:"pointer", fontSize:"14px" }}>🗑</button>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+      {odemeModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:700, padding:"16px" }} onClick={() => !odemeSaving && setOdemeModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"520px", padding:"24px" }}>
+            <h3 style={{ margin:"0 0 4px", fontSize:"17px", fontWeight:800, color:"#111827" }}>{odemeModal.tip === "AVANS_IADE" ? "↩ Avans İadesi Al" : "💸 Masraf Ödemesi Yap"}</h3>
+            <div style={{ fontSize:"12px", color:"#6b7280", marginBottom:"16px" }}>{odemeModal.tip === "AVANS_IADE" ? "Personel artan iş avansını kasaya geri veriyor; bakiyesi düşer." : "Şirket, personelin avanssız yaptığı masrafı (eksi bakiye) ödüyor; bakiye sıfıra yaklaşır, nakit akışında gider görünür."}</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px" }}>
+              <div style={{ gridColumn:"1/-1" }}>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Personel *</label>
+                <select value={odemeModal.personel_id} onChange={e => { const p = personelList.find(x => String(x.id) === e.target.value); setOdemeModal(m => ({ ...m, personel_id: e.target.value, firma: _altMarka ? _marka : (String(p?.marka || "ERC").toUpperCase() === "AHY" ? "AHY" : "ERC") })); }}
+                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", background:"#fff" }}>
+                  <option value="">Seçin</option>
+                  {personelList.filter(p => p.aktif !== false || String(p.id) === String(odemeModal.personel_id)).slice().sort((a, b) => String(a.ad_soyad).localeCompare(String(b.ad_soyad), "tr")).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
+                </select>
+                {(() => { const b = bakiyeler.find(x => String(x.id) === String(odemeModal.personel_id)); if (!b) return null; const bk = Number(b.bakiye || 0); return <div style={{ fontSize:"12px", marginTop:"6px", color: bk < 0 ? "#b91c1c" : "#15803d", fontWeight:600 }}>Mevcut bakiye: {bk < 0 ? "−" : ""}₺{Math.abs(bk).toLocaleString("tr-TR", { minimumFractionDigits:2 })} {bk < 0 ? "(şirket personele borçlu)" : bk > 0 ? "(personelde açık avans)" : ""}</div>; })()}
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Tür</label>
+                <select value={odemeModal.tip} onChange={e => setOdemeModal(m => ({ ...m, tip: e.target.value }))} style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", background:"#fff" }}>
+                  <option value="MASRAF_ODEME">Masraf ödemesi (şirket → personel)</option>
+                  <option value="AVANS_IADE">Avans iadesi (personel → kasa)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Tutar (₺) *</label>
+                <input value={odemeModal.tutar} onChange={e => setOdemeModal(m => ({ ...m, tutar: e.target.value }))} placeholder="0" style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Tarih</label>
+                <input type="date" value={odemeModal.tarih} onChange={e => setOdemeModal(m => ({ ...m, tarih: e.target.value }))} style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+              </div>
+              <div>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Yöntem</label>
+                <select value={odemeModal.yontem} onChange={e => setOdemeModal(m => ({ ...m, yontem: e.target.value }))} style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", background:"#fff" }}>
+                  <option value="HAVALE">Havale / EFT</option>
+                  <option value="NAKIT">Nakit</option>
+                </select>
+              </div>
+              {!_altMarka && (
+                <div>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Ödeyen firma</label>
+                  <select value={odemeModal.firma} onChange={e => setOdemeModal(m => ({ ...m, firma: e.target.value }))} style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", background:"#fff" }}>
+                    <option value="ERC">ŞİMŞEK</option>
+                    <option value="AHY">AHY</option>
+                  </select>
+                </div>
+              )}
+              <div style={{ gridColumn:"1/-1" }}>
+                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Açıklama</label>
+                <input value={odemeModal.aciklama} onChange={e => setOdemeModal(m => ({ ...m, aciklama: e.target.value }))} placeholder="Örn. Ağustos masraf formu alacağı" style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:"10px", justifyContent:"flex-end", marginTop:"18px" }}>
+              <button onClick={() => setOdemeModal(null)} disabled={odemeSaving} style={{ padding:"9px 16px", background:"#f3f4f6", border:"1px solid #d1d5db", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>Vazgeç</button>
+              <button onClick={odemeKaydet} disabled={odemeSaving} style={{ padding:"9px 16px", background:"#0f766e", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>{odemeSaving ? "Kaydediliyor…" : "✓ Kaydet"}</button>
+            </div>
+          </div>
         </div>
       )}
 
