@@ -17575,6 +17575,20 @@ const AVANS_TAM_GORUS = [
   "serdar.altinova@simsektel.com", "murat.istek@simsektel.com",
   "info@ahyelektrik.com",
 ];
+/* 10.09.2026: PM'in (Orhan Bedir) kişisel finansal kayıtları — masraf formu
+   listesindeki kuralla aynı: kendisi, direktör ve muhasebe görür; rollout
+   müdürü dahil alt kademeler görmez. Bakiye, ödeme ve hesap ekstresi için. */
+const PM_KISISEL_EMAIL = "orhan.bedir@simsektel.com";
+function pmKisiselGorur(req) {
+  const email = String(req.user?.email || "").toLowerCase().trim();
+  const rol = String(req.user?.role || "").toLowerCase();
+  return email === PM_KISISEL_EMAIL
+    || email === "duzgun.simsek@simsektel.com"
+    || email === "muhasebe@simsektel.com"
+    || email === "tugce.yelmen@simsektel.com"
+    || ["direktor", "muhasebe", "platform_admin"].includes(rol);
+}
+
 function avansTamGorus(req) {
   const email = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
@@ -17587,6 +17601,8 @@ app.get("/hr/is-avans/bakiye", authMiddleware, async (req, res) => {
     // Personel yalnız kendi bakiyesini sorgulayabilir
     const email = avansTamGorus(req) ? (req.query.email || req.user.email) : req.user.email;
     if (!email) return res.status(400).json({ error: "email gerekli" });
+    if (String(email).toLowerCase().trim() === PM_KISISEL_EMAIL && !pmKisiselGorur(req))
+      return res.status(403).json({ error: "Bu bakiyeyi görme yetkiniz yok" });
     // Avans: kişi PERSONEL olarak atandıysa ona göre say (talep eden değil, alıcı)
     const avansRes = await pool.query(
       `SELECT COALESCE(SUM(t.tutar),0) as toplam
@@ -17658,9 +17674,10 @@ app.get("/hr/is-avans/bakiyeler", authMiddleware, async (req, res) => {
         WHERE mf.durum='ARSIVLENDI'
         GROUP BY 1
       ) ms ON ms.email = LOWER(COALESCE(p.email,''))
-      WHERE COALESCE(av.toplam,0) <> 0 OR COALESCE(ms.toplam,0) <> 0 OR COALESCE(po.odeme,0) <> 0 OR COALESCE(po.iade,0) <> 0
+      WHERE (COALESCE(av.toplam,0) <> 0 OR COALESCE(ms.toplam,0) <> 0 OR COALESCE(po.odeme,0) <> 0 OR COALESCE(po.iade,0) <> 0)
+        AND ($1::bool OR LOWER(COALESCE(p.email,'')) <> $2)
       ORDER BY bakiye ASC, p.ad_soyad ASC
-    `);
+    `, [pmKisiselGorur(req), PM_KISISEL_EMAIL]);
     res.json({ ok: true, rows: r.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -17697,6 +17714,8 @@ app.get("/hr/is-avans/hesap", authMiddleware, async (req, res) => {
   try {
     const email = (avansTamGorus(req) ? (req.query.email || req.user.email) : req.user.email || "").toLowerCase().trim();
     if (!email) return res.status(400).json({ ok: false, error: "email gerekli" });
+    if (email === PM_KISISEL_EMAIL && !pmKisiselGorur(req))
+      return res.status(403).json({ ok: false, error: "Bu hesabın ekstresini görme yetkiniz yok" });
     const [av, mf, po, avBek, mfBek] = await Promise.all([
       pool.query(`SELECT t.id, COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi, t.direktor_onay_tarihi, t.tarih)::date AS tarih,
           t.tutar, COALESCE(t.gider_turu,'') AS gider_turu, COALESCE(t.aciklama,'') AS aciklama,
@@ -17762,7 +17781,8 @@ app.get("/hr/personel-odeme", authMiddleware, async (req, res) => {
       `SELECT o.*, to_char(o.tarih,'YYYY-MM-DD') AS tarih_str, p.ad_soyad, p.marka AS personel_marka
        FROM personel_odeme o LEFT JOIN personel p ON p.id = o.personel_id
        WHERE ($1 = '' OR LOWER(COALESCE(o.email,'')) = $1 OR LOWER(COALESCE(p.email,'')) = $1)
-       ORDER BY o.tarih DESC, o.id DESC`, [email]);
+         AND ($2::bool OR LOWER(COALESCE(o.email, p.email, '')) <> $3)
+       ORDER BY o.tarih DESC, o.id DESC`, [email, pmKisiselGorur(req), PM_KISISEL_EMAIL]);
     res.json({ ok: true, rows: r.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -17781,6 +17801,8 @@ app.post("/hr/personel-odeme", authMiddleware, async (req, res) => {
       if (!fir) fir = String(pr.rows[0].marka || "ERC").toUpperCase() === "AHY" ? "AHY" : "ERC";
     }
     if (!pid && !em) return res.status(400).json({ ok: false, error: "Personel seçin" });
+    if (em === PM_KISISEL_EMAIL && !pmKisiselGorur(req))
+      return res.status(403).json({ ok: false, error: "Bu personel için ödeme girme yetkiniz yok" });
     const r = await pool.query(
       `INSERT INTO personel_odeme (personel_id, email, ad, tip, tutar, tarih, aciklama, firma, yontem, masraf_form_id, created_by)
        VALUES ($1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),$7,$8,$9,$10,$11) RETURNING *`,

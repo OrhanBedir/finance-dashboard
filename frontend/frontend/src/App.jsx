@@ -18955,7 +18955,7 @@ const MASRAF_KATEGORILER = [
   { key: "TRAFIK_CEZA", label: "🚔 Trafik Cezası",        aciklamaPlaceholder: "Ceza detayı",                    belgeAciklamaPlaceholder: "Ceza belgesi açıklaması...", isTrafikCeza: true },
 ];
 
-function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initialDurum = "" }) {
+function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initialDurum = "", initialFormId = null }) {
   const isPM       = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com" || currentUser?.role === "muhasebe";
@@ -19068,6 +19068,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
   };
 
   useEffect(() => { load(); loadPersonel(); }, []);
+  /* 10.09.2026: Genel Bakış kuyruğundaki "İncele" doğrudan formun detayını açsın —
+     eskiden yalnız sekme değişiyor, kullanıcı formu listede aramak zorunda kalıyordu. */
+  useEffect(() => { if (initialFormId) loadDetail(initialFormId); }, [initialFormId]);
   useEffect(() => { if (nfPersonelId) loadBakiye(nfPersonelId); }, [nfPersonelId]);
 
   // Reload kalemler when activeForm changes
@@ -20486,6 +20489,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPendingAvans, onPendingMasraf }) {
   const [tab, setTab] = useState(initialTab);
   useEffect(() => { setTab(initialTab); }, [initialTab]);
+  useEffect(() => { if (tab !== "masraf") setInceleFormId(null); }, [tab]);
   const _email = String(currentUser?.email || "").toLowerCase().trim();
   const _role = String(currentUser?.role || "").toLowerCase();
   const isPM = _email === "orhan.bedir@simsektel.com";
@@ -20506,6 +20510,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
   const [bakiye, setBakiye] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [firmaSec, setFirmaSec] = useState(null); // {id, path}
+  const [inceleFormId, setInceleFormId] = useState(null); // kuyruktan "İncele" ile açılan masraf formu
   const [hesap, setHesap] = useState(null);        // kişisel ekstre (/hr/is-avans/hesap)
   const [hesapKisi, setHesapKisi] = useState("");  // yönetici başka personelin ekstresine bakabilir
   const [tazele, setTazele] = useState(0);
@@ -20724,7 +20729,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
                         <td style={td}>{(() => { const g = gun(r.tarih); return <span style={pill(g >= 5 ? "#fee2e2" : g >= 3 ? "#fef3c7" : "#f3f5f8", g >= 5 ? "#b91c1c" : g >= 3 ? "#b45309" : "#6b7a90")}>{g === 0 ? "bugün" : `${g} gün`}</span>; })()}</td>
                         <td style={{ ...td, whiteSpace:"nowrap", textAlign:"right" }}>
                           {!isRequester && r.tip === "AVANS" && <><button onClick={() => avansOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>✓ Onayla</button> <button onClick={() => avansReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}
-                          {!isRequester && r.tip === "MASRAF" && <><button onClick={() => setTab("masraf")} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>İncele</button> <button onClick={() => masrafOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.arsiv ? "💸 Ödendi · Arşivle" : "✓ Onayla"}</button>{(isPM || isDirektor) && !r.arsiv && <> <button onClick={() => masrafReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
+                          {!isRequester && r.tip === "MASRAF" && <><button onClick={() => { setInceleFormId(r.id); setTab("masraf"); }} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>İncele</button> <button onClick={() => masrafOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.arsiv ? "💸 Ödendi · Arşivle" : "✓ Onayla"}</button>{(isPM || isDirektor) && !r.arsiv && <> <button onClick={() => masrafReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
                           {isRequester && <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[r.durum] || r.durum}</span>}
                         </td>
                       </tr>
@@ -20873,7 +20878,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
         );
       })()}
       {tab === "avans" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={onPendingAvans} embedded mode="liste" /></div>}
-      {tab === "masraf" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={onPendingMasraf} embedded /></div>}
+      {tab === "masraf" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={onPendingMasraf} embedded initialFormId={inceleFormId} /></div>}
       {tab === "odemeler" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={() => {}} embedded mode="odemeler" /></div>}
       {tab === "arsiv" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={() => {}} embedded initialDurum="ARSIVLENDI" /></div>}
 
