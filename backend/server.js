@@ -18246,7 +18246,7 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
 
     const ws = wb.addWorksheet("İş Avansı Talepleri");
 
-    let { email, durum, gider_turu, bolge, proje, baslangic, bitis, firma } = req.query;
+    let { email, durum, gider_turu, bolge, proje, baslangic, bitis, firma, ara, ara_kapsam } = req.query;
     let personelKilidi = null; // personel: yalnız kendi kayıtları (talep eden VEYA adına açılan)
     if (!avansTamGorus(req)) { email = null; personelKilidi = String(req.user.email || "").toLowerCase(); }
     const conditions = [];
@@ -18272,10 +18272,29 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
       ORDER BY t.tarih DESC, t.created_at DESC
     `, params);
 
+    // 11.09.2026 (Orhan): paneldeki arama Excel'e de uygulanır. Varsayılan kapsam "KIME" =
+    // avansın üzerinde olduğu kişi (personel seçilmemişse talep eden kendisi). Türkçe
+    // karakter duyarsız: "beyazit" → "Beyazıt".
+    const trNorm = (v) => String(v || "").toLocaleLowerCase("tr-TR")
+      .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const kimeAd = (t) => t.personel_ad || t.talep_eden_ad || "";
+    const araN = trNorm(ara);
+    if (araN) {
+      const kap = String(ara_kapsam || "KIME").toUpperCase();
+      list.rows = list.rows.filter((t) => {
+        const kime = trNorm(kimeAd(t)), talep = trNorm(t.talep_eden_ad);
+        if (kap === "KIME") return kime.includes(araN);
+        if (kap === "TALEP_EDEN") return talep.includes(araN);
+        return kime.includes(araN) || talep.includes(araN) || trNorm(t.aciklama).includes(araN);
+      });
+    }
+
     // Title row
     ws.mergeCells("A1:O1");
     const titleCell = ws.getCell("A1");
-    titleCell.value = "İŞ AVANSI TALEP RAPORU";
+    const _baslikEk = [ara && String(ara).trim(), gider_turu, bolge, proje, baslangic || bitis ? `${baslangic || "…"} – ${bitis || "…"}` : ""].filter(Boolean).join(" · ");
+    titleCell.value = "İŞ AVANSI TALEP RAPORU" + (_baslikEk ? " — " + _baslikEk : "");
     titleCell.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" }, name: "Arial" };
     titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
@@ -18286,7 +18305,7 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
       { header: "Kayıt No",         key: "id",         width: 10 },
       { header: "Tarih",            key: "tarih",       width: 13 },
       { header: "Talep Eden",       key: "talep_eden",  width: 20 },
-      { header: "Personel",         key: "personel",    width: 20 },
+      { header: "Personel (Avans Sahibi)", key: "personel", width: 24 },
       { header: "Gider Türü",       key: "gider",       width: 16 },
       { header: "Bölge",            key: "bolge",       width: 13 },
       { header: "Proje",            key: "proje",       width: 18 },
@@ -18332,7 +18351,7 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
         t.id,
         fmtDate(t.tarih),
         t.talep_eden_ad || "",
-        t.personel_ad || "",
+        kimeAd(t), // personel kendisi için talep ettiyse talep eden = avans sahibi
         t.gider_turu || "",
         t.bolge || "",
         t.proje || "",
@@ -18391,7 +18410,9 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
     totRow.height = 20;
 
     // Freeze panes: freeze title + header
-    ws.views = [{ state: "frozen", xSplit: 0, ySplit: 2, topLeftCell: "A3" }];
+    ws.views = [{ state: "frozen", xSplit: 0, ySplit: 2, topLeftCell: "A3", showGridLines: false }];
+    // Excel içinde de sütun filtresi (Personel/Gider Türü seçerek süzmek için)
+    ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: Math.max(2, list.rows.length + 2), column: colDefs.length } };
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename=is_avans_talepleri.xlsx`);

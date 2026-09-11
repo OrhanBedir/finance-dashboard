@@ -21105,13 +21105,18 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   // (Personel seçilmişse o, seçilmemişse talep eden). "Nurcan" yazınca Nurcan'ın
   // başkaları için açtığı talepler değil, Nurcan'ın ÜZERİNDEKİ avanslar gelir.
   const [searchKapsam, setSearchKapsam] = useState("KIME"); // KIME | TALEP_EDEN | HEPSI
+  // 11.09.2026: Türkçe karakter duyarsız ("beyazit" → "Beyazıt"); Excel de aynı kuralla süzülür
+  const _trN = (v) => String(v || "").toLocaleLowerCase("tr-TR")
+    .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
   const aramaEslesir = (t) => {
     if (!searchText) return true;
-    const s = searchText.toLowerCase().trim();
-    const kime = String(t.personel_ad || t.talep_eden_ad || "").toLowerCase();
+    const s = _trN(searchText);
+    const kime = _trN(t.personel_ad || t.talep_eden_ad);
+    const talep = _trN(t.talep_eden_ad);
     if (searchKapsam === "KIME") return kime.includes(s);
-    if (searchKapsam === "TALEP_EDEN") return String(t.talep_eden_ad || "").toLowerCase().includes(s);
-    return kime.includes(s) || String(t.talep_eden_ad || "").toLowerCase().includes(s) || String(t.aciklama || "").toLowerCase().includes(s);
+    if (searchKapsam === "TALEP_EDEN") return talep.includes(s);
+    return kime.includes(s) || talep.includes(s) || _trN(t.aciklama).includes(s);
   };
   const [filterDurum, setFilterDurum] = useState("");
   const [filterGider, setFilterGider] = useState("");
@@ -21682,7 +21687,10 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
             if (filterProje) p.set("proje", filterProje);
             if (filterBaslangic) p.set("baslangic", filterBaslangic);
             if (filterBitis) p.set("bitis", filterBitis);
+            if (searchText.trim()) { p.set("ara", searchText.trim()); p.set("ara_kapsam", searchKapsam); }
             const qs = p.toString();
+            const _dosyaAdi = ["is_avanslari", searchText.trim(), filterGider, filterBolge, filterProje]
+              .filter(Boolean).join("_").replace(/[^\p{L}\p{N}_-]+/gu, "_") + ".xlsx";
             const indirExcel = async () => {
               try {
                 const r = await fetch(`${API_BASE}/hr/is-avans/excel${qs ? "?" + qs : ""}`,
@@ -21691,7 +21699,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                 const blob = await r.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
-                a.href = url; a.download = "is_avanslari.xlsx"; a.click();
+                a.href = url; a.download = _dosyaAdi; a.click();
                 URL.revokeObjectURL(url);
               } catch { alert("Excel indirilemedi"); }
             };
@@ -21717,9 +21725,15 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
             value={searchText}
             autoComplete="off"
             name="avans_ara"
+            list={searchKapsam === "HEPSI" ? undefined : "avans-kisi-listesi"}
             onChange={e => setSearchText(e.target.value)}
             style={{ padding: "8px 14px", border: "none", fontSize: "14px", minWidth: "220px", outline: "none" }}
           />
+          {/* Kişi seçimi: avans sahibi (Kime) ya da talep eden adları listeden seçilebilir */}
+          <datalist id="avans-kisi-listesi">
+            {[...new Set(list.map(t => searchKapsam === "TALEP_EDEN" ? t.talep_eden_ad : (t.personel_ad || t.talep_eden_ad)).filter(Boolean))]
+              .sort((a, b) => a.localeCompare(b, "tr")).map(ad => <option key={ad} value={ad} />)}
+          </datalist>
         </div>
         <input type="date" value={filterBaslangic} onChange={e => setFilterBaslangic(e.target.value)}
           style={{ padding: "8px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px" }} />
