@@ -19575,17 +19575,22 @@ pool.query(`
   // kasa bakiyesinden düşmez (İzmir depo Temmuz 2026 istisnası gibi)
   pool.query(`ALTER TABLE ofis_kira_odemeler ADD COLUMN IF NOT EXISTS kasadan_dus BOOLEAN DEFAULT true`)
 ).catch(() => {});
+// 11.09.2026: araç paneliyle aynı ödeme modeli — peşin/sonradan + ayın kaçı (vade bazlı borç)
+pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS odeme_tipi TEXT DEFAULT 'PESIN'`).catch(() => {});
+pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS donem_gunu INTEGER`).catch(() => {});
 
 app.post("/hr/ofis/:id/kira-ode", async (req, res) => {
   try {
-    const { donem, tutar, tarih, aciklama } = req.body;
+    const { donem, tutar, tarih, aciklama, kasadan_dus } = req.body;
     if (!/^\d{4}-\d{2}$/.test(String(donem || ""))) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
     const r = await pool.query(
-      `INSERT INTO ofis_kira_odemeler (ofis_id, donem, tutar, tarih, aciklama)
-       VALUES ($1,$2,$3,COALESCE($4::date, CURRENT_DATE),$5)
-       ON CONFLICT (ofis_id, donem) DO UPDATE SET tutar=$3, tarih=COALESCE($4::date, CURRENT_DATE), aciklama=$5
+      `INSERT INTO ofis_kira_odemeler (ofis_id, donem, tutar, tarih, aciklama, kasadan_dus)
+       VALUES ($1,$2,$3,COALESCE($4::date, CURRENT_DATE),$5,COALESCE($6, true))
+       ON CONFLICT (ofis_id, donem) DO UPDATE SET tutar=$3, tarih=COALESCE($4::date, CURRENT_DATE), aciklama=$5,
+         kasadan_dus=COALESCE($6, ofis_kira_odemeler.kasadan_dus)
        RETURNING *`,
-      [req.params.id, donem, Number(tutar || 0), tarih || null, aciklama || null],
+      [req.params.id, donem, Number(tutar || 0), tarih || null, aciklama || null,
+       kasadan_dus === undefined || kasadan_dus === null ? null : !!kasadan_dus],
     );
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -19627,13 +19632,15 @@ app.get("/hr/ofis", async (req, res) => {
 app.post("/hr/ofis", async (req, res) => {
   try {
     const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
-            aylik_kira,metrekare,kat,sorumlu,durum,notlar } = req.body;
+            aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu } = req.body;
     const { rows } = await pool.query(
       `INSERT INTO ofis_depo (tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,
-        kira_bitis,aylik_kira,metrekare,kat,sorumlu,durum,notlar)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+        kira_bitis,aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
       [tur||'OFİS',ad,bolge,adres,kiraya_veren,sozlesme_no,
-       kira_baslangic||null,kira_bitis||null,aylik_kira||null,metrekare||null,kat,sorumlu,durum||'AKTİF',notlar]
+       kira_baslangic||null,kira_bitis||null,aylik_kira||null,metrekare||null,kat,sorumlu,durum||'AKTİF',notlar,
+       odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN',
+       Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -19642,13 +19649,16 @@ app.post("/hr/ofis", async (req, res) => {
 app.put("/hr/ofis/:id", async (req, res) => {
   try {
     const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
-            aylik_kira,metrekare,kat,sorumlu,durum,notlar } = req.body;
+            aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu } = req.body;
     const { rows } = await pool.query(
       `UPDATE ofis_depo SET tur=$2,ad=$3,bolge=$4,adres=$5,kiraya_veren=$6,sozlesme_no=$7,
         kira_baslangic=$8,kira_bitis=$9,aylik_kira=$10,metrekare=$11,kat=$12,
-        sorumlu=$13,durum=$14,notlar=$15 WHERE id=$1 RETURNING *`,
+        sorumlu=$13,durum=$14,notlar=$15,
+        odeme_tipi=COALESCE($16,odeme_tipi), donem_gunu=COALESCE($17,donem_gunu) WHERE id=$1 RETURNING *`,
       [req.params.id,tur,ad,bolge,adres,kiraya_veren,sozlesme_no,
-       kira_baslangic||null,kira_bitis||null,aylik_kira||null,metrekare||null,kat,sorumlu,durum,notlar]
+       kira_baslangic||null,kira_bitis||null,aylik_kira||null,metrekare||null,kat,sorumlu,durum,notlar,
+       odeme_tipi ? (odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN') : null,
+       Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }

@@ -32521,7 +32521,7 @@ function App() {
             {page === "hr" && <HrDashboard onBack={()=>setPage("finance")} currentUser={user} initialTab={hrTab} onTabChange={setHrTab} />}
             {(page === "is_avans" || page === "masraf") && <PersonelHarcamalariPanel currentUser={user} initialTab={page === "masraf" ? "masraf" : "genel"} onPendingAvans={setPendingAvansCount} onPendingMasraf={setPendingMasrafCount} />}
             {page === "araclar" && <AraclarPanel currentUser={user} onBack={()=>setPage("finance")} onGoOfis={isAdmin ? () => setPage("ofis") : undefined} />}
-            {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} />}
+            {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} onGoArac={()=>setPage("araclar")} />}
             {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
@@ -36084,26 +36084,36 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
 }
 
 // ─── OFİS & DEPO PANELİ ──────────────────────────────────────────────────────
-function OfisDepoPanel({ currentUser, onBack }) {
+function OfisDepoPanel({ currentUser, onBack, onGoArac }) {
+  /* 11.09.2026: Araç Filosu paneliyle aynı kurumsal yapı — başlık şeridi, KPI,
+     satır görünümü + açılır detay, vade bazlı kira takibi, toplu Kira Öde. */
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
   const canEdit = isPM || isDirektor || isMuhasebe;
 
   const [liste, setListe] = useState([]);
+  const [kiraOdemeler, setKiraOdemeler] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    tur:"OFİS", ad:"", bolge:"", adres:"", kiraya_veren:"", sozlesme_no:"",
+  const BOS_FORM = { tur:"OFİS", ad:"", bolge:"", adres:"", kiraya_veren:"", sozlesme_no:"",
     kira_baslangic:"", kira_bitis:"", aylik_kira:"", metrekare:"", kat:"",
-    sorumlu:"", durum:"AKTİF", notlar:""
-  });
-  const [filter, setFilter] = useState("TUMU");
+    sorumlu:"", durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:"" };
+  const [form, setForm] = useState(BOS_FORM);
+  const [filter, setFilter] = useState("AKTİF");
+  const [arama, setArama] = useState("");
+  const [acikSatir, setAcikSatir] = useState(null);
+  const [payOpen, setPayOpen] = useState(false);
+  const bugunStr = new Date().toISOString().slice(0, 10);
+  const buDonem = bugunStr.slice(0, 7);
+  const [payDonem, setPayDonem] = useState(buDonem);
+  const [payRows, setPayRows] = useState([]);
+  const [payBusy, setPayBusy] = useState(false);
 
-  const [kiraOdemeler, setKiraOdemeler] = useState([]);
   const load = async () => {
     const r = await fetch(`${API_BASE}/hr/ofis`);
-    setListe(await r.json());
+    const d = await r.json().catch(() => []);
+    setListe(Array.isArray(d) ? d : []);
     try {
       const k = await fetch(`${API_BASE}/hr/ofis-kira-odemeler`);
       const kd = await k.json();
@@ -36114,56 +36124,78 @@ function OfisDepoPanel({ currentUser, onBack }) {
 
   const today = new Date();
   const dayDiff = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
-  const expiryColor = (d) => { const n=dayDiff(d); if(n===null)return"#9ca3af"; if(n<0)return"#dc2626"; if(n<=30)return"#f59e0b"; return"#166534"; };
-  const expiryBg = (d) => { const n=dayDiff(d); if(n===null)return"#f3f4f6"; if(n<0)return"#fee2e2"; if(n<=30)return"#fef9c3"; return"#dcfce7"; };
+  const expiryColor = (d) => { const n = dayDiff(d); if (n === null) return "#9ca3af"; if (n < 0) return "#dc2626"; if (n <= 30) return "#b45309"; return "#15803d"; };
+  const fT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "";
+  const AY_KISA = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const tutarSayi = (t) => { const x = String(t ?? "").trim(); return /^\d+(\.\d{1,2})?$/.test(x) ? Number(x) : Number(x.replace(/\./g, "").replace(",", ".")) || 0; };
+  const aktifMi = (o) => o.durum === "AKTİF";
+  const gunOf = (o) => Number(o.donem_gunu) || Number(String(o.kira_baslangic || "").slice(8, 10)) || 1;
 
-  // Borç takibi: devir ayından (2026-07, kira başlangıcı daha yeniyse o) bu aya
-  // kadar ödenmeyen aylar × aylık kira. Pasif konum borç üretmez. (Araçlarla aynı kurgu)
-  const borcHesap = (o) => {
-    if (o.durum !== "AKTİF" || Number(o.aylik_kira || 0) <= 0) return { aylar: [], tutar: 0 };
-    const simdi = new Date().toISOString().slice(0, 7);
+  // Vade bazlı dönem listesi (araç paneliyle aynı kural)
+  const donemListesi = (o) => {
+    const gun = gunOf(o);
+    const pesin = (o.odeme_tipi || "PESIN") !== "SONRADAN";
     let bas = "2026-07";
     if (o.kira_baslangic) { const kb = String(o.kira_baslangic).slice(0, 7); if (kb > bas) bas = kb; }
-    const aylar = [];
     let [y, m] = bas.split("-").map(Number);
-    while (`${y}-${String(m).padStart(2, "0")}` <= simdi) {
-      const ayStr = `${y}-${String(m).padStart(2, "0")}`;
-      if (!kiraOdemeler.some(x => String(x.ofis_id) === String(o.id) && x.donem === ayStr)) aylar.push(ayStr);
+    const out = [];
+    for (let i = 0; i < 40; i++) {
+      const donem = `${y}-${pad2(m)}`;
+      let vy = y, vm = m; if (!pesin) { vm++; if (vm > 12) { vm = 1; vy++; } }
+      const vade = `${vy}-${pad2(vm)}-${pad2(Math.min(gun, 28))}`;
+      const odeme = kiraOdemeler.find(x => String(x.ofis_id) === String(o.id) && x.donem === donem);
+      const vadesiGeldi = vade <= bugunStr;
+      out.push({ donem, vade, odeme, durum: odeme ? "ODENDI" : vadesiGeldi ? "GECIKTI" : "BEKLIYOR" });
+      if (!vadesiGeldi) break;
       m++; if (m > 12) { m = 1; y++; }
     }
-    return { aylar, tutar: aylar.length * Number(o.aylik_kira || 0) };
+    return out;
   };
-  const _parseTutar = (t) => {
-    const s = String(t).trim();
-    return /^\d+(\.\d{1,2})?$/.test(s) ? Number(s) : Number(s.replace(/\./g, "").replace(",", ".")) || 0;
+  const borcHesap = (o) => {
+    const kira = Number(o.aylik_kira || 0);
+    if (!aktifMi(o) || kira <= 0) return { aylar: [], tutar: 0, siradaki: null, liste: [] };
+    const l = donemListesi(o);
+    const aylar = l.filter(x => x.durum === "GECIKTI").map(x => x.donem);
+    return { aylar, tutar: aylar.length * kira, siradaki: l.find(x => x.durum === "BEKLIYOR") || null, liste: l };
   };
 
-  const openNew = () => {
-    setForm({ tur:"OFİS", ad:"", bolge:"", adres:"", kiraya_veren:"", sozlesme_no:"",
-      kira_baslangic:"", kira_bitis:"", aylik_kira:"", metrekare:"", kat:"",
-      sorumlu:"", durum:"AKTİF", notlar:"" });
-    setSelected(null); setShowForm(true);
-  };
+  const aktifler = liste.filter(aktifMi);
+  const kiralik = aktifler.filter(o => Number(o.aylik_kira || 0) > 0);
+  const aylikToplam = aktifler.reduce((t, o) => t + Number(o.aylik_kira || 0), 0);
+  const toplamBorc = liste.reduce((t, o) => t + borcHesap(o).tutar, 0);
+  const borclular = aktifler.filter(o => borcHesap(o).tutar > 0);
+  const buDonemOdenen = kiraOdemeler.filter(x => x.donem === buDonem && aktifler.some(o => String(o.id) === String(x.ofis_id)));
+  const siradakiler = kiralik.map(o => ({ o, s: borcHesap(o).siradaki })).filter(x => x.s);
+  const siradakiVade = siradakiler.length ? siradakiler.map(x => x.s.vade).sort()[0] : null;
+  const siradakiTutar = siradakiler.filter(x => x.s.vade === siradakiVade).reduce((t, x) => t + Number(x.o.aylik_kira || 0), 0);
+  const toplamM2 = aktifler.reduce((t, o) => t + Number(o.metrekare || 0), 0);
+  const sozlesmesiz = aktifler.filter(o => !(o.belgeler || []).some(b => b.belge_turu === "SOZLESME"));
+  const bitisYakin = aktifler.filter(o => { const d = dayDiff(o.kira_bitis); return d !== null && d <= 60; });
+
+  const belgeUrl = (b) => String(b?.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/ofis-belge/file/${encodeURIComponent(b?.dosya_adi || "")}`;
+  const getSozlesme = (o) => (o.belgeler || []).find(b => b.belge_turu === "SOZLESME");
+  const getEkler = (o) => (o.belgeler || []).filter(b => b.belge_turu !== "SOZLESME");
+
+  const openNew = () => { setForm(BOS_FORM); setSelected(null); setShowForm(true); };
   const openEdit = (o) => {
-    const fmt = (d) => d ? d.slice(0,10) : "";
+    const f = (d) => d ? String(d).slice(0, 10) : "";
     setForm({ tur:o.tur||"OFİS", ad:o.ad||"", bolge:o.bolge||"", adres:o.adres||"",
       kiraya_veren:o.kiraya_veren||"", sozlesme_no:o.sozlesme_no||"",
-      kira_baslangic:fmt(o.kira_baslangic), kira_bitis:fmt(o.kira_bitis),
+      kira_baslangic:f(o.kira_baslangic), kira_bitis:f(o.kira_bitis),
       aylik_kira:o.aylik_kira||"", metrekare:o.metrekare||"", kat:o.kat||"",
-      sorumlu:o.sorumlu||"", durum:o.durum||"AKTİF", notlar:o.notlar||""
-    });
+      sorumlu:o.sorumlu||"", durum:o.durum||"AKTİF", notlar:o.notlar||"",
+      odeme_tipi:o.odeme_tipi||"PESIN", donem_gunu:o.donem_gunu||"" });
     setSelected(o); setShowForm(true);
   };
-
   const handleSave = async () => {
     if (!form.ad) return alert("Ad zorunlu");
     const method = selected ? "PUT" : "POST";
     const url = selected ? `${API_BASE}/hr/ofis/${selected.id}` : `${API_BASE}/hr/ofis`;
-    const r = await fetch(url, { method, headers:{"Content-Type":"application/json"}, body: JSON.stringify(form) });
-    if (!r.ok) { const e = await r.json(); return alert(e.error); }
+    const r = await fetch(url, { method, headers:{ "Content-Type":"application/json" }, body: JSON.stringify(form) });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); return alert(e.error || "Kaydedilemedi"); }
     setShowForm(false); load();
   };
-
   const handleBelgeUpload = async (ofisId, turu, file) => {
     if (!file) return;
     const fd = new FormData(); fd.append("dosya", file); fd.append("belge_turu", turu);
@@ -36175,299 +36207,370 @@ function OfisDepoPanel({ currentUser, onBack }) {
     load();
   };
   const handleBelgeSil = async (id) => {
-    const yetkiliEmails = ["orhan.bedir@simsektel.com", "nurcan.kus@simsektel.com"];
-    if (!yetkiliEmails.includes((currentUser?.email || "").toLowerCase())) {
-      alert("Bu işlem için yetkiniz bulunmamaktadır. Dosya silme yetkisi yalnızca Nurcan Kuş ve Orhan Bedir'e aittir.");
-      return;
-    }
+    const yetkili = ["orhan.bedir@simsektel.com", "nurcan.kus@simsektel.com"];
+    if (!yetkili.includes((currentUser?.email || "").toLowerCase())) { alert("Dosya silme yetkisi yalnızca Nurcan Kuş ve Orhan Bedir'e aittir."); return; }
     if (!window.confirm("Bu belgeyi silmek istediğinizden emin misiniz?")) return;
     await fetch(`${API_BASE}/hr/ofis-belge/${id}`, { method:"DELETE" }); load();
   };
-  const getSozlesme = (o) => (o.belgeler||[]).find(b=>b.belge_turu==="SOZLESME");
-  const getEkler = (o) => (o.belgeler||[]).filter(b=>b.belge_turu!=="SOZLESME");
+  const durumDegistir = async (o, yeni) => {
+    if (yeni === "PASİF" && !window.confirm(`${o.ad} pasife alınsın mı? Kira takibi durur.`)) return;
+    await fetch(`${API_BASE}/hr/ofis/${o.id}`, { method:"PUT", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ ...o, kira_baslangic: o.kira_baslangic ? String(o.kira_baslangic).slice(0, 10) : null, kira_bitis: o.kira_bitis ? String(o.kira_bitis).slice(0, 10) : null, durum: yeni }) });
+    load();
+  };
+  const odemeGeriAl = async (o, donem, odeme, modalIci) => {
+    if (!window.confirm(`${o.ad} — ${donem} kira ödemesi (₺${Number(odeme?.tutar || 0).toLocaleString("tr-TR")}) geri alınsın mı?`)) return;
+    const r = await fetch(`${API_BASE}/hr/ofis/${o.id}/kira-ode?donem=${donem}`, { method:"DELETE" });
+    if (!r.ok) { alert("Geri alınamadı"); return; }
+    await load();
+    if (modalIci) setPayRows(rs => rs.map(x => x.key === `${o.id}_${donem}` ? { ...x, odendi:false, odeme:null, sec:true, gecikti: x.vade <= bugunStr } : x));
+  };
 
-  const turIcon = { "OFİS":"🏢", "DEPO":"🏭", "OFİS+DEPO":"🏗" };
-  const filtered = liste.filter(o => filter==="TUMU" ? true : o.durum===filter);
+  // Toplu Kira Öde
+  const payRowsOlustur = (donemSec) => {
+    const rows = [];
+    kiralik.slice().sort((a, b) => String(a.ad).localeCompare(String(b.ad), "tr")).forEach(o => {
+      const l = donemListesi(o);
+      const donemler = new Set(l.filter(x => x.durum === "GECIKTI").map(x => x.donem));
+      donemler.add(donemSec);
+      [...donemler].sort().forEach(donem => {
+        const d = l.find(x => x.donem === donem);
+        const pesin = (o.odeme_tipi || "PESIN") !== "SONRADAN";
+        let [y, m] = donem.split("-").map(Number); if (!pesin) { m++; if (m > 12) { m = 1; y++; } }
+        const vade = d ? d.vade : `${y}-${pad2(m)}-${pad2(Math.min(gunOf(o), 28))}`;
+        const odeme = d ? d.odeme : kiraOdemeler.find(x => String(x.ofis_id) === String(o.id) && x.donem === donem);
+        rows.push({ key: `${o.id}_${donem}`, ofis: o, donem, vade, kira: Number(o.aylik_kira || 0),
+          odendi: !!odeme, odeme, gecikti: !odeme && vade <= bugunStr, sec: !odeme && vade <= bugunStr,
+          tutar: Math.round(Number(o.aylik_kira || 0)).toLocaleString("tr-TR"), kasadan: true, tarih: bugunStr });
+      });
+    });
+    return rows;
+  };
+  const kiraOdeAc = () => { setPayDonem(buDonem); setPayRows(payRowsOlustur(buDonem)); setPayOpen(true); };
+  const payKaydir = (delta) => { let [y, m] = payDonem.split("-").map(Number); m += delta; if (m > 12) { m = 1; y++; } if (m < 1) { m = 12; y--; } const d = `${y}-${pad2(m)}`; setPayDonem(d); setPayRows(payRowsOlustur(d)); };
+  const payRowSet = (i, patch) => setPayRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r));
+  const paySecili = payRows.filter(r => r.sec && !r.odendi && tutarSayi(r.tutar) > 0);
+  const paySeciliToplam = paySecili.reduce((t, r) => t + tutarSayi(r.tutar), 0);
+  const odemeleriKaydet = async () => {
+    if (!paySecili.length) return;
+    setPayBusy(true); let hata = 0;
+    for (const r of paySecili) {
+      try {
+        const res = await fetch(`${API_BASE}/hr/ofis/${r.ofis.id}/kira-ode`, { method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ donem: r.donem, tutar: tutarSayi(r.tutar), tarih: r.tarih || null, kasadan_dus: !!r.kasadan,
+            aciklama: tutarSayi(r.tutar) < r.kira ? `Kısmi ödeme (kira ₺${r.kira.toLocaleString("tr-TR")})` : null }) });
+        if (!res.ok) hata++;
+      } catch { hata++; }
+    }
+    await load(); setPayBusy(false);
+    if (hata) alert(`${hata} ödeme kaydedilemedi.`); else setPayOpen(false);
+  };
+
+  const excelIndir = () => {
+    const rows = liste.slice().sort((a, b) => String(a.ad).localeCompare(String(b.ad), "tr")).map(o => {
+      const b = borcHesap(o);
+      return [o.ad || "", o.tur || "", o.bolge || "", o.adres || "", o.sorumlu || "", o.kiraya_veren || "",
+        Number(o.aylik_kira || 0), (o.odeme_tipi || "PESIN") === "SONRADAN" ? `Sonradan (${gunOf(o)})` : `Peşin (${gunOf(o)})`,
+        Number(o.metrekare || 0) || "", fT(o.kira_baslangic), fT(o.kira_bitis), getSozlesme(o) ? "Var" : "Yok", b.tutar, o.durum || ""];
+    });
+    const odRows = kiraOdemeler.slice().sort((a, b) => String(b.donem).localeCompare(String(a.donem))).map(x => [x.ad || "", x.donem, Number(x.tutar || 0), fT(x.tarih), x.kasadan_dus === false ? "AHY ödedi" : "Kasadan", x.aciklama || ""]);
+    exportStandardExcel({
+      title: "Ofis & Depo — Konumlar", sheetName: "Konumlar", fileBase: "Ofis_Depo",
+      headers: ["Ad", "Tür", "Bölge", "Adres", "Sorumlu", "Kiraya Veren", "Aylık Kira (₺)", "Ödeme", "Alan (m²)", "Kira Başlangıç", "Kira Bitiş", "Sözleşme", "Ödenmemiş (₺)", "Durum"],
+      colWidths: [20, 11, 12, 40, 20, 20, 14, 12, 9, 13, 13, 10, 13, 9], numericCols: [6, 12], rows,
+      extraSheets: [{ sheetName: "Kira Ödemeleri", title: "Ofis & Depo — Kira Ödemeleri",
+        headers: ["Konum", "Dönem", "Tutar (₺)", "Tarih", "Kaynak", "Açıklama"], colWidths: [22, 10, 14, 12, 12, 36], numericCols: [2], rows: odRows }],
+    }).catch(e => alert("Excel indirilemedi: " + e.message));
+  };
+
+  const filtered = liste.filter(o => filter === "TUMU" ? true : o.durum === filter)
+    .filter(o => { const q = arama.trim().toLocaleLowerCase("tr"); if (!q) return true; return [o.ad, o.bolge, o.adres, o.sorumlu, o.kiraya_veren].some(x => String(x || "").toLocaleLowerCase("tr").includes(q)); })
+    .slice().sort((a, b) => String(a.ad).localeCompare(String(b.ad), "tr"));
   const detailOfis = selected && liste.find(o => o.id === selected.id);
+  const TUR_IKON = { "OFİS":"🏢", "DEPO":"🏭", "OFİS+DEPO":"🏗" };
+
+  const btnBase = { display:"inline-flex", alignItems:"center", gap:"8px", borderRadius:"10px", padding:"9px 15px", fontWeight:700, fontSize:"13px", border:"1px solid transparent", cursor:"pointer", whiteSpace:"nowrap" };
+  const btnGhost = { ...btnBase, background:"rgba(255,255,255,.1)", color:"#fff", border:"1px solid rgba(255,255,255,.28)" };
+  const pill = { display:"inline-flex", alignItems:"center", borderRadius:"999px", padding:"4px 10px", fontSize:"12px", fontWeight:700, whiteSpace:"nowrap" };
+  const chip = { display:"inline-flex", alignItems:"center", gap:"6px", borderRadius:"999px", padding:"5px 11px", fontSize:"12px", fontWeight:700, cursor:"pointer" };
+  const thSt = { fontSize:"11px", textTransform:"uppercase", letterSpacing:".06em", color:"#6b7a90", fontWeight:700, padding:"9px 13px", borderBottom:"1px solid #e3e8ef", background:"#f8fafc", whiteSpace:"nowrap", textAlign:"left" };
+  const tdSt = { padding:"11px 13px", borderBottom:"1px solid #eef1f5", verticalAlign:"middle", fontSize:"13px", color:"#0f1c2e" };
+  const icoBtn = { background:"#fff", border:"1px solid #cfd7e2", borderRadius:"8px", width:"30px", height:"30px", cursor:"pointer", color:"#3c4a5d", fontSize:"13px" };
+  const kutu = { background:"#fff", border:"1px solid #e3e8ef", borderRadius:"12px", padding:"12px 14px" };
+  const kutuBaslik = { fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700, marginBottom:"6px" };
+  const inp = { width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box", background:"#fff" };
+  const lbl = { display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" };
 
   return (
-    <div style={{ maxWidth:"1100px", margin:"0 auto", padding:"24px 16px" }}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"24px" }}>
+    <div style={{ maxWidth:"1360px", margin:"0 auto", padding:"22px 18px 60px", fontFamily:"-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" }}>
+      {/* Başlık şeridi */}
+      <div style={{ background:"#1e3a5f", color:"#fff", borderRadius:"16px", padding:"20px 24px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"16px", flexWrap:"wrap", boxShadow:"0 8px 24px -12px rgba(15,28,46,.35)" }}>
         <div style={{ display:"flex", alignItems:"center", gap:"14px" }}>
-          {onBack && <button onClick={onBack} style={{ background:"#f3f4f6", border:"none", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>←</button>}
+          {onBack && <button onClick={onBack} style={{ background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.25)", color:"#fff", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer" }}>←</button>}
           <div>
-            <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>🏢 Ofis & Depo</h2>
-            <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>{liste.filter(o=>o.durum==="AKTİF").length} aktif konum</p>
-            <div style={{ marginTop:"5px", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
-              <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💰 Aylık Toplam Kira:</span>
-              <span style={{ fontSize:"16px", fontWeight:800, color:"#1e40af", background:"#eff6ff", borderRadius:"8px", padding:"2px 12px" }}>
-                ₺{liste.filter(o=>o.durum==="AKTİF").reduce((s,o)=>s+Number(o.aylik_kira||0),0).toLocaleString("tr-TR")}
-              </span>
-              {(() => {
-                const toplamBorc = liste.reduce((s, o) => s + borcHesap(o).tutar, 0);
-                return (
-                  <>
-                    <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>💳 Toplam Borç:</span>
-                    <span title="Aktif konumlarda ödenmemiş kira ayları toplamı (Temmuz 2026'dan itibaren)"
-                      style={{ fontSize:"16px", fontWeight:800, color: toplamBorc > 0 ? "#b91c1c" : "#166534", background: toplamBorc > 0 ? "#fee2e2" : "#dcfce7", borderRadius:"8px", padding:"2px 12px" }}>
-                      ₺{toplamBorc.toLocaleString("tr-TR")}
-                    </span>
-                  </>
-                );
-              })()}
-            </div>
+            <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, letterSpacing:"-.01em" }}>Ofis & Depo</h2>
+            <div style={{ opacity:.75, fontSize:"13px", marginTop:"3px" }}>{aktifler.length} aktif konum · {new Date().toLocaleDateString("tr-TR", { day:"numeric", month:"long", year:"numeric" })}</div>
           </div>
         </div>
-        <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-          {["TUMU","AKTİF","PASİF"].map(f => (
-            <button key={f} onClick={()=>setFilter(f)}
-              style={{ padding:"6px 14px", borderRadius:"20px", border:"none", cursor:"pointer", fontSize:"12px", fontWeight:600,
-                background: filter===f ? "#1e3a5f" : "#f3f4f6", color: filter===f ? "#fff" : "#374151" }}>
-              {f}
-            </button>
-          ))}
-          {canEdit && (
-            <button onClick={openNew}
-              style={{ padding:"9px 18px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"14px" }}>
-              ＋ Ekle
-            </button>
-          )}
+        <div style={{ display:"flex", gap:"10px", flexWrap:"wrap", justifyContent:"flex-end" }}>
+          <button onClick={excelIndir} style={btnGhost}>📥 Excel (2 sayfa)</button>
+          {onGoArac && <button onClick={onGoArac} style={btnGhost}>🚗 Araç Filosu</button>}
+          {canEdit && <button onClick={kiraOdeAc} style={{ ...btnBase, background:"#f59e0b", color:"#1a1200" }}>💳 Kira Öde</button>}
+          {canEdit && <button onClick={openNew} style={{ ...btnBase, background:"#0f766e", color:"#fff" }}>＋ Konum Ekle</button>}
         </div>
       </div>
 
-      {/* Kira bitiş uyarıları */}
-      {(() => {
-        const exp = liste.filter(o => { const d=dayDiff(o.kira_bitis); return d!==null && d<=30; });
-        if (!exp.length) return null;
-        return (
-          <div style={{ background:"#fef9c3", border:"1px solid #fde047", borderRadius:"12px", padding:"12px 16px", marginBottom:"20px" }}>
-            <strong style={{ color:"#713f12", fontSize:"13px" }}>⚠️ Kira Bitiş Yaklaşıyor ({exp.length} konum)</strong>
-            <div style={{ marginTop:"6px", display:"flex", flexWrap:"wrap", gap:"6px" }}>
-              {exp.map(o => (
-                <span key={o.id} onClick={()=>openEdit(o)}
-                  style={{ background:"#fff", border:"1px solid #fde047", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", color:"#92400e", fontWeight:600 }}>
-                  {o.ad}
-                </span>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
-
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))", gap:"16px" }}>
-        {filtered.map(o => (
-          <div key={o.id} style={{ background:"#fff", borderRadius:"14px", boxShadow:"0 1px 6px rgba(0,0,0,0.08)", overflow:"hidden" }}>
-            <div style={{ background: o.durum==="AKTİF" ? "#1e3a5f" : "#6b7280", padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div>
-                <div style={{ color:"#fff", fontWeight:800, fontSize:"17px" }}>{turIcon[o.tur]||"🏢"} {o.ad}</div>
-                <div style={{ color:"#bfdbfe", fontSize:"12px" }}>{o.tur} · {o.bolge}</div>
-              </div>
-              <span style={{ background:"rgba(255,255,255,0.15)", color:"#fff", borderRadius:"20px", padding:"3px 9px", fontSize:"11px", fontWeight:700 }}>{o.durum}</span>
-            </div>
-            <div style={{ padding:"14px 16px" }}>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px", marginBottom:"10px" }}>
-                {o.adres && <div style={{ fontSize:"12px", color:"#6b7280", gridColumn:"1/-1" }}>📍 {o.adres}</div>}
-                {o.kiraya_veren && <div style={{ fontSize:"12px", color:"#6b7280" }}>🏘 {o.kiraya_veren}</div>}
-                {o.sorumlu && <div style={{ fontSize:"12px", color:"#6b7280" }}>👤 {o.sorumlu}</div>}
-                {o.aylik_kira && <div style={{ fontSize:"12px", color:"#6b7280" }}>💰 ₺{Number(o.aylik_kira).toLocaleString("tr-TR")}/ay</div>}
-                {o.metrekare && <div style={{ fontSize:"12px", color:"#6b7280" }}>📐 {o.metrekare} m²{o.kat ? ` · ${o.kat}. Kat` : ""}</div>}
-              </div>
-              <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginBottom:"10px" }}>
-                {o.kira_bitis && (
-                  <span style={{ fontSize:"11px", fontWeight:600, padding:"3px 8px", borderRadius:"6px", background:expiryBg(o.kira_bitis), color:expiryColor(o.kira_bitis) }}>
-                    📅 Kira: {new Date(o.kira_bitis).toLocaleDateString("tr-TR")}
-                    {dayDiff(o.kira_bitis) !== null && dayDiff(o.kira_bitis) <= 60 && ` (${dayDiff(o.kira_bitis) < 0 ? "GEÇTİ" : dayDiff(o.kira_bitis)+" gün"})`}
-                  </span>
-                )}
-              </div>
-              <div style={{ display:"flex", gap:"6px" }}>
-                {getSozlesme(o) ? (
-                  <a href={`${API_BASE}/hr/ofis-belge/file/${getSozlesme(o).dosya_yolu}?name=${encodeURIComponent(getSozlesme(o).dosya_adi)}`}
-                    style={{ fontSize:"11px", background:"#dcfce7", color:"#166534", padding:"3px 8px", borderRadius:"6px", textDecoration:"none", fontWeight:600 }}>
-                    ✓ Sözleşme
-                  </a>
-                ) : (
-                  <span style={{ fontSize:"11px", background:"#f3f4f6", color:"#9ca3af", padding:"3px 8px", borderRadius:"6px" }}>— Sözleşme yok</span>
-                )}
-                {getEkler(o).length > 0 && (
-                  <span style={{ fontSize:"11px", background:"#dbeafe", color:"#1d4ed8", padding:"3px 8px", borderRadius:"6px", fontWeight:600 }}>
-                    +{getEkler(o).length} ek belge
-                  </span>
-                )}
-              </div>
-              {/* Kira ödeme durumu — aktif kiralık konumlarda (araç kartıyla aynı kurgu) */}
-              {o.durum === "AKTİF" && Number(o.aylik_kira || 0) > 0 && (() => {
-                const _buAy = new Date().toISOString().slice(0, 7);
-                const odemeler = kiraOdemeler.filter(x => String(x.ofis_id) === String(o.id));
-                const odeme = odemeler.find(x => x.donem === _buAy);
-                const odendi = !!odeme;
-                const borc = borcHesap(o);
-                const gecmisTitle = odemeler.length
-                  ? "Ödeme geçmişi:\n" + odemeler.map(x => `${x.donem}: ₺${Math.round(Number(x.tutar || 0)).toLocaleString("tr-TR")}${x.tarih ? " (" + String(x.tarih).slice(0, 10) + ")" : ""}`).join("\n")
-                  : "Henüz ödeme kaydı yok";
-                return (
-                  <div style={{ display:"flex", gap:"6px", alignItems:"center", marginTop:"10px", flexWrap:"wrap" }}>
-                    {odendi
-                      ? <span title={gecmisTitle} style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#dcfce7", color:"#166534", cursor:"help" }}>✅ Bu ay kira ödendi (₺{Math.round(Number(odeme.tutar || 0)).toLocaleString("tr-TR")})</span>
-                      : <span title={gecmisTitle} style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#fee2e2", color:"#991b1b", cursor:"help" }}>💳 Kira bekliyor</span>}
-                    {canEdit && !odendi && (
-                      <button title={gecmisTitle} onClick={async () => {
-                        const donem = prompt("Hangi dönemin kirası? (YYYY-AA)", _buAy);
-                        if (!donem) return;
-                        const t = prompt("Ödenen tutar (₺):", String(Math.round(Number(o.aylik_kira || 0)) || ""));
-                        if (!t) return;
-                        const tutarN = _parseTutar(t);
-                        if (tutarN <= 0) { alert("Geçerli tutar giriniz"); return; }
-                        try {
-                          const r = await fetch(`${API_BASE}/hr/ofis/${o.id}/kira-ode`, {
-                            method: "POST", headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ donem, tutar: tutarN }),
-                          });
-                          if (!r.ok) throw new Error("Kaydedilemedi");
-                          await load();
-                        } catch (err) { alert(err.message || "Kira ödemesi kaydedilemedi"); }
-                      }} style={{ padding:"3px 10px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>💸 Kira Öde</button>
-                    )}
-                    {canEdit && odendi && (
-                      <>
-                        <button title="Ödeme tutarını düzelt" onClick={async () => {
-                          const t = prompt(`${_buAy} kirası için doğru tutarı yazın (₺):`, String(Math.round(Number(odeme.tutar || 0))));
-                          if (!t) return;
-                          const tutarN = _parseTutar(t);
-                          if (tutarN <= 0) { alert("Geçerli tutar giriniz"); return; }
-                          try {
-                            const r = await fetch(`${API_BASE}/hr/ofis/${o.id}/kira-ode`, {
-                              method: "POST", headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ donem: _buAy, tutar: tutarN }),
-                            });
-                            if (!r.ok) throw new Error("Güncellenemedi");
-                            await load();
-                          } catch (err) { alert(err.message || "Ödeme güncellenemedi"); }
-                        }} style={{ padding:"3px 8px", background:"#eff6ff", color:"#1e40af", border:"1px solid #bfdbfe", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>✏️ Düzelt</button>
-                        <button title="Ödemeyi geri al (kira bekliyor durumuna döner)" onClick={async () => {
-                          if (!window.confirm(`${o.ad} — ${_buAy} kira ödemesi (₺${Math.round(Number(odeme.tutar || 0)).toLocaleString("tr-TR")}) geri alınsın mı?\n\nKayıt silinir, konum yeniden "Kira bekliyor" olur.`)) return;
-                          try {
-                            const r = await fetch(`${API_BASE}/hr/ofis/${o.id}/kira-ode?donem=${_buAy}`, { method: "DELETE" });
-                            if (!r.ok) throw new Error("Geri alınamadı");
-                            await load();
-                          } catch (err) { alert(err.message || "Ödeme geri alınamadı"); }
-                        }} style={{ padding:"3px 8px", background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:"20px", fontSize:"11px", fontWeight:700, cursor:"pointer" }}>↩︎ Geri Al</button>
-                      </>
-                    )}
-                    {borc.tutar > 0 && (
-                      <span title={`Ödenmeyen aylar: ${borc.aylar.join(", ")}`}
-                        style={{ fontSize:"11px", fontWeight:700, padding:"3px 10px", borderRadius:"20px", background:"#fee2e2", color:"#b91c1c", cursor:"help" }}>
-                        💳 Borç: ₺{borc.tutar.toLocaleString("tr-TR")} ({borc.aylar.length} ay)
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
-              {canEdit && (
-                <button onClick={()=>openEdit(o)}
-                  style={{ marginTop:"12px", width:"100%", padding:"8px", background:"#f3f4f6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer", color:"#374151" }}>
-                  ✏️ Düzenle / Belge Yükle
-                </button>
-              )}
-            </div>
+      {/* KPI şeridi */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))", gap:"12px", marginTop:"14px" }}>
+        {[
+          { l:"Aktif konum", v:String(aktifler.length), d:[["OFİS", "ofis"], ["DEPO", "depo"], ["OFİS+DEPO", "ofis+depo"]].map(([k, a]) => { const n = aktifler.filter(o => o.tur === k).length; return n ? `${n} ${a}` : null; }).filter(Boolean).join(" · ") || "—", c:"#0f1c2e" },
+          { l:"Aylık toplam kira", v:`₺${aylikToplam.toLocaleString("tr-TR")}`, d: toplamM2 ? `${toplamM2.toLocaleString("tr-TR")} m² · ₺${Math.round(aylikToplam / toplamM2).toLocaleString("tr-TR")}/m²` : "alan girilmemiş", c:"#0f1c2e" },
+          { l:"Ödenmemiş kira", v:`₺${toplamBorc.toLocaleString("tr-TR")}`, d: toplamBorc ? `${borclular.length} konum · vadesi geçmiş` : "Vadesi geçen ödeme yok", c: toplamBorc ? "#b91c1c" : "#15803d" },
+          { l:"Bu dönem ödenen", v:`₺${buDonemOdenen.reduce((t, x) => t + Number(x.tutar || 0), 0).toLocaleString("tr-TR")}`, d:`${buDonemOdenen.length} / ${kiralik.length} konum · ${buDonem}`, c:"#15803d" },
+          { l:"Sıradaki vade", v: siradakiVade ? fT(siradakiVade) : "—", d: siradakiVade ? `₺${siradakiTutar.toLocaleString("tr-TR")}` : "Tanımlı vade yok", c:"#b45309" },
+          { l:"Belge uyarısı", v:String(sozlesmesiz.length + bitisYakin.length), d:`${sozlesmesiz.length} sözleşmesiz · ${bitisYakin.length} bitişe <60 gün`, c: (sozlesmesiz.length + bitisYakin.length) ? "#b45309" : "#15803d" },
+        ].map(k => (
+          <div key={k.l} style={{ background:"#fff", border:"1px solid #e3e8ef", borderRadius:"14px", padding:"13px 16px", boxShadow:"0 1px 2px rgba(15,28,46,.05)" }}>
+            <div style={{ fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700 }}>{k.l}</div>
+            <div style={{ fontSize:"23px", fontWeight:800, marginTop:"3px", color:k.c, fontVariantNumeric:"tabular-nums" }}>{k.v}</div>
+            <div style={{ fontSize:"12px", color:"#6b7a90", marginTop:"2px" }}>{k.d}</div>
           </div>
         ))}
-        {filtered.length === 0 && (
-          <div style={{ gridColumn:"1/-1", textAlign:"center", padding:"60px 0", color:"#9ca3af" }}>Henüz kayıt yok</div>
-        )}
       </div>
 
-      {/* Form / Detail Modal */}
-      {showForm && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:500, overflowY:"auto", padding:"20px 16px" }}>
-          <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"620px", padding:"28px 24px", position:"relative" }}>
-            <button onClick={()=>setShowForm(false)}
-              style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"32px", height:"32px", fontSize:"18px", cursor:"pointer" }}>✕</button>
-            <h3 style={{ margin:"0 0 20px", fontSize:"18px", fontWeight:800, color:"#1e3a5f" }}>
-              {selected ? `✏️ ${form.ad}` : "🏢 Yeni Konum"}
-            </h3>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"16px" }}>
-              <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Tür</label>
-                <select value={form.tur} onChange={e=>setForm(f=>({...f,tur:e.target.value}))}
-                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px" }}>
-                  {["OFİS","DEPO","OFİS+DEPO"].map(t=><option key={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Durum</label>
-                <select value={form.durum} onChange={e=>setForm(f=>({...f,durum:e.target.value}))}
-                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px" }}>
-                  {["AKTİF","PASİF"].map(d=><option key={d}>{d}</option>)}
-                </select>
-              </div>
-              {[
-                ["ad","Ad / Tanım *","text","1/-1"],["bolge","Bölge / Şehir","text","auto"],
-                ["kiraya_veren","Kiraya Veren","text","auto"],["sozlesme_no","Sözleşme No","text","auto"],
-                ["kira_baslangic","Kira Başlangıç","date","auto"],["kira_bitis","Kira Bitiş","date","auto"],
-                ["aylik_kira","Aylık Kira (₺)","number","auto"],["metrekare","Alan (m²)","number","auto"],
-                ["kat","Kat","text","auto"],["sorumlu","Sorumlu Kişi","text","auto"],
-                ["adres","Adres","text","1/-1"],
-              ].map(([k,l,t,gc]) => (
-                <div key={k} style={{ gridColumn:gc }}>
-                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>{l}</label>
-                  <input type={t} value={form[k]||""} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}
-                    style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
-                </div>
+      {(borclular.length > 0 || sozlesmesiz.length > 0 || bitisYakin.length > 0) && (
+        <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginTop:"12px" }}>
+          {borclular.map(o => <span key={"b" + o.id} onClick={() => setAcikSatir(o.id)} style={{ ...chip, background:"#fee2e2", color:"#b91c1c" }}>● {o.ad} · {borcHesap(o).aylar.length} dönem ödenmedi</span>)}
+          {sozlesmesiz.map(o => <span key={"s" + o.id} onClick={() => canEdit && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · sözleşme yüklenmemiş</span>)}
+          {bitisYakin.map(o => <span key={"k" + o.id} onClick={() => canEdit && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · kira bitişi {fT(o.kira_bitis)}</span>)}
+        </div>
+      )}
+
+      {/* Konum tablosu */}
+      <div style={{ background:"#fff", border:"1px solid #e3e8ef", borderRadius:"16px", marginTop:"14px", overflow:"hidden", boxShadow:"0 8px 24px -12px rgba(15,28,46,.15)" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", padding:"12px 16px", borderBottom:"1px solid #e3e8ef", flexWrap:"wrap" }}>
+          <h3 style={{ margin:0, fontSize:"15px", fontWeight:800, color:"#0f1c2e" }}>Konumlar</h3>
+          <div style={{ display:"flex", gap:"10px", alignItems:"center", flexWrap:"wrap" }}>
+            <div style={{ display:"flex", gap:"4px", background:"#f3f5f8", padding:"4px", borderRadius:"10px" }}>
+              {[["AKTİF", `Aktif (${liste.filter(o => o.durum === "AKTİF").length})`], ["PASİF", `Pasif (${liste.filter(o => o.durum === "PASİF").length})`], ["TUMU", "Tümü"]].map(([f, l]) => (
+                <button key={f} onClick={() => setFilter(f)} style={{ padding:"6px 12px", borderRadius:"7px", border:"none", fontSize:"12.5px", fontWeight:700, cursor:"pointer", background: filter === f ? "#1e3a5f" : "transparent", color: filter === f ? "#fff" : "#6b7a90" }}>{l}</button>
               ))}
-              <div style={{ gridColumn:"1/-1" }}>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Notlar</label>
-                <textarea value={form.notlar||""} onChange={e=>setForm(f=>({...f,notlar:e.target.value}))} rows={2}
-                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", resize:"vertical", boxSizing:"border-box" }} />
+            </div>
+            <input value={arama} onChange={e => setArama(e.target.value)} placeholder="🔍 Ad, bölge, sorumlu…" style={{ border:"1px solid #cfd7e2", borderRadius:"9px", padding:"7px 11px", fontSize:"13px", minWidth:"200px" }} />
+          </div>
+        </div>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"1080px" }}>
+            <thead><tr>{["Konum", "Adres", "Sorumlu", "Kiraya veren", "Aylık kira", "Kira takibi", "Durum", "Sözleşme", ""].map((h, i) => <th key={h + i} style={{ ...thSt, textAlign: i === 4 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {filtered.map(o => {
+                const borc = borcHesap(o);
+                const acik = acikSatir === o.id;
+                const kira = Number(o.aylik_kira || 0);
+                const soz = getSozlesme(o);
+                const durumPill = !aktifMi(o) ? { bg:"#f3f5f8", c:"#6b7a90", t:"Pasif" }
+                  : kira <= 0 ? { bg:"#f3f5f8", c:"#6b7a90", t:"Kira yok" }
+                  : borc.tutar > 0 ? { bg:"#fee2e2", c:"#b91c1c", t:`Borç ₺${borc.tutar.toLocaleString("tr-TR")} · ${borc.aylar.length} dönem` }
+                  : borc.siradaki ? { bg:"#dcfce7", c:"#15803d", t:`Ödendi · sıradaki ${fT(borc.siradaki.vade).slice(0, 5)}` }
+                  : { bg:"#dcfce7", c:"#15803d", t:"Ödendi" };
+                return (
+                  <React.Fragment key={o.id}>
+                    <tr onClick={() => setAcikSatir(acik ? null : o.id)} style={{ cursor:"pointer", background: acik ? "#eefaf8" : "transparent" }}>
+                      <td style={tdSt}>
+                        <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                          <span style={{ width:"34px", height:"34px", borderRadius:"9px", background: aktifMi(o) ? "#1e3a5f" : "#9ca3af", color:"#fff", display:"grid", placeItems:"center", fontSize:"16px", flex:"none" }}>{TUR_IKON[o.tur] || "🏢"}</span>
+                          <div><div style={{ fontWeight:800 }}>{o.ad}</div><div style={{ fontSize:"12px", color:"#6b7a90" }}>{[o.tur, o.bolge, o.metrekare ? `${o.metrekare} m²` : null].filter(Boolean).join(" · ")}</div></div>
+                        </div>
+                      </td>
+                      <td style={{ ...tdSt, maxWidth:"260px", color:"#3c4a5d", fontSize:"12.5px" }}>{o.adres || <span style={{ color:"#9ca3af" }}>—</span>}</td>
+                      <td style={tdSt}>{o.sorumlu || "—"}</td>
+                      <td style={tdSt}>{o.kiraya_veren || <span style={{ color:"#9ca3af" }}>—</span>}</td>
+                      <td style={{ ...tdSt, textAlign:"right", fontWeight:700, fontVariantNumeric:"tabular-nums" }}>{kira > 0 ? `₺${kira.toLocaleString("tr-TR")}` : "—"}<div style={{ fontSize:"11px", color:"#6b7a90", fontWeight:500 }}>{kira > 0 ? `${(o.odeme_tipi || "PESIN") === "SONRADAN" ? "ay sonu" : "peşin"} · ${gunOf(o)}'i` : ""}</div></td>
+                      <td style={tdSt}>
+                        {aktifMi(o) && kira > 0 ? (
+                          <div style={{ display:"flex", gap:"4px" }}>
+                            {borc.liste.slice(-5).map(d => (
+                              <span key={d.donem} title={`${d.donem} · vade ${fT(d.vade)} · ${d.durum === "ODENDI" ? `ödendi ₺${Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} (${fT(d.odeme.tarih)})` : d.durum === "GECIKTI" ? "ÖDENMEDİ" : "vadesi gelmedi"}`}
+                                style={{ width:"26px", height:"24px", borderRadius:"6px", display:"grid", placeItems:"center", fontSize:"10px", fontWeight:800,
+                                  background: d.durum === "ODENDI" ? "#dcfce7" : d.durum === "GECIKTI" ? "#fee2e2" : "#fff",
+                                  color: d.durum === "ODENDI" ? "#15803d" : d.durum === "GECIKTI" ? "#b91c1c" : "#6b7a90",
+                                  border: d.durum === "BEKLIYOR" ? "1px dashed #cfd7e2" : "1px solid transparent" }}>{AY_KISA[Number(d.donem.slice(5, 7)) - 1]}</span>
+                            ))}
+                          </div>
+                        ) : <span style={{ color:"#9ca3af" }}>—</span>}
+                      </td>
+                      <td style={tdSt}><span style={{ ...pill, background:durumPill.bg, color:durumPill.c }}>{durumPill.t}</span></td>
+                      <td style={tdSt}>
+                        {soz
+                          ? <a onClick={e => e.stopPropagation()} href={belgeUrl(soz)} target="_blank" rel="noreferrer" style={{ ...pill, background:"#d9f2ee", color:"#0f766e", textDecoration:"none" }}>✓ Sözleşme</a>
+                          : <span style={{ ...pill, background:"#fef3c7", color:"#b45309" }}>Yok</span>}
+                        {getEkler(o).length > 0 && <span style={{ ...pill, background:"#dbeafe", color:"#1d4ed8", marginLeft:"4px" }}>+{getEkler(o).length}</span>}
+                      </td>
+                      <td style={{ ...tdSt, textAlign:"right" }}>{canEdit && <button onClick={e => { e.stopPropagation(); openEdit(o); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}</td>
+                    </tr>
+                    {acik && (
+                      <tr><td colSpan={9} style={{ padding:"0 14px 16px", background:"#eefaf8", borderBottom:"1px solid #e3e8ef" }}>
+                        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(260px, 1fr))", gap:"12px", paddingTop:"12px" }}>
+                          <div style={kutu}>
+                            <div style={kutuBaslik}>Kira ödemeleri</div>
+                            {kira > 0 && aktifMi(o) ? borc.liste.slice().reverse().map(d => (
+                              <div key={d.donem} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"12.5px", padding:"4px 0", borderBottom:"1px dashed #e3e8ef", gap:"8px" }}>
+                                <span style={{ fontFamily:"ui-monospace, Menlo, monospace" }}>{d.donem} <span style={{ color:"#6b7a90" }}>· vade {fT(d.vade)}</span></span>
+                                {d.durum === "ODENDI"
+                                  ? <span style={{ color:"#15803d", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)}{d.odeme.kasadan_dus === false ? " · AHY" : ""}
+                                      {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(o, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}</span>
+                                  : d.durum === "GECIKTI" ? <span style={{ color:"#b91c1c", fontWeight:700 }}>Ödenmedi</span>
+                                  : <span style={{ color:"#6b7a90" }}>Vadesi gelmedi</span>}
+                              </div>
+                            )) : <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Kira takibi yok</div>}
+                          </div>
+                          <div style={kutu}>
+                            <div style={kutuBaslik}>Belgeler</div>
+                            {soz ? <a href={belgeUrl(soz)} target="_blank" rel="noreferrer" style={{ display:"block", fontSize:"12.5px", color:"#1d4ed8", fontWeight:700, padding:"4px 0" }}>📄 Kira sözleşmesi · {soz.dosya_adi}</a>
+                              : <div style={{ fontSize:"12.5px", color:"#b45309", padding:"4px 0" }}>Kira sözleşmesi yüklenmemiş</div>}
+                            {getEkler(o).map(b => <a key={b.id} href={belgeUrl(b)} target="_blank" rel="noreferrer" style={{ display:"block", fontSize:"12.5px", color:"#1d4ed8", padding:"3px 0" }}>📎 {b.aciklama || b.dosya_adi}</a>)}
+                            {canEdit && <button onClick={() => openEdit(o)} style={{ marginTop:"8px", padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>📁 Belge yükle</button>}
+                          </div>
+                          <div style={kutu}>
+                            <div style={kutuBaslik}>Konum bilgisi</div>
+                            <div style={{ fontSize:"12.5px", lineHeight:1.7 }}>
+                              <div>Kira: {fT(o.kira_baslangic) || "—"} → {o.kira_bitis ? <span style={{ color: expiryColor(o.kira_bitis), fontWeight:700 }}>{fT(o.kira_bitis)}</span> : "süresiz"}</div>
+                              {o.sozlesme_no && <div>Sözleşme no: {o.sozlesme_no}</div>}
+                              {(o.metrekare || o.kat) && <div>{o.metrekare ? `${o.metrekare} m²` : ""}{o.kat ? ` · ${o.kat}. kat` : ""}</div>}
+                              {o.notlar && <div style={{ color:"#3c4a5d" }}>{o.notlar}</div>}
+                            </div>
+                            {canEdit && (
+                              <div style={{ display:"flex", gap:"6px", marginTop:"8px" }} onClick={e => e.stopPropagation()}>
+                                <select value={o.durum || "AKTİF"} onChange={e => durumDegistir(o, e.target.value)} style={{ padding:"6px 10px", borderRadius:"8px", border:"1px solid #cfd7e2", fontSize:"12px", fontWeight:700 }}>
+                                  <option value="AKTİF">🟢 Aktif</option><option value="PASİF">⚪ Pasif</option>
+                                </select>
+                                <button onClick={() => openEdit(o)} style={{ padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle</button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td></tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+              {filtered.length === 0 && <tr><td colSpan={9} style={{ textAlign:"center", padding:"50px 0", color:"#9ca3af" }}>Bu filtrede konum yok</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div style={{ display:"flex", gap:"14px", flexWrap:"wrap", color:"#6b7a90", fontSize:"12px", marginTop:"10px" }}>
+        <span><span style={{ display:"inline-block", width:"12px", height:"12px", borderRadius:"3px", background:"#dcfce7", verticalAlign:"-2px" }}></span> ödendi</span>
+        <span><span style={{ display:"inline-block", width:"12px", height:"12px", borderRadius:"3px", background:"#fee2e2", verticalAlign:"-2px" }}></span> vadesi geçti, ödenmedi</span>
+        <span><span style={{ display:"inline-block", width:"12px", height:"12px", borderRadius:"3px", border:"1px dashed #cfd7e2", verticalAlign:"-2px" }}></span> sıradaki dönem</span>
+        <span>Satıra tıklayınca ödeme geçmişi, belgeler ve konum bilgisi açılır</span>
+      </div>
+
+      {/* Toplu Kira Öde */}
+      {payOpen && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(10,20,35,.55)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:600, overflowY:"auto", padding:"24px 14px" }} onClick={() => !payBusy && setPayOpen(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"1000px", boxShadow:"0 30px 60px -20px rgba(0,0,0,.45)", overflow:"hidden" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 20px", borderBottom:"1px solid #e3e8ef", gap:"12px", flexWrap:"wrap" }}>
+              <div><h3 style={{ margin:0, fontSize:"16px", fontWeight:800 }}>Kira Ödemesi Gir</h3><div style={{ color:"#6b7a90", fontSize:"12.5px", marginTop:"2px" }}>Tüm konumlar tek listede · vadesi geçmiş dönemler de listede</div></div>
+              <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                <span style={{ display:"inline-flex", alignItems:"center", gap:"6px", border:"1px solid #cfd7e2", borderRadius:"9px", padding:"4px 8px", fontWeight:700, fontSize:"13px", background:"#f8fafc" }}>
+                  <button onClick={() => payKaydir(-1)} style={icoBtn}>◀</button><span style={{ fontFamily:"ui-monospace, Menlo, monospace" }}>{payDonem}</span><button onClick={() => payKaydir(1)} style={icoBtn}>▶</button>
+                </span>
+                <button onClick={() => setPayOpen(false)} style={icoBtn}>✕</button>
               </div>
             </div>
-            <button onClick={handleSave}
-              style={{ width:"100%", padding:"13px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"15px", cursor:"pointer", marginBottom: selected ? "24px" : 0 }}>
-              💾 Kaydet
-            </button>
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"900px" }}>
+                <thead><tr>
+                  <th style={{ ...thSt, width:"40px" }}><input type="checkbox" checked={payRows.length > 0 && payRows.filter(r => !r.odendi).every(r => r.sec)} onChange={e => setPayRows(rs => rs.map(r => r.odendi ? r : { ...r, sec: e.target.checked }))} /></th>
+                  {["Konum", "Sorumlu", "Dönem", "Kira", "Ödenen tutar", "Kaynak", "Tarih", "Durum"].map((h, i) => <th key={h} style={{ ...thSt, textAlign: (i === 3 || i === 4) ? "right" : "left" }}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {payRows.map((r, i) => (
+                    <tr key={r.key} style={{ background: r.odendi ? "#f8fafc" : "transparent" }}>
+                      <td style={tdSt}>{!r.odendi && <input type="checkbox" checked={!!r.sec} onChange={e => payRowSet(i, { sec: e.target.checked })} />}</td>
+                      <td style={tdSt}><b>{TUR_IKON[r.ofis.tur] || "🏢"} {r.ofis.ad}</b><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{r.ofis.kiraya_veren || r.ofis.bolge}</div></td>
+                      <td style={tdSt}>{r.ofis.sorumlu || "—"}</td>
+                      <td style={{ ...tdSt, fontFamily:"ui-monospace, Menlo, monospace" }}>{r.donem}<div style={{ fontSize:"11px", color:"#6b7a90" }}>vade {fT(r.vade)}</div></td>
+                      <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>₺{r.kira.toLocaleString("tr-TR")}</td>
+                      <td style={{ ...tdSt, textAlign:"right" }}>{r.odendi ? <b>₺{Number(r.odeme.tutar || 0).toLocaleString("tr-TR")}</b>
+                        : <input value={r.tutar} onChange={e => payRowSet(i, { tutar: e.target.value, sec: true })} style={{ width:"110px", border:"1px solid #cfd7e2", borderRadius:"8px", padding:"6px 8px", fontFamily:"ui-monospace, Menlo, monospace", fontSize:"13px", textAlign:"right" }} />}</td>
+                      <td style={tdSt}>{r.odendi ? <span style={{ fontSize:"12.5px" }}>{r.odeme.kasadan_dus === false ? "AHY ödedi" : "Kasadan"}</span>
+                        : <select value={r.kasadan ? "KASA" : "AHY"} onChange={e => payRowSet(i, { kasadan: e.target.value === "KASA" })} style={{ border:"1px solid #cfd7e2", borderRadius:"8px", padding:"6px 8px", fontSize:"12.5px" }}><option value="KASA">Kasadan</option><option value="AHY">AHY ödedi</option></select>}</td>
+                      <td style={tdSt}>{r.odendi ? <span style={{ fontSize:"12.5px", color:"#6b7a90" }}>{fT(r.odeme.tarih)}</span>
+                        : <input type="date" value={r.tarih} onChange={e => payRowSet(i, { tarih: e.target.value })} style={{ border:"1px solid #cfd7e2", borderRadius:"8px", padding:"5px 8px", fontSize:"12.5px" }} />}</td>
+                      <td style={tdSt}>{r.odendi
+                        ? <span style={{ display:"inline-flex", gap:"6px", alignItems:"center" }}><span style={{ ...pill, background:"#dcfce7", color:"#15803d" }}>Ödendi</span>{canEdit && <button onClick={() => odemeGeriAl(r.ofis, r.donem, r.odeme, true)} title="Geri al" style={{ ...icoBtn, width:"24px", height:"24px", fontSize:"11px" }}>↩︎</button>}</span>
+                        : r.gecikti ? <span style={{ ...pill, background:"#fee2e2", color:"#b91c1c" }}>Vadesi geçti</span>
+                        : <span style={{ ...pill, background:"#f3f5f8", color:"#6b7a90", border:"1px solid #e3e8ef" }}>Bekliyor</span>}</td>
+                    </tr>
+                  ))}
+                  {payRows.length === 0 && <tr><td colSpan={9} style={{ textAlign:"center", padding:"30px", color:"#9ca3af" }}>Kiralık aktif konum yok</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", padding:"14px 20px", borderTop:"1px solid #e3e8ef", background:"#f8fafc", flexWrap:"wrap" }}>
+              <div style={{ fontSize:"13px", color:"#3c4a5d" }}>Seçili <b>{paySecili.length} ödeme</b> · toplam <b style={{ fontSize:"16px" }}>₺{paySeciliToplam.toLocaleString("tr-TR")}</b></div>
+              <div style={{ display:"flex", gap:"10px" }}>
+                <button onClick={() => setPayOpen(false)} disabled={payBusy} style={{ ...btnBase, background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>Vazgeç</button>
+                <button onClick={odemeleriKaydet} disabled={payBusy || !paySecili.length} style={{ ...btnBase, background: paySecili.length ? "#0f766e" : "#9ca3af", color:"#fff" }}>{payBusy ? "Kaydediliyor…" : "✓ Ödemeleri Kaydet"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
+      {/* Form / Belge penceresi */}
+      {showForm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(10,20,35,.55)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:600, overflowY:"auto", padding:"24px 14px" }} onClick={() => setShowForm(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"660px", padding:"24px", position:"relative" }}>
+            <button onClick={() => setShowForm(false)} style={{ position:"absolute", top:"16px", right:"16px", ...icoBtn }}>✕</button>
+            <h3 style={{ margin:"0 0 18px", fontSize:"18px", fontWeight:800, color:"#1e3a5f" }}>{selected ? `✏️ ${form.ad}` : "🏢 Yeni Konum"}</h3>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"16px" }}>
+              <div><label style={lbl}>Tür</label><select value={form.tur} onChange={e => setForm(f => ({ ...f, tur: e.target.value }))} style={inp}>{["OFİS", "DEPO", "OFİS+DEPO"].map(t => <option key={t}>{t}</option>)}</select></div>
+              <div><label style={lbl}>Durum</label><select value={form.durum} onChange={e => setForm(f => ({ ...f, durum: e.target.value }))} style={inp}>{["AKTİF", "PASİF"].map(d => <option key={d}>{d}</option>)}</select></div>
+              <div style={{ gridColumn:"1/-1" }}><label style={lbl}>Ad / Tanım *</label><input value={form.ad} onChange={e => setForm(f => ({ ...f, ad: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Bölge</label>
+                <select value={(() => { const v = String(form.bolge || "").trim(); return (typeof ARAC_BOLGELER !== "undefined" ? ARAC_BOLGELER : []).find(b => b.toLocaleLowerCase("tr") === v.toLocaleLowerCase("tr")) || v; })()} onChange={e => setForm(f => ({ ...f, bolge: e.target.value }))} style={inp}>
+                  <option value="">Seçin</option>
+                  {(typeof ARAC_BOLGELER !== "undefined" ? ARAC_BOLGELER : ["İzmir", "Ankara", "Bursa"]).map(b => <option key={b} value={b}>{b}</option>)}
+                  {form.bolge && !(typeof ARAC_BOLGELER !== "undefined" ? ARAC_BOLGELER : []).some(b => b.toLocaleLowerCase("tr") === String(form.bolge).trim().toLocaleLowerCase("tr")) && <option value={form.bolge}>{form.bolge}</option>}
+                </select></div>
+              <div><label style={lbl}>Sorumlu Kişi</label><input value={form.sorumlu} onChange={e => setForm(f => ({ ...f, sorumlu: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Kiraya Veren</label><input value={form.kiraya_veren} onChange={e => setForm(f => ({ ...f, kiraya_veren: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Sözleşme No</label><input value={form.sozlesme_no} onChange={e => setForm(f => ({ ...f, sozlesme_no: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Aylık Kira (₺)</label><input type="number" value={form.aylik_kira} onChange={e => setForm(f => ({ ...f, aylik_kira: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Kira Ödeme Şekli</label><select value={form.odeme_tipi || "PESIN"} onChange={e => setForm(f => ({ ...f, odeme_tipi: e.target.value }))} style={inp}><option value="PESIN">Peşin — dönem başında</option><option value="SONRADAN">Sonradan — dönem sonunda</option></select></div>
+              <div><label style={lbl}>Kira Başlangıç</label><input type="date" value={form.kira_baslangic} onChange={e => setForm(f => ({ ...f, kira_baslangic: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Ödeme Günü (ayın kaçı)</label><input type="number" min="1" max="28" placeholder={form.kira_baslangic ? String(Number(form.kira_baslangic.slice(8, 10))) : "başlangıç günü"} value={form.donem_gunu} onChange={e => setForm(f => ({ ...f, donem_gunu: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Kira Bitiş</label><input type="date" value={form.kira_bitis} onChange={e => setForm(f => ({ ...f, kira_bitis: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Alan (m²)</label><input type="number" value={form.metrekare} onChange={e => setForm(f => ({ ...f, metrekare: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Kat</label><input value={form.kat} onChange={e => setForm(f => ({ ...f, kat: e.target.value }))} style={inp} /></div>
+              <div style={{ gridColumn:"1/-1" }}><label style={lbl}>Adres</label><input value={form.adres} onChange={e => setForm(f => ({ ...f, adres: e.target.value }))} style={inp} /></div>
+              <div style={{ gridColumn:"1/-1" }}><label style={lbl}>Notlar</label><textarea value={form.notlar} onChange={e => setForm(f => ({ ...f, notlar: e.target.value }))} rows={2} style={{ ...inp, resize:"vertical" }} /></div>
+            </div>
+            <button onClick={handleSave} style={{ width:"100%", padding:"13px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"15px", cursor:"pointer", marginBottom: selected ? "22px" : 0 }}>💾 Kaydet</button>
             {selected && detailOfis && (
-              <div style={{ borderTop:"1px solid #e5e7eb", paddingTop:"20px" }}>
-                <h4 style={{ margin:"0 0 14px", fontSize:"15px", fontWeight:700, color:"#1e3a5f" }}>📁 Belgeler</h4>
-                {/* Kira sözleşmesi */}
-                {(() => {
-                  const b = getSozlesme(detailOfis);
-                  return (
-                    <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
-                      <span style={{ fontWeight:700, fontSize:"13px", color:"#374151", minWidth:"160px" }}>📄 Kira Sözleşmesi</span>
-                      {b ? (
-                        <>
-                          <a href={`${API_BASE}/hr/ofis-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
-                            style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>📥 {b.dosya_adi}</a>
-                          {canEdit && <button onClick={()=>handleBelgeSil(b.id)} style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>}
-                        </>
-                      ) : <span style={{ fontSize:"12px", color:"#9ca3af", flex:1 }}>— Henüz yüklenmedi</span>}
-                      {canEdit && (
-                        <label style={{ background:"#dbeafe", color:"#1d4ed8", borderRadius:"6px", padding:"5px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>
-                          {b ? "Güncelle" : "Yükle"}
-                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }}
-                            onChange={async e => { if(e.target.files[0]) await handleBelgeUpload(selected.id,"SOZLESME",e.target.files[0]); e.target.value=""; }} />
-                        </label>
-                      )}
-                    </div>
-                  );
-                })()}
-                {/* Ek belgeler */}
+              <div style={{ borderTop:"1px solid #e5e7eb", paddingTop:"18px" }}>
+                <h4 style={{ margin:"0 0 12px", fontSize:"15px", fontWeight:700, color:"#1e3a5f" }}>📁 Belgeler</h4>
+                {(() => { const b = getSozlesme(detailOfis); return (
+                  <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
+                    <span style={{ fontWeight:700, fontSize:"13px", color:"#374151", minWidth:"150px" }}>📄 Kira Sözleşmesi</span>
+                    {b ? <><a href={belgeUrl(b)} target="_blank" rel="noreferrer" style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>📥 {b.dosya_adi}</a>
+                      {canEdit && <button onClick={() => handleBelgeSil(b.id)} style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>}</>
+                      : <span style={{ fontSize:"12px", color:"#9ca3af", flex:1 }}>— Henüz yüklenmedi</span>}
+                    {canEdit && <label style={{ background:"#dbeafe", color:"#1d4ed8", borderRadius:"6px", padding:"5px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>{b ? "Güncelle" : "Yükle"}
+                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} onChange={async e => { if (e.target.files[0]) await handleBelgeUpload(selected.id, "SOZLESME", e.target.files[0]); e.target.value = ""; }} /></label>}
+                  </div>); })()}
                 {getEkler(detailOfis).map(b => (
                   <div key={b.id} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
-                    <span style={{ fontSize:"12px", color:"#6b7280", minWidth:"160px" }}>📎 {b.aciklama||b.dosya_adi}</span>
-                    <a href={`${API_BASE}/hr/ofis-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
-                      style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>📥 {b.dosya_adi}</a>
-                    {canEdit && <button onClick={()=>handleBelgeSil(b.id)} style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>}
+                    <span style={{ fontSize:"12px", color:"#6b7280", minWidth:"150px" }}>📎 {b.aciklama || "Ek belge"}</span>
+                    <a href={belgeUrl(b)} target="_blank" rel="noreferrer" style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>📥 {b.dosya_adi}</a>
+                    {canEdit && <button onClick={() => handleBelgeSil(b.id)} style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>}
                   </div>
                 ))}
-                {canEdit && (
-                  <label style={{ display:"block", background:"#f0fdf4", border:"1px dashed #86efac", borderRadius:"10px", padding:"12px", textAlign:"center", cursor:"pointer", color:"#166534", fontSize:"13px", fontWeight:600 }}>
-                    ➕ Ek Belge Yükle
-                    <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }}
-                      onChange={async e => { if(e.target.files[0]) await handleBelgeUpload(selected.id,"DIGER",e.target.files[0]); e.target.value=""; }} />
-                  </label>
-                )}
+                {canEdit && <label style={{ display:"block", background:"#f0fdf4", border:"1px dashed #86efac", borderRadius:"10px", padding:"12px", textAlign:"center", cursor:"pointer", color:"#166534", fontSize:"13px", fontWeight:600 }}>➕ Ek Belge Yükle
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }} onChange={async e => { if (e.target.files[0]) await handleBelgeUpload(selected.id, "DIGER", e.target.files[0]); e.target.value = ""; }} /></label>}
               </div>
             )}
           </div>
