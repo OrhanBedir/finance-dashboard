@@ -5618,6 +5618,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
   const [duzenleme, setDuzenleme] = useState({}); // { item_code: { pr_qty, done_qty } }
   const [kaydediyor, setKaydediyor] = useState(false);
   const [hata, setHata] = useState("");
+  const [gizliAcik, setGizliAcik] = useState(false); // gizlenen PO kalemleri listesi
   // Öneri şeridinden eklenen, henüz DB'de olmayan kalemler — tabloya eklenir,
   // Kaydet'te normal satır gibi gönderilir (0 requested → "PO açılmamış" farkı)
   const [ekstraKalemler, setEkstraKalemler] = useState([]);
@@ -5701,6 +5702,20 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
     } catch (e) { alert(`Silme hatası: ${e.message}`); }
   };
 
+  // PO'da olup bizde kaydı olmayan satırı gizle / geri al (12.09.2026)
+  const kalemGizle = async (r, gizli) => {
+    if (gizli && !window.confirm(`${r.item_code} PO satırı bu sahada gizlensin mi?\n\nHuawei PO kaydına dokunulmaz; satır grid'den ve sayaçlardan çıkar, alttaki "Gizlenen PO kalemleri" listesinden geri alınabilir.`)) return;
+    try {
+      const d = await fetchJson(`${API_BASE}/master/saha-kalem/gizle`, {
+        method: "POST", withAuth: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site: String(siteCode).toUpperCase(), item: r.item_code, gizli }),
+      });
+      if (!d?.ok) throw new Error(d?.error || "İşlem yapılamadı");
+      window.dispatchEvent(new Event("dataUpdated"));
+    } catch (e) { alert(`Gizleme hatası: ${e.message}`); }
+  };
+  const gizlenenler = (data.rows || []).filter((r) => r.gizli);
+
   const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
   // Ekranda gösterilen değer: düzenleme varsa o, yoksa DB değeri
   const goster = (row, alan) => {
@@ -5730,7 +5745,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
 
   const rows = useMemo(() => {
     const mevcut = new Set((data.rows || []).map((r) => r.item_code));
-    const liste = [...(data.rows || []), ...ekstraKalemler.filter((e) => !mevcut.has(e.item_code))];
+    const liste = [...(data.rows || []).filter((r) => !r.gizli), ...ekstraKalemler.filter((e) => !mevcut.has(e.item_code))];
     // Sıralama (31.08.2026, Orhan): düzgün kalemler üstte; parçalı/eksik/fazla
     // olanlar sona, PO hiç açılmamışlar en sona. Kayıtlı (DB) değerlere göre
     // sıralanır — hücreye yazarken satır zıplamasın diye düzenlemeler sıralamayı
@@ -5988,11 +6003,40 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
                               🗑
                             </button>
                           )}
+                          {silYetkili && !r.kayit_var && !r.yeni && (
+                            <button type="button" onClick={() => kalemGizle(r, true)} title="Bizde kaydı olmayan PO satırını grid'den gizle (PO'ya dokunulmaz)"
+                              style={{ background:"#f8fafc", color:"#64748b", border:"1px solid #cbd5e1", borderRadius:7, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                              Gizle
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
                   );
                 })}
+                {gizlenenler.length > 0 && (
+                  <tr>
+                    <td colSpan={99} style={{ ...S.td, background:"#f8fafc", fontSize:11.5, color:"#64748b" }}>
+                      <button type="button" onClick={() => setGizliAcik((v) => !v)}
+                        style={{ background:"none", border:"none", color:"#475569", fontWeight:700, fontSize:11.5, cursor:"pointer", padding:0 }}>
+                        {gizliAcik ? "▾" : "▸"} Gizlenen PO kalemleri ({gizlenenler.length})
+                      </button>
+                      {gizliAcik && gizlenenler.map((g) => (
+                        <div key={g.item_code} style={{ display:"flex", gap:10, alignItems:"center", marginTop:6 }}>
+                          <span style={{ fontFamily:"monospace", color:"#334155" }}>{g.item_code}</span>
+                          <span style={{ flex:1 }}>{g.item_description}</span>
+                          <span>PO: {Number(g.requested_qty || 0)} · {g.po_no || "—"}</span>
+                          {silYetkili && (
+                            <button type="button" onClick={() => kalemGizle(g, false)}
+                              style={{ background:"#fff", color:"#1d4ed8", border:"1px solid #bfdbfe", borderRadius:7, padding:"3px 8px", fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                              Geri al
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                )}
                 <tr style={{ background:"#f1f5f9", fontWeight:700, borderTop:"2px solid #cbd5e1" }}>
                   <td style={{ ...S.td, textAlign:"left", fontWeight:700 }} colSpan={2}>TOPLAM · {rows.length} kalem</td>
                   <td style={{ ...S.td, fontWeight:700 }}>{Math.round(ozet.prT * 100) / 100}</td>

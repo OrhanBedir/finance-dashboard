@@ -4695,10 +4695,15 @@ app.get("/master/saha-kalemler", async (req, res) => {
       ),
     ]);
 
+    const gizliRes = await pool.query(
+      `SELECT item_code FROM saha_kalem_gizli WHERE site_code = $1`, [site]).catch(() => ({ rows: [] }));
+    const gizliSet = new Set(gizliRes.rows.map((g) => String(g.item_code || "").trim()));
     const rows = (gridRes.rows || []).map((r) => ({
       ...r,
       currency: normalizeCurrency(r.currency),
       pr_qty: r.pr_qty === null || r.pr_qty === undefined ? null : Number(r.pr_qty),
+      // Gizleme yalnız bizde kaydı olmayan (PO-only) satırda geçerli
+      gizli: !r.kayit_var && gizliSet.has(String(r.item_code || "").trim()),
     }));
 
     const meta = metaRes.rows[0] || {};
@@ -4748,6 +4753,36 @@ app.delete("/master/saha-kalem", authMiddleware, async (req, res) => {
     res.json({ ok: true, silinen: r.rowCount });
   } catch (err) {
     console.error("SAHA KALEM SIL ERROR:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/* PO'da olup bizde kaydı olmayan kalemi grid'den gizle (12.09.2026, Orhan): kalem
+   değiştirilince (ör. AI5006 1-3 RRU → 4-6 RRU) Huawei'nin eski PO satırı "PR eksik"
+   olarak kalıyordu; PO silinemez (sonraki yüklemede geri gelir) → gizlenir.
+   Bizde o kalem için kayıt açılırsa satır yeniden görünür. */
+pool.query(`CREATE TABLE IF NOT EXISTS saha_kalem_gizli (site_code TEXT NOT NULL, item_code TEXT NOT NULL, created_by TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (site_code, item_code))`)
+  .then(() => pool.query(`ALTER TABLE saha_kalem_gizli ENABLE ROW LEVEL SECURITY`).catch(() => {}))
+  .catch(() => {});
+app.post("/master/saha-kalem/gizle", authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || "").toLowerCase().trim();
+    if (!SAHA_KALEM_SIL_YETKI.includes(email)) {
+      return res.status(403).json({ ok: false, error: "Kalem gizleme yetkiniz yok" });
+    }
+    const site = String(req.body?.site || "").replace(/\s+/g, "").toUpperCase();
+    const item = String(req.body?.item || "").trim();
+    if (!site || !item) return res.status(400).json({ ok: false, error: "site ve item zorunlu" });
+    if (req.body?.gizli === false) {
+      await pool.query(`DELETE FROM saha_kalem_gizli WHERE site_code = $1 AND item_code = $2`, [site, item]);
+    } else {
+      await pool.query(
+        `INSERT INTO saha_kalem_gizli (site_code, item_code, created_by) VALUES ($1, $2, $3)
+         ON CONFLICT (site_code, item_code) DO NOTHING`, [site, item, email]);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("SAHA KALEM GIZLE ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
