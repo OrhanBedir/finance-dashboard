@@ -7057,7 +7057,8 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
       // Maaş avansları: personel markası bazlı. İş avansları: ONAYDA SEÇİLEN
       // firmaya göre (is_avans_talep.firma) — ödeme/direktör onay tarihiyle.
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
-          'MAAS_AVANSI' AS tip, a.tutar, COALESCE(a.aciklama,'') AS aciklama
+          'MAAS_AVANSI' AS tip, a.tutar, COALESCE(a.aciklama,'') AS aciklama,
+          (LOWER(COALESCE(p.email,'')) = '${PM_KISISEL_EMAIL}') AS pm_kisisel
         FROM avans a JOIN personel p ON p.id = a.personel_id
         WHERE COALESCE(p.marka,'ERC') = $1 AND a.tarih >= $2
           AND UPPER(COALESCE(a.avans_turu,'MAAS')) = 'MAAS'
@@ -7073,7 +7074,8 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
             NULLIF(t.not_aciklama,''),
             CASE WHEN NULLIF(hp.ad_soyad,'') IS NOT NULL AND hp.ad_soyad <> t.talep_eden_ad
                  THEN 'talep: ' || t.talep_eden_ad END
-          ) AS aciklama
+          ) AS aciklama,
+          ${pmAvansSahibiSql("t", "hp")} AS pm_kisisel
         FROM is_avans_talep t
         LEFT JOIN personel hp ON hp.id = t.personel_id
         WHERE UPPER(COALESCE(t.firma,'ERC')) = $1
@@ -7083,7 +7085,8 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih,
           COALESCE(NULLIF(pp.ad_soyad,''), o.ad, o.email) AS ad_soyad,
           'MASRAF_ODEME' AS tip, o.tutar,
-          ('Masraf alacağı ödemesi' || COALESCE(' · '||NULLIF(o.aciklama,''),'')) AS aciklama
+          ('Masraf alacağı ödemesi' || COALESCE(' · '||NULLIF(o.aciklama,''),'')) AS aciklama,
+          (LOWER(COALESCE(NULLIF(pp.email,''), o.email, '')) = '${PM_KISISEL_EMAIL}') AS pm_kisisel
         FROM personel_odeme o LEFT JOIN personel pp ON pp.id = o.personel_id
         WHERE UPPER(COALESCE(o.firma,'ERC')) = $1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2`, [marka, baslangic]),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad,
@@ -7134,8 +7137,14 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
               AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
           )`, [marka]).catch(() => ({ rows: [] })),
     ]);
+    const _pmGor = pmKisiselGorur(req);
     const rows = [...maas.rows, ...avanslar.rows, ...kiralar.rows, ...ofisKiralar.rows, ...manuel.rows, ...taseronOdeme.rows]
-      .map(r => ({ ...r, tutar: Number(r.tutar || 0) }))
+      .map(r => {
+        const { pm_kisisel, ...x } = r;
+        // Orhan'ın avansı/ödemesi: tutar toplamlarda kalır, kimlik yetkisizlere gizlenir
+        if (pm_kisisel && !_pmGor) { x.ad_soyad = "Yönetim (gizli)"; x.aciklama = ""; }
+        return { ...x, tutar: Number(x.tutar || 0) };
+      })
       .sort((a, b) => b.tarih.localeCompare(a.tarih));
     res.json({ ok: true, baslangic, rows });
   } catch (e) {
@@ -15192,17 +15201,22 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
     // İş avansları: PD (Direktör) onayından geçenler — otomatik gider
     // Tarih: ödeme tarihi varsa o, yoksa direktör onay tarihi
     const av = await pool.query(
-      `SELECT id,
-              TO_CHAR(COALESCE(odeme_tarihi, direktor_onay_tarihi),'YYYY-MM-DD') AS tarih,
-              tutar, talep_eden_ad, gider_turu, aciklama, durum
-       FROM is_avans_talep
-       WHERE durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
-         AND UPPER(COALESCE(firma,'ERC')) = 'ERC'
-         AND COALESCE(odeme_tarihi, direktor_onay_tarihi) IS NOT NULL
-         AND EXTRACT(YEAR FROM COALESCE(odeme_tarihi, direktor_onay_tarihi))=$1
-         AND EXTRACT(MONTH FROM COALESCE(odeme_tarihi, direktor_onay_tarihi))=$2`,
+      `SELECT t.id,
+              TO_CHAR(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM-DD') AS tarih,
+              t.tutar, t.talep_eden_ad, t.gider_turu, t.aciklama, t.durum,
+              ${pmAvansSahibiSql("t", "p")} AS pm_kisisel
+       FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
+       WHERE t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
+         AND UPPER(COALESCE(t.firma,'ERC')) = 'ERC'
+         AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) IS NOT NULL
+         AND EXTRACT(YEAR FROM COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi))=$1
+         AND EXTRACT(MONTH FROM COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi))=$2`,
       [yil, ay]).catch(() => ({ rows: [] }));
-    res.json({ ok: true, odemeler: r.rows, maaslar: [...m.rows, ...mav.rows], avanslar: av.rows });
+    // Orhan'ın avansı: tutar giderde kalır, kimlik yalnız yetkililere (Nurcan/Serdar finans görür ama bunu görmez)
+    const _pmGorF = pmKisiselEmailGorur(req.financeUser?.email, req.financeUser?.role);
+    const avRows = av.rows.map(({ pm_kisisel, ...x }) =>
+      pm_kisisel && !_pmGorF ? { ...x, talep_eden_ad: "Yönetim (gizli)", aciklama: "", gider_turu: x.gider_turu } : x);
+    res.json({ ok: true, odemeler: r.rows, maaslar: [...m.rows, ...mav.rows], avanslar: avRows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -17618,15 +17632,22 @@ const yemekHaricAvans = (a) => `NOT (COALESCE(${a}.gider_turu,'') ~* '${YEMEK_AV
 // masraf_kalem + masraf_form alias'ları; bakiyeden DÜŞÜLECEK kalemlerin koşulu
 const yemekHaricKalem = (k, f) => `NOT (UPPER(COALESCE(${k}.kategori,'')) = 'YEMEK'
   AND COALESCE(${f}.arsiv_tarihi, ${f}.created_at)::date >= DATE '${YEMEK_HARIC_TARIH}')`;
-function pmKisiselGorur(req) {
-  const email = String(req.user?.email || "").toLowerCase().trim();
-  const rol = String(req.user?.role || "").toLowerCase();
-  return email === PM_KISISEL_EMAIL
-    || email === "duzgun.simsek@simsektel.com"
-    || email === "muhasebe@simsektel.com"
-    || email === "tugce.yelmen@simsektel.com"
-    || ["direktor", "muhasebe", "platform_admin"].includes(rol);
+// 11.09.2026 (Orhan): Orhan Bedir'in avansları/ödemeleri YALNIZ Orhan, Düzgün Şimşek,
+// Eren Can Şimşek ve Muhasebe tarafından görülür (rollout müdürleri, AHY yöneticisi vb. görmez).
+const PM_KISISEL_GORENLER = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com",
+  "duzgun.simsek@simsektel.com", "eren.simsek@simsektel.com", "muhasebe@simsektel.com"];
+function pmKisiselEmailGorur(email, rol = "") {
+  const e = String(email || "").toLowerCase().trim();
+  return PM_KISISEL_GORENLER.includes(e) || String(rol || "").toLowerCase() === "muhasebe";
 }
+function pmKisiselGorur(req) {
+  return pmKisiselEmailGorur(req.user?.email, req.user?.role);
+}
+// Avansın SAHİBİ Orhan mı? (Orhan'ın başkası adına açtığı talepler — ör. Beyazıt — görünür kalır)
+const pmAvansSahibiSql = (t = "t", p = "p") =>
+  `(LOWER(COALESCE(${p}.email,'')) = '${PM_KISISEL_EMAIL}' OR (${t}.personel_id IS NULL AND LOWER(COALESCE(${t}.talep_eden_email,'')) = '${PM_KISISEL_EMAIL}'))`;
+const pmAvansSahibiMi = (r) => String(r.personel_email || "").toLowerCase().trim() === PM_KISISEL_EMAIL
+  || (!r.personel_id && String(r.talep_eden_email || "").toLowerCase().trim() === PM_KISISEL_EMAIL);
 
 function avansTamGorus(req) {
   const email = String(req.user?.email || "").toLowerCase().trim();
@@ -17939,7 +17960,7 @@ app.get("/hr/is-avans", authMiddleware, async (req, res) => {
       params = [];
     }
     const r = await pool.query(query, params);
-    res.json(r.rows);
+    res.json(pmKisiselGorur(req) ? r.rows : r.rows.filter(t => !pmAvansSahibiMi(t)));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -18304,6 +18325,7 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
       params.push(personelKilidi);
     }
     if (firma) { conditions.push(`UPPER(COALESCE(t.firma,'')) = $${params.length+1}`); params.push(String(firma).toUpperCase()); }
+    if (!pmKisiselGorur(req)) conditions.push(`NOT ${pmAvansSahibiSql("t", "p")}`);
     if (durum) { conditions.push(`t.durum = $${params.length+1}`); params.push(durum); }
     if (gider_turu) { conditions.push(`t.gider_turu = $${params.length+1}`); params.push(gider_turu); }
     if (bolge) { conditions.push(`t.bolge = $${params.length+1}`); params.push(bolge); }
@@ -18710,6 +18732,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
          FROM is_avans_talep t
          LEFT JOIN personel p ON p.id = t.personel_id
          WHERE t.durum = ANY($1)
+           ${pmKisiselEmailGorur(userEmailLower) ? "" : `AND NOT ${pmAvansSahibiSql("t", "p")}`}
          ORDER BY t.created_at ASC
          LIMIT 20`,
         [bekleyenDurumlar]
