@@ -6540,6 +6540,14 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 // Gelir = SADECE markanın (taşeron canon eşleşmeli) yaptığı işlerin hakedişi
 // × pay (%90), onair tarihine göre aylıklanır — Bölge Analizi ile aynı kaynak.
 // Gider = marka personelinin maaş ödemeleri + maaş/iş avansları (aylık).
+// 11.09.2026 (Cumali Kabaklı vakası): Taşeron Ödeme Girişi FIFO ile ödemeyi faturalara
+// dağıtıp invoice_entries.odenen_tutar'a yazar; AHY ödemesi ayrıca marka_taseron_odeme'ye
+// düşer. "Fatura girişinden" ödeme sayılırken bu dağıtılan kısım çıkarılır — yoksa bölünmüş
+// ödeme (25.000 = 16.800 + 8.200) tutar eşleşmesi korumasına takılmadan ikinci kez sayılıyordu.
+const TASERON_LOG_DAGILIM_SQL = `(SELECT (d->>'fatura_id')::int AS fid, SUM((d->>'odeme')::numeric) AS t
+  FROM taseron_odeme_log l,
+       jsonb_array_elements(CASE WHEN jsonb_typeof(l.dagilim) = 'array' THEN l.dagilim ELSE '[]'::jsonb END) d
+  WHERE (d->>'fatura_id') ~ '^[0-9]+$' GROUP BY 1)`;
 app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
   try {
     const rol = String(req.user?.role || "").toLowerCase();
@@ -6611,9 +6619,9 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           SELECT to_char(tarih,'YYYY-MM') AS ay, COALESCE(tutar,0) AS t
           FROM marka_taseron_odeme WHERE UPPER(marka) = $1
           UNION ALL
-          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), COALESCE(i.odenen_tutar,0)
-          FROM invoice_entries i
-          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0))
+          FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
+          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
             AND NOT EXISTS (
               SELECT 1 FROM marka_taseron_odeme mo
               WHERE UPPER(mo.marka) = $1
@@ -6825,9 +6833,9 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         pool.query(`SELECT COALESCE(taseron_adi,'') AS ad, COALESCE(tutar,0) AS t
           FROM marka_taseron_odeme WHERE UPPER(marka) = $1
           UNION ALL
-          SELECT COALESCE(i.tedarikci,''), COALESCE(i.odenen_tutar,0)
-          FROM invoice_entries i
-          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+          SELECT COALESCE(i.tedarikci,''), (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0))
+          FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
+          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
           AND NOT EXISTS (
             SELECT 1 FROM marka_taseron_odeme mo
             WHERE UPPER(mo.marka) = $1
@@ -7113,11 +7121,11 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         WHERE UPPER(marka) = $1
         UNION ALL
         SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM-DD') AS tarih,
-          COALESCE(i.tedarikci,'') AS ad_soyad, 'TASERON' AS tip, COALESCE(i.odenen_tutar,0) AS tutar,
+          COALESCE(i.tedarikci,'') AS ad_soyad, 'TASERON' AS tip, (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) AS tutar,
           ('Fatura ödemesi (AHY ödedi) · fatura girişinden: ' || COALESCE(i.fatura_no,'')) AS aciklama,
           false AS kasadan_dus
-        FROM invoice_entries i
-        WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+        FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
+        WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
           -- Aynı ödeme AHY panelinden de girildiyse çift sayma (taşeron ilk kelime + tutar eşleşmesi)
           AND NOT EXISTS (
             SELECT 1 FROM marka_taseron_odeme mo
@@ -7766,12 +7774,12 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
     let faturaOdemeleri = [];
     try {
       const fo = await pool.query(`SELECT (id * -1) AS id, COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '') AS taseron_adi,
-          'FATURA_ODEME' AS tip, COALESCE(odenen_tutar,0) AS tutar,
+          'FATURA_ODEME' AS tip, (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) AS tutar,
           to_char(COALESCE(odeme_tarihi, fatura_tarihi),'YYYY-MM-DD') AS tarih,
           ('Fatura girişinde ödendi: ' || COALESCE(fatura_no,'')) AS aciklama,
           id AS fatura_id, 'FATURA' AS kaynak
-        FROM invoice_entries i
-        WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+        FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
+        WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
           -- Aynı ödeme Avans/Ödeme olarak da girildiyse çift sayma
           AND NOT EXISTS (
             SELECT 1 FROM marka_taseron_odeme mo
@@ -8477,9 +8485,9 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
           SELECT to_char(tarih,'YYYY-MM') AS ay, COALESCE(tutar,0) AS t
           FROM marka_taseron_odeme WHERE UPPER(marka) = $1
           UNION ALL
-          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), COALESCE(i.odenen_tutar,0)
-          FROM invoice_entries i
-          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND COALESCE(i.odenen_tutar,0) > 0
+          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0))
+          FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
+          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
             AND NOT EXISTS (
               SELECT 1 FROM marka_taseron_odeme mo
               WHERE UPPER(mo.marka) = $1
