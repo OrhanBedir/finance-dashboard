@@ -36382,7 +36382,11 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac }) {
                           <div><div style={{ fontWeight:800 }}>{o.ad}</div><div style={{ fontSize:"12px", color:"#6b7a90" }}>{[o.tur, o.bolge, o.metrekare ? `${o.metrekare} m²` : null].filter(Boolean).join(" · ")}</div></div>
                         </div>
                       </td>
-                      <td style={{ ...tdSt, maxWidth:"260px", color:"#3c4a5d", fontSize:"12.5px" }}>{o.adres || <span style={{ color:"#9ca3af" }}>—</span>}</td>
+                      <td style={{ ...tdSt, width:"240px", minWidth:"200px", maxWidth:"260px", whiteSpace:"normal" }}>
+                        {o.adres
+                          ? <div title={o.adres} style={{ color:"#3c4a5d", fontSize:"12.5px", lineHeight:1.4, whiteSpace:"normal", wordBreak:"break-word", overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{o.adres}</div>
+                          : <span style={{ color:"#9ca3af" }}>—</span>}
+                      </td>
                       <td style={tdSt}>{o.sorumlu || "—"}</td>
                       <td style={tdSt}>{o.kiraya_veren || <span style={{ color:"#9ca3af" }}>—</span>}</td>
                       <td style={{ ...tdSt, textAlign:"right", fontWeight:700, fontVariantNumeric:"tabular-nums" }}>{kira > 0 ? `₺${kira.toLocaleString("tr-TR")}` : "—"}<div style={{ fontSize:"11px", color:"#6b7a90", fontWeight:500 }}>{kira > 0 ? `${(o.odeme_tipi || "PESIN") === "SONRADAN" ? "ay sonu" : "peşin"} · ${gunOf(o)}'i` : ""}</div></td>
