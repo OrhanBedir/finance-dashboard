@@ -36084,6 +36084,20 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
 }
 
 // ─── OFİS & DEPO PANELİ ──────────────────────────────────────────────────────
+/* 11.09.2026: konum türü ikonları — emoji (🏭 fabrika / 🏗 vinç) yerine sade çizgi ikon */
+function KonumIkon({ tur, size = 18, color = "#fff" }) {
+  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
+  if (tur === "DEPO") return (
+    <svg {...p}><path d="M3 21V9l9-5 9 5v12" /><path d="M7 21v-8h10v8" /><path d="M7 17h10" /></svg>
+  );
+  if (tur === "OFİS+DEPO") return (
+    <svg {...p}><path d="M2 21V10l6-3.5L14 10v11" /><path d="M14 21V6.5L18.5 4 22 6v15" /><path d="M5 21v-5h6v5" /><path d="M17 9h2M17 12.5h2M17 16h2" /><path d="M1.5 21h21" /></svg>
+  );
+  return (
+    <svg {...p}><rect x="5" y="3" width="14" height="18" rx="1.5" /><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2" /><path d="M10.5 21v-3h3v3" /></svg>
+  );
+}
+
 function OfisDepoPanel({ currentUser, onBack, onGoArac }) {
   /* 11.09.2026: Araç Filosu paneliyle aynı kurumsal yapı — başlık şeridi, KPI,
      satır görünümü + açılır detay, vade bazlı kira takibi, toplu Kira Öde. */
@@ -36378,7 +36392,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac }) {
                     <tr onClick={() => setAcikSatir(acik ? null : o.id)} style={{ cursor:"pointer", background: acik ? "#eefaf8" : "transparent" }}>
                       <td style={tdSt}>
                         <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-                          <span style={{ width:"34px", height:"34px", borderRadius:"9px", background: aktifMi(o) ? "#1e3a5f" : "#9ca3af", color:"#fff", display:"grid", placeItems:"center", fontSize:"16px", flex:"none" }}>{TUR_IKON[o.tur] || "🏢"}</span>
+                          <span title={o.tur} style={{ width:"34px", height:"34px", borderRadius:"9px", background: aktifMi(o) ? "#1e3a5f" : "#9ca3af", display:"grid", placeItems:"center", flex:"none" }}><KonumIkon tur={o.tur} /></span>
                           <div><div style={{ fontWeight:800 }}>{o.ad}</div><div style={{ fontSize:"12px", color:"#6b7a90" }}>{[o.tur, o.bolge, o.metrekare ? `${o.metrekare} m²` : null].filter(Boolean).join(" · ")}</div></div>
                         </div>
                       </td>
@@ -36493,7 +36507,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac }) {
                   {payRows.map((r, i) => (
                     <tr key={r.key} style={{ background: r.odendi ? "#f8fafc" : "transparent" }}>
                       <td style={tdSt}>{!r.odendi && <input type="checkbox" checked={!!r.sec} onChange={e => payRowSet(i, { sec: e.target.checked })} />}</td>
-                      <td style={tdSt}><b>{TUR_IKON[r.ofis.tur] || "🏢"} {r.ofis.ad}</b><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{r.ofis.kiraya_veren || r.ofis.bolge}</div></td>
+                      <td style={tdSt}><b style={{ display:"inline-flex", alignItems:"center", gap:"6px" }}><KonumIkon tur={r.ofis.tur} size={15} color="#1e3a5f" />{r.ofis.ad}</b><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{r.ofis.kiraya_veren || r.ofis.bolge}</div></td>
                       <td style={tdSt}>{r.ofis.sorumlu || "—"}</td>
                       <td style={{ ...tdSt, fontFamily:"ui-monospace, Menlo, monospace" }}>{r.donem}<div style={{ fontSize:"11px", color:"#6b7a90" }}>vade {fT(r.vade)}</div></td>
                       <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>₺{r.kira.toLocaleString("tr-TR")}</td>
