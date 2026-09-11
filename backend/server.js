@@ -2073,6 +2073,10 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     }
 
     const COL_SITE_ID = findColIndex(["DU ID", "SITE ID", "Site ID"], 2);
+    // 11.09.2026 (ES0098 vakası): DSS-GPS Readiness görevi ISDP'de ayrı bir DU'da
+    // ya da DU'suz, yalnız ana saha kimliğiyle ("ES0098") açılabiliyor; GPS kalemi
+    // ise bizde ES0098_L800_MWA altında. Ana saha sütunu ayrıca okunur.
+    const COL_SITE_BASE = findColIndex(["Site ID/Node ID", "SITE ID", "Site ID"], -1);
     const COL_STATUS = findColIndex(["Status", "Task Status"], 7);
     const COL_TEMPLATE = findColIndex(["Template Name"], 15);
     // ISDP export'unda görev tipi: QC-TE = saha QC'si, QA = EHS/denetim.
@@ -2188,9 +2192,9 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i] || [];
 
-      const siteCode = String(row[COL_SITE_ID] || "")
-        .trim()
-        .toUpperCase();
+      const siteBaseRaw = COL_SITE_BASE >= 0 ? String(row[COL_SITE_BASE] || "").trim().toUpperCase() : "";
+      const siteCode = (String(row[COL_SITE_ID] || "").trim().toUpperCase()) || siteBaseRaw;
+      const siteBase = (siteBaseRaw || siteCode).split("_")[0];
       const qcDurum = normalizeStatus(row[COL_STATUS]);
 
       if (!siteCode || !qcDurum) continue;
@@ -2210,7 +2214,7 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
       const key = `${siteCode}|${scope}`;
       const prev = bySiteScope.get(key);
       if (!prev || (prev.qcDurum !== "OK" && qcDurum === "OK")) {
-        bySiteScope.set(key, { siteCode, scope, qcDurum, firstSubmitDateOnly, qcClosedDateOnly });
+        bySiteScope.set(key, { siteCode, siteBase, scope, qcDurum, firstSubmitDateOnly, qcClosedDateOnly });
       } else if (prev.qcDurum === "OK" && qcDurum === "OK") {
         prev.firstSubmitDateOnly = prev.firstSubmitDateOnly || firstSubmitDateOnly;
         prev.qcClosedDateOnly = prev.qcClosedDateOnly || qcClosedDateOnly;
@@ -2237,6 +2241,19 @@ app.post("/qc/upload", upload.single("file"), async (req, res) => {
         [m.qcDurum, m.siteCode, items],
       );
       updatedCount += r.rowCount || 0;
+      // GPS görevi birebir DU ile eşleşmediyse (GPS kalemi aynı ana sahanın başka
+      // DU kodunda — ES0098_L800_MWA gibi): kapanışta (OK) ana sahanın GPS
+      // kalemleri kapatılır. NOK ile başka DU'nun GPS'i yeniden AÇILMAZ.
+      if (m.scope === "GPS" && !(r.rowCount > 0) && m.qcDurum === "OK" && m.siteBase && m.siteBase.length >= 4) {
+        const fb = await pool.query(
+          `UPDATE master_works SET qc_durum = 'OK'
+            WHERE UPPER(TRIM(COALESCE(site_code, ''))) LIKE $1
+              AND TRIM(COALESCE(item_code, '')) = ANY($2::text[])
+              AND COALESCE(qc_durum, '') <> 'OK'`,
+          [m.siteBase + "\\_%", ITEM_GPS],
+        );
+        updatedCount += fb.rowCount || 0;
+      }
       // Enerji QC OK → rollout enerji kapanış tarihi
       if (m.scope === "ENERJI" && m.qcDurum === "OK") {
         await pool.query(
