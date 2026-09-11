@@ -20575,7 +20575,9 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
     const q = hesapKisi || _email;
     if (!q) return;
     setHesap(null);
-    fetch(`${API_BASE}/hr/is-avans/hesap?email=${encodeURIComponent(q)}`, { headers: _auth })
+    // "pid:31" → e-postası olmayan personel, personel_id ile açılır
+    const _hq = String(q).startsWith("pid:") ? `personel_id=${encodeURIComponent(String(q).slice(4))}` : `email=${encodeURIComponent(q)}`;
+    fetch(`${API_BASE}/hr/is-avans/hesap?${_hq}`, { headers: _auth })
       .then(r => r.json()).then(d => setHesap(d && d.ok ? d : { ok: false, hareketler: [], ozet: {}, bekleyen: { avanslar: [], formlar: [] } }))
       .catch(() => setHesap({ ok: false, hareketler: [], ozet: {}, bekleyen: { avanslar: [], formlar: [] } }));
   }, [tab, hesapKisi, tazele]);
@@ -20844,7 +20846,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
                 {!isRequester && bakiyeler.length > 0 && (
                   <select value={hesapKisi} onChange={e => setHesapKisi(e.target.value)} style={{ padding:"8px 12px", borderRadius:"9px", border:"1px solid #cfd7e2", fontSize:"13px", fontWeight:700, background:"#fff" }}>
                     <option value="">Kendi hesabım</option>
-                    {bakiyeler.filter(b => b.email).map(b => <option key={b.id} value={String(b.email).toLowerCase()}>{b.ad_soyad}</option>)}
+                    {bakiyeler.map(b => <option key={b.id} value={b.email ? String(b.email).toLowerCase() : `pid:${b.id}`}>{b.ad_soyad}</option>)}
                   </select>
                 )}
               </div>
@@ -20957,7 +20959,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
                         <td style={{ ...td, textAlign:"right", fontVariantNumeric:"tabular-nums", color: Number(b.masraf) > 0 ? "#6d28d9" : "#9ca3af" }}>{Number(b.masraf) > 0 ? `₺${fmt(b.masraf)}` : "—"}</td>
                         <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums", color: bk < 0 ? "#b91c1c" : bk > 0 ? "#15803d" : "#6b7a90" }}>{bk < 0 ? "−" : bk > 0 ? "+" : ""}₺{fmt(Math.abs(bk))}<div style={{ fontSize:"10.5px", fontWeight:600, color:"#6b7a90" }}>{bk < 0 ? "şirket borçlu" : bk > 0 ? "avans açık" : "kapalı"}</div></td>
                         <td style={{ ...td, textAlign:"right", whiteSpace:"nowrap" }}>
-                          <button onClick={() => { setBakiyeModal(false); setHesapKisi(String(b.email || "").toLowerCase()); setTab("hesabim"); }} style={{ ...btn, padding:"4px 9px", fontSize:"11.5px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>Ekstre</button>
+                          <button onClick={() => { setBakiyeModal(false); setHesapKisi(b.email ? String(b.email).toLowerCase() : `pid:${b.id}`); setTab("hesabim"); }} style={{ ...btn, padding:"4px 9px", fontSize:"11.5px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>Ekstre</button>
                           {canPay && bk !== 0 && <button onClick={() => { setBakiyeModal(false); setTab("odemeler"); }} style={{ ...btn, padding:"4px 9px", fontSize:"11.5px", marginLeft:"5px", background: bk < 0 ? "#0f766e" : "#f3f5f8", color: bk < 0 ? "#fff" : "#374151", border: bk < 0 ? "none" : "1px solid #cfd7e2" }}>{bk < 0 ? "💸 Öde" : "↩ İade"}</button>}
                         </td>
                       </tr>

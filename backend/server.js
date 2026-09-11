@@ -17681,6 +17681,7 @@ app.get("/hr/is-avans/bakiyeler", authMiddleware, async (req, res) => {
     if (!avansTamGorus(req)) return res.status(403).json({ error: "Yetkiniz yok" });
     const r = await pool.query(`
       SELECT p.id, p.ad_soyad, p.aktif, COALESCE(p.marka,'ERC') AS marka,
+        LOWER(TRIM(COALESCE(p.email,''))) AS email,
         COALESCE(av.toplam,0) AS avans,
         COALESCE(ms.toplam,0) AS masraf,
         COALESCE(po.odeme,0) AS odeme,
@@ -17744,8 +17745,16 @@ pool.query(`CREATE TABLE IF NOT EXISTS personel_odeme (
    girmez ama "yolda" olarak gösterilir. */
 app.get("/hr/is-avans/hesap", authMiddleware, async (req, res) => {
   try {
-    const email = (avansTamGorus(req) ? (req.query.email || req.user.email) : req.user.email || "").toLowerCase().trim();
-    if (!email) return res.status(400).json({ ok: false, error: "email gerekli" });
+    const tam = avansTamGorus(req);
+    let email = (tam ? (req.query.email || (req.query.personel_id ? "" : req.user.email)) : req.user.email || "").toLowerCase().trim();
+    // 11.09.2026: e-postası olmayan personel ekstresi personel_id ile açılır
+    let pid = null;
+    if (tam && req.query.personel_id) {
+      const pr = await pool.query(`SELECT id, LOWER(TRIM(COALESCE(email,''))) AS email FROM personel WHERE id=$1`, [Number(req.query.personel_id)]);
+      if (!pr.rows[0]) return res.status(404).json({ ok: false, error: "Personel bulunamadı" });
+      pid = pr.rows[0].id; if (!email) email = pr.rows[0].email;
+    }
+    if (!email && !pid) return res.status(400).json({ ok: false, error: "email gerekli" });
     if (email === PM_KISISEL_EMAIL && !pmKisiselGorur(req))
       return res.status(403).json({ ok: false, error: "Bu hesabın ekstresini görme yetkiniz yok" });
     const [av, mf, po, avBek, mfBek] = await Promise.all([
@@ -17754,29 +17763,35 @@ app.get("/hr/is-avans/hesap", authMiddleware, async (req, res) => {
           COALESCE(t.bolge,'') AS bolge, COALESCE(t.proje,'') AS proje, COALESCE(t.firma,'') AS firma, t.talep_eden_ad,
           NOT (${yemekHaricAvans("t")}) AS yemek_haric
         FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
-        WHERE t.durum='TAMAMLANDI' AND (LOWER(COALESCE(p.email,''))=$1 OR (t.personel_id IS NULL AND LOWER(t.talep_eden_email)=$1))
-        ORDER BY 2, t.id`, [email]),
+        WHERE t.durum='TAMAMLANDI' AND (($1<>'' AND (LOWER(COALESCE(p.email,''))=$1 OR (t.personel_id IS NULL AND LOWER(t.talep_eden_email)=$1))) OR ($1='' AND t.personel_id=$2::int))
+        ORDER BY 2, t.id`, [email, pid]),
       pool.query(`SELECT mf.id, mf.arsiv_tarihi::date AS tarih, mf.form_no, COALESCE(mf.donem,'') AS donem,
           COALESCE(SUM(mk.tutar),0) AS tutar, COUNT(mk.id)::int AS kalem
         FROM masraf_form mf LEFT JOIN masraf_kalem mk ON mk.form_id=mf.id
-        WHERE LOWER(mf.talep_eden_email)=$1 AND mf.durum='ARSIVLENDI'
-        GROUP BY mf.id ORDER BY 2, mf.id`, [email]),
+        WHERE (($1<>'' AND LOWER(mf.talep_eden_email)=$1) OR ($1='' AND mf.personel_id=$2::int)) AND mf.durum='ARSIVLENDI'
+        GROUP BY mf.id ORDER BY 2, mf.id`, [email, pid]),
       pool.query(`SELECT o.id, o.tarih::date AS tarih, o.tip, o.tutar, COALESCE(o.aciklama,'') AS aciklama,
           COALESCE(o.firma,'') AS firma, COALESCE(o.yontem,'') AS yontem
         FROM personel_odeme o LEFT JOIN personel p ON p.id=o.personel_id
-        WHERE LOWER(COALESCE(o.email,''))=$1 OR LOWER(COALESCE(p.email,''))=$1
-        ORDER BY 2, o.id`, [email]).catch(() => ({ rows: [] })),
+        WHERE ($1<>'' AND (LOWER(COALESCE(o.email,''))=$1 OR LOWER(COALESCE(p.email,''))=$1)) OR ($1='' AND o.personel_id=$2::int)
+        ORDER BY 2, o.id`, [email, pid]).catch(() => ({ rows: [] })),
       pool.query(`SELECT t.id, t.tarih::date AS tarih, t.tutar, t.durum, COALESCE(t.gider_turu,'') AS gider_turu, COALESCE(t.aciklama,'') AS aciklama
         FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
         WHERE t.durum NOT IN ('TAMAMLANDI','REDDEDILDI')
-          AND (LOWER(COALESCE(p.email,''))=$1 OR (t.personel_id IS NULL AND LOWER(t.talep_eden_email)=$1))
-        ORDER BY 2`, [email]),
+          AND (($1<>'' AND (LOWER(COALESCE(p.email,''))=$1 OR (t.personel_id IS NULL AND LOWER(t.talep_eden_email)=$1))) OR ($1='' AND t.personel_id=$2::int))
+        ORDER BY 2`, [email, pid]),
       pool.query(`SELECT mf.id, mf.created_at::date AS tarih, mf.form_no, COALESCE(mf.donem,'') AS donem, mf.durum,
           COALESCE(SUM(mk.tutar),0) AS tutar, COUNT(mk.id)::int AS kalem
         FROM masraf_form mf LEFT JOIN masraf_kalem mk ON mk.form_id=mf.id
-        WHERE LOWER(mf.talep_eden_email)=$1 AND mf.durum NOT IN ('ARSIVLENDI','REDDEDILDI')
-        GROUP BY mf.id ORDER BY 2`, [email]),
+        WHERE (($1<>'' AND LOWER(mf.talep_eden_email)=$1) OR ($1='' AND mf.personel_id=$2::int)) AND mf.durum NOT IN ('ARSIVLENDI','REDDEDILDI')
+        GROUP BY mf.id ORDER BY 2`, [email, pid]),
     ]);
+    // pg DATE → JS Date; String(Date) "Wed Sep 09…" gün adına göre sıralanıyordu → ISO metin
+    const _iso = (v) => v instanceof Date
+      ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`
+      : String(v || "").slice(0, 10);
+    for (const q of [av, mf, po, avBek, mfBek]) q.rows.forEach(r => { r.tarih = _iso(r.tarih); });
+    const _sira = { AVANS: 0, ODEME: 1, YEMEK: 2, MASRAF: 3, IADE: 4 };
     const hareketler = [
       ...av.rows.filter(r => !r.yemek_haric).map(r => ({ tarih: r.tarih, tip: "AVANS", yon: 1, tutar: Number(r.tutar),
         baslik: `İş avansı alındı${r.gider_turu ? ` · ${r.gider_turu}` : ""}`,
@@ -17791,7 +17806,7 @@ app.get("/hr/is-avans/hesap", authMiddleware, async (req, res) => {
         tutar: Number(r.tutar),
         baslik: r.tip === "AVANS_IADE" ? "Avans iadesi (kasaya)" : "Masraf ödemesi (şirket → personel)",
         detay: [r.aciklama, r.yontem === "NAKIT" ? "nakit" : "havale"].filter(Boolean).join(" · "), ref: `Ö${r.id}`, firma: r.firma })),
-    ].sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)) || (a.tip === "AVANS" ? -1 : 1));
+    ].sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)) || (_sira[a.tip] ?? 9) - (_sira[b.tip] ?? 9));
     let bakiye = 0;
     hareketler.forEach(h => { bakiye += h.yon * h.tutar; h.bakiye = Math.round(bakiye * 100) / 100; });
     res.json({ ok: true, email, hareketler,
