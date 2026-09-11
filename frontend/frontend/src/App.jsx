@@ -7144,7 +7144,20 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
       <SahaKalemGridi
         siteCode={siteSearchCode}
         oneriler={sahaOneri?.oneriler || []}
-        onVeriGir={(r) => {
+        onVeriGir={async (r) => {
+          // 12.09.2026 (Orhan): kayıtlı kalemde "Veri Gir" o SATIRI düzenler (PUT /master/:id).
+          // Eskiden editingId verilmediği için kalem kodu değişince /master/add ile YENİ satır
+          // açılıyordu (AI5006 1-3 RRU → 4-6 RRU vakası). Tam satır by-site'tan alınır ki
+          // tamamlanan/onair/kabul alanları boşla ezilmesin.
+          if (r.master_id) {
+            try {
+              const d = await fetchJson(`${API_BASE}/master/by-site?site_code=${encodeURIComponent(String(siteSearchCode || "").toUpperCase())}`);
+              const satir = (d?.rows || []).find((x) => Number(x.id) === Number(r.master_id));
+              if (satir) { handleEdit(satir); return; }
+            } catch (_) { /* aşağıdaki yeni kayıt akışına düşmesin: uyar */ alert("Kayıt okunamadı, sayfayı yenileyip tekrar deneyin"); return; }
+          }
+          // Kaydı olmayan (yalnız PO'da) kalem → yeni kayıt; önceki düzenlemeden kalan id temizlenir
+          setEditingId(null);
           setForm((prev) => ({
             ...prev,
             site_code: String(siteSearchCode || "").toUpperCase(),
