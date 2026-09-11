@@ -34728,11 +34728,12 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
 
       // Belge upload helper — tek dosya yükler, publicUrl döner
       const uploadRolloutBelge = async (file, type) => {
-        const ext = file.name.split(".").pop();
+        const ext = (/\.([A-Za-z0-9]{1,8})$/.exec(file.name || "")?.[1] || "bin").toLowerCase();
         const signRes = await fetch(`${API_BASE}/rollout/signed-upload-url?rolloutId=${result.row.id}&type=${type}&ext=${ext}`);
         if (!signRes.ok) throw new Error("Signed URL alınamadı");
         const { signedUrl, publicUrl } = await signRes.json();
-        const upRes = await fetch(signedUrl, { method:"PUT", body: file, headers:{ "Content-Type": file.type, "x-upsert":"true" } });
+        // Bazı tarayıcılar .xls/.dwg/.msg için boş MIME verir — boş Content-Type yüklemeyi bozmasın
+        const upRes = await fetch(signedUrl, { method:"PUT", body: file, headers:{ "Content-Type": file.type || "application/octet-stream", "x-upsert":"true" } });
         if (!upRes.ok) throw new Error("Supabase yükleme başarısız");
         return publicUrl;
       };
@@ -34900,7 +34901,8 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
   };
   const belgeWidget = (urlField, files, setFiles) => {
     const urls = String(form[urlField] || "").split("\n").filter(Boolean);
-    const accept = ".pdf,.jpg,.jpeg,.png,.dwg,.xlsx,.doc,.docx,.zip";
+    // 11.09.2026: .xls (eski Excel) kabul edilmiyordu — Excel/Office/arşiv/görsel türleri genişletildi
+    const accept = ".pdf,.jpg,.jpeg,.png,.heic,.tif,.tiff,.dwg,.dxf,.xlsx,.xls,.xlsm,.xlsb,.csv,.doc,.docx,.ppt,.pptx,.txt,.msg,.eml,.kmz,.kml,.zip,.rar,.7z";
     // ZIP desteği (03.09.2026, Orhan): fotoğraflar tek tek yükleniyordu — .zip seçilirse
     // içindeki dosyalar (klasör/__MACOSX hariç) tek tek belge olarak eklenir
     const zipAc = async (dosyalar) => {
@@ -34912,7 +34914,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           for (const [ad, entry] of Object.entries(zip.files)) {
             if (entry.dir || /(^|\/)__MACOSX\//.test(ad) || /(^|\/)\./.test(ad)) continue;
             const ext = (ad.split(".").pop() || "").toLowerCase();
-            const mime = { pdf:"application/pdf", jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", doc:"application/msword", docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document", dwg:"application/acad" }[ext] || "application/octet-stream";
+            const mime = { pdf:"application/pdf", jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xls:"application/vnd.ms-excel", xlsm:"application/vnd.ms-excel.sheet.macroEnabled.12", csv:"text/csv", doc:"application/msword", docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document", dwg:"application/acad" }[ext] || "application/octet-stream";
             const blob = await entry.async("blob");
             out.push(new File([blob], ad.split("/").pop(), { type: mime }));
           }
@@ -34950,7 +34952,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           </div>
         ))}
         <label style={{ display:"inline-flex", alignItems:"center", gap:"6px", background:"#f3f4f6", border:"1px dashed #9ca3af", borderRadius:"8px", padding:"7px 14px", cursor:"pointer", fontSize:"12px" }}>
-          📎 {urls.length || files.length ? "Belge Ekle" : "Belge Ekle (PDF, JPG, PNG, DWG, Excel, Word, ZIP)"}
+          📎 {urls.length || files.length ? "Belge Ekle" : "Belge Ekle (PDF, görsel, DWG, Excel xls/xlsx, Word, ZIP/RAR)"}
           <input type="file" multiple accept={accept} style={{ display:"none" }}
             onChange={async e => {
               const yeni = await zipAc(Array.from(e.target.files || []));
