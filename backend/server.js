@@ -18238,6 +18238,30 @@ app.put("/hr/is-avans/:id/reddet", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// 11.09.2026 (Orhan): aynı kişinin farklı yazılışları (BEYAZIT/Beyazıt, Yokus/Yokuş,
+// Mehmet bağcı/MEHMET BAĞCI) tek isimde birleşir. Anahtar = Türkçe karakter + büyük/küçük
+// harf duyarsız; gösterim = en çok Türkçe karakter taşıyan yazılışın "Baş Harf Büyük" hali.
+const _adAnahtar = (v) => String(v || "").toLocaleLowerCase("tr-TR")
+  .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c")
+  .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
+const _adBaslik = (v) => String(v || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("tr-TR").split(" ")
+  .map(w => (w === "ve" || !w) ? w : w.charAt(0).toLocaleUpperCase("tr-TR") + w.slice(1)).join(" ");
+function adlariTeklestir(rows, alanlar) {
+  if (!Array.isArray(rows)) return rows;
+  const skor = (a) => (String(a).match(/[^\x00-\x7F]/g) || []).length;
+  const en = {};
+  for (const r of rows) for (const f of alanlar) {
+    const a = r && r[f]; if (!a) continue;
+    const k = _adAnahtar(a);
+    if (!en[k] || skor(a) > skor(en[k])) en[k] = a;
+  }
+  return rows.map(r => {
+    if (!r) return r;
+    const o = { ...r };
+    for (const f of alanlar) if (o[f]) o[f] = _adBaslik(en[_adAnahtar(o[f])] || o[f]);
+    return o;
+  });
+}
 app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
   try {
     const ExcelJS = require("exceljs");
@@ -18278,6 +18302,7 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
     const trNorm = (v) => String(v || "").toLocaleLowerCase("tr-TR")
       .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c")
       .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    list.rows = adlariTeklestir(list.rows, ["personel_ad", "talep_eden_ad"]);
     const kimeAd = (t) => t.personel_ad || t.talep_eden_ad || "";
     const araN = trNorm(ara);
     if (araN) {
