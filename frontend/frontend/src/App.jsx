@@ -20696,14 +20696,21 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
      bekleyen" listesi bunu isimle gösterir, kimseyi aramaya gerek kalmaz. */
   const KIMDE_AVANS = { TALEP:"Rollout müdürü", ROLLOUT_MUDUR_ONAY:"Orhan Bedir (PM)", PM_ONAY:"Düzgün Şimşek (PD)", DIREKTOR_ONAY:"Muhasebe", MUHASEBE_ONAY:"Muhasebe" };
   const KIMDE_MASRAF = { ROLLOUT_BEKLE:"Nurcan Kuş (Rollout)", MUHASEBE_BEKLE:"Muhasebe kontrolü", PM_BEKLE:"Orhan Bedir (PM)", DIREKTOR_BEKLE:"Düzgün Şimşek (PD)", TAMAMLANDI:"Muhasebe (ödeme)" };
+  // 11.09.2026 (Orhan): kendi talebim (ya da benim adıma açılan) "Başkasında bekleyen"de
+  // en üste sabitlenir — liste en eski önde + ilk 8 ile kesildiği için bugünkü talep görünmüyordu
+  const _benAd = String(currentUser?.name || "").toLocaleLowerCase("tr-TR").trim();
+  const _benimMi = (email, ad) => (!!_email && String(email || "").toLowerCase().trim() === _email)
+    || (!!_benAd && String(ad || "").toLocaleLowerCase("tr-TR").trim() === _benAd);
   const digerleri = [
     ...avBekleyen.filter(t => !avansBana(t)).map(t => ({ tip:"AVANS", id: t.id, ad: t.personel_ad || t.talep_eden_ad,
+      benim: _benimMi(t.talep_eden_email, t.personel_ad || t.talep_eden_ad),
       alt: [t.bolge, t.proje].filter(Boolean).join(" · "), ne: [t.gider_turu, t.plaka, t.aciklama].filter(Boolean).join(" · "),
       tutar: t.tutar, durum: t.durum, adim: AV_ADIM[t.durum] ?? 0, et: AV_ET, tarih: t.tarih, kimde: KIMDE_AVANS[t.durum] || "—" })),
     ...mfBekleyen.filter(f => !masrafBana(f)).map(f => ({ tip:"MASRAF", id: f.id, ad: f.talep_eden_ad,
+      benim: _benimMi(f.talep_eden_email, f.talep_eden_ad),
       alt: `Form #${f.form_no || f.id} · ${f.donem || ""}`, ne: `${f.kalem_sayisi || 0} kalem`,
       tutar: f.toplam_tutar, durum: f.durum, adim: MF_ADIM[f.durum] ?? 0, et: MF_ET, tarih: f.created_at, kimde: KIMDE_MASRAF[f.durum] || "—" })),
-  ].sort((a, b) => gun(b.tarih) - gun(a.tarih));
+  ].sort((a, b) => (b.benim ? 1 : 0) - (a.benim ? 1 : 0) || gun(b.tarih) - gun(a.tarih));
   const DURUM_AD = { TALEP:"Rollout onayı", ROLLOUT_MUDUR_ONAY:"PM onayı", PM_ONAY:"Direktör onayı", DIREKTOR_ONAY:"Muhasebe", MUHASEBE_ONAY:"Muhasebe", ROLLOUT_BEKLE:"Rollout onayı", MUHASEBE_BEKLE:"Muhasebe kontrolü", PM_BEKLE:"PM onayı", DIREKTOR_BEKLE:"Direktör onayı", TAMAMLANDI:"Ödeme / arşiv" };
 
   return (
@@ -20794,9 +20801,9 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
                       <thead><tr>{["Talep", "Personel", "Ne", "Tutar", "Akış", "Kimde bekliyor", "Bekleme"].map((h, i) => <th key={h} style={{ ...th, textAlign: i === 3 ? "right" : "left" }}>{h}</th>)}</tr></thead>
                       <tbody>
                         {(bekleyenAcik ? digerleri : digerleri.slice(0, 8)).map((r, i) => (
-                          <tr key={r.tip + r.id + i}>
+                          <tr key={r.tip + r.id + i} style={r.benim ? { background:"#f0f7ff" } : undefined}>
                             <td style={td}>{r.tip === "AVANS" ? <span style={pill("#fef3c7", "#b45309")}>İş avansı</span> : <span style={pill("#ede9fe", "#6d28d9")}>Masraf formu</span>}</td>
-                            <td style={td}><div style={{ display:"flex", alignItems:"center", gap:"8px" }}><span style={{ width:"26px", height:"26px", borderRadius:"50%", background:"#cfd7e2", color:"#3c4a5d", fontWeight:800, fontSize:"10px", display:"grid", placeItems:"center", flex:"none" }}>{initials(r.ad)}</span><div><div style={{ fontWeight:600 }}>{r.ad}</div><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{r.alt}</div></div></div></td>
+                            <td style={td}><div style={{ display:"flex", alignItems:"center", gap:"8px" }}><span style={{ width:"26px", height:"26px", borderRadius:"50%", background:"#cfd7e2", color:"#3c4a5d", fontWeight:800, fontSize:"10px", display:"grid", placeItems:"center", flex:"none" }}>{initials(r.ad)}</span><div><div style={{ fontWeight:600 }}>{r.ad}{r.benim && <span style={{ ...pill("#dbeafe", "#1d4ed8"), marginLeft:"6px", fontSize:"10.5px" }}>Sizin talebiniz</span>}</div><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{r.alt}</div></div></div></td>
                             <td style={{ ...td, maxWidth:"220px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={r.ne}>{r.ne || "—"}</td>
                             <td style={{ ...td, textAlign:"right", fontWeight:700, fontVariantNumeric:"tabular-nums" }}>₺{fmt(r.tutar)}</td>
                             <td style={td}><Adimlar idx={r.adim} etiketler={r.et} /></td>
