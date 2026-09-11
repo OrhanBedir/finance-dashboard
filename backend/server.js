@@ -7891,6 +7891,8 @@ const AHY_BEDEL_COLOCATED = [
   [/7[.,]2\s*m\s*lprt/i, 8000, "Installation of 7,2m LPRT pole"],
   [/6\s*m\s*lprt/i, 7000, "Installation service 6m LPRT Pole"],
   [/one band addition/i, 12000, "One Band Addition at the same site visit"],
+  // 12.09.2026 (Orhan): Vedat Bey fiyat listesinde (04.09.2026) GPS 2.500/set vardı, kodda eksikti
+  [/gps equipment/i, 2500, "GPS equipment, antenna and feeder installation"],
 ];
 function ahyTaseronBedel(rows) {
   // rows: [{subcon, site, kalem, fq}] → { [subcon]: { bedel, detay[] } }
@@ -7934,6 +7936,9 @@ function ahyTaseronBedel(rows) {
       // One Band Addition: LTE benzeri ekstra iş — paket fiyata dahil değildir
       const qOB = qty(/one band addition/i);
       if (qOB > 0) { ek.bedel += qOB * 12000; ek.detay.push({ site: st, kalem: "One Band Addition at the same site visit", adet: qOB, birim: 12000, tutar: qOB * 12000, qc: qcOf(/one band addition/i) }); }
+      // GPS ekipman/anten/feeder: paket fiyata dahil değildir, set başına 2.500
+      const qGPS = qty(/gps equipment/i);
+      if (qGPS > 0) { ek.bedel += qGPS * 2500; ek.detay.push({ site: st, kalem: "GPS equipment, antenna and feeder installation", adet: qGPS, birim: 2500, tutar: qGPS * 2500, qc: qcOf(/gps equipment/i) }); }
     } else {
       // Diğer saha tipleri (L1800/L2100 One Band, co-located revizyon vb.):
       // anlaşma fiyat listesindeki kalemler adet bazlı uygulanır
