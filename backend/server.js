@@ -10521,7 +10521,13 @@ app.get("/is-atama/liste", authMiddleware, async (req, res) => {
              (SELECT COUNT(*) FROM is_atama_gun g WHERE g.is_atama_id = a.id) AS adam_gun
       FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori
       ${where.length ? "WHERE " + where.join(" AND ") : ""}
-      ORDER BY CASE a.durum WHEN 'BASLADI' THEN 0 WHEN 'ARA_VERILDI' THEN 1 WHEN 'DEVAM' THEN 1 WHEN 'ATANDI' THEN 2 WHEN 'QC_BEKLE' THEN 3 ELSE 4 END, a.plan_tarihi DESC NULLS LAST, a.id DESC
+      -- Sıralama (12.09.2026, Orhan): önce durum (sahadaki iş üstte), sonra AÇIK işlerde
+      -- plan tarihi ESKİDEN yeniye — gecikmiş/bugünkü iş en üstte, ileri tarihli plan altta.
+      -- Kapanmış işlerde (tamamlandı/iptal) tersi: en son yapılan üstte.
+      ORDER BY CASE a.durum WHEN 'BASLADI' THEN 0 WHEN 'ARA_VERILDI' THEN 1 WHEN 'DEVAM' THEN 1 WHEN 'ATANDI' THEN 2 WHEN 'QC_BEKLE' THEN 3 ELSE 4 END,
+               CASE WHEN a.durum IN ('TAMAMLANDI','IPTAL') THEN NULL ELSE a.plan_tarihi END ASC NULLS LAST,
+               CASE WHEN a.durum IN ('TAMAMLANDI','IPTAL') THEN a.plan_tarihi END DESC NULLS LAST,
+               a.id DESC
       LIMIT 500`, params);
     res.json({ ok: true, rows: r.rows, yetkili: isAtamaYetkiliMi(req) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
