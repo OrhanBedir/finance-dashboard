@@ -2885,6 +2885,10 @@ const MT_KATEGORILER = [
 ];
 const mtKatAdi = (k) => { const f = MT_KATEGORILER.find(x => x[0] === String(k || "").toUpperCase()); return f ? f[1] : (k || "—"); };
 // Taşeron adı kanonik anahtarı: "NETELCOM" ≈ "NETELCOM TELEKOMÜNİKASYON … LTD ŞTİ" ≈ "AHY_NETELKOM"
+// Firma ünvanı ile ekip kodu tutmayan taşeronlar (12.09.2026, Orhan):
+// AHY_VEDAT = AKCAN BİLİŞİM ENERJİ İNŞAAT SAN. VE TİC. LTD. ŞTİ. — aynı firma.
+// Anahtar K→C normalizasyonundan SONRAKİ hâliyle yazılır.
+const TASERON_TAKMA_AD = { ACCANBILISIM: "VEDAT", ACCAN: "VEDAT" };
 const mtCanon = (ad) => {
   let t = String(ad || "").toUpperCase()
     .replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ç/g, "C")
@@ -2898,7 +2902,8 @@ const mtCanon = (ad) => {
   const kelimeler = t.trim().split(/\s+/).filter(Boolean);
   const ikiKelime = kelimeler.length > 1 && kelimeler[0].length <= 5;
   t = (ikiKelime ? kelimeler.slice(0, 2).join("") : kelimeler[0] || "") || String(ad || "").toUpperCase().trim();
-  return t.replace(/K/g, "C");
+  t = t.replace(/K/g, "C");
+  return TASERON_TAKMA_AD[t] || t;
 };
 
 // ── ERC (Şimşek) Taşeron Hesabı: STATE %80 · 2KX %75 · FERRUMX AHY paket kuralı ──

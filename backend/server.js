@@ -7739,6 +7739,10 @@ app.delete("/finance/marka-borc/:id", authMiddleware, async (req, res) => {
 // VE TİC. LTD. ŞTİ." ve "AHY_NETELKOM" aynı taşerona işaret eder.
 // Kural: AHY_ önekini at, TR harfleri sadeleştir, şirket tür kelimelerini at,
 // ilk anlamlı kelimeyi al, K→C normalize et (NETELKOM/NETELCOM farkı).
+// Firma ünvanı ile ekip kodu tutmayan taşeronlar (12.09.2026, Orhan):
+// AHY_VEDAT = AKCAN BİLİŞİM ENERJİ İNŞAAT SAN. VE TİC. LTD. ŞTİ. — aynı firma.
+// Anahtar K→C normalizasyonundan SONRAKİ hâliyle yazılır.
+const TASERON_TAKMA_AD = { ACCANBILISIM: "VEDAT", ACCAN: "VEDAT" };
 function taseronCanonKey(ad) {
   let t = String(ad || "").toUpperCase()
     .replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ç/g, "C")
@@ -7752,7 +7756,8 @@ function taseronCanonKey(ad) {
   const kelimeler = t.trim().split(/\s+/).filter(Boolean);
   const ikiKelime = kelimeler.length > 1 && kelimeler[0].length <= 5;
   t = (ikiKelime ? kelimeler.slice(0, 2).join("") : kelimeler[0] || "") || String(ad || "").toUpperCase().trim();
-  return t.replace(/K/g, "C");
+  t = t.replace(/K/g, "C");
+  return TASERON_TAKMA_AD[t] || t;
 }
 
 app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
