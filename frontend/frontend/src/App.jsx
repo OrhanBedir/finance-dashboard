@@ -34388,10 +34388,10 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                   style={{ padding:"7px 13px", borderRadius:"9px", border:"1.5px solid #e2e8f0", background:"#f8fafc", cursor:"pointer", fontSize:"12px", fontWeight:700, color:"#334155" }}>Temizle</button>}
               </div>
             </div>
-            <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:"12px", overflow:"hidden" }}>
-              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px" }}>
+            <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:"12px", overflowX:"auto" }}>
+              <table style={{ width:"100%", minWidth:"1080px", borderCollapse:"collapse", fontSize:"12.5px" }}>
                 <thead><tr style={{ background:"#f8fafc" }}>
-                  {["Plan", "Kategori", "Saha", "Personel", "Durum", "Gün", "Not", ""].map((h) => <th key={h} style={{ textAlign:"left", padding:"9px 12px", fontSize:"11px", color:"#64748b", letterSpacing:".05em", textTransform:"uppercase", borderBottom:"1px solid #e2e8f0" }}>{h}</th>)}
+                  {["Plan", "Kategori", "Saha", "Personel", "Durum", "Gün", "Not", "İşlem"].map((h) => <th key={h} style={{ textAlign:"left", padding:"9px 12px", fontSize:"11px", color:"#64748b", letterSpacing:".05em", textTransform:"uppercase", borderBottom:"1px solid #e2e8f0" }}>{h}</th>)}
                 </tr></thead>
                 <tbody>
                   {atamalarF.map((r) => {
@@ -34406,13 +34406,13 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                           <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9" }}>{(r.personeller || []).map((p) => p.ad).join(", ")}</td>
                           <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9" }}><span style={chip(d.bg, d.ink)}>{d.txt}</span></td>
                           <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", textAlign:"center" }}>{Number(r.gun_sayisi || 0) || "—"}{Number(r.adam_gun || 0) > Number(r.gun_sayisi || 0) ? <span style={{ color:"#94a3b8", fontSize:"11px" }}> ({r.adam_gun} adam·gün)</span> : null}</td>
-                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", color:"#475569", maxWidth:"260px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={[r.durdurma_sebebi ? `Ara verme: ${r.durdurma_sebebi}` : "", r.atayan_not || ""].filter(Boolean).join("\n")}>{r.durdurma_sebebi ? <span style={{ color:"#b91c1c", fontWeight:700 }}>⏸ {r.durdurma_sebebi} · </span> : null}{r.atayan_not || ""}</td>
+                          <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", color:"#475569", maxWidth:"200px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={[r.durdurma_sebebi ? `Ara verme: ${r.durdurma_sebebi}` : "", r.atayan_not || ""].filter(Boolean).join("\n")}>{r.durdurma_sebebi ? <span style={{ color:"#b91c1c", fontWeight:700 }}>⏸ {r.durdurma_sebebi} · </span> : null}{r.atayan_not || ""}</td>
                           <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", whiteSpace:"nowrap" }} onClick={(e) => e.stopPropagation()}>
-                            {!["TAMAMLANDI", "IPTAL"].includes(r.durum) && <button type="button" onClick={() => setAraVer({ row: r, sebep: r.durum === "ARA_VERILDI" ? "" : "Halk tepkisi", not: "" })} title="Sahada yarım kaldı / ara verildi" style={{ background: r.durum === "ARA_VERILDI" ? "#ecfdf5" : "#fef2f2", color: r.durum === "ARA_VERILDI" ? "#047857" : "#b91c1c", border: "1px solid " + (r.durum === "ARA_VERILDI" ? "#a7f3d0" : "#fecaca"), borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>{r.durum === "ARA_VERILDI" ? "▶ Devam" : "⏸ Ara ver"}</button>}
-                            {!["TAMAMLANDI", "IPTAL"].includes(r.durum) && <button type="button" onClick={() => durumDegistir(r, "IPTAL")} style={{ background:"#fff7ed", color:"#b45309", border:"1px solid #fed7aa", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>İptal</button>}
                             {listeYetkili && <button type="button" title="Ofisten tamamla / not gir / plan tarihini değiştir"
                               onClick={() => setDuzenle({ row: r, plan_tarihi: gunStr(r.plan_tarihi), atayan_not: r.atayan_not || "", tamamla: false, qc: true, kapanis_not: "" })}
                               style={{ background:"#eff6ff", color:"#1d4ed8", border:"1px solid #bfdbfe", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>✎ Düzenle</button>}
+                            {!["TAMAMLANDI", "IPTAL"].includes(r.durum) && <button type="button" onClick={() => setAraVer({ row: r, sebep: r.durum === "ARA_VERILDI" ? "" : "Halk tepkisi", not: "" })} title="Sahada yarım kaldı / ara verildi" style={{ background: r.durum === "ARA_VERILDI" ? "#ecfdf5" : "#fef2f2", color: r.durum === "ARA_VERILDI" ? "#047857" : "#b91c1c", border: "1px solid " + (r.durum === "ARA_VERILDI" ? "#a7f3d0" : "#fecaca"), borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>{r.durum === "ARA_VERILDI" ? "▶ Devam" : "⏸ Ara ver"}</button>}
+                            {!["TAMAMLANDI", "IPTAL"].includes(r.durum) && <button type="button" onClick={() => durumDegistir(r, "IPTAL")} style={{ background:"#fff7ed", color:"#b45309", border:"1px solid #fed7aa", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>İptal</button>}
                             <button type="button" onClick={() => sil(r)} style={{ background:"#fef2f2", color:"#b91c1c", border:"1px solid #fecaca", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700 }}>Sil</button>
                           </td>
                         </tr>
