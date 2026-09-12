@@ -34044,6 +34044,16 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
   const [personelListesi, setPersonelListesi] = useState([]);
   const [atamalar, setAtamalar] = useState([]);
   const [listeFiltre, setListeFiltre] = useState("ACIK");
+  // Liste filtreleri (12.09.2026, Orhan): kategori / kişi / durum / tarih aralığı
+  const [fKategori, setFKategori] = useState("");
+  const [fKisi, setFKisi] = useState("");
+  const [fDurum, setFDurum] = useState("");
+  const [fBas, setFBas] = useState("");
+  const [fBit, setFBit] = useState("");
+  const [listeYetkili, setListeYetkili] = useState(false);
+  const [duzenle, setDuzenle] = useState(null); // { row, plan_tarihi, not, tamamla, qc }
+  const [duzenleKayit, setDuzenleKayit] = useState(false);
+  const ISF_SEC = { padding:"7px 10px", borderRadius:"9px", border:"1.5px solid #e2e8f0", background:"#fff", fontSize:"12.5px", fontWeight:600, color:"#0f172a", minWidth:"150px", outline:"none" };
   const [acikDetay, setAcikDetay] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [mesaj, setMesaj] = useState("");
@@ -34057,9 +34067,47 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
   const listeYukle = async () => {
     try {
       const d = await fetch(`${API_BASE}/is-atama/liste?durum=${listeFiltre === "ACIK" ? "ACIK" : ""}`, { headers }).then((r) => r.json());
-      if (d?.ok) setAtamalar(d.rows || []);
+      if (d?.ok) { setAtamalar(d.rows || []); setListeYetkili(!!d.yetkili); }
     } catch {}
   };
+  const gunStr = (v) => (v ? String(v).slice(0, 10) : "");
+  const atamalarF = atamalar.filter((r) => {
+    if (fKategori && r.kategori !== fKategori) return false;
+    if (fDurum && r.durum !== fDurum) return false;
+    if (fKisi && !(r.personeller || []).some((p) => String(p.ad || p.email || "") === fKisi)) return false;
+    const g = gunStr(r.plan_tarihi);
+    if (fBas && (!g || g < fBas)) return false;
+    if (fBit && (!g || g > fBit)) return false;
+    return true;
+  });
+  const filtreVar = !!(fKategori || fKisi || fDurum || fBas || fBit);
+  const kisiSecenek = [...new Set(atamalar.flatMap((r) => (r.personeller || []).map((p) => p.ad || p.email)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "tr"));
+
+  // Ofisten düzenleme (12.09.2026, Orhan): ekip sahadan girmeyi unuttuysa yetkili
+  // panelden plan tarihini/notu günceller ya da işi tamamlandı olarak kapatır.
+  const duzenleKaydet = async () => {
+    if (!duzenle) return;
+    const r = duzenle.row;
+    setDuzenleKayit(true);
+    try {
+      const planDegisti = duzenle.plan_tarihi && duzenle.plan_tarihi !== gunStr(r.plan_tarihi);
+      const notDegisti = (duzenle.atayan_not || "") !== (r.atayan_not || "");
+      if (planDegisti || notDegisti) {
+        const d1 = await fetch(`${API_BASE}/is-atama/${r.id}`, { method: "PUT", headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ plan_tarihi: planDegisti ? duzenle.plan_tarihi : null, atayan_not: notDegisti ? duzenle.atayan_not : null }) }).then((x) => x.json());
+        if (!d1?.ok) throw new Error(d1?.error || "Güncellenemedi");
+      }
+      if (duzenle.tamamla) {
+        const d2 = await fetch(`${API_BASE}/is-atama/${r.id}/bitir`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ tamamlandi: true, qc_tamamlandi: !!duzenle.qc, not: duzenle.kapanis_not || "" }) }).then((x) => x.json());
+        if (!d2?.ok) throw new Error(d2?.error || "İş kapatılamadı");
+      }
+      setDuzenle(null);
+      await listeYukle();
+    } catch (e) { alert(e.message || "Kaydedilemedi"); }
+    setDuzenleKayit(false);
+  };
+
   useEffect(() => {
     fetch(`${API_BASE}/is-atama/kategoriler`, { headers }).then((r) => r.json()).then((d) => { if (d?.ok) setKategoriler(d.rows || []); }).catch(() => {});
     fetch(`${API_BASE}/is-atama/personel-listesi`, { headers }).then((r) => r.json()).then((d) => { if (d?.ok) setPersonelListesi(d.rows || []); }).catch(() => {});
@@ -34186,12 +34234,12 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
             <div style={{ fontWeight:800, fontSize:"16px" }}>🗂 Rollout İş Atama</div>
             <div style={{ display:"flex", gap:"4px", background:"rgba(255,255,255,.12)", padding:"3px", borderRadius:"10px" }}>
               {sekmeBtn("yeni", "Yeni Atama")}
-              {sekmeBtn("liste", `Atamalar (${atamalar.length})`)}
+              {sekmeBtn("liste", `Atamalar (${atamalarF.length}${filtreVar ? "/" + atamalar.length : ""})`)}
             </div>
             {sekme === "liste" && (
               <button type="button" onClick={() => {
                 const headersX = ["Plan", "Kategori", "Tip", "Saha", "Bölge", "Personel", "Durum", "Gün", "Adam·Gün", "Ara verme sebebi", "Atayan", "Atayan notu", "Saha notları", "Başlama", "Bitiş", "QC"];
-                const dataX = atamalar.map((r) => [fmtT(r.plan_tarihi), r.kategori_ad || r.kategori, r.alt_tip || "", (r.site_codes || []).join(", "), r.bolge || "", (r.personeller || []).map((p) => p.ad).join(", "), (IS_DURUM[r.durum] || {}).txt || r.durum, Number(r.gun_sayisi || 0), Number(r.adam_gun || 0), r.durdurma_sebebi || "", r.atayan_ad || r.atayan_email || "", r.atayan_not || "", r.kapanis_not || "", r.baslama_ts ? `${fmtT(r.baslama_ts)} ${fmtS(r.baslama_ts)}` : "", r.bitis_ts ? `${fmtT(r.bitis_ts)} ${fmtS(r.bitis_ts)}` : "", r.qc_tamamlandi == null ? "" : (r.qc_tamamlandi ? "Tamam" : "Bekliyor")]);
+                const dataX = atamalarF.map((r) => [fmtT(r.plan_tarihi), r.kategori_ad || r.kategori, r.alt_tip || "", (r.site_codes || []).join(", "), r.bolge || "", (r.personeller || []).map((p) => p.ad).join(", "), (IS_DURUM[r.durum] || {}).txt || r.durum, Number(r.gun_sayisi || 0), Number(r.adam_gun || 0), r.durdurma_sebebi || "", r.atayan_ad || r.atayan_email || "", r.atayan_not || "", r.kapanis_not || "", r.baslama_ts ? `${fmtT(r.baslama_ts)} ${fmtS(r.baslama_ts)}` : "", r.bitis_ts ? `${fmtT(r.bitis_ts)} ${fmtS(r.bitis_ts)}` : "", r.qc_tamamlandi == null ? "" : (r.qc_tamamlandi ? "Tamam" : "Bekliyor")]);
                 exportStandardExcel({ title: `Rollout İş Atamaları — ${listeFiltre === "ACIK" ? "Açık işler" : "Tümü"}`, headers: headersX, rows: dataX, colWidths: [11, 22, 12, 24, 10, 26, 13, 6, 9, 20, 18, 34, 40, 16, 16, 9], fileBase: `Is_Atamalari_${listeFiltre === "ACIK" ? "Acik" : "Tumu"}`, sheetName: "İş Atamaları", intCols: [7, 8] });
               }} style={{ background:"#2e7d32", color:"#fff", border:"none", borderRadius:"8px", padding:"7px 12px", fontSize:"12px", fontWeight:800, cursor:"pointer" }}>📥 Excel İndir</button>
             )}
@@ -34312,13 +34360,41 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
               ))}
               <button type="button" onClick={listeYukle} style={{ marginLeft:"auto", padding:"6px 12px", borderRadius:"8px", border:"1.5px solid #e2e8f0", background:"#fff", cursor:"pointer", fontSize:"12px", fontWeight:700 }}>↻ Yenile</button>
             </div>
+            {/* Filtre şeridi: kategori · kişi · durum · tarih aralığı */}
+            <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:"12px", padding:"12px 14px", marginBottom:"12px", display:"flex", flexWrap:"wrap", gap:"10px", alignItems:"flex-end" }}>
+              {[["Kategori", <select key="k" value={fKategori} onChange={(e) => setFKategori(e.target.value)} style={ISF_SEC}>
+                  <option value="">Tümü</option>
+                  {kategoriler.map((k) => <option key={k.kod} value={k.kod}>{k.ikon} {k.ad}</option>)}
+                </select>],
+                ["Kişi", <select key="p" value={fKisi} onChange={(e) => setFKisi(e.target.value)} style={ISF_SEC}>
+                  <option value="">Tümü</option>
+                  {kisiSecenek.map((ad) => <option key={ad} value={ad}>{ad}</option>)}
+                </select>],
+                ["Durum", <select key="d" value={fDurum} onChange={(e) => setFDurum(e.target.value)} style={ISF_SEC}>
+                  <option value="">Tümü</option>
+                  {Object.entries(IS_DURUM).map(([kod, v]) => <option key={kod} value={kod}>{v.txt}</option>)}
+                </select>],
+                ["Plan başlangıç", <input key="b" type="date" value={fBas} onChange={(e) => setFBas(e.target.value)} style={ISF_SEC} />],
+                ["Plan bitiş", <input key="s" type="date" value={fBit} onChange={(e) => setFBit(e.target.value)} style={ISF_SEC} />],
+              ].map(([etiket, alan]) => (
+                <div key={etiket} style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
+                  <span style={{ fontSize:"10.5px", fontWeight:800, color:"#64748b", letterSpacing:".06em", textTransform:"uppercase" }}>{etiket}</span>
+                  {alan}
+                </div>
+              ))}
+              <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:"10px" }}>
+                <span style={{ fontSize:"12px", color:"#64748b" }}><b style={{ color:"#0f172a" }}>{atamalarF.length}</b> kayıt{filtreVar ? ` · ${atamalar.length} içinden` : ""}</span>
+                {filtreVar && <button type="button" onClick={() => { setFKategori(""); setFKisi(""); setFDurum(""); setFBas(""); setFBit(""); }}
+                  style={{ padding:"7px 13px", borderRadius:"9px", border:"1.5px solid #e2e8f0", background:"#f8fafc", cursor:"pointer", fontSize:"12px", fontWeight:700, color:"#334155" }}>Temizle</button>}
+              </div>
+            </div>
             <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:"12px", overflow:"hidden" }}>
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12.5px" }}>
                 <thead><tr style={{ background:"#f8fafc" }}>
                   {["Plan", "Kategori", "Saha", "Personel", "Durum", "Gün", "Not", ""].map((h) => <th key={h} style={{ textAlign:"left", padding:"9px 12px", fontSize:"11px", color:"#64748b", letterSpacing:".05em", textTransform:"uppercase", borderBottom:"1px solid #e2e8f0" }}>{h}</th>)}
                 </tr></thead>
                 <tbody>
-                  {atamalar.map((r) => {
+                  {atamalarF.map((r) => {
                     const d = IS_DURUM[r.durum] || IS_DURUM.ATANDI;
                     const acik = acikDetay?.id === r.id;
                     return (
@@ -34334,6 +34410,9 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                           <td style={{ padding:"9px 12px", borderBottom:"1px solid #f1f5f9", whiteSpace:"nowrap" }} onClick={(e) => e.stopPropagation()}>
                             {!["TAMAMLANDI", "IPTAL"].includes(r.durum) && <button type="button" onClick={() => setAraVer({ row: r, sebep: r.durum === "ARA_VERILDI" ? "" : "Halk tepkisi", not: "" })} title="Sahada yarım kaldı / ara verildi" style={{ background: r.durum === "ARA_VERILDI" ? "#ecfdf5" : "#fef2f2", color: r.durum === "ARA_VERILDI" ? "#047857" : "#b91c1c", border: "1px solid " + (r.durum === "ARA_VERILDI" ? "#a7f3d0" : "#fecaca"), borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>{r.durum === "ARA_VERILDI" ? "▶ Devam" : "⏸ Ara ver"}</button>}
                             {!["TAMAMLANDI", "IPTAL"].includes(r.durum) && <button type="button" onClick={() => durumDegistir(r, "IPTAL")} style={{ background:"#fff7ed", color:"#b45309", border:"1px solid #fed7aa", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>İptal</button>}
+                            {listeYetkili && <button type="button" title="Ofisten tamamla / not gir / plan tarihini değiştir"
+                              onClick={() => setDuzenle({ row: r, plan_tarihi: gunStr(r.plan_tarihi), atayan_not: r.atayan_not || "", tamamla: false, qc: true, kapanis_not: "" })}
+                              style={{ background:"#eff6ff", color:"#1d4ed8", border:"1px solid #bfdbfe", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>✎ Düzenle</button>}
                             <button type="button" onClick={() => sil(r)} style={{ background:"#fef2f2", color:"#b91c1c", border:"1px solid #fecaca", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"11px", fontWeight:700 }}>Sil</button>
                           </td>
                         </tr>
@@ -34368,10 +34447,58 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                       </React.Fragment>
                     );
                   })}
-                  {!atamalar.length && <tr><td colSpan={8} style={{ padding:"24px", textAlign:"center", color:"#94a3b8" }}>Kayıt yok</td></tr>}
+                  {!atamalarF.length && <tr><td colSpan={8} style={{ padding:"24px", textAlign:"center", color:"#94a3b8" }}>{filtreVar ? "Filtreye uyan kayıt yok" : "Kayıt yok"}</td></tr>}
                 </tbody>
               </table>
             </div>
+            {duzenle && (
+              <div onClick={() => !duzenleKayit && setDuzenle(null)} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.5)", zIndex:9500, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}>
+                <div onClick={(e) => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", padding:"20px", width:"min(560px, 96vw)", boxShadow:"0 20px 60px rgba(0,0,0,.3)" }}>
+                  <div style={{ fontWeight:800, fontSize:"15px", marginBottom:"4px" }}>✎ Ofisten düzenle · {duzenle.row.kategori_ad} · {(duzenle.row.site_codes || []).join(", ")}</div>
+                  <div style={{ fontSize:"12px", color:"#64748b", marginBottom:"14px" }}>Ekip sahadan girmediyse plan tarihini/notu buradan güncelleyebilir, işi tamamlandı olarak kapatabilirsiniz. Kapanış Rollout Data'daki tarih kolonunu ve saha notunu da yazar.</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"12px" }}>
+                    <div>
+                      <div style={{ fontSize:"11px", fontWeight:800, color:"#64748b", marginBottom:"4px", textTransform:"uppercase", letterSpacing:".05em" }}>Plan tarihi</div>
+                      <input type="date" value={duzenle.plan_tarihi} onChange={(e) => setDuzenle((d) => ({ ...d, plan_tarihi: e.target.value }))} style={{ ...ISF_SEC, width:"100%", boxSizing:"border-box" }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize:"11px", fontWeight:800, color:"#64748b", marginBottom:"4px", textTransform:"uppercase", letterSpacing:".05em" }}>Durum</div>
+                      <div style={{ ...ISF_SEC, background:"#f8fafc", color:"#475569" }}>{(IS_DURUM[duzenle.row.durum] || {}).txt || duzenle.row.durum}</div>
+                    </div>
+                  </div>
+                  <div style={{ marginBottom:"12px" }}>
+                    <div style={{ fontSize:"11px", fontWeight:800, color:"#64748b", marginBottom:"4px", textTransform:"uppercase", letterSpacing:".05em" }}>Atama notu</div>
+                    <textarea value={duzenle.atayan_not} onChange={(e) => setDuzenle((d) => ({ ...d, atayan_not: e.target.value }))} rows={2}
+                      placeholder="Ekibe not / işin kapsamı" style={{ width:"100%", boxSizing:"border-box", padding:"9px 11px", borderRadius:"10px", border:"1.5px solid #e2e8f0", fontSize:"13px", fontFamily:"inherit", resize:"vertical" }} />
+                  </div>
+                  {!["TAMAMLANDI", "IPTAL"].includes(duzenle.row.durum) && (
+                    <div style={{ border:"1.5px solid " + (duzenle.tamamla ? "#bbf7d0" : "#e2e8f0"), background: duzenle.tamamla ? "#f0fdf4" : "#fff", borderRadius:"12px", padding:"12px 14px", marginBottom:"14px" }}>
+                      <label style={{ display:"flex", alignItems:"center", gap:"8px", cursor:"pointer", fontWeight:800, fontSize:"13px", color:"#15803d" }}>
+                        <input type="checkbox" checked={duzenle.tamamla} onChange={(e) => setDuzenle((d) => ({ ...d, tamamla: e.target.checked }))} />
+                        İşi tamamlandı olarak kapat
+                      </label>
+                      {duzenle.tamamla && (
+                        <div style={{ marginTop:"10px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                          {duzenle.row.qc_yazar && (
+                            <label style={{ display:"flex", alignItems:"center", gap:"8px", cursor:"pointer", fontSize:"12.5px", fontWeight:600, color:"#334155" }}>
+                              <input type="checkbox" checked={duzenle.qc} onChange={(e) => setDuzenle((d) => ({ ...d, qc: e.target.checked }))} />
+                              QC tamamlandı (işaretlenmezse iş QC bekliyor durumuna geçer)
+                            </label>
+                          )}
+                          <textarea value={duzenle.kapanis_not} onChange={(e) => setDuzenle((d) => ({ ...d, kapanis_not: e.target.value }))} rows={2}
+                            placeholder={duzenle.row.qc_yazar && !duzenle.qc ? "QC tamamlanmadıysa not zorunlu" : "Kapanış notu (saha notuna da işlenir)"}
+                            style={{ width:"100%", boxSizing:"border-box", padding:"9px 11px", borderRadius:"10px", border:"1.5px solid #e2e8f0", fontSize:"13px", fontFamily:"inherit", resize:"vertical" }} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ display:"flex", justifyContent:"flex-end", gap:"10px" }}>
+                    <button type="button" disabled={duzenleKayit} onClick={() => setDuzenle(null)} style={{ background:"#f1f5f9", color:"#334155", border:"none", borderRadius:"9px", padding:"9px 16px", fontWeight:700, cursor:"pointer" }}>Vazgeç</button>
+                    <button type="button" disabled={duzenleKayit} onClick={duzenleKaydet} style={{ background:"#1d4ed8", color:"#fff", border:"none", borderRadius:"9px", padding:"9px 18px", fontWeight:800, cursor:"pointer" }}>{duzenleKayit ? "Kaydediliyor…" : "Kaydet"}</button>
+                  </div>
+                </div>
+              </div>
+            )}
             {araVer && (
               <div onClick={() => setAraVer(null)} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.5)", zIndex:9500, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}>
                 <div onClick={(e) => e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", padding:"20px", width:"min(520px, 96vw)", boxShadow:"0 20px 60px rgba(0,0,0,.3)" }}>
