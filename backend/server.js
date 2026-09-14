@@ -24025,8 +24025,31 @@ app.get("/2kx/dashboard", authMiddleware, async (req, res) => {
   }
 });
 
+/* ═══ OTOMATİK SİSTEM YEDEĞİ (14.09.2026, Orhan) ═══
+   3 günde bir Nurcan/Düzgün/Eren, 7 günde bir Orhan: tüm tablolar tek Excel'de
+   e-posta ekinde. Ayrıntı ve SMTP değişkenleri: backend/yedek.js */
+const yedek = require("./yedek");
+const YEDEK_YETKI = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "duzgun.simsek@simsektel.com"];
+const yedekYetkiliMi = (req) => YEDEK_YETKI.includes(String(req.user?.email || "").toLowerCase().trim());
+app.get("/yedek/durum", authMiddleware, async (req, res) => {
+  try {
+    if (!yedekYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await yedek.yedekTablo(pool);
+    const r = await pool.query(`SELECT * FROM yedek_log ORDER BY gonderim_ts DESC LIMIT 20`);
+    res.json({ ok: true, smtp_hazir: !!yedek.smtpAyari(), kurallar: yedek.YEDEK_TIPLERI, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/yedek/simdi", authMiddleware, async (req, res) => {
+  try {
+    if (!yedekYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const tip = String(req.body?.tip || "HAFTA").toUpperCase() === "3GUN" ? "3GUN" : "HAFTA";
+    res.json({ ok: true, ...(await yedek.yedekGonder(pool, tip)) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server çalışıyor: ${PORT}`);
+  yedek.yedekBaslat(pool);
 });
 
 module.exports = app;
