@@ -18107,6 +18107,9 @@ app.delete("/hr/is-avans/:id", async (req, res) => {
 // Onaylarken firma seçimi (16.07.2026 kurgusu): PM (Orhan) onaylarken —
 // talep Orhan'ınsa Direktör (Düzgün) onaylarken — AHY/ŞİMŞEK seçer.
 // firma='AHY' → AHY nakit akışına, 'ERC' → Şimşek nakit akışına düşer.
+// 16.09.2026 (Orhan): mobilden onaylarken firma hiç gönderilmiyordu; kayıt firmasız
+// kalıp nakit akışında Şimşek'e düşüyordu. Artık firma seçilmemişse AHY varsayılır
+// (devir sonrası saha giderleri AHY'de) — mobil de artık seçim soruyor.
 function normalizeAvansFirma(v) {
   const s = String(v || "").toUpperCase().trim();
   if (s === "AHY") return "AHY";
@@ -18236,7 +18239,7 @@ app.put("/hr/is-avans/:id/pm-onayla", authMiddleware, async (req, res) => {
     const firmaSecim = normalizeAvansFirma(req.body?.firma);
     const today = new Date().toISOString().split("T")[0];
     const updated = await pool.query(
-      "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1, firma=COALESCE($3, firma) WHERE id=$2 RETURNING *",
+      "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1, firma=COALESCE($3, NULLIF(TRIM(firma),''), 'AHY') WHERE id=$2 RETURNING *",
       [today, id, firmaSecim]
     );
     res.json(updated.rows[0]);
@@ -18264,7 +18267,7 @@ app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => 
       `UPDATE is_avans_talep SET durum='DIREKTOR_ONAY',
          rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1),
          pm_onay_tarihi=COALESCE(pm_onay_tarihi,$1), direktor_onay_tarihi=$1,
-         firma=COALESCE($3, firma) WHERE id=$2 RETURNING *`,
+         firma=COALESCE($3, NULLIF(TRIM(firma),''), 'AHY') WHERE id=$2 RETURNING *`,
       [today, id, firmaSecim]
     );
     res.json(updated.rows[0]);
