@@ -174,21 +174,35 @@ function parseOcrText(text) {
       }
     }
   }
-  // 3) Son çare: kimlik/no satırları HARİÇ; önce ondalıklı (,00 biçimli)
-  //    sayılar — çıplak no'lar (MERSİS, ref, onay) tutar sanılmaz
+  // 3) Akaryakıt fişi: "19,64 LT X 101,83" → litre × birim fiyat (TOPLAM satırı okunamadıysa)
   if (!amount) {
-    const decNums = [], anyNums = [];
     for (const line of lines) {
-      if (ID_RE.test(line)) continue;
-      for (const m of (line.match(TR_NUM_RE) || [])) {
-        const n = parseTrNumber(m);
-        if (n < 1 || n > 999999) continue;
-        anyNums.push(n);
-        if (/[.,]\d{2}$/.test(m)) decNums.push(n);
+      const m = line.match(/(\d{1,4}[.,]\d{1,3})\s*L(?:T|İT|IT)?\.?\s*[X×*]\s*(\d{1,4}[.,]\d{2})/i);
+      if (m) {
+        const t = Math.round(parseFloat(m[1].replace(",", ".")) * parseFloat(m[2].replace(",", ".")) * 100) / 100;
+        if (t >= 1 && t <= 999999) { amount = t; break; }
       }
     }
-    const pool = decNums.length ? decNums : anyNums;
-    if (pool.length) amount = Math.max(...pool);
+  }
+  // 4) Son çare: kimlik/no satırları HARİÇ; YALNIZ ondalıklı (,00) ya da "*" ile
+  //    başlayan sayılar. Kod parçaları (BAY/454-726/0, ADA NO: 5-28) tutar sayılmaz.
+  //    Güvenilir sayı yoksa boş döner — yanlış tutar yazmaktansa elle girilsin
+  //    (17.09.2026: 2.000 TL fişte 726 okunuyordu).
+  if (!amount) {
+    const aday = [];
+    for (const line of lines) {
+      if (ID_RE.test(line) || /EPDK|L[İI]SANS|ADA\s*NO|BAY\s*\/|KDV\s*%|%\s*\d/i.test(line)) continue;
+      const re = new RegExp(TR_NUM_RE.source, "g");
+      let m;
+      while ((m = re.exec(line))) {
+        const once = line[m.index - 1] || "", sonra = line[m.index + m[0].length] || "";
+        if (/[\/\-\dA-Za-z]/.test(once) || /[\/\-A-Za-z]/.test(sonra)) continue;
+        const n = parseTrNumber(m[0]);
+        if (n < 1 || n > 999999) continue;
+        if (/[.,]\d{2}$/.test(m[0]) || (/^\*/.test(m[0]) && n >= 100)) aday.push(n);
+      }
+    }
+    if (aday.length) amount = Math.max(...aday);
   }
   // Türk plaka formatı: 2 rakam + 1-3 HARF (rakam değil) + 2-4 rakam
   // Örn: 16GB307, 34ABC1234, 06A1234
