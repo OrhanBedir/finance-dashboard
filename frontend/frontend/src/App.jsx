@@ -15875,6 +15875,43 @@ function hesaplaVergi(netBankadan) {
 /* ============================================================
    HR DASHBOARD - Personel / Puantaj / Avans / ISG
    ============================================================ */
+// ── İK pencere kabuğu (17.09.2026, Orhan): Öde / Düzenle / Personel Ekle aynı kurumsal
+// pencerede açılır — başlıkta kişi rozeti, sağ üstte kapatma, gövde kendi içinde kayar,
+// altta sabit işlem çubuğu. Esc ile de kapanır.
+function IkModalKabuk({ onKapat, baslik, altBaslik, adSoyad, ikon, rozet, genislik = 720, children, footer }) {
+  useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onKapat?.(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onKapat]);
+  const basHarf = String(adSoyad || "").trim().split(/\s+/).filter(Boolean).slice(0, 2).map(x => x.charAt(0)).join("").toLocaleUpperCase("tr");
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.58)", backdropFilter:"blur(5px)", WebkitBackdropFilter:"blur(5px)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+      <div style={{ background:"#fff", borderRadius:"20px", width:"100%", maxWidth:`${genislik}px`, maxHeight:"92vh", display:"flex", flexDirection:"column", overflow:"hidden", boxShadow:"0 32px 80px rgba(2,6,23,0.45), 0 0 0 1px rgba(15,23,42,0.06)" }}>
+        <div style={{ height:"4px", background:"linear-gradient(90deg,#0f2a47,#2d5a8e 55%,#c9a227)" }} />
+        <div style={{ display:"flex", alignItems:"center", gap:"14px", padding:"18px 26px", borderBottom:"1px solid #eef2f7", background:"linear-gradient(180deg,#f8fafc,#ffffff)" }}>
+          <div style={{ width:48, height:48, borderRadius:"14px", flexShrink:0, background:"linear-gradient(135deg,#0f2a47,#2d5a8e)", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize: basHarf ? "16px" : "21px", letterSpacing:"0.5px", boxShadow:"0 6px 16px rgba(15,42,71,0.28)" }}>
+            {basHarf || ikon || "👤"}
+          </div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:"11px", fontWeight:700, letterSpacing:"1.2px", color:"#94a3b8" }}>{String(baslik || "").toLocaleUpperCase("tr")}</div>
+            <div style={{ fontSize:"18px", fontWeight:800, color:"#0f1c2e", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap", lineHeight:1.25 }}>
+              <span style={{ overflow:"hidden", textOverflow:"ellipsis" }}>{adSoyad || altBaslik}</span>{rozet}
+            </div>
+            {adSoyad && altBaslik && <div style={{ fontSize:"12.5px", color:"#64748b", marginTop:"1px" }}>{altBaslik}</div>}
+          </div>
+          <button type="button" onClick={onKapat} aria-label="Kapat" title="Kapat (Esc)"
+            onMouseEnter={e=>{ e.currentTarget.style.background="#e2e8f0"; e.currentTarget.style.color="#0f1c2e"; }}
+            onMouseLeave={e=>{ e.currentTarget.style.background="#f1f5f9"; e.currentTarget.style.color="#64748b"; }}
+            style={{ width:38, height:38, borderRadius:"12px", border:"none", background:"#f1f5f9", color:"#64748b", fontSize:"17px", fontWeight:700, cursor:"pointer", flexShrink:0, transition:"background .15s, color .15s" }}>✕</button>
+        </div>
+        <div style={{ padding:"22px 26px", overflowY:"auto", overscrollBehavior:"contain", flex:1 }}>{children}</div>
+        {footer && <div style={{ padding:"14px 26px", borderTop:"1px solid #eef2f7", background:"#fafbfc", display:"flex", alignItems:"center", gap:"10px" }}>{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
 function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   // Maaş görünürlüğü (21.07.2026): ERC'de YALNIZ Orhan Bedir + Düzgün Şimşek.
@@ -16242,6 +16279,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     loadPersonel();
     loadAylikOdemeler();
   };
+  const openMaasOde = (p) => {
+    const pOzet = ozet.find(o => String(o.personel_id) === String(p.id));
+    const hakVal = Math.round(ahyMaasPay(p, pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0)));
+    setMaasOdeModal(p); setMaasOdeHak(hakVal);
+    setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih:new Date().toISOString().split("T")[0], aciklama:"", odeyen: _hrMarka==="AHY" ? "AHY" : "SIMSEK" });
+    loadMaasOde(p.id);
+  };
+  const [pasifAcik, setPasifAcik] = useState(false);
   const handleEditPersonel = (p) => {
     setEditingPersonel(p);
     setPForm({ ...p,
@@ -17359,6 +17404,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     { label:"💰 M.Avansı",  align:"right", color:"#9d174d" },
                                     { label:"Toplam Öd.",  align:"right" },
                                     { label:"Kalan",       align:"right" },
+                                    { label:"İşlem",       align:"center" },
                                   ].map(h=>(
                                     <th key={h.label} style={{ padding:"8px 12px", fontWeight:700, color: h.color||"#374151", textAlign: h.align, borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap", position:"sticky", top:0, zIndex:2, background:"#f1f5f9" }}>{h.label}</th>
                                   ))}
@@ -17455,6 +17501,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                           </div>
                                         </div>
                                       ))}
+                                    </td>
+                                    <td style={{ padding:"7px 12px", textAlign:"center", whiteSpace:"nowrap" }}>
+                                      <button onClick={()=>openMaasOde(p)} title="Maaş ödemesi gir"
+                                        style={{ padding:"5px 12px", background:"#0f2a47", color:"#fff", border:"none", borderRadius:"8px", fontSize:"11.5px", fontWeight:700, cursor:"pointer", marginRight:"6px" }}>💰 Öde</button>
+                                      <button onClick={()=>handleEditPersonel(p)} title="Personel bilgilerini düzenle"
+                                        style={{ padding:"5px 11px", background:"#fff", color:"#334155", border:"1.5px solid #cbd5e1", borderRadius:"8px", fontSize:"11.5px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle</button>
                                     </td>
                                   </tr>
                                 ))}
@@ -17780,59 +17832,54 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 );
               })()}
 
-              {showPersonelForm && (
-                <div style={{ ...secSt, marginBottom:"20px", background:"#f8fafc", border:"1.5px solid #e5e7eb" }}>
-                  <div style={{ fontWeight:700, fontSize:"15px", marginBottom:"16px" }}>{editingPersonel?"✏️ Personel Düzenle":"➕ Yeni Personel"}</div>
-                  <form onSubmit={handleSavePersonel}>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"12px", marginBottom:"12px" }}>
-                      {[["Ad Soyad *","ad_soyad"],["TC No","tc_no"],["Telefon","telefon"],["E-posta","email"],
-                        ["Unvan","unvan"],["Bölge","bolge"],["IBAN","iban"],["Banka Adı","banka_adi"],["Banka Hesap No","banka_hesap_no"]
-                      ].map(([l,n])=>(
-                        <div key={n}>
-                          <label style={labelSt}>{l}</label>
-                          <input value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} required={n==="ad_soyad"} />
-                        </div>
-                      ))}
-                      {[["Doğum Tarihi","dogum_tarihi"],["İşe Giriş","ise_giris_tarihi"],["İşten Ayrılma","isten_ayrilma_tarihi"]].map(([l,n])=>(
-                        <div key={n}>
-                          <label style={labelSt}>{l}</label>
-                          <input type="date" value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} />
-                        </div>
-                      ))}
-                      {!_maasGizli && [["Net Maaş (₺)","net_maas"],["Bankadan Gösterilen (₺)","bankadan_gosterilen"],["Elden Verilen (₺)","elden_verilen"]].map(([l,n])=>(
-                        <div key={n}>
-                          <label style={labelSt}>{l}</label>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={formatTLInput(pForm[n]||"")}
-                            onChange={e=>setPForm(f=>({...f,[n]:parseTLInput(e.target.value)}))}
-                            style={inputSt}
-                          />
-                        </div>
-                      ))}
-                      {editingPersonel && !_maasGizli && (
-                        <div>
-                          <label style={labelSt}>Yeni Maaş Geçerlilik Ayı</label>
-                          <input type="month" value={pForm.maas_donem || puantajAy} onChange={e=>setPForm(f=>({...f,maas_donem:e.target.value}))} style={inputSt} />
-                          <div style={{ fontSize:"11px", color:"#92400e", marginTop:"3px", lineHeight:1.4 }}>
-                            💡 Maaşı değiştirirsen bu aydan itibaren geçerli olur — önceki aylar eski maaşla hesaplanmaya devam eder.
-                          </div>
-                        </div>
-                      )}
+              {showPersonelForm && (() => {
+                const kapat = () => { setShowPersonelForm(false); setEditingPersonel(null); };
+                const bolum = (t) => (
+                  <div style={{ display:"flex", alignItems:"center", gap:"10px", margin:"4px 0 12px" }}>
+                    <span style={{ fontSize:"11px", fontWeight:800, letterSpacing:"1.1px", color:"#0f2a47", whiteSpace:"nowrap" }}>{String(t).toLocaleUpperCase("tr")}</span>
+                    <span style={{ flex:1, height:"1px", background:"#e2e8f0" }} />
+                  </div>
+                );
+                const gridSt = { display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))", gap:"12px 14px", marginBottom:"20px" };
+                const metin = ([l,n,zorunlu]) => (
+                  <div key={n}>
+                    <label style={labelSt}>{l}</label>
+                    <input value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} required={!!zorunlu} />
+                  </div>
+                );
+                const tarih = ([l,n]) => (
+                  <div key={n}>
+                    <label style={labelSt}>{l}</label>
+                    <input type="date" value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} />
+                  </div>
+                );
+                return (
+                <IkModalKabuk onKapat={kapat} genislik={920}
+                  baslik={editingPersonel ? "Personel kartı · düzenle" : "Yeni personel"}
+                  adSoyad={editingPersonel ? editingPersonel.ad_soyad : ""} ikon="＋"
+                  altBaslik={editingPersonel ? [editingPersonel.unvan, editingPersonel.bolge].filter(Boolean).join(" · ") : "Yeni personel kaydı"}
+                  rozet={editingPersonel ? <FirmaRozet p={editingPersonel} kucuk /> : null}
+                  footer={<>
+                    {editingPersonel && (
+                      <div style={{ display:"flex", gap:"14px", fontSize:"12px", fontWeight:600 }}>
+                        <span onClick={async ()=>{ await handleToggleAktif(editingPersonel); kapat(); }} style={{ color:"#92400e", cursor:"pointer" }}>{editingPersonel.aktif ? "Pasife al" : "Aktif et"}</span>
+                        <span onClick={async ()=>{ await handleDeletePersonel(editingPersonel); kapat(); }} style={{ color:"#b91c1c", cursor:"pointer" }}>Kaydı sil</span>
+                      </div>
+                    )}
+                    <div style={{ flex:1 }} />
+                    <button type="button" onClick={kapat} style={{ padding:"10px 18px", background:"#fff", color:"#334155", border:"1.5px solid #cbd5e1", borderRadius:"10px", fontWeight:700, fontSize:"13px", cursor:"pointer" }}>Vazgeç</button>
+                    <button type="submit" form="ikPersonelForm" style={{ padding:"10px 22px", background:"linear-gradient(135deg,#0f2a47,#2d5a8e)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:800, fontSize:"13px", cursor:"pointer", boxShadow:"0 6px 14px rgba(15,42,71,0.25)" }}>Kaydet</button>
+                  </>}>
+                  <form id="ikPersonelForm" onSubmit={handleSavePersonel}>
+                    {bolum("Kimlik ve iletişim")}
+                    <div style={gridSt}>
+                      {[["Ad Soyad *","ad_soyad",true],["TC No","tc_no"],["Telefon","telefon"],["E-posta","email"]].map(metin)}
+                      {tarih(["Doğum Tarihi","dogum_tarihi"])}
                     </div>
-                    {/* Bordro özeti — sadece bankadan gösterilen kısım üzerinden vergi hesabı */}
-                    {!_maasGizli && <BordroOzeti bankadan={Number(pForm.bankadan_gosterilen||0)} elden={Number(pForm.elden_verilen||0)} />}
-                    {/* ── ISG / RFQ Ek Alanlar ── */}
-                    <div style={{ marginTop:"14px", marginBottom:"8px", fontWeight:700, fontSize:"13px", color:"#374151", borderTop:"1px solid #f3f4f6", paddingTop:"12px" }}>🎓 ISG / RFQ Bilgileri</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"12px", marginBottom:"12px" }}>
-                      {[["Ekip Bilgisi","ekip_bilgisi"],["Alt Yüklenici / Firma","alt_yuklenici"],["ISDP Account","isdp_account"],["İResource Girişi","iresource_giris"],
-                        ["Mesleki Yeterlilik Durumu","mesleki_yeterlilik_durum"]].map(([l,n])=>(
-                        <div key={n}>
-                          <label style={labelSt}>{l}</label>
-                          <input value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} />
-                        </div>
-                      ))}
+                    {bolum("Görev ve istihdam")}
+                    <div style={gridSt}>
+                      {[["Unvan","unvan"],["Bölge","bolge"]].map(metin)}
+                      {[["İşe Giriş","ise_giris_tarihi"],["İşten Ayrılma","isten_ayrilma_tarihi"]].map(tarih)}
                       <div>
                         <label style={labelSt}>Firma Tipi</label>
                         {/* Personel Maaş yalnız Şimşek içindir; taşeron personeli ISG/Belgeler'den eklenir */}
@@ -17851,30 +17898,54 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           </select>
                         </div>
                       )}
-                      <div>
-                        <label style={labelSt}>KKD Zimmet Tarihi</label>
-                        <input type="date" value={pForm.kkd_zimmet_tarihi||""} onChange={e=>setPForm(f=>({...f,kkd_zimmet_tarihi:e.target.value}))} style={inputSt} />
-                      </div>
-                      <div>
-                        <label style={labelSt}>Mesleki Yet. Tarihi</label>
-                        <input type="date" value={pForm.mesleki_yeterlilik_tarihi||""} onChange={e=>setPForm(f=>({...f,mesleki_yeterlilik_tarihi:e.target.value}))} style={inputSt} />
-                      </div>
                     </div>
-                    <div style={{ display:"flex", gap:"20px", marginBottom:"12px" }}>
+                    {!_maasGizli && (<>
+                      {bolum("Maaş")}
+                      <div style={gridSt}>
+                        {[["Net Maaş (₺)","net_maas"],["Bankadan Gösterilen (₺)","bankadan_gosterilen"],["Elden Verilen (₺)","elden_verilen"]].map(([l,n])=>(
+                          <div key={n}>
+                            <label style={labelSt}>{l}</label>
+                            <input type="text" inputMode="numeric" value={formatTLInput(pForm[n]||"")}
+                              onChange={e=>setPForm(f=>({...f,[n]:parseTLInput(e.target.value)}))} style={inputSt} />
+                          </div>
+                        ))}
+                        {editingPersonel && (
+                          <div>
+                            <label style={labelSt}>Yeni Maaş Geçerlilik Ayı</label>
+                            <input type="month" value={pForm.maas_donem || puantajAy} onChange={e=>setPForm(f=>({...f,maas_donem:e.target.value}))} style={inputSt} />
+                          </div>
+                        )}
+                      </div>
+                      {editingPersonel && (
+                        <div style={{ fontSize:"12px", color:"#92400e", background:"#fffbeb", border:"1px solid #fde68a", borderRadius:"10px", padding:"8px 12px", margin:"-8px 0 16px", lineHeight:1.45 }}>
+                          💡 Maaşı değiştirirsen seçtiğin aydan itibaren geçerli olur — önceki aylar eski maaşla hesaplanmaya devam eder.
+                        </div>
+                      )}
+                      {/* Bordro özeti — sadece bankadan gösterilen kısım üzerinden vergi hesabı */}
+                      <div style={{ marginBottom:"20px" }}><BordroOzeti bankadan={Number(pForm.bankadan_gosterilen||0)} elden={Number(pForm.elden_verilen||0)} /></div>
+                    </>)}
+                    {bolum("Banka bilgileri")}
+                    <div style={gridSt}>
+                      {[["IBAN","iban"],["Banka Adı","banka_adi"],["Banka Hesap No","banka_hesap_no"]].map(metin)}
+                    </div>
+                    {bolum("ISG / RFQ bilgileri")}
+                    <div style={gridSt}>
+                      {[["Ekip Bilgisi","ekip_bilgisi"],["Alt Yüklenici / Firma","alt_yuklenici"],["ISDP Account","isdp_account"],["İResource Girişi","iresource_giris"],
+                        ["Mesleki Yeterlilik Durumu","mesleki_yeterlilik_durum"]].map(metin)}
+                      {[["KKD Zimmet Tarihi","kkd_zimmet_tarihi"],["Mesleki Yet. Tarihi","mesleki_yeterlilik_tarihi"]].map(tarih)}
+                    </div>
+                    <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
                       {[["Elektrik işi yapacak","elektrik_isi"],["Yüksekte çalışacak","yuksekte_calisma"],["Araç kullanacak","arac_kullanim"]].map(([l,n])=>(
-                        <label key={n} style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>
+                        <label key={n} style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer", padding:"8px 14px", borderRadius:"10px", border: pForm[n] ? "1.5px solid #2d5a8e" : "1.5px solid #e5e7eb", background: pForm[n] ? "#f0f6ff" : "#fff", color:"#0f1c2e" }}>
                           <input type="checkbox" checked={!!pForm[n]} onChange={e=>setPForm(f=>({...f,[n]:e.target.checked}))} />
                           {l}
                         </label>
                       ))}
                     </div>
-                    <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
-                      <button type="button" className="tab" onClick={()=>setShowPersonelForm(false)}>Vazgeç</button>
-                      <button type="submit" className="saveButton">Kaydet</button>
-                    </div>
                   </form>
-                </div>
-              )}
+                </IkModalKabuk>
+                );
+              })()}
 
               <div style={{ display:"grid", gap:"10px" }}>
                 {/* Muhasebe: maaş bloğu gizli olduğundan araç çubuğu görünmez —
@@ -17885,27 +17956,35 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       onClick={()=>setPersonelListeModal(true)}>👥 Personel Listesi & Excel</button>
                   </div>
                 )}
-                {personelList.filter(p => firmaUygun(p) && (!hrPersonelFilter || String(p.id) === String(hrPersonelFilter))).map(p => (
-                  <div key={p.id} style={{ background:"#fff", borderRadius:"14px", padding:"16px 20px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"grid", gridTemplateColumns:"44px 1fr auto auto auto", alignItems:"center", gap:"16px", opacity: p.aktif?1:0.6 }}>
-                    <div style={{ width:44, height:44, borderRadius:"12px", background: p.aktif?"linear-gradient(135deg,#60a5fa,#3b82f6)":"#e5e7eb", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"18px", fontWeight:700, color:"#fff" }}>
-                      {p.ad_soyad.charAt(0)}
+                {/* 17.09.2026 (Orhan): personel kartları kaldırıldı — Öde/Düzenle tablonun İşlem kolonunda.
+                    Tabloda görünmeyen (pasif / o ay istihdamda olmayan) personel burada ince şeritte durur. */}
+                {(() => {
+                  const gizliMod = _maasGizli;
+                  const kisiler = personelList.filter(p => firmaUygun(p) && (!hrPersonelFilter || String(p.id) === String(hrPersonelFilter))
+                    && (gizliMod || !puantajIstihdam(p)));
+                  if (!kisiler.length) return null;
+                  const acik = gizliMod || pasifAcik;
+                  return (
+                    <div style={{ background:"#fff", borderRadius:"14px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", overflow:"hidden" }}>
+                      {!gizliMod && (
+                        <div onClick={()=>setPasifAcik(v=>!v)} style={{ padding:"12px 18px", cursor:"pointer", display:"flex", alignItems:"center", gap:"8px", fontSize:"13px", fontWeight:700, color:"#475569" }}>
+                          <span>{acik ? "▾" : "▸"}</span> Tabloda olmayan personel (pasif / ayrılmış) <span style={{ background:"#f1f5f9", borderRadius:"20px", padding:"1px 9px", fontSize:"12px" }}>{kisiler.length}</span>
+                        </div>
+                      )}
+                      {acik && kisiler.map(p => (
+                        <div key={p.id} style={{ display:"flex", alignItems:"center", gap:"12px", padding:"9px 18px", borderTop:"1px solid #f1f5f9", opacity: p.aktif ? 1 : 0.75 }}>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <span style={{ fontWeight:700, fontSize:"13px", color:"#0f1c2e" }}>{p.ad_soyad}</span><FirmaRozet p={p} kucuk />
+                            <span style={{ fontSize:"12px", color:"#94a3b8", marginLeft:"8px" }}>{[p.unvan, p.bolge].filter(Boolean).join(" · ")}</span>
+                          </div>
+                          <span style={{ background:p.aktif?"#dcfce7":"#f3f4f6", color:p.aktif?"#166534":"#6b7280", padding:"2px 10px", borderRadius:"20px", fontSize:"11px", fontWeight:700 }}>{p.aktif?"Aktif":"Pasif"}</span>
+                          {!gizliMod && <button onClick={()=>openMaasOde(p)} style={{ padding:"5px 12px", background:"#0f2a47", color:"#fff", border:"none", borderRadius:"8px", fontSize:"11.5px", fontWeight:700, cursor:"pointer" }}>💰 Öde</button>}
+                          <button onClick={()=>handleEditPersonel(p)} style={{ padding:"5px 11px", background:"#fff", color:"#334155", border:"1.5px solid #cbd5e1", borderRadius:"8px", fontSize:"11.5px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle</button>
+                        </div>
+                      ))}
                     </div>
-                    <div>
-                      <div style={{ fontWeight:700, fontSize:"15px" }}>{p.ad_soyad}<FirmaRozet p={p} kucuk /></div>
-                      <div style={{ fontSize:"12px", color:"#9ca3af" }}>{p.unvan} {p.bolge && `· ${p.bolge}`}</div>
-                      {!_maasGizli && <div style={{ fontSize:"12px", color:"#6b7280", marginTop:"2px" }}>Net: <b>₺{Number(p.net_maas||0).toLocaleString("tr-TR")}</b> · Banka: ₺{Number(p.bankadan_gosterilen||0).toLocaleString("tr-TR")} · Elden: ₺{Number(p.elden_verilen||0).toLocaleString("tr-TR")}</div>}
-                    </div>
-                    <span style={{ background:p.aktif?"#dcfce7":"#f3f4f6", color:p.aktif?"#166534":"#6b7280", padding:"3px 12px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{p.aktif?"Aktif":"Pasif"}</span>
-                    <div style={{ display:"flex", gap:"6px" }}>
-                      <button onClick={()=>handleEditPersonel(p)} style={{ padding:"6px 12px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
-                      {!_maasGizli && <button onClick={()=>{ const now=new Date(); const pOzet=ozet.find(o=>String(o.personel_id)===String(p.id)); const hakVal=Math.round(ahyMaasPay(p, pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0))); setMaasOdeModal(p); setMaasOdeHak(hakVal); setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih:now.toISOString().split("T")[0], aciklama:"", odeyen: _hrMarka==="AHY" ? "AHY" : "SIMSEK" }); loadMaasOde(p.id); }} style={{ padding:"6px 12px", background:"#f0fdf4", color:"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>💰 Öde</button>}
-                      <button onClick={()=>handleToggleAktif(p)} style={{ padding:"6px 12px", background:p.aktif?"#fef3c7":"#f0fdf4", color:p.aktif?"#92400e":"#166534", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
-                        {p.aktif?"Pasife Al":"Aktif Et"}
-                      </button>
-                    </div>
-                    <button onClick={()=>handleDeletePersonel(p)} style={{ padding:"6px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
-                  </div>
-                ))}
+                  );
+                })()}
                 {personelList.length===0 && <div style={{ ...secSt, textAlign:"center", color:"#9ca3af" }}>Henüz personel eklenmemiş. "Personel Ekle" butonuna tıklayın.</div>}
               </div>
         </div>
@@ -17986,13 +18065,16 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
              ["DEVRET","Sonraki aya devret","Bir sonraki ayın alacağına eklenir"]];
         const inp = { width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", boxSizing:"border-box" };
         return (
-        <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.5)", zIndex:4000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}
-          onClick={()=>!kapamaSaving && setKapamaModal(null)}>
-          <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", padding:"22px 24px", width:"100%", maxWidth:"460px", maxHeight:"92vh", overflowY:"auto", boxShadow:"0 20px 50px rgba(0,0,0,0.25)" }}>
-            <div style={{ fontWeight:800, fontSize:"16px", color:"#0f1c2e" }}>🔒 Dönemi Kapat — {km.p.ad_soyad}</div>
-            <div style={{ fontSize:"12.5px", color:"#6b7280", margin:"3px 0 14px" }}>
-              {ayAdiK} {puantajAy.slice(0,4)} · hakediş ₺{km.p.hakEdis.toLocaleString("tr-TR")} · ödenen ₺{km.p.odenen.toLocaleString("tr-TR")}
-            </div>
+        <IkModalKabuk onKapat={()=>!kapamaSaving && setKapamaModal(null)} genislik={500}
+          baslik={`Dönemi kapat · ${ayAdiK} ${puantajAy.slice(0,4)}`} adSoyad={km.p.ad_soyad}
+          altBaslik={`hakediş ₺${km.p.hakEdis.toLocaleString("tr-TR")} · ödenen ₺${km.p.odenen.toLocaleString("tr-TR")}`}
+          rozet={<FirmaRozet p={km.p} kucuk />}
+          footer={<>
+            <div style={{ flex:1 }} />
+            <button disabled={kapamaSaving} onClick={()=>setKapamaModal(null)} style={{ padding:"10px 18px", background:"#fff", color:"#334155", border:"1.5px solid #cbd5e1", borderRadius:"10px", fontWeight:700, fontSize:"13px", cursor:"pointer" }}>Vazgeç</button>
+            <button disabled={kapamaSaving} onClick={handleSaveKapama} style={{ padding:"10px 22px", background: kapamaSaving ? "#9ca3af" : "linear-gradient(135deg,#0f2a47,#2d5a8e)", color:"#fff", border:"none", borderRadius:"10px", fontWeight:800, fontSize:"13px", cursor: kapamaSaving ? "not-allowed" : "pointer" }}>{kapamaSaving ? "Kaydediliyor…" : "Kapat ve Kaydet"}</button>
+          </>}>
+          <div>
             <div style={{ background: km.fazlaMod ? "#fef3c7" : "#fee2e2", color: km.fazlaMod ? "#92400e" : "#991b1b", borderRadius:"10px", padding:"9px 12px", fontSize:"13px", fontWeight:700, marginBottom:"14px" }}>
               {km.fazlaMod ? `Fazla ödeme: ₺${km.fark.toLocaleString("tr-TR")}` : `Kalan fark: ₺${km.fark.toLocaleString("tr-TR")} (eksik ödendi)`}
             </div>
@@ -18023,22 +18105,18 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
             <div style={{ fontSize:"11.5px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Not (zorunlu)</div>
             <textarea rows={2} value={kapamaForm.not_aciklama} onChange={e=>setKapamaForm(f=>({...f, not_aciklama:e.target.value}))}
               placeholder="Örn. kayıp el aleti bedeli, personelle konuşuldu" style={{ ...inp, resize:"vertical", fontFamily:"inherit" }} />
-            <div style={{ display:"flex", justifyContent:"flex-end", gap:"8px", marginTop:"16px" }}>
-              <button disabled={kapamaSaving} onClick={()=>setKapamaModal(null)} style={{ padding:"9px 16px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"9px", fontWeight:600, cursor:"pointer" }}>Vazgeç</button>
-              <button disabled={kapamaSaving} onClick={handleSaveKapama} style={{ padding:"9px 16px", background: kapamaSaving ? "#9ca3af" : "#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontWeight:700, cursor: kapamaSaving ? "not-allowed" : "pointer" }}>{kapamaSaving ? "Kaydediliyor…" : "Kapat ve Kaydet"}</button>
-            </div>
           </div>
-        </div>
+        </IkModalKabuk>
         );
       })()}
 
       {maasOdeModal && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}>
-          <div style={{ background:"#fff", borderRadius:"18px", padding:"28px", width:"100%", maxWidth:"600px", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px" }}>
-              <h3 style={{ margin:0, fontSize:"18px" }}>💰 Maaş Ödemesi — {maasOdeModal.ad_soyad}</h3>
-              <button onClick={()=>setMaasOdeModal(null)} style={{ background:"none", border:"none", fontSize:"20px", cursor:"pointer", color:"#6b7280" }}>✕</button>
-            </div>
+        <IkModalKabuk onKapat={()=>{ setMaasOdeModal(null); setMaasOdeEditId(null); }} genislik={680}
+          baslik={`Maaş ödemesi · ${["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(puantajAy.slice(5,7))-1]} ${puantajAy.slice(0,4)}`}
+          adSoyad={maasOdeModal.ad_soyad}
+          altBaslik={[maasOdeModal.unvan, maasOdeModal.bolge].filter(Boolean).join(" · ")}
+          rozet={<FirmaRozet p={maasOdeModal} kucuk />}>
+          <div>
 
             {/* Kalan özeti */}
             {(() => {
@@ -18276,7 +18354,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 })()
             }
           </div>
-        </div>
+        </IkModalKabuk>
       )}
 
       {/* ===== PUANTAJ SEKMESİ ===== */}
