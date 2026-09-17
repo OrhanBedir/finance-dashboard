@@ -1190,15 +1190,22 @@ function ProjePLSeridi({ ozet, tGider }) {
     ["🚗", "Araç Kiraları", Number(gk.arac_kira || 0), ""],
     ["🏢", "Ofis & Depo Kiraları", Number(gk.ofis_kira || 0), ""],
     ["🍽", "Yemek Kartı Ödemeleri", Number(gk.yemek || 0), ""],
-    ["🔧", "Taşeron Ödemeleri", Number(gk.taseron || 0) + planliTas, planliTas > 0 ? `planlı ₺${fmt(planliTas)} dahil` : ""],
-    ["👥", "Personel Maaş & Avansları", Number(gk.maas || 0) + planliMaas, planliMaas > 0 ? `planlı maaş ₺${fmt(planliMaas)} dahil` : ""],
+    // 17.09.2026: planlı (henüz ödenmemiş) tutarlar bu satırlara KATILMAZ — ayrı bölümde
+    ["🔧", "Taşeron Ödemeleri", Number(gk.taseron || 0), "15.07 sonrası ödenen"],
+    ["👥", "Personel Maaş & Avansları", Number(gk.maas || 0), "ödenen"],
     ["📋", "Genel Saha & İşletme Giderleri", Number(gk.genel || 0), "iş avansları + günlük ödemeler"],
   ] : [
     ["💸", "Gerçekleşen Giderler", Number(tGider || 0), ""],
     ["👥", "Planlı Maaş", planliMaas, ""],
     ["🔧", "Planlı Taşeron", planliTas, ""],
   ];
-  const toplamG = kalemler.reduce((sm, k) => sm + k[2], 0);
+  const odenenG = kalemler.reduce((sm, k) => sm + k[2], 0);
+  const planliKalemler = gk ? [
+    ["🔧", "Planlı Taşeron", planliTas, "yapılan iş − ödenen (henüz ödenmedi)"],
+    ["👥", "Planlı Maaş", planliMaas, "tahakkuk eden, ödenmemiş net maaş"],
+  ] : [];
+  const planliG = planliKalemler.reduce((sm, k) => sm + k[2], 0);
+  const toplamG = odenenG + planliG;
   const brut = hakedis - toplamG;
   const marj = hakedis > 0 ? (brut / hakedis) * 100 : 0;
   const gidPct = hakedis > 0 ? Math.min(100, (toplamG / hakedis) * 100) : 0;
@@ -1226,21 +1233,39 @@ function ProjePLSeridi({ ozet, tGider }) {
 
       {/* Gider kalemleri */}
       <div style={{ fontSize: "11px", fontWeight: 800, letterSpacing: "1px", color: "rgba(255,255,255,0.45)", margin: "12px 0 2px" }}>GİDERLER</div>
-      {kalemler.map(([ik, ad, tutar, not_]) => (
-        <div key={ad} style={rowSt}>
-          <span style={{ ...lblK, opacity: tutar > 0 ? 1 : 0.45 }}>
-            <span>{ik}</span><span>{ad}</span>
-            {not_ && <span style={notK}>{not_}</span>}
-          </span>
-          <span style={{ fontSize: "15px", fontWeight: 700, color: tutar > 0 ? "#fca5a5" : "rgba(255,255,255,0.35)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-            {tutar > 0 ? `−₺${fmt(tutar)}` : "₺0"}
-          </span>
-        </div>
-      ))}
-      <div style={{ ...rowSt, borderBottom: "1.5px solid rgba(255,255,255,0.15)" }}>
-        <span style={{ fontSize: "13px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>TOPLAM GİDER</span>
-        <span style={{ fontSize: "18px", fontWeight: 800, color: "#f87171", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>−₺{fmt(toplamG)}</span>
-      </div>
+      {(() => {
+        const kalemSatiri = ([ik, ad, tutar, not_]) => (
+          <div key={ad} style={rowSt}>
+            <span style={{ ...lblK, opacity: tutar > 0 ? 1 : 0.45 }}>
+              <span>{ik}</span><span>{ad}</span>
+              {not_ && <span style={notK}>{not_}</span>}
+            </span>
+            <span style={{ fontSize: "15px", fontWeight: 700, color: tutar > 0 ? "#fca5a5" : "rgba(255,255,255,0.35)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+              {tutar > 0 ? `−₺${fmt(tutar)}` : "₺0"}
+            </span>
+          </div>
+        );
+        const toplamSatiri = (ad, tutar, renk, buyuk) => (
+          <div style={{ ...rowSt, borderBottom: "1.5px solid rgba(255,255,255,0.15)" }}>
+            <span style={{ fontSize: "13px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>{ad}</span>
+            <span style={{ fontSize: buyuk ? "18px" : "16px", fontWeight: 800, color: renk, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>−₺{fmt(tutar)}</span>
+          </div>
+        );
+        const altBaslik = (t) => (
+          <div style={{ fontSize: "11px", fontWeight: 800, letterSpacing: "1px", color: "rgba(255,255,255,0.45)", margin: "14px 0 2px" }}>{t}</div>
+        );
+        if (!planliKalemler.length) return (<>{kalemler.map(kalemSatiri)}{toplamSatiri("TOPLAM GİDER", toplamG, "#f87171", true)}</>);
+        return (
+          <>
+            {kalemler.map(kalemSatiri)}
+            {toplamSatiri("ÖDENEN GİDER TOPLAMI", odenenG, "#f87171", false)}
+            {altBaslik("PLANLI GİDERLER · HENÜZ ÖDENMEDİ")}
+            {planliKalemler.map(kalemSatiri)}
+            {toplamSatiri("PLANLI GİDER TOPLAMI", planliG, "#fbbf24", false)}
+            {toplamSatiri("TOPLAM GİDER (ÖDENEN + PLANLI)", toplamG, "#f87171", true)}
+          </>
+        );
+      })()}
 
       {/* Brüt kâr */}
       <div style={{ ...rowSt, borderBottom: "none", paddingTop: "12px" }}>

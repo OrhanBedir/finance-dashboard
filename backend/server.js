@@ -6558,6 +6558,10 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 // dağıtıp invoice_entries.odenen_tutar'a yazar; AHY ödemesi ayrıca marka_taseron_odeme'ye
 // düşer. "Fatura girişinden" ödeme sayılırken bu dağıtılan kısım çıkarılır — yoksa bölünmüş
 // ödeme (25.000 = 16.800 + 8.200) tutar eşleşmesi korumasına takılmadan ikinci kez sayılıyordu.
+// 17.09.2026 (Orhan): P&L'de devir ayı (Temmuz 2026) araç/ofis kirasının YARISI sayılır
+// (15.07 devir); araçların hepsi AHY'nin — araclar.firma ile markaya süzülür.
+const PL_KIRA_TUTAR_SQL = `(CASE WHEN o.donem = '2026-07' THEN COALESCE(o.tutar,0) * 0.5 ELSE COALESCE(o.tutar,0) END)`;
+pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS firma TEXT DEFAULT 'AHY'`).catch(() => {});
 const TASERON_LOG_DAGILIM_SQL = `(SELECT (d->>'fatura_id')::int AS fid, SUM((d->>'odeme')::numeric) AS t
   FROM taseron_odeme_log l,
        jsonb_array_elements(CASE WHEN jsonb_typeof(l.dagilim) = 'array' THEN l.dagilim ELSE '[]'::jsonb END) d
@@ -6616,10 +6620,10 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           FROM personel_odeme o
           WHERE UPPER(COALESCE(o.firma,'ERC'))=$1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2
         ) x GROUP BY 1`, [marka, DEVIR]),
-      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
-        FROM arac_kira_odemeler o
-        WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
-      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
+        FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
+        WHERE o.created_at >= $1::date AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = $2 GROUP BY 1`, [DEVIR, marka]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
         FROM ofis_kira_odemeler o
         WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
@@ -6631,18 +6635,20 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       // marka-nakit'tekiyle birebir aynı (ilk kelime + tutar eşleşmesi).
       pool.query(`SELECT ay, SUM(t) AS t FROM (
           SELECT to_char(tarih,'YYYY-MM') AS ay, COALESCE(tutar,0) AS t
-          FROM marka_taseron_odeme WHERE UPPER(marka) = $1
+          FROM marka_taseron_odeme WHERE UPPER(marka) = $1 AND tarih >= $2::date
           UNION ALL
+          -- 17.09.2026: devirden (15.07) önceki ödeme/faturalar AHY giderine girmez
           SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0))
           FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
           WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
+            AND COALESCE(i.odeme_tarihi, i.fatura_tarihi) >= $2::date
             AND NOT EXISTS (
               SELECT 1 FROM marka_taseron_odeme mo
               WHERE UPPER(mo.marka) = $1
                 AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
                 AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
             )
-        ) x GROUP BY ay`, [marka]).catch(() => ({ rows: [] })),
+        ) x GROUP BY ay`, [marka, DEVIR]).catch(() => ({ rows: [] })),
       // Yemek kartı ödemeleri (cashflow kategori TICKET) — kalem dökümü için ayrı
       pool.query(`SELECT SUM(tutar) AS t FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1 AND UPPER(COALESCE(kategori,'')) = 'TICKET'`, [marka]).catch(() => ({ rows: [] })),
@@ -7108,7 +7114,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama,
           COALESCE(o.kasadan_dus, true) AS kasadan_dus
         FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
-        WHERE o.created_at >= $1::date`, [girisBaslangic]),
+        WHERE o.created_at >= $1::date AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = $2`, [girisBaslangic, marka]),
       // Ofis/Depo kiraları: devirden sonra girilen ödemeler (araç kira kuralıyla aynı).
       // kasadan_dus=false → AHY kendi ödedi: nakit akışında görünür ama kasa bakiyesinden düşmez
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, d.ad AS ad_soyad,
@@ -8501,10 +8507,10 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
           FROM personel_odeme o
           WHERE UPPER(COALESCE(o.firma,'ERC'))=$1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2
         ) x GROUP BY 1`, [marka, DEVIR]),
-      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
-        FROM arac_kira_odemeler o
-        WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
-      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(o.tutar) AS t
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
+        FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
+        WHERE o.created_at >= $1::date AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = $2 GROUP BY 1`, [DEVIR, marka]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
         FROM ofis_kira_odemeler o
         WHERE o.created_at >= $1::date GROUP BY 1`, [DEVIR]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, kategori, SUM(tutar) AS t
@@ -8516,18 +8522,20 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
       // marka-nakit'tekiyle birebir aynı (ilk kelime + tutar eşleşmesi).
       pool.query(`SELECT ay, SUM(t) AS t FROM (
           SELECT to_char(tarih,'YYYY-MM') AS ay, COALESCE(tutar,0) AS t
-          FROM marka_taseron_odeme WHERE UPPER(marka) = $1
+          FROM marka_taseron_odeme WHERE UPPER(marka) = $1 AND tarih >= $2::date
           UNION ALL
+          -- 17.09.2026: devirden (15.07) önceki ödeme/faturalar AHY giderine girmez
           SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0))
           FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
           WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
+            AND COALESCE(i.odeme_tarihi, i.fatura_tarihi) >= $2::date
             AND NOT EXISTS (
               SELECT 1 FROM marka_taseron_odeme mo
               WHERE UPPER(mo.marka) = $1
                 AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
                 AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
             )
-        ) x GROUP BY ay`, [marka]).catch(() => ({ rows: [] })),
+        ) x GROUP BY ay`, [marka, DEVIR]).catch(() => ({ rows: [] })),
     ]);
     const map = {};
     const rowOf = (ay) => (map[ay] = map[ay] || {
