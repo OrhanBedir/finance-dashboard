@@ -20097,14 +20097,18 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                       </button>
                     </div>
                     <div style={{ background:"#f9fafb", borderRadius:"8px", padding:"8px", overflow:"auto", maxHeight:"55vh" }}>
-                      <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)} style={{ width:"100%" }}>
-                        <img ref={cropImgRef} src={cropSrc} alt="fiş" style={{ width:"100%", height:"auto", display:"block", maxHeight:"55vh", objectFit:"contain" }}
+                      {/* 17.09.2026: Kırpma hep YÜZDE ile tutulur ve gerçek piksele yüzdeden çevrilir.
+                          Eski kod ilk (yüzde) kutuyu piksel sanıyordu; ayrıca width:100% + objectFit:contain
+                          görsel kutusunu fişten geniş yapınca yüklenen fiş dar bir şerit oluyordu. */}
+                      <div style={{ display:"flex", justifyContent:"center" }}>
+                      <ReactCrop crop={crop} onChange={(_px, pc) => setCrop(pc)} onComplete={(_px, pc) => setCompletedCrop(pc)}>
+                        <img ref={cropImgRef} src={cropSrc} alt="fiş" style={{ display:"block", maxWidth:"100%", maxHeight:"55vh", width:"auto", height:"auto" }}
                           onLoad={e => {
-                            const { width, height } = e.currentTarget;
-                            const c = centerCrop(makeAspectCrop({ unit:"%", width:90 }, width/height, width, height), width, height);
-                            setCrop(c); setCompletedCrop(c);
+                            const pc = { unit:"%", x:5, y:5, width:90, height:90 };
+                            setCrop(pc); setCompletedCrop(pc);
                           }} />
                       </ReactCrop>
+                      </div>
                     </div>
                     <canvas ref={cropCanvasRef} style={{ display:"none" }} />
                   </div>
@@ -20121,12 +20125,16 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                     if (completedCrop && cropImgRef.current && completedCrop.width > 0) {
                       const img = cropImgRef.current;
                       const canvas = document.createElement("canvas");
-                      const scaleX = img.naturalWidth / img.width;
-                      const scaleY = img.naturalHeight / img.height;
-                      canvas.width = completedCrop.width * scaleX;
-                      canvas.height = completedCrop.height * scaleY;
+                      const W = img.naturalWidth, Hh = img.naturalHeight;
+                      const yuzde = completedCrop.unit === "%";
+                      const sx = yuzde ? completedCrop.x / 100 * W : completedCrop.x * W / img.width;
+                      const sy = yuzde ? completedCrop.y / 100 * Hh : completedCrop.y * Hh / img.height;
+                      const sw = Math.min(W - sx, yuzde ? completedCrop.width / 100 * W : completedCrop.width * W / img.width);
+                      const sh = Math.min(Hh - sy, yuzde ? completedCrop.height / 100 * Hh : completedCrop.height * Hh / img.height);
+                      canvas.width = Math.round(sw);
+                      canvas.height = Math.round(sh);
                       const ctx = canvas.getContext("2d");
-                      ctx.drawImage(img, completedCrop.x * scaleX, completedCrop.y * scaleY, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+                      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
                       const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.92));
                       fileToUpload = new File([blob], "fis.jpg", { type: "image/jpeg" });
                     } else {
