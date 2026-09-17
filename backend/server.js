@@ -16800,6 +16800,22 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
           girisFactor = Math.min(1, calisilanTakvimGun / REFERANS_GUN);
         }
       }
+      // 17.09.2026 (Burak Ülker vakası): ay sonrası pasife alınan personel o ayın özetinden
+      // düşüyordu (tablo tam maaşı gösteriyordu). Özete "o ay istihdamda olan" girer; ayrılma bu
+      // ayın içindeyse ayrılma sonrası günler hakedişe girmez (giriş + ayrılma aynı aydaysa ikisi birden).
+      let istihdamda = !!p.aktif;
+      const _gd = p.ise_giris_tarihi ? new Date(p.ise_giris_tarihi) : null;
+      const _ad = p.isten_ayrilma_tarihi ? new Date(p.isten_ayrilma_tarihi) : null;
+      const _ayBas = new Date(Number(yil), Number(ay) - 1, 1).getTime();
+      const _aySon = new Date(Number(yil), Number(ay), 0).getTime();
+      if (_ad && !Number.isNaN(_ad.getTime())) {
+        istihdamda = _ad.getTime() >= _ayBas;
+        if (_ad.getTime() <= _aySon) {
+          const basGun = (_gd && !Number.isNaN(_gd.getTime()) && _gd.getFullYear() === Number(yil) && (_gd.getMonth() + 1) === Number(ay)) ? _gd.getDate() : 1;
+          girisFactor = Math.min(1, Math.max(0, _ad.getDate() - basGun + 1) / REFERANS_GUN);
+        }
+      }
+      if (_gd && !Number.isNaN(_gd.getTime()) && _gd.getTime() > _aySon) istihdamda = false;
       // Pazar/resmi tatil bonusu maaşa EKLENMEZ — dinlenme bakiyesine birikir
       const hakedilenOto = Math.max(0, Math.round(netMaas * girisFactor - gelmedi * dailyRate));
       const pazarBonus = 0; // Artık maaşa yansımıyor, dinlenme hakkı olarak birikiyor
@@ -16834,7 +16850,7 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
       const extraHakedis = Math.round(dinlenmeBakiye * (netMaas / REFERANS_GUN) * 1.5);
 
       return {
-        personel_id: p.id, ad_soyad: p.ad_soyad, unvan: p.unvan, aktif: p.aktif,
+        personel_id: p.id, ad_soyad: p.ad_soyad, unvan: p.unvan, aktif: p.aktif, istihdamda,
         net_maas: p.net_maas, bankadan_gosterilen: p.bankadan_gosterilen, elden_verilen: p.elden_verilen,
         calisilan_gun: calisilan, gelmedi_gun: gelmedi, pazar_calisdi: pazarCalisdi,
         pazar_bonus: pazarBonus, dinlenme_gun: dinlenme, toplam_gun: totalDays,
@@ -16847,7 +16863,7 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
         toplam_dinlenme: toplamDinlenme,
         extra_hakedis: extraHakedis,
       };
-    }).filter(p => p.aktif);
+    }).filter(p => p.istihdamda);
 
     res.json(ozet);
   } catch (e) { res.status(500).json({ error: e.message }); }
