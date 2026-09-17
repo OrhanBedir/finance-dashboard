@@ -17343,8 +17343,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           overflow: "hidden",
                           transition: "max-height 0.35s ease",
                         }}>
-                          <div style={{ overflowX:"auto" }}>
-                            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px" }}>
+                          {/* 17.09.2026 (Orhan): tablo kendi içinde kayar — başlık sabit, fare tekeri
+                              tablonun üstündeyken sayfa kaymaz (overscroll-behavior: contain) */}
+                          <div style={{ overflow:"auto", maxHeight:"calc(100vh - 300px)", minHeight:"220px", overscrollBehavior:"contain" }}>
+                            <table style={{ width:"100%", borderCollapse:"separate", borderSpacing:0, fontSize:"12px" }}>
                               <thead>
                                 <tr style={{ background:"#f8fafc" }}>
                                   {[
@@ -17358,7 +17360,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     { label:"Toplam Öd.",  align:"right" },
                                     { label:"Kalan",       align:"right" },
                                   ].map(h=>(
-                                    <th key={h.label} style={{ padding:"8px 12px", fontWeight:700, color: h.color||"#374151", textAlign: h.align, borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap" }}>{h.label}</th>
+                                    <th key={h.label} style={{ padding:"8px 12px", fontWeight:700, color: h.color||"#374151", textAlign: h.align, borderBottom:"1.5px solid #e5e7eb", whiteSpace:"nowrap", position:"sticky", top:0, zIndex:2, background:"#f1f5f9" }}>{h.label}</th>
                                   ))}
                                 </tr>
                               </thead>
