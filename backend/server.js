@@ -6777,6 +6777,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         dd = new Date(Date.UTC(dd.getUTCFullYear(), dd.getUTCMonth() + 1, 1));
       }
       const carry = {}; // personel bazlı devir (fazla ödeme)
+      const carryEksik = {}; // personel bazlı devir (DEVRET ile sonraki aya taşınan eksik)
       for (const donem of donemler) {
         const [dy, dm] = donem.split("-").map(Number);
         const gunSay = new Date(Date.UTC(dy, dm, 0)).getUTCDate();
@@ -6808,6 +6809,12 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         const gmM = new Map(gm.rows.map(r => [String(r.personel_id), Number(r.gelmedi || 0)]));
         const odM = new Map(od.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
         const avM = new Map(av.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
+        // Dönem kapamaları (17.09.2026): kesinti/yuvarlama borcu siler, DEVRET sonraki aya
+        // taşır, PRIM fazla ödemenin devrini engeller — İK tablosuyla aynı kural
+        const kp = await pool.query(
+          `SELECT personel_id, tip, SUM(tutar) AS t FROM maas_donem_kapama WHERE donem = $1 GROUP BY 1,2`, [donem]).catch(() => ({ rows: [] }));
+        const kpM = {};
+        kp.rows.forEach(r => { const k = (kpM[String(r.personel_id)] = kpM[String(r.personel_id)] || {}); k[r.tip] = Number(r.t || 0); });
         const REFERANS_GUN = 30; // Bordro esası: ay 30 gün (İK ekranıyla aynı)
         for (const p of pr.rows) {
           const gStr = p.ise_giris_tarihi
@@ -6834,8 +6841,12 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           }
           const oden = (odM.get(String(p.id)) || 0) + (avM.get(String(p.id)) || 0);
           const dev = carry[p.id] || 0;
-          bekleyenMaas += Math.max(0, hak - oden - dev);
-          carry[p.id] = Math.max(0, oden + dev - hak);
+          const kk = kpM[String(p.id)] || {};
+          const dus = (kk.KESINTI || 0) + (kk.YUVARLAMA || 0) + (kk.DEVRET || 0);
+          const gereken = hak - dev + (carryEksik[p.id] || 0) - dus;
+          bekleyenMaas += Math.max(0, gereken - oden);
+          carry[p.id] = Math.max(0, oden - gereken - (kk.PRIM || 0));
+          carryEksik[p.id] = kk.DEVRET || 0;
         }
       }
     } catch (e) { console.error("MARKA OZET bekleyen maas:", e.message); }
@@ -16984,6 +16995,69 @@ app.put("/hr/maas-odeme/:id", async (req, res) => {
 app.delete("/hr/maas-odeme/:id", async (req, res) => {
   try {
     await pool.query("DELETE FROM maas_odeme WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── MAAŞ DÖNEM KAPAMA (17.09.2026, Orhan) ──
+   Hakediş ile ödenen arasında kalan küçük farklar iz bırakarak kapatılır:
+     KESINTI   → personele ödenmez, borç silinir (sebep + not zorunlu)
+     YUVARLAMA → küsurat farkı
+     DEVRET    → eksik kalan tutar sonraki ayın alacağına eklenir
+     PRIM      → fazla ödeme prim/ek ödeme sayılır, sonraki aydan DÜŞÜLMEZ
+   Hakediş değişmez; kapama ayrı satırdır. Yetki: yalnız Düzgün Şimşek, Orhan Bedir, Erencan Şimşek. */
+const MAAS_KAPAMA_YETKILI = ["duzgun.simsek@simsektel.com", "orhan.bedir@simsektel.com",
+  "orhan.bedir@gmail.com", "eren.simsek@simsektel.com"];
+const MAAS_KAPAMA_TIPLER = ["KESINTI", "YUVARLAMA", "DEVRET", "PRIM"];
+const maasKapamaYetkili = (req) => MAAS_KAPAMA_YETKILI.includes(String(req.user?.email || "").toLowerCase().trim());
+pool.query(`CREATE TABLE IF NOT EXISTS maas_donem_kapama (
+  id SERIAL PRIMARY KEY,
+  personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE,
+  donem TEXT NOT NULL,
+  tip TEXT NOT NULL,
+  tutar NUMERIC NOT NULL,
+  sebep TEXT,
+  not_aciklama TEXT NOT NULL,
+  created_by TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`).then(() => pool.query(`ALTER TABLE maas_donem_kapama ENABLE ROW LEVEL SECURITY`)).catch(() => {});
+
+// donem=YYYY-MM → o ay + bir önceki ay (devir hesabı önceki ayın kayıtlarını da ister)
+app.get("/hr/maas-kapama", authMiddleware, async (req, res) => {
+  try {
+    const donem = String(req.query.donem || "");
+    if (!/^\d{4}-\d{2}$/.test(donem)) return res.status(400).json({ error: "donem (YYYY-AA) zorunlu" });
+    const [y, m] = donem.split("-").map(Number);
+    const pd = new Date(Date.UTC(y, m - 2, 1));
+    const onceki = `${pd.getUTCFullYear()}-${String(pd.getUTCMonth() + 1).padStart(2, "0")}`;
+    const r = await pool.query(
+      `SELECT k.*, to_char(k.created_at,'DD.MM.YYYY') AS tarih_fmt FROM maas_donem_kapama k
+        WHERE k.donem IN ($1,$2) ORDER BY k.created_at`, [donem, onceki]);
+    res.json({ ok: true, rows: r.rows, yetkili: maasKapamaYetkili(req) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/hr/maas-kapama", authMiddleware, async (req, res) => {
+  try {
+    if (!maasKapamaYetkili(req)) return res.status(403).json({ error: "Dönem kapatma yetkiniz yok" });
+    const { personel_id, donem, tip, tutar, sebep, not_aciklama } = req.body || {};
+    const t = Number(tutar);
+    if (!personel_id || !/^\d{4}-\d{2}$/.test(String(donem || ""))) return res.status(400).json({ error: "personel ve dönem zorunlu" });
+    if (!MAAS_KAPAMA_TIPLER.includes(String(tip))) return res.status(400).json({ error: "Geçersiz kapama türü" });
+    if (!Number.isFinite(t) || t <= 0) return res.status(400).json({ error: "Tutar sıfırdan büyük olmalı" });
+    if (!String(not_aciklama || "").trim()) return res.status(400).json({ error: "Not zorunlu" });
+    const r = await pool.query(
+      `INSERT INTO maas_donem_kapama (personel_id, donem, tip, tutar, sebep, not_aciklama, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [personel_id, donem, tip, t, String(sebep || "").trim() || null, String(not_aciklama).trim(), req.user?.email || null]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/hr/maas-kapama/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!maasKapamaYetkili(req)) return res.status(403).json({ error: "Dönem kapatma yetkiniz yok" });
+    await pool.query(`DELETE FROM maas_donem_kapama WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

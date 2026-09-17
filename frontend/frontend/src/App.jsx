@@ -16064,6 +16064,56 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   // Önceki aydan devreden FAZLA maaş ödemesi: geçen ay hakedişten fazla ödendiyse
   // (avans + banka + elden > hakediş) fark bu ayın maaşından düşülür.
   const _prevAyStr = (() => { const [y, m] = puantajAy.split("-").map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
+  // ── Maaş dönem kapama (17.09.2026): hakediş−ödenen farkı kesinti/yuvarlama/devret/prim ile kapatılır ──
+  const [maasKapamalar, setMaasKapamalar] = useState([]);   // seçili ay + önceki ay kayıtları
+  const [maasKapamaYetkili, setMaasKapamaYetkili] = useState(false);
+  const [kapamaModal, setKapamaModal] = useState(null);     // { p, fazlaMod, fark }
+  const [kapamaForm, setKapamaForm] = useState({ tip:"KESINTI", tutar:"", sebep:"Zimmet / kayıp malzeme", not_aciklama:"" });
+  const [kapamaSaving, setKapamaSaving] = useState(false);
+  const loadMaasKapama = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/hr/maas-kapama?donem=${puantajAy}`, { headers:{ Authorization:`Bearer ${localStorage.getItem("token")||""}` } });
+      const d = await r.json().catch(()=>({}));
+      setMaasKapamalar(Array.isArray(d.rows) ? d.rows : []);
+      setMaasKapamaYetkili(!!d.yetkili);
+    } catch { setMaasKapamalar([]); }
+  };
+  const _kapamaTop = (personelId, donem, tipler) => maasKapamalar
+    .filter(k => String(k.personel_id) === String(personelId) && k.donem === donem && tipler.includes(k.tip))
+    .reduce((t, k) => t + Number(k.tutar || 0), 0);
+  // Bu ayın alacağından düşülecek net düzeltme: kesinti+yuvarlama+devret (bu ay) − geçen aydan devreden eksik
+  const getKapamaDus = (personelId) =>
+    _kapamaTop(personelId, puantajAy, ["KESINTI","YUVARLAMA","DEVRET"]) - _kapamaTop(personelId, _prevAyStr, ["DEVRET"]);
+  const getKapamaPrim = (personelId) => _kapamaTop(personelId, puantajAy, ["PRIM"]);
+  const getKapamaList = (personelId) => maasKapamalar.filter(k => String(k.personel_id) === String(personelId) && k.donem === puantajAy);
+  const KAPAMA_TIP_AD = { KESINTI:"kesinti", YUVARLAMA:"yuvarlama farkı", DEVRET:"sonraki aya devredildi", PRIM:"prim / ek ödeme" };
+  const handleSaveKapama = async () => {
+    if (!kapamaModal) return;
+    const t = Number(String(kapamaForm.tutar).trim().replace(/\./g,"").replace(",","."));
+    if (!Number.isFinite(t) || t <= 0) { alert("Geçerli bir tutar girin"); return; }
+    if (!String(kapamaForm.not_aciklama).trim()) { alert("Not zorunlu — neden kapatıldığını yazın"); return; }
+    setKapamaSaving(true);
+    try {
+      const r = await fetch(`${API_BASE}/hr/maas-kapama`, {
+        method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${localStorage.getItem("token")||""}` },
+        body: JSON.stringify({ personel_id: kapamaModal.p.id, donem: puantajAy, tip: kapamaForm.tip, tutar: t,
+          sebep: kapamaForm.tip === "KESINTI" ? kapamaForm.sebep : "", not_aciklama: kapamaForm.not_aciklama }),
+      });
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok || d.error) { alert(d.error || "Kaydedilemedi"); return; }
+      setKapamaModal(null);
+      await loadMaasKapama();
+    } catch { alert("Kaydedilemedi"); } finally { setKapamaSaving(false); }
+  };
+  const handleDeleteKapama = async (k) => {
+    if (!window.confirm(`Bu kapama kaydı geri alınsın mı?\n₺${Number(k.tutar).toLocaleString("tr-TR")} ${KAPAMA_TIP_AD[k.tip] || k.tip}`)) return;
+    try {
+      const r = await fetch(`${API_BASE}/hr/maas-kapama/${k.id}`, { method:"DELETE", headers:{ Authorization:`Bearer ${localStorage.getItem("token")||""}` } });
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok || d.error) { alert(d.error || "Silinemedi"); return; }
+      await loadMaasKapama();
+    } catch { alert("Silinemedi"); }
+  };
   const getDevirFazla = (personelId) => {
     const prevOz = prevAyOzet.find(o => String(o.personel_id) === String(personelId));
     if (!prevOz) return 0; // önceki ay verisi yoksa devir hesaplama (güvenli taraf)
@@ -16076,7 +16126,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       .filter(o => String(o.personel_id) === String(personelId))
       .reduce((s, o) => s + Number(o.bankadan || 0) + Number(o.elden || 0), 0);
     const toplam = prevAvans + prevOde;
-    return toplam > 0 ? Math.max(0, toplam - Number(prevOz.hakedilen_maas || 0)) : 0;
+    // Geçen ayın kapamaları: kesinti/yuvarlama/devret o ayın alacağını azaltır; PRIM fazlanın devrini engeller
+    const prevDus = _kapamaTop(personelId, _prevAyStr, ["KESINTI","YUVARLAMA","DEVRET"]);
+    const prevPrim = _kapamaTop(personelId, _prevAyStr, ["PRIM"]);
+    return toplam > 0 ? Math.max(0, toplam - (Number(prevOz.hakedilen_maas || 0) - prevDus) - prevPrim) : 0;
   };
   // ISG/Belgeler'den hızlı taşeron personeli ekleme (tek tek)
   const addTaseronPersonel = async () => {
@@ -16222,6 +16275,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     } catch { setMaasOdeList([]); }
   };
   const loadAylikOdemeler = async () => {
+    loadMaasKapama();
     try {
       const res = await fetch(`${API_BASE}/hr/maas-odeme-aylik?donem=${puantajAy}`);
       const data = await res.json();
@@ -16934,7 +16988,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               personelList.filter(pp => puantajIstihdam(pp)).forEach(pp => {
                                 const oz = ozet.find(o => String(o.personel_id) === String(pp.id));
                                 const hak = Math.round(ahyMaasPay(pp, oz ? Number(oz.hakedilen_maas||0) : Number(pp.net_maas||0)));
-                                const gereken = Math.max(0, hak - getDevirFazla(pp.id));
+                                const gereken = Math.max(0, hak - getDevirFazla(pp.id) - getKapamaDus(pp.id));
                                 const odenen = (odemeByPer[pp.id]||0) + (avansByPer[pp.id]||0);
                                 toplamKalan += Math.max(0, gereken - odenen);
                               });
@@ -17055,12 +17109,13 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       const odenen   = banka + elden + avans;
                       // Önceki aydan devreden fazla ödeme bu ayın alacağından düşülür
                       const devir    = getDevirFazla(p.id);
-                      const gereken  = Math.max(0, hakEdis - devir);
+                      const kapamalar = getKapamaList(p.id);
+                      const gereken  = Math.max(0, hakEdis - devir - getKapamaDus(p.id));
                       const kalan    = Math.max(0, gereken - odenen);
-                      const fazla    = odenen > 0 ? Math.max(0, odenen - gereken) : 0;
+                      const fazla    = odenen > 0 ? Math.max(0, odenen - gereken - getKapamaPrim(p.id)) : 0;
                       const odeSimsek = odeSimsekByPer[p.id] || 0;
                       const odeAhy    = odeAhyByPer[p.id]    || 0;
-                      return { ...p, hakEdis, hakManuel, hakOto, avans, isAvans, banka, elden, odenen, kalan, fazla, devir, odeSimsek, odeAhy };
+                      return { ...p, hakEdis, hakManuel, hakOto, avans, isAvans, banka, elden, odenen, kalan, fazla, devir, odeSimsek, odeAhy, kapamalar };
                     });
                     // Tablo satırları: filtre seçiliyse sadece o personel
                     const perRows = hrPersonelFilter
@@ -17197,6 +17252,22 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     XLSXStyle.utils.book_append_sheet(wb, gws, "Maaş Geçmişi");
                                   }
                                 } catch {}
+                                // Dönem Kapamaları sayfası (17.09.2026): seçili ayın kesinti/yuvarlama/devret/prim kayıtları
+                                {
+                                  const kRows = maasKapamalar.filter(k => k.donem === puantajAy);
+                                  if (kRows.length) {
+                                    const kHead = ["Ad Soyad","Dönem","Tür","Tutar (₺)","Sebep","Not","Kapatan","Tarih"];
+                                    const adOf = (id) => (personelList.find(pp=>String(pp.id)===String(id))||{}).ad_soyad || "";
+                                    const kData = [kHead, ...kRows.map(k=>[adOf(k.personel_id), k.donem, KAPAMA_TIP_AD[k.tip]||k.tip, fmtNum(k.tutar), k.sebep||"", k.not_aciklama||"", k.created_by||"", k.tarih_fmt||""])];
+                                    const kws = XLSXStyle.utils.aoa_to_sheet(kData);
+                                    kws["!cols"] = [{wch:26},{wch:10},{wch:22},{wch:13},{wch:24},{wch:50},{wch:28},{wch:12}];
+                                    kws["!rows"] = [{ hpt:26 }, ...kRows.map(()=>({hpt:20}))];
+                                    kHead.forEach((_,ci)=>{ const a=XLSXStyle.utils.encode_cell({r:0,c:ci}); if(kws[a]) kws[a].s=headerS; });
+                                    kRows.forEach((_,ri)=>{ kHead.forEach((__,ci)=>{ const a=XLSXStyle.utils.encode_cell({r:ri+1,c:ci}); if(kws[a]) kws[a].s=cellS(ri, ci===3, false, kws[a].v, false); }); });
+                                    kws["!freeze"] = { xSplit:0, ySplit:1 };
+                                    XLSXStyle.utils.book_append_sheet(wb, kws, "Dönem Kapamaları");
+                                  }
+                                }
                                 const buf = XLSXStyle.write(wb, { type:"array", bookType:"xlsx" });
                                 JSZip.loadAsync(buf).then(zip => {
                                   // Tüm sayfalarda gridline'ları kapat
@@ -17345,17 +17416,43 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     <td style={{ padding:"7px 12px", textAlign:"right" }}>
                                       {p.fazla>0
                                         ? <span style={{ color:"#b45309", fontWeight:800 }}>⚠️ ₺{p.fazla.toLocaleString("tr-TR")} fazla</span>
+                                        : p.kalan===0 && p.kapamalar.length>0
+                                          ? <span style={{ background:"#fef3c7", color:"#92400e", fontWeight:700, borderRadius:"8px", padding:"2px 8px", fontSize:"12px", whiteSpace:"nowrap" }}>🔒 Kapatıldı</span>
                                         : p.kalan===0 && p.odenen>0
                                           ? <span style={{ color:"#166534", fontWeight:700 }}>✅ Tam</span>
                                           : p.kalan>0
                                             ? <span style={{ color:"#dc2626", fontWeight:800 }}>₺{p.kalan.toLocaleString("tr-TR")}</span>
                                             : <span style={{ color:"#9ca3af" }}>—</span>
                                       }
+                                      {maasKapamaYetkili && (p.kalan>0 || p.fazla>0) && (
+                                        <button onClick={()=>{
+                                            const fazlaMod = p.fazla>0;
+                                            const fark = fazlaMod ? p.fazla : p.kalan;
+                                            setKapamaForm({ tip: fazlaMod ? "PRIM" : (fark < 100 ? "YUVARLAMA" : "KESINTI"), tutar: String(fark), sebep:"Zimmet / kayıp malzeme", not_aciklama:"" });
+                                            setKapamaModal({ p, fazlaMod, fark });
+                                          }}
+                                          title="Hakediş ile ödenen arasındaki farkı not düşerek kapat"
+                                          style={{ marginLeft:"8px", padding:"2px 9px", fontSize:"11px", fontWeight:700, background:"#fff", color:"#1e3a5f", border:"1.5px solid #cbd5e1", borderRadius:"7px", cursor:"pointer" }}>
+                                          Kapat
+                                        </button>
+                                      )}
                                       {p.devir>0 && (
                                         <div style={{ fontSize:"10px", color:"#7c3aed", fontWeight:600, marginTop:"2px" }}>
                                           geçen aydan devir −₺{p.devir.toLocaleString("tr-TR")}
                                         </div>
                                       )}
+                                      {(() => { const de = _kapamaTop(p.id, _prevAyStr, ["DEVRET"]); return de>0 ? (
+                                        <div style={{ fontSize:"10px", color:"#7c3aed", fontWeight:600, marginTop:"2px" }}>geçen aydan eksik devri +₺{de.toLocaleString("tr-TR")}</div>
+                                      ) : null; })()}
+                                      {p.kapamalar.map(k => (
+                                        <div key={k.id} style={{ fontSize:"10.5px", color:"#92400e", marginTop:"3px", maxWidth:"260px", marginLeft:"auto", lineHeight:1.35 }}
+                                          title={`${k.created_by || ""} · ${k.tarih_fmt || ""}`}>
+                                          <b>₺{Number(k.tutar).toLocaleString("tr-TR")} {KAPAMA_TIP_AD[k.tip] || k.tip}</b>{k.sebep ? ` · ${k.sebep}` : ""}
+                                          <div style={{ color:"#6b7280" }}>“{k.not_aciklama}” · {(k.created_by||"").split("@")[0]} · {k.tarih_fmt}
+                                            {maasKapamaYetkili && <span onClick={()=>handleDeleteKapama(k)} style={{ marginLeft:"6px", color:"#dc2626", cursor:"pointer", fontWeight:700 }}>geri al</span>}
+                                          </div>
+                                        </div>
+                                      ))}
                                     </td>
                                   </tr>
                                 ))}
@@ -17430,7 +17527,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 const proratedElden = Math.round(Number(sp.elden_verilen||0) * hakRatio);
                 // Kalan ödeme = hakedilen - maaş avansı - iş avansı - trafik ceza - ödenen bu ay - geçen ay fazla ödeme devri
                 const devirFazlaHR = getDevirFazla(sp.id);
-                const toplamOdenmesi = Math.max(0, hakedilen - maasAvans - isAvans - trafikCezaToplam - odenenBuAy - devirFazlaHR);
+                const toplamOdenmesi = Math.max(0, hakedilen - maasAvans - isAvans - trafikCezaToplam - odenenBuAy - devirFazlaHR - getKapamaDus(sp.id));
                 return (
                   <div style={{ background:"#fff", borderRadius:"16px", padding:"18px 22px", boxShadow:"0 2px 8px rgba(0,0,0,0.08)", marginBottom:"20px", display:"flex", gap:"20px", alignItems:"center", flexWrap:"wrap" }}>
                     <div style={{ minWidth:"130px" }}>
@@ -17878,6 +17975,61 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       })()}
 
       {/* ===== MAAŞ ÖDEME MODAL ===== */}
+      {kapamaModal && (() => {
+        const km = kapamaModal; const ayAdiK = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(puantajAy.slice(5,7))-1];
+        const secenekler = km.fazlaMod
+          ? [["PRIM","Prim / ek ödeme say","Fazla ödeme personelde kalır, sonraki aydan düşülmez"]]
+          : [["KESINTI","Kesinti olarak kapat","Personele ödenmeyecek, borç silinir"],
+             ["YUVARLAMA","Yuvarlama farkı","Küçük küsurat farkı"],
+             ["DEVRET","Sonraki aya devret","Bir sonraki ayın alacağına eklenir"]];
+        const inp = { width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", boxSizing:"border-box" };
+        return (
+        <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.5)", zIndex:4000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}
+          onClick={()=>!kapamaSaving && setKapamaModal(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", padding:"22px 24px", width:"100%", maxWidth:"460px", maxHeight:"92vh", overflowY:"auto", boxShadow:"0 20px 50px rgba(0,0,0,0.25)" }}>
+            <div style={{ fontWeight:800, fontSize:"16px", color:"#0f1c2e" }}>🔒 Dönemi Kapat — {km.p.ad_soyad}</div>
+            <div style={{ fontSize:"12.5px", color:"#6b7280", margin:"3px 0 14px" }}>
+              {ayAdiK} {puantajAy.slice(0,4)} · hakediş ₺{km.p.hakEdis.toLocaleString("tr-TR")} · ödenen ₺{km.p.odenen.toLocaleString("tr-TR")}
+            </div>
+            <div style={{ background: km.fazlaMod ? "#fef3c7" : "#fee2e2", color: km.fazlaMod ? "#92400e" : "#991b1b", borderRadius:"10px", padding:"9px 12px", fontSize:"13px", fontWeight:700, marginBottom:"14px" }}>
+              {km.fazlaMod ? `Fazla ödeme: ₺${km.fark.toLocaleString("tr-TR")}` : `Kalan fark: ₺${km.fark.toLocaleString("tr-TR")} (eksik ödendi)`}
+            </div>
+            {km.fazlaMod && <div style={{ fontSize:"12px", color:"#6b7280", marginBottom:"10px" }}>Hiçbir şey yapmazsanız bu fazla ödeme sonraki ayın maaşından otomatik düşülür. Düşülmesini istemiyorsanız aşağıdan kapatın.</div>}
+            <div style={{ fontSize:"12px", fontWeight:700, color:"#374151", marginBottom:"6px" }}>Bu fark ne olsun?</div>
+            <div style={{ display:"grid", gap:"6px", marginBottom:"14px" }}>
+              {secenekler.map(([v, ad, acik]) => (
+                <label key={v} style={{ display:"flex", gap:"9px", alignItems:"flex-start", padding:"9px 11px", borderRadius:"10px", cursor:"pointer", border: kapamaForm.tip===v ? "2px solid #1e3a5f" : "1.5px solid #e5e7eb", background: kapamaForm.tip===v ? "#f0f6ff" : "#fff" }}>
+                  <input type="radio" name="kapamaTip" checked={kapamaForm.tip===v} onChange={()=>setKapamaForm(f=>({...f, tip:v}))} style={{ marginTop:"3px" }} />
+                  <span><span style={{ fontWeight:700, fontSize:"13px", color:"#0f1c2e" }}>{ad}</span><br/><span style={{ fontSize:"12px", color:"#6b7280" }}>{acik}</span></span>
+                </label>
+              ))}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns: kapamaForm.tip==="KESINTI" ? "1fr 1.4fr" : "1fr", gap:"10px", marginBottom:"10px" }}>
+              <div>
+                <div style={{ fontSize:"11.5px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Tutar (₺)</div>
+                <input type="text" inputMode="decimal" value={kapamaForm.tutar} onChange={e=>setKapamaForm(f=>({...f, tutar:e.target.value}))} style={inp} />
+              </div>
+              {kapamaForm.tip==="KESINTI" && (
+                <div>
+                  <div style={{ fontSize:"11.5px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Sebep</div>
+                  <select value={kapamaForm.sebep} onChange={e=>setKapamaForm(f=>({...f, sebep:e.target.value}))} style={inp}>
+                    {["Zimmet / kayıp malzeme","Trafik cezası","İcra kesintisi","Devamsızlık","Diğer"].map(x=><option key={x} value={x}>{x}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+            <div style={{ fontSize:"11.5px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Not (zorunlu)</div>
+            <textarea rows={2} value={kapamaForm.not_aciklama} onChange={e=>setKapamaForm(f=>({...f, not_aciklama:e.target.value}))}
+              placeholder="Örn. kayıp el aleti bedeli, personelle konuşuldu" style={{ ...inp, resize:"vertical", fontFamily:"inherit" }} />
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:"8px", marginTop:"16px" }}>
+              <button disabled={kapamaSaving} onClick={()=>setKapamaModal(null)} style={{ padding:"9px 16px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"9px", fontWeight:600, cursor:"pointer" }}>Vazgeç</button>
+              <button disabled={kapamaSaving} onClick={handleSaveKapama} style={{ padding:"9px 16px", background: kapamaSaving ? "#9ca3af" : "#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontWeight:700, cursor: kapamaSaving ? "not-allowed" : "pointer" }}>{kapamaSaving ? "Kaydediliyor…" : "Kapat ve Kaydet"}</button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
       {maasOdeModal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}>
           <div style={{ background:"#fff", borderRadius:"18px", padding:"28px", width:"100%", maxWidth:"600px", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
@@ -17896,7 +18048,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 ? trafikCezaList.reduce((s,a)=>s+Number(a.tutar||0),0) : 0;
               const modalOdenen = maasOdeList.filter(o => o.donem===puantajAy && ahyOdemeGor(o)).reduce((s,o)=>s+Number(o.bankadan||0)+Number(o.elden||0),0);
               const modalDevir = getDevirFazla(maasOdeModal.id); // geçen ay fazla ödeme devri
-              const modalKalan = maasOdeHak - modalMaasAvans - modalIsAvans - modalTrafik - modalOdenen - modalDevir;
+              const modalKalan = maasOdeHak - modalMaasAvans - modalIsAvans - modalTrafik - modalOdenen - modalDevir - getKapamaDus(maasOdeModal.id);
               return (
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginBottom:"16px", padding:"12px", background:"#f8fafc", borderRadius:"12px", textAlign:"center" }}>
                   <div>
