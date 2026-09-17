@@ -25229,11 +25229,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   },
                 }, {
                   label: `${canonTaseron(userSubconName) === "ahy" ? "AHY" : (subconDisplayName || "Taşeron")} → Şimşek'e Kesilen Fatura`,
+                  // 17.09.2026 (Orhan): ana rakam = saha/kalem içine girilen fatura kayıtları
+                  // (Bölge Analizi Excel'indeki "Fatura Miktarı KDV Hariç" toplamıyla birebir).
+                  // Kalemle eşleşmeyen (başka nedenle kesilmiş) faturalar buraya girmez.
                   sub: kesilecekOzet
-                    ? `${kesilecekOzet.kesilenKalem} kalem · fiili kesilen ₺${Math.round(kesilecekOzet.kesilenFiili).toLocaleString("tr-TR")} (KDV hariç) · kesilecek ₺${Math.round(kesilecekOzet.kalanTam).toLocaleString("tr-TR")}`
+                    ? `${kesilecekOzet.kesilenKalem} kalem · saha/kalem fatura kayıtları (KDV hariç, Excel ile aynı) · bu işlerin bedeli ₺${Math.round(kesilecekOzet.kesilenTam).toLocaleString("tr-TR")} · kesilecek ₺${Math.round(kesilecekOzet.toplam).toLocaleString("tr-TR")}`
                     : "hesaplanıyor…",
-                  value: kesilecekOzet ? kesilecekOzet.kesilenTam : 0,
-                  pct: kesilecekOzet && subconSummary.fizikiIs > 0 ? (kesilecekOzet.kesilenTam / subconSummary.fizikiIs) * 100 : 0,
+                  value: kesilecekOzet ? kesilecekOzet.kesilenFiili : 0,
+                  pct: kesilecekOzet && subconSummary.fizikiIs > 0 ? (kesilecekOzet.kesilenFiili / subconSummary.fizikiIs) * 100 : 0,
                   pctLabel: "fizikinin", color: "#b45309",
                   tik: () => {
                     if (!kesilecekOzet) return;
