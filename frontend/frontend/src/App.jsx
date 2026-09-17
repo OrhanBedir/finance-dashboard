@@ -24208,6 +24208,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           const kesmeliBedel = simsekHw * getSubconRateByRow(row);
           return {
             fatura_qty: efQty,
+            // Taşeronun %100 payı (kırılım bazlı, %80 dilimsiz) — özet kartı
+            // bütün rakamları bu bazda gösterir (17.09.2026)
+            pay_tam: hwRaw * getSubconRateByRow(row),
             simsek_hw_kesilen: simsekHw,
             kesmesi_gereken: kesmeliBedel,
             site_id: row.site_code,
@@ -24236,6 +24239,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       // faturalandığı ayrı sayaçta durur ki kayıp hissi olmasın.
       const _kesilebilir = matched.filter(x => x.durum !== "Faturalandı");
       _kesilebilir.faturalanmisAdet = matched.length - _kesilebilir.length;
+      _kesilebilir.tumu = matched;
       _kesilebilir.faturalanmisTutar = matched
         .filter(x => x.durum === "Faturalandı")
         .reduce((s, x) => s + Number(x.kesmesi_gereken || 0), 0);
@@ -24409,9 +24413,19 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     computeBillableRows()
       .then((m) => {
         if (iptal) return;
+        const tumu = m.tumu || m;
+        const kesilen = tumu.filter(x => x.durum === "Faturalandı");
         setKesilecekOzet({
           toplam: m.reduce((s, x) => s + Number(x.kesmesi_gereken || 0), 0),
           kalem: m.length,
+          // %100 pay bazında (kırılım fiyatı): HW'ye faturalanan / taşeronun kestiği / kalan
+          hwTam: tumu.reduce((s, x) => s + Number(x.pay_tam || 0), 0),
+          hwKalem: tumu.length,
+          kesilenTam: kesilen.reduce((s, x) => s + Number(x.pay_tam || 0), 0),
+          kesilenKalem: kesilen.length,
+          kesilenFiili: kesilen.reduce((s, x) => s + Number(x.fatura_miktari || 0) / 1.2, 0),
+          kalanTam: m.reduce((s, x) => s + Number(x.pay_tam || 0), 0),
+          kesilenListe: kesilen,
         });
       })
       .catch(() => {});
@@ -25143,14 +25157,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   },
                 },
                 ...(_paketTaseron ? [] : [{
-                  // Kesilecek fatura: Fatura Kesilebilir modalıyla AYNI hesap
-                  // (HW'ye faturalanan miktar × %80 × kırılım). Hesap yüklenene
-                  // kadar hakediş bazlı değer görünür. Paket fiyatlı taşeronda
-                  // gizlenir — Şimşek'in HW'ye kestiği fatura onu ilgilendirmez.
-                  label: kesilecekOzet ? "Kesilecek Fatura (HW'ye faturalanan)" : "HW'ye Faturalanan",
-                  sub: kesilecekOzet ? `${kesilecekOzet.kalem} kalem · Fatura Kesilebilir ile aynı · liste için tıkla` : "fatura kesilen · saha listesi için tıkla",
-                  value: kesilecekOzet ? kesilecekOzet.toplam : subconSummary.faturalanan,
-                  pct: kesilecekOzet && subconSummary.fizikiIs > 0 ? (kesilecekOzet.toplam / subconSummary.fizikiIs) * 100 : subconSummary.faturaPct,
+                  // 17.09.2026 (Orhan): tek "Kesilecek Fatura" satırı ikiye ayrıldı —
+                  // HW'ye faturalanan ve taşeronun Şimşek'e kestiği. İkisi de kartın
+                  // geri kalanı gibi %100 pay (kırılım fiyatı) bazında; yüzde fizikinin.
+                  // Paket fiyatlı taşeronda gizlenir.
+                  label: "HW'ye Faturalanan",
+                  sub: kesilecekOzet ? `${kesilecekOzet.hwKalem} kalem · Şimşek'in Huawei'ye faturaladığı · liste için tıkla` : "Şimşek'in Huawei'ye faturaladığı · liste için tıkla",
+                  value: kesilecekOzet ? kesilecekOzet.hwTam : subconSummary.faturalanan,
+                  pct: kesilecekOzet && subconSummary.fizikiIs > 0 ? (kesilecekOzet.hwTam / subconSummary.fizikiIs) * 100 : subconSummary.faturaPct,
                   pctLabel: "fizikinin", color: "#7c3aed",
                   tik: () => {
                     // Kalem bazlı faturalanan liste (billed_qty > 0): item + miktar + tutar
@@ -25184,6 +25198,42 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                         { k: "birim", l: "Birim Fiyat" },
                         { k: "tutar_fmt", l: "Tutar (HW)" },
                         { k: "pay", l: `Pay (%${Math.round(subconRate * 100)})` },
+                      ],
+                      rows: list,
+                    });
+                  },
+                }, {
+                  label: `${canonTaseron(userSubconName) === "ahy" ? "AHY" : (subconDisplayName || "Taşeron")} → Şimşek'e Kesilen Fatura`,
+                  sub: kesilecekOzet
+                    ? `${kesilecekOzet.kesilenKalem} kalem · fiili kesilen ₺${Math.round(kesilecekOzet.kesilenFiili).toLocaleString("tr-TR")} (KDV hariç) · kesilecek ₺${Math.round(kesilecekOzet.kalanTam).toLocaleString("tr-TR")}`
+                    : "hesaplanıyor…",
+                  value: kesilecekOzet ? kesilecekOzet.kesilenTam : 0,
+                  pct: kesilecekOzet && subconSummary.fizikiIs > 0 ? (kesilecekOzet.kesilenTam / subconSummary.fizikiIs) * 100 : 0,
+                  pctLabel: "fizikinin", color: "#b45309",
+                  tik: () => {
+                    if (!kesilecekOzet) return;
+                    const tl = (v) => `₺${Number(v || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`;
+                    const list = (kesilecekOzet.kesilenListe || [])
+                      .map(x => ({
+                        site: String(x.site_id || "").toUpperCase(),
+                        item_code: x.item_code || "",
+                        kalem: x.item_description || "",
+                        fatura_no: x.fatura_no || "",
+                        fatura_tarihi: x.fatura_tarihi || "",
+                        pay: tl(x.pay_tam),
+                        fiili: tl(Number(x.fatura_miktari || 0) / 1.2),
+                      }))
+                      .sort((a, b) => String(b.fatura_no).localeCompare(String(a.fatura_no)) || a.site.localeCompare(b.site));
+                    setOzetModal({
+                      title: `🧾 ${canonTaseron(userSubconName) === "ahy" ? "AHY" : (subconDisplayName || "Taşeron")} → Şimşek'e Kesilen Faturalar — Kalem Listesi`,
+                      cols: [
+                        { k: "fatura_no", l: "Fatura No" },
+                        { k: "fatura_tarihi", l: "Fatura Tarihi" },
+                        { k: "site", l: "Site ID" },
+                        { k: "item_code", l: "Item Code" },
+                        { k: "kalem", l: "Kalem Adı" },
+                        { k: "pay", l: `İş Bedeli (%${Math.round(subconRate * 100)})` },
+                        { k: "fiili", l: "Kesilen (KDV Hariç)" },
                       ],
                       rows: list,
                     });

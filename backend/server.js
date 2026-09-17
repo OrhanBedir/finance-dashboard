@@ -13503,8 +13503,11 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
       if (!invoicedByKey[k]) {
         invoicedByKey[k] = {
           fatura_no: r.fatura_no || "",
+          // DATE kolonu Date nesnesi gelir; String().slice "Fri Aug 07" veriyordu (17.09.2026)
           fatura_tarihi: r.fatura_tarihi
-            ? String(r.fatura_tarihi).slice(0, 10)
+            ? (r.fatura_tarihi instanceof Date
+                ? `${String(r.fatura_tarihi.getDate()).padStart(2, "0")}.${String(r.fatura_tarihi.getMonth() + 1).padStart(2, "0")}.${r.fatura_tarihi.getFullYear()}`
+                : String(r.fatura_tarihi).slice(0, 10))
             : "",
           fatura_miktari: 0,
         };
