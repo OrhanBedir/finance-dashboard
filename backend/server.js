@@ -16606,6 +16606,14 @@ app.get("/hr/puantaj", async (req, res) => {
 app.post("/hr/puantaj", async (req, res) => {
   try {
     const { personel_id, tarih, durum, created_by } = req.body;
+    // 17.09.2026 (Orhan): işten ayrılma tarihinden SONRAYA ve bordro dışı (puantaj_haric)
+    // personele puantaj yazılmaz — Adem Karhan vakası: ayrıldıktan sonra her güne "Gelmedi" girilmişti
+    const per = await pool.query(
+      `SELECT to_char(isten_ayrilma_tarihi,'YYYY-MM-DD') AS ayrilma, COALESCE(puantaj_haric,false) AS haric FROM personel WHERE id=$1`, [personel_id]);
+    if (per.rows[0]?.haric) return res.status(400).json({ error: "Bu personel puantaj dışıdır (sabit maaş)" });
+    const _t = String(tarih || "").slice(0, 10);
+    if (per.rows[0]?.ayrilma && _t > per.rows[0].ayrilma)
+      return res.status(400).json({ error: `İşten ayrılma tarihi (${per.rows[0].ayrilma}) sonrasına puantaj girilemez` });
     const r = await pool.query(
       `INSERT INTO puantaj (personel_id,tarih,durum,created_by)
        VALUES ($1,$2,$3,$4)
@@ -16760,7 +16768,10 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
     const totalDays = new Date(yil, ay, 0).getDate();
 
     const ozet = personelList.rows.map(p => {
-      const pRows = puantajRows.rows.filter(r => r.personel_id === p.id);
+      // Ayrılma sonrası kayıtlar yok sayılır; bordro dışı (puantaj_haric) personelde kesinti yok — sabit maaş
+      const _ayrilma = p.isten_ayrilma_tarihi ? new Date(p.isten_ayrilma_tarihi).getTime() : null;
+      const pRows = p.puantaj_haric ? [] : puantajRows.rows.filter(r => r.personel_id === p.id
+        && (_ayrilma === null || new Date(r.tarih).getTime() <= _ayrilma));
 
       const calisilan = pRows.filter(r => r.durum === "CALISDI").length;
       // 17.09.2026 (Orhan): pazar tatildir — o gün ne yazılırsa yazılsın maaştan kesinti OLMAZ.

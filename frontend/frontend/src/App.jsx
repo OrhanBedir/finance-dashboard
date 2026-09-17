@@ -15698,12 +15698,14 @@ function PuantajPanel({ currentUser, onBack }) {
                     const cellBg = DURUM_COLOR[durum] || defaultCellBg;
                     const hasNot = !!(row?.not_aciklama || row?.belge_yolu);
                     const showNot = durum!=="CALISDI" && durum!=="TATIL" && durum!=="RESMI_TATIL" && row?.id;
-                    const cellEditable = canEditAny || tarih === todayStr;
+                    const _ayrC = (p.isten_ayrilma_tarihi||"").split("T")[0];
+                    const ayrilmaSonrasi = !!_ayrC && tarih > _ayrC;   // 17.09.2026: ayrılan personele puantaj girilmez
+                    const cellEditable = !ayrilmaSonrasi && (canEditAny || tarih === todayStr);
                     return (
                       <td key={g} style={{ padding:"0", background:cellBg, border:"1px solid #f0f0f0", minWidth:"36px", width:"36px", userSelect:"none" }}>
                         <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
                           <div onClick={()=>{ if(!cellEditable) return; handlePuantaj(p.id, tarih, nextDurum(row?.durum)); }}
-                            title={!cellEditable ? "Geçmiş tarihe müdahale yetkisi yok" : ""}
+                            title={ayrilmaSonrasi ? `İşten ayrıldı (${_ayrC.split("-").reverse().join(".")}) — puantaj girilemez` : !cellEditable ? "Geçmiş tarihe müdahale yetkisi yok" : ""}
                             style={{ flex:1, minHeight: showNot?"30px":"44px", display:"flex", alignItems:"center", justifyContent:"center", cursor: cellEditable?"pointer":"not-allowed", fontSize:"18px", opacity: cellEditable?1:0.6 }}>
                             {label}
                           </div>
@@ -18133,7 +18135,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     onMouseLeave={e=>e.currentTarget.style.background=""}>
                     👥 Tüm Personel
                   </div>
-                  {personelList.filter(p=>puantajIstihdam(p) && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
+                  {personelList.filter(p=>puantajIstihdam(p) && !p.puantaj_haric && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
                     <div key={p.id} onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); }}
                       style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
                       onMouseEnter={e=>e.currentTarget.style.background="#eff6ff"}
@@ -18181,9 +18183,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 </tr>
               </thead>
               <tbody>
-                {personelList.filter(p=>puantajIstihdam(p) && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
-                  const calisilan = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="CALISDI").length;
-                  const gelmediCount = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="GELMEDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay()!==0).length; // pazar kesilmez
+                {personelList.filter(p=>puantajIstihdam(p) && !p.puantaj_haric && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
+                  // İşten ayrılma sonrası günler sayılmaz (17.09.2026)
+                  const _ayrP = (p.isten_ayrilma_tarihi||"").split("T")[0];
+                  const _gecerliGun = (g) => !_ayrP || `${puantajAy}-${String(g).padStart(2,"0")}` <= _ayrP;
+                  const calisilan = ayGunleri.filter(g => _gecerliGun(g) && getPuantaj(p.id,g)?.durum==="CALISDI").length;
+                  const gelmediCount = ayGunleri.filter(g => _gecerliGun(g) && getPuantaj(p.id,g)?.durum==="GELMEDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay()!==0).length; // pazar kesilmez
                   const pazarCalisdiCount = ayGunleri.filter(g => {
                     const row = getPuantaj(p.id, g);
                     return row?.durum==="CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay()===0;
@@ -18201,6 +18206,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         const durum = row?.durum || "TATIL";
                         const d = DURUMLAR.find(x=>x.key===durum);
                         const tarih = `${puantajAy}-${String(g).padStart(2,"0")}`;
+                        if (!_gecerliGun(g)) {
+                          return (
+                            <td key={g} title={`İşten ayrıldı (${_ayrP.split("-").reverse().join(".")}) — puantaj girilemez`}
+                              style={{ padding:"0", background:"#e5e7eb", border:"1px solid #f0f0f0", minWidth:"36px", width:"36px", textAlign:"center", color:"#9ca3af", fontSize:"13px", cursor:"not-allowed" }}>—</td>
+                          );
+                        }
                         const dayW = new Date(Number(yilStr), Number(ayStr)-1, g).getDay();
                         const isResmiTatilCell2 = TR_RESMI_TATIL_HR.includes(tarih);
                         const defaultBg2 = dayW===0 ? "#ede9fe" : isResmiTatilCell2 ? "#dbeafe" : dayW===6 ? "#f8fafc" : "transparent";
