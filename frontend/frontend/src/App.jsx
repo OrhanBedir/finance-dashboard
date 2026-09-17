@@ -19023,6 +19023,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
   const [kalemler, setKalemler]   = useState([]);
   const [fotoModal, setFotoModal] = useState(null); // kalem id waiting for photo after new kalem add
   const [extraFotoModal, setExtraFotoModal] = useState(null);
+  const [fisGoster, setFisGoster] = useState(null); // 17.09.2026: yüklenen fişleri görüntüle / sil
   const [cezaBelgeKalemId, setCezaBelgeKalemId] = useState(null); // kalem id for ceza tutanagi upload
   const [showCezaModal, setShowCezaModal] = useState(false);
   const cezaBelgeInputRef = useRef(null);
@@ -19789,7 +19790,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                       {k.belge_aciklama && <div style={{ fontSize:"13px", color:"#374151", marginBottom:"2px" }}>{k.belge_aciklama}</div>}
                       {k.aciklama && <div style={{ fontSize:"12px", color:"#6b7280" }}>{k.aciklama}</div>}
                       {!k.fis_var && <div style={{ fontSize:"11px", color:"#dc2626", marginTop:"2px" }}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</div>}
-                      {(k.belgeler||[]).length>0 && <div style={{ fontSize:"11px", color:"#059669", marginTop:"2px" }}>📷 {k.belgeler.length} fiş eklendi</div>}
+                      {(k.belgeler||[]).length>0 && <div onClick={()=>setFisGoster(k)} title="Fişleri görüntüle" style={{ fontSize:"11px", color:"#059669", marginTop:"2px", cursor:"pointer", textDecoration:"underline" }}>📷 {k.belgeler.length} fiş eklendi</div>}
                       <div style={{ display:"flex", gap:"6px", marginTop:"8px" }}>
                         <button onClick={()=>{ setExtraFotoModal(k.id); setUploadFile(null); }}
                           style={{ padding:"6px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>📷 Fiş Ekle</button>
@@ -19821,7 +19822,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                     <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>
                       {k.aciklama||"—"}
                       {!k.fis_var && <div style={{ fontSize:"10px",color:"#dc2626",marginTop:"2px" }}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</div>}
-                      {(k.belgeler||[]).length>0 && <div style={{ fontSize:"10px",color:"#059669",marginTop:"2px" }}>📷 {k.belgeler.length} fiş</div>}
+                      {(k.belgeler||[]).length>0 && <div onClick={()=>setFisGoster(k)} title="Fişleri görüntüle" style={{ fontSize:"10px",color:"#059669",marginTop:"2px",cursor:"pointer",textDecoration:"underline" }}>📷 {k.belgeler.length} fiş</div>}
                     </div>
                     <div style={{ padding:"8px 8px", fontWeight:700, fontSize:"12px", textAlign:"right" }}>
                       ₺{Number(k.tutar).toLocaleString("tr-TR")}
@@ -20219,6 +20220,55 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
             </div>
           </div>
         )}
+        {fisGoster && (() => {
+          const fisUrl = (b) => String(b.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`;
+          const silinebilir = activeForm?.durum === "TASLAK";
+          const belgeler = fisGoster.belgeler || [];
+          return (
+            <div onClick={()=>setFisGoster(null)} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.6)", zIndex:9600, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}>
+              <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", padding:"20px", width:"min(760px,96vw)", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,.3)" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
+                  <div>
+                    <div style={{ fontWeight:800, fontSize:"15px" }}>📷 Yüklenen fişler ({belgeler.length})</div>
+                    <div style={{ fontSize:"12px", color:"#64748b" }}>{fisGoster.belge_aciklama || ""}{fisGoster.belge_no ? ` · Belge no ${fisGoster.belge_no}` : ""} · ₺{Number(fisGoster.tutar||0).toLocaleString("tr-TR")}</div>
+                  </div>
+                  <button onClick={()=>setFisGoster(null)} style={{ background:"#f1f5f9", border:"none", borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontWeight:700 }}>Kapat</button>
+                </div>
+                {!belgeler.length && <div style={{ color:"#94a3b8", padding:"20px", textAlign:"center" }}>Bu kalemde fiş kalmadı</div>}
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(210px, 1fr))", gap:"12px" }}>
+                  {belgeler.map((b, i) => {
+                    const url = fisUrl(b);
+                    const pdf = /\.pdf($|\?)/i.test(url);
+                    return (
+                      <div key={b.id || i} style={{ border:"1px solid #e2e8f0", borderRadius:"12px", overflow:"hidden", display:"flex", flexDirection:"column" }}>
+                        <a href={url} target="_blank" rel="noreferrer" style={{ display:"block", background:"#f8fafc", height:"220px" }}>
+                          {pdf
+                            ? <div style={{ height:"100%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"40px" }}>📄</div>
+                            : <img src={url} alt={`Fiş ${i+1}`} style={{ width:"100%", height:"100%", objectFit:"contain" }} />}
+                        </a>
+                        <div style={{ display:"flex", gap:"6px", padding:"8px" }}>
+                          <a href={url} target="_blank" rel="noreferrer" style={{ flex:1, textAlign:"center", padding:"6px", borderRadius:"8px", background:"#eff6ff", color:"#1d4ed8", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>Aç</a>
+                          {silinebilir && (
+                            <button onClick={async()=>{
+                              if (!window.confirm("Bu fiş silinsin mi?")) return;
+                              try {
+                                const r = await fetch(`${API_BASE}/hr/masraf-belge/${b.id}`, { method:"DELETE" });
+                                if (!r.ok) throw new Error("Silinemedi");
+                                setFisGoster(fg => fg ? { ...fg, belgeler: (fg.belgeler||[]).filter(x => x.id !== b.id) } : fg);
+                                refreshActive(activeForm.id);
+                              } catch (err) { alert("Fiş silinemedi: " + err.message); }
+                            }} style={{ flex:1, padding:"6px", borderRadius:"8px", background:"#fee2e2", color:"#991b1b", border:"none", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>Sil</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {!silinebilir && <div style={{ marginTop:"12px", fontSize:"12px", color:"#64748b" }}>Form onaya gönderildiği için fiş silinemez; yalnız görüntülenebilir.</div>}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   }
