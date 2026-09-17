@@ -6770,7 +6770,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           ) g ON true
           WHERE p.aktif = true AND UPPER(COALESCE(p.marka,'ERC')) = $1`, [marka, donem]);
         const gm = await pool.query(`
-          SELECT personel_id, COUNT(*) FILTER (WHERE durum = 'GELMEDI') AS gelmedi
+          SELECT personel_id, COUNT(*) FILTER (WHERE durum = 'GELMEDI' AND EXTRACT(DOW FROM tarih) <> 0) AS gelmedi
           FROM puantaj WHERE to_char(tarih,'YYYY-MM') = $1 GROUP BY personel_id`, [donem]);
         const od = await pool.query(
           `SELECT personel_id, SUM(COALESCE(bankadan,0)+COALESCE(elden,0)) AS t
@@ -16763,7 +16763,9 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
       const pRows = puantajRows.rows.filter(r => r.personel_id === p.id);
 
       const calisilan = pRows.filter(r => r.durum === "CALISDI").length;
-      const gelmedi = pRows.filter(r => r.durum === "GELMEDI").length;
+      // 17.09.2026 (Orhan): pazar tatildir — o gün ne yazılırsa yazılsın maaştan kesinti OLMAZ.
+      // Pazar çalışılırsa (CALISDI) aşağıda pazarCalisdi olarak fazla çalışmaya yazılır.
+      const gelmedi = pRows.filter(r => r.durum === "GELMEDI" && new Date(r.tarih).getDay() !== 0).length;
       const dinlenme = pRows.filter(r => r.durum === "DINLENME").length;
 
       // Count CALISDI entries that fall on a Sunday (DOW=0)

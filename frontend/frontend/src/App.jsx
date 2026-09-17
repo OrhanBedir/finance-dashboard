@@ -15594,7 +15594,8 @@ function PuantajPanel({ currentUser, onBack }) {
         const sc = {};
         ayGunleri.forEach(g => { const durum = getPuantaj(sp.id,g)?.durum||"TATIL"; sc[durum]=(sc[durum]||0)+1; });
         const cal = sc["CALISDI"]||0;
-        const gelmedi = sc["GELMEDI"]||0;
+        // Pazar tatildir: pazar günü "Gelmedi" yazılsa da kesinti yapılmaz (17.09.2026)
+        const gelmedi = ayGunleri.filter(g => getPuantaj(sp.id,g)?.durum === "GELMEDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() !== 0).length;
         const pazarCalisdi = ayGunleri.filter(g => {
           const row = getPuantaj(sp.id, g);
           return row?.durum === "CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0;
@@ -17348,7 +17349,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 const sc = {};
                 ayGunleri.forEach(g => { const durum = getPuantaj(sp.id,g)?.durum||"TATIL"; sc[durum]=(sc[durum]||0)+1; });
                 const cal = sc["CALISDI"]||0;
-                const gelmediSay = sc["GELMEDI"]||0;
+                // Pazar tatildir: pazar günü "Gelmedi" yazılsa da kesinti yapılmaz (17.09.2026)
+                const gelmediSay = ayGunleri.filter(g => getPuantaj(sp.id,g)?.durum === "GELMEDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() !== 0).length;
                 const pazarCalisdiHR = ayGunleri.filter(g => {
                   const row = getPuantaj(sp.id, g);
                   return row?.durum === "CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay() === 0;
@@ -18181,7 +18183,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               <tbody>
                 {personelList.filter(p=>puantajIstihdam(p) && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
                   const calisilan = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="CALISDI").length;
-                  const gelmediCount = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="GELMEDI").length;
+                  const gelmediCount = ayGunleri.filter(g => getPuantaj(p.id,g)?.durum==="GELMEDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay()!==0).length; // pazar kesilmez
                   const pazarCalisdiCount = ayGunleri.filter(g => {
                     const row = getPuantaj(p.id, g);
                     return row?.durum==="CALISDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay()===0;
