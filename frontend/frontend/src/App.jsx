@@ -8867,6 +8867,54 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
   );
 }
 
+// ── Tarih alanı GG.AA.YYYY (18.09.2026, Orhan): tarayıcı dili İngilizce olunca <input type="date">
+// AA/GG/YYYY gösteriyordu ve kafa karıştırıyordu. Kullanıcı gün.ay.yıl yazar, değer ISO (YYYY-MM-DD)
+// olarak tutulur; 📅 düğmesi tarayıcının takvimini açar.
+function TarihGirisi({ value, onChange, style, required, placeholder = "gg.aa.yyyy" }) {
+  const isoToTr = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v))) ? String(v).slice(0, 10).split("-").reverse().join(".") : "";
+  const [metin, setMetin] = useState(isoToTr(value));
+  const gizliRef = useRef(null);
+  useEffect(() => { setMetin(isoToTr(value)); }, [value]);
+  const trToIso = (t) => {
+    const m = String(t || "").trim().match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+    if (!m) return null;
+    const g = Number(m[1]), a = Number(m[2]), y = Number(m[3]);
+    if (a < 1 || a > 12 || g < 1 || g > 31) return null;
+    const d = new Date(Date.UTC(y, a - 1, g));
+    if (d.getUTCMonth() !== a - 1 || d.getUTCDate() !== g) return null;
+    return `${y}-${String(a).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
+  };
+  const yaz = (raw) => {
+    // Sadece rakam; noktaları otomatik koy: 18092026 → 18.09.2026
+    const r = raw.replace(/[^\d]/g, "").slice(0, 8);
+    let t = r;
+    if (r.length > 4) t = `${r.slice(0, 2)}.${r.slice(2, 4)}.${r.slice(4)}`;
+    else if (r.length > 2) t = `${r.slice(0, 2)}.${r.slice(2)}`;
+    setMetin(t);
+    if (r.length === 0) onChange("");
+    else if (r.length === 8) { const iso = trToIso(t); if (iso) onChange(iso); }
+  };
+  const bitir = () => {
+    if (!metin.trim()) { onChange(""); return; }
+    const iso = trToIso(metin);
+    if (iso) { onChange(iso); setMetin(isoToTr(iso)); }
+    else setMetin(isoToTr(value)); // geçersiz → eski değere dön
+  };
+  return (
+    <div style={{ position:"relative" }}>
+      <input type="text" inputMode="numeric" value={metin} placeholder={placeholder} required={required}
+        onChange={e => yaz(e.target.value)} onBlur={bitir}
+        style={{ ...(style || {}), paddingRight:"36px" }} />
+      <input ref={gizliRef} type="date" tabIndex={-1} aria-hidden="true" value={value && /^\d{4}-\d{2}-\d{2}/.test(String(value)) ? String(value).slice(0, 10) : ""}
+        onChange={e => onChange(e.target.value)}
+        style={{ position:"absolute", right:"8px", top:"50%", transform:"translateY(-50%)", width:"1px", height:"1px", opacity:0, pointerEvents:"none" }} />
+      <button type="button" title="Takvimden seç" tabIndex={-1}
+        onClick={() => { const el = gizliRef.current; if (!el) return; try { el.showPicker ? el.showPicker() : el.click(); } catch { el.click(); } }}
+        style={{ position:"absolute", right:"6px", top:"50%", transform:"translateY(-50%)", border:"none", background:"transparent", cursor:"pointer", fontSize:"15px", padding:"2px 4px", color:"#64748b" }}>📅</button>
+    </div>
+  );
+}
+
 function formatTLInput(value) {
   const numeric = String(value || "").replace(/[^\d]/g, "");
   if (!numeric) return "";
@@ -17854,7 +17902,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 const tarih = ([l,n]) => (
                   <div key={n}>
                     <label style={labelSt}>{l}</label>
-                    <input type="date" value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} />
+                    <TarihGirisi value={pForm[n]||""} onChange={v=>setPForm(f=>({...f,[n]:v}))} style={inputSt} />
                   </div>
                 );
                 return (
@@ -18177,7 +18225,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 </div>
                 <div>
                   <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Ödeme Tarihi</div>
-                  <input type="date" value={maasOdeForm.tarih} onChange={e=>setMaasOdeForm(f=>({...f,tarih:e.target.value}))} required style={{ width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
+                  <TarihGirisi value={maasOdeForm.tarih} onChange={v=>setMaasOdeForm(f=>({...f,tarih:v}))} required style={{ width:"100%", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"14px", boxSizing:"border-box" }} />
                 </div>
                 <div>
                   <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Bankadan (₺)</div>
