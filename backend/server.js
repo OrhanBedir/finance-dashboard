@@ -6845,7 +6845,8 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           const dus = (kk.KESINTI || 0) + (kk.YUVARLAMA || 0) + (kk.DEVRET || 0);
           const gereken = hak - dev + (carryEksik[p.id] || 0) - dus;
           bekleyenMaas += Math.max(0, gereken - oden);
-          carry[p.id] = Math.max(0, oden - gereken - (kk.PRIM || 0));
+          // Devir: yuvarlama iki kez sayılmasın; prim ve yuvarlama devretmez, FAZLA_DEVRET otomatik devir sürer
+          carry[p.id] = Math.max(0, oden - (gereken + (kk.YUVARLAMA || 0)) - (kk.PRIM || 0) - (kk.YUVARLAMA || 0));
           carryEksik[p.id] = kk.DEVRET || 0;
         }
       }
@@ -17008,7 +17009,7 @@ app.delete("/hr/maas-odeme/:id", async (req, res) => {
    Hakediş değişmez; kapama ayrı satırdır. Yetki: yalnız Düzgün Şimşek, Orhan Bedir, Erencan Şimşek. */
 const MAAS_KAPAMA_YETKILI = ["duzgun.simsek@simsektel.com", "orhan.bedir@simsektel.com",
   "orhan.bedir@gmail.com", "eren.simsek@simsektel.com"];
-const MAAS_KAPAMA_TIPLER = ["KESINTI", "YUVARLAMA", "DEVRET", "PRIM"];
+const MAAS_KAPAMA_TIPLER = ["KESINTI", "YUVARLAMA", "DEVRET", "PRIM", "FAZLA_DEVRET"];
 const maasKapamaYetkili = (req) => MAAS_KAPAMA_YETKILI.includes(String(req.user?.email || "").toLowerCase().trim());
 pool.query(`CREATE TABLE IF NOT EXISTS maas_donem_kapama (
   id SERIAL PRIMARY KEY,

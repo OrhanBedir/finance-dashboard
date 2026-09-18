@@ -16121,9 +16121,13 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   // Bu ayın alacağından düşülecek net düzeltme: kesinti+yuvarlama+devret (bu ay) − geçen aydan devreden eksik
   const getKapamaDus = (personelId) =>
     _kapamaTop(personelId, puantajAy, ["KESINTI","YUVARLAMA","DEVRET"]) - _kapamaTop(personelId, _prevAyStr, ["DEVRET"]);
-  const getKapamaPrim = (personelId) => _kapamaTop(personelId, puantajAy, ["PRIM"]);
+  // Fazla ödemeyi "kapatan" tutar: prim (devretmez) + yuvarlama + sonraki aya devret notu (devir otomatik sürer)
+  const getKapamaPrim = (personelId) => _kapamaTop(personelId, puantajAy, ["PRIM","YUVARLAMA","FAZLA_DEVRET"]);
+  // Yuvarlama alacağı da düşürdüğü için fazla hesabında ikinci kez sayılmasın
+  const getKapamaFazlaBaz = (personelId) =>
+    _kapamaTop(personelId, puantajAy, ["KESINTI","DEVRET"]) - _kapamaTop(personelId, _prevAyStr, ["DEVRET"]);
   const getKapamaList = (personelId) => maasKapamalar.filter(k => String(k.personel_id) === String(personelId) && k.donem === puantajAy);
-  const KAPAMA_TIP_AD = { KESINTI:"kesinti", YUVARLAMA:"yuvarlama farkı", DEVRET:"sonraki aya devredildi", PRIM:"prim / ek ödeme" };
+  const KAPAMA_TIP_AD = { KESINTI:"kesinti", YUVARLAMA:"yuvarlama farkı", DEVRET:"sonraki aya devredildi", PRIM:"prim / ek ödeme", FAZLA_DEVRET:"fazla ödeme sonraki aydan düşülecek" };
   const handleSaveKapama = async () => {
     if (!kapamaModal) return;
     const t = Number(String(kapamaForm.tutar).trim().replace(/\./g,"").replace(",","."));
@@ -16164,8 +16168,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       .reduce((s, o) => s + Number(o.bankadan || 0) + Number(o.elden || 0), 0);
     const toplam = prevAvans + prevOde;
     // Geçen ayın kapamaları: kesinti/yuvarlama/devret o ayın alacağını azaltır; PRIM fazlanın devrini engeller
-    const prevDus = _kapamaTop(personelId, _prevAyStr, ["KESINTI","YUVARLAMA","DEVRET"]);
-    const prevPrim = _kapamaTop(personelId, _prevAyStr, ["PRIM"]);
+    const prevDus = _kapamaTop(personelId, _prevAyStr, ["KESINTI","DEVRET"]);
+    const prevPrim = _kapamaTop(personelId, _prevAyStr, ["PRIM","YUVARLAMA"]);
     return toplam > 0 ? Math.max(0, toplam - (Number(prevOz.hakedilen_maas || 0) - prevDus) - prevPrim) : 0;
   };
   // ISG/Belgeler'den hızlı taşeron personeli ekleme (tek tek)
@@ -17157,7 +17161,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       const kapamalar = getKapamaList(p.id);
                       const gereken  = Math.max(0, hakEdis - devir - getKapamaDus(p.id));
                       const kalan    = Math.max(0, gereken - odenen);
-                      const fazla    = odenen > 0 ? Math.max(0, odenen - gereken - getKapamaPrim(p.id)) : 0;
+                      const fazla    = odenen > 0 ? Math.max(0, odenen - Math.max(0, hakEdis - devir - getKapamaFazlaBaz(p.id)) - getKapamaPrim(p.id)) : 0;
                       const odeSimsek = odeSimsekByPer[p.id] || 0;
                       const odeAhy    = odeAhyByPer[p.id]    || 0;
                       return { ...p, hakEdis, hakManuel, hakOto, avans, isAvans, banka, elden, odenen, kalan, fazla, devir, odeSimsek, odeAhy, kapamalar };
@@ -18059,7 +18063,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       {kapamaModal && (() => {
         const km = kapamaModal; const ayAdiK = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(puantajAy.slice(5,7))-1];
         const secenekler = km.fazlaMod
-          ? [["PRIM","Prim / ek ödeme say","Fazla ödeme personelde kalır, sonraki aydan düşülmez"]]
+          ? [["PRIM","Prim / ek ödeme say","Fazla ödeme personelde kalır, sonraki aydan düşülmez"],
+             ["FAZLA_DEVRET","Sonraki aya devret","Fazla ödeme sonraki ayın maaşından düşülür (not düşülerek kapatılır)"],
+             ["KESINTI","Kesinti olarak kapat","Personel borcuna eklenir, sonraki aydan düşülür"],
+             ["YUVARLAMA","Yuvarlama farkı","Küçük küsurat farkı, devretmez"]]
           : [["KESINTI","Kesinti olarak kapat","Personele ödenmeyecek, borç silinir"],
              ["YUVARLAMA","Yuvarlama farkı","Küçük küsurat farkı"],
              ["DEVRET","Sonraki aya devret","Bir sonraki ayın alacağına eklenir"]];
@@ -18078,7 +18085,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
             <div style={{ background: km.fazlaMod ? "#fef3c7" : "#fee2e2", color: km.fazlaMod ? "#92400e" : "#991b1b", borderRadius:"10px", padding:"9px 12px", fontSize:"13px", fontWeight:700, marginBottom:"14px" }}>
               {km.fazlaMod ? `Fazla ödeme: ₺${km.fark.toLocaleString("tr-TR")}` : `Kalan fark: ₺${km.fark.toLocaleString("tr-TR")} (eksik ödendi)`}
             </div>
-            {km.fazlaMod && <div style={{ fontSize:"12px", color:"#6b7280", marginBottom:"10px" }}>Hiçbir şey yapmazsanız bu fazla ödeme sonraki ayın maaşından otomatik düşülür. Düşülmesini istemiyorsanız aşağıdan kapatın.</div>}
+            {km.fazlaMod && <div style={{ fontSize:"12px", color:"#6b7280", marginBottom:"10px" }}>Hiçbir şey yapmazsanız bu fazla ödeme sonraki ayın maaşından otomatik düşülür. Aşağıdan seçip not düşerek kapatabilirsiniz.</div>}
             <div style={{ fontSize:"12px", fontWeight:700, color:"#374151", marginBottom:"6px" }}>Bu fark ne olsun?</div>
             <div style={{ display:"grid", gap:"6px", marginBottom:"14px" }}>
               {secenekler.map(([v, ad, acik]) => (
