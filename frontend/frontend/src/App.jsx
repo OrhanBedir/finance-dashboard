@@ -21763,6 +21763,13 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
     if (filterBaslangic && t.tarih?.split("T")[0] < filterBaslangic) return false;
     if (filterBitis && t.tarih?.split("T")[0] > filterBitis) return false;
     return true;
+  }).sort((a, b) => {
+    // 21.09.2026 (Orhan): durum sırası — ödemeye en yakın olan en üstte, bitenler en altta;
+    // aynı durumda yeni tarih önce
+    const SIRA = { DIREKTOR_ONAY: 0, MUHASEBE_ONAY: 1, PM_ONAY: 2, ROLLOUT_MUDUR_ONAY: 3, TALEP: 4, TAMAMLANDI: 8, REDDEDILDI: 9 };
+    const sa = SIRA[a.durum] ?? 6, sb = SIRA[b.durum] ?? 6;
+    if (sa !== sb) return sa - sb;
+    return String(b.tarih || "").localeCompare(String(a.tarih || "")) || (Number(b.id) - Number(a.id));
   });
 
   const openNew = () => {
