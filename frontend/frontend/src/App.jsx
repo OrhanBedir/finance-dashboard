@@ -19813,6 +19813,11 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     // Onay bekleyen formlar her zaman en üste gelsin
     const aNeedsAction = (isPM && a.durum==="PM_BEKLE") || (isDirektor && a.durum==="DIREKTOR_BEKLE") || (isRollout && a.durum==="ROLLOUT_BEKLE") || (isMuhOnay && a.durum==="MUHASEBE_BEKLE") || (isMuhasebe && a.durum==="TAMAMLANDI");
     const bNeedsAction = (isPM && b.durum==="PM_BEKLE") || (isDirektor && b.durum==="DIREKTOR_BEKLE") || (isRollout && b.durum==="ROLLOUT_BEKLE") || (isMuhOnay && b.durum==="MUHASEBE_BEKLE") || (isMuhasebe && b.durum==="TAMAMLANDI");
+    // 21.09.2026 (Orhan): kullanıcının KENDİ taslağı en üstte — açıp masraf girmeye hemen başlasın
+    const aTaslak = a.durum === "TASLAK" && a.talep_eden_email === currentUser?.email;
+    const bTaslak = b.durum === "TASLAK" && b.talep_eden_email === currentUser?.email;
+    if (aTaslak && !bTaslak) return -1;
+    if (!aTaslak && bTaslak) return 1;
     if (aNeedsAction && !bNeedsAction) return -1;
     if (!aNeedsAction && bNeedsAction) return 1;
     // Kalan formlar ID'ye göre azalan sırada (en yeni üstte)
@@ -20796,8 +20801,10 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
             {visibleList.map((f,i)=>{
               const needsMyAction = (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE") || (isRollout && f.durum==="ROLLOUT_BEKLE") || (isMuhOnay && f.durum==="MUHASEBE_BEKLE");
               const myPendingRow = !isApprover && f.talep_eden_email===currentUser?.email && ["ROLLOUT_BEKLE","MUHASEBE_BEKLE","PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum);
+              // Kendi taslağım: en üstte, yeşil şeritli — hemen göze çarpsın (21.09.2026)
+              const myDraftRow = f.durum==="TASLAK" && f.talep_eden_email===currentUser?.email;
               return (
-                <tr key={f.id} style={{ borderBottom:"1px solid #f3f4f6", background: needsMyAction?"#fffbeb": myPendingRow?"#fef2f2": i%2===0?"#fff":"#fafafa", borderLeft: needsMyAction?"4px solid #f59e0b": myPendingRow?"4px solid #f87171":"4px solid transparent" }}>
+                <tr key={f.id} style={{ borderBottom:"1px solid #f3f4f6", background: myDraftRow?"#f0fdf4": needsMyAction?"#fffbeb": myPendingRow?"#fef2f2": i%2===0?"#fff":"#fafafa", borderLeft: myDraftRow?"4px solid #16a34a": needsMyAction?"4px solid #f59e0b": myPendingRow?"4px solid #f87171":"4px solid transparent" }}>
                   <td style={{ padding:"12px 16px", color:"#9ca3af" }}>#{f.id}</td>
                   <td style={{ padding:"12px 16px", fontWeight:600 }}>{f.personel_ad || f.talep_eden_ad}</td>
                   <td style={{ padding:"12px 16px" }}>{f.donem}</td>
