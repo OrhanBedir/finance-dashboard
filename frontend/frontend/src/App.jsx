@@ -19626,12 +19626,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
       setIsUploading(false);
     }
 
-    const { ocr_tutar, ocr_plaka, ocr_plaka_eslesti } = belge;
+    const { ocr_tutar, ocr_plaka, ocr_plaka_eslesti, ocr_para } = belge;
 
     // Check tutar mismatch (>5% fark veya 10 TL'den fazla)
+    // 21.09.2026: dolar/euro fatura (ocr_para ≠ TRY) TL ile kıyaslanmaz — fark uyarısı çıkmaz
     const entered = pendingKalemTutar || 0;
     const ocrAmt = ocr_tutar ? Number(ocr_tutar) : null;
-    const hasMismatch = ocrAmt && entered &&
+    const yabanciPara = ocr_para && ocr_para !== "TRY";
+    const hasMismatch = !yabanciPara && ocrAmt && entered &&
       (Math.abs(ocrAmt - entered) > Math.max(entered * 0.05, 10));
 
     // Check plate for YAKIT
@@ -19832,6 +19834,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     if (!k.belgeler?.length) return null;
     for (const b of k.belgeler) {
       if (!b.ocr_tutar) continue;
+      if (b.ocr_para && b.ocr_para !== "TRY") continue; // yabancı para fatura: TL ile kıyaslanmaz
       const ocr = Number(b.ocr_tutar);
       const giris = Number(k.tutar);
       if (Math.abs(ocr - giris) > Math.max(giris * 0.05, 10)) return ocr;

@@ -154,21 +154,45 @@ function parseOcrText(text) {
   // fallback'te bunlardan sayı alınmaz (879 hatası: MERSİS 0879'dan geliyordu)
   const ID_RE = /(MERS[İI]S|REF|ONAY|TERM[İI]NAL|S[İI]C[İI]L|EK[ÜU]|Z\s*NO|F[İI][ŞS]\s*NO|[ÇC]EK\s*NO|MASA|K\.?\s*N\.?|VERG[İI]|V\.?D\.?|TAR[İI]H|SAAT|TEL|NO\s*[:.]|\bAID\b|BANKA|https?|WWW)/i;
   const numsOf = (s) => (s.match(TR_NUM_RE) || []).map(parseTrNumber).filter(n => n >= 1 && n <= 999999);
+  // Para birimi (21.09.2026): $ / USD / € / EUR geçen belge TL değildir — panel TL ile kıyaslamaz
+  const currency = /(\$|\bUSD\b)/.test(text) ? "USD" : /(€|\bEUR\b)/.test(text) ? "EUR" : "TRY";
+  // Ara toplam / vergi hariç / KDV satırları TOPLAM sayılmaz (21.09.2026: "Total excluding tax" 100 okunuyordu)
+  const ARA_RE = /(EXCLUDING|EXCL\.|SUBTOTAL|SUB\s*TOTAL|ARA\s*TOPLAM|HAR[İI][ÇC]|MATRAH|\bKDV\b|\bVAT\b|\bTAX\b|[İI]SKONTO|DISCOUNT)/i;
+  // 0) En güçlü anahtarlar: AMOUNT DUE / GENEL TOPLAM / ÖDENECEK — ya da "$120.00 USD due …" biçimi
+  for (let i = 0; i < lines.length && !amount; i++) {
+    const ln = lines[i];
+    if (/(AMOUNT\s*DUE|GENEL\s*TOPLAM|[ÖO]DENECEK\s*TUTAR|TOPLAM\s*TUTAR|GRAND\s*TOTAL)/i.test(ln) && !ARA_RE.test(ln)) {
+      let nums = numsOf(ln);
+      if (!nums.length && lines[i + 1] && !ID_RE.test(lines[i + 1])) nums = numsOf(lines[i + 1]);
+      if (nums.length) { amount = Math.max(...nums); break; }
+    }
+    const m = ln.match(/^\s*[$€₺]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\s*(USD|EUR|TRY|TL)\b/i);
+    if (m && /\bdue\b/i.test(ln)) { const n = parseTrNumber(m[1]); if (n >= 1) { amount = n; break; } }
+  }
+  // 0b) Tek başına "tutar + para birimi" satırı (ör. "$120.00 USD") — belgedeki en büyüğü
+  if (!amount) {
+    const adaylar = [];
+    for (const ln of lines) {
+      const m = ln.match(/^\s*[$€₺]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\s*(USD|EUR|TRY|TL)\s*$/i);
+      if (m) { const n = parseTrNumber(m[1]); if (n >= 1) adaylar.push(n); }
+    }
+    if (adaylar.length) amount = Math.max(...adaylar);
+  }
   // 1) Satır başında anahtar kelime; tutar aynı satırda yoksa (sütunlu fiş)
   //    bir sonraki satıra da bak
-  for (let i = 0; i < lines.length; i++) {
-    if (/^[\s*]*(GENEL\s*TOPLAM|TOPLAM|KRED[İI]|NAK[İI]T|TUTAR|TOTAL)/i.test(lines[i])) {
+  for (let i = 0; i < lines.length && !amount; i++) {
+    if (/^[\s*]*(GENEL\s*TOPLAM|TOPLAM|KRED[İI]|NAK[İI]T|TUTAR|TOTAL)/i.test(lines[i]) && !ARA_RE.test(lines[i])) {
       let nums = numsOf(lines[i]);
-      if (!nums.length && lines[i + 1] && !KEY_RE.test(lines[i + 1]) && !ID_RE.test(lines[i + 1])) {
+      if (!nums.length && lines[i + 1] && !KEY_RE.test(lines[i + 1]) && !ID_RE.test(lines[i + 1]) && !ARA_RE.test(lines[i + 1])) {
         nums = numsOf(lines[i + 1]);
       }
       if (nums.length) { amount = Math.max(...nums); break; }
     }
   }
-  // 2) Anahtar kelime satır içinde (kimlik satırları hariç)
+  // 2) Anahtar kelime satır içinde (kimlik ve ara toplam satırları hariç)
   if (!amount) {
     for (const line of lines) {
-      if (KEY_RE.test(line) && !ID_RE.test(line)) {
+      if (KEY_RE.test(line) && !ID_RE.test(line) && !ARA_RE.test(line)) {
         const nums = numsOf(line);
         if (nums.length) { amount = Math.max(...nums); break; }
       }
@@ -212,7 +236,7 @@ function parseOcrText(text) {
     .filter(p => p.length >= 5 && p.length <= 8);
   // En uzun eşleşmeyi önce al (gerçek plakalar genelde daha uzun)
   rawPlates.sort((a, b) => b.length - a.length);
-  return { amount: amount || null, plaka: rawPlates[0] || null, rawPlates };
+  return { amount: amount || null, plaka: rawPlates[0] || null, rawPlates, currency };
 }
 
 async function ocrFis(fileBuffer) {
@@ -238,7 +262,7 @@ async function ocrFis(fileBuffer) {
     return parseOcrText(text);
   } catch (e) {
     console.error("[OCR error]", e.message);
-    return { amount: null, plaka: null, rawPlates: [] };
+    return { amount: null, plaka: null, rawPlates: [], currency: null };
   }
 }
 
@@ -6562,6 +6586,7 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 // (15.07 devir); araçların hepsi AHY'nin — araclar.firma ile markaya süzülür.
 const PL_KIRA_TUTAR_SQL = `(CASE WHEN o.donem = '2026-07' THEN COALESCE(o.tutar,0) * 0.5 ELSE COALESCE(o.tutar,0) END)`;
 pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS firma TEXT DEFAULT 'AHY'`).catch(() => {});
+pool.query(`ALTER TABLE masraf_belge ADD COLUMN IF NOT EXISTS ocr_para TEXT`).catch(() => {});
 const TASERON_LOG_DAGILIM_SQL = `(SELECT (d->>'fatura_id')::int AS fid, SUM((d->>'odeme')::numeric) AS t
   FROM taseron_odeme_log l,
        jsonb_array_elements(CASE WHEN jsonb_typeof(l.dagilim) = 'array' THEN l.dagilim ELSE '[]'::jsonb END) d
@@ -19182,9 +19207,10 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
     const ocrTimeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
     const ocrResult = await Promise.race([ocrFis(fileBuffer), ocrTimeout]);
 
-    let ocrTutar = null, matchedPlaka = null, ocrPlakaEslesti = null;
+    let ocrTutar = null, matchedPlaka = null, ocrPlakaEslesti = null, ocrPara = null;
     if (ocrResult) {
       ocrTutar = ocrResult.amount;
+      ocrPara = ocrResult.currency || null;
       let ocrPlaka = ocrResult.plaka;
       const rawPlates = ocrResult.rawPlates || [];
       if (kategori === "YAKIT" && (ocrPlaka || rawPlates.length)) {
@@ -19206,8 +19232,8 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
 
     // 3. Update with OCR results (even if null)
     const updated = await pool.query(
-      `UPDATE masraf_belge SET ocr_tutar=$1, ocr_plaka=$2, ocr_plaka_eslesti=$3 WHERE id=$4 RETURNING *`,
-      [ocrTutar, matchedPlaka, ocrPlakaEslesti, belgeId]
+      `UPDATE masraf_belge SET ocr_tutar=$1, ocr_plaka=$2, ocr_plaka_eslesti=$3, ocr_para=$5 WHERE id=$4 RETURNING *`,
+      [ocrTutar, matchedPlaka, ocrPlakaEslesti, belgeId, ocrPara]
     );
     res.json(updated.rows[0]);
   } catch (e) {
