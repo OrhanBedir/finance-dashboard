@@ -3921,6 +3921,28 @@ function OrgSemasiPanel({ currentUser }) {
     } catch {}
   };
   const ekipAdi = (e) => (e.ad && e.ad.trim()) || `Ekip ${e.ekip_no}`;
+  // 21.09.2026 (Orhan): şemada her ekibin altında In-house / Subcon (taşeron adı) + plaka
+  const ekipTip = (e) => e.taseron_adi ? `Subcon · ${String(e.taseron_adi).toLocaleUpperCase("tr-TR")}` : "In-house";
+  const ekipPlaka = (e) => (e.plaka && e.plaka.trim()) || (ekipUyeleri(e.ekip_no).map(p => p.ekip_arac_plaka).find(Boolean) || "");
+  const ekipAlt = (e) => `${ekipTip(e)}${ekipPlaka(e) ? ` · ${ekipPlaka(e)}` : ""}`;
+  const svgRef = useRef(null);
+  // Şemayı PNG olarak indir (e-posta eki için) — SVG → canvas 2×
+  const indirPng = () => {
+    const svg = svgRef.current; if (!svg) return;
+    const xml = new XMLSerializer().serializeToString(svg);
+    const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = 1250 * 2; c.height = 910 * 2;
+      const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      const a = document.createElement("a"); a.download = `Organizasyon_Semasi_${new Date().toISOString().slice(0, 10)}.png`;
+      a.href = c.toDataURL("image/png"); a.click();
+    };
+    img.src = url;
+  };
   const bolgeEkipleri = (anahtar) => ekipler.filter(e => String(e.bolge || "").toLocaleUpperCase("tr-TR").includes(anahtar));
 
   const NAVY = "#1e3a5f", BLUE = "#2563eb", IZMIR = "#0c4a6e", ANKARA = "#7c2d12";
@@ -3962,19 +3984,24 @@ function OrgSemasiPanel({ currentUser }) {
     setBox(9, 0, 10, 2, "HATİCE OMUŞ\nIFIS · Survey · BTK · Atlas", "F1F5F9", "0F172A", 11);
     setBox(9, 3, 10, 5, "ERENCAN ŞİMŞEK\nEHS Officer", "F1F5F9", "0F172A", 11);
     setBox(9, 7, 10, 9, "TUĞÇE YELMEN\nInvoicing & Acceptance Coordinator", "F1F5F9", "0F172A", 11);
-    setBox(9, 10, 10, 12, "MURAT İSTEK\nWarehouse & Inventory Coordinator", "F1F5F9", "0F172A", 11);
+    setBox(9, 10, 10, 12, "EMRE AKDEĞİRMEN\nWarehouse & Inventory Coordinator", "F1F5F9", "0F172A", 11);
     setBox(12, 0, 12, 5, "İZMİR REGION", "0C4A6E", "FFFFFF");
     setBox(12, 7, 12, 12, "ANKARA REGION", "7C2D12", "FFFFFF");
     setBox(13, 1, 14, 4, "SERDAR ALTINOVA\nİzmir Regional Manager", "0369A1", "FFFFFF", 11);
     setBox(13, 8, 14, 11, "NURCAN KUŞ\nAnkara Regional Manager", "B45309", "FFFFFF", 11);
     setBox(16, 1, 17, 4, "KASIM EVİN\nSite Supervisor (İzmir · Ankara support)", "E0F2FE", "0C4A6E", 11);
     setBox(16, 8, 17, 11, "Site Support: KASIM EVİN\n(İzmir'den destek)", "FEF3C7", "7C2D12", 10);
-    setBox(19, 0, 20, 1, "RF TEAM 1", "F8FAFC", "0F172A", 10);
-    setBox(19, 2, 20, 3, "RF TEAM 2", "F8FAFC", "0F172A", 10);
-    setBox(19, 4, 20, 5, "RF TEAM 3", "F8FAFC", "0F172A", 10);
-    setBox(19, 7, 20, 8, "RF TEAM 4", "F8FAFC", "0F172A", 10);
-    setBox(19, 9, 20, 10, "RF TEAM 5", "F8FAFC", "0F172A", 10);
-    setBox(19, 11, 20, 12, "RF TEAM 6", "F8FAFC", "0F172A", 10);
+    // Ekip kutuları canlı ekip listesinden: ad + In-house/Subcon + plaka
+    const xlEkip = (list, c0, c1) => {
+      if (!list.length) return;
+      const gen = Math.max(1, Math.floor((c1 - c0 + 1) / list.length));
+      list.forEach((e, i) => {
+        const cc = c0 + i * gen; if (cc > c1) return;
+        setBox(19, cc, 20, Math.min(c1, cc + gen - 1), `${ekipAdi(e)}\n${ekipAlt(e)}`, e.taseron_adi ? "FEF3C7" : "F8FAFC", "0F172A", 9);
+      });
+    };
+    xlEkip(bolgeEkipleri("İZM").concat(bolgeEkipleri("IZM").filter(e => !bolgeEkipleri("İZM").includes(e))), 0, 5);
+    xlEkip(bolgeEkipleri("ANK"), 7, 12);
     setBox(22, 0, 22, 12, `Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · ${today}`, "F1F5F9", "64748B", 9);
     const ws1 = XLSXStyle.utils.aoa_to_sheet(wsData);
     ws1["!merges"] = merges;
@@ -3989,7 +4016,7 @@ function OrgSemasiPanel({ currentUser }) {
       ["",       "NURCAN KUŞ",               "Ankara Bölge",       "5392596108", "Rollout Müdürü"],
       ["",       "SERDAR ALTINOVA",          "İzmir Bölge",        "5321619481", "Rollout Müdürü"],
       ["",       "HATİCE OMUŞ",              "Ankara-İzmir Bölge", "5525473667", "BTK&IFIS Birim Müdürü"],
-      ["",       "MURAT İSTEK",              "Ankara-İzmir Bölge", "5535657939", "Envanter&Depo Sorumlusu"],
+      ["",       "EMRE AKDEĞİRMEN",          "Ankara-İzmir Bölge", "5426166144", "Envanter&Depo Sorumlusu"],
       ["",       "TUĞÇE YELMEN",             "Ankara-İzmir Bölge", "5330165678", "Muhasebe"],
       ["Team 1", "KASIM EVİN",               "Ankara Bölge",       "5321531797", "Süpervizör"],
       ["Team 1", "MEHMET BAĞCI",             "Ankara Bölge",       "5451445994", "Montaj personeli"],
@@ -4079,6 +4106,7 @@ function OrgSemasiPanel({ currentUser }) {
           {canEdit && (
             <button onClick={() => setShowEkip(true)} style={{ padding: "10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>🛠 Ekip Yönetimi</button>
           )}
+          <button onClick={indirPng} title="Şemayı resim olarak indir (e-posta eki)" style={{ padding: "10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer", marginRight: "8px" }}>🖼 PNG İndir</button>
           <button onClick={indirExcel} style={{ padding: "10px 22px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>📋 Excel İndir</button>
         </div>
       </div>
@@ -4194,7 +4222,7 @@ function OrgSemasiPanel({ currentUser }) {
               </div>
               <div style={{ display: "grid", gap: "6px", marginBottom: "18px" }}>
                 {ekipler.map(e => (
-                  <div key={e.ekip_no} style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr 1fr auto", gap: "8px", alignItems: "center", background: "#f8fafc", borderRadius: "10px", padding: "7px 10px" }}>
+                  <div key={e.ekip_no} style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr 110px 1fr auto", gap: "8px", alignItems: "center", background: "#f8fafc", borderRadius: "10px", padding: "7px 10px" }}>
                     <span style={{ fontWeight: 800, color: "#1e3a5f", fontSize: "13px" }}>Ekip {e.ekip_no}</span>
                     <input value={e.ad || ""} placeholder={`Ekip adı (örn. RF Ekip ${e.ekip_no}, ENH Ekibi)`}
                       onChange={ev => setEkipler(list => list.map(x => x.ekip_no === e.ekip_no ? { ...x, ad: ev.target.value } : x))}
@@ -4204,6 +4232,11 @@ function OrgSemasiPanel({ currentUser }) {
                       onChange={ev => setEkipler(list => list.map(x => x.ekip_no === e.ekip_no ? { ...x, taseron_adi: ev.target.value } : x))}
                       onBlur={ev => saveEkip({ ...e, taseron_adi: ev.target.value })}
                       style={{ padding: "6px 8px", border: "1px solid #fbbf24", background: "#fffbeb", borderRadius: "8px", fontSize: "12.5px" }} />
+                    {/* Ekip aracı plakası (21.09.2026): şemada ekibin altında görünür; üye aracı yoksa bu kullanılır */}
+                    <input value={e.plaka || ""} placeholder="Plaka"
+                      onChange={ev => setEkipler(list => list.map(x => x.ekip_no === e.ekip_no ? { ...x, plaka: ev.target.value.toLocaleUpperCase("tr-TR") } : x))}
+                      onBlur={ev => saveEkip({ ...e, plaka: ev.target.value.toLocaleUpperCase("tr-TR").replace(/\s+/g, "") })}
+                      style={{ padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px", fontFamily: "monospace" }} />
                     <select value={e.bolge || ""} onChange={ev => saveEkip({ ...e, bolge: ev.target.value })}
                       style={{ padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px" }}>
                       <option value="">📍 Bölge seç…</option>
@@ -4242,7 +4275,7 @@ function OrgSemasiPanel({ currentUser }) {
       )}
 
       <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "18px", overflowX: "auto" }}>
-        <svg viewBox="0 0 1250 910" style={{ width: "100%", minWidth: "900px", display: "block" }} xmlns="http://www.w3.org/2000/svg">
+        <svg ref={svgRef} viewBox="0 0 1250 910" width="1250" height="910" style={{ width: "100%", height: "auto", minWidth: "900px", display: "block" }} xmlns="http://www.w3.org/2000/svg">
           <defs>
             <filter id="gölge" x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#0f172a" floodOpacity="0.12" />
@@ -4258,7 +4291,7 @@ function OrgSemasiPanel({ currentUser }) {
           <Box x={80} y={276} w={250} h={64} light stroke="#64748b" nameText="HATİCE OMUŞ" title="IFIS · Survey · BTK · Atlas" />
           <Box x={360} y={276} w={250} h={64} light stroke="#64748b" nameText="ERENCAN ŞİMŞEK" title="EHS Officer" />
           <Box x={640} y={276} w={250} h={64} light stroke="#64748b" nameText="TUĞÇE YELMEN" title="Invoicing & Acceptance Coord." />
-          <Box x={920} y={276} w={250} h={64} light stroke="#64748b" nameText="MURAT İSTEK" title="Warehouse & Inventory Coord." />
+          <Box x={920} y={276} w={250} h={64} light stroke="#64748b" nameText="EMRE AKDEĞİRMEN" title="Warehouse & Inventory Coord." />
           {/* PM → bölgeler */}
           <L d="M625 340 V368 M330 368 H920 M330 368 V396 M920 368 V396" />
           {/* İZMİR bloğu */}
@@ -4273,7 +4306,7 @@ function OrgSemasiPanel({ currentUser }) {
           {(() => {
             const list = bolgeEkipleri("İZM").concat(bolgeEkipleri("IZM").filter(e => !bolgeEkipleri("İZM").includes(e)));
             if (!list.length) return null;
-            const W = Math.min(160, Math.floor(540 / list.length) - 12), H = 60, y = 690;
+            const W = Math.min(160, Math.floor(540 / list.length) - 12), H = 72, y = 690;
             const toplamW = list.length * (W + 20) - 20;
             const bas = 330 - toplamW / 2;
             return (
@@ -4284,7 +4317,7 @@ function OrgSemasiPanel({ currentUser }) {
                   return (
                     <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
                       <L d={`M${x + W / 2} 660 V${y}`} />
-                      <Box x={x} y={y} w={W} h={H} light stroke="#0369a1" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi${e.taseron_adi ? ` · ${e.taseron_adi}` : ""}`} />
+                      <Box x={x} y={y} w={W} h={H} light stroke={e.taseron_adi ? "#b45309" : "#0369a1"} nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} sub={ekipAlt(e)} />
                     </g>
                   );
                 })}
@@ -4303,7 +4336,7 @@ function OrgSemasiPanel({ currentUser }) {
           {(() => {
             const list = bolgeEkipleri("ANK");
             if (!list.length) return null;
-            const W = Math.min(160, Math.floor(540 / list.length) - 12), H = 60, y = 690;
+            const W = Math.min(160, Math.floor(540 / list.length) - 12), H = 72, y = 690;
             const toplamW = list.length * (W + 20) - 20;
             const bas = 920 - toplamW / 2;
             return (
@@ -4314,7 +4347,7 @@ function OrgSemasiPanel({ currentUser }) {
                   return (
                     <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
                       <L d={`M${x + W / 2} 660 V${y}`} />
-                      <Box x={x} y={y} w={W} h={H} light stroke="#b45309" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi${e.taseron_adi ? ` · ${e.taseron_adi}` : ""}`} />
+                      <Box x={x} y={y} w={W} h={H} light stroke="#b45309" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} sub={ekipAlt(e)} />
                     </g>
                   );
                 })}
