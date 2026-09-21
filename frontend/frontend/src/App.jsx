@@ -3946,11 +3946,11 @@ function OrgSemasiPanel({ currentUser }) {
   const bolgeEkipleri = (anahtar) => ekipler.filter(e => String(e.bolge || "").toLocaleUpperCase("tr-TR").includes(anahtar));
 
   const NAVY = "#1e3a5f", BLUE = "#2563eb", IZMIR = "#0c4a6e", ANKARA = "#7c2d12";
-  const Box = ({ x, y, w, h, fill, stroke, nameText, title, sub, light, dashed }) => (
+  const Box = ({ x, y, w, h, fill, stroke, nameText, title, sub, light, dashed, nameSize }) => (
     <g>
       <rect x={x} y={y} width={w} height={h} rx="10" fill={light ? "#fff" : fill} stroke={stroke || fill} strokeWidth="2" strokeDasharray={dashed ? "6 4" : "0"} filter="url(#gölge)" />
       {!light && <rect x={x} y={y} width={w} height="6" rx="3" fill="rgba(255,255,255,0.25)" />}
-      <text x={x + w / 2} y={title ? y + (sub ? 26 : 30) : y + h / 2 + 5} textAnchor="middle" fontSize="15" fontWeight="800" fill={light ? "#0f172a" : "#fff"} fontFamily="Arial">{nameText}</text>
+      <text x={x + w / 2} y={title ? y + (sub ? 26 : 30) : y + h / 2 + 5} textAnchor="middle" fontSize={nameSize || 15} fontWeight="800" fill={light ? "#0f172a" : "#fff"} fontFamily="Arial">{nameText}</text>
       {title && <text x={x + w / 2} y={y + (sub ? 45 : 52)} textAnchor="middle" fontSize="11.5" fontWeight="600" fill={light ? "#475569" : "rgba(255,255,255,0.85)"} fontFamily="Arial">{title}</text>}
       {sub && <text x={x + w / 2} y={y + 61} textAnchor="middle" fontSize="10" fill={light ? "#94a3b8" : "rgba(255,255,255,0.7)"} fontFamily="Arial">{sub}</text>}
     </g>
@@ -4317,7 +4317,7 @@ function OrgSemasiPanel({ currentUser }) {
                   return (
                     <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
                       <L d={`M${x + W / 2} 660 V${y}`} />
-                      <Box x={x} y={y} w={W} h={H} light stroke={e.taseron_adi ? "#b45309" : "#0369a1"} nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} sub={ekipAlt(e)} />
+                      <Box x={x} y={y} w={W} h={H} light stroke={e.taseron_adi ? "#b45309" : "#0369a1"} nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} sub={ekipAlt(e)} nameSize={W < 150 ? 12.5 : 15} />
                     </g>
                   );
                 })}
@@ -4347,7 +4347,7 @@ function OrgSemasiPanel({ currentUser }) {
                   return (
                     <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
                       <L d={`M${x + W / 2} 660 V${y}`} />
-                      <Box x={x} y={y} w={W} h={H} light stroke="#b45309" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} sub={ekipAlt(e)} />
+                      <Box x={x} y={y} w={W} h={H} light stroke="#b45309" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} sub={ekipAlt(e)} nameSize={W < 150 ? 12.5 : 15} />
                     </g>
                   );
                 })}
