@@ -29048,7 +29048,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const isPM       = _email === "orhan.bedir@simsektel.com";
   const isDirektor   = _email === "duzgun.simsek@simsektel.com";
   const isNurcan     = _email === "nurcan.kus@simsektel.com";
-  const isMurat      = _email === "murat.istek@simsektel.com";
+  // 25.09.2026: Emre Akdeğirmen, Murat İstek'in (depo/envanter) yerine — aynı yetkiler
+  const isMurat      = ["murat.istek@simsektel.com","emre.akdegirmen@simsektel.com"].includes(_email);
   const isBolgeMudur = !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat &&
     (["rollout_mudur","bolge_mudur"].includes((currentUser?.role||"").toLowerCase()) ||
      ["serdar.altinova@simsektel.com"].includes(_email));
@@ -30200,7 +30201,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
             const tEml = (d.talep_eden_email||"").toLowerCase();
             const talepEdenPM         = tEml === "orhan.bedir@simsektel.com";
             const talepEdenNurcan     = tEml === "nurcan.kus@simsektel.com";
-            const talepEdenMurat      = tEml === "murat.istek@simsektel.com";
+            const talepEdenMurat      = ["murat.istek@simsektel.com","emre.akdegirmen@simsektel.com"].includes(tEml);
             const talepEdenDirektor   = tEml === "duzgun.simsek@simsektel.com";
             const talepEdenBolgeMudur = !talepEdenPM && !talepEdenNurcan && !talepEdenMurat && !talepEdenDirektor &&
               (["serdar.altinova@simsektel.com"].includes(tEml) || false);
@@ -31824,15 +31825,16 @@ function App() {
   };
   // Rollout erişimi var ama Puantaj görmeyecek kullanıcılar (rol ne olursa olsun rollout gibi davranır)
   const _userEmail = (user?.email || "").toLowerCase().trim();
-  const _PUANTAJ_HARIC = ["hatice.omus@simsektel.com", "murat.istek@simsektel.com"];
+  const _PUANTAJ_HARIC = ["hatice.omus@simsektel.com", "murat.istek@simsektel.com", "emre.akdegirmen@simsektel.com"];
   const _ROLLOUT_OVERRIDE = ["hatice.omus@simsektel.com"]; // user rolünde olsa bile rollout gibi davranır
-  const _isBolgeMudur = _userEmail === "nurcan.kus@simsektel.com" || _userEmail === "serdar.altinova@simsektel.com" || _userEmail === "murat.istek@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
+  const _isBolgeMudur = _userEmail === "nurcan.kus@simsektel.com" || _userEmail === "serdar.altinova@simsektel.com" || _userEmail === "murat.istek@simsektel.com" || _userEmail === "emre.akdegirmen@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
   const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur || _ROLLOUT_OVERRIDE.includes(_userEmail);
   const canSeePuantaj = (isRollout || user?.role === "muhasebe") && !_PUANTAJ_HARIC.includes(_userEmail);
   const isPersonel = user?.role === "user" && !_isBolgeMudur && !_ROLLOUT_OVERRIDE.includes(_userEmail);
   const canSeeMalzeme = [
     "nurcan.kus@simsektel.com",
     "murat.istek@simsektel.com",
+    "emre.akdegirmen@simsektel.com",
     "serdar.altinova@simsektel.com",
   ].includes(_userEmail);
   // Alt marka (AHY) subcon_name taşısa da dar taşeron menüsüne DÜŞMEZ —
@@ -31894,7 +31896,7 @@ function App() {
   const [page, setPage] = useState(() => {
     const u = (() => { try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; } })();
     const _ue = (u?.email||"").toLowerCase().trim();
-    const bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com"];
+    const bolgeMudurEmails = ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com","emre.akdegirmen@simsektel.com"];
     const rolloutOverrideEmails = ["hatice.omus@simsektel.com"];
     const isBolge = bolgeMudurEmails.includes(_ue) || ["rollout_mudur","bolge_mudur"].includes((u?.role||"").toLowerCase());
     const isRolloutOverride = rolloutOverrideEmails.includes(_ue);
@@ -31990,7 +31992,7 @@ function App() {
             if (email === "nurcan.kus@simsektel.com")   mlc = mldata.filter(t => t.durum === "NURCAN_ONAY").length;
             else if (["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase()))  mlc = mldata.filter(t => t.durum === "ROLLOUT_BEKLE").length;
             else if (email === "orhan.bedir@simsektel.com") mlc = mldata.filter(t => t.durum === "PM_ONAY").length;
-            else if (email === "murat.istek@simsektel.com") mlc = mldata.filter(t => ["FIYAT_GIRISI","SATINALINACAK"].includes(t.durum)).length;
+            else if (["murat.istek@simsektel.com","emre.akdegirmen@simsektel.com"].includes(email)) mlc = mldata.filter(t => ["FIYAT_GIRISI","SATINALINACAK"].includes(t.durum)).length;
             else if (email === "duzgun.simsek@simsektel.com") mlc = mldata.filter(t => t.durum === "DUZGUN_ONAY").length;
             setPendingMalzemeCount(mlc);
           }

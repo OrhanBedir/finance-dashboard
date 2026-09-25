@@ -17781,7 +17781,7 @@ app.get("/hr/atanan-arac", async (req, res) => {
 const AVANS_TAM_GORUS = [
   "orhan.bedir@simsektel.com", "duzgun.simsek@simsektel.com",
   "muhasebe@simsektel.com", "nurcan.kus@simsektel.com",
-  "serdar.altinova@simsektel.com", "murat.istek@simsektel.com",
+  "serdar.altinova@simsektel.com", "murat.istek@simsektel.com", "emre.akdegirmen@simsektel.com",
   "info@ahyelektrik.com",
 ];
 /* 10.09.2026: PM'in (Orhan Bedir) kişisel finansal kayıtları — masraf formu
@@ -18277,7 +18277,7 @@ function normalizeAvansFirma(v) {
 // Mobil gmail ile oturum açınca JWT'deki email listede bulunamıyor ve onay
 // sessizce 403 alıyordu — gmail adresi simsektel ile aynı adımlara eklendi.
 const AVANS_YETKI = {
-  RM:  ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
+  RM:  ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com","murat.istek@simsektel.com","emre.akdegirmen@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
   PM:  ["orhan.bedir@simsektel.com","orhan.bedir@gmail.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
   PD:  ["duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
   ODE: ["muhasebe@simsektel.com","orhan.bedir@simsektel.com","orhan.bedir@gmail.com","duzgun.simsek@simsektel.com","info@ahyelektrik.com"],
@@ -20011,7 +20011,7 @@ const MASRAF_ADIMLAR = [
   { key: "ROLLOUT_BEKLE",  onaylayan: MASRAF_ROLLOUT_MAIL,
     // Rollout adımını atlayanlar: kendisi + saha kapaması olmayan kadro + üst yönetim
     atla: ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com", "kasim.evin@simsektel.com",
-           "hatice.omus@simsektel.com", "murat.istek@simsektel.com",
+           "hatice.omus@simsektel.com", "murat.istek@simsektel.com", "emre.akdegirmen@simsektel.com",
            ...MASRAF_MUHASEBE_MAIL, ...MASRAF_PM_MAIL, ...MASRAF_PD_MAIL] },
   { key: "MUHASEBE_BEKLE", onaylayan: MASRAF_MUHASEBE_MAIL,
     atla: [...MASRAF_MUHASEBE_MAIL, ...MASRAF_PM_MAIL] },
