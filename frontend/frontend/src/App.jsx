@@ -17321,17 +17321,23 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                 const ayAdiX = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(ayStr)-1];
                                 const fmtDate = v => { if (!v) return ""; const d = new Date(v); return isNaN(d)?String(v):`${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`; };
                                 const fmtNum  = v => v ? Number(v).toLocaleString("tr-TR") : "0";
-                                const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi",`Net Maaş ${ayAdiX} ${yilStr} (₺)`,`Bankadan ${ayAdiX} (₺)`,`Elden ${ayAdiX} (₺)`,`Bankadan Ödenen ${ayAdiX} (₺)`,`Elden Ödenen ${ayAdiX} (₺)`,"IBAN","Banka Adı","Hesap No","Durum"];
-                                const cols    = [26,18,14,14,13,14,28,13,13,17,15,13,19,17,34,16,18,8];
+                                // 09.10.2026 (Orhan): Net Maaş'ın sağına Hakediş kolonu — paneldeki tabloyla aynı
+                                // (işe giriş / puantaj / devir payına göre oranlanmış, manuel override dahil)
+                                const headers = ["Ad Soyad","Unvan","Bölge","TC No","Doğum Tarihi","Telefon","E-Posta","İşe Giriş","Ayrılma Tarihi",`Net Maaş ${ayAdiX} ${yilStr} (₺)`,`Hakediş ${ayAdiX} (₺)`,`Bankadan ${ayAdiX} (₺)`,`Elden ${ayAdiX} (₺)`,`Bankadan Ödenen ${ayAdiX} (₺)`,`Elden Ödenen ${ayAdiX} (₺)`,"IBAN","Banka Adı","Hesap No","Durum"];
+                                const cols    = [26,18,14,14,13,14,28,13,13,17,16,15,13,19,17,34,16,18,8];
                                 const dateKeys = ["dogum_tarihi","ise_giris_tarihi","isten_ayrilma_tarihi"];
                                 const numKeys  = ["net_maas","bankadan_gosterilen","elden_verilen"];
-                                const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","bankadan_gosterilen","elden_verilen","_banka_odenen","_elden_odenen","iban","banka_adi","banka_hesap_no","aktif"];
+                                const keys     = ["ad_soyad","unvan","bolge","tc_no","dogum_tarihi","telefon","email","ise_giris_tarihi","isten_ayrilma_tarihi","net_maas","_hakedis","bankadan_gosterilen","elden_verilen","_banka_odenen","_elden_odenen","iban","banka_adi","banka_hesap_no","aktif"];
                                 const odenenByPerId = {};
                                 aylikOdemeler.filter(ahyOdemeGor).forEach(o => {
                                   if (!odenenByPerId[o.personel_id]) odenenByPerId[o.personel_id] = { banka:0, elden:0 };
                                   odenenByPerId[o.personel_id].banka  += Number(o.bankadan||0);
                                   odenenByPerId[o.personel_id].elden  += Number(o.elden||0);
                                 });
+                                // Seçili ayın hakedişi: tablodaki allRows'tan (arama filtresinden bağımsız).
+                                // İstihdamda olmayan (ayrılan) personel allRows'ta yok → hakediş 0.
+                                const hakByPerId = {};
+                                allRows.forEach(r => { hakByPerId[r.id] = Number(r.hakEdis||0); });
                                 const headerS = { fill:{ patternType:"solid", fgColor:{ rgb:"1E3A5F" } }, font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3B6EA5"}}, right:{style:"thin",color:{rgb:"3B6EA5"}} } };
                                 const headerMN = { fill:{ patternType:"solid", fgColor:{ rgb:"1E5F3A" } }, font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"3BA57A"}}, right:{style:"thin",color:{rgb:"3BA57A"}} } };
                                 const headerGR = { fill:{ patternType:"solid", fgColor:{ rgb:"6B7280" } }, font:{ bold:true, color:{ rgb:"FFFFFF" }, sz:11, name:"Calibri" }, alignment:{ horizontal:"center", vertical:"center", wrapText:true }, border:{ top:{style:"medium",color:{rgb:"FFFFFF"}}, bottom:{style:"medium",color:{rgb:"FFFFFF"}}, left:{style:"thin",color:{rgb:"9CA3AF"}}, right:{style:"thin",color:{rgb:"9CA3AF"}} } };
@@ -17343,6 +17349,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     const ode = odenenByPerId[p.id] || { banka:0, elden:0 };
                                     wsData.push(keys.map(k => {
                                       if (k==="aktif") return p[k]?"Aktif":"Pasif";
+                                      if (k==="_hakedis") return fmtNum(hakByPerId[p.id]);
                                       if (k==="_banka_odenen") return fmtNum(ode.banka);
                                       if (k==="_elden_odenen") return fmtNum(ode.elden);
                                       if (dateKeys.includes(k)) return fmtDate(p[k]);
@@ -17353,8 +17360,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                   const ws = XLSXStyle.utils.aoa_to_sheet(wsData);
                                   ws["!cols"] = cols.map(w=>({wch:w}));
                                   ws["!rows"] = [{ hpt:26 }, ...rows.map(()=>({hpt:20}))];
-                                  headers.forEach((_,ci) => { const a = XLSXStyle.utils.encode_cell({r:0,c:ci}); if (ws[a]) ws[a].s = grayHeader ? headerGR : ((ci >= 12 && ci <= 13) ? headerMN : headerS); });
-                                  rows.forEach((_,ri) => { keys.forEach((k,ci) => { const a = XLSXStyle.utils.encode_cell({r:ri+1,c:ci}); if (!ws[a]) return; const isNum = numKeys.includes(k)||k==="_banka_odenen"||k==="_elden_odenen"; const isDurum = k==="aktif"; const isMN = k==="_banka_odenen"||k==="_elden_odenen"; ws[a].s = cellS(ri,isNum,isDurum,ws[a].v,isMN); }); });
+                                  // Yeşil başlık = "Bankadan/Elden Ödenen" (Hakediş kolonu eklenince 12-13 → 13-14'e kaydı)
+                                  headers.forEach((_,ci) => { const a = XLSXStyle.utils.encode_cell({r:0,c:ci}); if (ws[a]) ws[a].s = grayHeader ? headerGR : ((ci >= 13 && ci <= 14) ? headerMN : headerS); });
+                                  rows.forEach((_,ri) => { keys.forEach((k,ci) => { const a = XLSXStyle.utils.encode_cell({r:ri+1,c:ci}); if (!ws[a]) return; const isNum = numKeys.includes(k)||k==="_hakedis"||k==="_banka_odenen"||k==="_elden_odenen"; const isDurum = k==="aktif"; const isMN = k==="_banka_odenen"||k==="_elden_odenen"; ws[a].s = cellS(ri,isNum,isDurum,ws[a].v,isMN); }); });
                                   ws["!freeze"] = { xSplit:0, ySplit:1 };
                                   return ws;
                                 };
