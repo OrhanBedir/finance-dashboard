@@ -4637,64 +4637,275 @@ function BelgeSecModal({ siteCode, kaynak, onClose }) {
   );
 }
 
-/* ═══ HW DOSYA YÜKLEME MERKEZİ (03.09.2026, Orhan) ═══
-   eSupplier'dan indirilen tüm dosyalar tek sayfada, sırayla, alt alta yüklenir;
-   her kutu kendi dosya adı kuralını uygular. Kutular kapatılıp açılabilir,
-   yüklenen kutu "✓ Yüklendi" olur. */
+/* ═══ HW DOSYA YÜKLEME MERKEZİ — kompakt tek panel (12.10.2026, Orhan) ═══
+   Eski sürüm (03.09.2026) 9 ayrı inline bileşeni iç içe kartlarla alt alta basıyordu;
+   tek dosya yüklemek için ekran kaydırmak gerekiyordu. Yeni sürümde tüm tipler tablo
+   benzeri satırlarda: Sıra · Tür/format · Dosya seç · Yükle · Durum. Her tipin
+   endpoint / alan adı / tekli-çoklu / yetki başlığı / dosya adı kuralı / sonuç özeti
+   aşağıdaki HW_YUKLEME_TIPLERI'nde — davranış eski bileşenlerle (FinanceUploadInline,
+   FinanceInvoiceUploadInline, FinanceHwInvoiceItemsUploadInline, HWPoUploadInline,
+   HWAcceptanceUploadInline, QCUploadInline, BoQUploadInline, RolloutUploadInline,
+   SmartQcUploadInline) birebir aynı; yalnız arayüz değişti. Backend'e dokunulmadı. */
+
+// coklu: false = tek dosya, "tek-istek" = tüm dosyalar tek POST'ta "files" alanında,
+// "dosya-basina" = her dosya ayrı POST'ta "file" alanında (sırayla; biri patlarsa durur).
+// auth: localStorage anahtarı (token / finance_token) ya da null (BoQ, Rollout, QC — eskiden de başlıksız).
+// onek: eSupplier dosya adı öneki (büyük/küçük duyarsız, hwDosyaAdiKontrol ile aynı kural); null = kural yok.
+const HW_YUKLEME_TIPLERI = [
+  { key: "payment",     ad: "HW Payment",     ikon: "📤", format: "invoicePayment_….xlsx",         onek: "invoicePayment",    accept: ".xlsx,.xls",       coklu: false,          url: "/finance/hw-payment/upload",       auth: "finance_token",
+    ozet: (d) => `${d.inserted || 0} kayıt eklendi${d.uploaded_at ? ` · ${new Date(d.uploaded_at).toLocaleString("tr-TR")}` : ""}`,
+    nasil: "eSupplier'dan indirilen ödeme raporu; dosya adı invoicePayment_ ile başlamalı. Farklı adlı dosya kabul edilmez." },
+  { key: "fatura",      ad: "HW Fatura",      ikon: "🧾", format: "ap_invoiceHeadTemplate_….xlsx", onek: "ap_invoiceHeadTem", accept: ".xlsx,.xls",       coklu: "tek-istek",    url: "/finance/hw-invoice/upload",       auth: "finance_token",
+    ozet: (d) => `${d.inserted || 0} kayıt eklendi`,
+    nasil: "eSupplier fatura başlık exportu. 500'lük sayfa exportlarını birlikte seçebilirsin (tek seferde yüklenir). Dosya adı ap_invoiceHeadTemplate_ ile başlamalı." },
+  { key: "fatura_item", ad: "HW Fatura Item", ikon: "📑", format: "invoiceLine_….xlsx",            onek: "invoiceLine",       accept: ".xlsx,.xls,.xlsm", coklu: "dosya-basina", url: "/finance/hw-invoice-items/upload", auth: "finance_token",
+    ozet: (d) => `${d.invoice_count || "?"} fatura / ${d.inserted || 0} kalem`,
+    nasil: "eSupplier → Finance → Invoice Inquiry → Export Invoice Line. Fatura no, tarih, PO/Line/Shipment ve kalem tutarları dosyada hazır gelir; sistem fatura bazında tam yenileme yapar — aynı dosyayı tekrar yüklersen mükerrer kayıt oluşmaz. Birden çok dosya seçilebilir (sırayla yüklenir). PDF eşleştirme, Kalem Master ve manuel giriş için aşağıdaki “Diğer yöntemler”e bak." },
+  { key: "po",          ad: "HW PO",          ikon: "🔩", format: "PURCHASE_ORDER_….xlsx",         onek: "PURCHASE_ORDER",    accept: ".xlsx,.xls",       coklu: false,          url: "/hw-po/upload",                    auth: "token",
+    ozet: (d) => `${d.inserted || 0} kayıt eklendi`,
+    nasil: "eSupplier PO listesi exportu; dosya adı PURCHASE_ORDER_ ile başlamalı." },
+  { key: "acceptance",  ad: "HW Acceptance",  ikon: "📋", format: "ACCEPTANCE_….xlsx",             onek: "ACCEPTANCE",        accept: ".xlsx,.xls",       coklu: false,          url: "/hw-acceptance/upload",            auth: "token",
+    ozet: (d) => `${d.inserted || 0} kayıt eklendi`,
+    nasil: "eSupplier acceptance listesi exportu (Processed export'u reddedilen kalemleri de getirir); dosya adı ACCEPTANCE_ ile başlamalı." },
+  { key: "qc",          ad: "HW QC",          ikon: "🛡", format: "QC durum Excel",                onek: null,                accept: ".xlsx,.xls",       coklu: false,          url: "/qc/upload",                       auth: null,
+    ozet: (d) => `${d.updatedCount ?? 0} kayıt güncellendi${d.message ? ` · ${d.message}` : ""}`,
+    nasil: "Huawei QC durum Excel'i. Dosya adı kuralı yok; QA görevleri sayılmaz, yalnız QC kapanışları işlenir." },
+  { key: "boq",         ad: "HW BoQ",         ikon: "📚", format: "BoQ / kalem fiyat listesi",     onek: null,                accept: ".xlsx,.xls",       coklu: false,          url: "/boq/upload",                      auth: null,
+    ozet: (d) => `${d.inserted || 0} kalem eklendi`,
+    nasil: "Huawei BoQ (kalem kodu + açıklama + birim fiyat) Excel'i. Dosya adı kuralı yok." },
+  { key: "rollout",     ad: "HW Rollout",     ikon: "🚀", format: "Rollout takip Excel",           onek: null,                accept: ".xlsx,.xls",       coklu: false,          url: "/rollout/upload",                  auth: null,
+    ozet: (d) => d.count != null ? `${d.count} satır işlendi` : `${d.inserted || 0} eklendi / ${d.updated || 0} güncellendi`,
+    nasil: "Huawei'nin atadığı sahaların rollout takip Excel'i. Dosya adı kuralı yok." },
+  { key: "smartqc",     ad: "HW Smart QC Görevleri", ikon: "✅", format: "Task Explorer · Export Search Result", onek: null, accept: ".xlsx,.xls",  coklu: false,          url: "/rollout/is-kolu/smartqc",         auth: "token",
+    ozet: (d) => `${d.islenen ?? 0} görev okundu · ${d.guncellenen ?? 0} iş kolu güncellendi` +
+      (d.eslesmeyen_saha_sayisi ? ` · ⚠ Rollout Data'da bulunmayan ${d.eslesmeyen_saha_sayisi} Site ID: ${(d.eslesmeyen_saha || []).join(", ")}` : "") +
+      (d.atlanan_sablon?.length ? ` · atlanan şablon: ${d.atlanan_sablon.join(", ")}` : ""),
+    nasil: "ISDP → Smart QC → Task Explorer → Export Search Result (Excel). Gizleme / TRS / DSS-GPS / STANDALONE şablonları iş koluna eşlenir." },
+];
+
+// Dosya adı öneki kuralı — hwDosyaAdiKontrol ile aynı mantık, alert yerine hata metni döner (satırda gösterilir).
+function hwDosyaAdiHatasi(dosyalar, tip) {
+  const yanlisUzanti = dosyalar.filter((f) => !tip.accept.split(",").some((u) => String(f.name || "").toLowerCase().endsWith(u.trim())));
+  if (yanlisUzanti.length) return `Yalnız ${tip.accept.replace(/,/g, " / ")} kabul edilir. Seçilen: ${yanlisUzanti.map((f) => f.name).join(", ")}`;
+  if (!tip.onek) return null;
+  const yanlis = dosyalar.filter((f) => !new RegExp("^" + tip.onek, "i").test(String(f.name || "")));
+  if (!yanlis.length) return null;
+  return `Bu satır yalnız ${tip.format} dosyasını kabul eder. Seçilen: ${yanlis.map((f) => f.name).join(", ")}`;
+}
+
+// Tek tipin yüklemesi: eski inline bileşenlerin fetch mantığı (endpoint, alan adı, yetki başlığı, hata/başarı kontrolü) birebir.
+async function hwYuklemeCalistir(tip, dosyalar) {
+  const headers = tip.auth ? { Authorization: `Bearer ${localStorage.getItem(tip.auth) || ""}` } : {};
+  const gonder = async (fd) => {
+    const r = await fetch(`${API_BASE}${tip.url}`, { method: "POST", headers, body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) throw new Error(d.error || `${tip.ad} yükleme sırasında hata oluştu`);
+    return d;
+  };
+  if (tip.coklu === "dosya-basina") {
+    const parca = [];
+    for (const f of dosyalar) {
+      const fd = new FormData(); fd.append("file", f);
+      try { parca.push(`${f.name}: ${tip.ozet(await gonder(fd))}`); }
+      catch (e) { throw new Error(`${f.name}: ${e.message}${parca.length ? ` (önceki ${parca.length} dosya yüklendi)` : ""}`); }
+    }
+    return parca.join(" · ");
+  }
+  const fd = new FormData();
+  if (tip.coklu === "tek-istek") dosyalar.forEach((f) => fd.append("files", f)); else fd.append("file", dosyalar[0]);
+  return tip.ozet(await gonder(fd));
+}
+
+const hwAdKisalt = (ad, n = 38) => {
+  const s = String(ad || "");
+  if (s.length <= n) return s;
+  const nokta = s.lastIndexOf(".");
+  const uz = nokta > 0 ? s.slice(nokta) : "";
+  return s.slice(0, Math.max(8, n - uz.length - 1)) + "…" + uz;
+};
+
+const HWUP_DURUM = {
+  bos:        { etiket: "Dosya seçilmedi", cls: "bos" },
+  hazir:      { etiket: "Hazır",           cls: "hazir" },
+  yukleniyor: { etiket: "Yükleniyor",      cls: "yukleniyor" },
+  tamam:      { etiket: "Tamamlandı",      cls: "tamam" },
+  hata:       { etiket: "Hata",            cls: "hata" },
+};
+
 function HwYuklemeMerkezi({ odak, onRejected }) {
-  const PANELLER = [
-    { key: "payment",     ad: "HW Payment",     dosya: "invoicePayment_….xlsx",          ikon: "📤", C: FinanceUploadInline },
-    { key: "fatura",      ad: "HW Fatura",      dosya: "ap_invoiceHeadTemplate_….xlsx",  ikon: "🧾", C: FinanceInvoiceUploadInline },
-    { key: "fatura_item", ad: "HW Fatura Item", dosya: "invoiceLine_….xlsx",             ikon: "📑", C: FinanceHwInvoiceItemsUploadInline },
-    { key: "po",          ad: "HW PO",          dosya: "PURCHASE_ORDER_….xlsx",          ikon: "🔩", C: HWPoUploadInline },
-    { key: "acceptance",  ad: "HW Acceptance",  dosya: "ACCEPTANCE_….xlsx",              ikon: "📋", C: HWAcceptanceUploadInline },
-    { key: "qc",          ad: "HW QC",          dosya: "QC durum Excel",                 ikon: "🛡", C: QCUploadInline },
-    { key: "boq",         ad: "HW BoQ",         dosya: "BoQ / kalem fiyat listesi",      ikon: "📚", C: BoQUploadInline },
-    { key: "rollout",     ad: "HW Rollout",     dosya: "Rollout takip Excel",            ikon: "🚀", C: RolloutUploadInline },
-    { key: "smartqc",     ad: "HW Smart QC Görevleri", dosya: "ISDP Task Explorer · Export Search Result", ikon: "✅", C: SmartQcUploadInline },
-  ];
-  const [acik, setAcik] = useState(() => Object.fromEntries(PANELLER.map((p) => [p.key, true])));
-  const [bitti, setBitti] = useState({});
+  const bosSatir = () => ({ dosyalar: [], durum: "bos", sonuc: "", hata: "", hataAcik: false, isimler: false });
+  const [satir, setSatir] = useState(() => Object.fromEntries(HW_YUKLEME_TIPLERI.map((t) => [t.key, bosSatir()])));
+  const [bilgi, setBilgi] = useState(null);      // "Nasıl indirilir?" açık olan satır
+  const [vurgu, setVurgu] = useState(null);      // menüden gelen odak satırı kısa süre vurgulanır
+  const [toplu, setToplu] = useState(false);     // "Seçilen dosyaları yükle" çalışıyor
+  const inputRef = useRef({});
+  const guncelle = (key, degisiklik) => setSatir((s) => ({ ...s, [key]: { ...s[key], ...degisiklik } }));
+
+  // Eski tekil yükleme bağlantıları (üst menü → setHwUploadFocus) ilgili satıra kaydırıp vurgular.
   useEffect(() => {
     if (!odak) return;
-    setAcik((a) => ({ ...a, [odak]: true }));
-    const t = setTimeout(() => { const el = document.getElementById(`hwup-${odak}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 80);
-    return () => clearTimeout(t);
+    const t = setTimeout(() => {
+      const el = document.getElementById(`hwup-${odak}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setVurgu(odak);
+    }, 80);
+    const t2 = setTimeout(() => setVurgu(null), 2600);
+    return () => { clearTimeout(t); clearTimeout(t2); };
   }, [odak]);
-  const tamam = Object.values(bitti).filter(Boolean).length;
+
+  const dosyaSec = (tip, fileList) => {
+    const dosyalar = Array.from(fileList || []);
+    if (!dosyalar.length) return;
+    const secim = tip.coklu ? dosyalar : dosyalar.slice(0, 1);
+    const hata = hwDosyaAdiHatasi(secim, tip);
+    if (hata) {
+      if (inputRef.current[tip.key]) inputRef.current[tip.key].value = "";
+      guncelle(tip.key, { dosyalar: [], durum: "hata", hata, sonuc: "", hataAcik: false });
+      return;
+    }
+    guncelle(tip.key, { dosyalar: secim, durum: "hazir", hata: "", sonuc: "", hataAcik: false, isimler: false });
+  };
+  const dosyaKaldir = (key) => {
+    if (inputRef.current[key]) inputRef.current[key].value = "";
+    guncelle(key, bosSatir());
+  };
+
+  const yukle = async (tip) => {
+    const s = satir[tip.key];
+    if (!s || s.durum === "yukleniyor" || !s.dosyalar.length) return false;
+    guncelle(tip.key, { durum: "yukleniyor", hata: "", sonuc: "" });
+    try {
+      const ozet = await hwYuklemeCalistir(tip, s.dosyalar);
+      if (inputRef.current[tip.key]) inputRef.current[tip.key].value = "";
+      guncelle(tip.key, { durum: "tamam", sonuc: ozet, dosyalar: [] });
+      window.dispatchEvent(new Event("dataUpdated")); // diğer ekranlar yenilensin (eski davranış)
+      return true;
+    } catch (err) {
+      console.error(`${tip.ad} UPLOAD ERROR:`, err);
+      guncelle(tip.key, { durum: "hata", hata: err.message || "Yükleme hatası" }); // seçili dosyalar korunur → tekrar dene
+      return false;
+    }
+  };
+
+  // Seçilenleri sırayla yükle: yalnız Hazır satırlar; tamamlanan tekrar çalışmaz; her satırın sonucu kendi satırında.
+  // Backend'de tipler arası zorunlu bağımlılık yok (her endpoint kendi tablosunu yazar); mevcut işlem sırası korunur,
+  // bir satır hata verirse sonrakiler durmaz. Bağımlılık gerekirse tipe `bagli: ["po"]` eklenerek burada durdurulur.
+  const secilenleriYukle = async () => {
+    if (toplu) return;
+    setToplu(true);
+    const basarisiz = new Set();
+    try {
+      for (const tip of HW_YUKLEME_TIPLERI) {
+        const s = satir[tip.key];
+        if (!s || s.durum !== "hazir") continue;
+        const engel = (tip.bagli || []).find((k) => basarisiz.has(k));
+        if (engel) { guncelle(tip.key, { durum: "hata", hata: `${HW_YUKLEME_TIPLERI.find((t) => t.key === engel)?.ad || engel} yüklemesi başarısız olduğu için atlandı.` }); basarisiz.add(tip.key); continue; }
+        const ok = await yukle(tip);
+        if (!ok) basarisiz.add(tip.key);
+      }
+    } finally { setToplu(false); }
+  };
+
+  const hazirSayisi = HW_YUKLEME_TIPLERI.filter((t) => satir[t.key]?.durum === "hazir").length;
+  const tamamSayisi = HW_YUKLEME_TIPLERI.filter((t) => satir[t.key]?.durum === "tamam").length;
+  const mesgul = toplu || HW_YUKLEME_TIPLERI.some((t) => satir[t.key]?.durum === "yukleniyor");
+
   return (
-    <div style={{ padding: "22px 28px 60px", maxWidth: 1100, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
+    <div className="hwu-wrap">
+      <div className="hwu-top">
         <div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>📥 HW Dosya Yükleme Merkezi</div>
-          <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 2 }}>eSupplier'dan indirdiğin dosyaları sırayla yükle — her kutu yalnız kendi dosyasını kabul eder.</div>
+          <div className="hwu-title">📥 HW Dosya Yükleme Merkezi</div>
+          <div className="hwu-sub">eSupplier / ISDP'den indirdiğin dosyayı ilgili satırda seç, Yükle'ye bas. Satırlar işlem sırasıyla.</div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ background: tamam === PANELLER.length ? "#dcfce7" : "#eff6ff", color: tamam === PANELLER.length ? "#166534" : "#1d4ed8", borderRadius: 999, padding: "5px 12px", fontSize: 12, fontWeight: 800 }}>
-            {tamam}/{PANELLER.length} yüklendi
-          </span>
-          <button type="button" onClick={onRejected} style={{ border: "1px solid #fecaca", background: "#fef2f2", color: "#dc2626", borderRadius: 9, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>⛔ Reddedilenleri Gör</button>
+        <div className="hwu-top-r">
+          <span className={`hwu-pill ${tamamSayisi === HW_YUKLEME_TIPLERI.length ? "tamam" : "bos"}`}>{tamamSayisi}/{HW_YUKLEME_TIPLERI.length} tamamlandı</span>
+          <button type="button" className="hwu-pri" onClick={secilenleriYukle} disabled={hazirSayisi === 0 || mesgul}
+            title={hazirSayisi ? `${hazirSayisi} satır sırayla yüklenecek` : "Önce satırlarda dosya seç"}>
+            {toplu ? "Yükleniyor…" : `Seçilen dosyaları yükle${hazirSayisi ? ` (${hazirSayisi})` : ""}`}
+          </button>
+          <button type="button" className="hwu-link" onClick={onRejected}>Reddedilen kayıtları görüntüle</button>
         </div>
       </div>
-      {PANELLER.map((p, i) => (
-        <div id={`hwup-${p.key}`} key={p.key} className="hwup-card" style={{ scrollMarginTop: 80 }}>
-          <div className="hwup-head" onClick={() => setAcik((a) => ({ ...a, [p.key]: !a[p.key] }))}>
-            <span className="hwup-no">{i + 1}</span>
-            <span className="hwup-ikon">{p.ikon}</span>
-            <div><div className="hwup-ad">{p.ad} Upload</div><div className="hwup-dosya">{p.dosya}</div></div>
-            <span className={`hwup-durum ${bitti[p.key] ? "ok" : ""}`}>{bitti[p.key] ? "✓ Yüklendi" : "Bekliyor"}</span>
-            <span className="hwup-car">{acik[p.key] ? "▲" : "▼"}</span>
-          </div>
-          {acik[p.key] && (
-            <div className="hwup-body">
-              <p.C
-                onClose={() => setAcik((a) => ({ ...a, [p.key]: false }))}
-                onUploaded={() => { setBitti((b) => ({ ...b, [p.key]: true })); window.dispatchEvent(new Event("dataUpdated")); }}
-              />
-            </div>
-          )}
+
+      <div className="hwu-panel" role="table" aria-label="HW dosya yükleme satırları">
+        <div className="hwu-hdr" role="row">
+          <span>#</span><span>Dosya türü</span><span>Dosya</span><span>İşlem</span><span>Durum</span>
         </div>
-      ))}
+        {HW_YUKLEME_TIPLERI.map((tip, i) => {
+          const s = satir[tip.key];
+          const d = HWUP_DURUM[s.durum];
+          const tekAd = s.dosyalar.length === 1 ? s.dosyalar[0].name : "";
+          const cokAd = s.dosyalar.length > 1 ? `${s.dosyalar.length} dosya seçildi` : "";
+          const bilgiAcik = bilgi === tip.key;
+          return (
+            <div id={`hwup-${tip.key}`} key={tip.key} role="row" className={`hwu-row${vurgu === tip.key ? " vurgu" : ""}`}>
+              <span className="hwu-no" role="cell">{i + 1}</span>
+              <div className="hwu-tur" role="cell">
+                <div className="hwu-ad">
+                  <span aria-hidden="true">{tip.ikon}</span> {tip.ad}
+                  <button type="button" className="hwu-ibtn" aria-expanded={bilgiAcik} aria-label={`${tip.ad} — nasıl indirilir?`} title="Nasıl indirilir?"
+                    onClick={() => setBilgi(bilgiAcik ? null : tip.key)}>i</button>
+                </div>
+                <div className="hwu-fmt">{tip.format}{tip.coklu ? " · çoklu" : ""}</div>
+              </div>
+              <div className="hwu-file" role="cell">
+                <input ref={(el) => { inputRef.current[tip.key] = el; }} type="file" accept={tip.accept} multiple={!!tip.coklu}
+                  id={`hwup-input-${tip.key}`} className="hwu-input" disabled={s.durum === "yukleniyor" || toplu}
+                  onChange={(e) => dosyaSec(tip, e.target.files)} />
+                <button type="button" className="hwu-btn" disabled={s.durum === "yukleniyor" || toplu}
+                  onClick={() => inputRef.current[tip.key]?.click()}>
+                  {s.dosyalar.length ? "Değiştir" : "Dosya seç"}
+                </button>
+                {s.dosyalar.length ? (
+                  <>
+                    <span className="hwu-name" title={s.dosyalar.map((f) => f.name).join("\n")}>
+                      {tekAd ? hwAdKisalt(tekAd) : cokAd}
+                    </span>
+                    {s.dosyalar.length > 1 && (
+                      <button type="button" className="hwu-link sm" onClick={() => guncelle(tip.key, { isimler: !s.isimler })}>{s.isimler ? "gizle" : "isimler"}</button>
+                    )}
+                    <button type="button" className="hwu-x" aria-label="Seçimi kaldır" title="Seçimi kaldır" disabled={s.durum === "yukleniyor" || toplu}
+                      onClick={() => dosyaKaldir(tip.key)}>✕</button>
+                  </>
+                ) : (
+                  <span className="hwu-name bos">{s.durum === "tamam" ? "Yüklendi — yeni dosya seçebilirsin" : "Dosya seçilmedi"}</span>
+                )}
+              </div>
+              <div className="hwu-act" role="cell">
+                <button type="button" className="hwu-pri" disabled={s.durum !== "hazir" || mesgul} onClick={() => yukle(tip)}>
+                  {s.durum === "yukleniyor" ? "Yükleniyor…" : s.durum === "hata" && s.dosyalar.length ? "Tekrar dene" : "Yükle"}
+                </button>
+              </div>
+              <div className="hwu-st" role="cell">
+                <span className={`hwu-pill ${d.cls}`}>
+                  {s.durum === "yukleniyor" && <span className="hwu-spin" aria-hidden="true" />}
+                  {s.durum === "tamam" && "✓ "}{s.durum === "hata" && "⚠ "}{d.etiket}
+                </span>
+              </div>
+
+              {s.isimler && s.dosyalar.length > 1 && (
+                <div className="hwu-note info" role="cell">{s.dosyalar.map((f) => <div key={f.name}>• {f.name}</div>)}</div>
+              )}
+              {bilgiAcik && <div className="hwu-note info" role="cell"><b>Nasıl indirilir?</b> {tip.nasil}</div>}
+              {s.durum === "tamam" && s.sonuc && <div className="hwu-note ok" role="cell">✓ {s.sonuc}</div>}
+              {s.durum === "hata" && s.hata && (
+                <div className="hwu-note err" role="cell">
+                  {s.hata.length > 140 && !s.hataAcik ? s.hata.slice(0, 140) + "… " : s.hata + " "}
+                  {s.hata.length > 140 && <button type="button" className="hwu-link sm" onClick={() => guncelle(tip.key, { hataAcik: !s.hataAcik })}>{s.hataAcik ? "kısalt" : "ayrıntı"}</button>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Alternatif akışlar: eski Fatura Item panelinin yan araçları (PDF eşleştirme, Kalem Master, manuel kalem, eşleşmiş faturalar / export) */}
+      <details className="hwu-diger">
+        <summary>Diğer yöntemler — Fatura PDF eşleştirme · Kalem Master · Manuel kalem · Eşleşmiş faturalar</summary>
+        <div className="hwu-diger-body">
+          <FinanceHwInvoiceItemsUploadInline sadeceDiger onClose={() => {}} onUploaded={() => window.dispatchEvent(new Event("dataUpdated"))} />
+        </div>
+      </details>
     </div>
   );
 }
@@ -7939,7 +8150,9 @@ function FinanceInvoiceUploadInline({ onClose, onUploaded }) {
   );
 }
 
-function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
+// sadeceDiger (12.10.2026): HW Yükleme Merkezi'nin "Diğer yöntemler" bölümünde kullanılır —
+// başlık, açıklama ve ana Invoice Line kutusu gizlenir (o iş artık kompakt satırda), yan araçlar kalır.
+function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded, sadeceDiger = false }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
@@ -8312,8 +8525,9 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
   };
 
   return (
-    <div className="entryPanel" style={{ marginBottom: "18px" }}>
+    <div className="entryPanel" style={{ marginBottom: sadeceDiger ? 0 : "18px" }}>
       <div className="entryForm">
+        {!sadeceDiger && (<>
         <div
           style={{
             display: "flex",
@@ -8401,6 +8615,7 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded }) {
           </div>
           {lineMessage && <div className="entryMessage">{lineMessage}</div>}
         </div>
+        </>)}
 
         {/* ── Eski yöntem: e-Fatura PDF eşleştirme (katlanır) ── */}
         <details
@@ -32868,19 +33083,72 @@ function App() {
         .topnav-drop.right { left:auto; right:0; }
         .topnav-drop.right::before { left:auto; right:30px; }
         .topnav-drop-user { left:auto; right:0; min-width:250px; }
-        /* HW Yükleme Merkezi */
-        .hwup-card { background:#fff; border:1px solid #e2e8f0; border-radius:14px; margin-bottom:14px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.05); }
-        .hwup-head { display:flex; align-items:center; gap:12px; padding:12px 16px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #eef2f7; user-select:none; }
-        .hwup-head:hover { background:#f1f5f9; }
-        .hwup-no { width:28px; height:28px; border-radius:50%; background:#1e3a5f; color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; }
-        .hwup-ikon { font-size:18px; }
-        .hwup-ad { font-weight:800; color:#0f172a; font-size:14px; }
-        .hwup-dosya { font-size:12px; color:#64748b; }
-        .hwup-durum { margin-left:auto; font-size:11.5px; font-weight:800; border-radius:999px; padding:3px 10px; background:#f1f5f9; color:#64748b; white-space:nowrap; }
-        .hwup-durum.ok { background:#dcfce7; color:#166534; }
-        .hwup-car { color:#94a3b8; font-size:11px; }
-        .hwup-body { padding:6px 12px 12px; }
-        .hwup-body .entryForm { box-shadow:none; border:none; margin:0; }
+        /* HW Yükleme Merkezi — kompakt tek panel (12.10.2026). Masaüstü: tablo satırları; <860px: her tip blok. */
+        .hwu-wrap { padding:16px 22px 48px; max-width:1280px; margin:0 auto; }
+        .hwu-top { display:flex; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+        .hwu-title { font-size:17px; font-weight:800; color:#0f172a; }
+        .hwu-sub { font-size:12px; color:#64748b; margin-top:2px; }
+        .hwu-top-r { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+        .hwu-panel { background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; }
+        .hwu-hdr, .hwu-row { display:grid; grid-template-columns:40px minmax(200px,1.05fr) minmax(300px,1.8fr) 118px 150px; column-gap:12px; align-items:center; padding:0 14px; }
+        .hwu-hdr { height:32px; background:#f8fafc; border-bottom:1px solid #e2e8f0; font-size:10.5px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:#64748b; }
+        .hwu-row { min-height:68px; padding-top:9px; padding-bottom:9px; row-gap:6px; border-bottom:1px solid #eef2f7; transition:background .25s; }
+        .hwu-row:last-child { border-bottom:none; }
+        .hwu-row.vurgu { background:#fffbeb; }
+        .hwu-no { width:26px; height:26px; border-radius:50%; background:#1e3a5f; color:#fff; font-weight:800; font-size:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+        .hwu-tur { min-width:0; }
+        .hwu-ad { font-weight:700; font-size:13.5px; color:#0f172a; display:flex; align-items:center; gap:6px; line-height:1.2; }
+        .hwu-fmt { font-size:11.5px; color:#64748b; margin-top:3px; font-family:ui-monospace,Menlo,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .hwu-ibtn { border:1px solid #cbd5e1; background:#fff; color:#475569; width:18px; height:18px; border-radius:50%; font-size:11px; font-weight:800; cursor:pointer; line-height:1; padding:0; font-family:Georgia,serif; font-style:italic; flex-shrink:0; }
+        .hwu-ibtn:hover { border-color:#1e3a5f; color:#1e3a5f; }
+        .hwu-ibtn[aria-expanded="true"] { background:#1e3a5f; color:#fff; border-color:#1e3a5f; }
+        .hwu-file { display:flex; align-items:center; gap:8px; min-width:0; }
+        .hwu-input { position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; pointer-events:none; }
+        .hwu-btn { border:1px solid #cbd5e1; background:#fff; color:#1e293b; border-radius:8px; padding:7px 12px; font-size:12.5px; font-weight:700; cursor:pointer; white-space:nowrap; flex-shrink:0; }
+        .hwu-btn:hover:not(:disabled) { background:#f8fafc; border-color:#94a3b8; }
+        .hwu-btn:disabled, .hwu-x:disabled { opacity:.5; cursor:not-allowed; }
+        .hwu-name { font-size:12.5px; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+        .hwu-name.bos { color:#94a3b8; }
+        .hwu-x { border:none; background:transparent; color:#94a3b8; cursor:pointer; font-size:14px; line-height:1; padding:4px 6px; border-radius:6px; flex-shrink:0; }
+        .hwu-x:hover:not(:disabled) { color:#dc2626; background:#fef2f2; }
+        .hwu-pri { border:none; background:#1e3a5f; color:#fff; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:800; cursor:pointer; white-space:nowrap; }
+        .hwu-pri:hover:not(:disabled) { background:#162d4a; }
+        .hwu-pri:disabled { background:#cbd5e1; color:#fff; cursor:not-allowed; }
+        .hwu-act .hwu-pri { width:100%; }
+        .hwu-pill { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:800; border-radius:999px; padding:4px 10px; white-space:nowrap; }
+        .hwu-pill.bos { background:#f1f5f9; color:#64748b; }
+        .hwu-pill.hazir { background:#eff6ff; color:#1d4ed8; }
+        .hwu-pill.yukleniyor { background:#fef3c7; color:#92400e; }
+        .hwu-pill.tamam { background:#dcfce7; color:#166534; }
+        .hwu-pill.hata { background:#fee2e2; color:#991b1b; }
+        .hwu-spin { display:inline-block; width:10px; height:10px; border:2px solid #d97706; border-right-color:transparent; border-radius:50%; animation:hwuspin .8s linear infinite; }
+        @keyframes hwuspin { to { transform:rotate(360deg); } }
+        .hwu-note { grid-column:2 / -1; font-size:12px; line-height:1.45; padding:6px 10px; border-radius:8px; word-break:break-word; }
+        .hwu-note.ok { background:#f0fdf4; color:#166534; }
+        .hwu-note.err { background:#fef2f2; color:#991b1b; }
+        .hwu-note.info { background:#f8fafc; color:#475569; border:1px solid #e2e8f0; }
+        .hwu-link { background:none; border:none; color:#1d4ed8; font-size:12.5px; font-weight:700; cursor:pointer; text-decoration:underline; text-underline-offset:3px; padding:0; white-space:nowrap; }
+        .hwu-link.sm { font-size:11.5px; }
+        .hwu-link:hover { color:#1e3a8a; }
+        .hwu-btn:focus-visible, .hwu-pri:focus-visible, .hwu-ibtn:focus-visible, .hwu-x:focus-visible, .hwu-link:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }
+        .hwu-diger { margin-top:14px; border:1px solid #e2e8f0; border-radius:12px; background:#fff; }
+        .hwu-diger > summary { cursor:pointer; padding:11px 14px; font-size:13px; font-weight:700; color:#475569; list-style:none; }
+        .hwu-diger > summary::before { content:"▸ "; color:#94a3b8; }
+        .hwu-diger[open] > summary::before { content:"▾ "; }
+        .hwu-diger > summary::-webkit-details-marker { display:none; }
+        .hwu-diger-body { padding:0 10px 10px; border-top:1px solid #eef2f7; }
+        .hwu-diger-body .entryForm { box-shadow:none; border:none; margin:0; }
+        @media (max-width: 860px) {
+          .hwu-wrap { padding:12px 12px 40px; }
+          .hwu-top-r { margin-left:0; width:100%; }
+          .hwu-hdr { display:none; }
+          .hwu-row { grid-template-columns:32px minmax(0,1fr); column-gap:10px; min-height:0; padding-top:12px; padding-bottom:12px; }
+          .hwu-row > .hwu-file, .hwu-row > .hwu-act, .hwu-row > .hwu-st, .hwu-row > .hwu-note { grid-column:2; }
+          .hwu-file { flex-wrap:wrap; }
+          .hwu-name { white-space:normal; word-break:break-all; }
+          .hwu-act .hwu-pri { width:auto; }
+        }
+        @media (prefers-reduced-motion: reduce) { .hwu-spin { animation:none; } .hwu-row { transition:none; } }
         .topnav-drop-user::before { left:auto; right:30px; }
         .topnav-drop-who { padding:8px 10px 10px; border-bottom:1px solid #dde3ec; margin-bottom:4px; white-space:normal; }
         .topnav-drop-who b { display:block; }
