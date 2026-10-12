@@ -4645,6 +4645,37 @@ app.get("/master/by-site", async (req, res) => {
   }
 });
 
+/* Günlük İş Girişi — saha kodu önerisi (12.10.2026, Orhan): yazılan önekle başlayan ve
+   DAHA ÖNCE İŞ GİRİŞİ YAPILMIŞ benzersiz Site ID'ler. Yalnız master_works'e bakar; PO /
+   rollout / HW listelerinde olup iş girilmemiş sahalar önerilmez. Yetki: /master/by-site ile
+   aynı (sayfanın tam kodla zaten görebildiği kayıt kümesi). Salt okuma — hiçbir şey yazmaz. */
+app.get("/master/site-suggest", async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim().toUpperCase();
+    if (q.length < 2) return res.json({ ok: true, q, rows: [] });
+    // Site ID'de geçen _ ve % LIKE jokeri sayılmasın → kaçışla, yalnız gerçek önek eşleşsin
+    const onek = q.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+    const r = await pool.query(
+      `SELECT UPPER(TRIM(m.site_code))                                   AS site_code,
+              MAX(COALESCE(NULLIF(TRIM(m.project_code), ''), ''))        AS project_code,
+              MAX(COALESCE(NULLIF(TRIM(m.site_type), ''), ''))           AS site_type,
+              COUNT(*)::int                                              AS kayit,
+              MAX(m.created_at)                                          AS son_kayit
+         FROM master_works m
+        WHERE UPPER(TRIM(COALESCE(m.site_code, ''))) LIKE $1 ESCAPE '\\'
+        GROUP BY UPPER(TRIM(m.site_code))
+        ORDER BY UPPER(TRIM(m.site_code))
+        LIMIT $2`,
+      [onek, limit],
+    );
+    res.json({ ok: true, q, rows: r.rows });
+  } catch (err) {
+    console.error("MASTER SITE SUGGEST ERROR:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /* ================== SAHA KALEM GRIDI (31.08.2026) ==================
    Günlük İş Girişi'nde tek ekranda: bizim PR talebimiz + HW'nin açtığı PO
    (requested) + aradaki fark + gerçekleşen (done/due/billed/QC/subcon).

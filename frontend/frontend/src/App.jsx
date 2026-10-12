@@ -6862,6 +6862,7 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
 
   const handleSiteSearchChange = (e) => {
     const value = e.target.value.trim().toUpperCase();
+    sahaOneriSecilen.current = ""; // kullanıcı yeniden yazıyor → öneriler tekrar açılabilir
     setSiteSearchCode(value);
 
     setForm((prev) => ({
@@ -6869,6 +6870,52 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
       site_code: value,
       site_type: detectSiteTypeFromSiteCode(value),
     }));
+  };
+
+  // Saha kodu önerisi (12.10.2026, Orhan): yazılan önekle başlayan, daha önce iş girişi yapılmış
+  // benzersiz Site ID'ler (GET /master/site-suggest — sunucuda arar, ekranda yüklü satırlarla sınırlı
+  // değil). Seçim yalnız state değiştirir, hiçbir şey kaydetmez; tam kodu elle yazmakla aynı yolu
+  // izler (siteSearchCode + form.site_code/site_type) → SahaKalemGridi o sahayı otomatik yükler.
+  const [sahaOneriListe, setSahaOneriListe] = useState([]);
+  const [sahaOneriAcik, setSahaOneriAcik] = useState(false);
+  const [sahaOneriIdx, setSahaOneriIdx] = useState(-1);   // klavye vurgusu; -1 = hiçbiri (ilk sonuç otomatik seçilmez)
+  const sahaOneriSeq = useRef(0);                          // bayat yanıt yeni yazılanı ezmesin
+  const sahaOneriSecilen = useRef("");                     // öneriden seçilen kod için liste yeniden açılmasın
+  useEffect(() => {
+    const q = String(siteSearchCode || "").trim().toUpperCase();
+    if (q.length < 2 || q === sahaOneriSecilen.current) { setSahaOneriListe([]); setSahaOneriAcik(false); setSahaOneriIdx(-1); return; }
+    const seq = ++sahaOneriSeq.current;
+    const t = setTimeout(async () => {
+      try {
+        const d = await fetchJson(`${API_BASE}/master/site-suggest?q=${encodeURIComponent(q)}`);
+        if (seq !== sahaOneriSeq.current) return; // bu arada başka harf yazıldı
+        const gorulen = new Set();
+        const liste = (d?.rows || []).filter((r) => {
+          const k = String(r.site_code || "").trim().toUpperCase();
+          if (!k || gorulen.has(k)) return false;
+          gorulen.add(k); return true;
+        });
+        setSahaOneriListe(liste); setSahaOneriAcik(liste.length > 0); setSahaOneriIdx(-1);
+      } catch {
+        if (seq === sahaOneriSeq.current) { setSahaOneriListe([]); setSahaOneriAcik(false); }
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [siteSearchCode]);
+  const sahaOneriSec = (r) => {
+    const kod = String(r?.site_code || "").trim().toUpperCase();
+    if (!kod) return;
+    sahaOneriSecilen.current = kod;
+    setSahaOneriListe([]); setSahaOneriAcik(false); setSahaOneriIdx(-1);
+    setSiteSearchCode(kod);
+    setForm((prev) => ({ ...prev, site_code: kod, site_type: detectSiteTypeFromSiteCode(kod) }));
+  };
+  const sahaOneriKlavye = (e) => {
+    if (!sahaOneriAcik || !sahaOneriListe.length) { if (e.key === "Escape") setSahaOneriAcik(false); return; }
+    if (e.key === "ArrowDown")      { e.preventDefault(); setSahaOneriIdx((i) => (i + 1) % sahaOneriListe.length); }
+    else if (e.key === "ArrowUp")   { e.preventDefault(); setSahaOneriIdx((i) => (i <= 0 ? sahaOneriListe.length - 1 : i - 1)); }
+    else if (e.key === "Enter")     { if (sahaOneriIdx >= 0) { e.preventDefault(); sahaOneriSec(sahaOneriListe[sahaOneriIdx]); } } // vurgulu yoksa seçme
+    else if (e.key === "Escape")    { e.preventDefault(); setSahaOneriAcik(false); setSahaOneriIdx(-1); }
   };
 
   // Akıllı kontrol (20.08.2026): saha yazılınca o sahanın eksik kalemleri +
@@ -7398,14 +7445,38 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
         <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:12, flexWrap:"wrap" }}>
           <div style={{ fontSize:13, fontWeight:700, color:"#64748b", letterSpacing:"0.05em", textTransform:"uppercase" }}>🔎 Saha Kodu ile Ara</div>
           <div style={{ display:"flex", gap:10, width:"100%", maxWidth:520 }}>
-            <input
-              value={siteSearchCode}
-              onChange={handleSiteSearchChange}
-              placeholder="Site ID giriniz — örn: AT8227_NS_WM"
-              style={{ flex:1, height:48, padding:"0 16px", border:"2px solid #e2e8f0", borderRadius:12, fontSize:15, outline:"none", transition:"border 0.15s", fontWeight:500 }}
-              onFocus={e=>e.currentTarget.style.border="2px solid #3b82f6"}
-              onBlur={e=>e.currentTarget.style.border="2px solid #e2e8f0"}
-            />
+            <div style={{ position:"relative", flex:1, minWidth:0 }}>
+              <input
+                value={siteSearchCode}
+                onChange={handleSiteSearchChange}
+                onKeyDown={sahaOneriKlavye}
+                placeholder="Site ID giriniz — örn: AT8227_NS_WM"
+                autoComplete="off"
+                role="combobox" aria-autocomplete="list" aria-expanded={sahaOneriAcik} aria-controls="saha-oneri-listesi"
+                aria-activedescendant={sahaOneriAcik && sahaOneriIdx >= 0 ? `saha-oneri-${sahaOneriIdx}` : undefined}
+                style={{ width:"100%", boxSizing:"border-box", height:48, padding:"0 16px", border:"2px solid #e2e8f0", borderRadius:12, fontSize:15, outline:"none", transition:"border 0.15s", fontWeight:500 }}
+                onFocus={e=>{ e.currentTarget.style.border="2px solid #3b82f6"; if (sahaOneriListe.length) setSahaOneriAcik(true); }}
+                onBlur={e=>{ e.currentTarget.style.border="2px solid #e2e8f0"; setTimeout(() => setSahaOneriAcik(false), 150); }}
+              />
+              {/* Kayıtlı saha önerileri — kutunun hemen altında, sınırlı yükseklik + kaydırma; mobilde kutu genişliğinde */}
+              {sahaOneriAcik && sahaOneriListe.length > 0 && (
+                <div id="saha-oneri-listesi" role="listbox" aria-label="Kayıtlı saha önerileri"
+                  style={{ position:"absolute", top:"calc(100% + 6px)", left:0, right:0, zIndex:60, background:"#fff", border:"1.5px solid #e2e8f0", borderRadius:12, boxShadow:"0 10px 30px rgba(15,23,42,0.14)", maxHeight:260, overflowY:"auto", overscrollBehavior:"contain", textAlign:"left" }}>
+                  <div style={{ padding:"6px 12px 4px", fontSize:10.5, fontWeight:800, letterSpacing:"0.06em", textTransform:"uppercase", color:"#94a3b8" }}>Kayıtlı sahalar · {sahaOneriListe.length}</div>
+                  {sahaOneriListe.map((r, i) => (
+                    <div key={r.site_code} id={`saha-oneri-${i}`} role="option" aria-selected={i === sahaOneriIdx}
+                      onMouseDown={(e) => { e.preventDefault(); sahaOneriSec(r); }}
+                      onMouseEnter={() => setSahaOneriIdx(i)}
+                      style={{ display:"flex", alignItems:"baseline", gap:10, padding:"9px 12px", cursor:"pointer", background: i === sahaOneriIdx ? "#eff6ff" : "transparent", borderTop: i ? "1px solid #f1f5f9" : "none" }}>
+                      <span style={{ fontWeight:800, fontSize:14, color:"#0f172a", fontFamily:"ui-monospace,Menlo,Consolas,monospace", whiteSpace:"nowrap" }}>{r.site_code}</span>
+                      <span style={{ fontSize:12, color:"#64748b", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>
+                        {[r.project_code, r.site_type, r.kayit ? `${r.kayit} kayıt` : ""].filter(Boolean).join(" · ")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <button type="button" onClick={handleOpenEntryModal} disabled={!siteSearchCode}
               style={{ height:48, padding:"0 26px", background:siteSearchCode?"linear-gradient(135deg,#1d4ed8,#4f46e5)":"#cbd5e1", border:"none", borderRadius:12, color:"#fff", fontSize:14, fontWeight:700, cursor:siteSearchCode?"pointer":"not-allowed", boxShadow:siteSearchCode?"0 4px 12px rgba(79,70,229,0.35)":"none", display:"flex", alignItems:"center", gap:7, whiteSpace:"nowrap" }}>
               📡 Veri Gir
