@@ -3934,7 +3934,7 @@ function OrgSemasiPanel({ currentUser }) {
     const url = URL.createObjectURL(blob);
     const img = new Image();
     img.onload = () => {
-      const c = document.createElement("canvas"); c.width = 1250 * 2; c.height = 910 * 2;
+      const c = document.createElement("canvas"); c.width = 1250 * 2; c.height = 900 * 2; // viewBox ile aynı oran (ortak yönetim + 3 bölge + 9 ekip kesilmez)
       const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
       ctx.drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);
@@ -3943,9 +3943,39 @@ function OrgSemasiPanel({ currentUser }) {
     };
     img.src = url;
   };
-  const bolgeEkipleri = (anahtar) => ekipler.filter(e => String(e.bolge || "").toLocaleUpperCase("tr-TR").includes(anahtar));
+  // 12.10.2026 (Orhan): ekipler pasife alınabilir (aktif=false) — şema, kartlar ve Excel yalnız aktifleri gösterir;
+  // pasif ekiplerin personel bağları (ekip_bilgisi) korunur. Şablon ekipler sablon_kodu ile tekildir.
+  const aktifEkipler = ekipler.filter(e => e.aktif !== false);
+  const bolgeEkipleri = (anahtar) => aktifEkipler.filter(e => String(e.bolge || "").toLocaleUpperCase("tr-TR").includes(anahtar));
+  const izmirEkipleri = () => { const a = bolgeEkipleri("İZM"); return a.concat(bolgeEkipleri("IZM").filter(e => !a.includes(e))); };
+  // Kutu adı: "Firma — Ekip" (şablonlar firma + ekip adıyla gösterilir)
+  const ekipTamAd = (e) => e.taseron_adi ? `${e.taseron_adi} — ${ekipAdi(e)}` : ekipAdi(e);
+  const ekipKisi = (e) => ekipUyeleri(e.ekip_no).length;
+  const ekipDurumYazi = (e) => { const n = ekipKisi(e); return n ? `${n} kişi` : "Personel henüz atanmadı"; };
+  // Yönetim kadrosu — şema, PNG ve Excel aynı listeden. Ankara ve Bursa ORTAK yönetim: Nurcan Kuş + Fırat Kenan Ongun
+  // tek kayıt, iki bölge (ayrı personel kaydı açılmaz).
+  const YONETIM = {
+    izmir: { mudur: { ad: "SERDAR ALTINOVA", tel: "5321619481", gorev: "İzmir Bölge Müdürü" }, supervizor: { ad: "KASIM EVİN", tel: "5321531797", gorev: "İzmir Süpervizörü" } },
+    ortak: { mudur: { ad: "NURCAN KUŞ", tel: "5392596108", gorev: "Ankara & Bursa Bölge Müdürü" }, supervizor: { ad: "FIRAT KENAN ONGUN", tel: "5322127865", gorev: "Ankara & Bursa Süpervizörü" } },
+  };
+  const bolgeYonetim = (bolge) => (/İZM|IZM/i.test(bolge || "") ? YONETIM.izmir : YONETIM.ortak);
+  // Şablon kurulumu: 9 personelsiz ekip (İzmir 4 · Ankara 2 · Bursa 3); backend sablon_kodu ile tekil tutar
+  const [sablonMsg, setSablonMsg] = useState("");
+  const sablonKur = async (eskileriPasifle) => {
+    const uyari = `9 ekip şablonu kurulacak (İzmir 4 · Ankara 2 · Bursa 3). Var olan şablonlar güncellenir, mükerrer oluşmaz; personel taşınmaz.` +
+      (eskileriPasifle ? `\n\nŞablon dışı mevcut ekipler PASİFE alınır (silinmez, personel bağları ve geçmiş işler korunur).` : "") + `\n\nDevam edilsin mi?`;
+    if (!window.confirm(uyari)) return;
+    try {
+      setSablonMsg("Kuruluyor…");
+      const r = await fetch(`${API_BASE}/hr/ekipler/sablon-kur`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token") || ""}` }, body: JSON.stringify({ eskileri_pasifle: !!eskileriPasifle }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Şablon kurulamadı");
+      setSablonMsg(`✅ ${d.eklenen} yeni şablon, ${d.guncellenen} güncellendi, ${d.pasiflenen} ekip pasife alındı`);
+      loadOrgData();
+    } catch (e) { setSablonMsg(`❌ ${e.message}`); }
+  };
 
-  const NAVY = "#1e3a5f", BLUE = "#2563eb", IZMIR = "#0c4a6e", ANKARA = "#7c2d12";
+  const NAVY = "#1e3a5f", BLUE = "#2563eb", IZMIR = "#0c4a6e", ANKARA = "#7c2d12", BURSA = "#14532d";
   const Box = ({ x, y, w, h, fill, stroke, nameText, title, sub, light, dashed, nameSize }) => (
     <g>
       <rect x={x} y={y} width={w} height={h} rx="10" fill={light ? "#fff" : fill} stroke={stroke || fill} strokeWidth="2" strokeDasharray={dashed ? "6 4" : "0"} filter="url(#gölge)" />
@@ -3966,98 +3996,92 @@ function OrgSemasiPanel({ currentUser }) {
       alignment: { horizontal: "center", vertical: "center", wrapText: true },
       border: { top: border("1E3A5F"), bottom: border("1E3A5F"), left: border("1E3A5F"), right: border("1E3A5F") },
     });
-    const wsData = Array.from({ length: 24 }, () => Array(COLS).fill(""));
+    const wsData = Array.from({ length: 30 }, () => Array(COLS).fill(""));
     const merges = [];
     const ws = {};
+    const kutuSatirlari = new Set(); // kutu içeren satırlar yüksek yazılır
     const setBox = (r1, c1, r2, c2, text, fill, font, sz) => {
       wsData[r1][c1] = text;
       merges.push({ s: { r: r1, c: c1 }, e: { r: r2, c: c2 } });
-      for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) {
+      for (let r = r1; r <= r2; r++) { kutuSatirlari.add(r); for (let c = c1; c <= c2; c++) {
         const a = XLSXStyle.utils.encode_cell({ r, c });
         ws[`__style__${a}`] = boxS(fill, font, sz);
-      }
+      } }
     };
-    // Sheet 1 — Organization Chart
-    setBox(1, 0, 1, 12, "ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart", "1E3A5F", "FFFFFF", 14);
+    // Sheet 1 — Organization Chart (12.10.2026 düzeni: üst yönetim → İzmir | Ankara & Bursa ortak yönetim → bölgeler → ekipler)
+    const izmX = izmirEkipleri(), ankX = bolgeEkipleri("ANK"), burX = bolgeEkipleri("BUR");
+    setBox(1, 0, 1, 12, "ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart · İzmir · Ankara · Bursa", "1E3A5F", "FFFFFF", 14);
     setBox(3, 5, 4, 7, "DÜZGÜN ŞİMŞEK\nProject Director", "1E3A5F", "FFFFFF");
     setBox(6, 5, 7, 7, "ORHAN BEDİR\nProject Manager", "2563EB", "FFFFFF");
     setBox(9, 0, 10, 2, "HATİCE OMUŞ\nIFIS · Survey · BTK · Atlas", "F1F5F9", "0F172A", 11);
     setBox(9, 3, 10, 5, "ERENCAN ŞİMŞEK\nEHS Officer", "F1F5F9", "0F172A", 11);
     setBox(9, 7, 10, 9, "TUĞÇE YELMEN\nInvoicing & Acceptance Coordinator", "F1F5F9", "0F172A", 11);
     setBox(9, 10, 10, 12, "EMRE AKDEĞİRMEN\nWarehouse & Inventory Coordinator", "F1F5F9", "0F172A", 11);
-    setBox(12, 0, 12, 5, "İZMİR REGION", "0C4A6E", "FFFFFF");
-    setBox(12, 7, 12, 12, "ANKARA REGION", "7C2D12", "FFFFFF");
-    setBox(13, 1, 14, 4, "SERDAR ALTINOVA\nİzmir Regional Manager", "0369A1", "FFFFFF", 11);
-    setBox(13, 8, 14, 11, "NURCAN KUŞ\nAnkara Regional Manager", "B45309", "FFFFFF", 11);
-    setBox(16, 1, 17, 4, "KASIM EVİN\nSite Supervisor (İzmir · Ankara support)", "E0F2FE", "0C4A6E", 11);
-    setBox(16, 8, 17, 11, "Site Support: KASIM EVİN\n(İzmir'den destek)", "FEF3C7", "7C2D12", 10);
-    // Ekip kutuları canlı ekip listesinden: ad + In-house/Subcon + plaka
-    const xlEkip = (list, c0, c1) => {
-      if (!list.length) return;
-      const gen = Math.max(1, Math.floor((c1 - c0 + 1) / list.length));
-      list.forEach((e, i) => {
-        const cc = c0 + i * gen; if (cc > c1) return;
-        setBox(19, cc, 20, Math.min(c1, cc + gen - 1), `${ekipAdi(e)}\n${ekipAlt(e)}`, e.taseron_adi ? "FEF3C7" : "F8FAFC", "0F172A", 9);
-      });
-    };
-    xlEkip(bolgeEkipleri("İZM").concat(bolgeEkipleri("IZM").filter(e => !bolgeEkipleri("İZM").includes(e))), 0, 5);
-    xlEkip(bolgeEkipleri("ANK"), 7, 12);
-    setBox(22, 0, 22, 12, `Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · ${today}`, "F1F5F9", "64748B", 9);
+    setBox(12, 0, 12, 4, `İZMİR REGION · ${izmX.length} EKİP`, "0C4A6E", "FFFFFF");
+    setBox(12, 6, 12, 12, `ANKARA & BURSA — ORTAK YÖNETİM · ${ankX.length + burX.length} EKİP`, "1E3A5F", "FFFFFF");
+    setBox(13, 1, 14, 3, `${YONETIM.izmir.mudur.ad}\nİzmir Bölge Müdürü`, "0369A1", "FFFFFF", 11);
+    setBox(13, 8, 14, 10, `${YONETIM.ortak.mudur.ad}\nAnkara & Bursa Bölge Müdürü`, "1E3A5F", "FFFFFF", 11);
+    setBox(16, 1, 17, 3, `${YONETIM.izmir.supervizor.ad}\nİzmir Süpervizörü`, "E0F2FE", "0C4A6E", 11);
+    setBox(16, 8, 17, 10, `${YONETIM.ortak.supervizor.ad}\nAnkara & Bursa Süpervizörü`, "E2E8F0", "1E3A5F", 11);
+    setBox(19, 6, 19, 8, `ANKARA · ${ankX.length} EKİP`, "7C2D12", "FFFFFF", 10);
+    setBox(19, 10, 19, 12, `BURSA · ${burX.length} EKİP`, "14532D", "FFFFFF", 10);
+    // Ekip kutuları: "Firma — Ekip" + kişi sayısı ya da "Personel henüz atanmadı" (+plaka); 2 sütunlu ızgara
+    const xlEkipKutu = (e, r, c1, c2, fill, font) => setBox(r, c1, r + 1, c2, `${ekipTamAd(e)}\n${ekipDurumYazi(e)}${ekipPlaka(e) ? ` · ${ekipPlaka(e)}` : ""}`, fill, font, 9);
+    izmX.forEach((e, i) => xlEkipKutu(e, 19 + Math.floor(i / 2) * 3, i % 2 === 0 ? 0 : 3, i % 2 === 0 ? 1 : 4, "F8FAFC", "0C4A6E"));
+    ankX.forEach((e, i) => xlEkipKutu(e, 21 + Math.floor(i / 2) * 3, i % 2 === 0 ? 6 : 8, i % 2 === 0 ? 6 : 8, "FFF7ED", "7C2D12"));
+    burX.forEach((e, i) => { const son = i === burX.length - 1 && burX.length % 2 === 1; const c = son ? 11 : (i % 2 === 0 ? 10 : 12); xlEkipKutu(e, 21 + Math.floor(i / 2) * 3, c, c, "F0FDF4", "14532D"); });
+    setBox(28, 0, 28, 12, `Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · ${today}`, "F1F5F9", "64748B", 9);
     const ws1 = XLSXStyle.utils.aoa_to_sheet(wsData);
     ws1["!merges"] = merges;
-    ws1["!cols"] = Array(COLS).fill({ wch: 13 });
-    ws1["!rows"] = wsData.map((_, i) => ({ hpt: [3,4,6,7,9,10,13,14,16,17,19,20].includes(i) ? 24 : (i === 1 ? 30 : 14) }));
+    ws1["!cols"] = Array(COLS).fill({ wch: 14 });
+    ws1["!rows"] = wsData.map((_, i) => ({ hpt: i === 1 ? 30 : (kutuSatirlari.has(i) ? 24 : 12) }));
     Object.keys(ws).forEach(k => { const a = k.replace("__style__", ""); if (!ws1[a]) ws1[a] = { v: "", t: "s" }; ws1[a].s = ws[k]; });
-    // Sheet 2 — Details: Huawei'ye giden RESMİ eleman listesi (Team 7 = Bursa).
-    // TC kimlik no'ları sistemdeki personel kayıtlarından isimle eşlenir.
-    const ORG_DETAILS = [
-      ["",       "DÜZGÜN ŞİMŞEK",            "Ankara-İzmir Bölge", "5062939538", "Proje Direktörü"],
-      ["",       "ORHAN BEDİR",              "Ankara-İzmir Bölge", "5497419222", "Proje Müdürü"],
-      ["",       "NURCAN KUŞ",               "Ankara Bölge",       "5392596108", "Rollout Müdürü"],
-      ["",       "SERDAR ALTINOVA",          "İzmir Bölge",        "5321619481", "Rollout Müdürü"],
-      ["",       "HATİCE OMUŞ",              "Ankara-İzmir Bölge", "5525473667", "BTK&IFIS Birim Müdürü"],
-      ["",       "EMRE AKDEĞİRMEN",          "Ankara-İzmir Bölge", "5426166144", "Envanter&Depo Sorumlusu"],
-      ["",       "TUĞÇE YELMEN",             "Ankara-İzmir Bölge", "5330165678", "Muhasebe"],
-      ["Team 1", "KASIM EVİN",               "Ankara Bölge",       "5321531797", "Süpervizör"],
-      ["Team 1", "MEHMET BAĞCI",             "Ankara Bölge",       "5451445994", "Montaj personeli"],
-      ["Team 2", "FIRAT KENAN ONGUN",        "İzmir Bölge",        "5322127865", "Ekip Şefi"],
-      ["Team 2", "YİĞİT RAHMİ KARAGÖZOĞLU",  "İzmir Bölge",        "5058183583", "Montaj personeli"],
-      ["Team 2", "OĞUZHAN KÖKSAL",           "İzmir Bölge",        "5301295058", "Montaj personeli"],
-      ["Team 3", "SÜLEYMAN BALCI",           "İzmir Bölge",        "5393893166", "Ekip Şefi"],
-      ["Team 3", "MUSA GITTIK",              "İzmir Bölge",        "5433390489", "Montaj personeli"],
-      ["Team 3", "BEKİR ELELER",             "İzmir Bölge",        "5458868588", "Montaj personeli"],
-      ["Team 4", "MUSA ÇAKAR",               "İzmir Bölge",        "5062340828", "Ekip Şefi"],
-      ["Team 4", "EROL KAVLAK",              "İzmir Bölge",        "5529358896", "Montaj personeli"],
-      ["Team 4", "SEZGİN ÖZKAN",             "İzmir Bölge",        "5548860606", "Montaj personeli"],
-      ["Team 5", "İLYAS AYAN",               "Ankara Bölge",       "5510807226", "Ekip Şefi"],
-      ["Team 5", "MEHMET KİBAR",             "Ankara Bölge",       "5442756339", "Montaj personeli"],
-      ["Team 5", "BAHADIR ÇOBAN",            "Ankara Bölge",       "5300156837", "Montaj personeli"],
-      ["Team 6", "BEYAZIT BESTAMİ DEDEOĞLU", "Ankara Bölge",       "5343913924", "Ekip Şefi"],
-      ["Team 6", "AHMET METLİ",              "Ankara Bölge",       "5399211979", "Montaj personeli"],
-      ["Team 6", "YUNUS EMRE DOĞAN",         "Ankara Bölge",       "5349314257", "Montaj personeli"],
-      ["Team 7", "ENDER TEKE",               "Bursa Bölge",        "5442560309", "Ekip Şefi"],
-      ["Team 7", "SELÇUK FIRAT",             "Bursa Bölge",        "5350770889", "Montaj personeli"],
+    // Sheet 2 — Details (12.10.2026): CANLI veriden — üst yönetim + bölge yönetimi (sabit kadro) + aktif ekipler ve
+    // sistemdeki üyeleri. Personel atanmamış ekipte ad/görev/tel BOŞ bırakılır (uydurulmaz). Ankara ve Bursa
+    // satırlarında müdür Nurcan Kuş, süpervizör Fırat Kenan Ongun (tek kayıt, iki bölge).
+    const SIMSEK = "ŞİMŞEK HABERLEŞME";
+    const UST_YONETIM = [
+      ["DÜZGÜN ŞİMŞEK",   "Proje Direktörü",         "5062939538"],
+      ["ORHAN BEDİR",     "Proje Müdürü",            "5497419222"],
+      ["HATİCE OMUŞ",     "BTK&IFIS Birim Müdürü",   "5525473667"],
+      ["ERENCAN ŞİMŞEK",  "İSG Koordinatörü",        ""],
+      ["TUĞÇE YELMEN",    "Muhasebe",                "5330165678"],
+      ["EMRE AKDEĞİRMEN", "Envanter&Depo Sorumlusu", "5426166144"],
     ];
-    const dHead = ["Team List", "Adı Soyadı", "Görevi", "Bölge", "Tel NO", "Firma Adı"];
-    const dData = [dHead, ...ORG_DETAILS.map(([team, ad, bolge, tel, gorev]) =>
-      [team, ad, gorev, bolge, tel, "ŞİMŞEK HABERLEŞME"])];
+    const dHead = ["Team List", "Adı Soyadı", "Görevi", "Bölge", "Tel NO", "Firma Adı", "Bölge Müdürü", "Süpervizör"];
+    const dRows = [];
+    UST_YONETIM.forEach(([ad, gorev, tel]) => dRows.push(["", ad, gorev, "İzmir-Ankara-Bursa", tel, SIMSEK, "", ""]));
+    dRows.push(["", YONETIM.izmir.mudur.ad, "Bölge Müdürü", "İzmir Bölge", YONETIM.izmir.mudur.tel, SIMSEK, "", ""]);
+    dRows.push(["", YONETIM.izmir.supervizor.ad, "Süpervizör", "İzmir Bölge", YONETIM.izmir.supervizor.tel, SIMSEK, YONETIM.izmir.mudur.ad, ""]);
+    dRows.push(["", YONETIM.ortak.mudur.ad, "Bölge Müdürü", "Ankara & Bursa Bölge", YONETIM.ortak.mudur.tel, SIMSEK, "", ""]);
+    dRows.push(["", YONETIM.ortak.supervizor.ad, "Süpervizör", "Ankara & Bursa Bölge", YONETIM.ortak.supervizor.tel, SIMSEK, YONETIM.ortak.mudur.ad, ""]);
+    const bolgeSira = (b) => (/İZM|IZM/i.test(b || "") ? 1 : /ANK/i.test(b || "") ? 2 : /BUR/i.test(b || "") ? 3 : 9);
+    [...aktifEkipler].sort((a, b) => bolgeSira(a.bolge) - bolgeSira(b.bolge) || Number(a.ekip_no) - Number(b.ekip_no)).forEach(e => {
+      const y = bolgeYonetim(e.bolge), firma = e.taseron_adi || SIMSEK, bolge = e.bolge ? `${e.bolge} Bölge` : "";
+      const uyeler = ekipUyeleri(e.ekip_no);
+      if (!uyeler.length) dRows.push([ekipTamAd(e), "", "", bolge, "", firma, y.mudur.ad, y.supervizor.ad]);
+      uyeler.forEach(p => dRows.push([ekipTamAd(e), p.ad_soyad || "", p.unvan || "", bolge, p.telefon || "", firma, y.mudur.ad, y.supervizor.ad]));
+    });
+    const dData = [dHead, ...dRows];
     const ws2 = XLSXStyle.utils.aoa_to_sheet(dData);
-    ws2["!cols"] = [{ wch: 10 }, { wch: 30 }, { wch: 26 }, { wch: 18 }, { wch: 13 }, { wch: 22 }];
+    ws2["!cols"] = [{ wch: 24 }, { wch: 30 }, { wch: 24 }, { wch: 20 }, { wch: 13 }, { wch: 20 }, { wch: 22 }, { wch: 22 }];
     ws2["!rows"] = dData.map((_, i) => ({ hpt: i === 0 ? 24 : 18 }));
     dHead.forEach((_, ci) => { const a = XLSXStyle.utils.encode_cell({ r: 0, c: ci }); if (ws2[a]) ws2[a].s = boxS("1E3A5F", "FFFFFF", 11); });
-    ORG_DETAILS.forEach((_, ri) => dHead.forEach((__, ci) => {
+    dRows.forEach((_, ri) => dHead.forEach((__, ci) => {
       const a = XLSXStyle.utils.encode_cell({ r: ri + 1, c: ci }); if (!ws2[a]) return;
-      ws2[a].s = { fill: { patternType: "solid", fgColor: { rgb: ri % 2 === 0 ? "F0F6FF" : "FFFFFF" } }, font: { sz: 10, name: "Arial" }, alignment: { horizontal: [0, 4].includes(ci) ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
+      ws2[a].s = { fill: { patternType: "solid", fgColor: { rgb: ri % 2 === 0 ? "F0F6FF" : "FFFFFF" } }, font: { sz: 10, name: "Arial", bold: ci === 0 }, alignment: { horizontal: [4].includes(ci) ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
     }));
     ws2["!freeze"] = { xSplit: 0, ySplit: 1 };
 
     // 3. sayfa: EKİPLER — canlı veriden (kim hangi ekipte, hangi araçla)
     const eHead = ["Ekip", "Bölge", "Adı Soyadı", "Ünvanı", "Tel No", "Araç Plaka"];
     const eRows = [];
-    ekipler.forEach(e => {
+    // Aktif ekipler önce; pasif ekipler (eski kayıtlar, bağları korunur) "(pasif)" etiketiyle altta
+    [...aktifEkipler, ...ekipler.filter(e => e.aktif === false)].forEach(e => {
+      const etiket = ekipTamAd(e) + (e.aktif === false ? " (pasif)" : "");
       const uyeler = ekipUyeleri(e.ekip_no);
-      if (!uyeler.length) { eRows.push([ekipAdi(e), e.bolge || "", "— üye atanmadı —", "", "", ""]); return; }
-      uyeler.forEach(p => eRows.push([ekipAdi(e), e.bolge || "", p.ad_soyad, p.unvan || "", p.telefon || "", p.ekip_arac_plaka || ""]));
+      if (!uyeler.length) { eRows.push([etiket, e.bolge || "", e.aktif === false ? "" : "— personel henüz atanmadı —", "", "", ""]); return; }
+      uyeler.forEach(p => eRows.push([etiket, e.bolge || "", p.ad_soyad, p.unvan || "", p.telefon || "", p.ekip_arac_plaka || ""]));
     });
     const atanmamis = personelList.filter(p => p.aktif && !ayrildi(p) && !String(p.ekip_bilgisi || "").trim());
     atanmamis.forEach(p => eRows.push(["— Ekipsiz —", "", p.ad_soyad, p.unvan || "", p.telefon || "", ""]));
@@ -4100,7 +4124,7 @@ function OrgSemasiPanel({ currentUser }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "18px" }}>
         <div>
           <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🏢 Organizasyon Şeması</h2>
-          <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>ŞİMŞEK HABERLEŞME — TT Wireless Project · İzmir & Ankara</div>
+          <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>ŞİMŞEK HABERLEŞME — TT Wireless Project · İzmir · Ankara · Bursa</div>
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
           {canEdit && (
@@ -4213,17 +4237,25 @@ function OrgSemasiPanel({ currentUser }) {
             </div>
             <div style={{ overflowY: "auto", padding: "16px 20px" }}>
               {/* Ekipler: no + plaka + bölge */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <div style={{ fontSize: "13px", fontWeight: 800, color: "#1e3a5f" }}>EKİPLER</div>
-                <button onClick={() => {
-                  const next = ekipler.length ? Math.max(...ekipler.map(x => Number(x.ekip_no))) + 1 : 1;
-                  saveEkip({ ekip_no: next, plaka: "", bolge: "" });
-                }} style={{ padding: "5px 12px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>＋ Yeni Ekip</button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", gap: "8px", flexWrap: "wrap" }}>
+                <div style={{ fontSize: "13px", fontWeight: 800, color: "#1e3a5f" }}>EKİPLER <span style={{ fontWeight: 500, fontSize: "11px", color: "#94a3b8" }}>{aktifEkipler.length} aktif · {ekipler.length - aktifEkipler.length} pasif</span></div>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  {/* Şablon kurulumu (12.10.2026): 9 personelsiz ekip — İzmir 4 · Ankara 2 · Bursa 3; tekrar basmak mükerrer üretmez */}
+                  <button onClick={() => sablonKur(false)} title="9 ekip şablonunu kur/güncelle (mevcut ekiplere dokunmaz)"
+                    style={{ padding: "5px 12px", background: "#fff", color: "#1e3a5f", border: "1.5px solid #1e3a5f", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>📐 Şablonları Kur (9)</button>
+                  <button onClick={() => sablonKur(true)} title="9 şablonu kur ve şablon dışı eski ekipleri pasife al (silmez, personel bağları korunur)"
+                    style={{ padding: "5px 12px", background: "#fff7ed", color: "#9a3412", border: "1.5px solid #fdba74", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>📐 Kur + eskileri pasifle</button>
+                  <button onClick={() => {
+                    const next = ekipler.length ? Math.max(...ekipler.map(x => Number(x.ekip_no))) + 1 : 1;
+                    saveEkip({ ekip_no: next, plaka: "", bolge: "" });
+                  }} style={{ padding: "5px 12px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>＋ Yeni Ekip</button>
+                </div>
               </div>
+              {sablonMsg && <div style={{ fontSize: "12px", fontWeight: 600, color: sablonMsg.startsWith("❌") ? "#991b1b" : "#166534", marginBottom: "8px" }}>{sablonMsg}</div>}
               <div style={{ display: "grid", gap: "6px", marginBottom: "18px" }}>
-                {ekipler.map(e => (
-                  <div key={e.ekip_no} style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr 110px 1fr auto", gap: "8px", alignItems: "center", background: "#f8fafc", borderRadius: "10px", padding: "7px 10px" }}>
-                    <span style={{ fontWeight: 800, color: "#1e3a5f", fontSize: "13px" }}>Ekip {e.ekip_no}</span>
+                {[...aktifEkipler, ...ekipler.filter(e => e.aktif === false)].map(e => (
+                  <div key={e.ekip_no} style={{ display: "grid", gridTemplateColumns: "112px 1fr 1fr 110px 1fr auto auto", gap: "8px", alignItems: "center", background: e.aktif === false ? "#f1f5f9" : "#f8fafc", borderRadius: "10px", padding: "7px 10px", opacity: e.aktif === false ? 0.6 : 1 }}>
+                    <span style={{ fontWeight: 800, color: "#1e3a5f", fontSize: "12.5px", lineHeight: 1.2 }}>Ekip {e.ekip_no}{e.sablon_kodu ? <span title={`Şablon ${e.sablon_kodu}`} style={{ marginLeft: 4, fontSize: "10px", color: "#64748b" }}>📐</span> : null}{e.aktif === false && <span style={{ display: "block", fontSize: "10px", color: "#9a3412" }}>pasif</span>}</span>
                     <input value={e.ad || ""} placeholder={`Ekip adı (örn. RF Ekip ${e.ekip_no}, ENH Ekibi)`}
                       onChange={ev => setEkipler(list => list.map(x => x.ekip_no === e.ekip_no ? { ...x, ad: ev.target.value } : x))}
                       onBlur={ev => saveEkip({ ...e, ad: ev.target.value })}
@@ -4243,8 +4275,11 @@ function OrgSemasiPanel({ currentUser }) {
                       {["İzmir","Ankara","Bursa","Antalya"].map(bl => <option key={bl} value={bl}>{bl}</option>)}
                       {e.bolge && !["İzmir","Ankara","Bursa","Antalya"].includes(e.bolge) && <option value={e.bolge}>{e.bolge}</option>}
                     </select>
+                    {/* Pasife al / aktif et — silmek yerine önerilir (personel bağları ve geçmiş işler korunur) */}
+                    <button onClick={() => saveEkip({ ...e, aktif: e.aktif === false })} title={e.aktif === false ? "Ekibi yeniden aktif et" : "Ekibi pasife al (silmez; şemadan kalkar, bağlar korunur)"}
+                      style={{ background: e.aktif === false ? "#dcfce7" : "#fff", border: `1px solid ${e.aktif === false ? "#86efac" : "#cbd5e1"}`, color: e.aktif === false ? "#166534" : "#475569", borderRadius: "8px", padding: "5px 9px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>{e.aktif === false ? "Aktif et" : "Pasife al"}</button>
                     <button onClick={async () => {
-                      if (!window.confirm(`Ekip ${e.ekip_no} silinsin mi? Üyelerin ataması kaldırılır.`)) return;
+                      if (!window.confirm(`Ekip ${e.ekip_no} KALICI olarak silinsin mi? Üyelerin ataması kaldırılır.\n\nİpucu: geçmişi korumak için "Pasife al" tercih edin.`)) return;
                       await fetch(`${API_BASE}/hr/ekipler/${e.ekip_no}`, { method: "DELETE" });
                       loadOrgData();
                     }} style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", padding: "5px 10px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer" }}>🗑</button>
@@ -4264,7 +4299,8 @@ function OrgSemasiPanel({ currentUser }) {
                     <select value={String(p.ekip_bilgisi || "")} onChange={ev => setPersonelEkip(p.id, ev.target.value)}
                       style={{ padding: "5px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px", background: p.ekip_bilgisi ? "#eff6ff" : "#fff" }}>
                       <option value="">— Ekip yok —</option>
-                      {ekipler.map(e => <option key={e.ekip_no} value={String(e.ekip_no)}>Ekip {e.ekip_no}{e.plaka ? ` (${e.plaka})` : ""}</option>)}
+                      {aktifEkipler.map(e => <option key={e.ekip_no} value={String(e.ekip_no)}>{ekipTamAd(e)}{e.bolge ? ` · ${e.bolge}` : ""}{e.plaka ? ` (${e.plaka})` : ""}</option>)}
+                      {ekipler.filter(e => e.aktif === false).map(e => <option key={e.ekip_no} value={String(e.ekip_no)}>(pasif) {ekipTamAd(e)}{e.bolge ? ` · ${e.bolge}` : ""}</option>)}
                     </select>
                   </div>
                 ))}
@@ -4275,7 +4311,7 @@ function OrgSemasiPanel({ currentUser }) {
       )}
 
       <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "18px", overflowX: "auto" }}>
-        <svg ref={svgRef} viewBox="0 0 1250 910" width="1250" height="910" style={{ width: "100%", height: "auto", minWidth: "900px", display: "block" }} xmlns="http://www.w3.org/2000/svg">
+        <svg ref={svgRef} viewBox="0 0 1250 900" width="1250" height="900" style={{ width: "100%", height: "auto", minWidth: "900px", display: "block" }} xmlns="http://www.w3.org/2000/svg">
           <defs>
             <filter id="gölge" x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#0f172a" floodOpacity="0.12" />
@@ -4292,92 +4328,102 @@ function OrgSemasiPanel({ currentUser }) {
           <Box x={360} y={276} w={250} h={64} light stroke="#64748b" nameText="ERENCAN ŞİMŞEK" title="EHS Officer" />
           <Box x={640} y={276} w={250} h={64} light stroke="#64748b" nameText="TUĞÇE YELMEN" title="Invoicing & Acceptance Coord." />
           <Box x={920} y={276} w={250} h={64} light stroke="#64748b" nameText="EMRE AKDEĞİRMEN" title="Warehouse & Inventory Coord." />
-          {/* PM → bölgeler */}
-          <L d="M625 340 V368 M330 368 H920 M330 368 V396 M920 368 V396" />
-          {/* İZMİR bloğu */}
-          <rect x={40} y={396} width={580} height={492} rx="14" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
-          <rect x={40} y={396} width={580} height={38} rx="14" fill={IZMIR} />
-          <rect x={40} y={420} width={580} height={14} fill={IZMIR} />
-          <text x={330} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">İZMİR REGION</text>
-          <Box x={205} y={456} w={250} h={72} fill="#0369a1" nameText="SERDAR ALTINOVA" title="İzmir Regional Manager" />
-          <L d="M330 528 V560" />
-          <Box x={205} y={560} w={250} h={64} light stroke="#0369a1" nameText="KASIM EVİN" title="Site Supervisor · İzmir (Ankara destek)" />
-          <L d="M330 624 V660" />
+          {/* PM → İzmir yönetimi (x=230) ve Ankara–Bursa ortak yönetimi (x=825) — 12.10.2026 düzeni */}
+          <L d="M625 340 V368 M230 368 H825 M230 368 V396 M825 368 V396" />
           {(() => {
-            const list = bolgeEkipleri("İZM").concat(bolgeEkipleri("IZM").filter(e => !bolgeEkipleri("İZM").includes(e)));
-            if (!list.length) return null;
-            const W = Math.min(160, Math.floor(540 / list.length) - 12), H = 72, y = 690;
-            const toplamW = list.length * (W + 20) - 20;
-            const bas = 330 - toplamW / 2;
+            // Ekip kutusu: "Firma — Ekip", altında kişi sayısı ya da "Personel henüz atanmadı", varsa plaka
+            const W = 150, H = 72;
+            const EkipKutu = ({ e, x, y, stroke }) => (
+              <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
+                <Box x={x} y={y} w={W} h={H} light stroke={stroke} nameText={ekipTamAd(e)} title={ekipDurumYazi(e)} sub={ekipPlaka(e) || undefined} nameSize={ekipTamAd(e).length > 16 ? 11.5 : 12.5} />
+              </g>
+            );
+            // Ekipleri 2 sütuna yerleştir (2×2 / 2+1); merkez cx, ilk satır y0, satır aralığı 100
+            const Izgara = ({ list, cx, y0, stroke, ustY }) => {
+              if (!list.length) return <text x={cx} y={y0 + 30} textAnchor="middle" fontSize="11.5" fill="#94a3b8" fontFamily="Arial">Ekip tanımlı değil</text>;
+              const n = list.length, solX = cx - 85, sagX = cx + 85, satir = Math.ceil(n / 2);
+              const sonY = y0 + (satir - 1) * 100;
+              const tek = n % 2 === 1;                                   // son satırda tek kutu → ortalanır
+              const ciftSonY = tek ? (satir > 1 ? sonY - 100 : null) : sonY; // sol/sağ sütunun indiği en alt satır
+              const yollar = [`M${cx} ${ustY} V${ustY + 8}`];
+              if (ciftSonY != null) yollar.push(`M${solX} ${ustY + 8} H${sagX} M${solX} ${ustY + 8} V${ciftSonY} M${sagX} ${ustY + 8} V${ciftSonY}`);
+              if (tek) yollar.push(`M${cx} ${ustY + 8} V${sonY}`);     // ortadaki kutu: sütunlar arası boşluktan iner
+              return (
+                <g>
+                  <L d={yollar.join(" ")} />
+                  {list.map((e, i) => {
+                    const satirNo = Math.floor(i / 2), sonSatir = satirNo === satir - 1;
+                    const x = (tek && sonSatir) ? cx - 75 : (i % 2 === 0 ? solX - 75 : sagX - 75);
+                    return <EkipKutu key={e.ekip_no} e={e} x={x} y={y0 + satirNo * 100} stroke={stroke} />;
+                  })}
+                </g>
+              );
+            };
+            const izm = izmirEkipleri(), ank = bolgeEkipleri("ANK"), bur = bolgeEkipleri("BUR");
             return (
               <g>
-                <L d={`M${bas + W / 2} 660 H${bas + toplamW - W / 2}`} />
-                {list.map((e, i) => {
-                  const x = bas + i * (W + 20);
-                  return (
-                    <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
-                      <L d={`M${x + W / 2} 660 V${y}`} />
-                      <Box x={x} y={y} w={W} h={H} light stroke={e.taseron_adi ? "#b45309" : "#0369a1"} nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} sub={ekipAlt(e)} nameSize={W < 150 ? 12.5 : 15} />
-                    </g>
-                  );
-                })}
+                {/* ── İZMİR BÖLGESİ (mavi) ── */}
+                <rect x={40} y={396} width={380} height={484} rx="14" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
+                <rect x={40} y={396} width={380} height={38} rx="14" fill={IZMIR} />
+                <rect x={40} y={420} width={380} height={14} fill={IZMIR} />
+                <text x={230} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">İZMİR REGION · {izm.length} EKİP</text>
+                <Box x={105} y={456} w={250} h={72} fill="#0369a1" nameText={YONETIM.izmir.mudur.ad} title="İzmir Bölge Müdürü" />
+                <L d="M230 528 V560" />
+                <Box x={105} y={560} w={250} h={64} light stroke="#0369a1" nameText={YONETIM.izmir.supervizor.ad} title="İzmir Süpervizörü" />
+                <Izgara list={izm} cx={230} y0={690} stroke="#0369a1" ustY={624} />
+
+                {/* ── ANKARA & BURSA ORTAK YÖNETİM (nötr lacivert) ── */}
+                <rect x={440} y={396} width={770} height={484} rx="14" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
+                <rect x={440} y={396} width={770} height={38} rx="14" fill={NAVY} />
+                <rect x={440} y={420} width={770} height={14} fill={NAVY} />
+                <text x={825} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">ANKARA &amp; BURSA — ORTAK YÖNETİM · {ank.length + bur.length} EKİP</text>
+                <Box x={700} y={456} w={250} h={72} fill={NAVY} nameText={YONETIM.ortak.mudur.ad} title="Ankara & Bursa Bölge Müdürü" />
+                <L d="M825 528 V560" />
+                <Box x={700} y={560} w={250} h={64} light stroke={NAVY} nameText={YONETIM.ortak.supervizor.ad} title="Ankara & Bursa Süpervizörü" />
+                {/* Süpervizör → iki bölge */}
+                <L d="M825 624 V640 M632 640 H1015 M632 640 V652 M1015 640 V652" />
+
+                {/* ANKARA (turuncu) */}
+                <rect x={452} y={652} width={360} height={216} rx="12" fill="#fffbf5" stroke="#e7d5c0" strokeWidth="1.5" />
+                <rect x={452} y={652} width={360} height={30} rx="12" fill={ANKARA} />
+                <rect x={452} y={670} width={360} height={12} fill={ANKARA} />
+                <text x={632} y={672} textAnchor="middle" fontSize="12.5" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">ANKARA · {ank.length} EKİP</text>
+                <Izgara list={ank} cx={632} y0={700} stroke="#b45309" ustY={682} />
+
+                {/* BURSA (yeşil) */}
+                <rect x={835} y={652} width={360} height={216} rx="12" fill="#f0fdf4" stroke="#bbf7d0" strokeWidth="1.5" />
+                <rect x={835} y={652} width={360} height={30} rx="12" fill={BURSA} />
+                <rect x={835} y={670} width={360} height={12} fill={BURSA} />
+                <text x={1015} y={672} textAnchor="middle" fontSize="12.5" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">BURSA · {bur.length} EKİP</text>
+                <Izgara list={bur} cx={1015} y0={700} stroke="#15803d" ustY={682} />
               </g>
             );
           })()}
-          {/* ANKARA bloğu */}
-          <rect x={630} y={396} width={580} height={492} rx="14" fill="#fffbf5" stroke="#e7d5c0" strokeWidth="1.5" />
-          <rect x={630} y={396} width={580} height={38} rx="14" fill={ANKARA} />
-          <rect x={630} y={420} width={580} height={14} fill={ANKARA} />
-          <text x={920} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">ANKARA REGION</text>
-          <Box x={795} y={456} w={250} h={72} fill="#b45309" nameText="NURCAN KUŞ" title="Ankara Regional Manager" />
-          <L d="M920 528 V560" />
-          <Box x={795} y={560} w={250} h={64} light stroke="#b45309" dashed nameText="KASIM EVİN" title="Site Support (İzmir'den destek)" />
-          <L d="M920 624 V660" />
-          {(() => {
-            const list = bolgeEkipleri("ANK");
-            if (!list.length) return null;
-            const W = Math.min(160, Math.floor(540 / list.length) - 12), H = 72, y = 690;
-            const toplamW = list.length * (W + 20) - 20;
-            const bas = 920 - toplamW / 2;
-            return (
-              <g>
-                <L d={`M${bas + W / 2} 660 H${bas + toplamW - W / 2}`} />
-                {list.map((e, i) => {
-                  const x = bas + i * (W + 20);
-                  return (
-                    <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
-                      <L d={`M${x + W / 2} 660 V${y}`} />
-                      <Box x={x} y={y} w={W} h={H} light stroke="#b45309" nameText={ekipAdi(e)} title={`${ekipUyeleri(e.ekip_no).length} kişi`} sub={ekipAlt(e)} nameSize={W < 150 ? 12.5 : 15} />
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          })()}
-          <text x={625} y={905} textAnchor="middle" fontSize="10.5" fill="#94a3b8" fontFamily="Arial">Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · {new Date().toLocaleDateString("tr-TR")}</text>
+          <text x={625} y={893} textAnchor="middle" fontSize="10.5" fill="#94a3b8" fontFamily="Arial">Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · {new Date().toLocaleDateString("tr-TR")}</text>
         </svg>
       </div>
 
       {/* Canlı saha ekipleri — HERKESE görünür; karta tıklayınca detay modalı açılır */}
-      {ekipler.length > 0 && (
+      {aktifEkipler.length > 0 && (
         <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "16px 20px", marginBottom: "18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "12px" }}>
-            <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>👷 Saha Ekipleri <span style={{ fontSize: "11.5px", fontWeight: 500, color: "#94a3b8" }}>karta tıkla → ekip detayı</span></div>
+            <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>👷 Saha Ekipleri <span style={{ fontSize: "11.5px", fontWeight: 500, color: "#94a3b8" }}>{aktifEkipler.length} ekip · karta tıkla → ekip detayı</span></div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: "12px" }}>
-            {ekipler.map(e => {
+            {aktifEkipler.map(e => {
               const uyeler = ekipUyeleri(e.ekip_no);
+              const renk = /İZM|IZM/i.test(e.bolge || "") ? "#0369a1" : /ANK/i.test(e.bolge || "") ? "#b45309" : /BUR/i.test(e.bolge || "") ? "#15803d" : "#1e3a5f";
               return (
                 <div key={e.ekip_no} onClick={() => setEkipDetay(e)}
                   style={{ border: "1.5px solid #e2e8f0", borderRadius: "12px", overflow: "hidden", cursor: "pointer", transition: "all 0.15s" }}
                   onMouseEnter={ev => { ev.currentTarget.style.boxShadow = "0 8px 24px rgba(30,58,95,0.18)"; ev.currentTarget.style.transform = "translateY(-2px)"; }}
                   onMouseLeave={ev => { ev.currentTarget.style.boxShadow = "none"; ev.currentTarget.style.transform = "none"; }}>
-                  <div style={{ background: "linear-gradient(120deg,#1e3a5f,#1e40af)", color: "#fff", padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                  <div style={{ background: `linear-gradient(120deg,#1e3a5f,${renk})`, color: "#fff", padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
                     <span style={{ minWidth: 0 }}>
-                      <span style={{ display: "block", fontWeight: 800, fontSize: "13.5px" }}>{ekipAdi(e)}{e.bolge ? ` · ${e.bolge}` : ""}</span>
-                      {e.taseron_adi && <span style={{ display: "block", fontSize: "10.5px", fontWeight: 700, color: "#fde68a", marginTop: "1px" }}>🤝 {e.taseron_adi}</span>}
+                      <span style={{ display: "block", fontWeight: 800, fontSize: "13.5px" }}>{ekipTamAd(e)}</span>
+                      <span style={{ display: "block", fontSize: "10.5px", fontWeight: 700, color: "#fde68a", marginTop: "1px" }}>📍 {e.bolge || "Bölge atanmadı"}</span>
                     </span>
-                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: "6px", padding: "1px 8px", fontSize: "11.5px", fontWeight: 700, flexShrink: 0 }}>{uyeler.length} kişi</span>
+                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: "6px", padding: "1px 8px", fontSize: "11.5px", fontWeight: 700, flexShrink: 0 }}>{uyeler.length ? `${uyeler.length} kişi` : "atanmadı"}</span>
                   </div>
                   <div style={{ padding: "8px 12px" }}>
                     {uyeler.map(p => {
@@ -4394,7 +4440,7 @@ function OrgSemasiPanel({ currentUser }) {
                         </div>
                       );
                     })}
-                    {uyeler.length === 0 && <div style={{ fontSize: "12px", color: "#cbd5e1", padding: "4px 0" }}>Üye atanmadı</div>}
+                    {uyeler.length === 0 && <div style={{ fontSize: "12px", color: "#94a3b8", padding: "4px 0" }}>Personel henüz atanmadı — Ekip Yönetimi'nden atanır</div>}
                   </div>
                 </div>
               );
@@ -4404,7 +4450,7 @@ function OrgSemasiPanel({ currentUser }) {
       )}
 
       <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
-        💡 Excel çıktısı 2 sayfadır: "Organization Chart" (şema) + "Details" (resmi eleman listesi: Team 1-7 — Adı Soyadı, Görevi, Bölge, Tel NO, Firma Adı).
+        💡 Excel çıktısı 3 sayfadır: "Organization Chart" (şema), "Details" (üst yönetim + bölge yönetimi + ekipler; bölge müdürü/süpervizör kolonlu, atanmamış personel alanları boş) ve "Ekipler" (canlı üyeler). PNG, şema ve Excel aynı verilerden üretilir.
       </div>
     </div>
   );

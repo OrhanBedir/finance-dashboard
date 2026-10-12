@@ -19796,6 +19796,11 @@ pool.query(`ALTER TABLE personel ADD COLUMN IF NOT EXISTS ekip_arac_plaka TEXT`)
 
 // Ekip taşeron etiketi: kutucukta ekip adının altında görünür (örn. taşeron ekipler)
 pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS taseron_adi TEXT`).catch(() => {});
+// 12.10.2026 (Orhan): ekipler silinmek yerine pasife alınabilir (personel bağları korunur);
+// şablon ekipler sablon_kodu ile tekil → kurulum tekrar çalıştırılınca mükerrer oluşmaz.
+pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS aktif BOOLEAN DEFAULT true`).catch(() => {});
+pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS sablon_kodu TEXT`).catch(() => {});
+pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ekipler_sablon_kodu_uq ON ekipler (sablon_kodu) WHERE sablon_kodu IS NOT NULL`).catch(() => {});
 
 app.get("/hr/ekipler", async (req, res) => {
   try {
@@ -19808,13 +19813,16 @@ app.post("/hr/ekipler", async (req, res) => {
   try {
     const no = Number(req.body.ekip_no || 0);
     if (!no || no < 1) return res.status(400).json({ error: "Geçerli ekip no gerekli" });
+    // aktif gönderilmediyse mevcut değer korunur; sablon_kodu bu uçtan değiştirilmez
+    const aktif = typeof req.body.aktif === "boolean" ? req.body.aktif : null;
     const r = await pool.query(
-      `INSERT INTO ekipler (ekip_no, plaka, bolge, aciklama, ad, taseron_adi)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       ON CONFLICT (ekip_no) DO UPDATE SET plaka=$2, bolge=$3, aciklama=$4, ad=$5, taseron_adi=$6, updated_at=NOW()
+      `INSERT INTO ekipler (ekip_no, plaka, bolge, aciklama, ad, taseron_adi, aktif)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true))
+       ON CONFLICT (ekip_no) DO UPDATE SET plaka=$2, bolge=$3, aciklama=$4, ad=$5, taseron_adi=$6,
+         aktif=COALESCE($7, ekipler.aktif), updated_at=NOW()
        RETURNING *`,
       [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null, req.body.ad || null,
-       (req.body.taseron_adi || "").trim() || null]);
+       (req.body.taseron_adi || "").trim() || null, aktif]);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -19827,6 +19835,54 @@ app.delete("/hr/ekipler/:no", async (req, res) => {
     await pool.query(`UPDATE personel SET ekip_bilgisi=NULL WHERE ekip_bilgisi=$1`, [String(no)]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* Ekip şablonları (12.10.2026, Orhan): 9 personelsiz şablon — İzmir 4, Ankara 2, Bursa 3.
+   sablon_kodu ile tekil: tekrar çalıştırmak mükerrer üretmez (var olan şablon ad/firma/bölge olarak güncellenir,
+   personeli korunur). Eski ekipler SİLİNMEZ; eskileri_pasifle=true ise aktif=false yapılır — personel.ekip_bilgisi
+   bağları ve geçmiş işler durur. Personel yeni şablonlara otomatik TAŞINMAZ (Ekip Yönetimi'nden elle atanır).
+   TEK tek firmadır; her bölgedeki ekipleri ayrı kayıttır (ANK-TEK-RF-1 ≠ BUR-TEK-RF-1). */
+const EKIP_SABLONLARI = [
+  { kod: "IZM-FERRUMX-1",      ad: "Ekip 1",      taseron: "Ferrumx",      bolge: "İzmir"  },
+  { kod: "IZM-FERRUMX-2",      ad: "Ekip 2",      taseron: "Ferrumx",      bolge: "İzmir"  },
+  { kod: "IZM-TEK-RF-1",       ad: "RF Ekibi 1",  taseron: "TEK",          bolge: "İzmir"  },
+  { kod: "IZM-AKCAN-1",        ad: "Ekip 1",      taseron: "Akçan",        bolge: "İzmir"  },
+  { kod: "ANK-TEK-RF-1",       ad: "RF Ekibi 1",  taseron: "TEK",          bolge: "Ankara" },
+  { kod: "ANK-TEK-RF-2",       ad: "RF Ekibi 2",  taseron: "TEK",          bolge: "Ankara" },
+  { kod: "BUR-TEK-RF-1",       ad: "RF Ekibi 1",  taseron: "TEK",          bolge: "Bursa"  },
+  { kod: "BUR-TEK-RF-2",       ad: "RF Ekibi 2",  taseron: "TEK",          bolge: "Bursa"  },
+  { kod: "BUR-NETWORKGROUP-1", ad: "Ekip 1",      taseron: "Networkgroup", bolge: "Bursa"  },
+];
+// Org şemasını düzenleyebilenler (frontend canEdit listesiyle aynı)
+const ORG_DUZENLEYICI = new Set(["orhan.bedir@simsektel.com", "duzgun.simsek@simsektel.com", "nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com", "erencan.simsek@simsektel.com"]);
+app.post("/hr/ekipler/sablon-kur", authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || "").toLowerCase();
+    if (!ORG_DUZENLEYICI.has(email) && String(req.user?.role || "").toLowerCase() !== "admin") {
+      return res.status(403).json({ ok: false, error: "Ekip şablonu kurma yetkiniz yok" });
+    }
+    const eskileriPasifle = !!(req.body && req.body.eskileri_pasifle);
+    let eklenen = 0, guncellenen = 0, pasiflenen = 0;
+    for (const s of EKIP_SABLONLARI) {
+      const mevcut = await pool.query(`SELECT ekip_no FROM ekipler WHERE sablon_kodu = $1`, [s.kod]);
+      if (mevcut.rows.length) {
+        await pool.query(`UPDATE ekipler SET ad=$2, taseron_adi=$3, bolge=$4, aktif=true, updated_at=NOW() WHERE sablon_kodu=$1`, [s.kod, s.ad, s.taseron, s.bolge]);
+        guncellenen++;
+      } else {
+        const nx = await pool.query(`SELECT COALESCE(MAX(ekip_no), 0) + 1 AS n FROM ekipler`);
+        await pool.query(`INSERT INTO ekipler (ekip_no, ad, taseron_adi, bolge, aktif, sablon_kodu) VALUES ($1,$2,$3,$4,true,$5)`, [nx.rows[0].n, s.ad, s.taseron, s.bolge, s.kod]);
+        eklenen++;
+      }
+    }
+    if (eskileriPasifle) {
+      const r = await pool.query(
+        `UPDATE ekipler SET aktif=false, updated_at=NOW()
+          WHERE aktif IS DISTINCT FROM false AND (sablon_kodu IS NULL OR NOT (sablon_kodu = ANY($1::text[])))`,
+        [EKIP_SABLONLARI.map((s) => s.kod)]);
+      pasiflenen = r.rowCount;
+    }
+    res.json({ ok: true, eklenen, guncellenen, pasiflenen, toplam_sablon: EKIP_SABLONLARI.length });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // Personel → ekip ataması (yalnız ekip_bilgisi alanını günceller)
