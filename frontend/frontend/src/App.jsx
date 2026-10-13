@@ -3888,6 +3888,12 @@ const ORG_BOLGELER = [
 ];
 // Depo/ofis kaydında koordinat yoksa şehir bazında yaklaşık nokta (gerçek adres gibi sunulmaz)
 const ORG_SEHIR_MERKEZ = { "İZMİR": { lat: 38.4237, lng: 27.1428 }, "BURSA": { lat: 40.1885, lng: 29.0610 }, "ANKARA": { lat: 39.9208, lng: 32.8541 } };
+// Ekip adı yardımcıları — şema, kartlar, Excel ve harita paneli aynı mantığı kullanır (tek kaynak).
+// Ad zaten firmayla başlıyorsa (eski kayıtlar: "FERRUMX Ekip 1") firma tekrar eklenmez.
+const orgEkipAdi = (e) => (e.ad && e.ad.trim()) || `Ekip ${e.ekip_no}`;
+const orgEkipFirma = (e) => String(e.taseron_adi || "").trim();
+const orgEkipAdSade = (e) => { const ad = orgEkipAdi(e), f = orgEkipFirma(e); return f && ad.toLocaleLowerCase("tr-TR").startsWith(f.toLocaleLowerCase("tr-TR")) ? ad.slice(f.length).replace(/^[\s—\-·:]+/, "") || ad : ad; };
+const orgEkipTamAd = (e) => orgEkipFirma(e) ? `${orgEkipFirma(e)} — ${orgEkipAdSade(e)}` : orgEkipAdi(e);
 
 // Harita işareti — modül düzeyinde: render içinde tanımlansaydı her state değişiminde yeniden mount olur,
 // mousedown–mouseup arasında DOM düğümü değişip click hiç oluşmazdı (İzmir işareti vakası, 13.10.2026).
@@ -3985,6 +3991,20 @@ function OrgHaritaModal({ ekipler, ofisler, canEdit, onKonumKaydet, onClose }) {
         .orgmap-zoom button { width:34px; height:34px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; font-size:18px; font-weight:800; color:#1e3a5f; cursor:pointer; }
         .orgmap-gosterge { position:absolute; left:12px; bottom:12px; background:rgba(255,255,255,0.94); border:1px solid #e2e8f0; border-radius:10px; padding:8px 12px; font-size:11.5px; color:#1f2937; display:grid; gap:4px; }
         .orgmap-atif { position:absolute; right:12px; bottom:8px; font-size:10px; color:#94a3b8; max-width:52%; text-align:right; line-height:1.25; }
+        /* Sağ panel mini organizasyon şeması (13.10.2026): müdür → süpervizör → bar → sütun omurgaları → ekipler */
+        .orgmini { display:flex; flex-direction:column; align-items:center; animation:orgmini-in .18s ease-out; }
+        @keyframes orgmini-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+        @media (prefers-reduced-motion: reduce) { .orgmini { animation:none; } }
+        .orgmini-kutu { background:#fff; border:1.5px solid #cbd5e1; border-radius:10px; padding:8px 10px; text-align:center; box-shadow:0 1px 3px rgba(15,23,42,.08); width:100%; box-sizing:border-box; }
+        .orgmini-kutu b { display:block; font-size:13px; color:#0f172a; line-height:1.25; overflow-wrap:anywhere; }
+        .orgmini-kutu span { display:block; font-size:11px; color:#475569; margin-top:2px; line-height:1.25; }
+        .orgmini-dik { width:2px; height:14px; background:#cbd5e1; }
+        .orgmini-bar { width:100%; height:2px; background:linear-gradient(to right, transparent var(--sol), #cbd5e1 var(--sol), #cbd5e1 var(--sag), transparent var(--sag)); }
+        .orgmini-ekipler { position:relative; display:grid; gap:10px 12px; width:100%; padding-top:14px; }
+        .orgmini-spine { position:absolute; top:0; width:2px; margin-left:-1px; background:#cbd5e1; z-index:0; }
+        .orgmini-ekip { position:relative; z-index:1; height:54px; display:flex; flex-direction:column; justify-content:center; padding:4px 8px; }
+        .orgmini-bos { margin-top:12px; font-size:12px; color:#94a3b8; }
+        .orgmini-ofis { margin-top:14px; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; background:#f8fafc; }
         @media (max-width: 760px) {
           .orgmap-govde { flex-direction:column; }
           .orgmap-panel { width:auto; border-left:none; border-top:1px solid #e2e8f0; max-height:42%; }
@@ -4066,35 +4086,24 @@ function OrgHaritaModal({ ekipler, ofisler, canEdit, onKonumKaydet, onClose }) {
                   </div>
                 </div>
               )}
-              {seciliBolge && (() => { const b = seciliBolge, y = ORG_YONETIM[b.yonetim], ofs = bolgeOfisleri(b); return (
-                <div style={{ padding: "16px" }}>
-                  <div style={{ background: b.renk, color: "#fff", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
-                    <div style={{ fontSize: "15px", fontWeight: 800 }}>{b.ad} Bölgesi</div>
-                    <div style={{ fontSize: "11.5px", opacity: 0.9, marginTop: 2 }}>{b.iller.join(" · ")}</div>
-                  </div>
-                  <div style={{ display: "grid", gap: 8, fontSize: 13, color: "#1f2937" }}>
-                    <div><span style={{ color: "#64748b" }}>Bölge Müdürü:</span> <b>{y.mudur.ad}</b></div>
-                    <div><span style={{ color: "#64748b" }}>Süpervizör:</span> <b>{y.supervizor.ad}</b></div>
-                    <div><span style={{ color: "#64748b" }}>Ekipler:</span> {ekipOzet(b)}</div>
-                    {ofs.map((o) => <div key={o.id}><span style={{ color: "#64748b" }}>📍</span> {ofisEtiket(o)}</div>)}
-                    {b.ortak && <div style={{ marginTop: 4, fontSize: 12, color: "#1e3a5f", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "6px 10px" }}>🤝 {b.key === "ankara" ? "Bursa" : "Ankara"} ile ortak yönetim</div>}
-                  </div>
-                </div>
-              ); })()}
-              {seciliOfis && (() => { const o = seciliOfis, k = ofisKonum(o); return (
-                <div style={{ padding: "16px" }}>
-                  <div style={{ background: "#1e3a5f", color: "#fff", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
-                    <div style={{ fontSize: "15px", fontWeight: 800 }}>📍 {ofisEtiket(o)}</div>
-                    <div style={{ fontSize: "11.5px", opacity: 0.9, marginTop: 2 }}>{o.ad}</div>
-                  </div>
-                  <div style={{ fontSize: 13, color: "#1f2937", display: "grid", gap: 8 }}>
-                    <div><span style={{ color: "#64748b" }}>İşlev:</span> {ofisEtiket(o).split(" — ")[1]}</div>
-                    {o.adres ? <div><span style={{ color: "#64748b" }}>Adres:</span> {o.adres}</div> : null}
-                    <div style={{ fontSize: 12, color: k?.kesin ? "#166534" : "#92400e", background: k?.kesin ? "#f0fdf4" : "#fffbeb", border: `1px solid ${k?.kesin ? "#bbf7d0" : "#fde68a"}`, borderRadius: 8, padding: "6px 10px" }}>
+              {/* Bölge seçildiğinde (ya da işarete tıklanınca o bölge) mini organizasyon şeması + ayrı konum kartı (13.10.2026) */}
+              {(() => {
+                const panelBolge = seciliBolge || (seciliOfis ? ORG_BOLGELER.find((b) => String(seciliOfis.bolge || "").toLocaleUpperCase("tr-TR").includes(b.ad.toLocaleUpperCase("tr-TR").slice(0, 3))) : null);
+                if (!panelBolge) return null;
+                const b = panelBolge, y = ORG_YONETIM[b.yonetim], list = bolgeEkip(b);
+                const n = list.length, solSatir = Math.ceil(n / 2), sagSatir = Math.floor(n / 2);
+                const BOX = 54, GAP = 10, PAD = 14; // ekip kutusu sabit yükseklik → omurga boyu kutunun ortasında biter
+                const omurgaBoy = (r) => (r > 0 ? PAD + r * BOX + (r - 1) * GAP - BOX / 2 : 0);
+                const OfisKart = (o, tam) => { const k = ofisKonum(o); return (
+                  <div key={o.id} className="orgmini-ofis">
+                    <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a" }}>📍 {ofisEtiket(o)}</div>
+                    {tam && <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 1 }}>{o.ad}</div>}
+                    {o.adres ? <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{o.adres}</div> : null}
+                    <div style={{ marginTop: 6, fontSize: 11.5, color: k?.kesin ? "#166534" : "#92400e", background: k?.kesin ? "#f0fdf4" : "#fffbeb", border: `1px solid ${k?.kesin ? "#bbf7d0" : "#fde68a"}`, borderRadius: 8, padding: "5px 9px" }}>
                       {k?.kesin ? "Kesin konum (kayıtlı koordinat)" : o.adres ? "Şehir bazında gösterim — koordinat henüz eklenmedi (adres kayıtlardan)" : "Şehir bazında gösterim — kesin adres henüz eklenmedi"}
                     </div>
-                    {canEdit && (
-                      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 10, display: "grid", gap: 6 }}>
+                    {tam && canEdit && (
+                      <div style={{ borderTop: "1px solid #e2e8f0", marginTop: 10, paddingTop: 10, display: "grid", gap: 6 }}>
                         <div style={{ fontSize: 11.5, fontWeight: 800, color: "#1e3a5f" }}>Koordinat güncelle (yalnız yetkili)</div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <input value={konumForm.lat} onChange={(e) => setKonumForm((f) => ({ ...f, lat: e.target.value }))} placeholder="Enlem (38.46…)" style={{ flex: 1, minWidth: 0, padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 12.5 }} />
@@ -4107,8 +4116,39 @@ function OrgHaritaModal({ ekipler, ofisler, canEdit, onKonumKaydet, onClose }) {
                       </div>
                     )}
                   </div>
-                </div>
-              ); })()}
+                ); };
+                return (
+                  <div key={`${b.key}-${seciliOfis ? seciliOfis.id : "b"}`} style={{ padding: "14px" }}>
+                    <div style={{ background: b.renk, color: "#fff", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+                      <div style={{ fontSize: "15px", fontWeight: 800 }}>{b.ad} Bölgesi</div>
+                      <div style={{ fontSize: "11.5px", opacity: 0.9, marginTop: 2 }}>{b.iller.join(" · ")}</div>
+                    </div>
+                    <div className="orgmini">
+                      <div className="orgmini-kutu" style={{ borderColor: b.renk, borderWidth: 2 }}><b>{y.mudur.ad}</b><span>{y.mudur.gorev}</span></div>
+                      <div className="orgmini-dik" />
+                      <div className="orgmini-kutu" style={{ borderColor: b.renk }}><b>{y.supervizor.ad}</b><span>{y.supervizor.gorev}</span></div>
+                      {n > 0 ? (
+                        <>
+                          <div className="orgmini-dik" />
+                          <div className="orgmini-bar" style={{ "--sol": n > 1 ? "25%" : "50%", "--sag": n > 1 ? "75%" : "50%" }} />
+                          <div className="orgmini-ekipler" style={{ gridTemplateColumns: n > 1 ? "1fr 1fr" : "1fr" }}>
+                            {/* Sütun omurgaları: bardan iner, kutuların arkasından geçer → her ekip doğrudan süpervizöre bağlı */}
+                            <div className="orgmini-spine" style={{ left: n > 1 ? "25%" : "50%", height: omurgaBoy(solSatir) }} />
+                            {n > 1 && <div className="orgmini-spine" style={{ left: "75%", height: omurgaBoy(sagSatir) }} />}
+                            {list.map((e) => (
+                              <div key={e.ekip_no} className="orgmini-kutu orgmini-ekip" style={{ borderColor: b.renk }} title={orgEkipTamAd(e)}>
+                                <b>{orgEkipFirma(e) || orgEkipAdi(e)}</b>
+                                {orgEkipFirma(e) ? <span>{orgEkipAdSade(e)}</span> : null}
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      ) : <div className="orgmini-bos">Ekip tanımlı değil</div>}
+                    </div>
+                    {seciliOfis ? OfisKart(seciliOfis, true) : bolgeOfisleri(b).map((o) => OfisKart(o, false))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -4210,10 +4250,8 @@ function OrgSemasiPanel({ currentUser }) {
   const bolgeEkipleri = (anahtar) => aktifEkipler.filter(e => String(e.bolge || "").toLocaleUpperCase("tr-TR").includes(anahtar));
   const izmirEkipleri = () => { const a = bolgeEkipleri("İZM"); return a.concat(bolgeEkipleri("IZM").filter(e => !a.includes(e))); };
   // Kutu adı: "Firma — Ekip" (şablonlar firma + ekip adıyla gösterilir)
-  // Ad zaten firmayla başlıyorsa (eski kayıtlar: "FERRUMX Ekip 1") firma tekrar eklenmez → "FERRUMX — FERRUMX Ekip 1" olmaz
-  const ekipFirma = (e) => String(e.taseron_adi || "").trim();
-  const ekipAdSade = (e) => { const ad = ekipAdi(e), f = ekipFirma(e); return f && ad.toLocaleLowerCase("tr-TR").startsWith(f.toLocaleLowerCase("tr-TR")) ? ad.slice(f.length).replace(/^[\s—\-·:]+/, "") || ad : ad; };
-  const ekipTamAd = (e) => ekipFirma(e) ? `${ekipFirma(e)} — ${ekipAdSade(e)}` : ekipAdi(e);
+  // Ad mantığı modül düzeyinde (orgEkip*) — harita paneliyle ortak
+  const ekipFirma = orgEkipFirma, ekipAdSade = orgEkipAdSade, ekipTamAd = orgEkipTamAd;
   const ekipKisi = (e) => ekipUyeleri(e.ekip_no).length;
   const ekipDurumYazi = (e) => { const n = ekipKisi(e); return n ? `${n} kişi` : "Personel henüz atanmadı"; };
   // Yönetim kadrosu — şema, PNG ve Excel aynı listeden. Ankara ve Bursa ORTAK yönetim: Nurcan Kuş + Fırat Kenan Ongun
