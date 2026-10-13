@@ -449,6 +449,36 @@ async function altMarkalariYenile() {
 }
 setInterval(altMarkalariYenile, 5 * 60 * 1000).unref();
 
+// ── DEVİR KALEMİ GERİ ALMA KURALI (13.10.2026, Orhan) ─────────────────────────
+// AHY'den Teknocenter'a devredilen kalemler (yedek_tekno_devir_20261013'te
+// kaynak='master_works', eski_deger AHY/AHY_xxx olanlar) HW ödemesi geldiği anda
+// eski taşeronuna (AHY dönemine) geri döner — para AHY dönemi işine aittir.
+// Teknocenter'ın kendi yeni işleri bu tabloda olmadığı için hiç etkilenmez.
+// HW Payment yüklemesinden sonra ve her açılışta çalışır; idempotenttir.
+async function devirOdenenKalemleriGeriAl(kaynak = "açılış") {
+  try {
+    const r = await pool.query(`
+      WITH py AS (
+        SELECT regexp_replace(regexp_replace(TRIM(invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n, MAX(payment_date) pd
+        FROM hw_payment_rows GROUP BY 1),
+      odenen AS (
+        SELECT DISTINCT UPPER(TRIM(i.site_id)) sc, TRIM(COALESCE(i.item_code,'')) ic
+        FROM hw_invoice_items i
+        JOIN py ON py.n = regexp_replace(regexp_replace(TRIM(i.invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1')
+        WHERE TRIM(COALESCE(i.invoice_no,'')) <> '' AND py.pd IS NOT NULL)
+      UPDATE master_works m SET subcon_name = y.eski_deger
+      FROM yedek_tekno_devir_20261013 y, odenen o
+      WHERE y.kaynak = 'master_works' AND y.id = m.id
+        AND UPPER(COALESCE(y.eski_deger,'')) LIKE 'AHY%'
+        AND UPPER(COALESCE(m.subcon_name,'')) LIKE 'TEKNO%'
+        AND o.sc = UPPER(TRIM(m.site_code)) AND o.ic = TRIM(COALESCE(m.item_code,''))
+      RETURNING m.site_code, m.item_code, m.subcon_name`);
+    if (r.rowCount) console.log(`[devir geri alma · ${kaynak}] HW ödemesi gelen ${r.rowCount} kalem AHY dönemine döndü:`,
+      r.rows.slice(0, 20).map((x) => `${x.site_code}/${x.item_code}→${x.subcon_name}`).join(", "));
+    return r.rowCount;
+  } catch (e) { console.error("[devir geri alma] hata:", e.message); return 0; }
+}
+
 // Kısıtlı kullanıcı yöneticisi bayrağı: Admin Panel'de YALNIZ kullanıcı ekleme
 // ve şifre belirleme (16.08.2026 — Nurcan Kuş talebi). pool tanımından ÖNCE
 // çağrılınca TDZ hatasıyla açılışta çöküyordu; bu yüzden burada duruyor.
@@ -13960,12 +13990,16 @@ app.post(
         inserted++;
       }
 
+      // Devredilen AHY kalemlerinden ödemesi gelenler AHY dönemine geri döner (kalıcı kural, 13.10.2026)
+      const geriAlinan = await devirOdenenKalemleriGeriAl("HW Payment yüklemesi");
+
       res.json({
         ok: true,
         inserted,
         uploaded_at: uploadedAt,
-        message: "HW Payment raporu yüklendi",
+        message: "HW Payment raporu yüklendi" + (geriAlinan ? ` · ${geriAlinan} devir kalemi AHY dönemine döndü` : ""),
         sheet_name: firstSheetName,
+        devir_geri_alinan: geriAlinan,
       });
     } catch (err) {
       console.error("FINANCE HW PAYMENT UPLOAD ERROR:", err.message);
@@ -22376,6 +22410,9 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
         AND (COALESCE(marka,'') <> 'TEKNO' OR COALESCE(subcon_name,'') <> 'TEKNOCENTER' OR COALESCE(payment_rate,0) <> 0.90)`);
     await altMarkalariYenile();
     await ensureSimsekAhyOdemeTable().catch(() => {}); // marka kolonu açılışta hazır olsun
+    await pool.query(`CREATE TABLE IF NOT EXISTS yedek_tekno_devir_20261013 (kaynak TEXT, id INTEGER, site_code TEXT, eski_deger TEXT, ts TIMESTAMPTZ DEFAULT now())`).catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS yedek_tekno_devir_mw_idx ON yedek_tekno_devir_20261013 (kaynak, id)`).catch(() => {});
+    await devirOdenenKalemleriGeriAl("açılış");
     // Yeni araçlar güncel alt markaya (TEKNO) yazılır; eski AHY araçları bordro kapsamıyla görünür
     await pool.query(`ALTER TABLE araclar ALTER COLUMN firma SET DEFAULT '${guncelMarka("AHY")}'`).catch(() => {});
     // Bir defalık migration: hiç AHY kullanıcısı yoksa saha ekibini AHY'ye taşı.
