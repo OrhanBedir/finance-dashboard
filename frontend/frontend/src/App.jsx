@@ -24229,7 +24229,10 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     if (!(isSubconUser && /^(AHY|TEKNO)/.test(String(userSubconName || "").toUpperCase()))) return;
     (async () => {
       try {
-        const r = await fetch(`${API_BASE}/finance/marka-ozet?marka=AHY`, { headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` } });
+        // Marka kullanıcıdan gelir (AHY / TEKNO) — sabit AHY, Teknocenter'da AHY'nin rakamını gösteriyordu (13.10.2026)
+        const _u = (() => { try { return JSON.parse(localStorage.getItem("user") || "null"); } catch { return null; } })();
+        const _mk = altMarkaMi(_u?.marka) ? String(_u.marka).toUpperCase() : (/^TEKNO/.test(String(userSubconName || "").toUpperCase()) ? "TEKNO" : "AHY");
+        const r = await fetch(`${API_BASE}/finance/marka-ozet?marka=${_mk}`, { headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` } });
         const d = await r.json().catch(() => ({}));
         if (!r.ok || d.ok === false || !d.fiziki) return;
         const kur = Number(d.kur || 0);
