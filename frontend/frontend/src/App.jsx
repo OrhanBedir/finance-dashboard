@@ -3880,10 +3880,10 @@ const ORG_YONETIM = {
   ortak: { mudur: { ad: "NURCAN KUŞ", tel: "5392596108", gorev: "Ankara & Bursa Bölge Müdürü" }, supervizor: { ad: "FIRAT KENAN ONGUN", tel: "5322127865", gorev: "Ankara & Bursa Süpervizörü" } },
 };
 // Operasyon bölgeleri ve il kapsamları — Huawei BoQ "Delivery Region" haritasıyla (20260902) çapraz kontrol edildi.
-// Not: BoQ'da Yalova Region 2 (IST ASIA) içinde olduğundan Bursa kapsamına alınmadı.
+// Not: Yalova BoQ'da Region 2 (IST ASIA) görünse de operasyonel olarak Bursa bölgesine bağlıdır (Orhan kararı, 13.10.2026).
 const ORG_BOLGELER = [
   { key: "izmir",  ad: "İzmir",  boq: "Region 5", yonetim: "izmir", ortak: false, renk: "#0369a1", dolgu: "#bae6fd", vurgu: "#7dd3fc", iller: ["İzmir", "Manisa", "Uşak", "Aydın", "Denizli", "Muğla"] },
-  { key: "bursa",  ad: "Bursa",  boq: "Region 4", yonetim: "ortak", ortak: true,  renk: "#15803d", dolgu: "#bbf7d0", vurgu: "#86efac", iller: ["Bursa", "Çanakkale", "Balıkesir", "Bilecik", "Kütahya"] },
+  { key: "bursa",  ad: "Bursa",  boq: "Region 4", yonetim: "ortak", ortak: true,  renk: "#15803d", dolgu: "#bbf7d0", vurgu: "#86efac", iller: ["Bursa", "Çanakkale", "Balıkesir", "Yalova", "Bilecik", "Kütahya"] },
   { key: "ankara", ad: "Ankara", boq: "Region 3", yonetim: "ortak", ortak: true,  renk: "#b45309", dolgu: "#fed7aa", vurgu: "#fdba74", iller: ["Ankara", "Eskişehir", "Bolu", "Düzce", "Zonguldak", "Bartın", "Karabük", "Kastamonu", "Çankırı", "Kırıkkale"] },
 ];
 // Depo/ofis kaydında koordinat yoksa şehir bazında yaklaşık nokta (gerçek adres gibi sunulmaz)
@@ -4099,6 +4099,7 @@ function OrgHaritaModal({ ekipler, ofisler, canEdit, onKonumKaydet, onClose }) {
                     <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a" }}>📍 {ofisEtiket(o)}</div>
                     {tam && <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 1 }}>{o.ad}</div>}
                     {o.adres ? <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{o.adres}</div> : null}
+                    {Number(o.metrekare) > 0 && <div style={{ fontSize: 12, color: "#1e3a5f", fontWeight: 700, marginTop: 4 }}>Alan: {Number(o.metrekare).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} m²</div>}
                     <div style={{ marginTop: 6, fontSize: 11.5, color: k?.kesin ? "#166534" : "#92400e", background: k?.kesin ? "#f0fdf4" : "#fffbeb", border: `1px solid ${k?.kesin ? "#bbf7d0" : "#fde68a"}`, borderRadius: 8, padding: "5px 9px" }}>
                       {k?.kesin ? "Kesin konum (kayıtlı koordinat)" : o.adres ? "Şehir bazında gösterim — koordinat henüz eklenmedi (adres kayıtlardan)" : "Şehir bazında gösterim — kesin adres henüz eklenmedi"}
                     </div>
