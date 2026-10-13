@@ -403,12 +403,38 @@ function parseTrNumber(str) {
   return isNaN(n) ? 0 : n;
 }
 
+// ── ALT MARKALAR (13.10.2026, Teknocenter devri) ──────────────────────────
+// AHY 15.07–30.09.2026 arası çalıştı; TEKNO (Teknocenter) 01.10.2026'dan itibaren
+// kadroyu, araçları ve depoları devraldı. Kullanıcı nesnesi (login / auth-me)
+// marka_devir, marka_bitis, marka_bordro (ör. ["TEKNO","AHY"]) ve marka_pay taşır.
+const ALT_MARKA_LISTE = [
+  { kod: "AHY",   ad: "AHY Elektrik", kisa: "AHY",   ikon: "⚡", renk: "#b45309", bg: "#fffbeb", brd: "#fcd34d" },
+  { kod: "TEKNO", ad: "Teknocenter",  kisa: "TEKNO", ikon: "🔷", renk: "#1d4ed8", bg: "#eff6ff", brd: "#93c5fd" },
+];
+const GUNCEL_ALT_MARKA = "TEKNO"; // yeni kayıtların (avans, yemek kartı, kira) varsayılan alt markası
+const altMarkaBilgi = (kod) => ALT_MARKA_LISTE.find((m) => m.kod === String(kod || "").toUpperCase()) || null;
+const altMarkaMi = (kod) => !!altMarkaBilgi(kod);
+const altMarkaKisa = (kod) => altMarkaBilgi(kod)?.kisa || String(kod || "");
+const altMarkaEtiket = (kod) => { const m = altMarkaBilgi(kod); return m ? `${m.ikon} ${m.ad}` : String(kod || ""); };
+// Bitmiş markanın (AHY) yerine geçen güncel marka — personel/araç varsayılanlarında
+const guncelAltMarka = (kod) => { const k = String(kod || "").toUpperCase(); return k === "AHY" ? GUNCEL_ALT_MARKA : (altMarkaMi(k) ? k : null); };
+// Kullanıcının bordro kapsamı: alt marka kendi + devraldığı markaları görür
+const kullaniciBordro = (u) => {
+  const m = String(u?.marka || "ERC").toUpperCase();
+  const b = Array.isArray(u?.marka_bordro) && u.marka_bordro.length ? u.marka_bordro.map((x) => String(x).toUpperCase()) : [m];
+  return b.includes(m) ? b : [m, ...b];
+};
+// kasadan_dus=false etiketi: markanın kendi ödediği kira/fatura
+const kasaDisiEtiket = (u) => `${altMarkaKisa(u?.hw_yukleme === false ? u?.marka : GUNCEL_ALT_MARKA) || "Firma"} ödedi`;
+
 // Taşeron adını kanonik token'a indirger (tam isim → kısa kod). Eşleştirme anahtarlarında kullanılır.
 function canonTaseron(name) {
   const n = String(name || "").toLowerCase();
   if (n.includes("federal")) return "federal";
   if (n.includes("ubs")) return "ubs";
   if (n.includes("ahy")) return "ahy";
+  // Teknocenter (13.10.2026): "TEKNOCENTER", "Tekno_FERRUMX" → tekno ("…TEKNOLOJİ…" eşleşmez)
+  if (/^tekno(center)?([_\s-]|$)/.test(n)) return "tekno";
   if (n.includes("2kx")) return "2kx";
   if (n.includes("ferrum")) return "ferrumx";
   return n.trim();
@@ -1802,7 +1828,7 @@ function MarkaNakitPanel({ currentUser }) {
   const [gelenOdeModal, setGelenOdeModal] = useState(false);
   const loadGelenOde = async () => {
     try {
-      const r = await fetch(`${API_BASE}/finance/simsek-ahy-odeme`, { headers: _auth });
+      const r = await fetch(`${API_BASE}/finance/simsek-ahy-odeme?marka=${marka}`, { headers: _auth });
       const d = await r.json().catch(() => ({}));
       if (r.ok && d.ok) setGelenOde({ rows: d.rows || [], toplam: Number(d.toplam || 0), bu_ay: Number(d.bu_ay || 0) });
     } catch {}
@@ -1812,7 +1838,7 @@ function MarkaNakitPanel({ currentUser }) {
       .then(r2 => r2.json()).then(g => { if (g && g.ok) setGelecek(g); }).catch(() => {});
   };
   const gelenOdeEkle = async () => {
-    const t = prompt("Şimşek'ten AHY'ye gönderilen tutar (₺):");
+    const t = prompt(`Şimşek'ten ${altMarkaKisa(marka)}'ya gönderilen tutar (₺):`);
     if (!t) return;
     const _s = String(t).trim();
     const tutarN = /^\d+(\.\d{1,2})?$/.test(_s) ? Number(_s) : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
@@ -1823,7 +1849,7 @@ function MarkaNakitPanel({ currentUser }) {
     try {
       const r = await fetch(`${API_BASE}/finance/simsek-ahy-odeme`, {
         method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
-        body: JSON.stringify({ tarih, tutar: tutarN, aciklama: acikl }),
+        body: JSON.stringify({ tarih, tutar: tutarN, aciklama: acikl, marka }),
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
@@ -1969,7 +1995,7 @@ function MarkaNakitPanel({ currentUser }) {
                 ...rows.slice().sort((a, b) => String(a.tarih || "").localeCompare(String(b.tarih || ""))).map(r => [
                   r.tarih || "", (TIP[r.tip]?.ad) || r.tip || "Diğer", r.ad_soyad || "",
                   r.aciklama || "", -Number(r.tutar || 0),
-                  r.kasadan_dus === false ? "AHY ödedi" : "Kasadan düştü",
+                  r.kasadan_dus === false ? `${altMarkaKisa(marka)} ödedi` : "Kasadan düştü",
                 ]),
                 { cells: ["", "TOPLAM HARCAMA", "", "", -rows.reduce((sm, r) => sm + Number(r.tutar || 0), 0), ""], bold: true, merge: [1, 3] },
               ],
@@ -2403,7 +2429,7 @@ function MarkaNakitPanel({ currentUser }) {
                 <button
                   onClick={async () => {
                     try {
-                      const rr = await fetch(`${API_BASE}/finance/simsek-ahy-odeme/excel`, { headers: _auth });
+                      const rr = await fetch(`${API_BASE}/finance/simsek-ahy-odeme/excel?marka=${marka}`, { headers: _auth });
                       if (!rr.ok) { alert("Excel indirilemedi"); return; }
                       const blob = await rr.blob();
                       const url = URL.createObjectURL(blob);
@@ -3333,8 +3359,8 @@ function MarkaTaseronPanel({ currentUser }) {
               <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <span>Taşeron Bedeli: ₺{fmt(topBedel)} +KDV · Kalan Borç: ₺{fmt(topKalan)}</span>
                 <button onClick={() => exportStandardExcel({
-                  title: "AHY Elektrik — Taşeron Hesabı (Fatura Kesilecek & Borç Durumu)",
-                  sheetName: "Taşeron Hesabı", fileBase: "AHY_Taseron_Hesabi",
+                  title: `${currentUser?.marka_ad || marka} — Taşeron Hesabı (Fatura Kesilecek & Borç Durumu)`,
+                  sheetName: "Taşeron Hesabı", fileBase: `${marka}_Taseron_Hesabi`,
                   headers: ["Taşeron", "Ekip", "İş Kalemi", "Bedel (KDV Hariç)", "Bedel (KDV Dahil)", "Fatura No", "Kestiği Fatura", "Ödenen", "Kalan Borç"],
                   colWidths: [38, 16, 10, 16, 16, 24, 14, 12, 13],
                   numericCols: [3, 4, 6, 7, 8],
@@ -10224,7 +10250,7 @@ function FinanceDashboard({
   const handleExportFilteredSubconExcel = async () => {
     try {
       // Kırılım (%80) ile çalışan taşeronlar: yalnız Federal + UBS
-      const KIRILIM_TASERONLAR = ["federal", "ubs", "ahy"];
+      const KIRILIM_TASERONLAR = ["federal", "ubs", "ahy", "tekno"];
       const kirilimRows = (filteredSubconDetailRows || []).filter((r) => {
         const n = String(r.subcon_name || "").toLowerCase();
         return KIRILIM_TASERONLAR.some((t) => n.includes(t));
@@ -10240,7 +10266,7 @@ function FinanceDashboard({
         : "tum_taseronlar";
       // Hakediş kolon başlığı seçili taşerona göre dinamik (yoksa genel "Taşeron Hakediş")
       const _expSub = String(subconFilter || "").trim();
-      const _expPct = canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = ["ahy", "tekno"].includes(canonTaseron(_expSub)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş (Kırılım)";
       const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş (Kırılım) KDV Dahil";
 
@@ -10322,7 +10348,7 @@ function FinanceDashboard({
       aoa.push(titleRow);
       aoa.push(headers.map(h => ({ v: h, s: headerStyle })));
 
-      const FATURA_TASERONLAR_SUB = ["federal", "ubs", "ahy"];
+      const FATURA_TASERONLAR_SUB = ["federal", "ubs", "ahy", "tekno"];
       const usdR = Number(usdTryRate || 0);
 
       kirilimRows.forEach((row, idx) => {
@@ -10339,7 +10365,7 @@ function FinanceDashboard({
         const subconLower = String(row.subcon_name || "").toLowerCase().trim();
         const subconCanon = canonTaseron(row.subcon_name);
         // Kırılım oranı taşerona göre: AHY %90 (2026-07 anlaşması), diğerleri %80
-        const kirilimOran = subconCanon === "ahy" ? 0.90 : 0.80;
+        const kirilimOran = ["ahy", "tekno"].includes(subconCanon) ? 0.90 : 0.80;
         let federalHakedis = toplamHakedis * kirilimOran;
 
         // Manuel taşeron hakedişi varsa (kalem bazlı) sistemdeki kırılım hesabını override et
@@ -11134,8 +11160,9 @@ function FinanceDashboard({
       };
       // AHY_ önekli taşeron kaydı (AHY_FERRUMX vb.) → firma otomatik AHY:
       // fatura AHY panelindeki Taşeron Faturaları'nda görünür (26.08.2026)
-      if (name === "rf_montaj_firma" && /^AHY_/i.test(value.trim())) {
-        updated.firma = "AHY";
+      const _onekMarka = (value.trim().match(/^(AHY|TEKNO)_/i) || [])[1];
+      if (name === "rf_montaj_firma" && _onekMarka) {
+        updated.firma = _onekMarka.toUpperCase();
       }
 
       const tutar = Number(updated.tutar || 0);
@@ -11240,7 +11267,7 @@ function FinanceDashboard({
     e.preventDefault();
     if (!odemeModalFirma || !odemeModalTutar || !odemeModalTarih) return;
     // Firma seçimi (modaldeki ŞİMŞEK/AHY toggle): AHY ise ödeme AHY paneline de düşer
-    const firmaMarka = odemeModalFirmaMarka === "AHY" ? "AHY" : "SIMSEK";
+    const firmaMarka = altMarkaMi(odemeModalFirmaMarka) ? odemeModalFirmaMarka : "SIMSEK";
     setOdemeModalLoading(true);
     setOdemeModalSonuc(null);
     try {
@@ -11378,7 +11405,7 @@ function FinanceDashboard({
       };
 
       // Firma seçimi (modaldaki Şimşek/AHY toggle) — AHY ise AHY Taşeron Faturaları paneline yansır
-      payload.firma = String(invoiceForm.firma || "SIMSEK").toUpperCase() === "AHY" ? "AHY" : "SIMSEK";
+      payload.firma = altMarkaMi(invoiceForm.firma) ? String(invoiceForm.firma).toUpperCase() : "SIMSEK";
       console.log("MANUAL INVOICE PAYLOAD:", payload);
 
       if (editingInvoiceId) {
@@ -12292,7 +12319,7 @@ function FinanceDashboard({
           <div style={{ padding:"16px 20px", borderRight:"1px solid #f1f5f9", textAlign:"center" }}>
             <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"4px", fontWeight:500 }}>✅ Bugün Tahsil Edilen</div>
             <div style={{ fontSize:"20px", fontWeight:800, color:"#10b981" }}>{formatMoneyByCurrency(upcomingSummary.today_received_total||0,"TRY")}</div>
-            {((upcomingSummary.today_received_2kx||0) > 0 || (upcomingSummary.today_received_ahy||0) > 0) && (
+            {((upcomingSummary.today_received_2kx||0) > 0 || (upcomingSummary.today_received_ahy||0) > 0 || (upcomingSummary.today_received_tekno||0) > 0) && (
               <div style={{ display:"flex", gap:"6px", justifyContent:"center", marginTop:"5px", flexWrap:"wrap" }}>
                 {(upcomingSummary.today_received_2kx||0) > 0 && (
                   <span style={{ fontSize:"11px", fontWeight:700, color:"#7c3aed", background:"#f3e8ff", borderRadius:6, padding:"1px 7px" }}>
@@ -12302,6 +12329,11 @@ function FinanceDashboard({
                 {(upcomingSummary.today_received_ahy||0) > 0 && (
                   <span style={{ fontSize:"11px", fontWeight:700, color:"#1d4ed8", background:"#dbeafe", borderRadius:6, padding:"1px 7px" }}>
                     AHY: {formatMoneyByCurrency(upcomingSummary.today_received_ahy||0, "TRY")}
+                  </span>
+                )}
+                {(upcomingSummary.today_received_tekno||0) > 0 && (
+                  <span style={{ fontSize:"11px", fontWeight:700, color:"#1d4ed8", background:"#dbeafe", borderRadius:6, padding:"1px 7px" }}>
+                    TEKNO: {formatMoneyByCurrency(upcomingSummary.today_received_tekno||0, "TRY")}
                   </span>
                 )}
               </div>
@@ -12385,7 +12417,7 @@ function FinanceDashboard({
                             &nbsp;|&nbsp;Kesinti: {formatMoneyByCurrency(row.deduction_amount||0, row.currency||"TRY")}
                           </div>
                         )}
-                        {((row.subcon_2kx||0) > 0 || (row.subcon_ahy||0) > 0) && (
+                        {((row.subcon_2kx||0) > 0 || (row.subcon_ahy||0) > 0 || (row.subcon_tekno||0) > 0) && (
                           <div style={{ display:"flex", gap:"6px", justifyContent:"flex-end", marginTop:4, flexWrap:"wrap" }}>
                             {(row.subcon_2kx||0) > 0 && (
                               <span style={{ fontSize:11, fontWeight:700, color:"#7c3aed", background:"#f3e8ff", borderRadius:6, padding:"1px 7px" }}>
@@ -12395,6 +12427,11 @@ function FinanceDashboard({
                             {(row.subcon_ahy||0) > 0 && (
                               <span style={{ fontSize:11, fontWeight:700, color:"#1d4ed8", background:"#dbeafe", borderRadius:6, padding:"1px 7px" }}>
                                 AHY: {formatMoneyByCurrency(row.subcon_ahy||0, "TRY")}
+                              </span>
+                            )}
+                            {(row.subcon_tekno||0) > 0 && (
+                              <span style={{ fontSize:11, fontWeight:700, color:"#1d4ed8", background:"#dbeafe", borderRadius:6, padding:"1px 7px" }}>
+                                TEKNO: {formatMoneyByCurrency(row.subcon_tekno||0, "TRY")}
                               </span>
                             )}
                           </div>
@@ -13198,8 +13235,8 @@ function FinanceDashboard({
                           <td>{row.tedarikci || "-"}</td>
                           {/* Fatura hangi firmaya kesildi → ödemeyi o firma yapar */}
                           <td>
-                            {String(row.firma || "").toUpperCase() === "AHY"
-                              ? <span style={{ padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:"#fff7ed", color:"#9a3412", border:"1px solid #fed7aa", whiteSpace:"nowrap" }}>🔧 AHY</span>
+                            {altMarkaMi(row.firma)
+                              ? <span style={{ padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:"#fff7ed", color:"#9a3412", border:"1px solid #fed7aa", whiteSpace:"nowrap" }}>🔧 {altMarkaKisa(row.firma)}</span>
                               : <span style={{ padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:"#eff6ff", color:"#1e40af", border:"1px solid #bfdbfe", whiteSpace:"nowrap" }}>⚡ Şimşek</span>}
                           </td>
                           <td>{row.po_no || "-"}</td>
@@ -13380,13 +13417,13 @@ function FinanceDashboard({
                 {/* Firma: Şimşek / AHY — AHY seçilirse AHY Taşeron Faturaları paneline yansır */}
                 <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
                   <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Firma:</span>
-                  {[["SIMSEK","🟨 Şimşek Haberleşme","#92400e","#fffbeb","#fcd34d"],["AHY","⚡ AHY Elektrik","#1e40af","#eff6ff","#93c5fd"]].map(([val,lbl,col,bg,brd])=>(
+                  {[["SIMSEK","🟨 Şimşek Haberleşme","#92400e","#fffbeb","#fcd34d"],["TEKNO","🔷 Teknocenter","#1e40af","#eff6ff","#93c5fd"],["AHY","⚡ AHY Elektrik","#9a3412","#fff7ed","#fed7aa"]].map(([val,lbl,col,bg,brd])=>(
                     <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:(invoiceForm.firma||"SIMSEK")===val?bg:"#f9fafb", border:`1.5px solid ${(invoiceForm.firma||"SIMSEK")===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:(invoiceForm.firma||"SIMSEK")===val?col:"#6b7280" }}>
                       <input type="radio" name="fatura_firma" value={val} checked={(invoiceForm.firma||"SIMSEK")===val} onChange={()=>setInvoiceForm(p=>({...p,firma:val}))} style={{ display:"none" }} />{lbl}
                     </label>
                   ))}
-                  {(invoiceForm.firma||"SIMSEK")==="AHY" && (
-                    <span style={{ fontSize:12, color:"#1e40af", fontWeight:600 }}>→ AHY panelindeki Taşeron Faturaları'nda görünür</span>
+                  {altMarkaMi(invoiceForm.firma) && (
+                    <span style={{ fontSize:12, color:"#1e40af", fontWeight:600 }}>→ {altMarkaKisa(invoiceForm.firma)} panelindeki Taşeron Faturaları'nda görünür</span>
                   )}
                 </div>
 
@@ -13780,16 +13817,18 @@ function FinanceDashboard({
                             color: odemeModalFirmaMarka==="SIMSEK" ? "#fff" : "#6b7280" }}>
                           ⚡ ŞİMŞEK
                         </button>
-                        <button type="button" onClick={() => setOdemeModalFirmaMarka("AHY")}
-                          style={{ flex:1, padding:"10px", borderRadius:"10px", fontSize:"13px", fontWeight:800, cursor:"pointer",
-                            border: odemeModalFirmaMarka==="AHY" ? "2px solid #1d4ed8" : "1.5px solid #e5e7eb",
-                            background: odemeModalFirmaMarka==="AHY" ? "#1d4ed8" : "#fff",
-                            color: odemeModalFirmaMarka==="AHY" ? "#fff" : "#6b7280" }}>
-                          🔌 AHY ELEKTRİK
-                        </button>
+                        {ALT_MARKA_LISTE.map(m => (
+                          <button key={m.kod} type="button" onClick={() => setOdemeModalFirmaMarka(m.kod)}
+                            style={{ flex:1, padding:"10px", borderRadius:"10px", fontSize:"13px", fontWeight:800, cursor:"pointer",
+                              border: odemeModalFirmaMarka===m.kod ? "2px solid #1d4ed8" : "1.5px solid #e5e7eb",
+                              background: odemeModalFirmaMarka===m.kod ? "#1d4ed8" : "#fff",
+                              color: odemeModalFirmaMarka===m.kod ? "#fff" : "#6b7280" }}>
+                            {m.ikon} {m.ad.toUpperCase()}
+                          </button>
+                        ))}
                       </div>
-                      {odemeModalFirmaMarka==="AHY" && (
-                        <div style={{ fontSize:"11px", color:"#1d4ed8", marginTop:"4px" }}>💡 Ödeme AHY Taşeron Faturaları paneline ve AHY nakit akışına da yansıyacak</div>
+                      {altMarkaMi(odemeModalFirmaMarka) && (
+                        <div style={{ fontSize:"11px", color:"#1d4ed8", marginTop:"4px" }}>💡 Ödeme {altMarkaKisa(odemeModalFirmaMarka)} Taşeron Faturaları paneline ve {altMarkaKisa(odemeModalFirmaMarka)} nakit akışına da yansıyacak</div>
                       )}
                     </div>
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"12px" }}>
@@ -15449,7 +15488,7 @@ function FinanceDashboard({
                               >
                                 🧾 Fatura Yönetimi
                               </button>
-                              {["federal","ubs","ahy"].some(t => String(row.subcon_name||"").toLowerCase().includes(t)) && (
+                              {(["federal","ubs","ahy"].some(t => String(row.subcon_name||"").toLowerCase().includes(t)) || canonTaseron(row.subcon_name) === "tekno") && (
                                 <a
                                   href={`${API_BASE}/bolge-fatura/kesilecek-excel/${encodeURIComponent(row.subcon_name)}`}
                                   style={{ padding:"5px 10px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", textDecoration:"none", display:"inline-flex", alignItems:"center", gap:"4px" }}
@@ -15538,6 +15577,7 @@ function FinanceDashboard({
                 <option value="FEDERAL">FEDERAL</option>
                 <option value="UBS">UBS</option>
                 <option value="AHY">AHY</option>
+                <option value="TEKNO">TEKNO</option>
                 <option value="2KX">2KX</option>
                 <option value="FERRUMX">FERRUMX</option>
               </select>
@@ -15548,7 +15588,7 @@ function FinanceDashboard({
                   <div style={{ marginTop:"6px", fontSize:"11px", fontWeight:600, color: isFixed ? "#0369a1" : "#7c3aed" }}>
                     {isFixed
                       ? "🔹 Sabit fiyat taşeron — hakediş saha (Site ID) bazında girilir, kalem seçimi opsiyoneldir."
-                      : `🔸 Kırılım taşeron — hakediş kalem (Item) bazında %${c === "ahy" ? 90 : 80} olarak girilir.`}
+                      : `🔸 Kırılım taşeron — hakediş kalem (Item) bazında %${["ahy", "tekno"].includes(c) ? 90 : 80} olarak girilir.`}
                   </div>
                 );
               })()}
@@ -16212,14 +16252,16 @@ function PuantajPanel({ currentUser, onBack }) {
     // alt marka (AHY) yalnız kendi personelini görür; devir (15.07.2026)
     // öncesi ayrılanlar AHY'ye yansımaz.
     const _um = String(currentUser?.marka || "ERC").toUpperCase();
+    const _umBordro = kullaniciBordro(currentUser);          // TEKNO: ["TEKNO","AHY"] (devralınan kadro)
+    const _umDevir = currentUser?.marka_devir || "2026-07-15";
     const all = await r.json();
     const arr = Array.isArray(all) ? all : [];
     setPersonelList(_um === "ERC" ? arr : arr.filter(p => {
-      if (String(p.marka || "ERC").toUpperCase() !== _um) return false;
+      if (!_umBordro.includes(String(p.marka || "ERC").toUpperCase())) return false;
       if (p.aktif) return true;
       const giris = (p.ise_giris_tarihi || "").split("T")[0];
       const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
-      return giris >= "2026-07-15" || (ayrilma && ayrilma >= "2026-07-15");
+      return giris >= _umDevir || (ayrilma && ayrilma >= _umDevir);
     }));
   };
 
@@ -16645,18 +16687,23 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   // info@ahyelektrik.com kendi markasını ek şifreyle (ahy2026gsm) görür.
   // MAAŞ GÖRME YETKİSİ: Orhan Bedir, Düzgün Şimşek, Erencan Şimşek (şifresiz)
   // + info@ahyelektrik (Haşım Bey — YALNIZ ekstra şifreyle: ahy2026gsm).
-  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "erencan.simsek@simsektel.com" || _hrEmail === "info@ahyelektrik.com";
+  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "erencan.simsek@simsektel.com" || _hrEmail === "info@ahyelektrik.com" || _hrEmail === "teknocenter";
   // İK marka izolasyonu (TEK YÖNLÜ): ERC ana yüklenici — maaş ve kalan
   // ödemeleri yaptığı için TÜM personeli görür. Alt marka (AHY) yalnız
   // kendi markasının personelini görür; devir tarihi (15 Temmuz 2026)
   // öncesinde ayrılmış eski personel AHY paneline yansımaz.
   const _hrMarka = String(currentUser?.marka || "ERC").toUpperCase();
-  const AHY_DEVIR = "2026-07-15";
+  // Devir penceresi kullanıcının markasından gelir (AHY 15.07.2026, TEKNO 01.10.2026);
+  // bordro kapsamı devralınan markayı da içerir (TEKNO → AHY kadrosu).
+  const AHY_DEVIR = currentUser?.marka_devir || "2026-07-15";
+  const AHY_BITIS = currentUser?.marka_bitis || null;
+  const _hrBordro = kullaniciBordro(currentUser);
+  const _hrVarsayilanFirma = _hrMarka === "ERC" ? GUNCEL_ALT_MARKA : _hrMarka; // yeni kayıt varsayılanı
   const _markaFiltre = (list) => {
     const arr = Array.isArray(list) ? list : [];
     if (_hrMarka === "ERC") return arr;
     return arr.filter(p => {
-      if (String(p.marka || "ERC").toUpperCase() !== _hrMarka) return false;
+      if (!_hrBordro.includes(String(p.marka || "ERC").toUpperCase())) return false;
       if (p.aktif) return true;
       const giris = (p.ise_giris_tarihi || "").split("T")[0];
       const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
@@ -16670,7 +16717,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const _maasGizli = _isMuhasebe;
   // AHY tarafında maaşlar ekstra şifre korumalı: sadece Haşım Bey bilir
   // (ahy2026gsm). ERC yetkilileri şifresiz girer, AHY yetkilisi şifreyle.
-  const _maasSifreli = _hrEmail === "info@ahyelektrik.com";
+  const _maasSifreli = _hrEmail === "info@ahyelektrik.com"; // Teknocenter yöneticisi (teknocenter) şifresiz görür
   const _maasSifreler = _maasSifreli ? ["ahy2026gsm"] : ["Orhan2026!", "Duzgun2026!"];
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili && !_maasSifreli);
   // İş Avansı İK'dan kaldırıldı (Muhasebe menüsünde) — Muhasebe puantajdan,
@@ -16708,9 +16755,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     return hrFirmaFiltre === "TUMU" || hrFirmaFiltre === marka;
   };
   const FirmaRozet = ({ p, kucuk }) => {
-    const ahy = String(p?.marka || "ERC").toUpperCase() === "AHY";
+    const mk = altMarkaBilgi(p?.marka);
+    const ahy = !!mk;
     return (
-      <span title={ahy ? "AHY bordrosu" : "Şimşek bordrosu"} style={{ display:"inline-block", marginLeft:"6px", padding: kucuk ? "1px 6px" : "2px 8px", borderRadius:"999px", fontSize: kucuk ? "10px" : "11px", fontWeight:800, letterSpacing:".02em", background: ahy ? "#f3e8ff" : "#eff6ff", color: ahy ? "#6b21a8" : "#1d4ed8", verticalAlign:"middle" }}>{ahy ? "AHY" : "Şimşek"}</span>
+      <span title={ahy ? `${mk.ad} bordrosu` : "Şimşek bordrosu"} style={{ display:"inline-block", marginLeft:"6px", padding: kucuk ? "1px 6px" : "2px 8px", borderRadius:"999px", fontSize: kucuk ? "10px" : "11px", fontWeight:800, letterSpacing:".02em", background: ahy ? "#f3e8ff" : "#eff6ff", color: ahy ? "#6b21a8" : "#1d4ed8", verticalAlign:"middle" }}>{ahy ? mk.kisa : "Şimşek"}</span>
     );
   };
   const [hrSearchText, setHrSearchText]         = useState("");
@@ -16807,9 +16855,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [yemekKartlar, setYemekKartlar] = useState([]);
   const [yemekOdemeler, setYemekOdemeler] = useState([]);
   const [yemekOdeModal, setYemekOdeModal] = useState(null); // ödenen kart
-  const [yemekOdeForm, setYemekOdeForm] = useState({ tutar: "", tarih: "", firma: "AHY" });
+  const [yemekOdeForm, setYemekOdeForm] = useState({ tutar: "", tarih: "", firma: _hrVarsayilanFirma });
   const [yemekKartModal, setYemekKartModal] = useState(false);
-  const [yemekKartForm, setYemekKartForm] = useState({ ad_soyad: "", kart_no: "", aylik_tutar: "", firma: "AHY" });
+  const [yemekKartForm, setYemekKartForm] = useState({ ad_soyad: "", kart_no: "", aylik_tutar: "", firma: _hrVarsayilanFirma });
   const loadYemek = async () => {
     try {
       const r = await fetch(`${API_BASE}/hr/yemek-kartlari`);
@@ -16957,7 +17005,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     // görmez — o kayıtlar ERC dönemine aittir. ERC tarafı her şeyi görür.
     const all = await r.json();
     const arr = Array.isArray(all) ? all : [];
-    setAvansList(_hrMarka === "ERC" ? arr : arr.filter(a => ((a.tarih || "").split("T")[0]) >= "2026-07-15"));
+    setAvansList(_hrMarka === "ERC" ? arr : arr.filter(a => { const t = (a.tarih || "").split("T")[0]; return t >= AHY_DEVIR && (!AHY_BITIS || t <= AHY_BITIS); }));
   };
   const loadIsAvans = async () => {
     const r = await fetch(`${API_BASE}/hr/avans?turu=IS`);
@@ -17013,7 +17061,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     const pOzet = ozet.find(o => String(o.personel_id) === String(p.id));
     const hakVal = Math.round(ahyMaasPay(p, pOzet ? Number(pOzet.hakedilen_maas||0) : Number(p.net_maas||0)));
     setMaasOdeModal(p); setMaasOdeHak(hakVal);
-    setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih:new Date().toISOString().split("T")[0], aciklama:"", odeyen: _hrMarka==="AHY" ? "AHY" : "SIMSEK" });
+    setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih:new Date().toISOString().split("T")[0], aciklama:"", odeyen: _hrMarka === "ERC" ? "SIMSEK" : _hrMarka });
     loadMaasOde(p.id);
   };
   const [pasifAcik, setPasifAcik] = useState(false);
@@ -17091,7 +17139,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           body: JSON.stringify({ personel_id: maasOdeModal.id, ...maasOdeForm, created_by: currentUser?.email })
         });
       }
-      setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih: new Date().toISOString().split("T")[0], aciklama:"", odeyen: _hrMarka==="AHY" ? "AHY" : "SIMSEK" });
+      setMaasOdeForm({ donem: puantajAy, bankadan:"", elden:"", tarih: new Date().toISOString().split("T")[0], aciklama:"", odeyen: _hrMarka === "ERC" ? "SIMSEK" : _hrMarka });
       await loadMaasOde(maasOdeModal.id);
       loadAylikOdemeler();
     } catch (err) { alert("Kayıt sırasında hata: " + err.message); }
@@ -17345,8 +17393,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const ahyMaasOran = (p) => {
     if (_hrMarka === "ERC") return 1;
     const ayKey = `${yilStr}-${ayStr}`;
-    if (ayKey < "2026-07") return 0;
-    if (ayKey > "2026-07") return 1;
+    const devirAy = AHY_DEVIR.slice(0, 7);
+    if (ayKey < devirAy) return 0;
+    if (AHY_BITIS && ayKey > AHY_BITIS.slice(0, 7)) return 0; // bitmiş marka (AHY) sonraki ayları ödemez
+    if (ayKey > devirAy) return 1;
+    if (Number(AHY_DEVIR.slice(8, 10)) <= 1) return 1;       // ay başı devir (TEKNO 01.10): ilk ay tam
     const giris = String(p?.ise_giris_tarihi || "").split("T")[0];
     if (giris && giris >= AHY_DEVIR) return 1;
     return 0.5;
@@ -17358,7 +17409,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const ahyMaasPay = (p, base) => {
     const giris = String(p?.ise_giris_tarihi || "").split("T")[0];
     const g = Number((giris || "").slice(8, 10));
-    if (_hrMarka !== "ERC" && `${yilStr}-${ayStr}` === "2026-07"
+    if (_hrMarka === "AHY" && `${yilStr}-${ayStr}` === "2026-07"
         && giris && giris.slice(0, 7) === "2026-07" && g > 1 && g < 15) {
       return Math.min(Number(base || 0), Number(p?.net_maas || 0) * 0.5);
     }
@@ -17369,7 +17420,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   // kayıtlarda tarih kuralı: 15.07 öncesi ödemeler ERC'nindir.
   // ERC görünümü ana görünümdür: personelin aldığı TÜM ödemeleri sayar.
   const ahyOdemeGor = (o) => _hrMarka === "ERC"
-    || (o.odeyen ? o.odeyen === "AHY" : String(o.tarih || "").slice(0, 10) >= AHY_DEVIR);
+    || (o.odeyen ? String(o.odeyen).toUpperCase() === _hrMarka
+        : (String(o.tarih || "").slice(0, 10) >= AHY_DEVIR && (!AHY_BITIS || String(o.tarih || "").slice(0, 10) <= AHY_BITIS)));
 
   const TR_RESMI_TATIL_HR = [
     "2024-01-01","2024-04-10","2024-04-11","2024-04-12","2024-04-23","2024-05-01","2024-05-19","2024-06-15","2024-06-16","2024-06-17","2024-06-18","2024-07-15","2024-08-30","2024-10-29",
@@ -17512,7 +17564,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
         const donem = puantajAy;
         // Alt marka görünümü (AHY) yalnız kendi firmasının kartlarını görür;
         // ERC görünümü tümünü firma rozetleriyle görür
-        const aktifKartlar = yemekKartlar.filter(k => k.aktif && (_hrMarka === "ERC" || String(k.firma || "AHY").toUpperCase() === _hrMarka));
+        const aktifKartlar = yemekKartlar.filter(k => k.aktif && (_hrMarka === "ERC" || _hrBordro.includes(String(k.firma || "AHY").toUpperCase())));
         const odemeOf = (k) => yemekOdemeler.find(o => String(o.kart_id) === String(k.id) && o.donem === donem);
         const topGereken = aktifKartlar.reduce((sm,k) => sm + Number(k.aylik_tutar||0), 0);
         const topOdenen = aktifKartlar.reduce((sm,k) => { const o = odemeOf(k); return sm + (o ? Number(o.tutar||0) : 0); }, 0);
@@ -17528,7 +17580,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           colWidths: [28, 22, 10, 10, 12, 14, 14, 14],
           numericCols: [5, 6],
           rows: aktifKartlar.map(k => { const o = odemeOf(k); return [
-            k.ad_soyad, k.kart_no || "", (o?.firma || k.firma) === "SIMSEK" ? "Şimşek" : "AHY", donem,
+            k.ad_soyad, k.kart_no || "", (o?.firma || k.firma) === "SIMSEK" ? "Şimşek" : altMarkaKisa(o?.firma || k.firma), donem,
             o ? "ÖDENDİ" : "ÖDENMEDİ", Number(k.aylik_tutar||0), o ? Number(o.tutar||0) : 0,
             o ? fmtTar(o.tarih_str || o.tarih) : "" ]; }),
         }).catch(e => alert("Excel indirilemedi: " + e.message));
@@ -17541,7 +17593,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               </div>
               <div style={{ display:"flex", gap:"8px" }}>
                 <button onClick={indirYemekExcel} style={{ padding:"9px 16px", background:"#166534", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>📥 Excel İndir</button>
-                <button onClick={() => { setYemekKartForm({ ad_soyad:"", kart_no:"", aylik_tutar:"", firma:"AHY" }); setYemekKartModal(true); }} style={{ padding:"9px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>+ Kart Ekle</button>
+                <button onClick={() => { setYemekKartForm({ ad_soyad:"", kart_no:"", aylik_tutar:"", firma:_hrVarsayilanFirma }); setYemekKartModal(true); }} style={{ padding:"9px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>+ Kart Ekle</button>
               </div>
             </div>
 
@@ -17581,11 +17633,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               style={{ width:"90px", padding:"5px 8px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px", textAlign:"right" }} />
                           </td>
                           <td style={tdY}>
-                            <button onClick={_hrMarka === "ERC" ? () => yemekKartGuncelle(k.id, { firma: k.firma === "SIMSEK" ? "AHY" : "SIMSEK" }) : undefined}
+                            <button onClick={_hrMarka === "ERC" ? () => yemekKartGuncelle(k.id, { firma: k.firma === "SIMSEK" ? GUNCEL_ALT_MARKA : (k.firma === GUNCEL_ALT_MARKA ? "AHY" : "SIMSEK") }) : undefined}
                               title={_hrMarka === "ERC" ? "Değiştirmek için tıklayın" : undefined}
                               style={{ padding:"4px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, cursor: _hrMarka === "ERC" ? "pointer" : "default", border:"none",
                                 background: k.firma === "SIMSEK" ? "#fffbeb" : "#eff6ff", color: k.firma === "SIMSEK" ? "#92400e" : "#1e40af" }}>
-                              {k.firma === "SIMSEK" ? "🟨 Şimşek" : "⚡ AHY"}
+                              {k.firma === "SIMSEK" ? "🟨 Şimşek" : `${altMarkaBilgi(k.firma)?.ikon || "⚡"} ${altMarkaKisa(k.firma)}`}
                             </button>
                           </td>
                           <td style={tdY}>
@@ -17605,7 +17657,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               <button onClick={async () => { if (!window.confirm("Bu dönem ödemesi geri alınsın mı? (Nakit akışından da silinir)")) return; await fetch(`${API_BASE}/hr/yemek-kartlari/${k.id}/ode/${donem}`, { method:"DELETE" }); loadYemek(); }}
                                 style={{ padding:"5px 10px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>↩ Geri Al</button>
                             ) : (
-                              <button onClick={() => { setYemekOdeModal(k); setYemekOdeForm({ tutar: String(k.aylik_tutar || ""), tarih: new Date().toISOString().slice(0,10), firma: k.firma || "AHY" }); }}
+                              <button onClick={() => { setYemekOdeModal(k); setYemekOdeForm({ tutar: String(k.aylik_tutar || ""), tarih: new Date().toISOString().slice(0,10), firma: k.firma || _hrVarsayilanFirma }); }}
                                 style={{ padding:"5px 12px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>💸 Öde</button>
                             )}
                             <button onClick={async () => { if (!window.confirm(`${k.ad_soyad} kartı silinsin mi? (Tüm dönem ödemeleri ve nakit akışı kayıtları da silinir)`)) return; await fetch(`${API_BASE}/hr/yemek-kartlari/${k.id}`, { method:"DELETE" }); loadYemek(); }}
@@ -17629,7 +17681,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <div>
                       <span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Firma</span>
                       <div style={{ display:"flex", gap:"6px" }}>
-                        {[["AHY","⚡ AHY"],["SIMSEK","🟨 Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
+                        {[...ALT_MARKA_LISTE.map(m => [m.kod, `${m.ikon} ${m.kisa}`]), ["SIMSEK","🟨 Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
                           <button key={v} type="button" onClick={() => setYemekOdeForm(f => ({ ...f, firma: v }))}
                             style={{ flex:1, padding:"8px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekOdeForm.firma===v?"#1e3a5f":"#e5e7eb"}`, background: yemekOdeForm.firma===v?"#1e3a5f":"#fff", color: yemekOdeForm.firma===v?"#fff":"#6b7280" }}>{l}</button>
                         ))}
@@ -17679,7 +17731,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
                       <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Firma</span>
                         <div style={{ display:"flex", gap:"6px" }}>
-                          {[["AHY","AHY"],["SIMSEK","Şimşek"]].map(([v,l]) => (
+                          {[...ALT_MARKA_LISTE.map(m => [m.kod, m.kisa]), ["SIMSEK","Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
                             <button key={v} type="button" onClick={() => setYemekKartForm(f => ({ ...f, firma: v }))}
                               style={{ flex:1, padding:"8px 4px", borderRadius:"8px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekKartForm.firma===v?"#1e3a5f":"#e5e7eb"}`, background: yemekKartForm.firma===v?"#1e3a5f":"#fff", color: yemekKartForm.firma===v?"#fff":"#6b7280" }}>{l}</button>
                           ))}
@@ -17743,7 +17795,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                             ₺{Math.round(personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)).toLocaleString("tr-TR")}
                           </span>
                           <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:500 }}>
-                            {_hrMarka === "ERC" ? "(tüm personel tam çalışırsa)" : "(AHY payı — 15 Temmuz devri sonrası dönem)"}
+                            {_hrMarka === "ERC" ? "(tüm personel tam çalışırsa)" : `(${altMarkaKisa(_hrMarka)} payı — ${AHY_DEVIR.split("-").reverse().join(".")} devri sonrası dönem)`}
                           </span>
                         </div>
                         <div style={labelSt}>
@@ -17832,7 +17884,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     if (_hrMarka !== "ERC" && puantajAy < "2026-07") {
                       return (
                         <div style={{ marginTop:"14px", background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:"12px", padding:"16px 20px", fontSize:"13.5px", color:"#92400e", fontWeight:600 }}>
-                          🔒 {ayAdi} {yilStr} — devir (15 Temmuz 2026) öncesi dönem. Bu dönemin maaş ödemeleri ERC sorumluluğundadır; AHY panelinde gösterilmez.
+                          🔒 {ayAdi} {yilStr} — devir ({AHY_DEVIR.split("-").reverse().join(".")}) öncesi dönem. Bu dönemin maaş ödemeleri {altMarkaKisa(_hrMarka)} sorumluluğunda değildir; {altMarkaKisa(_hrMarka)} panelinde gösterilmez.
                         </div>
                       );
                     }
@@ -17843,7 +17895,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       bankaByPer[o.personel_id] = (bankaByPer[o.personel_id]||0) + Number(o.bankadan||0);
                       eldenByPer[o.personel_id] = (eldenByPer[o.personel_id]||0) + Number(o.elden||0);
                       const tut = Number(o.bankadan||0) + Number(o.elden||0);
-                      if (o.odeyen === "AHY") odeAhyByPer[o.personel_id] = (odeAhyByPer[o.personel_id]||0) + tut;
+                      if (altMarkaMi(o.odeyen)) odeAhyByPer[o.personel_id] = (odeAhyByPer[o.personel_id]||0) + tut;
                       else odeSimsekByPer[o.personel_id] = (odeSimsekByPer[o.personel_id]||0) + tut;
                     });
 
@@ -17924,6 +17976,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                 style={{ padding:"5px 10px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"12px", background:"#fff", color:"#1f2937", fontWeight:600, cursor:"pointer" }}>
                                 <option value="TUMU">🏢 Tümü</option>
                                 <option value="ERC">Şimşek</option>
+                                <option value="TEKNO">Teknocenter</option>
                                 <option value="AHY">AHY</option>
                               </select>
                             )}
@@ -18632,6 +18685,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           <label style={labelSt}>Bordro Şirketi</label>
                           <select value={pForm.marka||"ERC"} onChange={e=>setPForm(f=>({...f,marka:e.target.value}))} style={inputSt}>
                             <option value="ERC">Şimşek</option>
+                            <option value="TEKNO">Teknocenter</option>
                             <option value="AHY">AHY</option>
                           </select>
                         </div>
@@ -18898,7 +18952,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   {maasOdeEditId ? "✏️ Ödemeyi Düzenle" : "Yeni Ödeme Ekle"}
                 </div>
                 {maasOdeEditId && (
-                  <button type="button" onClick={()=>{ setMaasOdeEditId(null); setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"", odeyen: _hrMarka==="AHY" ? "AHY" : "SIMSEK" }); }}
+                  <button type="button" onClick={()=>{ setMaasOdeEditId(null); setMaasOdeForm({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"", odeyen: _hrMarka === "ERC" ? "SIMSEK" : _hrMarka }); }}
                     style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>
                     ✕ İptal
                   </button>
@@ -18925,7 +18979,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               <div>
                 <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Ödeyen Firma</div>
                 <div style={{ display:"flex", gap:"8px" }}>
-                  {[{ v:"SIMSEK", l:"🏢 ŞİMŞEK", c:"#1d4ed8", bg:"#eff6ff" }, { v:"AHY", l:"⚡ AHY", c:"#b45309", bg:"#fffbeb" }].map(f=>(
+                  {[{ v:"SIMSEK", l:"🏢 ŞİMŞEK", c:"#1d4ed8", bg:"#eff6ff" }, { v:"TEKNO", l:"🔷 TEKNO", c:"#1d4ed8", bg:"#dbeafe" }, { v:"AHY", l:"⚡ AHY", c:"#b45309", bg:"#fffbeb" }].filter(f => _hrMarka === "ERC" || f.v === "SIMSEK" || f.v === _hrMarka).map(f=>(
                     <button key={f.v} type="button" onClick={()=>setMaasOdeForm(x=>({...x,odeyen:f.v}))}
                       style={{ flex:1, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer",
                         border: maasOdeForm.odeyen===f.v ? `2px solid ${f.c}` : "1.5px solid #e5e7eb",
@@ -19028,10 +19082,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           <div>
                             <div style={{ fontWeight:700, fontSize:"14px" }}>{od.donem} <span style={{ fontWeight:400, color:"#6b7280", fontSize:"12px" }}>· {new Date(od.tarih).toLocaleDateString("tr-TR")}</span>{" "}
                               <span style={{ fontSize:"10px", fontWeight:800, padding:"2px 8px", borderRadius:"99px", verticalAlign:"1px",
-                                background: od.odeyen==="AHY" ? "#fffbeb" : "#eff6ff",
-                                color: od.odeyen==="AHY" ? "#b45309" : "#1d4ed8",
-                                border: od.odeyen==="AHY" ? "1px solid #fcd34d" : "1px solid #bfdbfe" }}>
-                                {od.odeyen==="AHY" ? "⚡ AHY" : "🏢 ŞİMŞEK"}
+                                background: altMarkaMi(od.odeyen) ? altMarkaBilgi(od.odeyen).bg : "#eff6ff",
+                                color: altMarkaMi(od.odeyen) ? altMarkaBilgi(od.odeyen).renk : "#1d4ed8",
+                                border: altMarkaMi(od.odeyen) ? `1px solid ${altMarkaBilgi(od.odeyen).brd}` : "1px solid #bfdbfe" }}>
+                                {altMarkaMi(od.odeyen) ? `${altMarkaBilgi(od.odeyen).ikon} ${altMarkaKisa(od.odeyen)}` : "🏢 ŞİMŞEK"}
                               </span>
                             </div>
                             <div style={{ fontSize:"13px", marginTop:"2px" }}>
@@ -21597,7 +21651,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
   const isRolloutMudur = _role === "rollout_mudur" || _role === "bolge_mudur";
   const _altMarka = currentUser?.hw_yukleme === false;
   const _marka = String(currentUser?.marka || "AHY").toUpperCase();
-  const _altMarkaYonetici = _altMarka && (["admin", "direktor", "genel_mudur"].includes(_role) || _email === "info@ahyelektrik.com");
+  const _altMarkaYonetici = _altMarka && (["admin", "direktor", "genel_mudur"].includes(_role) || _email === "info@ahyelektrik.com" || _email === "teknocenter");
   const isRequester = !_altMarkaYonetici && !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
   const canPay = isMuhasebe || isPM || isDirektor || isNurcan || _altMarkaYonetici;
   const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
@@ -22187,7 +22241,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
             <div style={{ fontSize:"12.5px", color:"#6b7a90", marginBottom:"14px" }}>Seçim ödemeyi ve gideri o firmaya yazar.</div>
             <div style={{ display:"flex", gap:"10px" }}>
               <button onClick={() => avansGonder(firmaSec.id, firmaSec.path, "ERC")} style={{ ...btn, flex:1, justifyContent:"center", background:navy, color:"#fff" }}>ŞİMŞEK</button>
-              <button onClick={() => avansGonder(firmaSec.id, firmaSec.path, "AHY")} style={{ ...btn, flex:1, justifyContent:"center", background:"#f59e0b", color:"#1a1200" }}>AHY</button>
+              <button onClick={() => avansGonder(firmaSec.id, firmaSec.path, GUNCEL_ALT_MARKA)} style={{ ...btn, flex:1, justifyContent:"center", background:"#f59e0b", color:"#1a1200" }}>{altMarkaKisa(GUNCEL_ALT_MARKA)}</button>
             </div>
             <button onClick={() => setFirmaSec(null)} style={{ ...btn, width:"100%", justifyContent:"center", marginTop:"10px", background:"#f3f5f8", color:"#3c4a5d" }}>Vazgeç</button>
           </div>
@@ -22310,7 +22364,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   // isRequester: sadece kendi avanslarını görür.
   // Alt marka (AHY) panelinde yalnız YÖNETİCİ hesabı tam listeyi görür;
   // markalı personel (ör. saha ekibi) kendi kayıtlarıyla sınırlıdır (17.08.2026).
-  const _altMarkaYonetici = _altMarka && (["admin","direktor","genel_mudur"].includes(_role) || _email === "info@ahyelektrik.com");
+  const _altMarkaYonetici = _altMarka && (["admin","direktor","genel_mudur"].includes(_role) || _email === "info@ahyelektrik.com" || _email === "teknocenter");
   const isRequester = !_altMarkaYonetici && !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
@@ -22325,7 +22379,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
         const db = await rb.json().catch(() => ({}));
         const rows = db.rows || [];
         // Alt marka yalnız kendi personelinin bakiyelerini görür
-        if (rb.ok) setBakiyeler(_altMarka ? rows.filter(b => String(b.marka || "ERC").toUpperCase() === _marka) : rows);
+        if (rb.ok) setBakiyeler(_altMarka ? rows.filter(b => kullaniciBordro(currentUser).includes(String(b.marka || "ERC").toUpperCase())) : rows);
       } catch {}
       try {
         const ro = await fetch(`${API_BASE}/hr/personel-odeme`, { headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}` } });
@@ -22339,7 +22393,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
     const bk = Number(b?.bakiye || 0);
     const tip = tipOn || (bk > 0 ? "AVANS_IADE" : "MASRAF_ODEME");
     setOdemeModal({ personel_id: b?.id ? String(b.id) : "", tip, tutar: bk !== 0 ? String(Math.round(Math.abs(bk) * 100) / 100) : "",
-      tarih: new Date().toISOString().slice(0, 10), aciklama: "", firma: _altMarka ? _marka : (String(b?.marka || "ERC").toUpperCase() === "AHY" ? "AHY" : "ERC"), yontem: "HAVALE" });
+      tarih: new Date().toISOString().slice(0, 10), aciklama: "", firma: _altMarka ? _marka : (guncelAltMarka(b?.marka) || "ERC"), yontem: "HAVALE" });
   };
   const odemeKaydet = async () => {
     const m = odemeModal; if (!m) return;
@@ -22392,14 +22446,16 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
     // Tek yönlü marka izolasyonu: ERC herkesi görür, alt marka (AHY) kendi
     // personelini; devir (15.07.2026) öncesi ayrılanlar AHY'ye yansımaz.
     const _um = String(currentUser?.marka || "ERC").toUpperCase();
+    const _umBordro = kullaniciBordro(currentUser);          // TEKNO: ["TEKNO","AHY"] (devralınan kadro)
+    const _umDevir = currentUser?.marka_devir || "2026-07-15";
     const all = await r.json();
     const arr = Array.isArray(all) ? all : [];
     setPersonelList(_um === "ERC" ? arr : arr.filter(p => {
-      if (String(p.marka || "ERC").toUpperCase() !== _um) return false;
+      if (!_umBordro.includes(String(p.marka || "ERC").toUpperCase())) return false;
       if (p.aktif) return true;
       const giris = (p.ise_giris_tarihi || "").split("T")[0];
       const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
-      return giris >= "2026-07-15" || (ayrilma && ayrilma >= "2026-07-15");
+      return giris >= _umDevir || (ayrilma && ayrilma >= _umDevir);
     }));
   };
 
@@ -22737,7 +22793,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                         ? <span style={{ background:"#f3f4f6", color:"#374151", borderRadius:"6px", padding:"2px 8px", fontSize:"11px", fontWeight:700 }}>Avans iadesi</span>
                         : <span style={{ background:"#ccfbf1", color:"#0f766e", borderRadius:"6px", padding:"2px 8px", fontSize:"11px", fontWeight:700 }}>Masraf ödemesi</span>}</td>
                       <td style={{ padding:"7px 14px", textAlign:"right", fontWeight:800, color: o.tip === "AVANS_IADE" ? "#374151" : "#0f766e" }}>{o.tip === "AVANS_IADE" ? "−" : ""}₺{Number(o.tutar).toLocaleString("tr-TR")}</td>
-                      <td style={{ padding:"7px 14px" }}>{String(o.firma || "ERC").toUpperCase() === "AHY" ? "AHY" : "ŞİMŞEK"}</td>
+                      <td style={{ padding:"7px 14px" }}>{altMarkaMi(o.firma) ? altMarkaKisa(o.firma) : "ŞİMŞEK"}</td>
                       <td style={{ padding:"7px 14px" }}>{o.yontem === "NAKIT" ? "Nakit" : "Havale"}</td>
                       <td style={{ padding:"7px 14px", color:"#6b7280" }}>{o.aciklama || ""}</td>
                       <td style={{ padding:"7px 14px", color:"#9ca3af", fontSize:"11px" }}>{String(o.created_by || "").split("@")[0]}</td>
@@ -22758,7 +22814,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px" }}>
               <div style={{ gridColumn:"1/-1" }}>
                 <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Personel *</label>
-                <select value={odemeModal.personel_id} onChange={e => { const p = personelList.find(x => String(x.id) === e.target.value); setOdemeModal(m => ({ ...m, personel_id: e.target.value, firma: _altMarka ? _marka : (String(p?.marka || "ERC").toUpperCase() === "AHY" ? "AHY" : "ERC") })); }}
+                <select value={odemeModal.personel_id} onChange={e => { const p = personelList.find(x => String(x.id) === e.target.value); setOdemeModal(m => ({ ...m, personel_id: e.target.value, firma: _altMarka ? _marka : (guncelAltMarka(p?.marka) || "ERC") })); }}
                   style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", background:"#fff" }}>
                   <option value="">Seçin</option>
                   {personelList.filter(p => p.aktif !== false || String(p.id) === String(odemeModal.personel_id)).slice().sort((a, b) => String(a.ad_soyad).localeCompare(String(b.ad_soyad), "tr")).map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
@@ -22792,6 +22848,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                   <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Ödeyen firma</label>
                   <select value={odemeModal.firma} onChange={e => setOdemeModal(m => ({ ...m, firma: e.target.value }))} style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", background:"#fff" }}>
                     <option value="ERC">ŞİMŞEK</option>
+                    <option value="TEKNO">TEKNO</option>
                     <option value="AHY">AHY</option>
                   </select>
                 </div>
@@ -23062,7 +23119,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                   {t.bolge && <span style={{ background:"#f3f4f6", color:"#374151", padding:"2px 10px", borderRadius:"20px", fontSize:"12px" }}>{t.bolge}</span>}
                   {t.proje && <span style={{ background:"#f0fdf4", color:"#166534", padding:"2px 10px", borderRadius:"20px", fontSize:"12px" }}>{t.proje}</span>}
                   {t.plaka && <span style={{ background:"#eff6ff", color:"#1e40af", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>🚗 {t.plaka}</span>}
-                  {t.firma && <span style={{ background: t.firma==="AHY" ? "#fffbeb" : "#f0f9ff", color: t.firma==="AHY" ? "#92400e" : "#0369a1", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{t.firma==="AHY" ? "⚡ AHY" : "🏢 ŞİMŞEK"}</span>}
+                  {t.firma && <span style={{ background: altMarkaMi(t.firma) ? "#fffbeb" : "#f0f9ff", color: altMarkaMi(t.firma) ? "#92400e" : "#0369a1", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{altMarkaMi(t.firma) ? `${altMarkaBilgi(t.firma).ikon} ${altMarkaKisa(t.firma)}` : "🏢 ŞİMŞEK"}</span>}
                 </div>
                 {t.aciklama && <div style={{ fontSize:"13px", color:"#6b7280", marginBottom:"8px" }}>{t.aciklama}</div>}
                 {t.red_aciklama && <div style={{ fontSize:"12px", color:"#dc2626", marginBottom:"8px" }}>Red: {t.red_aciklama}</div>}
@@ -23153,7 +23210,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                     onMouseLeave={() => setNotTooltip(p => ({ ...p, visible: false }))}
                   >
                     <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {t.firma && <span style={{ background: t.firma==="AHY" ? "#fffbeb" : "#f0f9ff", color: t.firma==="AHY" ? "#92400e" : "#0369a1", borderRadius:"6px", padding:"1px 6px", fontSize:"11px", fontWeight:700, marginRight:"4px" }}>{t.firma==="AHY" ? "⚡AHY" : "🏢ŞİMŞEK"}</span>}
+                      {t.firma && <span style={{ background: altMarkaMi(t.firma) ? "#fffbeb" : "#f0f9ff", color: altMarkaMi(t.firma) ? "#92400e" : "#0369a1", borderRadius:"6px", padding:"1px 6px", fontSize:"11px", fontWeight:700, marginRight:"4px" }}>{altMarkaMi(t.firma) ? `${altMarkaBilgi(t.firma).ikon}${altMarkaKisa(t.firma)}` : "🏢ŞİMŞEK"}</span>}
                       {t.plaka && <span style={{ background:"#eff6ff", color:"#1e40af", borderRadius:"6px", padding:"1px 6px", fontSize:"11px", fontWeight:700, marginRight:"6px" }}>🚗 {t.plaka}</span>}
                       {t.aciklama ? t.aciklama : <span style={{ color:"#d1d5db" }}>—</span>}
                     </div>
@@ -23244,12 +23301,12 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                       Hangi firma ödeyecek? <span style={{ color: "#dc2626" }}>*</span>
                     </div>
                     <div style={{ display: "flex", gap: "8px" }}>
-                      {[["ERC", "🏢 ŞİMŞEK (ERC)"], ["AHY", "⚡ AHY Elektrik"]].map(([val, lbl]) => (
+                      {[["ERC", "🏢 ŞİMŞEK (ERC)"], [GUNCEL_ALT_MARKA, altMarkaEtiket(GUNCEL_ALT_MARKA)]].map(([val, lbl]) => (
                         <button key={val} type="button" onClick={() => setForm(f => ({ ...f, firma: val }))}
                           style={{ flex: 1, padding: "10px", borderRadius: "10px", fontSize: "13.5px", fontWeight: 700, cursor: "pointer",
                             border: form.firma === val ? "2px solid #1e3a5f" : "1.5px solid #e5e7eb",
-                            background: form.firma === val ? (val === "AHY" ? "#fef3c7" : "#dbeafe") : "#fff",
-                            color: form.firma === val ? (val === "AHY" ? "#92400e" : "#1e40af") : "#6b7280" }}>
+                            background: form.firma === val ? (altMarkaMi(val) ? "#fef3c7" : "#dbeafe") : "#fff",
+                            color: form.firma === val ? (altMarkaMi(val) ? "#92400e" : "#1e40af") : "#6b7280" }}>
                           {lbl}
                         </button>
                       ))}
@@ -23366,9 +23423,9 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
               Bu iş avansı hangi firmadan ödeniyor? Seçim, avansı o firmanın nakit akışına yazar.
             </div>
             <div style={{ display:"grid", gap:"10px" }}>
-              <button onClick={async()=>{ const m=firmaModal; setFirmaModal(null); await _approve(m.id, m.action, "AHY"); }}
+              <button onClick={async()=>{ const m=firmaModal; setFirmaModal(null); await _approve(m.id, m.action, GUNCEL_ALT_MARKA); }}
                 style={{ padding:"14px", background:"#fffbeb", border:"2px solid #f59e0b", color:"#92400e", borderRadius:"12px", fontWeight:800, fontSize:"15px", cursor:"pointer" }}>
-                ⚡ AHY Elektrik
+                {altMarkaEtiket(GUNCEL_ALT_MARKA)}
               </button>
               <button onClick={async()=>{ const m=firmaModal; setFirmaModal(null); await _approve(m.id, m.action, "ERC"); }}
                 style={{ padding:"14px", background:"#eff6ff", border:"2px solid #3b82f6", color:"#1e40af", borderRadius:"12px", fontWeight:800, fontSize:"15px", cursor:"pointer" }}>
@@ -24167,7 +24224,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // hesaplanır (HW'ye faturalanan USD kısmı fatura anındaki kurda sabit)
   const [ahyLockedFiziki, setAhyLockedFiziki] = useState(null);
   useEffect(() => {
-    if (!(isSubconUser && String(userSubconName || "").toUpperCase().startsWith("AHY"))) return;
+    if (!(isSubconUser && /^(AHY|TEKNO)/.test(String(userSubconName || "").toUpperCase()))) return;
     (async () => {
       try {
         const r = await fetch(`${API_BASE}/finance/marka-ozet?marka=AHY`, { headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` } });
@@ -25079,7 +25136,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
     const itemCode = String(row.item_code || "").trim();
 
-    if (subconName.includes("ahy")) return 0.9; // AHY Elektrik %90 (2026-07 anlaşması)
+    if (subconName.includes("ahy") || canonTaseron(subconName) === "tekno") return 0.9; // AHY / Teknocenter %90
     if (subconName === "federal") return 0.8;
 
     if (subconName === "ubs") {
@@ -25451,7 +25508,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     const _name = subconDisplayName || userSubconName || "Taşeron";
     // Fatura zinciri kolonları: Şimşek HW'ye %80 keser; taşeron Şimşek'e
     // o bedelin kendi kırılım yüzdesi kadarını keser (AHY %90 → net %72)
-    const _pct = canonTaseron(userSubconName) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(userSubconName)) ? 75 : 80;
+    const _pct = ["ahy", "tekno"].includes(canonTaseron(userSubconName)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(userSubconName)) ? 75 : 80;
     const header = [
       "Site ID",
       "İş Açıklaması",
@@ -25575,7 +25632,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
       // Hakediş kolon başlığı taşerona göre dinamik (Federal → AHY → UBS ...)
       const _expSub = String(userSubconName || "").trim();
-      const _expPct = canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = ["ahy", "tekno"].includes(canonTaseron(_expSub)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş";
       // Tablo KDV HARİÇ kurgulanır (taşeron faturasını KDV hariç bedel üzerinden keser)
       const _tsr = _expSub ? _expSub.toUpperCase() : "TAŞERON";
@@ -25676,7 +25733,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
 
       // FEDERAL/UBS/AHY/2KX için fatura verileri
-      const FATURA_TASERONLAR = ["federal", "ubs", "ahy", "2kx"];
+      const FATURA_TASERONLAR = ["federal", "ubs", "ahy", "tekno", "2kx"];
       // bolge_fatura girişleri kısa adla ("2KX") yapılmış olabilir; satırdaki subcon_name
       // uzun yasal ad → canonTaseron ile normalize edilmiş anahtar haritası kur
       const bfMapCanon = {};
@@ -25955,6 +26012,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     federal: { rf: 0.80, gizleme: 0.80, genel: 0.80 },
     // AHY Elektrik: anahtar teslim %90 kırılım (2026-07 anlaşması, eski %80)
     ahy:     { rf: 0.90, gizleme: 0.90, genel: 0.90 },
+    tekno:   { rf: 0.90, gizleme: 0.90, genel: 0.90 }, // Teknocenter (01.10.2026, AHY ile aynı kural)
     "2kx":   { rf: 0.75, gizleme: 0.75, genel: 0.75 },
   };
   const subconRates = subconRateMap[_subconKey] || { rf: 1, gizleme: 1, genel: 1 };
@@ -26218,7 +26276,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     });
                   },
                 }, {
-                  label: `${canonTaseron(userSubconName) === "ahy" ? "AHY" : (subconDisplayName || "Taşeron")} → Şimşek'e Kesilen Fatura`,
+                  label: `${canonTaseron(userSubconName) === "ahy" ? "AHY" : canonTaseron(userSubconName) === "tekno" ? "TEKNO" : (subconDisplayName || "Taşeron")} → Şimşek'e Kesilen Fatura`,
                   // 17.09.2026 (Orhan): ana rakam = saha/kalem içine girilen fatura kayıtları
                   // (Bölge Analizi Excel'indeki "Fatura Miktarı KDV Hariç" toplamıyla birebir).
                   // Kalemle eşleşmeyen (başka nedenle kesilmiş) faturalar buraya girmez.
@@ -26243,7 +26301,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                       }))
                       .sort((a, b) => String(b.fatura_no).localeCompare(String(a.fatura_no)) || a.site.localeCompare(b.site));
                     setOzetModal({
-                      title: `🧾 ${canonTaseron(userSubconName) === "ahy" ? "AHY" : (subconDisplayName || "Taşeron")} → Şimşek'e Kesilen Faturalar — Kalem Listesi`,
+                      title: `🧾 ${canonTaseron(userSubconName) === "ahy" ? "AHY" : canonTaseron(userSubconName) === "tekno" ? "TEKNO" : (subconDisplayName || "Taşeron")} → Şimşek'e Kesilen Faturalar — Kalem Listesi`,
                       cols: [
                         { k: "fatura_no", l: "Fatura No" },
                         { k: "fatura_tarihi", l: "Fatura Tarihi" },
@@ -28731,9 +28789,10 @@ function CashFlowPanel({ currentUser, onBack }) {
                   <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Firma</label>
                   <select value={odemeForm.marka} onChange={e=>setOdemeForm(f=>({...f, marka:e.target.value}))} style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box", background: odemeForm.marka==="AHY" ? "#fffbeb" : "#fff" }}>
                     <option value="ERC">🏢 Şimşek (ERC)</option>
+                    <option value="TEKNO">🔷 Teknocenter</option>
                     <option value="AHY">⚡ AHY Elektrik</option>
                   </select>
-                  <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Şimşek girişlerini AHY göremez</div>
+                  <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Şimşek girişlerini alt markalar göremez</div>
                 </div>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
@@ -30104,7 +30163,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const BOLGELER = ["İzmir","İstanbul","Ankara","Bursa","Antalya","Adana","Samsun","Trabzon","Erzurum","Diyarbakır","Diğer"];
   const PROJELER = ["TT","TC","VF","Diğer"];
   const SITE_TYPES = ["5G","LTE","DSS","STANDALONE","Diğer"];
-  const FIRMALAR = ["Şimşek","UBS","FEDERAL","AHY","2KX","Diğer"];
+  const FIRMALAR = ["Şimşek","UBS","FEDERAL","AHY","TEKNO","2KX","Diğer"];
 
   // ── LOAD ──
   const loadTalepler = async () => {
@@ -33262,8 +33321,10 @@ function App() {
                 {/* Email input — no label */}
                 <div style={{marginBottom:'16px'}}>
                   <input
-                    type="email"
-                    placeholder="E-posta adresi"
+                    type="text"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    placeholder="E-posta adresi veya kullanıcı adı"
                     value={financeLoginEmail||''}
                     onChange={e=>setFinanceLoginEmail(e.target.value)}
                     onKeyDown={e=>e.key==='Enter'&&handleFinanceLogin(e)}
@@ -34112,8 +34173,8 @@ function App() {
                               :u.role==="rollout_mudur"?(u.email?.toLowerCase()==="serdar.altinova@simsektel.com"?"Bölge Müdürü":"Rollout Müdürü")
                               :u.role==="pm"?"Proje Müdürü":u.role==="direktor"?"Direktör":u.role==="muhasebe"?"Muhasebe":"Personel";
                             const firmaAdi = (u) =>
-                              String(u.marka||"").toUpperCase()==="AHY" ? "AHY Elektrik"
-                              : (u.tenant && u.tenant!=="erc") ? u.tenant : "ERC Mühendislik";
+                              altMarkaBilgi(u.marka)?.ad
+                              || ((u.tenant && u.tenant!=="erc") ? u.tenant : "ERC Mühendislik");
                             const sirali = [...adminUsers].sort((a,b) =>
                               (b.is_active?1:0)-(a.is_active?1:0) || String(a.name||"").localeCompare(String(b.name||""), "tr"));
                             exportStandardExcel({
@@ -37221,8 +37282,8 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                       </td>
                       <td style={tdSt}>
                         {r.odendi
-                          ? <span style={{ fontSize:"12.5px" }}>{r.odeme.kasadan_dus === false ? "AHY ödedi" : "Kasadan"}</span>
-                          : <select value={r.kasadan ? "KASA" : "AHY"} onChange={e => payRowSet(i, { kasadan: e.target.value === "KASA" })} style={{ border:"1px solid #cfd7e2", borderRadius:"8px", padding:"6px 8px", fontSize:"12.5px" }}><option value="AHY">AHY ödedi</option><option value="KASA">Kasadan</option></select>}
+                          ? <span style={{ fontSize:"12.5px" }}>{r.odeme.kasadan_dus === false ? kasaDisiEtiket(currentUser) : "Kasadan"}</span>
+                          : <select value={r.kasadan ? "KASA" : "AHY"} onChange={e => payRowSet(i, { kasadan: e.target.value === "KASA" })} style={{ border:"1px solid #cfd7e2", borderRadius:"8px", padding:"6px 8px", fontSize:"12.5px" }}><option value="AHY">{kasaDisiEtiket(currentUser)}</option><option value="KASA">Kasadan</option></select>}
                       </td>
                       <td style={tdSt}>
                         {r.odendi
@@ -37902,8 +37963,8 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac }) {
                       <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>₺{r.kira.toLocaleString("tr-TR")}</td>
                       <td style={{ ...tdSt, textAlign:"right" }}>{r.odendi ? <b>₺{Number(r.odeme.tutar || 0).toLocaleString("tr-TR")}</b>
                         : <input value={r.tutar} onChange={e => payRowSet(i, { tutar: e.target.value, sec: true })} style={{ width:"110px", border:"1px solid #cfd7e2", borderRadius:"8px", padding:"6px 8px", fontFamily:"ui-monospace, Menlo, monospace", fontSize:"13px", textAlign:"right" }} />}</td>
-                      <td style={tdSt}>{r.odendi ? <span style={{ fontSize:"12.5px" }}>{r.odeme.kasadan_dus === false ? "AHY ödedi" : "Kasadan"}</span>
-                        : <select value={r.kasadan ? "KASA" : "AHY"} onChange={e => payRowSet(i, { kasadan: e.target.value === "KASA" })} style={{ border:"1px solid #cfd7e2", borderRadius:"8px", padding:"6px 8px", fontSize:"12.5px" }}><option value="KASA">Kasadan</option><option value="AHY">AHY ödedi</option></select>}</td>
+                      <td style={tdSt}>{r.odendi ? <span style={{ fontSize:"12.5px" }}>{r.odeme.kasadan_dus === false ? kasaDisiEtiket(currentUser) : "Kasadan"}</span>
+                        : <select value={r.kasadan ? "KASA" : "AHY"} onChange={e => payRowSet(i, { kasadan: e.target.value === "KASA" })} style={{ border:"1px solid #cfd7e2", borderRadius:"8px", padding:"6px 8px", fontSize:"12.5px" }}><option value="KASA">Kasadan</option><option value="AHY">{kasaDisiEtiket(currentUser)}</option></select>}</td>
                       <td style={tdSt}>{r.odendi ? <span style={{ fontSize:"12.5px", color:"#6b7a90" }}>{fT(r.odeme.tarih)}</span>
                         : <input type="date" value={r.tarih} onChange={e => payRowSet(i, { tarih: e.target.value })} style={{ border:"1px solid #cfd7e2", borderRadius:"8px", padding:"5px 8px", fontSize:"12.5px" }} />}</td>
                       <td style={tdSt}>{r.odendi
