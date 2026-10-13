@@ -7,6 +7,9 @@ import JSZip from "jszip";
 import "react-datepicker/dist/react-datepicker.css";
 import DatePicker from "react-datepicker";
 import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
+// Türkiye il sınırları (81 il) — Org şeması "Haritadan Gör" için. Kaynak: github.com/alpers/Turkey-Maps-GeoJSON (Apache-2.0,
+// lisans: src/data/tr-iller.LICENSE.txt). Uygulamaya gömülüdür; çalışma anında dış harita servisi/tile kullanılmaz.
+import TR_ILLER from "./data/tr-iller.geo.json";
 import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
@@ -3869,10 +3872,257 @@ function CekSenetPanel({ currentUser }) {
 // ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart
 // Web'de kurumsal SVG şema + Huawei'ye gönderilebilir 2 sayfalı Excel
 // (Sheet1: şema, Sheet2: Details — ad soyad/görev/bölge/tel/TC).
+/* ═══ ORGANİZASYON — ORTAK SABİTLER (13.10.2026) ═══
+   Şema, Excel, PNG ve harita AYNI kaynağı kullanır; harita için ikinci bir personel/ekip listesi tutulmaz.
+   Ankara ve Bursa ORTAK yönetim: Nurcan Kuş + Fırat Kenan Ongun tek kayıt, iki bölge. */
+const ORG_YONETIM = {
+  izmir: { mudur: { ad: "SERDAR ALTINOVA", tel: "5321619481", gorev: "İzmir Bölge Müdürü" }, supervizor: { ad: "KASIM EVİN", tel: "5321531797", gorev: "İzmir Süpervizörü" } },
+  ortak: { mudur: { ad: "NURCAN KUŞ", tel: "5392596108", gorev: "Ankara & Bursa Bölge Müdürü" }, supervizor: { ad: "FIRAT KENAN ONGUN", tel: "5322127865", gorev: "Ankara & Bursa Süpervizörü" } },
+};
+// Operasyon bölgeleri ve il kapsamları — Huawei BoQ "Delivery Region" haritasıyla (20260902) çapraz kontrol edildi.
+// Not: BoQ'da Yalova Region 2 (IST ASIA) içinde olduğundan Bursa kapsamına alınmadı.
+const ORG_BOLGELER = [
+  { key: "izmir",  ad: "İzmir",  boq: "Region 5", yonetim: "izmir", ortak: false, renk: "#0369a1", dolgu: "#bae6fd", vurgu: "#7dd3fc", iller: ["İzmir", "Manisa", "Uşak", "Aydın", "Denizli", "Muğla"] },
+  { key: "bursa",  ad: "Bursa",  boq: "Region 4", yonetim: "ortak", ortak: true,  renk: "#15803d", dolgu: "#bbf7d0", vurgu: "#86efac", iller: ["Bursa", "Çanakkale", "Balıkesir", "Bilecik", "Kütahya"] },
+  { key: "ankara", ad: "Ankara", boq: "Region 3", yonetim: "ortak", ortak: true,  renk: "#b45309", dolgu: "#fed7aa", vurgu: "#fdba74", iller: ["Ankara", "Eskişehir", "Bolu", "Düzce", "Zonguldak", "Bartın", "Karabük", "Kastamonu", "Çankırı", "Kırıkkale"] },
+];
+// Depo/ofis kaydında koordinat yoksa şehir bazında yaklaşık nokta (gerçek adres gibi sunulmaz)
+const ORG_SEHIR_MERKEZ = { "İZMİR": { lat: 38.4237, lng: 27.1428 }, "BURSA": { lat: 40.1885, lng: 29.0610 }, "ANKARA": { lat: 39.9208, lng: 32.8541 } };
+
+// Harita işareti — modül düzeyinde: render içinde tanımlansaydı her state değişiminde yeniden mount olur,
+// mousedown–mouseup arasında DOM düğümü değişip click hiç oluşmazdı (İzmir işareti vakası, 13.10.2026).
+function OrgHaritaPin({ x, y, k, aktifMi, onClick }) {
+  return (
+    <g transform={`translate(${x},${y}) scale(${k})`} onClick={onClick} style={{ cursor: "pointer" }}>
+      <path d="M0 0 C-8 -10 -14 -16 -14 -24 A14 14 0 1 1 14 -24 C14 -16 8 -10 0 0Z" fill={aktifMi ? "#dc2626" : "#1e3a5f"} stroke="#fff" strokeWidth="2.5" />
+      <circle cx="0" cy="-24" r="5" fill="#fff" />
+    </g>
+  );
+}
+
+/* ═══ OPERASYON HARİTASI (13.10.2026, Orhan) ═══
+   Saf SVG + basit projeksiyon (dış tile/CDN yok): il sınırları, 3 bölge renkli, diğer iller gri;
+   bölgeye tıklayınca bilgi paneli (yönetim + canlı ekip sayıları), depo/ofis işaretleri; zoom/pan. */
+function OrgHaritaModal({ ekipler, ofisler, canEdit, onKonumKaydet, onClose }) {
+  const feats = Array.isArray(TR_ILLER?.features) ? TR_ILLER.features : [];
+  const yuklendi = feats.length > 0;
+  const proj = (lng, lat) => [(lng - 25.5) * 100 * Math.cos(39 * Math.PI / 180), (42.4 - lat) * 100];
+  // İl yolları + sınır kutuları bir kez hesaplanır
+  const iller = useMemo(() => feats.map((f) => {
+    const polys = f.geometry.type === "MultiPolygon" ? f.geometry.coordinates : [f.geometry.coordinates];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const d = polys.map((poly) => poly.map((ring) => ring.map(([lng, lat], i) => {
+      const [x, y] = proj(lng, lat);
+      if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+      return `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`;
+    }).join("") + "Z").join("")).join("");
+    return { ad: f.properties?.name || "", d, bbox: [minX, minY, maxX, maxY] };
+  }), [feats]);
+  const bolgeOf = (ad) => ORG_BOLGELER.find((b) => b.iller.includes(ad));
+  const bboxBirlestir = (list) => list.reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+  const bolgeBbox = (key) => bboxBirlestir(iller.filter((il) => bolgeOf(il.ad)?.key === key).map((il) => il.bbox));
+  const tumBbox = useMemo(() => iller.length ? bboxBirlestir(iller.filter((il) => bolgeOf(il.ad)).map((il) => il.bbox)) : [0, 0, 100, 100], [iller]);
+  const kutudanView = (bb, pad = 0.12) => { const w = bb[2] - bb[0], h = bb[3] - bb[1]; const p = Math.max(w, h) * pad; return { x: bb[0] - p, y: bb[1] - p, w: w + 2 * p, h: h + 2 * p }; };
+  const [view, setView] = useState(() => kutudanView(tumBbox));
+  const [secili, setSecili] = useState(null); // { tip:"bolge", key } | { tip:"ofis", id }
+  const [hover, setHover] = useState("");
+  const svgRef = useRef(null);
+  const drag = useRef(null);
+  useEffect(() => { setView(kutudanView(tumBbox)); }, [tumBbox]); // eslint-disable-line
+  // Esc ile kapat (diğer modallarla tutarlı)
+  useEffect(() => { const f = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", f); return () => window.removeEventListener("keydown", f); }, [onClose]);
+  // Tekerlekle yakınlaştırma (React'in pasif wheel dinleyicisi preventDefault'u engeller → native)
+  useEffect(() => {
+    const el = svgRef.current; if (!el) return;
+    const onWheel = (ev) => {
+      ev.preventDefault();
+      const r = el.getBoundingClientRect();
+      const px = (ev.clientX - r.left) / r.width, py = (ev.clientY - r.top) / r.height;
+      setView((v) => { const k = ev.deltaY > 0 ? 1.2 : 1 / 1.2; const w = v.w * k, h = v.h * k; return { x: v.x + (v.w - w) * px, y: v.y + (v.h - h) * py, w, h }; });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [yuklendi]);
+  const zoom = (k) => setView((v) => ({ x: v.x + (v.w - v.w * k) / 2, y: v.y + (v.h - v.h * k) / 2, w: v.w * k, h: v.h * k }));
+  const bolgeyeGit = (key) => { setView(kutudanView(bolgeBbox(key), 0.18)); setSecili({ tip: "bolge", key }); };
+  const tumunuGoster = () => { setView(kutudanView(tumBbox)); setSecili(null); };
+  const basla = (cx, cy) => { drag.current = { cx, cy, v: view, moved: false }; };
+  const surukle = (cx, cy) => {
+    const d = drag.current; if (!d || !svgRef.current) return;
+    const r = svgRef.current.getBoundingClientRect();
+    const dx = (cx - d.cx) / r.width * d.v.w, dy = (cy - d.cy) / r.height * d.v.h;
+    if (Math.abs(cx - d.cx) + Math.abs(cy - d.cy) > 3) d.moved = true;
+    setView({ x: d.v.x - dx, y: d.v.y - dy, w: d.v.w, h: d.v.h });
+  };
+  const birak = () => { drag.current = null; };
+  // Bölge bilgi paneli: yönetim (ortak sabit) + CANLI ekipler (aktif, bölgeye göre) + depo/ofis
+  const aktif = (ekipler || []).filter((e) => e.aktif !== false);
+  const bolgeEkip = (b) => aktif.filter((e) => String(e.bolge || "").toLocaleUpperCase("tr-TR").includes(b.ad.toLocaleUpperCase("tr-TR").slice(0, 3)));
+  const ekipOzet = (b) => {
+    const list = bolgeEkip(b); if (!list.length) return "Ekip tanımlı değil";
+    const say = {}; list.forEach((e) => { const f = (e.taseron_adi || "Şimşek").trim(); say[f] = (say[f] || 0) + 1; });
+    return `${list.length} ekip: ` + Object.entries(say).map(([f, n]) => `${n} ${f}`).join(", ");
+  };
+  const bolgeOfisleri = (b) => (ofisler || []).filter((o) => String(o.bolge || "").toLocaleUpperCase("tr-TR").includes(b.ad.toLocaleUpperCase("tr-TR").slice(0, 3)) && String(o.durum || "AKTİF").toLocaleUpperCase("tr-TR") !== "PASİF");
+  const ofisKonum = (o) => { const lat = Number(o.lat), lng = Number(o.lng); if (Number.isFinite(lat) && Number.isFinite(lng) && lat) return { lat, lng, kesin: true }; const m = ORG_SEHIR_MERKEZ[String(o.bolge || "").toLocaleUpperCase("tr-TR")]; return m ? { ...m, kesin: false } : null; };
+  const ofisEtiket = (o) => `${o.bolge ? o.bolge.charAt(0) + o.bolge.slice(1).toLocaleLowerCase("tr-TR") : ""} — ${/OFİS\+DEPO|OFIS\+DEPO/i.test(o.tur || "") ? "Depo ve Ofis" : /DEPO/i.test(o.tur || "") ? (/BURSA/i.test(o.bolge || "") ? "Depo ve Merkez Ofis" : "Depo") : "Ofis"}`;
+  const isaretler = (ofisler || []).filter((o) => !/ANK/i.test(o.bolge || "")).map((o) => ({ o, k: ofisKonum(o) })).filter((x) => x.k);
+  const [konumForm, setKonumForm] = useState({ lat: "", lng: "" });
+  const seciliBolge = secili?.tip === "bolge" ? ORG_BOLGELER.find((b) => b.key === secili.key) : null;
+  const seciliOfis = secili?.tip === "ofis" ? (ofisler || []).find((o) => o.id === secili.id) : null;
+  const sw = view.w / 1100; // çizgi kalınlığı zoom'dan bağımsız kalsın
+  const pinK = Math.max(0.5, view.w / 900); // işaret boyutu zoom'a göre
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: "12px", backdropFilter: "blur(2px)" }}>
+      <style>{`
+        .orgmap-govde { display:flex; gap:0; flex:1; min-height:0; }
+        .orgmap-harita { flex:1; min-width:0; position:relative; background:#f8fafc; }
+        .orgmap-panel { width:320px; flex-shrink:0; border-left:1px solid #e2e8f0; overflow-y:auto; background:#fff; }
+        .orgmap-ust { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 14px; border-bottom:1px solid #e2e8f0; background:#fff; }
+        .orgmap-btn { border:1.5px solid #cbd5e1; background:#fff; color:#1e293b; border-radius:8px; padding:6px 11px; font-size:12.5px; font-weight:700; cursor:pointer; white-space:nowrap; }
+        .orgmap-btn.aktif { background:#1e3a5f; color:#fff; border-color:#1e3a5f; }
+        .orgmap-zoom { position:absolute; right:12px; top:12px; display:flex; flex-direction:column; gap:4px; }
+        .orgmap-zoom button { width:34px; height:34px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; font-size:18px; font-weight:800; color:#1e3a5f; cursor:pointer; }
+        .orgmap-gosterge { position:absolute; left:12px; bottom:12px; background:rgba(255,255,255,0.94); border:1px solid #e2e8f0; border-radius:10px; padding:8px 12px; font-size:11.5px; color:#1f2937; display:grid; gap:4px; }
+        .orgmap-atif { position:absolute; right:12px; bottom:8px; font-size:10px; color:#94a3b8; max-width:52%; text-align:right; line-height:1.25; }
+        @media (max-width: 760px) {
+          .orgmap-govde { flex-direction:column; }
+          .orgmap-panel { width:auto; border-left:none; border-top:1px solid #e2e8f0; max-height:42%; }
+          .orgmap-harita { min-height:300px; }
+          .orgmap-gosterge { font-size:10.5px; padding:6px 9px; bottom:36px; gap:3px; }
+          .orgmap-atif { max-width:60%; font-size:9px; }
+        }
+      `}</style>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: "min(1180px, 98vw)", height: "min(780px, 94vh)", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 30px 70px rgba(0,0,0,0.35)" }}>
+        <div style={{ background: "linear-gradient(120deg,#1e3a5f,#1e40af)", padding: "14px 20px", color: "#fff", display: "flex", alignItems: "center", gap: "12px" }}>
+          <span style={{ fontSize: "20px" }}>🗺</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: "17px", fontWeight: 800 }}>Operasyon Bölgelerimiz ve Ofislerimiz</div>
+            <div style={{ fontSize: "12px", opacity: 0.85, marginTop: "2px" }}>ŞİMŞEK HABERLEŞME — TT Wireless Project · İzmir · Bursa · Ankara</div>
+          </div>
+          <button onClick={onClose} aria-label="Kapat" style={{ width: "34px", height: "34px", borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.18)", color: "#fff", fontSize: "15px", fontWeight: 700, cursor: "pointer", lineHeight: 1 }}>✕</button>
+        </div>
+        <div className="orgmap-ust">
+          <span style={{ fontSize: "11.5px", fontWeight: 800, color: "#64748b", letterSpacing: ".04em" }}>BÖLGE</span>
+          {ORG_BOLGELER.map((b) => (
+            <button key={b.key} className={`orgmap-btn${seciliBolge?.key === b.key ? " aktif" : ""}`} onClick={() => bolgeyeGit(b.key)} style={seciliBolge?.key === b.key ? { background: b.renk, borderColor: b.renk } : undefined}>
+              <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 3, background: b.renk, marginRight: 6, verticalAlign: "-1px" }} />{b.ad}
+            </button>
+          ))}
+          <button className={`orgmap-btn${!secili ? " aktif" : ""}`} onClick={tumunuGoster}>Tüm bölgeleri göster</button>
+        </div>
+        {!yuklendi ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", color: "#64748b", padding: "24px", textAlign: "center" }}>
+            <div style={{ fontSize: "34px" }}>🗺</div>
+            <div style={{ fontWeight: 700, color: "#0f172a" }}>Harita verisi yüklenemedi</div>
+            <div style={{ fontSize: "13px" }}>İl sınırları dosyası (tr-iller.geo.json) okunamadı. Sayfayı yenileyip tekrar deneyin.</div>
+            <button className="orgmap-btn" onClick={() => window.location.reload()}>↻ Tekrar dene</button>
+          </div>
+        ) : (
+          <div className="orgmap-govde">
+            <div className="orgmap-harita">
+              <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} style={{ width: "100%", height: "100%", display: "block", cursor: drag.current ? "grabbing" : "grab", touchAction: "none" }}
+                onMouseDown={(e) => basla(e.clientX, e.clientY)} onMouseMove={(e) => drag.current && surukle(e.clientX, e.clientY)} onMouseUp={birak} onMouseLeave={birak}
+                onTouchStart={(e) => { const t = e.touches[0]; if (t) basla(t.clientX, t.clientY); }} onTouchMove={(e) => { const t = e.touches[0]; if (t) surukle(t.clientX, t.clientY); }} onTouchEnd={birak}>
+                {iller.map((il) => {
+                  const b = bolgeOf(il.ad); const sec = b && seciliBolge?.key === b.key;
+                  return (
+                    <path key={il.ad} d={il.d}
+                      fill={b ? (sec || hover === il.ad ? b.vurgu : b.dolgu) : (hover === il.ad ? "#e2e8f0" : "#eef2f7")}
+                      stroke={b ? b.renk : "#cbd5e1"} strokeWidth={b ? 1.6 * sw : 0.9 * sw} strokeLinejoin="round"
+                      style={{ cursor: b ? "pointer" : "default", transition: "fill .12s" }}
+                      onMouseEnter={() => setHover(il.ad)} onMouseLeave={() => setHover("")}
+                      onClick={() => { if (drag.current?.moved) return; if (b) setSecili({ tip: "bolge", key: b.key }); }}>
+                      <title>{il.ad}{b ? ` — ${b.ad} Bölgesi` : ""}</title>
+                    </path>
+                  );
+                })}
+                {/* Bölge etiketleri: yalnız bizim üç bölge */}
+                {ORG_BOLGELER.map((b) => { const bb = bolgeBbox(b.key); if (!Number.isFinite(bb[0])) return null; const cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2; return (
+                  <text key={b.key} x={cx} y={cy} textAnchor="middle" fontSize={13 * sw * 1.1} fontWeight="900" fill={b.renk} fontFamily="Arial" letterSpacing="1" style={{ pointerEvents: "none", paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 * sw }}>{b.ad.toLocaleUpperCase("tr-TR")}</text>
+                ); })}
+                {/* Depo / ofis işaretleri (Ankara'da yok) */}
+                {isaretler.map(({ o, k }) => { const [x, y] = proj(k.lng, k.lat); return <OrgHaritaPin key={o.id} x={x} y={y} k={pinK} aktifMi={seciliOfis?.id === o.id} onClick={(e) => { e.stopPropagation(); if (drag.current?.moved) return; setSecili({ tip: "ofis", id: o.id }); setKonumForm({ lat: o.lat || "", lng: o.lng || "" }); }} />; })}
+              </svg>
+              <div className="orgmap-zoom"><button onClick={() => zoom(1 / 1.3)} title="Yakınlaştır">+</button><button onClick={() => zoom(1.3)} title="Uzaklaştır">−</button><button onClick={tumunuGoster} title="Tüm bölgeler" style={{ fontSize: 13 }}>⤢</button></div>
+              <div className="orgmap-gosterge">
+                {ORG_BOLGELER.map((b) => <div key={b.key}><span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 3, background: b.dolgu, border: `2px solid ${b.renk}`, verticalAlign: "-2px", marginRight: 6 }} />{b.ad} Bölgesi · {b.iller.length} il</div>)}
+                <div><span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 3, background: "#eef2f7", border: "1px solid #cbd5e1", verticalAlign: "-2px", marginRight: 6 }} />Kapsam dışı iller</div>
+                <div><span style={{ color: "#1e3a5f", marginRight: 6 }}>📍</span>Depo / Ofis</div>
+              </div>
+              <div className="orgmap-atif">İl sınırları: alpers/Turkey-Maps-GeoJSON (Apache-2.0) · Kapsam: Huawei BoQ Delivery Region</div>
+            </div>
+            <div className="orgmap-panel">
+              {!secili && (
+                <div style={{ padding: "18px 16px", color: "#475569", fontSize: "13px", lineHeight: 1.55 }}>
+                  <div style={{ fontWeight: 800, color: "#0f172a", marginBottom: 6 }}>Bölge seçin</div>
+                  Haritada renkli bir bölgeye ya da 📍 işaretine tıklayın; yönetim, ekip ve depo/ofis bilgisi burada görünür. Tekerlek / + − ile yakınlaştırın, sürükleyerek kaydırın.
+                  <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+                    {ORG_BOLGELER.map((b) => (
+                      <button key={b.key} onClick={() => bolgeyeGit(b.key)} style={{ textAlign: "left", border: `1.5px solid ${b.renk}`, background: b.dolgu, color: "#0f172a", borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 12.5 }}>
+                        <b style={{ color: b.renk }}>{b.ad} Bölgesi</b> · {ekipOzet(b)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {seciliBolge && (() => { const b = seciliBolge, y = ORG_YONETIM[b.yonetim], ofs = bolgeOfisleri(b); return (
+                <div style={{ padding: "16px" }}>
+                  <div style={{ background: b.renk, color: "#fff", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+                    <div style={{ fontSize: "15px", fontWeight: 800 }}>{b.ad} Bölgesi</div>
+                    <div style={{ fontSize: "11.5px", opacity: 0.9, marginTop: 2 }}>{b.iller.join(" · ")}</div>
+                  </div>
+                  <div style={{ display: "grid", gap: 8, fontSize: 13, color: "#1f2937" }}>
+                    <div><span style={{ color: "#64748b" }}>Bölge Müdürü:</span> <b>{y.mudur.ad}</b></div>
+                    <div><span style={{ color: "#64748b" }}>Süpervizör:</span> <b>{y.supervizor.ad}</b></div>
+                    <div><span style={{ color: "#64748b" }}>Ekipler:</span> {ekipOzet(b)}</div>
+                    {ofs.map((o) => <div key={o.id}><span style={{ color: "#64748b" }}>📍</span> {ofisEtiket(o)}</div>)}
+                    {b.ortak && <div style={{ marginTop: 4, fontSize: 12, color: "#1e3a5f", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "6px 10px" }}>🤝 {b.key === "ankara" ? "Bursa" : "Ankara"} ile ortak yönetim</div>}
+                  </div>
+                </div>
+              ); })()}
+              {seciliOfis && (() => { const o = seciliOfis, k = ofisKonum(o); return (
+                <div style={{ padding: "16px" }}>
+                  <div style={{ background: "#1e3a5f", color: "#fff", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+                    <div style={{ fontSize: "15px", fontWeight: 800 }}>📍 {ofisEtiket(o)}</div>
+                    <div style={{ fontSize: "11.5px", opacity: 0.9, marginTop: 2 }}>{o.ad}</div>
+                  </div>
+                  <div style={{ fontSize: 13, color: "#1f2937", display: "grid", gap: 8 }}>
+                    <div><span style={{ color: "#64748b" }}>İşlev:</span> {ofisEtiket(o).split(" — ")[1]}</div>
+                    {o.adres ? <div><span style={{ color: "#64748b" }}>Adres:</span> {o.adres}</div> : null}
+                    <div style={{ fontSize: 12, color: k?.kesin ? "#166534" : "#92400e", background: k?.kesin ? "#f0fdf4" : "#fffbeb", border: `1px solid ${k?.kesin ? "#bbf7d0" : "#fde68a"}`, borderRadius: 8, padding: "6px 10px" }}>
+                      {k?.kesin ? "Kesin konum (kayıtlı koordinat)" : o.adres ? "Şehir bazında gösterim — koordinat henüz eklenmedi (adres kayıtlardan)" : "Şehir bazında gösterim — kesin adres henüz eklenmedi"}
+                    </div>
+                    {canEdit && (
+                      <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 10, display: "grid", gap: 6 }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 800, color: "#1e3a5f" }}>Koordinat güncelle (yalnız yetkili)</div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <input value={konumForm.lat} onChange={(e) => setKonumForm((f) => ({ ...f, lat: e.target.value }))} placeholder="Enlem (38.46…)" style={{ flex: 1, minWidth: 0, padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 12.5 }} />
+                          <input value={konumForm.lng} onChange={(e) => setKonumForm((f) => ({ ...f, lng: e.target.value }))} placeholder="Boylam (27.21…)" style={{ flex: 1, minWidth: 0, padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 12.5 }} />
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button className="orgmap-btn aktif" onClick={() => onKonumKaydet(o.id, konumForm.lat, konumForm.lng)}>Kaydet</button>
+                          {k?.kesin && <button className="orgmap-btn" onClick={() => onKonumKaydet(o.id, "", "")}>Temizle</button>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ); })()}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OrgSemasiPanel({ currentUser }) {
   const [personelList, setPersonelList] = useState([]);
   const [ekipler, setEkipler] = useState([]);
   const [aracList, setAracList] = useState([]);
+  const [ofisler, setOfisler] = useState([]);      // depo/ofis kayıtları (harita işaretleri)
+  const [showHarita, setShowHarita] = useState(false);
   const [showEkip, setShowEkip] = useState(false);
   const [ekipDetay, setEkipDetay] = useState(null); // tıklanan ekip (detay modalı — herkes görür)
   // Ekip yönetimi yalnız yönetim ekibine açık — şema herkese görünür kalır
@@ -3880,16 +4130,27 @@ function OrgSemasiPanel({ currentUser }) {
   const canEdit = ["orhan.bedir@simsektel.com", "duzgun.simsek@simsektel.com", "nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com", "erencan.simsek@simsektel.com"].includes(_oEmail);
   const loadOrgData = async () => {
     try {
-      const [rp, re, ra] = await Promise.all([
+      const [rp, re, ra, ro] = await Promise.all([
         fetch(`${API_BASE}/hr/personel`),
         fetch(`${API_BASE}/hr/ekipler`),
         fetch(`${API_BASE}/hr/araclar`),
+        fetch(`${API_BASE}/hr/ofis`).catch(() => null),
       ]);
       const dp = await rp.json(); const de = await re.json(); const da = await ra.json();
       setPersonelList(Array.isArray(dp) ? dp : []);
       setEkipler(Array.isArray(de) ? de : []);
       setAracList((Array.isArray(da) ? da : []).filter(a => a.durum === "AKTİF"));
+      try { const dO = ro ? await ro.json() : []; setOfisler(Array.isArray(dO) ? dO : []); } catch { setOfisler([]); }
     } catch {}
+  };
+  // Harita: depo/ofis koordinatı güncelle (yalnız lat/lng; diğer alanlara dokunmaz)
+  const ofisKonumKaydet = async (id, lat, lng) => {
+    try {
+      const r = await fetch(`${API_BASE}/hr/ofis/${id}/konum`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lat, lng }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) { alert(d.error || "Konum kaydedilemedi"); return; }
+      loadOrgData();
+    } catch { alert("Konum kaydedilemedi"); }
   };
   useEffect(() => { loadOrgData(); }, []);
 
@@ -3949,15 +4210,15 @@ function OrgSemasiPanel({ currentUser }) {
   const bolgeEkipleri = (anahtar) => aktifEkipler.filter(e => String(e.bolge || "").toLocaleUpperCase("tr-TR").includes(anahtar));
   const izmirEkipleri = () => { const a = bolgeEkipleri("İZM"); return a.concat(bolgeEkipleri("IZM").filter(e => !a.includes(e))); };
   // Kutu adı: "Firma — Ekip" (şablonlar firma + ekip adıyla gösterilir)
-  const ekipTamAd = (e) => e.taseron_adi ? `${e.taseron_adi} — ${ekipAdi(e)}` : ekipAdi(e);
+  // Ad zaten firmayla başlıyorsa (eski kayıtlar: "FERRUMX Ekip 1") firma tekrar eklenmez → "FERRUMX — FERRUMX Ekip 1" olmaz
+  const ekipFirma = (e) => String(e.taseron_adi || "").trim();
+  const ekipAdSade = (e) => { const ad = ekipAdi(e), f = ekipFirma(e); return f && ad.toLocaleLowerCase("tr-TR").startsWith(f.toLocaleLowerCase("tr-TR")) ? ad.slice(f.length).replace(/^[\s—\-·:]+/, "") || ad : ad; };
+  const ekipTamAd = (e) => ekipFirma(e) ? `${ekipFirma(e)} — ${ekipAdSade(e)}` : ekipAdi(e);
   const ekipKisi = (e) => ekipUyeleri(e.ekip_no).length;
   const ekipDurumYazi = (e) => { const n = ekipKisi(e); return n ? `${n} kişi` : "Personel henüz atanmadı"; };
   // Yönetim kadrosu — şema, PNG ve Excel aynı listeden. Ankara ve Bursa ORTAK yönetim: Nurcan Kuş + Fırat Kenan Ongun
   // tek kayıt, iki bölge (ayrı personel kaydı açılmaz).
-  const YONETIM = {
-    izmir: { mudur: { ad: "SERDAR ALTINOVA", tel: "5321619481", gorev: "İzmir Bölge Müdürü" }, supervizor: { ad: "KASIM EVİN", tel: "5321531797", gorev: "İzmir Süpervizörü" } },
-    ortak: { mudur: { ad: "NURCAN KUŞ", tel: "5392596108", gorev: "Ankara & Bursa Bölge Müdürü" }, supervizor: { ad: "FIRAT KENAN ONGUN", tel: "5322127865", gorev: "Ankara & Bursa Süpervizörü" } },
-  };
+  const YONETIM = ORG_YONETIM; // modül düzeyi sabit — harita da aynısını kullanır
   const bolgeYonetim = (bolge) => (/İZM|IZM/i.test(bolge || "") ? YONETIM.izmir : YONETIM.ortak);
   // Şablon kurulumu: 9 personelsiz ekip (İzmir 4 · Ankara 2 · Bursa 3); backend sablon_kodu ile tekil tutar
   const [sablonMsg, setSablonMsg] = useState("");
@@ -4126,7 +4387,9 @@ function OrgSemasiPanel({ currentUser }) {
           <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🏢 Organizasyon Şeması</h2>
           <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>ŞİMŞEK HABERLEŞME — TT Wireless Project · İzmir · Ankara · Bursa</div>
         </div>
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          {/* Haritadan Gör (13.10.2026): operasyon bölgeleri + depo/ofis — herkes görür, şemayı/veriyi değiştirmez */}
+          <button onClick={() => setShowHarita(true)} title="Operasyon bölgelerimiz ve ofislerimiz" style={{ padding: "10px 14px", background: "#fff", color: "#1e3a5f", border: "1.5px solid #1e3a5f", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>🗺 Haritadan Gör</button>
           {canEdit && (
             <button onClick={() => setShowEkip(true)} style={{ padding: "10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>🛠 Ekip Yönetimi</button>
           )}
@@ -4134,6 +4397,9 @@ function OrgSemasiPanel({ currentUser }) {
           <button onClick={indirExcel} style={{ padding: "10px 22px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>📋 Excel İndir</button>
         </div>
       </div>
+
+      {/* Operasyon haritası — Esc ile kapanır; şemayı ve verileri değiştirmez */}
+      {showHarita && <OrgHaritaModal ekipler={ekipler} ofisler={ofisler} canEdit={canEdit} onKonumKaydet={ofisKonumKaydet} onClose={() => setShowHarita(false)} />}
 
       {/* Ekip Detay modalı — HERKES görür, yalnız yetkililer düzenler */}
       {ekipDetay && (() => {
@@ -4331,13 +4597,21 @@ function OrgSemasiPanel({ currentUser }) {
           {/* PM → İzmir yönetimi (x=230) ve Ankara–Bursa ortak yönetimi (x=825) — 12.10.2026 düzeni */}
           <L d="M625 340 V368 M230 368 H825 M230 368 V396 M825 368 V396" />
           {(() => {
-            // Ekip kutusu: "Firma — Ekip", altında kişi sayısı ya da "Personel henüz atanmadı", varsa plaka
+            // Ekip kutusu (3 satır, 150 px'e sığar): firma / ekip adı / durum (+plaka). Firma yoksa ekip adı üstte.
+            // EkipKutu ve Izgara BİLEŞEN değil düz fonksiyon olarak çağrılır: render içinde tanımlı bileşen her
+            // render'da yeniden mount olur ve kutu tıklaması (mousedown→mouseup arasında) kaybolabilir.
             const W = 150, H = 72;
-            const EkipKutu = ({ e, x, y, stroke }) => (
-              <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
-                <Box x={x} y={y} w={W} h={H} light stroke={stroke} nameText={ekipTamAd(e)} title={ekipDurumYazi(e)} sub={ekipPlaka(e) || undefined} nameSize={ekipTamAd(e).length > 16 ? 11.5 : 12.5} />
-              </g>
-            );
+            const EkipKutu = ({ e, x, y, stroke }) => {
+              const firma = ekipFirma(e), ad = ekipAdSade(e);
+              const durum = ekipDurumYazi(e) + (ekipPlaka(e) ? ` · ${ekipPlaka(e)}` : "");
+              const ust = firma || ad, orta = firma ? ad : durum, alt = firma ? durum : undefined;
+              const boy = (s) => (s.length > 18 ? 10.5 : s.length > 14 ? 11.5 : 12.5);
+              return (
+                <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
+                  <Box x={x} y={y} w={W} h={H} light stroke={stroke} nameText={ust} title={orta} sub={alt} nameSize={boy(ust)} />
+                </g>
+              );
+            };
             // Ekipleri 2 sütuna yerleştir (2×2 / 2+1); merkez cx, ilk satır y0, satır aralığı 100
             const Izgara = ({ list, cx, y0, stroke, ustY }) => {
               if (!list.length) return <text x={cx} y={y0 + 30} textAnchor="middle" fontSize="11.5" fill="#94a3b8" fontFamily="Arial">Ekip tanımlı değil</text>;
@@ -4354,7 +4628,7 @@ function OrgSemasiPanel({ currentUser }) {
                   {list.map((e, i) => {
                     const satirNo = Math.floor(i / 2), sonSatir = satirNo === satir - 1;
                     const x = (tek && sonSatir) ? cx - 75 : (i % 2 === 0 ? solX - 75 : sagX - 75);
-                    return <EkipKutu key={e.ekip_no} e={e} x={x} y={y0 + satirNo * 100} stroke={stroke} />;
+                    return EkipKutu({ e, x, y: y0 + satirNo * 100, stroke });
                   })}
                 </g>
               );
@@ -4370,7 +4644,7 @@ function OrgSemasiPanel({ currentUser }) {
                 <Box x={105} y={456} w={250} h={72} fill="#0369a1" nameText={YONETIM.izmir.mudur.ad} title="İzmir Bölge Müdürü" />
                 <L d="M230 528 V560" />
                 <Box x={105} y={560} w={250} h={64} light stroke="#0369a1" nameText={YONETIM.izmir.supervizor.ad} title="İzmir Süpervizörü" />
-                <Izgara list={izm} cx={230} y0={690} stroke="#0369a1" ustY={624} />
+                {Izgara({ list: izm, cx: 230, y0: 690, stroke: "#0369a1", ustY: 624 })}
 
                 {/* ── ANKARA & BURSA ORTAK YÖNETİM (nötr lacivert) ── */}
                 <rect x={440} y={396} width={770} height={484} rx="14" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
@@ -4388,14 +4662,14 @@ function OrgSemasiPanel({ currentUser }) {
                 <rect x={452} y={652} width={360} height={30} rx="12" fill={ANKARA} />
                 <rect x={452} y={670} width={360} height={12} fill={ANKARA} />
                 <text x={632} y={672} textAnchor="middle" fontSize="12.5" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">ANKARA · {ank.length} EKİP</text>
-                <Izgara list={ank} cx={632} y0={700} stroke="#b45309" ustY={682} />
+                {Izgara({ list: ank, cx: 632, y0: 700, stroke: "#b45309", ustY: 682 })}
 
                 {/* BURSA (yeşil) */}
                 <rect x={835} y={652} width={360} height={216} rx="12" fill="#f0fdf4" stroke="#bbf7d0" strokeWidth="1.5" />
                 <rect x={835} y={652} width={360} height={30} rx="12" fill={BURSA} />
                 <rect x={835} y={670} width={360} height={12} fill={BURSA} />
                 <text x={1015} y={672} textAnchor="middle" fontSize="12.5" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">BURSA · {bur.length} EKİP</text>
-                <Izgara list={bur} cx={1015} y0={700} stroke="#15803d" ustY={682} />
+                {Izgara({ list: bur, cx: 1015, y0: 700, stroke: "#15803d", ustY: 682 })}
               </g>
             );
           })()}

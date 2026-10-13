@@ -19948,6 +19948,10 @@ pool.query(`
 // 11.09.2026: araç paneliyle aynı ödeme modeli — peşin/sonradan + ayın kaçı (vade bazlı borç)
 pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS odeme_tipi TEXT DEFAULT 'PESIN'`).catch(() => {});
 pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS donem_gunu INTEGER`).catch(() => {});
+// Harita konumu (13.10.2026, Orhan): Org şeması "Haritadan Gör" için depo/ofis koordinatı. Boşsa harita
+// şehir merkezine yaklaşık işaret koyar ve "kesin adres henüz eklenmedi" yazar; sonradan buradan güncellenir.
+pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS lat NUMERIC(9,6)`).catch(() => {});
+pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS lng NUMERIC(9,6)`).catch(() => {});
 
 app.post("/hr/ofis/:id/kira-ode", async (req, res) => {
   try {
@@ -20032,6 +20036,21 @@ app.put("/hr/ofis/:id", async (req, res) => {
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Depo/ofis koordinatı (yalnız lat/lng; null → temizle). Diğer alanlara dokunmaz.
+app.put("/hr/ofis/:id/konum", async (req, res) => {
+  try {
+    const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
+    const lat = num(req.body?.lat), lng = num(req.body?.lng);
+    if ((lat === null) !== (lng === null)) return res.status(400).json({ ok: false, error: "lat ve lng birlikte verilmeli" });
+    if (lat !== null && (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 35 || lat > 43 || lng < 25 || lng > 46)) {
+      return res.status(400).json({ ok: false, error: "Koordinat Türkiye sınırları dışında (lat 35–43, lng 25–46)" });
+    }
+    const r = await pool.query(`UPDATE ofis_depo SET lat=$2, lng=$3 WHERE id=$1 RETURNING *`, [req.params.id, lat, lng]);
+    if (!r.rows.length) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.delete("/hr/ofis/:id", async (req, res) => {
