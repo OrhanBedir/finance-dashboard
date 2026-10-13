@@ -16757,6 +16757,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     return hrFirmaFiltre === "TUMU" || hrFirmaFiltre === marka;
   };
   const FirmaRozet = ({ p, kucuk }) => {
+    // Alt marka panelinde (Teknocenter/AHY) rozet gösterilmez — kadro zaten o markanındır (13.10.2026, Orhan)
+    if (_hrMarka !== "ERC") return null;
     const mk = altMarkaBilgi(p?.marka);
     const ahy = !!mk;
     return (
