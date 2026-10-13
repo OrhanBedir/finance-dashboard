@@ -26070,6 +26070,9 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
           }}
         >
           {isSubconUser ? `${subconDisplayName} GENEL ÖZET` : "GENEL ÖZET"}
+          <div style={{ fontSize: "10.5px", fontWeight: 500, color: "#cbd5e1", marginTop: "3px", letterSpacing: "0.2px", textTransform: "none" }}>
+            Tutarlar KDV hariç · HW PO birim fiyatı × tamamlanan adet{isSubconUser ? " × hakediş oranı" : ""}
+          </div>
         </div>
 
         <div style={{ background: "#f9fafb" }}>
