@@ -2094,7 +2094,7 @@ function MarkaNakitPanel({ currentUser }) {
         </div>
       </div>
       <div style={{ display: "flex", gap: "12px", marginBottom: "18px", flexWrap: "wrap" }}>
-        {[[`${ayBaslik} Toplam`, ayToplam, "#991b1b"], ["Bugün", bugunT, "#1e3a5f"], ["Genel Toplam (Tem'26'dan beri)", toplamGenel, "#b45309"]].map(([l, v, c]) => (
+        {[[`${ayBaslik} Toplam`, ayToplam, "#991b1b"], ["Bugün", bugunT, "#1e3a5f"], [`Genel Toplam (${devirMetni(currentUser).slice(3)}'dan beri)`, toplamGenel, "#b45309"]].map(([l, v, c]) => (
           <div key={l} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: `5px solid ${c}`, borderRadius: "12px", padding: "12px 20px", minWidth: "180px" }}>
             <div style={{ fontSize: "11px", color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{l}</div>
             <div style={{ fontSize: "20px", fontWeight: 800, color: c, marginTop: "3px" }}>₺{fk(v)}</div>
