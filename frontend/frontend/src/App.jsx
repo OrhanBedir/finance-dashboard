@@ -424,6 +424,8 @@ const kullaniciBordro = (u) => {
   const b = Array.isArray(u?.marka_bordro) && u.marka_bordro.length ? u.marka_bordro.map((x) => String(x).toUpperCase()) : [m];
   return b.includes(m) ? b : [m, ...b];
 };
+// Devir tarihi metni (DD.MM.YYYY) — kullanıcının markasından
+const devirMetni = (u) => String(u?.marka_devir || "2026-07-15").split("-").reverse().join(".");
 // kasadan_dus=false etiketi: markanın kendi ödediği kira/fatura
 const kasaDisiEtiket = (u) => `${altMarkaKisa(u?.hw_yukleme === false ? u?.marka : GUNCEL_ALT_MARKA) || "Firma"} ödedi`;
 
@@ -1367,7 +1369,7 @@ function MarkaFinansPanel({ currentUser }) {
     <div style={{ padding: "24px 28px", maxWidth: "1250px", margin: "0 auto" }}>
       <h2 style={{ margin: "0 0 2px", fontSize: "20px", fontWeight: 800, color: "#0f172a", textAlign: "center" }}>📊 {markaAd} — Finans Özeti</h2>
       <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "22px", textAlign: "center" }}>
-        Gelir: Şimşek Haberleşme'ye kesilen faturalar (KDV dahil) • Gider: 15 Temmuz 2026 sonrası nakit akışı (maaş, avans, kira ve diğer)
+        Gelir: Şimşek Haberleşme'ye kesilen faturalar (KDV dahil) • Gider: {devirMetni(currentUser)} devri sonrası nakit akışı (maaş, avans, kira ve diğer)
       </div>
 
       {/* ── Proje Kâr / Zarar Özeti — kurumsal şerit ── */}
@@ -1462,7 +1464,7 @@ function MarkaFinansPanel({ currentUser }) {
         </div>
       </div>
       <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px", textAlign: "center" }}>
-        💡 Gelir: Fatura Girişi'ne {markaAd} adına girilen faturalar (fatura tarihi bazlı). Gider: 15 Temmuz 2026 devri sonrası nakit akışı — maaş/avans ödeme tarihine, kira ve diğer ödemeler giriş zamanına göre. Masraf formu giderleri bir sonraki sürümde eklenecek.
+        💡 Gelir: Fatura Girişi'ne {markaAd} adına girilen faturalar (fatura tarihi bazlı). Gider: {devirMetni(currentUser)} devri sonrası nakit akışı — maaş/avans ödeme tarihine, kira ve diğer ödemeler giriş zamanına göre. Masraf formu giderleri bir sonraki sürümde eklenecek.
       </div>
     </div>
   );
@@ -1864,7 +1866,7 @@ function MarkaNakitPanel({ currentUser }) {
     } catch {}
   };
   const borcEkle = async (tip) => {
-    const t = prompt(tip === "ODEME" ? "Geri ödenen tutar (₺):" : "AHY'den alınan borç tutarı (₺):");
+    const t = prompt(tip === "ODEME" ? "Geri ödenen tutar (₺):" : `${altMarkaKisa(marka)}'den alınan borç tutarı (₺):`);
     if (!t) return;
     const _s = String(t).trim();
     const tutarN = /^\d+(\.\d{1,2})?$/.test(_s) ? Number(_s) : Number(_s.replace(/\./g, "").replace(",", ".")) || 0;
@@ -1957,7 +1959,7 @@ function MarkaNakitPanel({ currentUser }) {
     ["OFIS_KIRA",    "🏭 Depo/Ofis Kiraları", "Ofis & Depo → Kira Öde"],
     ["TICKET",       "🎫 Ticket / Yemek",  "Manuel girişler"],
     ["TASERON",      "🔧 Taşeron Ödemeleri", "Avans + fatura ödemeleri"],
-    ["DIGER",        "📋 Diğer Ödemeler",  "AHY seçilen manuel girişler"],
+    ["DIGER",        "📋 Diğer Ödemeler",  `${altMarkaKisa(marka)} seçilen manuel girişler`],
   ];
   const fk = (n) => Math.round(Number(n || 0)).toLocaleString("tr-TR");
   const TIP = {
@@ -1976,7 +1978,7 @@ function MarkaNakitPanel({ currentUser }) {
         <div>
           <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>
           <div style={{ fontSize: "13px", color: "#64748b" }}>
-            15 Temmuz 2026 devrinden itibaren — masraf formları burada listelenmez (iş avansını kapatır, para avansta çıkmıştır)
+            {devirMetni(currentUser)} devrinden itibaren — masraf formları burada listelenmez (iş avansını kapatır, para avansta çıkmıştır)
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "10px" }}>
@@ -2058,9 +2060,9 @@ function MarkaNakitPanel({ currentUser }) {
                   {eksi ? "-" : ""}₺{fk(Math.abs(bakiye))}
                 </div>
                 <div style={{ fontSize: "11px", color: "#6b7280", textAlign: "right" }}
-                  title={kasaDisi > 0 ? `AHY'nin kendi ödediği ₺${fk(kasaDisi)} kasa hesabına dahil değildir (nakit akışında görünür)` : undefined}>
+                  title={kasaDisi > 0 ? `${altMarkaKisa(marka)}'nın kendi ödediği ₺${fk(kasaDisi)} kasa hesabına dahil değildir (nakit akışında görünür)` : undefined}>
                   Giren ₺{fk(kasa.toplam)} − Kasadan harcanan ₺{fk(kasaHarcama)}
-                  {kasaDisi > 0 && <span style={{ color: "#b45309", fontWeight: 700 }}> · AHY ödedi: ₺{fk(kasaDisi)}</span>}
+                  {kasaDisi > 0 && <span style={{ color: "#b45309", fontWeight: 700 }}> · {altMarkaKisa(marka)} ödedi: ₺{fk(kasaDisi)}</span>}
                 </div>
               </div>
             );
@@ -2069,7 +2071,7 @@ function MarkaNakitPanel({ currentUser }) {
               Kasa hesabından AYRIDIR — yalnız kayıt/mutabakat amaçlıdır. */}
           <div style={{ background: "#fffbeb", border: "2px solid #fcd34d", borderRadius: "14px", padding: "10px 16px", minWidth: "250px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 800, color: "#92400e", letterSpacing: "0.04em" }}>🤝 BORÇ — AHY → ŞİMŞEK</div>
+              <div style={{ fontSize: "11px", fontWeight: 800, color: "#92400e", letterSpacing: "0.04em" }}>🤝 BORÇ — {altMarkaKisa(marka)} → ŞİMŞEK</div>
               <div style={{ display: "flex", gap: "6px" }}>
                 <button onClick={() => borcEkle("BORC")}
                   style={{ padding: "3px 10px", background: "#92400e", color: "#fff", border: "none", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>＋ Borç Ekle</button>
@@ -2084,7 +2086,7 @@ function MarkaNakitPanel({ currentUser }) {
             <div style={{ fontSize: "24px", fontWeight: 900, color: borc.kalan > 0 ? "#92400e" : "#166534", marginTop: "4px", textAlign: "right" }}>
               ₺{fk(borc.kalan)}
             </div>
-            <div style={{ fontSize: "11px", color: "#6b7280", textAlign: "right" }} title="Şimşek'in kendi harcamaları için AHY'den aldığı borç — kasa hesabına dahil değildir">
+            <div style={{ fontSize: "11px", color: "#6b7280", textAlign: "right" }} title={`Şimşek'in kendi harcamaları için ${altMarkaKisa(marka)}'den aldığı borç — kasa hesabına dahil değildir`}>
               Alınan ₺{fk(borc.alinan)} − Geri ödenen ₺{fk(borc.odenen)} · kalan borç
             </div>
           </div>
@@ -2100,7 +2102,7 @@ function MarkaNakitPanel({ currentUser }) {
         ))}
         {/* Hakediş takibi kartları: AHY'ye fiilen gelen ve geciken — en sağda, gradyanlı */}
         <div onClick={() => setGelenOdeModal(true)}
-          title={`Tıkla: Şimşek'in AHY'ye gönderdiği bedelleri gir/gör (dekont + Excel).\nERC panelindeki taşeron ödeme girişleri (AHY) de sayılır.\nKarşılaştırma: HW'den bu ay kesinleşen AHY payı ₺${fk(gelecek.hw_gelen_bu_ay)}`}
+          title={`Tıkla: Şimşek'in ${altMarkaKisa(marka)}'ya gönderdiği bedelleri gir/gör (dekont + Excel).\nERC panelindeki taşeron ödeme girişleri (${altMarkaKisa(marka)}) de sayılır.\nKarşılaştırma: HW'den bu ay kesinleşen ${altMarkaKisa(marka)} payı ₺${fk(gelecek.hw_gelen_bu_ay)}`}
           style={{ marginLeft: "auto", background: "linear-gradient(135deg,#065f46,#10b981)", borderRadius: "12px", padding: "12px 20px", minWidth: "190px", boxShadow: "0 4px 12px rgba(16,185,129,0.30)", cursor: "pointer" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
             <div style={{ fontSize: "11px", color: "#d1fae5", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>💵 Bu Ay Gelen Bakiye</div>
@@ -2116,7 +2118,7 @@ function MarkaNakitPanel({ currentUser }) {
           style={{ background: Number(gelecek.geciken || 0) > 0 ? "linear-gradient(135deg,#991b1b,#ef4444)" : "linear-gradient(135deg,#374151,#6b7280)", borderRadius: "12px", padding: "12px 20px", minWidth: "190px", boxShadow: "0 4px 12px rgba(239,68,68,0.28)", cursor: "pointer" }}>
           <div style={{ fontSize: "11px", color: "#fee2e2", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>⏳ Geciken Bakiye</div>
           <div style={{ fontSize: "20px", fontWeight: 800, color: "#fff", marginTop: "3px" }}>₺{fk(gelecek.geciken)}</div>
-          <div style={{ fontSize: "10px", color: "#fecaca", marginTop: "2px" }}>HW ödedi · AHY'ye gönderilmedi · detay için tıkla</div>
+          <div style={{ fontSize: "10px", color: "#fecaca", marginTop: "2px" }}>HW ödedi · {altMarkaKisa(marka)}'ya gönderilmedi · detay için tıkla</div>
         </div>
       </div>
 
@@ -2137,16 +2139,16 @@ function MarkaNakitPanel({ currentUser }) {
                 <div>
                   <div style={{ fontWeight: 800, fontSize: "17px", color: "#111827" }}>⏳ Geciken Bakiye — Gün Gün Döküm</div>
                   <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                    HW'den gelen toplam AHY payı <b>₺{fk(gelecek.hw_odenen_toplam)}</b> · Şimşek'ten AHY'ye aktarılan <b style={{ color: "#065f46" }}>₺{fk(gelecek.gonderilen)}</b> · geciken <b style={{ color: "#b91c1c" }}>₺{fk(gelecek.geciken)}</b>
+                    HW'den gelen toplam {altMarkaKisa(marka)} payı <b>₺{fk(gelecek.hw_odenen_toplam)}</b> · Şimşek'ten {altMarkaKisa(marka)}'ya aktarılan <b style={{ color: "#065f46" }}>₺{fk(gelecek.gonderilen)}</b> · geciken <b style={{ color: "#b91c1c" }}>₺{fk(gelecek.geciken)}</b>
                   </div>
-                  <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "3px" }}>Aktarımlar en eski günden itibaren mahsup edilir · tutarlar AHY payı, KDV dahil</div>
+                  <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "3px" }}>Aktarımlar en eski günden itibaren mahsup edilir · tutarlar {altMarkaKisa(marka)} payı, KDV dahil</div>
                 </div>
                 <button type="button" onClick={() => setGecikenModal(false)}
                   style={{ padding: "8px 14px", background: "#e2e8f0", color: "#334155", border: "none", borderRadius: "9px", fontSize: "12.5px", fontWeight: 700, cursor: "pointer" }}>Kapat</button>
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "10px" }}>
                 <thead><tr style={{ background: "#f8fafc" }}>
-                  {["Paranın Geldiği Gün", "Gelen (AHY payı)", "AHY'ye Aktarılan", "Bekleyen", "Durum"].map((h, i) => (
+                  {["Paranın Geldiği Gün", `Gelen (${altMarkaKisa(marka)} payı)`, `${altMarkaKisa(marka)}'ya Aktarılan`, "Bekleyen", "Durum"].map((h, i) => (
                     <th key={h} style={{ padding: "9px 12px", textAlign: i > 0 && i < 4 ? "right" : "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr></thead>
@@ -2161,7 +2163,7 @@ function MarkaNakitPanel({ currentUser }) {
                       <td style={{ padding: "9px 12px", fontSize: "13px", textAlign: "right", fontWeight: 800, color: s.kalan > 0 ? "#b91c1c" : "#94a3b8" }}>{s.kalan > 0 ? `₺${fk(s.kalan)}` : "—"}</td>
                       <td style={{ padding: "9px 12px", fontSize: "12px", whiteSpace: "nowrap" }}>
                         {s.kalan === 0
-                          ? <span style={{ color: "#065f46", fontWeight: 700 }}>✓ AHY'ye aktarıldı</span>
+                          ? <span style={{ color: "#065f46", fontWeight: 700 }}>✓ {altMarkaKisa(marka)}'ya aktarıldı</span>
                           : s.mahsup > 0
                             ? <span style={{ color: "#b45309", fontWeight: 700 }}>🔶 Kısmen aktarıldı</span>
                             : <span style={{ color: "#b91c1c", fontWeight: 700 }}>Geldi · Şimşek tarafında ödeme yapılmadı</span>}
@@ -2213,7 +2215,7 @@ function MarkaNakitPanel({ currentUser }) {
                   <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#f0fdf4", padding: "9px 14px", borderRight: "1px solid #e5e7eb" }}>
                     <div style={{ fontWeight: 800, color: "#14532d", fontSize: "13px", whiteSpace: "nowrap" }}>📈 Gelecek Bakiye</div>
                     <div style={{ fontSize: "10px", color: "#4d7c0f", marginTop: "2px", whiteSpace: "nowrap" }}>
-                      HW vade günü · AHY payı KDV dahil
+                      HW vade günü · {altMarkaKisa(marka)} payı KDV dahil
                       {Number(gelecek.onay_bekleyen || 0) > 0 ? ` · +₺${fk(gelecek.onay_bekleyen)} HW onayında` : ""}
                     </div>
                   </td>
@@ -2250,7 +2252,7 @@ function MarkaNakitPanel({ currentUser }) {
                   <td style={{ position: "sticky", left: 0, zIndex: 2, background: "#fef2f2", padding: "9px 14px", borderRight: "1px solid #e5e7eb" }}>
                     <div style={{ fontWeight: 800, color: "#991b1b", fontSize: "13px", whiteSpace: "nowrap" }}>⚠️ HW Geciken</div>
                     <div style={{ fontSize: "10px", color: "#b91c1c", marginTop: "2px", whiteSpace: "nowrap" }}>
-                      Vadesi geldi · HW ödemesi henüz gelmedi · AHY payı KDV dahil
+                      Vadesi geldi · HW ödemesi henüz gelmedi · {altMarkaKisa(marka)} payı KDV dahil
                     </div>
                   </td>
                   {gunListesi.map(g => {
@@ -2417,7 +2419,7 @@ function MarkaNakitPanel({ currentUser }) {
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: "min(680px, 96vw)", maxHeight: "84vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.35)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", background: "linear-gradient(135deg,#065f46 0%,#0d9488 60%,#10b981 100%)" }}>
               <div>
-                <div style={{ fontWeight: 800, fontSize: "16px", color: "#fff" }}>💵 Şimşek → AHY Gönderilen Bakiyeler</div>
+                <div style={{ fontWeight: 800, fontSize: "16px", color: "#fff" }}>💵 Şimşek → {altMarkaKisa(marka)} Gönderilen Bakiyeler</div>
                 <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.78)", marginTop: "2px" }}>
                   {gelenOde.rows.length} kayıt · toplam <b>₺{fk(gelenOde.toplam)}</b> · bu ay <b>₺{fk(gelenOde.bu_ay)}</b>
                 </div>
@@ -2502,9 +2504,9 @@ function MarkaNakitPanel({ currentUser }) {
                   >🗑</button>
                 </div>
               ))}
-              {gelenOde.rows.length === 0 && <div style={{ padding: "24px", textAlign: "center", color: "#9ca3af" }}>Henüz gönderim kaydı yok — "＋ Ödeme Ekle" ile Şimşek'in AHY'ye gönderdiği bedelleri girin</div>}
+              {gelenOde.rows.length === 0 && <div style={{ padding: "24px", textAlign: "center", color: "#9ca3af" }}>Henüz gönderim kaydı yok — "＋ Ödeme Ekle" ile Şimşek'in {altMarkaKisa(marka)}'ya gönderdiği bedelleri girin</div>}
               <div style={{ fontSize: "11px", color: "#94a3b8", padding: "6px 4px 0" }}>
-                Not: Aynı ödemeyi hem ERC panelindeki taşeron ödemesi (AHY) hem burada girmeyin — ikisi de "gelen" toplamına sayılır.
+                Not: Aynı ödemeyi hem ERC panelindeki taşeron ödemesi ({altMarkaKisa(marka)}) hem burada girmeyin — ikisi de "gelen" toplamına sayılır.
               </div>
             </div>
           </div>
@@ -2516,7 +2518,7 @@ function MarkaNakitPanel({ currentUser }) {
         <div onClick={() => setBorcModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(500px, 94vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid #e5e7eb", background: "#fffbeb" }}>
-              <div style={{ fontWeight: 800, fontSize: "15px", color: "#92400e" }}>🤝 Borç Defteri — AHY → Şimşek <span style={{ fontWeight: 600, fontSize: "12px", color: "#6b7280" }}>(kalan ₺{fk(borc.kalan)})</span></div>
+              <div style={{ fontWeight: 800, fontSize: "15px", color: "#92400e" }}>🤝 Borç Defteri — {altMarkaKisa(marka)} → Şimşek <span style={{ fontWeight: 600, fontSize: "12px", color: "#6b7280" }}>(kalan ₺{fk(borc.kalan)})</span></div>
               <button onClick={() => setBorcModal(false)} style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "6px 11px", cursor: "pointer", fontWeight: 700 }}>✕</button>
             </div>
             <div style={{ overflowY: "auto", padding: "10px 14px" }}>
@@ -2797,7 +2799,7 @@ function SimsekFaturaTakipPanel({ currentUser }) {
     ],
     extraSheets: [{
       sheetName: "Ödeme Planı",
-      title: "Şimşek'in Ödeme Planı — HW vadelerine göre AHY payı (KDV dahil)",
+      title: `Şimşek'in Ödeme Planı — HW vadelerine göre ${altMarkaKisa(marka)} payı (KDV dahil)`,
       headers: ["Vade Tarihi", "Tutar (₺)", "Kalem Sayısı"],
       colWidths: [18, 18, 14],
       numericCols: [1, 2],
@@ -2881,7 +2883,7 @@ function SimsekFaturaTakipPanel({ currentUser }) {
       {/* Şimşek'in ödeme planı — HW vadeleri */}
       <div style={{ background: "#fff", borderRadius: "14px", overflow: "hidden", boxShadow: "0 2px 10px rgba(15,23,42,0.08)" }}>
         <div style={{ padding: "12px 16px", background: "linear-gradient(135deg,#14532d,#166534)", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
-          <div style={{ fontSize: "14px", fontWeight: 700 }}>📅 Şimşek'in Ödeme Planı <span style={{ fontWeight: 500, fontSize: "12px", opacity: 0.8 }}>— HW fatura vadelerine göre AHY payı (KDV dahil), HW dosya yüklemeleriyle otomatik güncellenir</span></div>
+          <div style={{ fontSize: "14px", fontWeight: 700 }}>📅 Şimşek'in Ödeme Planı <span style={{ fontWeight: 500, fontSize: "12px", opacity: 0.8 }}>— HW fatura vadelerine göre {altMarkaKisa(marka)} payı (KDV dahil), HW dosya yüklemeleriyle otomatik güncellenir</span></div>
           <div style={{ fontSize: "13px", fontWeight: 800 }}>Plan toplamı: ₺{fk(planToplam + onayBek)}</div>
         </div>
         <div style={{ overflowX: "auto" }}>
@@ -2947,7 +2949,7 @@ const mtCanon = (ad) => {
   let t = String(ad || "").toUpperCase()
     .replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ç/g, "C")
     .replace(/Ğ/g, "G").replace(/Ü/g, "U").replace(/Ö/g, "O");
-  t = t.replace(/^AHY[_\s-]+/, "").replace(/[^A-Z0-9 ]/g, " ");
+  t = t.replace(/^(AHY|TEKNO)[_\s-]+/, "").replace(/[^A-Z0-9 ]/g, " ");
   t = t.replace(/\b(TELEKOMUNIKASYON|ILETISIM|HABERLESME|MAKINE|MAKINA|SANAYI|SAN|VE|TICARET|TIC|LIMITED|LTD|STI|SIRKETI|INSAAT|TURIZM|GIDA|ORGANIZASYON|RESTORAN|ELEKTRIK|ELEKTRONIK|MUHENDISLIK|HIZMETLERI|SISTEMLERI)\b/g, " ");
   // Kişi adlarında (kısa ilk kelime: HALIL, MURAT, SEFER...) soyad da anahtara
   // girer — "HALIL UYAR" ile "HALIL IBRAHIM ERALP" farklı kişilerdir, tek
@@ -3108,7 +3110,7 @@ function ErcTaseronPanel() {
           </table>
         </div>
         <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
-          Fatura: finans panelinden girilen Şimşek etiketli faturalar (AHY hariç) · Ödeme: taşeron ödeme geçmişi + fatura girişindeki Ödenen Tutar (çift sayım korumalı) · Excel'in 2. sayfası saha saha bedel dökümü ve QC durumudur
+          Fatura: finans panelinden girilen Şimşek etiketli faturalar (alt marka etiketliler hariç) · Ödeme: taşeron ödeme geçmişi + fatura girişindeki Ödenen Tutar (çift sayım korumalı) · Excel'in 2. sayfası saha saha bedel dökümü ve QC durumudur
         </div>
       </div>
       {detayModal && (
@@ -3392,7 +3394,7 @@ function MarkaTaseronPanel({ currentUser }) {
                   // MW fiziki 0 ise Radyosuz görünür, radyo yapılınca Radyolu'ya döner.
                   extraSheets: [{
                     sheetName: "Fatura Kesilecek (Bedel)",
-                    title: "AHY Elektrik — Taşeron Bedeli Saha Dökümü (fatura onayı için)",
+                    title: `${currentUser?.marka_ad || marka} — Taşeron Bedeli Saha Dökümü (fatura onayı için)`,
                     headers: ["Taşeron", "Saha", "Paket / Kalem", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "Tutar (KDV Dahil)", "QC (Ana Kalemler)"],
                     colWidths: [38, 22, 36, 7, 16, 16, 16, 15],
                     numericCols: [3, 4, 5, 6],
