@@ -25448,6 +25448,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
   // anlaşma paket fiyatından hesaplanır — AHY'nin gördüğü fiyatın aynısı
   const _paketTaseron = canonTaseron(userSubconName) === "ferrumx";
   const [paketModal, setPaketModal] = useState(null);
+
   // Paket taşeronda özet kutuları ve alt tablo kendi bedelinden beslenir —
   // sayfa açılışında bir kez çekilir
   const [paketVeri, setPaketVeri] = useState(null);
@@ -25459,6 +25460,12 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       .catch(() => {});
     return () => { iptal = true; };
   }, [_paketTaseron]);
+  // 14.10.2026 (Orhan): paket fiyatlı taşeron (FERRUMX) Şimşek'in HW PO fiyatlarını
+  // görmez — özet kartındaki tutarlar yalnız kendi anlaşma paket fiyatlarıdır.
+  // Fiziki = tüm paket kalemleri (QC OK + NOK); QC Onaylı = QC OK paketler
+  // (kesilebilir + zaten faturalanmış).
+  const _pkFiziki = Number(paketVeri?.bedel_tum || 0);
+  const _pkQcOk = Number(paketVeri?.bedel || 0) + Number(paketVeri?.faturalanmis?.tutar_kdv_haric || 0);
   // Arama kutusu paket saha listesini de filtreler (saha veya paket adına göre)
   const paketAra = String(regionSearch || "").trim().toUpperCase();
   const paketTumDetay = (paketVeri?.tum_detay || []).filter(x => !paketAra ||
@@ -26192,14 +26199,14 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
         >
           {isSubconUser ? `${subconDisplayName} GENEL ÖZET` : "GENEL ÖZET"}
           <div style={{ fontSize: "10.5px", fontWeight: 500, color: "#cbd5e1", marginTop: "3px", letterSpacing: "0.2px", textTransform: "none" }}>
-            Tutarlar KDV hariç · HW PO birim fiyatı × tamamlanan adet{isSubconUser ? " × hakediş oranı" : ""}
+            {_paketTaseron ? "Tutarlar KDV hariç · anlaşma paket fiyatları" : `Tutarlar KDV hariç · HW PO birim fiyatı × tamamlanan adet${isSubconUser ? " × hakediş oranı" : ""}`}
           </div>
         </div>
 
         <div style={{ background: "#f9fafb" }}>
           {isSubconUser ? (
             <>
-              <Row label="Atanan İş Tutarı (PO talebi)" value={subconSummary.atananIs}
+              <Row label={_paketTaseron ? "Atanan İş Tutarı (paket fiyatıyla)" : "Atanan İş Tutarı (PO talebi)"} value={_paketTaseron ? _pkFiziki : subconSummary.atananIs}
                 onClick={() => {
                   // Paket fiyatlı taşeron PO tutarını değil kendi alacağı bedeli görür
                   if (_paketTaseron) { handleOpenAtananPaket(); return; }
@@ -26256,8 +26263,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                   });
                 }} />
 
-              {/* ── Hakediş Oranları: RF & Gizleme ── */}
-              <div style={{ padding:"12px 16px", borderBottom:"1px solid #e5e7eb", background:"#fff" }}>
+              {/* ── Hakediş Oranları: RF & Gizleme (paket fiyatlı taşeronda kırılım yok → gizli) ── */}
+              {!_paketTaseron && <div style={{ padding:"12px 16px", borderBottom:"1px solid #e5e7eb", background:"#fff" }}>
                 <div style={{ fontSize:"12px", color:"#6b7280", marginBottom:"10px", fontWeight:500 }}>Hakediş Oranları</div>
                 {subconRates.rf === subconRates.gizleme ? (
                   /* Tek oran (AHY / Federal gibi tüm işlerde aynı %): tek kutu */
@@ -26288,16 +26295,22 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
                     </div>
                   </div>
                 )}
-              </div>
+              </div>}
 
               {/* Huni: Fiziki → QC Onaylı → Faturalanan (yüzde = bir önceki aşamaya göre) */}
               {[
                 {
-                  label: "Fiziki Tamamlanan", sub: "saha girişi bazlı · liste için tıkla", value: subconSummary.fizikiIs, pct: subconSummary.fizikiPct, pctLabel: "atananın", color: "#1d4ed8",
+                  label: _paketTaseron ? "Fiziki Tamamlanan (paket fiyatıyla)" : "Fiziki Tamamlanan",
+                  sub: _paketTaseron ? "anlaşma paket fiyatı · QC OK + NOK tüm paketler · liste için tıkla" : "saha girişi bazlı · liste için tıkla",
+                  value: _paketTaseron ? _pkFiziki : subconSummary.fizikiIs,
+                  pct: _paketTaseron ? 100 : subconSummary.fizikiPct, pctLabel: _paketTaseron ? "tüm işler" : "atananın", color: "#1d4ed8",
                   tik: () => _paketTaseron ? handleOpenAtananPaket() : setFizikiSoru(true),
                 },
                 {
-                  label: "QC Onaylı İş", sub: _paketTaseron ? "Huawei QC kapalı · paket dökümü için tıkla" : "Huawei QC kapalı · saha listesi için tıkla", value: subconSummary.qcOnayliIs, pct: subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857",
+                  label: _paketTaseron ? "QC Onaylı İş (paket fiyatıyla)" : "QC Onaylı İş",
+                  sub: _paketTaseron ? "Huawei QC kapalı · kesilebilir + faturalanmış paketler · dökümü için tıkla" : "Huawei QC kapalı · saha listesi için tıkla",
+                  value: _paketTaseron ? _pkQcOk : subconSummary.qcOnayliIs,
+                  pct: _paketTaseron ? (_pkFiziki > 0 ? (_pkQcOk / _pkFiziki) * 100 : 0) : subconSummary.qcPct, pctLabel: "fizikinin", color: "#047857",
                   tik: () => {
                     // Paket fiyatlı taşeron kalem kırılımını değil kendi saha
                     // paketlerini görür — QC OK olanların paket dökümü
