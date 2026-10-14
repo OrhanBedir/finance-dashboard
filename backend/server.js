@@ -23985,6 +23985,185 @@ app.get("/hw-acceptance/debug-codes", async (req, res) => {
 });
 
 /* ================== HW ACCEPTANCE SUMMARY ================== */
+// ── TOPLU SAHA → PO EXCEL (14.10.2026, Orhan) ─────────────────────────────────
+// Yapıştırılan Site ID listesi için ERC'deki PO satırlarını (po_rows: HW PO
+// yüklemesi) ve acceptance kayıtlarını (hw_acceptance_rows: HW Acceptance
+// yüklemesi, yalnız Pending/Rejected segmentleri) eşler. Amaç: Huawei
+// Engineering Acceptance ekranında sahaları tek tek aramak yerine PO
+// numaralarını topluca "PO No." alanına yapıştırmak. Hiçbir kayıt değişmez.
+// Durum kuralı (po_rows + acceptance):
+//   PENDING   : aynı PO/satır/shipment için "Pending Approval" kaydı var → HW'de onayda
+//   REJECTED  : yalnız "Rejected" kaydı var ve kalan miktar > 0 → yeniden gönderilebilir
+//   TAMAM     : kalan miktar (due_qty) ≤ 0 → kabul/fatura tamamlanmış
+//   KISMI     : faturalanmış > 0 ve kalan > 0, acceptance kaydı yok → kalan aşama ilerletilebilir
+//   BEKLIYOR  : hiç ilerleme yok, kalan > 0 → ilerletilebilir
+//   BELIRSIZ  : miktar bilgisi yok → durum doğrulanamadı
+function topluSahaNormalize(girdi) {
+  const ham = Array.isArray(girdi) ? girdi.join("\n") : String(girdi || "");
+  const parcalar = ham.split(/[\n\r\t,;]+/).map((x) => x.trim()).filter(Boolean);
+  const gorulen = new Set(); const sirali = []; let tekrar = 0;
+  for (const p of parcalar) {
+    const k = p.toUpperCase();
+    if (gorulen.has(k)) { tekrar++; continue; }
+    gorulen.add(k); sirali.push(k);
+  }
+  return { sahalar: sirali, girilen: parcalar.length, tekrar };
+}
+async function topluSahaPoHesapla(girdi) {
+  const { sahalar, girilen, tekrar } = topluSahaNormalize(girdi);
+  if (!sahalar.length) return { ok: true, girilen, benzersiz: 0, tekrar, rows: [], bulunamayan: [], po_siz: [], veri_tarihi: {} };
+  const [po, acc, paylasim, tarih, mw] = await Promise.all([
+    pool.query(`SELECT UPPER(TRIM(site_code)) AS site, TRIM(po_no) AS po_no, TRIM(COALESCE(po_line_no,'')) AS po_line_no,
+        TRIM(COALESCE(shipment_no,'')) AS shipment_no, TRIM(COALESCE(item_code,'')) AS item_code, item_description,
+        requested_qty, billed_qty, due_qty, po_status, to_char(acceptance_date,'YYYY-MM-DD') AS acceptance_date,
+        COALESCE(currency,'TRY') AS currency, unit_price
+      FROM po_rows WHERE UPPER(TRIM(site_code)) = ANY($1::text[])
+      ORDER BY 1, 2, NULLIF(regexp_replace(COALESCE(po_line_no,''),'\\D','','g'),'')::int NULLS LAST, 4`, [sahalar]),
+    pool.query(`SELECT UPPER(TRIM(site_code)) AS site, TRIM(po_no) AS po_no, TRIM(COALESCE(po_line_no,'')) AS po_line_no,
+        TRIM(COALESCE(shipment_no,'')) AS shipment_no, status, acceptance_no, approval_progress, current_handler,
+        rejected_reason, milestone_type, to_char(created_at,'YYYY-MM-DD') AS yuklendi
+      FROM hw_acceptance_rows WHERE UPPER(TRIM(site_code)) = ANY($1::text[])
+      ORDER BY created_at DESC, id DESC`, [sahalar]),
+    pool.query(`SELECT TRIM(po_no) AS po_no, COUNT(DISTINCT UPPER(TRIM(site_code)))::int AS saha_sayisi
+      FROM po_rows WHERE TRIM(po_no) IN (SELECT DISTINCT TRIM(po_no) FROM po_rows WHERE UPPER(TRIM(site_code)) = ANY($1::text[]))
+      GROUP BY 1`, [sahalar]),
+    pool.query(`SELECT (SELECT to_char(MAX(created_at),'DD.MM.YYYY HH24:MI') FROM po_rows) AS po,
+        (SELECT to_char(MAX(created_at),'DD.MM.YYYY HH24:MI') FROM hw_acceptance_rows) AS acceptance`),
+    pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS site FROM master_works WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [sahalar]),
+  ]);
+  const paylasimMap = new Map(paylasim.rows.map((r) => [r.po_no, Number(r.saha_sayisi || 0)]));
+  const accMap = new Map(); // site|po|line|ship → kayıtlar (yeniden eskiye)
+  for (const a of acc.rows) {
+    const k = `${a.site}|${a.po_no}|${a.po_line_no}|${a.shipment_no}`;
+    if (!accMap.has(k)) accMap.set(k, []);
+    accMap.get(k).push(a);
+  }
+  const bulunanSaha = new Set(po.rows.map((r) => r.site));
+  const mwSaha = new Set(mw.rows.map((r) => r.site));
+  const rows = po.rows.map((r) => {
+    const k = `${r.site}|${r.po_no}|${r.po_line_no}|${r.shipment_no}`;
+    const kayitlar = accMap.get(k) || [];
+    const pending = kayitlar.find((a) => /pending/i.test(a.status || ""));
+    const rejected = kayitlar.find((a) => /reject/i.test(a.status || ""));
+    const req = r.requested_qty == null ? null : Number(r.requested_qty);
+    const billed = r.billed_qty == null ? null : Number(r.billed_qty);
+    const due = r.due_qty == null ? (req != null && billed != null ? req - billed : null) : Number(r.due_qty);
+    let kod, durum;
+    if (pending) { kod = "PENDING"; durum = `Onaya gönderildi — HW'de bekliyor (${pending.approval_progress || "?"}${pending.current_handler ? ", " + pending.current_handler : ""})`; }
+    else if (due == null || req == null) { kod = "BELIRSIZ"; durum = "Durum doğrulanamadı — miktar bilgisi yok"; }
+    else if (due <= 0) { kod = "TAMAM"; durum = "Tamamlandı — kalan kabul yok"; }
+    else if (rejected) { kod = "REJECTED"; durum = `Reddedildi — yeniden gönderilebilir${rejected.rejected_reason ? " (" + rejected.rejected_reason + ")" : ""}`; }
+    else if (billed != null && billed > 0) {
+      kod = "KISMI";
+      const oranK = req ? Math.round((due / req) * 100) : null;
+      durum = oranK === 20 ? "Kısmen tamamlandı — kalan %20 (AC2 / PAC) aşaması ilerletilebilir"
+        : `Kısmen tamamlandı — kalan ${oranK != null ? "%" + oranK + " " : ""}aşama ilerletilebilir`;
+    }
+    else { kod = "BEKLIYOR"; durum = "Bekliyor — ilerletilebilir"; }
+    const oran = req ? Math.round(Math.max(0, Math.min(1, (due || 0) / req)) * 100) : null;
+    const notlar = [];
+    const sahaSayisi = paylasimMap.get(r.po_no) || 1;
+    if (sahaSayisi > 1) notlar.push(`Bu PO ${sahaSayisi} sahayı kapsıyor — HW aramasında diğer sahalar da çıkar`);
+    if (r.po_status && String(r.po_status).toUpperCase() === "CLOSED") notlar.push("PO kapalı (CLOSED)");
+    if (rejected && !pending && kod === "REJECTED") notlar.push(`Son red: ${rejected.yuklendi}`);
+    return {
+      site: r.site, po_no: r.po_no, po_line_no: r.po_line_no, shipment_no: r.shipment_no,
+      item_code: r.item_code, item_description: r.item_description || "",
+      requested_qty: req, billed_qty: billed, due_qty: due, kalan_oran: oran, birim: "adet",
+      po_status: r.po_status, currency: r.currency,
+      durum_kod: kod, durum, acceptance_no: (pending || rejected)?.acceptance_no || "",
+      po_saha_sayisi: sahaSayisi, ilerletilebilir: ["BEKLIYOR", "KISMI", "REJECTED"].includes(kod),
+      not: notlar.join(" · "),
+    };
+  });
+  const bulunamayan = sahalar.filter((s) => !bulunanSaha.has(s) && !mwSaha.has(s));
+  const poSiz = sahalar.filter((s) => !bulunanSaha.has(s) && mwSaha.has(s));
+  return {
+    ok: true, girilen, benzersiz: sahalar.length, tekrar, bulunan_saha: bulunanSaha.size,
+    rows, bulunamayan, po_siz: poSiz,
+    po_sayisi: new Set(rows.map((r) => r.po_no)).size,
+    veri_tarihi: tarih.rows[0] || {},
+    not: "Sonuçlar ERC'ye son yüklenen HW PO ve Acceptance dosyalarına dayanır; güncel durum Huawei'de kontrol edilmelidir.",
+  };
+}
+app.post("/finance/toplu-saha-po", authMiddleware, async (req, res) => {
+  try { res.json(await topluSahaPoHesapla(req.body?.sites ?? req.body?.metin ?? "")); }
+  catch (e) { console.error("TOPLU SAHA PO:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/finance/toplu-saha-po/excel", authMiddleware, async (req, res) => {
+  try {
+    const d = await topluSahaPoHesapla(req.body?.sites ?? req.body?.metin ?? "");
+    const seciliSet = Array.isArray(req.body?.secili) ? new Set(req.body.secili.map(String)) : null; // null → tümü
+    const grup = Math.max(1, Math.min(500, Number(req.body?.grup || 50)));
+    const anahtar = (r) => `${r.site}|${r.po_no}|${r.po_line_no}|${r.shipment_no}`;
+    // Seçim gönderilmediyse paneldeki varsayılan: yalnız ilerletilebilir kayıtlar (onayda/tamamlanmış hariç)
+    const rows = d.rows.map((r) => ({ ...r, secili: seciliSet ? seciliSet.has(anahtar(r)) : !!r.ilerletilebilir }));
+    const ExcelJS = require("exceljs");
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "ERC"; wb.created = new Date();
+    const F = { name: "Arial", size: 10 };
+    const baslik = (ws, cols) => {
+      ws.columns = cols.map((c) => ({ header: c.h, key: c.k, width: c.w, style: { font: F } }));
+      const hr = ws.getRow(1); hr.height = 22;
+      hr.eachCell((cell) => { cell.font = { ...F, bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3A5F" } }; cell.alignment = { vertical: "middle", wrapText: true }; });
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+    };
+    const metin = (ws, keys) => keys.forEach((k) => { ws.getColumn(k).numFmt = "@"; });
+    const tarihS = new Date().toLocaleDateString("tr-TR");
+    // 1) Saha-PO Listesi
+    const ws1 = wb.addWorksheet("Saha-PO Listesi");
+    baslik(ws1, [
+      { h: "Site ID", k: "site", w: 24 }, { h: "PO numarası", k: "po_no", w: 20 }, { h: "PO satırı", k: "po_line_no", w: 10 },
+      { h: "Shipment", k: "shipment_no", w: 10 }, { h: "Item Code", k: "item_code", w: 14 }, { h: "Kalem", k: "item_description", w: 44 },
+      { h: "Acceptance durumu", k: "durum", w: 46 }, { h: "Kalan kabul (PO adedi × kalan oran)", k: "due_qty", w: 16 }, { h: "Kalan oran", k: "kalan_oran", w: 10 },
+      { h: "İstenen", k: "requested_qty", w: 9 }, { h: "Faturalanan", k: "billed_qty", w: 11 },
+      { h: "Veri güncelleme (PO / Acceptance)", k: "veri", w: 30 }, { h: "Huawei listesine seçildi mi?", k: "secili", w: 14 }, { h: "Açıklama", k: "not", w: 60 },
+    ]);
+    metin(ws1, ["site", "po_no", "po_line_no", "shipment_no", "item_code"]);
+    const veriTxt = `PO: ${d.veri_tarihi.po || "-"} · Acceptance: ${d.veri_tarihi.acceptance || "-"}`;
+    for (const r of rows) {
+      const row = ws1.addRow({ ...r, kalan_oran: r.kalan_oran == null ? "" : r.kalan_oran / 100, veri: veriTxt, secili: r.secili ? "EVET" : "HAYIR" });
+      row.getCell("kalan_oran").numFmt = "0%";
+      const c = r.durum_kod === "PENDING" ? "FFFFF7ED" : r.durum_kod === "REJECTED" ? "FFFEF2F2" : r.durum_kod === "TAMAM" ? "FFF0FDF4" : r.durum_kod === "BELIRSIZ" ? "FFF3F4F6" : null;
+      if (c) row.getCell("durum").fill = { type: "pattern", pattern: "solid", fgColor: { argb: c } };
+    }
+    ws1.autoFilter = { from: "A1", to: `N${Math.max(2, rows.length + 1)}` };
+    // 2) Huawei'ye Kopyala — seçili satırların benzersiz PO'ları, gruplu
+    const ws2 = wb.addWorksheet("Huawei'ye Kopyala");
+    const poListe = [...new Set(rows.filter((r) => r.secili).map((r) => r.po_no))];
+    ws2.getCell("A1").value = "Kullanım: Huawei Engineering Acceptance ekranında Site Info alanını temizleyin. İlgili grubun PO listesini PO No. alanına yapıştırıp Search'e basın. Sonuçlarda saha, PO satırı ve kabul aşamasını kontrol edin. Aynı PO başka sahaları da içeriyorsa bu kalemler de sonuçlarda görünebilir.";
+    ws2.getCell("A1").font = { ...F, italic: true, color: { argb: "FF475569" } }; ws2.getCell("A1").alignment = { wrapText: true, vertical: "top" };
+    ws2.mergeCells("A1:C1"); ws2.getRow(1).height = 48;
+    ws2.getCell("A2").value = `Seçili kayıtlardan ${poListe.length} benzersiz PO · grup büyüklüğü ${grup} · PO numaraları HW PO dosyasındaki "PO No." alanıyla aynıdır (satır/shipment eklenmez) · ${veriTxt}`;
+    ws2.getCell("A2").font = { ...F, bold: true }; ws2.mergeCells("A2:C2");
+    const h2 = ws2.getRow(3); h2.values = ["Grup", "PO sayısı", "PO listesi (virgülle, boşluksuz)"];
+    h2.eachCell((cell) => { cell.font = { ...F, bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3A5F" } }; });
+    ws2.getColumn(1).width = 8; ws2.getColumn(2).width = 10; ws2.getColumn(3).width = 120; ws2.getColumn(3).numFmt = "@";
+    for (let i = 0, g = 1; i < poListe.length; i += grup, g++) {
+      const parca = poListe.slice(i, i + grup);
+      const row = ws2.addRow([g, parca.length, parca.join(",")]);
+      row.getCell(3).alignment = { wrapText: true, vertical: "top" }; row.font = F;
+    }
+    ws2.views = [{ state: "frozen", ySplit: 3 }];
+    // 3) Kontrol Gerekenler
+    const ws3 = wb.addWorksheet("Kontrol Gerekenler");
+    baslik(ws3, [{ h: "Site ID", k: "site", w: 24 }, { h: "Konu", k: "konu", w: 34 }, { h: "Açıklama", k: "aciklama", w: 80 }]);
+    metin(ws3, ["site"]);
+    d.bulunamayan.forEach((s) => ws3.addRow({ site: s, konu: "ERC'de bulunamadı", aciklama: "Site ID ne PO tablosunda ne iş listesinde var — yazımı kontrol edin" }));
+    d.po_siz.forEach((s) => ws3.addRow({ site: s, konu: "PO eşleşmesi yok", aciklama: "Saha ERC'de var ama HW PO dosyasında satırı yok — PO henüz açılmamış olabilir" }));
+    rows.filter((r) => r.durum_kod === "BELIRSIZ").forEach((r) => ws3.addRow({ site: r.site, konu: "Durum doğrulanamadı", aciklama: `${r.po_no} / satır ${r.po_line_no} — miktar bilgisi eksik` }));
+    rows.filter((r) => r.durum_kod === "PENDING").forEach((r) => ws3.addRow({ site: r.site, konu: "Zaten onayda", aciklama: `${r.po_no} / satır ${r.po_line_no} — ${r.durum}; yeniden göndermeyin` }));
+    const ortakPo = [...new Map(rows.filter((r) => r.po_saha_sayisi > 1).map((r) => [r.po_no, r.po_saha_sayisi])).entries()];
+    ortakPo.forEach(([po, n]) => ws3.addRow({ site: "(ortak PO)", konu: "PO birden fazla sahaya bağlı", aciklama: `${po}: ${n} saha — HW aramasında listedeki dışı sahalar da görünebilir` }));
+    if (ws3.rowCount === 1) ws3.addRow({ site: "-", konu: "Kontrol gerektiren kayıt yok", aciklama: "" });
+    ws3.autoFilter = { from: "A1", to: `C${Math.max(2, ws3.rowCount)}` };
+    const fname = `ERC_Toplu_Saha_PO_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=${fname}`);
+    await wb.xlsx.write(res); res.end();
+  } catch (e) { console.error("TOPLU SAHA PO EXCEL:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.get("/hw-acceptance/summary", async (req, res) => {
   try {
     await ensureHwAcceptanceTable();

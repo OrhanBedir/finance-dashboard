@@ -8387,6 +8387,117 @@ function InvoiceBelgeUploader({ invoiceId, currentBelge }) {
   );
 }
 
+// ── TOPLU SAHA → PO EXCEL (14.10.2026) ──────────────────────────────────────
+// Yapıştırılan Site ID listesi → ERC'deki PO satırları + acceptance durumu;
+// seçilen kayıtların benzersiz PO'ları Huawei "PO No." alanına yapıştırılmak
+// üzere gruplu Excel'e yazılır. Hiçbir kayıt değişmez (salt okunur).
+function TopluSahaPoModal({ onClose }) {
+  const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const [metin, setMetin] = useState("");
+  const [sonuc, setSonuc] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [hata, setHata] = useState("");
+  const [sadeceIlerletilebilir, setSadeceIlerletilebilir] = useState(false);
+  const [secili, setSecili] = useState(() => new Set());
+  const [grup, setGrup] = useState(50);
+  const anahtar = (r) => `${r.site}|${r.po_no}|${r.po_line_no}|${r.shipment_no}`;
+  const bul = async () => {
+    setYukleniyor(true); setHata("");
+    try {
+      const r = await fetch(`${API_BASE}/finance/toplu-saha-po`, { method: "POST", headers: { ..._auth, "Content-Type": "application/json" }, body: JSON.stringify({ metin }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "PO eşleştirme başarısız");
+      setSonuc(d);
+      // Varsayılan seçim: ilerletilebilir kayıtlar (onayda olanlar ve tamamlananlar seçilmez)
+      setSecili(new Set((d.rows || []).filter((x) => x.ilerletilebilir).map(anahtar)));
+    } catch (e) { setHata(e.message); } finally { setYukleniyor(false); }
+  };
+  const gorunen = (sonuc?.rows || []).filter((r) => !sadeceIlerletilebilir || r.ilerletilebilir);
+  const seciliPo = new Set((sonuc?.rows || []).filter((r) => secili.has(anahtar(r))).map((r) => r.po_no));
+  const tumunuSec = (ac) => setSecili((p) => { const n = new Set(p); gorunen.forEach((r) => ac ? n.add(anahtar(r)) : n.delete(anahtar(r))); return n; });
+  const indir = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/finance/toplu-saha-po/excel`, { method: "POST", headers: { ..._auth, "Content-Type": "application/json" }, body: JSON.stringify({ metin, secili: [...secili], grup: Number(grup) || 50 }) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || "Excel üretilemedi"); }
+      const blob = await r.blob(); const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `ERC_Toplu_Saha_PO_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url);
+    } catch (e) { alert(e.message); }
+  };
+  const renk = { PENDING: ["#fff7ed", "#9a3412"], REJECTED: ["#fef2f2", "#b91c1c"], TAMAM: ["#f0fdf4", "#166534"], KISMI: ["#eff6ff", "#1d4ed8"], BEKLIYOR: ["#eff6ff", "#1d4ed8"], BELIRSIZ: ["#f3f4f6", "#4b5563"] };
+  const th = { padding: "8px 10px", fontSize: "11px", fontWeight: 700, color: "#475569", background: "#f8fafc", borderBottom: "1.5px solid #e5e7eb", textAlign: "left", whiteSpace: "nowrap", position: "sticky", top: 0 };
+  const td = { padding: "7px 10px", fontSize: "12px", color: "#1f2937", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap", fontFamily: "ui-monospace, Menlo, monospace" };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: "16px", width: "100%", maxWidth: "1180px", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ padding: "18px 24px 14px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: "17px", fontWeight: 800, color: "#0f172a" }}>📑 Toplu Saha → PO Excel</div>
+            <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>Site ID listesini yapıştır → ERC'deki PO satırları ve acceptance durumu → Huawei "PO No." alanına yapıştırılacak liste. Sonuçlar ERC'ye son yüklenen HW PO/Acceptance dosyalarına dayanır; güncel durum Huawei'de kontrol edilir.</div>
+          </div>
+          <button onClick={onClose} style={{ border: "1px solid #e5e7eb", background: "#fff", borderRadius: "8px", padding: "6px 12px", cursor: "pointer", fontWeight: 700 }}>Kapat</button>
+        </div>
+        <div style={{ padding: "14px 24px", display: "flex", gap: 14, alignItems: "flex-start", borderBottom: "1px solid #f1f5f9", flexWrap: "wrap" }}>
+          <textarea value={metin} onChange={(e) => setMetin(e.target.value)} placeholder={"Site ID listesi — satır, sekme, virgül veya noktalı virgülle ayrılmış\nMN0426_L1800_AE\nIZ1609_L2100_AE"}
+            style={{ flex: "1 1 420px", minHeight: "96px", border: "1.5px solid #e5e7eb", borderRadius: "10px", padding: "10px 12px", fontSize: "12.5px", fontFamily: "ui-monospace, Menlo, monospace", resize: "vertical" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 220 }}>
+            <button onClick={bul} disabled={yukleniyor || !metin.trim()} style={{ padding: "10px 14px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 800, cursor: "pointer", opacity: yukleniyor || !metin.trim() ? 0.6 : 1 }}>{yukleniyor ? "Aranıyor…" : "🔎 PO'ları Bul"}</button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ fontSize: "11.5px", color: "#475569", fontWeight: 600 }}>Grup büyüklüğü</label>
+              <input type="number" min={1} max={500} value={grup} onChange={(e) => setGrup(e.target.value)} style={{ width: 70, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px" }} />
+            </div>
+            <button onClick={indir} disabled={!sonuc || !secili.size} style={{ padding: "10px 14px", background: "#166534", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 800, cursor: "pointer", opacity: !sonuc || !secili.size ? 0.5 : 1 }}>📥 Excel İndir ({seciliPo.size} PO)</button>
+          </div>
+          {hata && <div style={{ width: "100%", color: "#b91c1c", fontSize: "12.5px", fontWeight: 600 }}>{hata}</div>}
+          {sonuc && (
+            <div style={{ width: "100%", display: "flex", gap: 8, flexWrap: "wrap", fontSize: "12px" }}>
+              {[["Girilen", sonuc.girilen], ["Benzersiz saha", sonuc.benzersiz], ["Tekrar", sonuc.tekrar], ["Bulunan saha", sonuc.bulunan_saha], ["PO satırı", sonuc.rows.length], ["Benzersiz PO", sonuc.po_sayisi],
+                ["ERC'de yok", sonuc.bulunamayan.length], ["PO'suz saha", sonuc.po_siz.length],
+                ["Onayda", sonuc.rows.filter((r) => r.durum_kod === "PENDING").length], ["Reddedilmiş", sonuc.rows.filter((r) => r.durum_kod === "REJECTED").length],
+                ["Tamamlanmış", sonuc.rows.filter((r) => r.durum_kod === "TAMAM").length], ["Doğrulanamadı", sonuc.rows.filter((r) => r.durum_kod === "BELIRSIZ").length]].map(([l, v]) => (
+                <span key={l} style={{ padding: "4px 10px", borderRadius: "999px", background: "#f1f5f9", color: "#334155", fontWeight: 700 }}>{l}: {v}</span>
+              ))}
+              <span style={{ padding: "4px 10px", borderRadius: "999px", background: "#fffbeb", color: "#92400e", fontWeight: 700 }}>Veri: PO {sonuc.veri_tarihi?.po || "-"} · Acceptance {sonuc.veri_tarihi?.acceptance || "-"}</span>
+              <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, fontWeight: 600, color: "#334155" }}>
+                <input type="checkbox" checked={sadeceIlerletilebilir} onChange={(e) => setSadeceIlerletilebilir(e.target.checked)} /> Yalnızca ilerletilmesi bekleyenler
+              </label>
+              <button onClick={() => tumunuSec(true)} style={{ border: "1px solid #e5e7eb", background: "#fff", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Görünenleri seç</button>
+              <button onClick={() => tumunuSec(false)} style={{ border: "1px solid #e5e7eb", background: "#fff", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Seçimi kaldır</button>
+            </div>
+          )}
+        </div>
+        <div style={{ overflow: "auto", flex: 1 }}>
+          {sonuc && (sonuc.bulunamayan.length > 0 || sonuc.po_siz.length > 0) && (
+            <div style={{ margin: "12px 24px 0", padding: "10px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, fontSize: 12, color: "#991b1b" }}>
+              {sonuc.bulunamayan.length > 0 && <div><b>ERC'de bulunamadı:</b> {sonuc.bulunamayan.join(", ")}</div>}
+              {sonuc.po_siz.length > 0 && <div><b>PO eşleşmesi yok:</b> {sonuc.po_siz.join(", ")}</div>}
+            </div>
+          )}
+          {sonuc && (
+            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+              <thead><tr>{["Seç", "Site ID", "PO", "Satır", "Shipment", "Kalem", "Durum", "Kalan", "İstenen", "Faturalanan", "Not"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {gorunen.map((r) => { const k = anahtar(r); const [bg, fg] = renk[r.durum_kod] || renk.BELIRSIZ; return (
+                  <tr key={k} style={{ background: secili.has(k) ? "#f8fafc" : "#fff" }}>
+                    <td style={td}><input type="checkbox" checked={secili.has(k)} onChange={(e) => setSecili((p) => { const n = new Set(p); e.target.checked ? n.add(k) : n.delete(k); return n; })} /></td>
+                    <td style={{ ...td, fontWeight: 700 }}>{r.site}</td>
+                    <td style={td}>{r.po_no}{r.po_saha_sayisi > 1 && <span title={`Bu PO ${r.po_saha_sayisi} sahayı kapsıyor`} style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 99, background: "#fef3c7", color: "#92400e", fontWeight: 700 }}>×{r.po_saha_sayisi}</span>}</td>
+                    <td style={td}>{r.po_line_no}</td><td style={td}>{r.shipment_no}</td>
+                    <td style={{ ...td, fontFamily: "inherit", whiteSpace: "normal", minWidth: 220 }}>{r.item_code} · {r.item_description}</td>
+                    <td style={{ ...td, fontFamily: "inherit", whiteSpace: "normal", minWidth: 220 }}><span style={{ padding: "2px 8px", borderRadius: 999, background: bg, color: fg, fontWeight: 700, fontSize: 11 }}>{r.durum}</span></td>
+                    <td style={td}>{r.due_qty == null ? "—" : `${r.due_qty} (${r.kalan_oran}%)`}</td>
+                    <td style={td}>{r.requested_qty ?? "—"}</td><td style={td}>{r.billed_qty ?? "—"}</td>
+                    <td style={{ ...td, fontFamily: "inherit", whiteSpace: "normal", color: "#6b7280", minWidth: 200 }}>{r.not}</td>
+                  </tr>); })}
+                {sonuc && gorunen.length === 0 && <tr><td colSpan={11} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>Gösterilecek kayıt yok</td></tr>}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FinanceUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -9944,6 +10055,7 @@ function FinanceDashboard({
   const [showUpload, setShowUpload] = useState(false);
   const [hwAcceptanceSummary, setHwAcceptanceSummary] = useState(null);
   const [showHwAcceptanceModal, setShowHwAcceptanceModal] = useState(false);
+  const [showTopluSahaPo, setShowTopluSahaPo] = useState(false); // Toplu Saha → PO Excel (14.10.2026)
   // Zirve e-fatura içe aktarım modalı
   const [zirveModal, setZirveModal] = useState(false);
   const [zirveFile, setZirveFile] = useState(null);
@@ -12166,6 +12278,12 @@ function FinanceDashboard({
                 </div>
                 <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
                   <button
+                    onClick={() => setShowTopluSahaPo(true)}
+                    title="Site ID listesinden PO numaralarını bul, Huawei aramasına yapıştırmak için Excel al"
+                    style={{ padding:"3px 7px", fontSize:"10px", fontWeight:700, background:"#eff6ff", color:"#1d4ed8", border:"1px solid #bfdbfe", borderRadius:"6px", cursor:"pointer", display:"flex", alignItems:"center", gap:"3px" }}>
+                    📑 Toplu Saha → PO Excel
+                  </button>
+                  <button
                     onClick={openRejectedModal}
                     title="Reddedilen kalemler (dün/bugün)"
                     style={{ padding:"3px 7px", fontSize:"10px", fontWeight:700, background:"#fef2f2", color:"#dc2626", border:"1px solid #fca5a5", borderRadius:"6px", cursor:"pointer", display:"flex", alignItems:"center", gap:"3px" }}>
@@ -12613,6 +12731,7 @@ function FinanceDashboard({
         </table>
       </div>
 
+      {showTopluSahaPo && <TopluSahaPoModal onClose={() => setShowTopluSahaPo(false)} />}
       {/* HW Acceptance Detay Modal */}
       {showHwAcceptanceModal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}
