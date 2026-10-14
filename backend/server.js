@@ -308,7 +308,8 @@ function canonSub(name) {
 // okunamazsa buradaki varsayılanlar geçerlidir.
 const ALT_MARKA_VARSAYILAN = [
   { kod: "AHY",   ad: "AHY Elektrik", onek: "AHY",   devir: "2026-07-15", bitis: "2026-09-30", pay: 0.90, devralinan: null },
-  { kod: "TEKNO", ad: "Teknocenter",  onek: "TEKNO", devir: "2026-10-01", bitis: null,         pay: 0.90, devralinan: "AHY" },
+  // 14.10.2026 anlaşması: AHY 30.09'a kadar; 01–14.10 arası Şimşek; TEKNO 15.10'dan itibaren
+  { kod: "TEKNO", ad: "Teknocenter",  onek: "TEKNO", devir: "2026-10-15", bitis: null,         pay: 0.90, devralinan: "AHY" },
 ];
 let ALT_MARKALAR = ALT_MARKA_VARSAYILAN.map((x) => ({ ...x }));
 const _ertesiGun = (d) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10); };
@@ -329,15 +330,22 @@ const altMarkaKodlari = () => ALT_MARKALAR.map((m) => m.kod);
 const altMarkaMi = (kod) => !!altMarka(kod);
 // SQL literal listesi: 'AHY','TEKNO' (kodlar koddan gelir, kullanıcı girdisi değildir)
 const altMarkaInSql = () => ALT_MARKALAR.map((m) => `'${m.kod}'`).join(",");
-// Ödeyen/firma boş eski kayıtlar için tarih kuralı: en yeni devirden geriye
+// Ödeyen/firma boş eski kayıtlar için tarih kuralı: tarih hangi markanın devir
+// penceresine düşüyorsa (bitiş varsa dahil) o marka; hiçbirine düşmüyorsa Şimşek
+// (ör. 01–14.10.2026 arası AHY bitmiş, TEKNO başlamamış → SIMSEK).
+const _pencereSql = (m, col) => m.bitis
+  ? `${col} >= DATE '${m.devir}' AND ${col} <= DATE '${m.bitis}'`
+  : `${col} >= DATE '${m.devir}'`;
 function odeyenTarihSql(tarihCol) {
   const sirali = [...ALT_MARKALAR].sort((a, b) => b.devir.localeCompare(a.devir));
-  return `CASE ${sirali.map((m) => `WHEN ${tarihCol} >= DATE '${m.devir}' THEN '${m.kod}'`).join(" ")} ELSE 'SIMSEK' END`;
+  return `CASE ${sirali.map((m) => `WHEN ${_pencereSql(m, tarihCol)} THEN '${m.kod}'`).join(" ")} ELSE 'SIMSEK' END`;
 }
+// Tarih herhangi bir alt markanın aktif penceresinde mi (Şimşek tarafı hariç tutmalarında)
+const altMarkaAktifSql = (tarihCol) => "(" + ALT_MARKALAR.map((m) => `(${_pencereSql(m, tarihCol)})`).join(" OR ") + ")";
 function odeyenVarsayilan(tarih) {
   const t = String(tarih || "").slice(0, 10);
   const sirali = [...ALT_MARKALAR].sort((a, b) => b.devir.localeCompare(a.devir));
-  for (const m of sirali) if (t >= m.devir) return m.kod;
+  for (const m of sirali) if (t >= m.devir && (!m.bitis || t <= m.bitis)) return m.kod;
   return "SIMSEK";
 }
 const ilkDevirTarihi = () => [...ALT_MARKALAR].map((m) => m.devir).sort()[0] || "2026-07-15";
@@ -370,14 +378,17 @@ function altMarkaPayOf(nameLower) {
   return m ? m.pay : null;
 }
 // Bitmiş markanın (AHY) yerine geçen güncel marka: AHY → TEKNO (devralan)
+// Tarih bir markanın penceresine düşmüyorsa (ör. 01–14.10.2026) null döner → çağıran Şimşek'e düşer
 function guncelMarka(kod, tarih) {
   let k = String(kod || "").toUpperCase(), guard = 0;
   const t = String(tarih || new Date().toISOString()).slice(0, 10);
   while (guard++ < 5) {
     const m = altMarka(k);
-    if (!m || !m.bitis || t <= m.bitis) return k;
+    if (!m) return k;
+    if (t < m.devir) return null;
+    if (!m.bitis || t <= m.bitis) return k;
     const sonraki = ALT_MARKALAR.find((x) => x.devralinan === k);
-    if (!sonraki) return k;
+    if (!sonraki) return null;
     k = sonraki.kod;
   }
   return k;
@@ -7897,7 +7908,7 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
          FROM avans a JOIN personel p ON p.id = a.personel_id
          WHERE a.odendi=true AND a.avans_turu='MAAS'
            AND COALESCE(a.odeme_tarihi, a.tarih) >= $1::date
-           AND UPPER(COALESCE(p.marka,'ERC')) NOT IN (${altMarkaInSql()})`),
+           AND (UPPER(COALESCE(p.marka,'ERC')) NOT IN (${altMarkaInSql()}) OR NOT ${altMarkaAktifSql("COALESCE(a.odeme_tarihi, a.tarih)")})`),
       q(`SELECT COALESCE(SUM(t),0) t FROM (
            SELECT tutar AS t FROM is_avans_talep
            WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date
@@ -15475,7 +15486,7 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
        FROM avans a JOIN personel p ON p.id = a.personel_id
        WHERE UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS'
          AND EXTRACT(YEAR FROM a.tarih)=$1 AND EXTRACT(MONTH FROM a.tarih)=$2
-         AND (UPPER(COALESCE(p.marka,'ERC')) NOT IN (${altMarkaInSql()}) OR a.tarih < DATE '${ilkDevirTarihi()}')`,
+         AND (UPPER(COALESCE(p.marka,'ERC')) NOT IN (${altMarkaInSql()}) OR NOT ${altMarkaAktifSql("a.tarih")})`,
       [yil, ay]).catch(() => ({ rows: [] }));
     // İş avansları: PD (Direktör) onayından geçenler — otomatik gider
     // Tarih: ödeme tarihi varsa o, yoksa direktör onay tarihi
@@ -18597,7 +18608,7 @@ app.put("/hr/is-avans/:id/pm-onayla", authMiddleware, async (req, res) => {
     const today = new Date().toISOString().split("T")[0];
     const updated = await pool.query(
       "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1, firma=COALESCE($3, NULLIF(TRIM(firma),''), $4) WHERE id=$2 RETURNING *",
-      [today, id, firmaSecim, guncelMarka("AHY", today)]
+      [today, id, firmaSecim, guncelMarka("AHY", today) || "ERC"]
     );
     res.json(updated.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -18625,7 +18636,7 @@ app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => 
          rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1),
          pm_onay_tarihi=COALESCE(pm_onay_tarihi,$1), direktor_onay_tarihi=$1,
          firma=COALESCE($3, NULLIF(TRIM(firma),''), $4) WHERE id=$2 RETURNING *`,
-      [today, id, firmaSecim, guncelMarka("AHY", today)]
+      [today, id, firmaSecim, guncelMarka("AHY", today) || "ERC"]
     );
     res.json(updated.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -19603,7 +19614,7 @@ app.post("/hr/yemek-kartlari", async (req, res) => {
     const r = await pool.query(
       `INSERT INTO yemek_kartlari (ad_soyad, kart_no, aylik_tutar, firma) VALUES ($1,$2,$3,$4) RETURNING *`,
       [String(ad_soyad).trim().toUpperCase(), kart_no || null, Number(aylik_tutar || 0),
-       String(firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (altMarkaKoduNormalize(firma) || guncelMarka("AHY"))]);
+       String(firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (altMarkaKoduNormalize(firma) || guncelMarka("AHY") || "SIMSEK")]);
     res.json({ ok: true, kart: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -19619,7 +19630,7 @@ app.put("/hr/yemek-kartlari/:id", async (req, res) => {
       let v = req.body[k];
       if (tip === "num") v = Number(v || 0);
       if (tip === "bool") v = !!v;
-      if (tip === "firma") v = String(v || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (altMarkaKoduNormalize(v) || guncelMarka("AHY"));
+      if (tip === "firma") v = String(v || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (altMarkaKoduNormalize(v) || guncelMarka("AHY") || "SIMSEK");
       if (tip === "text") v = v === null ? null : String(v);
       vals.push(v); alanlar.push(`${k}=$${vals.length}`);
     }
@@ -19651,7 +19662,7 @@ app.post("/hr/yemek-kartlari/:id/ode", async (req, res) => {
     const kq = await pool.query(`SELECT * FROM yemek_kartlari WHERE id=$1`, [req.params.id]);
     if (!kq.rows[0]) return res.status(404).json({ ok: false, error: "Kart bulunamadı" });
     const kart = kq.rows[0];
-    const f = String(firma || kart.firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (altMarkaKoduNormalize(firma || kart.firma) || guncelMarka("AHY", tarih));
+    const f = String(firma || kart.firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (altMarkaKoduNormalize(firma || kart.firma) || guncelMarka("AHY", tarih) || "SIMSEK");
     const cfMarka = f === "SIMSEK" ? "ERC" : f; // Şimşek ödemeleri ERC nakit akışında
     const t = tarih || new Date().toISOString().slice(0, 10);
     const acik = `${kart.ad_soyad} · yemek kartı`;
@@ -22414,7 +22425,7 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     await pool.query(`CREATE INDEX IF NOT EXISTS yedek_tekno_devir_mw_idx ON yedek_tekno_devir_20261013 (kaynak, id)`).catch(() => {});
     await devirOdenenKalemleriGeriAl("açılış");
     // Yeni araçlar güncel alt markaya (TEKNO) yazılır; eski AHY araçları bordro kapsamıyla görünür
-    await pool.query(`ALTER TABLE araclar ALTER COLUMN firma SET DEFAULT '${guncelMarka("AHY")}'`).catch(() => {});
+    await pool.query(`ALTER TABLE araclar ALTER COLUMN firma SET DEFAULT '${guncelMarka("AHY") || altMarkaKodlari().slice(-1)[0] || "AHY"}'`).catch(() => {});
     // Bir defalık migration: hiç AHY kullanıcısı yoksa saha ekibini AHY'ye taşı.
     // Yönetim + muhasebe ERC'de kalır. Sonradan admin panelden düzeltilebilir;
     // AHY kullanıcısı oluştuğu için bu blok bir daha çalışmaz.
