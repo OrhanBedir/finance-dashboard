@@ -395,6 +395,17 @@ function guncelMarka(kod, tarih) {
 }
 // Gelen firma etiketi: alt marka kodu ise o, değilse null
 const altMarkaKoduNormalize = (v) => { const k = String(v || "").trim().toUpperCase(); return altMarka(k) ? k : null; };
+// Yeni girişlerde (avans, masraf, personel ödemesi, nakit, yemek, taşeron ödemesi) bitmiş marka
+// seçilirse (eski mobil sürümü hâlâ "AHY" gönderir) devralan güncel markaya (TEKNO) çevrilir;
+// hiçbir marka aktif değilse null → çağıran Şimşek'e düşer. (14.10.2026, Orhan: "ya Şimşek ya TEKNO")
+function aktifAltMarkaKodu(v, tarih) {
+  const k = altMarkaKoduNormalize(v);
+  if (!k) return null;
+  const m = altMarka(k);
+  const t = String(tarih || new Date().toISOString()).slice(0, 10);
+  if (m.bitis && t > m.bitis) return guncelMarka(k, t);
+  return k;
+}
 
 // Veri kapsamı: subcon rolü VEYA alt marka (hw_yukleme=false, ör. AHY yönetimi)
 // VEYA yönetici olmayan taşeron-adlı kullanıcı (ör. 2KX Serdar gmail) yalnız
@@ -15516,7 +15527,7 @@ app.post("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
     const { kategori, tarih, tutar, donem, aciklama, marka } = req.body;
     if (!kategori || !tarih || !tutar)
       return res.status(400).json({ ok: false, error: "kategori, tarih, tutar zorunlu" });
-    const markaVal = altMarkaKoduNormalize(marka) || "ERC";
+    const markaVal = aktifAltMarkaKodu(marka, tarih) || "ERC";
     const r = await pool.query(
       `INSERT INTO cashflow_odeme (kategori,tarih,tutar,donem,aciklama,marka)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
@@ -18272,7 +18283,7 @@ app.post("/hr/personel-odeme", authMiddleware, async (req, res) => {
       `INSERT INTO personel_odeme (personel_id, email, ad, tip, tutar, tarih, aciklama, firma, yontem, masraf_form_id, created_by)
        VALUES ($1,$2,$3,$4,$5,COALESCE($6::date, CURRENT_DATE),$7,$8,$9,$10,$11) RETURNING *`,
       [pid, em || null, ad, tipN, t, tarih || null, aciklama || null,
-       altMarkaKoduNormalize(fir) || "ERC",
+       aktifAltMarkaKodu(fir, tarih) || "ERC",
        String(yontem || "HAVALE").toUpperCase() === "NAKIT" ? "NAKIT" : "HAVALE",
        masraf_form_id ? Number(masraf_form_id) : null, String(req.user?.email || "")]);
     res.json({ ok: true, row: r.rows[0] });
@@ -18367,7 +18378,8 @@ app.post("/hr/is-avans", async (req, res) => {
       firma,                              // talep anında AHY / ERC seçimi
     } = req.body;
     const firmaFinal = altMarkaKoduNormalize(firma)
-      || (String(firma || "").toUpperCase() === "ERC" ? "ERC" : null);
+      ? (aktifAltMarkaKodu(firma) || "ERC")
+      : (String(firma || "").toUpperCase() === "ERC" ? "ERC" : null);
 
     const adFinal    = talep_eden_ad || talep_eden || "";
     const projeFinal = proje || proje_kodu || null;
@@ -18480,7 +18492,7 @@ app.delete("/hr/is-avans/:id", async (req, res) => {
 // (devir sonrası saha giderleri AHY'de) — mobil de artık seçim soruyor.
 function normalizeAvansFirma(v) {
   const s = String(v || "").toUpperCase().trim();
-  if (altMarkaMi(s)) return s;
+  if (altMarkaMi(s)) return aktifAltMarkaKodu(s) || "ERC";
   if (s === "ERC" || s === "SIMSEK" || s === "ŞİMŞEK") return "ERC";
   return null;
 }
@@ -19614,7 +19626,7 @@ app.post("/hr/yemek-kartlari", async (req, res) => {
     const r = await pool.query(
       `INSERT INTO yemek_kartlari (ad_soyad, kart_no, aylik_tutar, firma) VALUES ($1,$2,$3,$4) RETURNING *`,
       [String(ad_soyad).trim().toUpperCase(), kart_no || null, Number(aylik_tutar || 0),
-       String(firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (altMarkaKoduNormalize(firma) || guncelMarka("AHY") || "SIMSEK")]);
+       String(firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(firma) || guncelMarka("AHY") || "SIMSEK")]);
     res.json({ ok: true, kart: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -19630,7 +19642,7 @@ app.put("/hr/yemek-kartlari/:id", async (req, res) => {
       let v = req.body[k];
       if (tip === "num") v = Number(v || 0);
       if (tip === "bool") v = !!v;
-      if (tip === "firma") v = String(v || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (altMarkaKoduNormalize(v) || guncelMarka("AHY") || "SIMSEK");
+      if (tip === "firma") v = String(v || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(v) || guncelMarka("AHY") || "SIMSEK");
       if (tip === "text") v = v === null ? null : String(v);
       vals.push(v); alanlar.push(`${k}=$${vals.length}`);
     }
@@ -19662,7 +19674,7 @@ app.post("/hr/yemek-kartlari/:id/ode", async (req, res) => {
     const kq = await pool.query(`SELECT * FROM yemek_kartlari WHERE id=$1`, [req.params.id]);
     if (!kq.rows[0]) return res.status(404).json({ ok: false, error: "Kart bulunamadı" });
     const kart = kq.rows[0];
-    const f = String(firma || kart.firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (altMarkaKoduNormalize(firma || kart.firma) || guncelMarka("AHY", tarih) || "SIMSEK");
+    const f = String(firma || kart.firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(firma || kart.firma, tarih) || guncelMarka("AHY", tarih) || "SIMSEK");
     const cfMarka = f === "SIMSEK" ? "ERC" : f; // Şimşek ödemeleri ERC nakit akışında
     const t = tarih || new Date().toISOString().slice(0, 10);
     const acik = `${kart.ad_soyad} · yemek kartı`;
@@ -23000,7 +23012,7 @@ app.post("/finance/taseron-odeme", requireFinanceAuth, async (req, res) => {
       return res.status(400).json({ error: "firma, tutar ve tarih zorunlu" });
     }
     // AHY/TEKNO seçildiyse ödeme o markanın Taşeron Faturaları paneline + nakit akışına da düşer
-    const odemeMarka = altMarkaKoduNormalize(firma_marka);
+    const odemeMarka = aktifAltMarkaKodu(firma_marka, tarih);
     const isAhyOdeme = !!odemeMarka;
 
     const odemeAmount = Number(tutar);

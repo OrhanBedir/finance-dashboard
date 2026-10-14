@@ -13538,7 +13538,7 @@ function FinanceDashboard({
                 {/* Firma: Şimşek / AHY — AHY seçilirse AHY Taşeron Faturaları paneline yansır */}
                 <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
                   <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Firma:</span>
-                  {[["SIMSEK","🟨 Şimşek Haberleşme","#92400e","#fffbeb","#fcd34d"],["TEKNO","🔷 Teknocenter","#1e40af","#eff6ff","#93c5fd"],["AHY","⚡ AHY Elektrik","#9a3412","#fff7ed","#fed7aa"]].map(([val,lbl,col,bg,brd])=>(
+                  {[["SIMSEK","🟨 Şimşek Haberleşme","#92400e","#fffbeb","#fcd34d"],["TEKNO","🔷 Teknocenter","#1e40af","#eff6ff","#93c5fd"]].map(([val,lbl,col,bg,brd])=>(
                     <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:(invoiceForm.firma||"SIMSEK")===val?bg:"#f9fafb", border:`1.5px solid ${(invoiceForm.firma||"SIMSEK")===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:(invoiceForm.firma||"SIMSEK")===val?col:"#6b7280" }}>
                       <input type="radio" name="fatura_firma" value={val} checked={(invoiceForm.firma||"SIMSEK")===val} onChange={()=>setInvoiceForm(p=>({...p,firma:val}))} style={{ display:"none" }} />{lbl}
                     </label>
@@ -13938,7 +13938,7 @@ function FinanceDashboard({
                             color: odemeModalFirmaMarka==="SIMSEK" ? "#fff" : "#6b7280" }}>
                           ⚡ ŞİMŞEK
                         </button>
-                        {ALT_MARKA_LISTE.map(m => (
+                        {ALT_MARKA_LISTE.filter(m => m.kod === GUNCEL_ALT_MARKA).map(m => (
                           <button key={m.kod} type="button" onClick={() => setOdemeModalFirmaMarka(m.kod)}
                             style={{ flex:1, padding:"10px", borderRadius:"10px", fontSize:"13px", fontWeight:800, cursor:"pointer",
                               border: odemeModalFirmaMarka===m.kod ? "2px solid #1d4ed8" : "1.5px solid #e5e7eb",
@@ -15697,7 +15697,6 @@ function FinanceDashboard({
                 style={{ width:"100%", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", fontSize:"14px" }}>
                 <option value="FEDERAL">FEDERAL</option>
                 <option value="UBS">UBS</option>
-                <option value="AHY">AHY</option>
                 <option value="TEKNO">TEKNO</option>
                 <option value="2KX">2KX</option>
                 <option value="FERRUMX">FERRUMX</option>
@@ -17804,7 +17803,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <div>
                       <span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Firma</span>
                       <div style={{ display:"flex", gap:"6px" }}>
-                        {[...ALT_MARKA_LISTE.map(m => [m.kod, `${m.ikon} ${m.kisa}`]), ["SIMSEK","🟨 Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
+                        {[...ALT_MARKA_LISTE.filter(m => m.kod === GUNCEL_ALT_MARKA).map(m => [m.kod, `${m.ikon} ${m.kisa}`]), ["SIMSEK","🟨 Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
                           <button key={v} type="button" onClick={() => setYemekOdeForm(f => ({ ...f, firma: v }))}
                             style={{ flex:1, padding:"8px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekOdeForm.firma===v?"#1e3a5f":"#e5e7eb"}`, background: yemekOdeForm.firma===v?"#1e3a5f":"#fff", color: yemekOdeForm.firma===v?"#fff":"#6b7280" }}>{l}</button>
                         ))}
@@ -17854,7 +17853,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
                       <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Firma</span>
                         <div style={{ display:"flex", gap:"6px" }}>
-                          {[...ALT_MARKA_LISTE.map(m => [m.kod, m.kisa]), ["SIMSEK","Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
+                          {[...ALT_MARKA_LISTE.filter(m => m.kod === GUNCEL_ALT_MARKA).map(m => [m.kod, m.kisa]), ["SIMSEK","Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
                             <button key={v} type="button" onClick={() => setYemekKartForm(f => ({ ...f, firma: v }))}
                               style={{ flex:1, padding:"8px 4px", borderRadius:"8px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekKartForm.firma===v?"#1e3a5f":"#e5e7eb"}`, background: yemekKartForm.firma===v?"#1e3a5f":"#fff", color: yemekKartForm.firma===v?"#fff":"#6b7280" }}>{l}</button>
                           ))}
@@ -19102,7 +19101,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               <div>
                 <div style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", marginBottom:"4px" }}>Ödeyen Firma</div>
                 <div style={{ display:"flex", gap:"8px" }}>
-                  {[{ v:"SIMSEK", l:"🏢 ŞİMŞEK", c:"#1d4ed8", bg:"#eff6ff" }, { v:"TEKNO", l:"🔷 TEKNO", c:"#1d4ed8", bg:"#dbeafe" }, { v:"AHY", l:"⚡ AHY", c:"#b45309", bg:"#fffbeb" }].filter(f => _hrMarka === "ERC" || f.v === "SIMSEK" || f.v === _hrMarka).map(f=>(
+                  {[{ v:"SIMSEK", l:"🏢 ŞİMŞEK", c:"#1d4ed8", bg:"#eff6ff" }, { v:"TEKNO", l:"🔷 TEKNO", c:"#1d4ed8", bg:"#dbeafe" }].filter(f => _hrMarka === "ERC" || f.v === "SIMSEK" || f.v === _hrMarka).map(f=>(
                     <button key={f.v} type="button" onClick={()=>setMaasOdeForm(x=>({...x,odeyen:f.v}))}
                       style={{ flex:1, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer",
                         border: maasOdeForm.odeyen===f.v ? `2px solid ${f.c}` : "1.5px solid #e5e7eb",
@@ -22972,7 +22971,6 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                   <select value={odemeModal.firma} onChange={e => setOdemeModal(m => ({ ...m, firma: e.target.value }))} style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", background:"#fff" }}>
                     <option value="ERC">ŞİMŞEK</option>
                     <option value="TEKNO">TEKNO</option>
-                    <option value="AHY">AHY</option>
                   </select>
                 </div>
               )}
@@ -28932,7 +28930,6 @@ function CashFlowPanel({ currentUser, onBack }) {
                   <select value={odemeForm.marka} onChange={e=>setOdemeForm(f=>({...f, marka:e.target.value}))} style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box", background: odemeForm.marka==="AHY" ? "#fffbeb" : "#fff" }}>
                     <option value="ERC">🏢 Şimşek (ERC)</option>
                     <option value="TEKNO">🔷 Teknocenter</option>
-                    <option value="AHY">⚡ AHY Elektrik</option>
                   </select>
                   <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Şimşek girişlerini alt markalar göremez</div>
                 </div>
@@ -30305,7 +30302,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const BOLGELER = ["İzmir","İstanbul","Ankara","Bursa","Antalya","Adana","Samsun","Trabzon","Erzurum","Diyarbakır","Diğer"];
   const PROJELER = ["TT","TC","VF","Diğer"];
   const SITE_TYPES = ["5G","LTE","DSS","STANDALONE","Diğer"];
-  const FIRMALAR = ["Şimşek","UBS","FEDERAL","AHY","TEKNO","2KX","Diğer"];
+  const FIRMALAR = ["Şimşek","UBS","FEDERAL","TEKNO","2KX","Diğer"];
 
   // ── LOAD ──
   const loadTalepler = async () => {
