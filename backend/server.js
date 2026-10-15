@@ -2184,9 +2184,9 @@ app.get("/health", (req, res) => {
    akıtır; /mobil ise personele paylaşılacak tek tıkla indirme sayfası.
    Yeni build çıkınca MOBIL_APK.url ve surum güncellenir. */
 const MOBIL_APK = {
-  surum: 26,
-  ad: "ERC_Operasyon_v26.apk",
-  url: "https://expo.dev/artifacts/eas/jJtKWzrWrMtpEtYmM0eHhE59PvXqdpxpdEZ9JkuQVjw.apk",
+  surum: 27,
+  ad: "ERC_Operasyon_v27.apk",
+  url: "https://expo.dev/artifacts/eas/B0YywIh-DbLfwq-AiV70aFGeL5MC5cg_yPs7dhWDxxQ.apk",
 };
 app.get("/mobil/apk", async (req, res) => {
   try {
