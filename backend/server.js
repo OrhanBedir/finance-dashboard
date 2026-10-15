@@ -6785,13 +6785,41 @@ const ARAC_DEPOZITO_AY_SQL = `
           SELECT to_char(a.depozito_iade_tarihi,'YYYY-MM') AS ay, -COALESCE(a.depozito_tutar,0) AS t FROM araclar a
           WHERE a.depozito_iade_tarihi >= $1::date AND a.depozito_iade_tarihi < $3::date AND ${ARAC_DEPOZITO_FILTRE_SQL}`;
 const ARAC_DEPOZITO_GUN_SQL = `
-        SELECT to_char(a.depozito_tarihi,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad, 'ARAC_KIRA' AS tip,
-          COALESCE(a.depozito_tutar,0) AS tutar, ('Depozito' || COALESCE(' · '||NULLIF(a.depozito_not,''),'')) AS aciklama, true AS kasadan_dus
+        SELECT to_char(a.depozito_tarihi,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad, 'ARAC_DEPOZITO' AS tip,
+          COALESCE(a.depozito_tutar,0) AS tutar, COALESCE(NULLIF(a.depozito_not,''),'') AS aciklama, true AS kasadan_dus,
+          a.plaka, NULL::text AS donem, 'DEPOZITO' AS islem_turu, a.id AS arac_id, 'arac_depozito' AS kaynak, a.id AS kaynak_id
         FROM araclar a WHERE a.depozito_tarihi >= $1::date AND a.depozito_tarihi < $3::date AND ${ARAC_DEPOZITO_FILTRE_SQL}
         UNION ALL
-        SELECT to_char(a.depozito_iade_tarihi,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad, 'ARAC_KIRA' AS tip,
-          -COALESCE(a.depozito_tutar,0) AS tutar, 'Depozito iadesi (geri geldi)' AS aciklama, true AS kasadan_dus
+        SELECT to_char(a.depozito_iade_tarihi,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad, 'ARAC_DEPOZITO' AS tip,
+          -COALESCE(a.depozito_tutar,0) AS tutar, 'iade alındı' AS aciklama, true AS kasadan_dus,
+          a.plaka, NULL::text AS donem, 'DEPOZITO_IADE' AS islem_turu, a.id AS arac_id, 'arac_depozito' AS kaynak, a.id AS kaynak_id
         FROM araclar a WHERE a.depozito_iade_tarihi >= $1::date AND a.depozito_iade_tarihi < $3::date AND ${ARAC_DEPOZITO_FILTRE_SQL}`;
+// 16.10.2026 (Orhan): kiralama firmasının (NABAT vb.) faturası taşeron fatura girişinde "Ödenen" ile girildiyse
+// ve aynı para "Kira Öde" ile de kaydedildiyse iki kez sayılmasın. Bağ kayıt kimlikleriyle tutulur
+// (fatura_id ↔ arac_kira_odemeler.id); bağlı kira tutarı taşeron NAKİT çıkışından düşülür. Borç/planlı
+// taşeron hesapları değişmez (fatura ödenmiş görünmeye devam eder). Kira ödemesi silinirse fatura yeniden sayılır.
+pool.query(`CREATE TABLE IF NOT EXISTS arac_kira_fatura_bag (
+  id SERIAL PRIMARY KEY, fatura_id INTEGER NOT NULL, odeme_id INTEGER NOT NULL, kullanici TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (fatura_id, odeme_id))`).catch(() => {});
+const ARAC_FATURA_BAG_JOIN = `LEFT JOIN (SELECT b.fatura_id, SUM(o.tutar) AS t FROM arac_kira_fatura_bag b
+    JOIN arac_kira_odemeler o ON o.id = b.odeme_id GROUP BY 1) akb ON akb.fatura_id = i.id`;
+const TASERON_NAKIT_SQL = `(COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0) - LEAST(COALESCE(akb.t,0), COALESCE(i.odenen_tutar,0)))`;
+// 16.10.2026 (Orhan): araç kirası / depozito nakit satırı — "16GIG304 | Ekim 2026 Kirası | 54.000 TL"
+const NAKIT_AY_AD = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+function aracNakitSatiri(r, odeyenKod) {
+  if (r.tip !== "ARAC_KIRA" && r.tip !== "ARAC_DEPOZITO") return r;
+  const m = String(r.donem || "").match(/^(\d{4})-(\d{2})$/);
+  const donemAd = m ? `${NAKIT_AY_AD[Number(m[2]) - 1]} ${m[1]}` : "";
+  const islem_ad = r.islem_turu === "DEPOZITO" ? "Depozito" : r.islem_turu === "DEPOZITO_IADE" ? "Depozito iadesi"
+    : (donemAd ? `${donemAd} Kirası` : "Kira");
+  const plaka = r.plaka || null;
+  const tutarTxt = Math.abs(Number(r.tutar || 0)).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+  const not = String(r.aciklama || "").trim();
+  return { ...r, plaka, plaka_eksik: !plaka, islem_ad, donem_ad: donemAd,
+    ad_soyad: plaka || "⚠ Plaka yok",
+    aciklama: `${plaka || "⚠ PLAKA YOK"} | ${islem_ad} | ${tutarTxt} TL${not ? ` · ${not}` : ""}` };
+}
+
 const TASERON_LOG_DAGILIM_SQL = `(SELECT (d->>'fatura_id')::int AS fid, SUM((d->>'odeme')::numeric) AS t
   FROM taseron_odeme_log l,
        jsonb_array_elements(CASE WHEN jsonb_typeof(l.dagilim) = 'array' THEN l.dagilim ELSE '[]'::jsonb END) d
@@ -6817,7 +6845,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     // P&L şeridindeki hakediş × 1,20 kuralıyla da aynı hizada.
     const P = markaProfil(marka);          // devir penceresi [devir, son) + bordro kapsamı
     const DEVIR = P.devir, SON = P.son;
-    const [fatura, maas, mavans, iavans, kiralar, ofisk, manuel, taseronOd, yemekOd] = await Promise.all([
+    const [fatura, maas, mavans, iavans, kiralar, ofisk, manuel, taseronOd, yemekOd, depozitolar, manuelArac] = await Promise.all([
       pool.query(`SELECT to_char(fatura_tarihi,'YYYY-MM') AS ay,
           TRIM(COALESCE(NULLIF(rf_montaj_firma,''), tedarikci, '')) AS firma,
           COALESCE(NULLIF(toplam_tutar,0), tutar, 0) AS t
@@ -6850,13 +6878,11 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           FROM personel_odeme o
           WHERE UPPER(COALESCE(o.firma,'ERC'))=$1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2
         ) x GROUP BY 1`, [marka, DEVIR]),
-      pool.query(`SELECT ay, SUM(t) AS t FROM (
-          SELECT to_char(o.tarih,'YYYY-MM') AS ay, ${PL_KIRA_TUTAR_SQL} AS t
+      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
           FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
           WHERE o.created_at >= $1::date AND o.created_at < $3::date
             AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = ANY($2::text[])
-          UNION ALL ${ARAC_DEPOZITO_AY_SQL}
-        ) x GROUP BY 1`, [DEVIR, P.bordro, SON]).catch(() => ({ rows: [] })),
+          GROUP BY 1`, [DEVIR, P.bordro, SON]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
         FROM ofis_kira_odemeler o
         WHERE o.created_at >= $1::date AND o.created_at < $2::date GROUP BY 1`, [DEVIR, SON]).catch(() => ({ rows: [] })),
@@ -6872,9 +6898,9 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           FROM marka_taseron_odeme WHERE UPPER(marka) = $1 AND tarih >= $2::date
           UNION ALL
           -- 17.09.2026: devirden (15.07) önceki ödeme/faturalar AHY giderine girmez
-          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0))
-          FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
-          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
+          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), ${TASERON_NAKIT_SQL}
+          FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id ${ARAC_FATURA_BAG_JOIN}
+          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND ${TASERON_NAKIT_SQL} > 0
             AND COALESCE(i.odeme_tarihi, i.fatura_tarihi) >= $2::date
             AND NOT EXISTS (
               SELECT 1 FROM marka_taseron_odeme mo
@@ -6886,6 +6912,11 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       // Yemek kartı ödemeleri (cashflow kategori TICKET) — kalem dökümü için ayrı
       pool.query(`SELECT SUM(tutar) AS t FROM cashflow_odeme
         WHERE UPPER(COALESCE(marka,'ERC')) = $1 AND UPPER(COALESCE(kategori,'')) = 'TICKET'`, [marka]).catch(() => ({ rows: [] })),
+      // 16.10.2026: araç depozitoları ayrı kalem (ödeme günü +, iade günü −)
+      pool.query(`SELECT ay, SUM(t) AS t FROM (${ARAC_DEPOZITO_AY_SQL}) x GROUP BY 1`, [DEVIR, P.bordro, SON]).catch(() => ({ rows: [] })),
+      // Manuel araç kira / depozito girişleri — "genel" yerine araç kalemlerine
+      pool.query(`SELECT UPPER(kategori) AS kategori, SUM(tutar) AS t FROM cashflow_odeme
+        WHERE UPPER(COALESCE(marka,'ERC')) = $1 AND UPPER(COALESCE(kategori,'')) IN ('ARAC','ARAC_DEPOZITO') GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const map = {};
     const rowOf = (ay) => (map[ay] = map[ay] || { ay, gelir_try: 0, gelir_usd: 0, maas: 0, maas_avans: 0, is_avans: 0, diger: 0 });
@@ -6901,6 +6932,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     mavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).maas_avans = Number(r.t || 0); });
     iavans.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).is_avans = Number(r.t || 0); });
     kiralar.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
+    depozitolar.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
     ofisk.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
     manuel.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
     taseronOd.rows.forEach(r => { if (!r.ay) return; rowOf(r.ay).diger += Number(r.t || 0); });
@@ -6911,13 +6943,16 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     // ── Gider kalem dökümü (P&L şeridinin dikey gelir tablosu için) ──
     const _top = (q) => (q.rows || []).reduce((sm, r) => sm + Number(r.t || 0), 0);
     const yemekToplam = _top(yemekOd);
+    const _manArac = Number((manuelArac.rows.find(r => r.kategori === "ARAC") || {}).t || 0);
+    const _manDep = Number((manuelArac.rows.find(r => r.kategori === "ARAC_DEPOZITO") || {}).t || 0);
     const gider_kalemleri = {
       maas: +( _top(maas) + _top(mavans) ).toFixed(2),          // maaş + maaş avansları
-      arac_kira: +_top(kiralar).toFixed(2),
+      arac_kira: +( _top(kiralar) + _manArac ).toFixed(2),       // Kira Öde + manuel araç kirası (gerçek ödemeler)
+      arac_depozito: +( _top(depozitolar) + _manDep ).toFixed(2), // depozito (iade edilince düşer)
       ofis_kira: +_top(ofisk).toFixed(2),
       yemek: +yemekToplam.toFixed(2),
       taseron: +_top(taseronOd).toFixed(2),
-      genel: +( _top(iavans) + Math.max(0, _top(manuel) - yemekToplam) ).toFixed(2), // iş avansları + manuel (yemek hariç)
+      genel: +( _top(iavans) + Math.max(0, _top(manuel) - yemekToplam - _manArac - _manDep) ).toFixed(2), // iş avansları + manuel (yemek/araç hariç)
     };
     // ── Proje P&L şeridi (kartların üstü) ──
     // Fiziki tamamlanan iş bedeli: Bölge Analizi ile aynı fiyat zinciri —
@@ -7298,6 +7333,28 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
   }
 });
 
+// Kiralama faturası ↔ Kira Öde kayıtları bağı (yönetici). Toplam bağlı kira, fatura ödenen tutarını aşamaz.
+app.post("/finance/arac-kira-fatura-bag", authMiddleware, async (req, res) => {
+  try {
+    const rol = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "platform_admin", "direktor", "muhasebe"].includes(rol)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const faturaId = Number(req.body?.fatura_id), odemeIds = (req.body?.odeme_ids || []).map(Number).filter(Boolean);
+    if (!faturaId || !odemeIds.length) return res.status(400).json({ ok: false, error: "fatura_id ve odeme_ids gerekli" });
+    const f = await pool.query(`SELECT id, fatura_no, COALESCE(odenen_tutar,0) AS odenen FROM invoice_entries WHERE id=$1`, [faturaId]);
+    if (!f.rows[0]) return res.status(404).json({ ok: false, error: "Fatura yok" });
+    const o = await pool.query(`SELECT o.id, o.tutar, o.arac_id, a.plaka FROM arac_kira_odemeler o JOIN araclar a ON a.id=o.arac_id WHERE o.id = ANY($1::int[])`, [odemeIds]);
+    if (o.rows.length !== odemeIds.length) return res.status(400).json({ ok: false, error: "Kira ödemesi bulunamadı" });
+    const top = o.rows.reduce((s, r) => s + Number(r.tutar || 0), 0);
+    if (top - Number(f.rows[0].odenen) > 1) return res.status(400).json({ ok: false, error: `Bağlanan kira toplamı (₺${top}) faturada ödenen tutarı (₺${f.rows[0].odenen}) aşıyor` });
+    const kul = String(req.user?.email || "").toLowerCase();
+    for (const r of o.rows) {
+      await pool.query(`INSERT INTO arac_kira_fatura_bag (fatura_id, odeme_id, kullanici) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [faturaId, r.id, kul]);
+      await aracIslemLog(req, r.arac_id, "kira_odeme", r.id, "FATURA_BAGLANDI", `Kira ödemesi #${r.id} (₺${r.tutar}) ↔ fatura ${f.rows[0].fatura_no} (#${faturaId}) — taşeron nakit çıkışından düşülür`);
+    }
+    res.json({ ok: true, fatura_id: faturaId, bagli_toplam: top });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
   try {
     const rol = String(req.user?.role || "").toLowerCase();
@@ -7362,8 +7419,9 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         WHERE UPPER(COALESCE(o.firma,'ERC')) = $1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2`, [marka, baslangic, P.bordro, son]),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad,
           'ARAC_KIRA' AS tip, o.tutar,
-          (o.donem || COALESCE(' · '||o.aciklama,'')) AS aciklama,
-          COALESCE(o.kasadan_dus, true) AS kasadan_dus
+          COALESCE(o.aciklama,'') AS aciklama,
+          COALESCE(o.kasadan_dus, true) AS kasadan_dus,
+          a.plaka, o.donem, 'KIRA' AS islem_turu, o.arac_id, 'arac_kira_odeme' AS kaynak, o.id AS kaynak_id
         FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
         WHERE o.created_at >= $1::date AND o.created_at < $3::date
           AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = ANY($2::text[])
@@ -7378,13 +7436,16 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         WHERE o.created_at >= $1::date AND o.created_at < $2::date`, [girisBaslangic, son]).catch(() => ({ rows: [] })),
       // Manuel ödemeler: yalnız bu MARKAYA girilenler (firma seçimi 16.07.2026,
       // eski/etiketsiz kayıtlar ERC sayılır — AHY görmez)
-      pool.query(`SELECT to_char(tarih,'YYYY-MM-DD') AS tarih,
-          COALESCE(NULLIF(aciklama,''),
-            CASE kategori WHEN 'ARAC' THEN 'Araç kirası' WHEN 'TICKET' THEN 'Ticket/Yemek' ELSE 'Diğer ödeme' END) AS ad_soyad,
-          CASE kategori WHEN 'ARAC' THEN 'ARAC_KIRA' WHEN 'TICKET' THEN 'TICKET' ELSE 'DIGER' END AS tip,
-          tutar, COALESCE(donem,'') AS aciklama
-        FROM cashflow_odeme
-        WHERE UPPER(COALESCE(marka,'ERC')) = $1`, [marka]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT to_char(c.tarih,'YYYY-MM-DD') AS tarih,
+          COALESCE(NULLIF(c.aciklama,''),
+            CASE c.kategori WHEN 'ARAC' THEN 'Araç kirası' WHEN 'ARAC_DEPOZITO' THEN 'Araç depozitosu' WHEN 'TICKET' THEN 'Ticket/Yemek' ELSE 'Diğer ödeme' END) AS ad_soyad,
+          CASE c.kategori WHEN 'ARAC' THEN 'ARAC_KIRA' WHEN 'ARAC_DEPOZITO' THEN 'ARAC_DEPOZITO' WHEN 'TICKET' THEN 'TICKET' ELSE 'DIGER' END AS tip,
+          c.tutar,
+          CASE WHEN c.kategori IN ('ARAC','ARAC_DEPOZITO') THEN COALESCE(c.aciklama,'') ELSE COALESCE(c.donem,'') END AS aciklama,
+          ar.plaka, c.donem, CASE c.kategori WHEN 'ARAC_DEPOZITO' THEN 'DEPOZITO' WHEN 'ARAC' THEN 'KIRA' END AS islem_turu,
+          c.arac_id, 'manuel' AS kaynak, c.id AS kaynak_id
+        FROM cashflow_odeme c LEFT JOIN araclar ar ON ar.id = c.arac_id
+        WHERE UPPER(COALESCE(c.marka,'ERC')) = $1`, [marka]).catch(() => ({ rows: [] })),
       // Taşeron ödemeleri: AVANSLAR kasadaki nakitten çıkar (kasadan düşer);
       // FATURA ödemelerini AHY kendisi yapar — nakit akışında/giderde görünür,
       // kasa bakiyesinden DÜŞMEZ (araç/ofis kirasındaki kasadan_dus kurgusu)
@@ -7397,11 +7458,11 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         WHERE UPPER(marka) = $1
         UNION ALL
         SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM-DD') AS tarih,
-          COALESCE(i.tedarikci,'') AS ad_soyad, 'TASERON' AS tip, (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) AS tutar,
+          COALESCE(i.tedarikci,'') AS ad_soyad, 'TASERON' AS tip, ${TASERON_NAKIT_SQL} AS tutar,
           ('Fatura ödemesi (${P.kod} ödedi) · fatura girişinden: ' || COALESCE(i.fatura_no,'')) AS aciklama,
           false AS kasadan_dus
-        FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
-        WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
+        FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id ${ARAC_FATURA_BAG_JOIN}
+        WHERE UPPER(COALESCE(i.firma,'')) = $1 AND ${TASERON_NAKIT_SQL} > 0
           -- Aynı ödeme AHY panelinden de girildiyse çift sayma (taşeron ilk kelime + tutar eşleşmesi)
           AND NOT EXISTS (
             SELECT 1 FROM marka_taseron_odeme mo
@@ -7416,7 +7477,9 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         const { pm_kisisel, ...x } = r;
         // Orhan'ın avansı/ödemesi: tutar toplamlarda kalır, kimlik yetkisizlere gizlenir
         if (pm_kisisel && !_pmGor) { x.ad_soyad = "Yönetim (gizli)"; x.aciklama = ""; }
-        return { ...x, tutar: Number(x.tutar || 0) };
+        const y = { ...x, tutar: Number(x.tutar || 0) };
+        y.odeme_yontemi = y.kasadan_dus === false ? `${P.kod} ödedi` : "Kasadan";
+        return aracNakitSatiri(y, P.kod);
       })
       .sort((a, b) => b.tarih.localeCompare(a.tarih));
     res.json({ ok: true, baslangic, rows });
@@ -8812,9 +8875,9 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
           FROM marka_taseron_odeme WHERE UPPER(marka) = $1 AND tarih >= $2::date
           UNION ALL
           -- 17.09.2026: devirden (15.07) önceki ödeme/faturalar AHY giderine girmez
-          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0))
-          FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
-          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
+          SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), ${TASERON_NAKIT_SQL}
+          FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id ${ARAC_FATURA_BAG_JOIN}
+          WHERE UPPER(COALESCE(i.firma,'')) = $1 AND ${TASERON_NAKIT_SQL} > 0
             AND COALESCE(i.odeme_tarihi, i.fatura_tarihi) >= $2::date
             AND NOT EXISTS (
               SELECT 1 FROM marka_taseron_odeme mo
@@ -8844,7 +8907,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
     ofisKira.rows.forEach(r => { if (r.ay) rowOf(r.ay).kira += Number(r.t || 0); });
     manuel.rows.forEach(r => {
       if (!r.ay) return;
-      if (String(r.kategori).toUpperCase() === "ARAC") rowOf(r.ay).kira += Number(r.t || 0);
+      if (["ARAC", "ARAC_DEPOZITO"].includes(String(r.kategori).toUpperCase())) rowOf(r.ay).kira += Number(r.t || 0);
       else rowOf(r.ay).diger += Number(r.t || 0);
     });
     taseronOd.rows.forEach(r => { if (r.ay) rowOf(r.ay).taseron += Number(r.t || 0); });
@@ -15494,6 +15557,8 @@ async function ensureCashflowOdemeTable() {
   // Firma ayrımı (16.07.2026): ERC (Şimşek) girişlerini AHY görmez. Eski
   // kayıtların tümü (bugünküler dahil) ERC sayılır.
   await pool.query(`ALTER TABLE cashflow_odeme ADD COLUMN IF NOT EXISTS marka TEXT DEFAULT 'ERC'`);
+  // 16.10.2026 (Orhan): araç kirası / depozito manuel girişleri araç kimliğine bağlanır (plaka zorunlu)
+  await pool.query(`ALTER TABLE cashflow_odeme ADD COLUMN IF NOT EXISTS arac_id INTEGER`).catch(() => {});
 }
 
 app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
@@ -15505,12 +15570,12 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
     // AHY panelinde; AHY personelinin devir (15.07.2026) sonrası maaş/avans
     // ödemeleri de AHY sorumluluğundadır, buraya yansımaz.
     const r = await pool.query(
-      `SELECT id, kategori, TO_CHAR(tarih,'YYYY-MM-DD') AS tarih, tutar, donem, aciklama,
-              UPPER(COALESCE(marka,'ERC')) AS marka
-       FROM cashflow_odeme
-       WHERE EXTRACT(YEAR FROM tarih)=$1 AND EXTRACT(MONTH FROM tarih)=$2
-         AND UPPER(COALESCE(marka,'ERC'))='ERC'
-       ORDER BY tarih, id`, [yil, ay]);
+      `SELECT c.id, c.kategori, TO_CHAR(c.tarih,'YYYY-MM-DD') AS tarih, c.tutar, c.donem, c.aciklama,
+              UPPER(COALESCE(c.marka,'ERC')) AS marka, c.arac_id, ar.plaka
+       FROM cashflow_odeme c LEFT JOIN araclar ar ON ar.id = c.arac_id
+       WHERE EXTRACT(YEAR FROM c.tarih)=$1 AND EXTRACT(MONTH FROM c.tarih)=$2
+         AND UPPER(COALESCE(c.marka,'ERC'))='ERC'
+       ORDER BY c.tarih, c.id`, [yil, ay]);
     // Maaş ödemeleri: İK'daki maas_odeme kayıtları (bu ay yapılan ödemeler)
     const m = await pool.query(
       `SELECT m.id, TO_CHAR(m.tarih,'YYYY-MM-DD') AS tarih,
@@ -15558,14 +15623,31 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
 app.post("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
   try {
     await ensureCashflowOdemeTable();
-    const { kategori, tarih, tutar, donem, aciklama, marka } = req.body;
+    const { kategori, tarih, tutar, donem, aciklama, marka, arac_id, zorla } = req.body;
     if (!kategori || !tarih || !tutar)
       return res.status(400).json({ ok: false, error: "kategori, tarih, tutar zorunlu" });
     const markaVal = aktifAltMarkaKodu(marka, tarih) || "ERC";
+    const tutarN = parseFinanceNumber(tutar);
+    // 16.10.2026: araç kirası / depozito → araç seçimi zorunlu; aynı ödeme Kira Öde'den de girilmişse iki kez sayılmasın
+    let aracId = null, acik = aciklama || null;
+    if (["ARAC", "ARAC_DEPOZITO"].includes(String(kategori).toUpperCase())) {
+      const ar = arac_id ? await pool.query(`SELECT id, plaka, depozito_tutar, to_char(depozito_tarihi,'YYYY-MM-DD') AS depozito_tarihi FROM araclar WHERE id=$1`, [arac_id]) : { rows: [] };
+      if (!ar.rows[0]) return res.status(400).json({ ok: false, error: "Araç kirası / depozito girişinde araç (plaka) seçimi zorunlu" });
+      aracId = ar.rows[0].id;
+      if (!zorla) {
+        if (String(kategori).toUpperCase() === "ARAC" && donem) {
+          const k = await pool.query(`SELECT id, tutar, to_char(tarih,'YYYY-MM-DD') AS tarih FROM arac_kira_odemeler WHERE arac_id=$1 AND donem=$2`, [aracId, donem]);
+          if (k.rows[0]) return res.status(409).json({ ok: false, cakisma: true, error: `${ar.rows[0].plaka} · ${donem} kirası "Kira Öde" ile zaten kayıtlı (₺${Number(k.rows[0].tutar).toLocaleString("tr-TR")}, ${k.rows[0].tarih}). Aynı ödeme ise tekrar girmeyin; farklı bir ödemeyse onaylayarak kaydedin.` });
+        }
+        if (String(kategori).toUpperCase() === "ARAC_DEPOZITO" && Number(ar.rows[0].depozito_tutar || 0) > 0) {
+          return res.status(409).json({ ok: false, cakisma: true, error: `${ar.rows[0].plaka} için araç kartında ₺${Number(ar.rows[0].depozito_tutar).toLocaleString("tr-TR")} depozito (${ar.rows[0].depozito_tarihi || "tarihsiz"}) zaten kayıtlı ve nakit akışına düşüyor. Aynı depozitoysa tekrar girmeyin; farklıysa onaylayarak kaydedin.` });
+        }
+      }
+    }
     const r = await pool.query(
-      `INSERT INTO cashflow_odeme (kategori,tarih,tutar,donem,aciklama,marka)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [kategori, tarih, parseFinanceNumber(tutar), donem || null, aciklama || null, markaVal]);
+      `INSERT INTO cashflow_odeme (kategori,tarih,tutar,donem,aciklama,marka,arac_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [kategori, tarih, tutarN, donem || null, acik, markaVal, aracId]);
     res.json({ ok: true, row: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

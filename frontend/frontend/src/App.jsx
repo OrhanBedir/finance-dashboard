@@ -1229,7 +1229,8 @@ function ProjePLSeridi({ ozet, tGider }) {
   const planliTas = Number(data.bekleyen_taseron || 0); // taşeron fatura − ödeme
   const gk = data.gider_kalemleri || null;
   const kalemler = gk ? [
-    ["🚗", "Araç Kiraları", Number(gk.arac_kira || 0), ""],
+    ["🚗", "Araç Kiraları", Number(gk.arac_kira || 0), "gerçek ödemeler"],
+    ["🔒", "Araç Depozitoları", Number(gk.arac_depozito || 0), "iade edilince düşer"],
     ["🏢", "Ofis & Depo Kiraları", Number(gk.ofis_kira || 0), ""],
     ["🍽", "Yemek Kartı Ödemeleri", Number(gk.yemek || 0), ""],
     // 17.09.2026: planlı (henüz ödenmemiş) tutarlar bu satırlara KATILMAZ — ayrı bölümde
@@ -1830,6 +1831,7 @@ function MarkaNakitPanel({ currentUser }) {
   const [ay, setAy] = useState(() => new Date().toISOString().slice(0, 7)); // görüntülenen ay (YYYY-MM)
   const [kasa, setKasa] = useState({ rows: [], toplam: 0 }); // manuel nakit girişleri
   const [kasaModal, setKasaModal] = useState(false);
+  const [hucreDetay, setHucreDetay] = useState(null); // 16.10.2026: tıklanan hücrenin kalem detayı {tip, gun, items}
   // Gelecek bakiye: HW'ye faturalanmış, ödenmemiş kalemlerin AHY payı (vade gününde)
   const [gelecek, setGelecek] = useState({ gunler: [], onay_bekleyen: 0, toplam: 0, gelen_gunluk: [] });
   const [gecikenModal, setGecikenModal] = useState(false);
@@ -1950,7 +1952,7 @@ function MarkaNakitPanel({ currentUser }) {
   ayRows.forEach(r => {
     const g = Number((r.tarih || "").slice(8, 10));
     if (!g) return;
-    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","ARAC_KIRA","OFIS_KIRA","TICKET","TASERON"].includes(r.tip) ? r.tip : "DIGER";
+    const key = r.tip && ["MAAS_ODEME","MAAS_AVANSI","IS_AVANSI","ARAC_KIRA","ARAC_DEPOZITO","OFIS_KIRA","TICKET","TASERON"].includes(r.tip) ? r.tip : "DIGER";
     const m = (hucre[key] = hucre[key] || {});
     const c = (m[g] = m[g] || { t: 0, items: [] });
     c.t += r.tutar; c.items.push(r);
@@ -1966,7 +1968,8 @@ function MarkaNakitPanel({ currentUser }) {
     ["MAAS_ODEME",   "👥 Maaş Ödemeleri",  "Ödendikçe görünür (İK → Öde)"],
     ["MAAS_AVANSI",  "💰 Maaş Avansları",  "Ödendiği gün görünür"],
     ["IS_AVANSI",    "🏗 İş Avansları",    "Onaylanıp ödendiği gün"],
-    ["ARAC_KIRA",    "🚗 Araç Kiraları",   "Kira Öde + manuel girişler"],
+    ["ARAC_KIRA",    "🚗 Araç Kiraları",   "Gerçek ödemeler · Kira Öde + manuel"],
+    ["ARAC_DEPOZITO","🔒 Araç Depozitoları", "Ödeme günü gider · iade günü eksi"],
     ["OFIS_KIRA",    "🏭 Depo/Ofis Kiraları", "Ofis & Depo → Kira Öde"],
     ["TICKET",       "🎫 Ticket / Yemek",  "Manuel girişler"],
     ["TASERON",      "🔧 Taşeron Ödemeleri", "Avans + fatura ödemeleri"],
@@ -1978,6 +1981,7 @@ function MarkaNakitPanel({ currentUser }) {
     MAAS_AVANSI:  { ad: "Maaş Avansı",      bg: "#fef3c7", fg: "#92400e" },
     IS_AVANSI:    { ad: "İş Avansı",        bg: "#dbeafe", fg: "#1e40af" },
     ARAC_KIRA:    { ad: "Araç Kirası",      bg: "#ede9fe", fg: "#6d28d9" },
+    ARAC_DEPOZITO:{ ad: "Araç Depozitosu",  bg: "#fef3c7", fg: "#92400e" },
     OFIS_KIRA:    { ad: "Depo/Ofis Kirası", bg: "#e0f2fe", fg: "#0369a1" },
     TICKET:       { ad: "Ticket/Yemek",     bg: "#ffedd5", fg: "#9a3412" },
     TASERON:      { ad: "Taşeron Ödemesi",  bg: "#fce7f3", fg: "#9d174d" },
@@ -2000,17 +2004,21 @@ function MarkaNakitPanel({ currentUser }) {
             <button onClick={() => exportStandardExcel({
               title: `${markaAd} — Günlük Nakit Akışı (tüm hareketler)`,
               sheetName: "Nakit Akışı", fileBase: `${marka}_Nakit_Akisi`,
-              headers: ["Tarih", "Kategori", "Kişi / Kalem", "Açıklama", "Tutar (₺)", "Kasa"],
-              colWidths: [13, 18, 32, 46, 14, 16],
-              numericCols: [4],
+              headers: ["Ödeme Tarihi", "Kategori", "Kişi / Kalem", "Plaka", "İşlem Türü", "Dönem", "Açıklama", "Tutar (₺)", "Ödeme Yöntemi"],
+              colWidths: [13, 18, 28, 12, 18, 14, 46, 14, 16],
+              numericCols: [7],
               rows: [
-                // Tüm hareketler tarih sırasıyla; kasadan düşmeyenler "AHY ödedi" işaretli
-                ...rows.slice().sort((a, b) => String(a.tarih || "").localeCompare(String(b.tarih || ""))).map(r => [
-                  r.tarih || "", (TIP[r.tip]?.ad) || r.tip || "Diğer", r.ad_soyad || "",
-                  r.aciklama || "", -Number(r.tutar || 0),
-                  r.kasadan_dus === false ? `${altMarkaKisa(marka)} ödedi` : "Kasadan düştü",
-                ]),
-                { cells: ["", "TOPLAM HARCAMA", "", "", -rows.reduce((sm, r) => sm + Number(r.tutar || 0), 0), ""], bold: true, merge: [1, 3] },
+                // Tüm hareketler tarih sırasıyla; araç kira/depozito satırlarında plaka + işlem türü + dönem ayrı sütunda
+                ...rows.slice().sort((a, b) => String(a.tarih || "").localeCompare(String(b.tarih || ""))).map(r => {
+                  const aracMi = r.tip === "ARAC_KIRA" || r.tip === "ARAC_DEPOZITO";
+                  return [
+                    r.tarih || "", (TIP[r.tip]?.ad) || r.tip || "Diğer", aracMi ? (r.plaka || "⚠ Plaka yok") : (r.ad_soyad || ""),
+                    aracMi ? (r.plaka || "") : "", aracMi ? (r.islem_ad || "") : "", aracMi ? (r.donem_ad || "") : (r.donem || ""),
+                    r.aciklama || "", -Number(r.tutar || 0),
+                    r.odeme_yontemi || (r.kasadan_dus === false ? `${altMarkaKisa(marka)} ödedi` : "Kasadan"),
+                  ];
+                }),
+                { cells: ["", "TOPLAM HARCAMA", "", "", "", "", "", -rows.reduce((sm, r) => sm + Number(r.tutar || 0), 0), ""], bold: true, merge: [1, 6] },
               ],
               extraSheets: [{
                 sheetName: "Kasa Girişleri",
@@ -2292,8 +2300,9 @@ function MarkaNakitPanel({ currentUser }) {
                 {gunListesi.map(g => {
                   const c = hucre[tip] && hucre[tip][g];
                   return (
-                    <td key={g} title={c ? c.items.map(i => `${i.ad_soyad}${i.aciklama ? " (" + i.aciklama + ")" : ""}: ₺${fk(i.tutar)}`).join("\n") : ""}
-                      style={{ textAlign: "center", padding: "8px 3px", background: c ? TIP[tip].bg : (haftaSonu(g) ? "#f8fafc" : "#fff"), color: TIP[tip].fg, fontWeight: 700, fontSize: "11.5px", cursor: c ? "help" : "default", borderLeft: "1px solid #f8fafc", whiteSpace: "nowrap" }}>
+                    <td key={g} title={c ? c.items.map(i => (i.tip === "ARAC_KIRA" || i.tip === "ARAC_DEPOZITO") ? i.aciklama : `${i.ad_soyad}${i.aciklama ? " (" + i.aciklama + ")" : ""}: ₺${fk(i.tutar)}`).join("\n") + "\n— detay için tıklayın" : ""}
+                      onClick={c ? () => setHucreDetay({ tip, gun: g, items: c.items }) : undefined}
+                      style={{ textAlign: "center", padding: "8px 3px", background: c ? TIP[tip].bg : (haftaSonu(g) ? "#f8fafc" : "#fff"), color: TIP[tip].fg, fontWeight: 700, fontSize: "11.5px", cursor: c ? "pointer" : "default", borderLeft: "1px solid #f8fafc", whiteSpace: "nowrap" }}>
                       {c ? `-${fk(c.t)}` : ""}
                     </td>
                   );
@@ -2329,8 +2338,48 @@ function MarkaNakitPanel({ currentUser }) {
         <div style={{ marginTop: "10px", fontSize: "12px", color: "#9ca3af" }}>Bu ay için henüz harcama kaydı yok.</div>
       )}
       <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
-        💡 Hücrelerin üzerine gelince kalem detayları görünür. Kasa bakiyesi = manuel nakit girişleri − tüm harcamalar; Temmuz maaşının 15 Temmuz sonrası kısmı Ağustos ortasındaki ödemeyle düşer.
+        💡 Hücreye tıklayınca kalem detayı (plaka, işlem türü, dönem, ödeme yöntemi) açılır. Kasa bakiyesi = manuel nakit girişleri − tüm harcamalar; Temmuz maaşının 15 Temmuz sonrası kısmı Ağustos ortasındaki ödemeyle düşer.
       </div>
+
+      {/* Hücre detayı (16.10.2026): plaka, işlem türü, dönem, ödeme tarihi, tutar, ödeme yöntemi */}
+      {hucreDetay && (() => {
+        const aracMi = hucreDetay.tip === "ARAC_KIRA" || hucreDetay.tip === "ARAC_DEPOZITO";
+        const top = hucreDetay.items.reduce((s, i) => s + Number(i.tutar || 0), 0);
+        const th = { padding: "8px 10px", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textAlign: "left", whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: "0.03em" };
+        const td = { padding: "8px 10px", fontSize: "13px", borderBottom: "1px solid #f1f5f9", verticalAlign: "top" };
+        return (
+          <div onClick={() => setHucreDetay(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(860px, 96vw)", maxHeight: "84vh", overflow: "auto", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "14px 18px", borderBottom: "1px solid #e5e7eb", background: TIP[hucreDetay.tip]?.bg || "#f8fafc" }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: "16px", color: TIP[hucreDetay.tip]?.fg || "#111827" }}>{TIP[hucreDetay.tip]?.ad || hucreDetay.tip} — {hucreDetay.gun} {ayBaslik}</div>
+                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>{hucreDetay.items.length} kalem · toplam <b>₺{fk(top)}</b></div>
+                </div>
+                <button onClick={() => setHucreDetay(null)} style={{ padding: "7px 13px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "9px", fontWeight: 700, cursor: "pointer" }}>Kapat</button>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "640px" }}>
+                  <thead><tr>{(aracMi ? ["Plaka", "İşlem Türü", "Kira Dönemi", "Ödeme Tarihi", "Tutar", "Ödeme Yöntemi", "Not"] : ["Kişi / Kalem", "İşlem Türü", "Dönem", "Ödeme Tarihi", "Tutar", "Ödeme Yöntemi", "Açıklama"]).map((h, i) => <th key={h} style={{ ...th, textAlign: i === 4 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {hucreDetay.items.map((i, k) => (
+                      <tr key={k} style={{ background: i.plaka_eksik ? "#fef2f2" : undefined }}>
+                        <td style={{ ...td, fontWeight: 700, fontFamily: aracMi ? "ui-monospace, Menlo, monospace" : undefined, color: i.plaka_eksik ? "#b91c1c" : "#0f172a" }}>{aracMi ? (i.plaka || "⚠ Plaka yok") : i.ad_soyad}</td>
+                        <td style={td}>{aracMi ? (i.islem_ad || "Kira") : (TIP[i.tip]?.ad || i.tip)}</td>
+                        <td style={td}>{aracMi ? (i.donem_ad || (i.islem_turu === "KIRA" ? "—" : "uygulanmaz")) : (i.donem || "")}</td>
+                        <td style={td}>{String(i.tarih || "").split("-").reverse().join(".")}</td>
+                        <td style={{ ...td, textAlign: "right", fontWeight: 800, color: Number(i.tutar) < 0 ? "#15803d" : "#b91c1c", whiteSpace: "nowrap" }}>{Number(i.tutar) < 0 ? "+" : "-"}₺{fk(Math.abs(i.tutar))}</td>
+                        <td style={td}>{i.odeme_yontemi || (i.kasadan_dus === false ? `${altMarkaKisa(marka)} ödedi` : "Kasadan")}</td>
+                        <td style={{ ...td, color: "#475569", fontSize: "12px" }}>{aracMi ? String(i.aciklama || "").split(" · ").slice(1).join(" · ") : (i.aciklama || "")}{i.kaynak === "manuel" ? <span style={{ color: "#94a3b8" }}> · manuel giriş</span> : ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {aracMi && hucreDetay.items.some(i => i.plaka_eksik) && <div style={{ padding: "10px 18px", fontSize: "12px", color: "#b91c1c" }}>⚠ Plakası olmayan eski manuel kayıt var — kontrol listesindedir, plaka uydurulmadı.</div>}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Kasa girişleri modalı — sıralı liste + dekont + Excel (17.08.2026) */}
       {kasaModal && (
@@ -28667,7 +28716,8 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [maasOdemeler,setMaasOdemeler]= useState([]); // İK maas_odeme (bu ay yapılan)
   const [isAvanslar,  setIsAvanslar]  = useState([]); // PD onaylı iş avansları (otomatik)
   const [showOdemeModal, setShowOdemeModal] = useState(false);
-  const [odemeForm,   setOdemeForm]   = useState({ kategori:"ARAC", tarih:"", tutar:"", donem:"", aciklama:"", marka:"ERC" });
+  const [odemeForm,   setOdemeForm]   = useState({ kategori:"ARAC", tarih:"", tutar:"", donem:"", aciklama:"", marka:"ERC", arac_id:"" });
+  const [tumAraclar,  setTumAraclar]  = useState([]); // 16.10.2026: manuel araç kira/depozito girişinde seçim (pasifler dahil)
   const [odemeSaving, setOdemeSaving] = useState(false);
   const [loading,     setLoading]     = useState(false);
 
@@ -28709,6 +28759,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       // Sadece Şimşek maaşlı personel (taşeron ISG kayıtları hariç — maaş/ticket hesabına girmez)
       setPersonelList(Array.isArray(perData) ? perData.filter(p => p.aktif && (p.firma_tipi || "simsek") === "simsek") : []);
       setAraclar(Array.isArray(aracData) ? aracData.filter(a => a.durum === "AKTİF") : []);
+      setTumAraclar(Array.isArray(aracData) ? aracData.slice().sort((x, y) => (x.durum === "AKTİF" ? 0 : 1) - (y.durum === "AKTİF" ? 0 : 1) || String(x.plaka).localeCompare(String(y.plaka))) : []);
       setOfisList(Array.isArray(ofisData?.rows) ? ofisData.rows : Array.isArray(ofisData) ? ofisData : []);
       setSarkanlar(Array.isArray(sarkanData) ? sarkanData : []);
       setPrevOzet(Array.isArray(prevOzetData) ? prevOzetData : []);
@@ -28789,6 +28840,7 @@ function CashFlowPanel({ currentUser, onBack }) {
   };
   const maasByDay = {}, maasTips = {};
   const aracByDay = {}, aracTips = {};
+  const depozitoByDay = {}, depozitoTips = {};
   const ticketByDay = {}, ticketTips = {};
   const digerByDay = {}, digerTips = {};
   const cekSenetByDay = {}, cekSenetTips = {};
@@ -28806,12 +28858,17 @@ function CashFlowPanel({ currentUser, onBack }) {
     else addTo(digerByDay, digerTips, d, t, `⏰ Geciken ${tip}`);
   });
   // Manuel ödemeler (araç/ticket/diğer): beklenen dönem → kendi satırı, eski dönem → Diğer
-  const KAT_LBL = { ARAC: "Araç kirası", TICKET: "Ticket/Yemek", DIGER: "Diğer" };
+  const KAT_LBL = { ARAC: "Araç kirası", ARAC_DEPOZITO: "Araç depozitosu", TICKET: "Ticket/Yemek", DIGER: "Diğer" };
   odemeler.forEach((o) => {
     const d = dayOf(o.tarih);
     const t = Number(o.tutar || 0);
     if (t <= 0) return;
-    const tip = `${o.aciklama || KAT_LBL[o.kategori] || o.kategori}${o.donem ? ` (${AY_KISA(o.donem)})` : ""}: ₺${t.toLocaleString("tr-TR")}`;
+    const aracMi = o.kategori === "ARAC" || o.kategori === "ARAC_DEPOZITO";
+    // 16.10.2026: araç satırları "PLAKA | Ekim 2026 Kirası | 54.000 TL" biçiminde (plaka yoksa uyarı)
+    const tip = aracMi
+      ? `${o.plaka || "⚠ PLAKA YOK"} | ${o.kategori === "ARAC_DEPOZITO" ? "Depozito" : (o.donem ? `${AY_KISA(o.donem)} Kirası` : "Kira")} | ${t.toLocaleString("tr-TR")} TL${o.aciklama ? ` · ${o.aciklama}` : ""}`
+      : `${o.aciklama || KAT_LBL[o.kategori] || o.kategori}${o.donem ? ` (${AY_KISA(o.donem)})` : ""}: ₺${t.toLocaleString("tr-TR")}`;
+    if (o.kategori === "ARAC_DEPOZITO") { addTo(depozitoByDay, depozitoTips, d, t, tip); return; }
     // Geciken = dönemi beklenen dönemden ESKİ olan; cari/gelecek dönem (yemek
     // kartı gibi ay içi giderler) kendi satırında kalır
     const eskiDonem = o.donem && o.donem < expDonem;
@@ -28836,6 +28893,7 @@ function CashFlowPanel({ currentUser, onBack }) {
     { key:"hw_pending",  label:"⏳ HW Tahsilat (Bekleyen)",    type:"income",  color:"#dcfce7", textColor:"#166534", byDay: hwPending,  note:"Vade bazlı projeksiyon (vade > bugün)" },
     { key:"maas",        label:`👥 ${prevAyAdi} Maaşları`,     type:"expense", color:"#fecaca", textColor:"#7f1d1d", byDay: maasByDay,   tips: maasTips,   note: "Ödendikçe görünür (İK → Öde)" },
     { key:"arac",        label:`🚗 ${prevAyAdi} Araç Kiraları`, type:"expense", color:"#fef3c7", textColor:"#92400e", byDay: aracByDay,   tips: aracTips,   note: "Ödendikçe görünür (+ Ödeme Ekle)" },
+    { key:"depozito",    label:"🔒 Araç Depozitoları",          type:"expense", color:"#fde68a", textColor:"#78350f", byDay: depozitoByDay, tips: depozitoTips, note: "Depozito ödemeleri (plaka zorunlu)" },
     { key:"ticket",      label:"🎫 Ticket'lar",                 type:"expense", color:"#f3e8ff", textColor:"#6b21a8", byDay: ticketByDay, tips: ticketTips, note: "Ödendikçe görünür (+ Ödeme Ekle)" },
     { key:"ofis",        label:`🏢 ${prevAyAdi} Depo & Ofis Kirası`, type:"expense", color:"#fff7ed", textColor:"#9a3412", byDay: totalOfis>0 ? {5: totalOfis} : {}, note: `${prevAyAdi} kirası · Ödeme: 5. gün` },
     { key:"taseron",     label:"🔧 Taşeron Ödemeleri",          type:"expense", color:"#fdf4ff", textColor:"#7e22ce", byDay: taseronByDay, isTaseron: true },
@@ -28996,7 +29054,7 @@ function CashFlowPanel({ currentUser, onBack }) {
           <select value={ay} onChange={e=>setAy(e.target.value)} style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", fontWeight:600, minWidth:"100px" }}>
             {AY_ADLARI.map((a,i)=><option key={i} value={String(i+1).padStart(2,"0")}>{a}</option>)}
           </select>
-          <button onClick={()=>{ setOdemeForm({ kategori:"ARAC", tarih:`${yil}-${ay}-${String(new Date().getDate()).padStart(2,"0")}`, tutar:"", donem:expDonem, aciklama:"" }); setShowOdemeModal(true); }}
+          <button onClick={()=>{ setOdemeForm({ kategori:"ARAC", tarih:`${yil}-${ay}-${String(new Date().getDate()).padStart(2,"0")}`, tutar:"", donem:expDonem, aciklama:"", marka:"ERC", arac_id:"" }); setShowOdemeModal(true); }}
             style={{ padding:"8px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>
             ＋ Ödeme Ekle
           </button>
@@ -29017,6 +29075,7 @@ function CashFlowPanel({ currentUser, onBack }) {
                   <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Kategori</label>
                   <select value={odemeForm.kategori} onChange={e=>setOdemeForm(f=>({...f, kategori:e.target.value}))} style={{ width:"100%", padding:"9px 10px", border:"1px solid #d1d5db", borderRadius:"8px", boxSizing:"border-box" }}>
                     <option value="ARAC">🚗 Araç Kirası</option>
+                    <option value="ARAC_DEPOZITO">🔒 Araç Depozitosu</option>
                     <option value="TICKET">🎫 Ticket / Yemek</option>
                     <option value="DIGER">📋 Diğer (yemek, konaklama vb.)</option>
                   </select>
@@ -29030,6 +29089,17 @@ function CashFlowPanel({ currentUser, onBack }) {
                   <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Şimşek girişlerini alt markalar göremez</div>
                 </div>
               </div>
+              {["ARAC","ARAC_DEPOZITO"].includes(odemeForm.kategori) && (
+                <div>
+                  <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Araç (plaka) *</label>
+                  <select value={odemeForm.arac_id||""} onChange={e=>{ const a = tumAraclar.find(x=>String(x.id)===e.target.value); setOdemeForm(f=>({...f, arac_id:e.target.value, tutar: f.tutar || (odemeForm.kategori==="ARAC" && a && Number(a.aylik_kira||0)>0 ? String(Math.round(Number(a.aylik_kira))) : f.tutar) })); }}
+                    style={{ width:"100%", padding:"9px 10px", border:`1px solid ${odemeForm.arac_id ? "#d1d5db" : "#f59e0b"}`, borderRadius:"8px", boxSizing:"border-box", background:"#fff" }}>
+                    <option value="">Araç seçin…</option>
+                    {tumAraclar.map(a => <option key={a.id} value={a.id}>{a.plaka} · {[a.marka, a.model].filter(Boolean).join(" ")}{a.surucu ? ` · ${a.surucu}` : ""}{a.durum !== "AKTİF" ? " (pasif)" : ""}{odemeForm.kategori==="ARAC" && Number(a.aylik_kira||0)>0 ? ` · ₺${Number(a.aylik_kira).toLocaleString("tr-TR")} KDV dahil` : ""}</option>)}
+                  </select>
+                  <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>Plaka nakit akışı detayına ve Excel'e otomatik yazılır. Kira tutarı aracın KDV dahil aylık bedeliyle gelir, gerçekte ödenen tutarı girin.</div>
+                </div>
+              )}
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
                 <div>
                   <label style={{ fontSize:"12px", fontWeight:600, color:"#6b7280", display:"block", marginBottom:"4px" }}>Ödeme Tarihi</label>
@@ -29057,10 +29127,17 @@ function CashFlowPanel({ currentUser, onBack }) {
                 <button onClick={()=>setShowOdemeModal(false)} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"8px", cursor:"pointer", fontWeight:600 }}>İptal</button>
                 <button disabled={odemeSaving} onClick={async()=>{
                   if(!odemeForm.tarih || !odemeForm.tutar){ alert("Tarih ve tutar zorunlu"); return; }
+                  if(["ARAC","ARAC_DEPOZITO"].includes(odemeForm.kategori) && !odemeForm.arac_id){ alert("Araç kirası / depozito için araç (plaka) seçin"); return; }
                   try {
                     setOdemeSaving(true);
-                    const r = await fetch(`${API_BASE}/finance/cashflow-odeme`, { method:"POST", headers:{...headers,"Content-Type":"application/json"}, body: JSON.stringify(odemeForm) });
-                    const d = await r.json();
+                    let r = await fetch(`${API_BASE}/finance/cashflow-odeme`, { method:"POST", headers:{...headers,"Content-Type":"application/json"}, body: JSON.stringify(odemeForm) });
+                    let d = await r.json();
+                    // Aynı araç + dönem "Kira Öde" ile zaten kayıtlıysa iki kez sayılmasın — kullanıcı onaylarsa (farklı ödeme) kaydedilir
+                    if (r.status === 409 && d.cakisma) {
+                      if (!window.confirm(`${d.error}\n\nBu FARKLI bir ödeme mi? (Tamam = yine de kaydet)`)) return;
+                      r = await fetch(`${API_BASE}/finance/cashflow-odeme`, { method:"POST", headers:{...headers,"Content-Type":"application/json"}, body: JSON.stringify({ ...odemeForm, zorla:true }) });
+                      d = await r.json();
+                    }
                     if(!d.ok) throw new Error(d.error||"Kaydedilemedi");
                     setShowOdemeModal(false);
                     await loadData();
@@ -29085,7 +29162,8 @@ function CashFlowPanel({ currentUser, onBack }) {
                     {odemeler.map((o) => (
                       <div key={o.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"8px", padding:"7px 10px", fontSize:"12px" }}>
                         <span style={{ flex:1, minWidth:0 }}>
-                          <b>{({ARAC:"🚗 Araç",TICKET:"🎫 Ticket/Yemek",DIGER:"📋 Diğer"})[o.kategori] || o.kategori}</b>
+                          <b>{({ARAC:"🚗 Araç",ARAC_DEPOZITO:"🔒 Depozito",TICKET:"🎫 Ticket/Yemek",DIGER:"📋 Diğer"})[o.kategori] || o.kategori}</b>
+                          {(o.kategori === "ARAC" || o.kategori === "ARAC_DEPOZITO") && <b style={{ fontFamily:"ui-monospace, Menlo, monospace", color: o.plaka ? "#0f172a" : "#b91c1c" }}> · {o.plaka || "⚠ plaka yok"}</b>}
                           {" · "}{o.tarih ? new Date(o.tarih).toLocaleDateString("tr-TR") : "-"}
                           {o.donem ? ` · ${o.donem}` : ""}
                           {o.aciklama ? <span style={{ color:"#64748b" }}> · {o.aciklama}</span> : ""}
@@ -29285,7 +29363,7 @@ function CashFlowPanel({ currentUser, onBack }) {
                     const cellBg = val!==0
                       ? (kat.overdue ? "#fecaca" : kat.color)
                       : (kat.overdue ? "#fff5f5" : (isWeekend(d)?"#f8f9fe":"transparent"));
-                    const isManualKat = ["arac","ticket","diger"].includes(kat.key);
+                    const isManualKat = ["arac","depozito","ticket","diger"].includes(kat.key);
                     const hasManualThisDay = isManualKat && odemeler.some(o => dayOf(o.tarih) === d);
                     return (
                       <td key={d}
@@ -29367,7 +29445,7 @@ function CashFlowPanel({ currentUser, onBack }) {
       {manualDelModal && (() => {
         // CEKSENET otomatik kayıttır — buradan silinmez (Çek & Senet panelinden Geri Al)
         const gunOdemeler = odemeler.filter(o => dayOf(o.tarih) === manualDelModal.gun && o.kategori !== "CEKSENET");
-        const KAT_LBL = { ARAC:"🚗 Araç kirası", TICKET:"🎫 Ticket/Yemek", DIGER:"📋 Diğer" };
+        const KAT_LBL = { ARAC:"🚗 Araç kirası", ARAC_DEPOZITO:"🔒 Araç depozitosu", TICKET:"🎫 Ticket/Yemek", DIGER:"📋 Diğer" };
         return (
           <div onClick={() => setManualDelModal(null)} style={{ position:"fixed", inset:0, zIndex:12500, background:"rgba(0,0,0,0.4)", display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
             <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", padding:"20px 22px", width:"100%", maxWidth:"520px", boxShadow:"0 20px 60px rgba(0,0,0,0.25)" }}>
@@ -29386,6 +29464,7 @@ function CashFlowPanel({ currentUser, onBack }) {
                     <div key={o.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"9px 12px", fontSize:"13px" }}>
                       <span style={{ flex:1, minWidth:0 }}>
                         <b>{KAT_LBL[o.kategori] || o.kategori}</b>
+                        {(o.kategori === "ARAC" || o.kategori === "ARAC_DEPOZITO") && <b style={{ fontFamily:"ui-monospace, Menlo, monospace", color: o.plaka ? "#0f172a" : "#b91c1c" }}> · {o.plaka || "⚠ plaka yok"}</b>}
                         {o.donem ? ` · ${o.donem}` : ""}
                         {o.aciklama ? <span style={{ color:"#64748b" }}> · {o.aciklama}</span> : ""}
                       </span>
@@ -38192,7 +38271,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                     onChange={e=>setForm(f=>{ const h = Number(f.kira_kdv_haric || 0), o = Number(e.target.value || 0); return { ...f, kira_kdv_orani: e.target.value, aylik_kira: h > 0 ? String(Math.round(h * (1 + o / 100))) : f.aylik_kira }; })} style={aInpSt} />
                 </div>
                 <div>
-                  <label style={lblSt}>Aylık Kira — KDV DAHİL (₺)</label>
+                  <label style={lblSt}>Aylık Kira (KDV Dahil) (₺)</label>
                   <input type="number" value={form.aylik_kira||""} onChange={e=>setForm(f=>({...f,aylik_kira:e.target.value}))} style={{ ...aInpSt, fontWeight:700 }} />
                   <div style={{ fontSize:"11px", color:"#6b7a90", marginTop:"3px" }}>Listede ve borç hesabında bu tutar kullanılır. KDV hariç bedel girilirse otomatik hesaplanır.</div>
                 </div>
