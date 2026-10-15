@@ -36880,6 +36880,380 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     </div>
   );
 }
+/* ─── ARAÇ: Teslim & Fotoğraflar · Lastikler (15.10.2026, Orhan) ─────────────────────────
+   Modül düzeyinde bileşenler (render içinde tanımlanan bileşen her state değişiminde
+   remount olur — React tuzağı). Panelin sekmeli düzenleme penceresinden kullanılır. */
+const ARAC_FOTO_KAT = [["ON","Ön"],["ARKA","Arka"],["SAG","Sağ"],["SOL","Sol"],["IC_KABIN","İç kabin"],["KM_GOSTERGE","Kilometre göstergesi"],["LASTIKLER","Lastikler"],["HASAR_DIGER","Mevcut hasar / diğer"]];
+const ARAC_FOTO_KAT_AD = Object.fromEntries(ARAC_FOTO_KAT);
+const ARAC_TESLIM_TUR = { BASLANGIC:"Başlangıç", DEVIR:"Devir", IADE:"İade" };
+const ARAC_LASTIK_TUR = { YAZLIK:"Yazlık", KISLIK:"Kışlık", DORT_MEVSIM:"Dört mevsim" };
+const ARAC_LASTIK_DURUM = { ARAC_UZERINDE:"Araç üzerinde", DEPODA:"Depoda", DEGISIM_GEREKLI:"Değişim gerekli", KULLANIM_DISI:"Kullanım dışı" };
+const ARAC_MULKIYET = { KIRALIK:"Kiralık Araç", SIRKET:"Şirket Aracı" };
+const aracSirketMi = (a) => String(a?.mulkiyet_turu || "KIRALIK").toUpperCase() === "SIRKET";
+const aracHdr = () => ({ Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("finance_token") || ""}` });
+const aracFT = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "";
+const aracZaman = (z) => z ? `${aracFT(z)} ${String(z).slice(11, 16)}` : "";
+const aracInp = { width:"100%", padding:"8px 11px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"13.5px", boxSizing:"border-box", background:"#fff" };
+const aracLbl = { display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" };
+const aracBtn = { display:"inline-flex", alignItems:"center", gap:"6px", borderRadius:"9px", padding:"8px 13px", fontWeight:700, fontSize:"12.5px", border:"1px solid transparent", cursor:"pointer", whiteSpace:"nowrap" };
+const aracBtnAna = { ...aracBtn, background:"#1e3a5f", color:"#fff" };
+const aracBtnIkincil = { ...aracBtn, background:"#f3f5f8", color:"#0f1c2e", border:"1px solid #cfd7e2" };
+const aracBtnSil = { ...aracBtn, background:"#fee2e2", color:"#b91c1c", padding:"6px 10px" };
+const aracKart = { background:"#fff", border:"1px solid #e3e8ef", borderRadius:"12px", padding:"12px 14px" };
+const aracPill = (bg, c) => ({ display:"inline-flex", alignItems:"center", borderRadius:"999px", padding:"3px 9px", fontSize:"11.5px", fontWeight:700, background:bg, color:c, whiteSpace:"nowrap" });
+const aracPdfMi = (f) => /\.pdf(\?|$)/i.test(String(f?.url || f?.dosya_adi || ""));
+
+/* Satır detayındaki kompakt lastik özeti */
+function AracLastikOzet({ lastikler }) {
+  const liste = Array.isArray(lastikler) ? lastikler : [];
+  if (!liste.length) return <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Lastik bilgisi girilmedi</div>;
+  const takili = liste.filter(l => l.durum === "ARAC_UZERINDE");
+  const digerleri = liste.filter(l => l.durum !== "ARAC_UZERINDE");
+  const ad = (l) => [l.marka, l.model].filter(Boolean).join(" ") + (l.ebat ? ` / ${l.ebat}` : "");
+  return (
+    <div style={{ fontSize:"12.5px", lineHeight:1.7 }}>
+      {takili.length > 1 && <div style={{ color:"#b45309", fontWeight:700 }}>⚠ {takili.length} takım "araç üzerinde" görünüyor, kontrol edin</div>}
+      {takili.length === 0 && <div style={{ color:"#6b7a90" }}>Takılı takım işaretlenmedi</div>}
+      {takili.map(l => <div key={l.id}><b>Takılı:</b> {ARAC_LASTIK_TUR[l.tur] || l.tur} • {ad(l) || "—"}</div>)}
+      {digerleri.map(l => <div key={l.id} style={{ color:"#3c4a5d" }}>{ARAC_LASTIK_TUR[l.tur] || l.tur} takım: {ARAC_LASTIK_DURUM[l.durum] || l.durum}{l.depolama_yeri ? ` • ${l.depolama_yeri}` : ""}{ad(l) ? ` • ${ad(l)}` : ""}</div>)}
+    </div>
+  );
+}
+
+/* Fotoğraf büyütme */
+function AracFotoBuyut({ foto, onClose }) {
+  if (!foto) return null;
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(5,10,20,.85)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px", cursor:"zoom-out" }}>
+      <div onClick={e => e.stopPropagation()} style={{ maxWidth:"min(1100px, 96vw)", maxHeight:"94vh", display:"flex", flexDirection:"column", gap:"8px", cursor:"default" }}>
+        {aracPdfMi(foto)
+          ? <iframe title={foto.dosya_adi} src={foto.url} style={{ width:"min(900px, 92vw)", height:"80vh", border:"none", background:"#fff", borderRadius:"10px" }} />
+          : <img src={foto.url} alt={foto.dosya_adi} style={{ maxWidth:"100%", maxHeight:"82vh", objectFit:"contain", borderRadius:"10px", background:"#000" }} />}
+        <div style={{ color:"#fff", fontSize:"13px", display:"flex", justifyContent:"space-between", gap:"12px", flexWrap:"wrap" }}>
+          <span><b>{ARAC_FOTO_KAT_AD[foto.kategori] || foto.kategori || "Fotoğraf"}</b>{foto.aciklama ? ` · ${foto.aciklama}` : ""}</span>
+          <span style={{ opacity:.8 }}>{foto.yukleyen ? `${foto.yukleyen} · ` : ""}yükleme {aracZaman(foto.yukleme)} · <a href={foto.url} target="_blank" rel="noreferrer" style={{ color:"#93c5fd" }}>indir ↗</a> · <span onClick={onClose} style={{ cursor:"pointer" }}>kapat ✕</span></span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── TESLİM VE FOTOĞRAFLAR ── */
+function AracTeslimSekmesi({ arac, canEdit, canDelete, projeler }) {
+  const bos = { tur:"BASLANGIC", proje:"", tarih:"", km:"", teslim_eden:"", teslim_alan: arac?.surucu || "", aciklama:"" };
+  const [liste, setListe] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [form, setForm] = useState(bos);
+  const [formAcik, setFormAcik] = useState(false);
+  const [duzenleId, setDuzenleId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [fotoKat, setFotoKat] = useState({});          // teslimId → seçili kategori
+  const [yukleme, setYukleme] = useState({});          // teslimId → { busy, mesaj, hatalar }
+  const [fotoEdit, setFotoEdit] = useState(null);      // { id, kategori, aciklama }
+  const [buyut, setBuyut] = useState(null);
+
+  const load = async () => {
+    setYukleniyor(true);
+    try { const r = await fetch(`${API_BASE}/hr/araclar/${arac.id}/teslim`, { headers: aracHdr() }); const d = await r.json(); setListe(Array.isArray(d) ? d : []); if (!r.ok) alert(d.error || "Teslim kayıtları alınamadı"); }
+    catch (e) { setListe([]); }
+    setYukleniyor(false);
+  };
+  useEffect(() => { if (arac?.id) load(); }, [arac?.id]);
+
+  const kaydet = async () => {
+    if (!form.tarih && !window.confirm("Teslim tarihi girilmedi. Tarihsiz kaydedilsin mi?")) return;
+    setBusy(true);
+    try {
+      const url = duzenleId ? `${API_BASE}/hr/arac-teslim/${duzenleId}` : `${API_BASE}/hr/araclar/${arac.id}/teslim`;
+      const r = await fetch(url, { method: duzenleId ? "PUT" : "POST", headers: { "Content-Type":"application/json", ...aracHdr() }, body: JSON.stringify(form) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Kaydedilemedi");
+      setForm(bos); setFormAcik(false); setDuzenleId(null);
+      await load();
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+  const duzenle = (t) => { setForm({ tur: t.tur || "BASLANGIC", proje: t.proje || "", tarih: t.tarih || "", km: t.km ?? "", teslim_eden: t.teslim_eden || "", teslim_alan: t.teslim_alan || "", aciklama: t.aciklama || "" }); setDuzenleId(t.id); setFormAcik(true); };
+  const sil = async (t) => {
+    if (!window.confirm(`${ARAC_TESLIM_TUR[t.tur] || t.tur} kaydı (${aracFT(t.tarih) || "tarihsiz"}) ve ${(t.fotolar || []).length} fotoğrafı silinsin mi? Bu işlem geri alınamaz, günlüğe yazılır.`)) return;
+    try { const r = await fetch(`${API_BASE}/hr/arac-teslim/${t.id}`, { method:"DELETE", headers: aracHdr() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || "Silinemedi"); load(); }
+    catch (e) { alert(e.message); }
+  };
+  const fotoYukle = async (teslimId, files) => {
+    if (!files?.length) return;
+    const kat = fotoKat[teslimId] || "HASAR_DIGER";
+    setYukleme(y => ({ ...y, [teslimId]: { busy: true, mesaj: `${files.length} dosya yükleniyor…`, hatalar: [] } }));
+    const fd = new FormData();
+    [...files].forEach(f => fd.append("foto", f));
+    fd.append("kategori", kat);
+    try {
+      const r = await fetch(`${API_BASE}/hr/arac-teslim/${teslimId}/foto`, { method:"POST", headers: aracHdr(), body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok && !d.eklenen) throw new Error(d.error || "Yüklenemedi");
+      const ek = (d.eklenen || []).length, hata = d.hatalar || [];
+      setYukleme(y => ({ ...y, [teslimId]: { busy:false, mesaj: ek ? `${ek} fotoğraf yüklendi (${ARAC_FOTO_KAT_AD[kat]})` : "Hiçbir dosya yüklenemedi", hatalar: hata } }));
+      await load();
+    } catch (e) { setYukleme(y => ({ ...y, [teslimId]: { busy:false, mesaj:"", hatalar:[{ dosya_adi:"", hata: e.message }] } })); }
+  };
+  const fotoKaydet = async () => {
+    if (!fotoEdit) return;
+    try { const r = await fetch(`${API_BASE}/hr/arac-teslim-foto/${fotoEdit.id}`, { method:"PUT", headers:{ "Content-Type":"application/json", ...aracHdr() }, body: JSON.stringify({ kategori: fotoEdit.kategori, aciklama: fotoEdit.aciklama }) }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || "Kaydedilemedi"); setFotoEdit(null); load(); }
+    catch (e) { alert(e.message); }
+  };
+  const fotoSil = async (f) => {
+    if (!window.confirm(`${ARAC_FOTO_KAT_AD[f.kategori] || "Fotoğraf"} · ${f.dosya_adi} silinsin mi?`)) return;
+    try { const r = await fetch(`${API_BASE}/hr/arac-teslim-foto/${f.id}`, { method:"DELETE", headers: aracHdr() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || "Silinemedi"); load(); }
+    catch (e) { alert(e.message); }
+  };
+
+  const formAlan = (
+    <div style={{ ...aracKart, background:"#f8fafc", marginBottom:"12px" }}>
+      <div style={{ fontWeight:800, fontSize:"13px", color:"#1e3a5f", marginBottom:"10px" }}>{duzenleId ? "✏️ Teslim kaydını düzenle" : "＋ Yeni teslim kaydı"}</div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(170px, 1fr))", gap:"10px" }}>
+        <div><label style={aracLbl}>Kayıt türü</label><select value={form.tur} onChange={e => setForm(f => ({ ...f, tur: e.target.value }))} style={aracInp}>{Object.entries(ARAC_TESLIM_TUR).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+        <div><label style={aracLbl}>Proje / görev</label><input list="arac-teslim-projeler" value={form.proje} onChange={e => setForm(f => ({ ...f, proje: e.target.value }))} placeholder="Proje kodu" style={aracInp} />
+          <datalist id="arac-teslim-projeler">{(projeler || []).map(p => <option key={p} value={p} />)}</datalist></div>
+        <div><label style={aracLbl}>Teslim / başlangıç tarihi</label><input type="date" value={form.tarih} onChange={e => setForm(f => ({ ...f, tarih: e.target.value }))} style={aracInp} /></div>
+        <div><label style={aracLbl}>Teslim kilometresi</label><input type="number" value={form.km} onChange={e => setForm(f => ({ ...f, km: e.target.value }))} placeholder="km" style={aracInp} /></div>
+        <div><label style={aracLbl}>Teslim eden</label><input value={form.teslim_eden} onChange={e => setForm(f => ({ ...f, teslim_eden: e.target.value }))} style={aracInp} /></div>
+        <div><label style={aracLbl}>Teslim alan</label><input value={form.teslim_alan} onChange={e => setForm(f => ({ ...f, teslim_alan: e.target.value }))} style={aracInp} /></div>
+        <div style={{ gridColumn:"1/-1" }}><label style={aracLbl}>Mevcut hasar ve genel durum</label><textarea rows={2} value={form.aciklama} onChange={e => setForm(f => ({ ...f, aciklama: e.target.value }))} style={{ ...aracInp, resize:"vertical" }} placeholder="Çizik, göçük, eksik parça, genel temizlik…" /></div>
+      </div>
+      <div style={{ display:"flex", gap:"8px", marginTop:"10px", justifyContent:"flex-end" }}>
+        <button onClick={() => { setFormAcik(false); setDuzenleId(null); setForm(bos); }} style={aracBtnIkincil}>Vazgeç</button>
+        <button onClick={kaydet} disabled={busy} style={aracBtnAna}>{busy ? "Kaydediliyor…" : "💾 Kaydet"}</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", flexWrap:"wrap", marginBottom:"10px" }}>
+        <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Her proje başlangıcı, devir ve iade ayrı kayıttır; eski fotoğraflar üzerine yazılmaz. Teslim tarihi ile yükleme zamanı ayrı tutulur.</div>
+        {canEdit && !formAcik && <button onClick={() => { setForm(bos); setDuzenleId(null); setFormAcik(true); }} style={aracBtnAna}>＋ Teslim kaydı</button>}
+      </div>
+      {formAcik && formAlan}
+      {yukleniyor && <div style={{ color:"#6b7a90", fontSize:"13px", padding:"10px 0" }}>Yükleniyor…</div>}
+      {!yukleniyor && liste.length === 0 && <div style={{ ...aracKart, textAlign:"center", color:"#9ca3af", fontSize:"13px" }}>Henüz teslim kaydı yok</div>}
+      {liste.map(t => {
+        const y = yukleme[t.id] || {};
+        const turRenk = t.tur === "IADE" ? ["#fee2e2", "#b91c1c"] : t.tur === "DEVIR" ? ["#fef3c7", "#b45309"] : ["#dcfce7", "#15803d"];
+        return (
+          <div key={t.id} style={{ ...aracKart, marginBottom:"12px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px", flexWrap:"wrap" }}>
+              <div>
+                <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+                  <span style={aracPill(turRenk[0], turRenk[1])}>{ARAC_TESLIM_TUR[t.tur] || t.tur}</span>
+                  <b style={{ fontSize:"14px", color:"#0f1c2e" }}>{t.proje || "Proje belirtilmedi"}</b>
+                  <span style={{ fontSize:"13px", color:"#3c4a5d" }}>{t.tarih ? aracFT(t.tarih) : "tarih girilmedi"}{t.km != null && t.km !== "" ? ` · ${Number(t.km).toLocaleString("tr-TR")} km` : ""}</span>
+                </div>
+                <div style={{ fontSize:"12.5px", color:"#3c4a5d", marginTop:"3px" }}>{t.teslim_eden || "—"} → {t.teslim_alan || "—"}{t.aciklama ? ` · ${t.aciklama}` : ""}</div>
+                <div style={{ fontSize:"11.5px", color:"#9ca3af", marginTop:"2px" }}>Kaydeden {t.olusturan || "—"} · {aracZaman(t.olusturma)}{t.guncelleme ? ` · güncelleme ${t.guncelleyen || ""} ${aracZaman(t.guncelleme)}` : ""}</div>
+              </div>
+              {canEdit && (
+                <div style={{ display:"flex", gap:"6px" }}>
+                  <button onClick={() => duzenle(t)} style={aracBtnIkincil}>✏️ Düzenle</button>
+                  {canDelete && <button onClick={() => sil(t)} style={aracBtnSil}>🗑 Sil</button>}
+                </div>
+              )}
+            </div>
+            {/* Fotoğraflar */}
+            <div style={{ display:"flex", flexWrap:"wrap", gap:"8px", marginTop:"10px" }}>
+              {(t.fotolar || []).map(f => (
+                <div key={f.id} style={{ width:"118px", border:"1px solid #e3e8ef", borderRadius:"10px", overflow:"hidden", background:"#f8fafc" }}>
+                  <div onClick={() => setBuyut(f)} title="Büyüt" style={{ width:"100%", height:"88px", cursor:"zoom-in", background:"#e5e7eb", display:"grid", placeItems:"center" }}>
+                    {aracPdfMi(f) ? <span style={{ fontSize:"30px" }}>📄</span> : <img src={f.url} alt={f.dosya_adi} loading="lazy" style={{ width:"100%", height:"100%", objectFit:"cover" }} />}
+                  </div>
+                  <div style={{ padding:"5px 6px" }}>
+                    <div style={{ fontSize:"11px", fontWeight:700, color:"#1e3a5f" }}>{ARAC_FOTO_KAT_AD[f.kategori] || f.kategori}</div>
+                    {f.aciklama && <div style={{ fontSize:"10.5px", color:"#3c4a5d", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={f.aciklama}>{f.aciklama}</div>}
+                    <div style={{ fontSize:"10px", color:"#9ca3af" }}>{aracFT(f.yukleme)}</div>
+                    {canEdit && (
+                      <div style={{ display:"flex", gap:"4px", marginTop:"3px" }}>
+                        <button onClick={() => setFotoEdit({ id: f.id, kategori: f.kategori || "HASAR_DIGER", aciklama: f.aciklama || "" })} title="Açıklama / kategori" style={{ ...aracBtnIkincil, padding:"2px 6px", fontSize:"11px" }}>✎</button>
+                        {canDelete && <button onClick={() => fotoSil(f)} title="Sil" style={{ ...aracBtnSil, padding:"2px 6px", fontSize:"11px" }}>🗑</button>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {!(t.fotolar || []).length && <div style={{ fontSize:"12px", color:"#9ca3af" }}>Fotoğraf yok</div>}
+            </div>
+            {fotoEdit && (t.fotolar || []).some(f => f.id === fotoEdit.id) && (
+              <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap", marginTop:"8px", padding:"8px", background:"#f8fafc", borderRadius:"8px" }}>
+                <select value={fotoEdit.kategori} onChange={e => setFotoEdit(x => ({ ...x, kategori: e.target.value }))} style={{ ...aracInp, width:"auto" }}>{ARAC_FOTO_KAT.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+                <input value={fotoEdit.aciklama} onChange={e => setFotoEdit(x => ({ ...x, aciklama: e.target.value }))} placeholder="Fotoğraf açıklaması" style={{ ...aracInp, flex:1, minWidth:"180px" }} />
+                <button onClick={fotoKaydet} style={aracBtnAna}>Kaydet</button>
+                <button onClick={() => setFotoEdit(null)} style={aracBtnIkincil}>Vazgeç</button>
+              </div>
+            )}
+            {canEdit && (
+              <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap", marginTop:"10px" }}>
+                <select value={fotoKat[t.id] || "HASAR_DIGER"} onChange={e => setFotoKat(k => ({ ...k, [t.id]: e.target.value }))} style={{ ...aracInp, width:"auto" }}>{ARAC_FOTO_KAT.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+                <label style={{ ...aracBtnIkincil, cursor: y.busy ? "wait" : "pointer" }}>📁 Dosya seç (çoklu)
+                  <input type="file" multiple accept="image/*,application/pdf" disabled={!!y.busy} style={{ display:"none" }} onChange={e => { fotoYukle(t.id, e.target.files); e.target.value = ""; }} /></label>
+                <label style={{ ...aracBtnIkincil, cursor: y.busy ? "wait" : "pointer" }}>📷 Fotoğraf çek
+                  <input type="file" accept="image/*" capture="environment" disabled={!!y.busy} style={{ display:"none" }} onChange={e => { fotoYukle(t.id, e.target.files); e.target.value = ""; }} /></label>
+                <span style={{ fontSize:"11.5px", color:"#6b7a90" }}>Görsel / PDF · en çok 15 MB · seçilen kategori hepsine uygulanır, sonra ✎ ile değiştirilebilir</span>
+              </div>
+            )}
+            {(y.mesaj || (y.hatalar || []).length > 0) && (
+              <div style={{ marginTop:"6px", fontSize:"12px" }}>
+                {y.mesaj && <div style={{ color: y.busy ? "#6b7a90" : "#15803d", fontWeight:600 }}>{y.mesaj}</div>}
+                {(y.hatalar || []).map((h, i) => <div key={i} style={{ color:"#b91c1c" }}>✕ {h.dosya_adi ? `${h.dosya_adi}: ` : ""}{h.hata}</div>)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <AracFotoBuyut foto={buyut} onClose={() => setBuyut(null)} />
+    </div>
+  );
+}
+
+/* ── LASTİK BİLGİLERİ ── */
+function AracLastikSekmesi({ arac, canEdit, canDelete }) {
+  const bos = { tur:"YAZLIK", marka:"", model:"", ebat:"", adet:"4", dot:"", satin_alma_tarihi:"", durum:"DEPODA", takilma_tarihi:"", takilma_km:"", sokulme_tarihi:"", sokulme_km:"", depolama_yeri:"", teslim_kisi:"", notlar:"" };
+  const [liste, setListe] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [form, setForm] = useState(bos);
+  const [formAcik, setFormAcik] = useState(false);
+  const [duzenleId, setDuzenleId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [gecmisAcik, setGecmisAcik] = useState({});
+  const [buyut, setBuyut] = useState(null);
+
+  const load = async () => {
+    setYukleniyor(true);
+    try { const r = await fetch(`${API_BASE}/hr/araclar/${arac.id}/lastik`, { headers: aracHdr() }); const d = await r.json(); setListe(Array.isArray(d) ? d : []); if (!r.ok) alert(d.error || "Lastik kayıtları alınamadı"); }
+    catch { setListe([]); }
+    setYukleniyor(false);
+  };
+  useEffect(() => { if (arac?.id) load(); }, [arac?.id]);
+
+  const kaydet = async () => {
+    if (form.durum === "ARAC_UZERINDE" && !form.takilma_tarihi && !window.confirm("Takılma tarihi girilmedi. Yine de 'araç üzerinde' olarak kaydedilsin mi?")) return;
+    setBusy(true);
+    try {
+      const url = duzenleId ? `${API_BASE}/hr/arac-lastik/${duzenleId}` : `${API_BASE}/hr/araclar/${arac.id}/lastik`;
+      const r = await fetch(url, { method: duzenleId ? "PUT" : "POST", headers:{ "Content-Type":"application/json", ...aracHdr() }, body: JSON.stringify(form) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Kaydedilemedi");
+      setForm(bos); setFormAcik(false); setDuzenleId(null);
+      await load();
+    } catch (e) { alert(e.message); }
+    setBusy(false);
+  };
+  const duzenle = (l) => { setForm({ tur: l.tur || "YAZLIK", marka: l.marka || "", model: l.model || "", ebat: l.ebat || "", adet: l.adet ?? "", dot: l.dot || "", satin_alma_tarihi: l.satin_alma_tarihi || "", durum: l.durum || "DEPODA", takilma_tarihi: l.takilma_tarihi || "", takilma_km: l.takilma_km ?? "", sokulme_tarihi: l.sokulme_tarihi || "", sokulme_km: l.sokulme_km ?? "", depolama_yeri: l.depolama_yeri || "", teslim_kisi: l.teslim_kisi || "", notlar: l.notlar || "" }); setDuzenleId(l.id); setFormAcik(true); };
+  const sil = async (l) => {
+    if (!window.confirm(`${ARAC_LASTIK_TUR[l.tur] || l.tur} takım (${l.ebat || "ebat yok"}) silinsin mi? Takma/sökme geçmişi günlükte kalır.`)) return;
+    try { const r = await fetch(`${API_BASE}/hr/arac-lastik/${l.id}`, { method:"DELETE", headers: aracHdr() }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || "Silinemedi"); load(); }
+    catch (e) { alert(e.message); }
+  };
+  const dosyaYukle = async (l, tip, file) => {
+    if (!file) return;
+    const fd = new FormData(); fd.append("dosya", file); fd.append("tip", tip);
+    try { const r = await fetch(`${API_BASE}/hr/arac-lastik/${l.id}/dosya`, { method:"POST", headers: aracHdr(), body: fd }); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || "Yüklenemedi"); load(); }
+    catch (e) { alert(e.message); }
+  };
+
+  const takili = liste.filter(l => l.durum === "ARAC_UZERINDE");
+  const celiskili = liste.filter(l => l.durum === "ARAC_UZERINDE" && l.sokulme_tarihi && (!l.takilma_tarihi || l.sokulme_tarihi > l.takilma_tarihi));
+  const durumRenk = (d) => d === "ARAC_UZERINDE" ? ["#dcfce7", "#15803d"] : d === "DEGISIM_GEREKLI" ? ["#fee2e2", "#b91c1c"] : d === "KULLANIM_DISI" ? ["#f3f5f8", "#6b7a90"] : ["#dbeafe", "#1d4ed8"];
+  const turRenk = (t) => t === "KISLIK" ? ["#e0f2fe", "#075985"] : t === "DORT_MEVSIM" ? ["#ede9fe", "#5b21b6"] : ["#fef3c7", "#92400e"];
+  const OLAY = { EKLENDI:"Kayıt açıldı", TAKILDI:"Takıldı", SOKULDU:"Söküldü", GUNCELLENDI:"Güncellendi" };
+
+  const formAlan = (
+    <div style={{ ...aracKart, background:"#f8fafc", marginBottom:"12px" }}>
+      <div style={{ fontWeight:800, fontSize:"13px", color:"#1e3a5f", marginBottom:"10px" }}>{duzenleId ? "✏️ Lastik takımını düzenle" : "＋ Yeni lastik takımı"}</div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))", gap:"10px" }}>
+        <div><label style={aracLbl}>Lastik türü</label><select value={form.tur} onChange={e => setForm(f => ({ ...f, tur: e.target.value }))} style={aracInp}>{Object.entries(ARAC_LASTIK_TUR).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+        <div><label style={aracLbl}>Durum</label><select value={form.durum} onChange={e => setForm(f => ({ ...f, durum: e.target.value }))} style={aracInp}>{Object.entries(ARAC_LASTIK_DURUM).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+        <div><label style={aracLbl}>Marka</label><input value={form.marka} onChange={e => setForm(f => ({ ...f, marka: e.target.value }))} style={aracInp} placeholder="Michelin, Lassa…" /></div>
+        <div><label style={aracLbl}>Model</label><input value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))} style={aracInp} /></div>
+        <div><label style={aracLbl}>Ebat</label><input value={form.ebat} onChange={e => setForm(f => ({ ...f, ebat: e.target.value }))} style={aracInp} placeholder="205/55 R16" /></div>
+        <div><label style={aracLbl}>Adet</label><input type="number" min="1" value={form.adet} onChange={e => setForm(f => ({ ...f, adet: e.target.value }))} style={aracInp} /></div>
+        <div style={{ gridColumn:"span 2" }}><label style={aracLbl}>DOT / üretim hafta-yıl</label><input value={form.dot} onChange={e => setForm(f => ({ ...f, dot: e.target.value }))} style={aracInp} placeholder="2324 · farklıysa: 2324, 2324, 1823, 1823" /></div>
+        <div><label style={aracLbl}>Satın alma tarihi (isteğe bağlı)</label><input type="date" value={form.satin_alma_tarihi} onChange={e => setForm(f => ({ ...f, satin_alma_tarihi: e.target.value }))} style={aracInp} /></div>
+        <div><label style={aracLbl}>Takılma tarihi</label><input type="date" value={form.takilma_tarihi} onChange={e => setForm(f => ({ ...f, takilma_tarihi: e.target.value }))} style={aracInp} /></div>
+        <div><label style={aracLbl}>Takılma km</label><input type="number" value={form.takilma_km} onChange={e => setForm(f => ({ ...f, takilma_km: e.target.value }))} style={aracInp} /></div>
+        <div><label style={aracLbl}>Sökülme tarihi</label><input type="date" value={form.sokulme_tarihi} onChange={e => setForm(f => ({ ...f, sokulme_tarihi: e.target.value }))} style={aracInp} /></div>
+        <div><label style={aracLbl}>Sökülme km</label><input type="number" value={form.sokulme_km} onChange={e => setForm(f => ({ ...f, sokulme_km: e.target.value }))} style={aracInp} /></div>
+        <div><label style={aracLbl}>Depolama yeri</label><input value={form.depolama_yeri} onChange={e => setForm(f => ({ ...f, depolama_yeri: e.target.value }))} style={aracInp} placeholder="İzmir depo, lastikçi…" /></div>
+        <div><label style={aracLbl}>Teslim edilen kişi / firma</label><input value={form.teslim_kisi} onChange={e => setForm(f => ({ ...f, teslim_kisi: e.target.value }))} style={aracInp} /></div>
+        <div style={{ gridColumn:"1/-1" }}><label style={aracLbl}>Genel durum / hasar notu</label><textarea rows={2} value={form.notlar} onChange={e => setForm(f => ({ ...f, notlar: e.target.value }))} style={{ ...aracInp, resize:"vertical" }} /></div>
+      </div>
+      <div style={{ fontSize:"11.5px", color:"#6b7a90", marginTop:"6px" }}>Bilinmeyen alanları boş bırakın; tarih ve bilgi varsayılmaz. Durum değişimleri (takıldı / söküldü) geçmişe otomatik yazılır.</div>
+      <div style={{ display:"flex", gap:"8px", marginTop:"10px", justifyContent:"flex-end" }}>
+        <button onClick={() => { setFormAcik(false); setDuzenleId(null); setForm(bos); }} style={aracBtnIkincil}>Vazgeç</button>
+        <button onClick={kaydet} disabled={busy} style={aracBtnAna}>{busy ? "Kaydediliyor…" : "💾 Kaydet"}</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", flexWrap:"wrap", marginBottom:"10px" }}>
+        <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Yazlık ve kışlık takımlar ayrı kayıttır. Takılı takım yeşil görünür; takma/sökme geçmişi korunur.</div>
+        {canEdit && !formAcik && <button onClick={() => { setForm(bos); setDuzenleId(null); setFormAcik(true); }} style={aracBtnAna}>＋ Lastik takımı</button>}
+      </div>
+      {takili.length > 1 && <div style={{ background:"#fef3c7", color:"#92400e", border:"1px solid #fbbf24", borderRadius:"10px", padding:"8px 12px", fontSize:"12.5px", fontWeight:700, marginBottom:"10px" }}>⚠ {takili.length} takım aynı anda "araç üzerinde" görünüyor. Sökülen takımın durumunu güncelleyin.</div>}
+      {celiskili.length > 0 && <div style={{ background:"#fee2e2", color:"#b91c1c", border:"1px solid #fecaca", borderRadius:"10px", padding:"8px 12px", fontSize:"12.5px", fontWeight:700, marginBottom:"10px" }}>⚠ "Araç üzerinde" görünen takımda takılma tarihinden sonra sökülme tarihi var: {celiskili.map(l => ARAC_LASTIK_TUR[l.tur] || l.tur).join(", ")}</div>}
+      {formAcik && formAlan}
+      {yukleniyor && <div style={{ color:"#6b7a90", fontSize:"13px", padding:"10px 0" }}>Yükleniyor…</div>}
+      {!yukleniyor && liste.length === 0 && <div style={{ ...aracKart, textAlign:"center", color:"#9ca3af", fontSize:"13px" }}>Lastik bilgisi girilmedi</div>}
+      {liste.map(l => {
+        const dr = durumRenk(l.durum), tr = turRenk(l.tur);
+        const foto = l.foto_yolu ? { url: l.foto_yolu, dosya_adi: "lastik", kategori: "LASTIKLER", aciklama: `${ARAC_LASTIK_TUR[l.tur] || l.tur} ${l.ebat || ""}` } : null;
+        return (
+          <div key={l.id} style={{ ...aracKart, marginBottom:"12px", borderColor: l.durum === "ARAC_UZERINDE" ? "#86efac" : "#e3e8ef" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px", flexWrap:"wrap" }}>
+              <div style={{ display:"flex", gap:"12px", alignItems:"flex-start" }}>
+                {foto && <img src={foto.url} alt="lastik" onClick={() => setBuyut(foto)} style={{ width:"64px", height:"64px", objectFit:"cover", borderRadius:"8px", cursor:"zoom-in", border:"1px solid #e3e8ef" }} />}
+                <div>
+                  <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+                    <span style={aracPill(tr[0], tr[1])}>{ARAC_LASTIK_TUR[l.tur] || l.tur}</span>
+                    <span style={aracPill(dr[0], dr[1])}>{ARAC_LASTIK_DURUM[l.durum] || l.durum}</span>
+                    <b style={{ fontSize:"14px", color:"#0f1c2e" }}>{[l.marka, l.model].filter(Boolean).join(" ") || "Marka girilmedi"}{l.ebat ? ` · ${l.ebat}` : ""}</b>
+                    {l.adet ? <span style={{ fontSize:"12.5px", color:"#3c4a5d" }}>{l.adet} adet</span> : null}
+                  </div>
+                  <div style={{ fontSize:"12.5px", color:"#3c4a5d", marginTop:"4px", lineHeight:1.6 }}>
+                    {l.dot && <div>DOT: {l.dot}{l.satin_alma_tarihi ? ` · satın alma ${aracFT(l.satin_alma_tarihi)}` : ""}</div>}
+                    {!l.dot && l.satin_alma_tarihi && <div>Satın alma {aracFT(l.satin_alma_tarihi)}</div>}
+                    {(l.takilma_tarihi || l.takilma_km != null) && <div>Takıldı: {aracFT(l.takilma_tarihi) || "tarih yok"}{l.takilma_km != null ? ` · ${Number(l.takilma_km).toLocaleString("tr-TR")} km` : ""}</div>}
+                    {(l.sokulme_tarihi || l.sokulme_km != null) && <div>Söküldü: {aracFT(l.sokulme_tarihi) || "tarih yok"}{l.sokulme_km != null ? ` · ${Number(l.sokulme_km).toLocaleString("tr-TR")} km` : ""}</div>}
+                    {(l.depolama_yeri || l.teslim_kisi) && <div>Depolama: {l.depolama_yeri || "—"}{l.teslim_kisi ? ` · teslim: ${l.teslim_kisi}` : ""}</div>}
+                    {l.notlar && <div style={{ color:"#92400e" }}>{l.notlar}</div>}
+                    {l.belge_yolu && <div><a href={l.belge_yolu} target="_blank" rel="noreferrer" style={{ color:"#1d4ed8", fontWeight:600 }}>📎 Belge / fatura ↗</a></div>}
+                  </div>
+                </div>
+              </div>
+              {canEdit && (
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                  <label style={aracBtnIkincil}>📷 Foto<input type="file" accept="image/*" style={{ display:"none" }} onChange={e => { dosyaYukle(l, "foto", e.target.files?.[0]); e.target.value = ""; }} /></label>
+                  <label style={aracBtnIkincil}>📎 Belge<input type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={e => { dosyaYukle(l, "belge", e.target.files?.[0]); e.target.value = ""; }} /></label>
+                  <button onClick={() => duzenle(l)} style={aracBtnIkincil}>✏️ Düzenle</button>
+                  {canDelete && <button onClick={() => sil(l)} style={aracBtnSil}>🗑</button>}
+                </div>
+              )}
+            </div>
+            <div style={{ marginTop:"8px" }}>
+              <button onClick={() => setGecmisAcik(g => ({ ...g, [l.id]: !g[l.id] }))} style={{ background:"none", border:"none", color:"#1d4ed8", fontSize:"12px", fontWeight:700, cursor:"pointer", padding:0 }}>{gecmisAcik[l.id] ? "▾" : "▸"} Takma / sökme geçmişi ({(l.gecmis || []).length})</button>
+              {gecmisAcik[l.id] && (
+                <div style={{ marginTop:"6px", fontSize:"12px", color:"#3c4a5d" }}>
+                  {(l.gecmis || []).map(g => <div key={g.id} style={{ padding:"3px 0", borderBottom:"1px dashed #e3e8ef" }}><b>{OLAY[g.olay] || g.olay}</b>{g.tarih ? ` · ${aracFT(g.tarih)}` : ""}{g.km != null ? ` · ${Number(g.km).toLocaleString("tr-TR")} km` : ""}{g.aciklama ? ` · ${g.aciklama}` : ""}<span style={{ color:"#9ca3af" }}> · {g.kullanici || "—"} {aracZaman(g.zaman)}</span></div>)}
+                  {!(l.gecmis || []).length && <div style={{ color:"#9ca3af" }}>Geçmiş kaydı yok</div>}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      <AracFotoBuyut foto={buyut} onClose={() => setBuyut(null)} />
+    </div>
+  );
+}
+
 const ARAC_BOLGELER = ["İzmir", "Ankara", "Bursa", "Antalya", "Eskişehir", "İstanbul", "Muğla", "Aydın", "Manisa", "Denizli", "Balıkesir", "Diğer"];
 const ARAC_MARKALAR = {
   // 15.10.2026 (Orhan): Türkiye pazarı tam model listeleri (301 eksikti) — ticari araçlar önce
@@ -36948,9 +37322,15 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
     aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
     durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15,
-    depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:""
+    depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:"", mulkiyet_turu:"KIRALIK", sahip_firma:""
   });
   const [belgeUpload, setBelgeUpload] = useState({ turu:null, file:null }); // {turu, file}
+  // 15.10.2026: sekmeli düzenleme penceresi — sekme, açılış anındaki form kopyası (kirli kontrolü), proje listesi
+  const [modalTab, setModalTab] = useState("GENEL");
+  const [formSnap, setFormSnap] = useState("");
+  const [projeler, setProjeler] = useState([]);
+  const [mulkiyetFilter, setMulkiyetFilter] = useState("TUMU"); // TUMU | KIRALIK | SIRKET
+  const acForm = (f) => { setForm(f); setFormSnap(JSON.stringify(f)); setModalTab("GENEL"); };
   const [filter, setFilter] = useState("TUMU"); // TUMU | AKTİF | PASİF
   // Araç KM girişi: kart başına {km, tarih} — kayıtlar tarihli log olarak tutulur,
   // ay sonu km ↔ yakıt karşılaştırması bu geçmişten yapılır
@@ -36979,6 +37359,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       const kd = await k.json();
       setKiraOdemeler(Array.isArray(kd) ? kd : []);
     } catch { setKiraOdemeler([]); }
+    try { const p = await fetch(`${API_BASE}/hr/arac-teslim-projeler`, { headers: aracHdr() }); const pd = await p.json(); setProjeler(Array.isArray(pd) ? pd : []); } catch { setProjeler([]); }
   };
 
   useEffect(() => { load(); }, []);
@@ -37002,18 +37383,18 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   };
 
   const openNew = () => {
-    setForm({ plaka:"", marka:"", model:"", yil:"", tip:"Binek",
+    acForm({ plaka:"", marka:"", model:"", yil:"", tip:"Binek",
       kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
       aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
       durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15,
-      depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:"" });
+      depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:"", mulkiyet_turu:"KIRALIK", sahip_firma:"" });
     setSelected(null);
     setShowForm(true);
   };
 
   const openEdit = (a) => {
     const fmt = (d) => d ? d.slice(0,10) : "";
-    setForm({
+    acForm({
       plaka: a.plaka||"", marka: a.marka||"", model: a.model||"", yil: a.yil||"",
       tip: a.tip||"Binek", kiralama_firmasi: a.kiralama_firmasi||"",
       sozlesme_no: a.sozlesme_no||"",
@@ -37023,7 +37404,8 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       durum: a.durum||"AKTİF", notlar: a.notlar||"",
       odeme_tipi: a.odeme_tipi||"PESIN", donem_gunu: a.donem_gunu||15,
       depozito_tutar: a.depozito_tutar||"", depozito_tarihi: fmt(a.depozito_tarihi),
-      depozito_iade_tarihi: fmt(a.depozito_iade_tarihi), depozito_not: a.depozito_not||""
+      depozito_iade_tarihi: fmt(a.depozito_iade_tarihi), depozito_not: a.depozito_not||"",
+      mulkiyet_turu: aracSirketMi(a) ? "SIRKET" : "KIRALIK", sahip_firma: a.sahip_firma||""
     });
     setSelected(a);
     setShowForm(true);
@@ -37035,9 +37417,16 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     const url = selected ? `${API_BASE}/hr/araclar/${selected.id}` : `${API_BASE}/hr/araclar`;
     const r = await fetch(url, { method, headers:{"Content-Type":"application/json"}, body: JSON.stringify(form) });
     if (!r.ok) { const e = await r.json(); return alert(e.error); }
+    setFormSnap(JSON.stringify(form));
     setShowForm(false);
     load();
   };
+  const formKirli = () => JSON.stringify(form) !== formSnap;
+  const modalKapat = () => {
+    if (formKirli() && !window.confirm("Kaydedilmemiş değişiklikler var. Pencere kapatılsın mı?")) return;
+    setShowForm(false);
+  };
+  const openEditTab = (a, tab) => { openEdit(a); setModalTab(tab); };
 
   const handleBelgeUpload = async (aracId, turu, file) => {
     if (!file) return;
@@ -37119,7 +37508,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     return out;
   };
   const borcHesap = (a) => {
-    const kira = Number(a.aylik_kira || 0);
+    const kira = aracSirketMi(a) ? 0 : Number(a.aylik_kira || 0); // şirket aracı: kira takibi uygulanmaz
     if (!a.aktif || kira <= 0) return { aylar: [], tutar: 0, siradaki: null, liste: [] };
     const liste = donemListesi(a);
     const aylar = liste.filter(x => x.durum === "GECIKTI").map(x => x.donem);
@@ -37127,8 +37516,8 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   };
 
   const aktifAraclar = araclar.filter(a => a.durum === "AKTİF");
-  const kiralikAraclar = aktifAraclar.filter(a => Number(a.aylik_kira || 0) > 0);
-  const aylikToplam = aktifAraclar.reduce((s, a) => s + Number(a.aylik_kira || 0), 0);
+  const kiralikAraclar = aktifAraclar.filter(a => !aracSirketMi(a) && Number(a.aylik_kira || 0) > 0);
+  const aylikToplam = aktifAraclar.reduce((s, a) => s + (aracSirketMi(a) ? 0 : Number(a.aylik_kira || 0)), 0);
   const toplamBorc = araclar.reduce((s, a) => s + borcHesap(a).tutar, 0);
   const borcluAraclar = aktifAraclar.filter(a => borcHesap(a).tutar > 0);
   const bolgeOzet = (() => { const m = {}; aktifAraclar.forEach(a => { const b = (a.bolge || "—").trim(); m[b] = (m[b] || 0) + 1; }); return Object.entries(m).map(([b, n]) => `${n} ${b}`).join(" · "); })();
@@ -37138,7 +37527,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   const siradakiAdet = siradakiler.filter(x => x.s.vade === siradakiVade).length;
   const siradakiTutar = siradakiler.filter(x => x.s.vade === siradakiVade).reduce((s, x) => s + Number(x.a.aylik_kira || 0), 0);
   const belgeUyari = aktifAraclar.map(a => {
-    const sd = dayDiff(a.sigorta_bitis), md = dayDiff(a.muayene_bitis), kd = dayDiff(a.kira_bitis);
+    const sd = dayDiff(a.sigorta_bitis), md = dayDiff(a.muayene_bitis), kd = aracSirketMi(a) ? null : dayDiff(a.kira_bitis);
     const u = [];
     if (sd === null) u.push("sigorta tarihi yok"); else if (sd < 0) u.push("sigorta GEÇTİ"); else if (sd <= 30) u.push(`sigorta ${sd} gün`);
     if (md === null) u.push("muayene tarihi yok"); else if (md < 0) u.push("muayene GEÇTİ"); else if (md <= 30) u.push(`muayene ${md} gün`);
@@ -37168,11 +37557,11 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     const hepsi = [...gecmisRows, ...pasifler].sort((x, y) => String(y._sira).localeCompare(String(x._sira)));
     exportStandardExcel({
       title: "Araç Filosu — Aktif Araçlar", sheetName: "Araçlar", fileBase: "Arac_Filosu",
-      headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira (₺)", "Depozito (₺)", "Depozito Durumu", "Ödeme", "Kiralama Firması", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
-      colWidths: [12, 12, 14, 8, 10, 12, 26, 14, 14, 22, 14, 20, 13, 13, 13, 13, 10], numericCols: [7, 8],
-      rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", a.bolge || "", a.surucu || "", Number(a.aylik_kira || 0),
-        Number(a.depozito_tutar || 0), Number(a.depozito_tutar || 0) > 0 ? (a.depozito_iade_tarihi ? `İade alındı ${fT(a.depozito_iade_tarihi)}` : `Ödendi ${fT(a.depozito_tarihi) || ""} · iade bekleniyor`) : "",
-        (a.odeme_tipi || "PESIN") === "SONRADAN" ? `Ay sonu (${a.donem_gunu || 1})` : `Peşin (${a.donem_gunu || 15})`, a.kiralama_firmasi || "",
+      headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Mülkiyet", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira (₺)", "Depozito (₺)", "Depozito Durumu", "Ödeme", "Kiralama Firması / Sahibi", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
+      colWidths: [12, 12, 14, 8, 10, 13, 12, 26, 14, 14, 22, 14, 22, 13, 13, 13, 13, 10], numericCols: [8, 9],
+      rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", aracSirketMi(a) ? "Şirket aracı" : "Kiralık", a.bolge || "", a.surucu || "", aracSirketMi(a) ? 0 : Number(a.aylik_kira || 0),
+        aracSirketMi(a) ? 0 : Number(a.depozito_tutar || 0), !aracSirketMi(a) && Number(a.depozito_tutar || 0) > 0 ? (a.depozito_iade_tarihi ? `İade alındı ${fT(a.depozito_iade_tarihi)}` : `Ödendi ${fT(a.depozito_tarihi) || ""} · iade bekleniyor`) : "",
+        aracSirketMi(a) ? "Uygulanmaz" : (a.odeme_tipi || "PESIN") === "SONRADAN" ? `Ay sonu (${a.donem_gunu || 1})` : `Peşin (${a.donem_gunu || 15})`, aracSirketMi(a) ? (a.sahip_firma || "Şirket") : (a.kiralama_firmasi || ""),
         fT(a.kira_baslangic), fT(a.kira_bitis), fT(a.sigorta_bitis), fT(a.muayene_bitis), a.durum || ""]),
       extraSheets: [{
         sheetName: "Geçmiş Araçlar", title: "Geçmiş Araçlar — Kim, Hangi Aracı, Ne Zaman Kullandı",
@@ -37249,6 +37638,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   };
 
   const filtered = _aracBaz.filter(a => filter === "TUMU" ? a.durum !== "PASİF" : a.durum === filter)
+    .filter(a => mulkiyetFilter === "TUMU" ? true : mulkiyetFilter === "SIRKET" ? aracSirketMi(a) : !aracSirketMi(a))
     .filter(a => { const q = arama.trim().toLowerCase(); if (!q) return true; return [a.plaka, a.surucu, a.bolge, a.marka, a.model].some(x => String(x || "").toLowerCase().includes(q)); })
     .slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka)));
 
@@ -37312,6 +37702,11 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                 <button key={f} onClick={() => setFilter(f)} style={{ padding:"6px 12px", borderRadius:"7px", border:"none", fontSize:"12.5px", fontWeight:700, cursor:"pointer", background: filter === f ? "#1e3a5f" : "transparent", color: filter === f ? "#fff" : "#6b7a90" }}>{l}</button>
               ))}
             </div>
+            <div style={{ display:"flex", gap:"4px", background:"#f3f5f8", padding:"4px", borderRadius:"10px" }}>
+              {[["TUMU", "Tümü"], ["KIRALIK", `Kiralık (${_aracBaz.filter(a => !aracSirketMi(a) && a.durum !== "PASİF").length})`], ["SIRKET", `Şirket Aracı (${_aracBaz.filter(a => aracSirketMi(a) && a.durum !== "PASİF").length})`]].map(([f, l]) => (
+                <button key={f} onClick={() => setMulkiyetFilter(f)} style={{ padding:"6px 12px", borderRadius:"7px", border:"none", fontSize:"12.5px", fontWeight:700, cursor:"pointer", background: mulkiyetFilter === f ? "#0f766e" : "transparent", color: mulkiyetFilter === f ? "#fff" : "#6b7a90" }}>{l}</button>
+              ))}
+            </div>
             <input value={arama} onChange={e => setArama(e.target.value)} placeholder="🔍 Plaka, sürücü, bölge…" style={{ border:"1px solid #cfd7e2", borderRadius:"9px", padding:"7px 11px", fontSize:"13px", minWidth:"220px" }} />
           </div>
         </div>
@@ -37328,11 +37723,12 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
               {filtered.map(a => {
                 const borc = borcHesap(a);
                 const acik = acikSatir === a.id;
-                const kira = Number(a.aylik_kira || 0);
+                const kira = aracSirketMi(a) ? 0 : Number(a.aylik_kira || 0); // şirket aracı: kira takibi uygulanmaz
                 const sonKm = (a.km_log || [])[0];
                 const initials = String(a.surucu || "?").split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join("").toUpperCase();
                 const durumPill = !a.aktif
                   ? { bg:"#f3f5f8", c:"#6b7a90", t: a.durum === "SERVİSTE" ? "Serviste" : "Pasif / iade" }
+                  : aracSirketMi(a) ? { bg:"#e0e7ff", c:"#3730a3", t:"Şirket mülkiyeti" }
                   : kira <= 0 ? { bg:"#f3f5f8", c:"#6b7a90", t:"Kira yok" }
                   : borc.tutar > 0 ? { bg:"#fee2e2", c:"#b91c1c", t:`Borç ₺${borc.tutar.toLocaleString("tr-TR")} · ${borc.aylar.length} dönem` }
                   : borc.siradaki ? { bg:"#dcfce7", c:"#15803d", t:`Ödendi · sıradaki ${borc.siradaki.vade.split("-").reverse().slice(0, 2).join(".")}` }
@@ -37341,15 +37737,15 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                   <React.Fragment key={a.id}>
                     <tr onClick={() => setAcikSatir(acik ? null : a.id)} style={{ cursor:"pointer", background: acik ? "#eefaf8" : "transparent" }}>
                       <td style={tdSt}><span style={plateSt(a.durum)}>{a.plaka}</span></td>
-                      <td style={tdSt}><div style={{ fontWeight:700, color:"#0f1c2e" }}>{a.marka} {a.model}</div><div style={{ fontSize:"12px", color:"#6b7a90" }}>{[a.yil, a.tip, a.kiralama_firmasi].filter(Boolean).join(" · ")}</div></td>
+                      <td style={tdSt}><div style={{ fontWeight:700, color:"#0f1c2e" }}>{a.marka} {a.model}</div><div style={{ fontSize:"12px", color:"#6b7a90" }}>{[a.yil, a.tip, aracSirketMi(a) ? (a.sahip_firma ? `Sahibi: ${a.sahip_firma}` : "Şirket aracı") : a.kiralama_firmasi].filter(Boolean).join(" · ")}</div></td>
                       <td style={tdSt}>
                         <div style={{ display:"flex", alignItems:"center", gap:"9px" }}>
                           <span style={{ width:"30px", height:"30px", borderRadius:"50%", background:"#1e3a5f", color:"#fff", fontWeight:800, fontSize:"11.5px", display:"grid", placeItems:"center", flex:"none" }}>{initials}</span>
-                          <div><div style={{ fontWeight:600, color:"#0f1c2e" }}>{a.surucu || "—"}</div><div style={{ fontSize:"12px", color:"#6b7a90" }}>{a.kira_baslangic ? `${fT(a.kira_baslangic)}'den beri` : ""}</div></div>
+                          <div><div style={{ fontWeight:600, color:"#0f1c2e" }}>{a.surucu || "—"}</div><div style={{ fontSize:"12px", color:"#6b7a90" }}>{!aracSirketMi(a) && a.kira_baslangic ? `${fT(a.kira_baslangic)}'den beri` : ""}</div></div>
                         </div>
                       </td>
                       <td style={tdSt}>{a.bolge || "—"}</td>
-                      <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums", fontWeight:700 }}>{kira > 0 ? `₺${kira.toLocaleString("tr-TR")}` : "—"}<div style={{ fontSize:"11px", color:"#6b7a90", fontWeight:500 }}>{kira > 0 ? ((a.odeme_tipi || "PESIN") === "SONRADAN" ? `ay sonu · ${a.donem_gunu || 1}'i` : `peşin · ${a.donem_gunu || 15}'i`) : ""}</div></td>
+                      <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums", fontWeight:700 }}>{kira > 0 ? `₺${kira.toLocaleString("tr-TR")}` : "—"}<div style={{ fontSize:"11px", color:"#6b7a90", fontWeight:500 }}>{aracSirketMi(a) ? "uygulanmaz" : kira > 0 ? ((a.odeme_tipi || "PESIN") === "SONRADAN" ? `ay sonu · ${a.donem_gunu || 1}'i` : `peşin · ${a.donem_gunu || 15}'i`) : ""}</div></td>
                       <td style={tdSt}>
                         {a.aktif && kira > 0 ? (
                           <div style={{ display:"flex", gap:"4px" }}>
@@ -37369,7 +37765,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                       <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums" }}>{sonKm ? <>{Number(sonKm.km).toLocaleString("tr-TR")}<div style={{ fontSize:"11px", color:"#6b7a90" }}>{fT(sonKm.tarih)}</div></> : <span style={{ color:"#9ca3af" }}>—</span>}</td>
                       <td style={tdSt}>
                         <div style={{ display:"flex", gap:"5px" }}>
-                          {BELGE_YUVALARI.map(({ turu, label }) => {
+                          {BELGE_YUVALARI.filter(y => !(aracSirketMi(a) && y.turu === "SOZLESME")).map(({ turu, label }) => {
                             const b = getBelge(a, turu);
                             const harf = label.replace(/^[^ ]+ /, "")[0];
                             return b
@@ -37400,7 +37796,17 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                                       ? <span style={{ color:"#b91c1c", fontWeight:700 }}>Ödenmedi</span>
                                       : <span style={{ color:"#6b7a90" }}>Vadesi gelmedi</span>}
                                 </div>
-                              )) : <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Kira takibi yok</div>}
+                              )) : aracSirketMi(a) ? (
+                                <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>
+                                  Şirket mülkiyeti · kira takibi uygulanmaz
+                                  {kiraOdemeler.filter(o => String(o.arac_id) === String(a.id)).map(o => (
+                                    <div key={o.id || o.donem} style={{ display:"flex", justifyContent:"space-between", padding:"3px 0", borderBottom:"1px dashed #e3e8ef", color:"#3c4a5d" }}>
+                                      <span style={{ fontFamily:"ui-monospace, Menlo, monospace" }}>{o.donem} <span style={{ color:"#9ca3af" }}>· geçmiş dönem</span></span>
+                                      <span>₺{Number(o.tutar || 0).toLocaleString("tr-TR")} · {fT(o.tarih)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Kira takibi yok</div>}
                             </div>
                             {/* KM */}
                             <div style={detayKutu}>
@@ -37421,7 +37827,9 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                             <div style={detayKutu}>
                               <div style={detayBaslik}>Araç bilgisi</div>
                               <div style={{ fontSize:"12.5px", lineHeight:1.7 }}>
-                                <div>Kira: {fT(a.kira_baslangic) || "—"} → {fT(a.kira_bitis) || "süresiz"}</div>
+                                {aracSirketMi(a)
+                                  ? <div><span style={{ ...pill, background:"#e0e7ff", color:"#3730a3" }}>Şirket mülkiyeti</span>{a.sahip_firma ? <span> Sahibi: <b>{a.sahip_firma}</b></span> : null}</div>
+                                  : <div>Kira: {fT(a.kira_baslangic) || "—"} → {fT(a.kira_bitis) || "süresiz"}</div>}
                                 <div>Sigorta: <span style={{ color: expiryColor(a.sigorta_bitis), fontWeight:600 }}>{fT(a.sigorta_bitis) || "girilmedi"}</span> · Muayene: <span style={{ color: expiryColor(a.muayene_bitis), fontWeight:600 }}>{fT(a.muayene_bitis) || "girilmedi"}</span></div>
                                 {a.sozlesme_no && <div>Sözleşme: {a.sozlesme_no}</div>}
                                 {Number(a.depozito_tutar || 0) > 0 && (
@@ -37443,6 +37851,18 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                                     <option value="AKTİF">🟢 Aktif</option><option value="PASİF">⚪ Pasif / iade</option><option value="SERVİSTE">🔧 Serviste</option>
                                   </select>
                                   <button onClick={() => openEdit(a)} style={{ padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle / Belge</button>
+                                </div>
+                              )}
+                            </div>
+                            {/* Lastik özeti + teslim/fotoğraf kısayolu (15.10.2026) */}
+                            <div style={detayKutu}>
+                              <div style={detayBaslik}>Lastikler</div>
+                              <AracLastikOzet lastikler={a.lastikler} />
+                              <div style={{ fontSize:"12.5px", color:"#3c4a5d", marginTop:"8px" }}>Teslim kaydı: <b>{a.teslim_sayisi || 0}</b> · fotoğraf: <b>{a.foto_sayisi || 0}</b></div>
+                              {canEdit && (
+                                <div style={{ display:"flex", gap:"6px", marginTop:"8px", flexWrap:"wrap" }} onClick={e => e.stopPropagation()}>
+                                  <button onClick={() => openEditTab(a, "TESLIM")} style={{ padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>📷 Teslim & Fotoğraflar</button>
+                                  <button onClick={() => openEditTab(a, "LASTIK")} style={{ padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>🛞 Lastikler</button>
                                 </div>
                               )}
                             </div>
@@ -37572,31 +37992,74 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
         </div>
       )}
 
-      {/* Form / Detail Modal */}
-      {showForm && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:500, overflowY:"auto", padding:"20px 16px" }}>
-          <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth:"640px", padding:"28px 24px", position:"relative" }}>
-            <button onClick={()=>setShowForm(false)}
-              style={{ position:"absolute", top:"16px", right:"16px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"32px", height:"32px", fontSize:"18px", cursor:"pointer" }}>✕</button>
-            <h3 style={{ margin:"0 0 20px", fontSize:"18px", fontWeight:800, color:"#1e3a5f" }}>
-              {selected ? `✏️ ${form.plaka}` : "🚗 Yeni Araç"}
+      {/* Form / Detail Modal — sekmeli (15.10.2026): Genel Bilgiler · Belgeler · Teslim ve Fotoğraflar · Lastikler.
+          Şirket aracında kira alanları gösterilmez; sekme değişince form verisi korunur; kaydedilmemiş
+          değişiklikle kapatmada uyarı verilir (modalKapat). */}
+      {showForm && (() => {
+        const sirket = String(form.mulkiyet_turu || "KIRALIK").toUpperCase() === "SIRKET";
+        const SEKMELER = [["GENEL", "Genel Bilgiler"], ["BELGELER", "Belgeler"], ["TESLIM", "Teslim ve Fotoğraflar"], ["LASTIK", "Lastikler"]];
+        const canDelete = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "nurcan.kus@simsektel.com", "duzgun.simsek@simsektel.com"].includes((currentUser?.email || "").toLowerCase())
+          || ["admin", "platform_admin", "direktor"].includes(String(currentUser?.role || "").toLowerCase());
+        const lblSt = { display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" };
+        return (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:500, overflowY:"auto", padding:"20px 10px" }}>
+          <div style={{ background:"#fff", borderRadius:"16px", width:"100%", maxWidth: modalTab === "GENEL" ? "680px" : "880px", padding:"22px 20px 20px", position:"relative", boxSizing:"border-box" }}>
+            <button onClick={modalKapat}
+              style={{ position:"absolute", top:"14px", right:"14px", background:"#f3f4f6", border:"none", borderRadius:"50%", width:"32px", height:"32px", fontSize:"18px", cursor:"pointer" }}>✕</button>
+            <h3 style={{ margin:"0 0 14px", fontSize:"18px", fontWeight:800, color:"#1e3a5f", display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap", paddingRight:"40px" }}>
+              <span>{selected ? `✏️ ${form.plaka}` : "🚗 Yeni Araç"}</span>
+              <span style={{ ...pill, background: sirket ? "#e0e7ff" : "#fef3c7", color: sirket ? "#3730a3" : "#92400e" }}>{sirket ? "Şirket Aracı" : "Kiralık Araç"}</span>
+              {selected && detailArac && <span style={{ fontSize:"12px", color:"#6b7a90", fontWeight:500 }}>{[detailArac.marka, detailArac.model].filter(Boolean).join(" ")}{detailArac.surucu ? ` · ${detailArac.surucu}` : ""}</span>}
             </h3>
 
-            {/* Form fields */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginBottom:"16px" }}>
+            {/* Sekmeler */}
+            <div style={{ display:"flex", gap:"4px", background:"#f3f5f8", padding:"4px", borderRadius:"10px", marginBottom:"16px", overflowX:"auto" }}>
+              {SEKMELER.map(([k, l]) => {
+                const kapali = !selected && k !== "GENEL";
+                return (
+                  <button key={k} disabled={kapali} title={kapali ? "Önce aracı kaydedin" : ""} onClick={() => setModalTab(k)}
+                    style={{ flex:"1 0 auto", padding:"8px 12px", borderRadius:"8px", border:"none", fontSize:"12.5px", fontWeight:700, cursor: kapali ? "not-allowed" : "pointer",
+                      background: modalTab === k ? "#1e3a5f" : "transparent", color: modalTab === k ? "#fff" : kapali ? "#b8c2d0" : "#6b7a90", whiteSpace:"nowrap" }}>
+                    {l}{k === "GENEL" && formKirli() ? " •" : ""}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* ── GENEL BİLGİLER ── */}
+            {modalTab === "GENEL" && (<>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(240px, 1fr))", gap:"12px", marginBottom:"16px" }}>
               <div style={{ gridColumn:"1/-1" }}>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Plaka *</label>
+                <label style={lblSt}>Plaka *</label>
                 <input value={form.plaka||""} onChange={e=>setForm(f=>({...f,plaka:e.target.value.toUpperCase()}))} style={aInpSt} />
               </div>
               <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Marka</label>
+                <label style={lblSt}>Mülkiyet Türü</label>
+                <select value={sirket ? "SIRKET" : "KIRALIK"} onChange={e=>setForm(f=>({...f,mulkiyet_turu:e.target.value}))} style={aSelSt}>
+                  <option value="KIRALIK">Kiralık Araç</option>
+                  <option value="SIRKET">Şirket Aracı</option>
+                </select>
+              </div>
+              {sirket ? (
+                <div>
+                  <label style={lblSt}>Araç Sahibi Firma</label>
+                  <input value={form.sahip_firma||""} onChange={e=>setForm(f=>({...f,sahip_firma:e.target.value}))} placeholder="Şimşek Haberleşme / Teknocenter…" style={aInpSt} />
+                </div>
+              ) : (
+                <div>
+                  <label style={lblSt}>Kiralama Firması</label>
+                  <input value={form.kiralama_firmasi||""} onChange={e=>setForm(f=>({...f,kiralama_firmasi:e.target.value}))} style={aInpSt} />
+                </div>
+              )}
+              <div>
+                <label style={lblSt}>Marka</label>
                 <select value={form.marka||""} onChange={e=>setForm(f=>({...f,marka:e.target.value,model:""}))} style={aSelSt}>
                   <option value="">Seçin</option>
                   {Object.keys(ARAC_MARKALAR).sort((x, y) => (x === "Diger") - (y === "Diger") || x.localeCompare(y, "tr")).map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Model</label>
+                <label style={lblSt}>Model</label>
                 {aracModeller.length > 0
                   ? <select value={form.model||""} onChange={e=>setForm(f=>({...f,model:e.target.value}))} style={aSelSt}>
                       <option value="">Seçin</option>
@@ -37606,61 +38069,24 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                 }
               </div>
               <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Yıl</label>
+                <label style={lblSt}>Yıl</label>
                 <select value={form.yil||""} onChange={e=>setForm(f=>({...f,yil:e.target.value}))} style={aSelSt}>
                   <option value="">Seçin</option>
                   {ARAC_YIL.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Kiralama Firması</label>
-                <input value={form.kiralama_firmasi||""} onChange={e=>setForm(f=>({...f,kiralama_firmasi:e.target.value}))} style={aInpSt} />
-              </div>
-              <div style={{ gridColumn:"1/-1" }}>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Sözleşme No</label>
-                <input value={form.sozlesme_no||""} onChange={e=>setForm(f=>({...f,sozlesme_no:e.target.value}))} style={aInpSt} />
-              </div>
-              <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Aylık Kira (₺)</label>
-                <input type="number" value={form.aylik_kira||""} onChange={e=>setForm(f=>({...f,aylik_kira:e.target.value}))} style={aInpSt} />
-              </div>
-              <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Kira Ödeme Şekli</label>
-                <select value={form.odeme_tipi||"PESIN"} onChange={e=>setForm(f=>({...f,odeme_tipi:e.target.value}))} style={aSelSt}>
-                  <option value="PESIN">Peşin — dönem başında ödenir</option>
-                  <option value="SONRADAN">Sonradan — dönem sonunda ödenir</option>
+                <label style={lblSt}>Araç Tipi</label>
+                <select value={form.tip} onChange={e=>setForm(f=>({...f,tip:e.target.value}))} style={aSelSt}>
+                  {TIPLER.map(t => <option key={t}>{t}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Dönem Günü (ayın kaçı)</label>
-                <input type="number" min="1" max="28" value={form.donem_gunu||15} onChange={e=>setForm(f=>({...f,donem_gunu:e.target.value}))} style={aInpSt} />
-              </div>
-              {/* 15.10.2026 (Orhan): kiralama firmasına ödenen depozito — nakit akışında Araç Kiraları satırına düşer */}
-              <div style={{ gridColumn:"1/-1", display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"10px", padding:"10px", background:"#fffbeb", border:"1px dashed #fbbf24", borderRadius:"10px" }}>
-                <div style={{ gridColumn:"1/-1", fontSize:"12px", fontWeight:800, color:"#92400e" }}>🔒 Depozito (kiralama firmasına ödenen, iade edilecek)</div>
-                <div>
-                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Depozito (₺)</label>
-                  <input type="number" value={form.depozito_tutar||""} onChange={e=>setForm(f=>({...f,depozito_tutar:e.target.value}))} style={aInpSt} placeholder="0" />
-                </div>
-                <div>
-                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Ödeme Tarihi</label>
-                  <input type="date" value={form.depozito_tarihi||""} onChange={e=>setForm(f=>({...f,depozito_tarihi:e.target.value}))} style={aInpSt} />
-                </div>
-                <div>
-                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>İade Tarihi (geri gelince)</label>
-                  <input type="date" value={form.depozito_iade_tarihi||""} onChange={e=>setForm(f=>({...f,depozito_iade_tarihi:e.target.value}))} style={aInpSt} />
-                </div>
-                <div style={{ gridColumn:"1/-1" }}>
-                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Depozito Notu</label>
-                  <input value={form.depozito_not||""} onChange={e=>setForm(f=>({...f,depozito_not:e.target.value}))} style={aInpSt} placeholder="Havale / kime ödendi / şart" />
-                </div>
-              </div>
-              <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Sürücü / Kullanan</label>
+                <label style={lblSt}>Sürücü / Kullanan</label>
                 <input value={form.surucu||""} onChange={e=>setForm(f=>({...f,surucu:e.target.value}))} style={aInpSt} />
               </div>
-              <div style={{ gridColumn:"1/-1" }}>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Atandığı Bölge</label>
+              <div>
+                <label style={lblSt}>Atandığı Bölge</label>
                 {/* 09.09.2026: serbest metin yerine liste — ilk üçü ana bölgeler (İzmir, Ankara, Bursa) */}
                 <select value={(() => { const v = String(form.bolge || "").trim(); const m = ARAC_BOLGELER.find(b => b.toLocaleLowerCase("tr") === v.toLocaleLowerCase("tr")); return m || v; })()}
                   onChange={e=>setForm(f=>({...f,bolge:e.target.value}))} style={aSelSt}>
@@ -37669,62 +38095,107 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                   {form.bolge && !ARAC_BOLGELER.some(b => b.toLocaleLowerCase("tr") === String(form.bolge).trim().toLocaleLowerCase("tr")) && <option value={form.bolge}>{form.bolge}</option>}
                 </select>
               </div>
+
+              {!sirket && (<>
+                <div style={{ gridColumn:"1/-1", fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700, marginTop:"4px" }}>Kira bilgileri</div>
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label style={lblSt}>Sözleşme No</label>
+                  <input value={form.sozlesme_no||""} onChange={e=>setForm(f=>({...f,sozlesme_no:e.target.value}))} style={aInpSt} />
+                </div>
+                <div>
+                  <label style={lblSt}>Aylık Kira (₺)</label>
+                  <input type="number" value={form.aylik_kira||""} onChange={e=>setForm(f=>({...f,aylik_kira:e.target.value}))} style={aInpSt} />
+                </div>
+                <div>
+                  <label style={lblSt}>Kira Ödeme Şekli</label>
+                  <select value={form.odeme_tipi||"PESIN"} onChange={e=>setForm(f=>({...f,odeme_tipi:e.target.value}))} style={aSelSt}>
+                    <option value="PESIN">Peşin — dönem başında ödenir</option>
+                    <option value="SONRADAN">Sonradan — dönem sonunda ödenir</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={lblSt}>Dönem Günü (ayın kaçı)</label>
+                  <input type="number" min="1" max="28" value={form.donem_gunu||15} onChange={e=>setForm(f=>({...f,donem_gunu:e.target.value}))} style={aInpSt} />
+                </div>
+                <div>
+                  <label style={lblSt}>Kira Başlangıç</label>
+                  <input type="date" value={form.kira_baslangic||""} onChange={e=>setForm(f=>({...f,kira_baslangic:e.target.value}))} style={aInpSt} />
+                </div>
+                <div>
+                  <label style={lblSt}>Kira Bitiş</label>
+                  <input type="date" value={form.kira_bitis||""} onChange={e=>setForm(f=>({...f,kira_bitis:e.target.value}))} style={aInpSt} />
+                </div>
+                {/* 15.10.2026 (Orhan): kiralama firmasına ödenen depozito — nakit akışında Araç Kiraları satırına düşer */}
+                <div style={{ gridColumn:"1/-1", display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))", gap:"10px", padding:"10px", background:"#fffbeb", border:"1px dashed #fbbf24", borderRadius:"10px" }}>
+                  <div style={{ gridColumn:"1/-1", fontSize:"12px", fontWeight:800, color:"#92400e" }}>🔒 Depozito (kiralama firmasına ödenen, iade edilecek)</div>
+                  <div>
+                    <label style={lblSt}>Depozito (₺)</label>
+                    <input type="number" value={form.depozito_tutar||""} onChange={e=>setForm(f=>({...f,depozito_tutar:e.target.value}))} style={aInpSt} placeholder="0" />
+                  </div>
+                  <div>
+                    <label style={lblSt}>Ödeme Tarihi</label>
+                    <input type="date" value={form.depozito_tarihi||""} onChange={e=>setForm(f=>({...f,depozito_tarihi:e.target.value}))} style={aInpSt} />
+                  </div>
+                  <div>
+                    <label style={lblSt}>İade Tarihi (geri gelince)</label>
+                    <input type="date" value={form.depozito_iade_tarihi||""} onChange={e=>setForm(f=>({...f,depozito_iade_tarihi:e.target.value}))} style={aInpSt} />
+                  </div>
+                  <div style={{ gridColumn:"1/-1" }}>
+                    <label style={lblSt}>Depozito Notu</label>
+                    <input value={form.depozito_not||""} onChange={e=>setForm(f=>({...f,depozito_not:e.target.value}))} style={aInpSt} placeholder="Havale / kime ödendi / şart" />
+                  </div>
+                </div>
+              </>)}
+              {sirket && (
+                <div style={{ gridColumn:"1/-1", fontSize:"12.5px", color:"#3730a3", background:"#eef2ff", border:"1px solid #c7d2fe", borderRadius:"10px", padding:"9px 12px" }}>
+                  Şirket mülkiyeti: kira bedeli, kiralama firması, sözleşme ve ödeme dönemi tutulmaz; kira borcu üretilmez. Ruhsat, sigorta, muayene, sürücü, bölge ve KM takibi devam eder.
+                  {Number(form.aylik_kira || 0) > 0 && <div style={{ marginTop:"4px", color:"#6b7a90" }}>Kayıtlı eski kira bedeli (₺{Number(form.aylik_kira).toLocaleString("tr-TR")}) ve geçmiş ödemeler silinmez, "geçmiş dönem" olarak görünür.</div>}
+                </div>
+              )}
+
+              <div style={{ gridColumn:"1/-1", fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700, marginTop:"4px" }}>Belge tarihleri ve durum</div>
               <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Kira Başlangıç</label>
-                <input type="date" value={form.kira_baslangic||""} onChange={e=>setForm(f=>({...f,kira_baslangic:e.target.value}))} style={aInpSt} />
-              </div>
-              <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Kira Bitiş</label>
-                <input type="date" value={form.kira_bitis||""} onChange={e=>setForm(f=>({...f,kira_bitis:e.target.value}))} style={aInpSt} />
-              </div>
-              <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Sigorta Bitiş</label>
+                <label style={lblSt}>Sigorta Bitiş</label>
                 <input type="date" value={form.sigorta_bitis||""} onChange={e=>setForm(f=>({...f,sigorta_bitis:e.target.value}))} style={aInpSt} />
               </div>
               <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Muayene Bitiş</label>
+                <label style={lblSt}>Muayene Bitiş</label>
                 <input type="date" value={form.muayene_bitis||""} onChange={e=>setForm(f=>({...f,muayene_bitis:e.target.value}))} style={aInpSt} />
               </div>
               <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Araç Tipi</label>
-                <select value={form.tip} onChange={e=>setForm(f=>({...f,tip:e.target.value}))}
-                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px" }}>
-                  {TIPLER.map(t => <option key={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Durum</label>
-                <select value={form.durum} onChange={e=>setForm(f=>({...f,durum:e.target.value}))}
-                  style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px" }}>
+                <label style={lblSt}>Durum</label>
+                <select value={form.durum} onChange={e=>setForm(f=>({...f,durum:e.target.value}))} style={aSelSt}>
                   {DURUMLAR.map(d => <option key={d}>{d}</option>)}
                 </select>
               </div>
               <div style={{ gridColumn:"1 / -1" }}>
-                <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Notlar</label>
+                <label style={lblSt}>Notlar</label>
                 <textarea value={form.notlar||""} onChange={e=>setForm(f=>({...f,notlar:e.target.value}))} rows={2}
                   style={{ width:"100%", padding:"9px 12px", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"14px", resize:"vertical", boxSizing:"border-box" }} />
               </div>
             </div>
 
             <button onClick={handleSave}
-              style={{ width:"100%", padding:"13px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"15px", cursor:"pointer", marginBottom: selected ? "24px" : 0 }}>
+              style={{ width:"100%", padding:"13px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"15px", cursor:"pointer" }}>
               💾 Kaydet
             </button>
+            {!selected && <div style={{ fontSize:"12px", color:"#6b7a90", marginTop:"8px", textAlign:"center" }}>Belgeler, teslim fotoğrafları ve lastik bilgileri araç kaydedildikten sonra eklenir.</div>}
+            </>)}
 
-            {/* Belge yükleme — sadece düzenleme modunda */}
-            {selected && detailArac && (
-              <div style={{ borderTop:"1px solid #e5e7eb", paddingTop:"20px" }}>
-                <h4 style={{ margin:"0 0 14px", fontSize:"15px", fontWeight:700, color:"#1e3a5f" }}>📁 Belgeler</h4>
+            {/* ── BELGELER ── */}
+            {modalTab === "BELGELER" && selected && detailArac && (
+              <div>
+                {sirket && <div style={{ fontSize:"12.5px", color:"#6b7a90", marginBottom:"10px" }}>Şirket aracı: kira sözleşmesi gerekmez, eksik belge sayılmaz.</div>}
                 <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-                  {BELGE_YUVALARI.map(({ turu, label }) => {
+                  {BELGE_YUVALARI.filter(y => !(sirket && y.turu === "SOZLESME")).map(({ turu, label }) => {
                     const b = getBelge(detailArac, turu);
                     return (
-                      <div key={turu} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px" }}>
+                      <div key={turu} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
                         <span style={{ fontWeight:700, fontSize:"13px", color:"#374151", minWidth:"150px" }}>{label}</span>
                         {b ? (
                           <>
                             <a href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
-                              style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>
+                              style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1, minWidth:"120px", overflowWrap:"anywhere" }}>
                               📥 {b.dosya_adi}
                             </a>
                             {canEdit && (
@@ -37749,10 +38220,10 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                   })}
                   {/* Diğer belgeler */}
                   {(detailArac.belgeler||[]).filter(b=>b.belge_turu==="DIGER").map(b => (
-                    <div key={b.id} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px" }}>
+                    <div key={b.id} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
                       <span style={{ fontSize:"12px", color:"#6b7280", minWidth:"150px" }}>📎 Ek Belge</span>
                       <a href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
-                        style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1 }}>📥 {b.dosya_adi}</a>
+                        style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1, minWidth:"120px", overflowWrap:"anywhere" }}>📥 {b.dosya_adi}</a>
                       {canEdit && (
                         <button onClick={()=>handleBelgeSil(b.id)}
                           style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>Sil</button>
@@ -37769,9 +38240,20 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                 </div>
               </div>
             )}
+
+            {/* ── TESLİM VE FOTOĞRAFLAR ── */}
+            {modalTab === "TESLIM" && selected && detailArac && (
+              <AracTeslimSekmesi arac={detailArac} canEdit={canEdit} canDelete={canDelete} projeler={projeler} />
+            )}
+
+            {/* ── LASTİKLER ── */}
+            {modalTab === "LASTIK" && selected && detailArac && (
+              <AracLastikSekmesi arac={detailArac} canEdit={canEdit} canDelete={canDelete} />
+            )}
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

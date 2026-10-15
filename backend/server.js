@@ -8895,7 +8895,7 @@ app.get("/finance/marka-sabit-giderler", authMiddleware, async (req, res) => {
       pool.query(`SELECT ad, COALESCE(aylik_kira,0) AS tutar FROM ofis_depo
         WHERE durum='AKTİF' AND COALESCE(aylik_kira,0) > 0 ORDER BY tutar DESC`).catch(() => ({ rows: [] })),
       pool.query(`SELECT plaka AS ad, COALESCE(aylik_kira,0) AS tutar FROM araclar
-        WHERE durum='AKTİF' AND COALESCE(aylik_kira,0) > 0 ORDER BY tutar DESC`).catch(() => ({ rows: [] })),
+        WHERE durum='AKTİF' AND COALESCE(aylik_kira,0) > 0 AND COALESCE(mulkiyet_turu,'KIRALIK') <> 'SIRKET' ORDER BY tutar DESC`).catch(() => ({ rows: [] })),
       // Yalnız kadrolu (Şimşek tipi) personel — ISG için kayıtlı taşeron
       // ekipleri maaşlı kadro değildir, kişi sayısına girmez
       pool.query(`SELECT COUNT(*)::int AS kisi, COALESCE(SUM(net_maas),0) AS toplam FROM personel
@@ -19890,6 +19890,33 @@ async function ensureAracKmTable() {
   await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS depozito_tarihi DATE`).catch(() => {});
   await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS depozito_iade_tarihi DATE`).catch(() => {});
   await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS depozito_not TEXT`).catch(() => {});
+  /* 15.10.2026 (Orhan): MÜLKİYET AYRIMI — KIRALIK (varsayılan) / SIRKET. Şirket aracında kira
+     alanları gösterilmez, kira borcu/vadesi üretilmez; ruhsat/sigorta/muayene/KM takibi sürer.
+     Araç sahibi (sahip_firma) ile sürücü (surucu) ayrı alanlardır. */
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS mulkiyet_turu TEXT DEFAULT 'KIRALIK'`).catch(() => {});
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS sahip_firma TEXT`).catch(() => {});
+  /* Teslim / proje başlangıç kayıtları + fotoğrafları. Teslim tarihi (tarih) ile yükleme
+     zamanı (created_at) ayrı tutulur; her teslim ayrı kayıt, eski fotoğraflar üzerine yazılmaz. */
+  await pool.query(`CREATE TABLE IF NOT EXISTS arac_teslim (
+      id SERIAL PRIMARY KEY, arac_id INTEGER NOT NULL, tur TEXT DEFAULT 'BASLANGIC',
+      proje TEXT, tarih DATE, km NUMERIC, teslim_eden TEXT, teslim_alan TEXT, aciklama TEXT,
+      olusturan TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, guncelleyen TEXT, updated_at TIMESTAMP)`).catch(() => {});
+  await pool.query(`CREATE TABLE IF NOT EXISTS arac_teslim_foto (
+      id SERIAL PRIMARY KEY, teslim_id INTEGER NOT NULL, arac_id INTEGER NOT NULL, kategori TEXT,
+      dosya_adi TEXT, dosya_yolu TEXT, aciklama TEXT, yukleyen TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(() => {});
+  /* Lastik takımları (yazlık/kışlık/dört mevsim ayrı kayıt) + takma-sökme geçmişi */
+  await pool.query(`CREATE TABLE IF NOT EXISTS arac_lastik (
+      id SERIAL PRIMARY KEY, arac_id INTEGER NOT NULL, tur TEXT, marka TEXT, model TEXT, ebat TEXT, adet INTEGER, dot TEXT,
+      satin_alma_tarihi DATE, durum TEXT DEFAULT 'DEPODA', takilma_tarihi DATE, takilma_km NUMERIC, sokulme_tarihi DATE, sokulme_km NUMERIC,
+      depolama_yeri TEXT, teslim_kisi TEXT, notlar TEXT, foto_yolu TEXT, belge_yolu TEXT,
+      olusturan TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP)`).catch(() => {});
+  await pool.query(`CREATE TABLE IF NOT EXISTS arac_lastik_gecmis (
+      id SERIAL PRIMARY KEY, lastik_id INTEGER, arac_id INTEGER, olay TEXT, tarih DATE, km NUMERIC, aciklama TEXT, kullanici TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(() => {});
+  /* İşlem geçmişi: teslim/foto/lastik/mülkiyet değişiklikleri kim-ne zaman */
+  await pool.query(`CREATE TABLE IF NOT EXISTS arac_islem_log (
+      id SERIAL PRIMARY KEY, arac_id INTEGER, kaynak TEXT, kaynak_id INTEGER, islem TEXT, detay TEXT, kullanici TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(() => {});
 }
 
 // Eski araç satırını geçmişe yazar (olay: PLAKA_DEGISTI / SURUCU_DEGISTI / KIRA_DEGISTI / PASIFE_ALINDI)
@@ -19911,7 +19938,12 @@ app.get("/hr/araclar", async (req, res) => {
     SELECT a.*, json_agg(b ORDER BY b.belge_turu) FILTER (WHERE b.id IS NOT NULL) as belgeler,
       (SELECT json_agg(json_build_object('id', k.id, 'km', k.km, 'tarih', to_char(k.tarih,'YYYY-MM-DD'))
               ORDER BY k.tarih DESC, k.id DESC)
-         FROM arac_km_log k WHERE k.arac_id = a.id) AS km_log
+         FROM arac_km_log k WHERE k.arac_id = a.id) AS km_log,
+      (SELECT json_agg(json_build_object('id', l.id, 'tur', l.tur, 'marka', l.marka, 'model', l.model, 'ebat', l.ebat,
+                'durum', l.durum, 'depolama_yeri', l.depolama_yeri) ORDER BY (l.durum='ARAC_UZERINDE') DESC, l.id)
+         FROM arac_lastik l WHERE l.arac_id = a.id) AS lastikler,
+      (SELECT COUNT(*)::int FROM arac_teslim t WHERE t.arac_id = a.id) AS teslim_sayisi,
+      (SELECT COUNT(*)::int FROM arac_teslim_foto f WHERE f.arac_id = a.id) AS foto_sayisi
     FROM araclar a
     LEFT JOIN arac_belgeler b ON b.arac_id = a.id
     GROUP BY a.id ORDER BY a.plaka
@@ -19945,26 +19977,28 @@ app.post("/hr/araclar", async (req, res) => {
     const { plaka, marka, model, yil, tip, kiralama_firmasi, sozlesme_no,
             kira_baslangic, kira_bitis, aylik_kira, bolge, surucu,
             sigorta_bitis, muayene_bitis, durum, notlar, odeme_tipi, donem_gunu,
-            depozito_tutar, depozito_tarihi, depozito_iade_tarihi, depozito_not } = req.body;
+            depozito_tutar, depozito_tarihi, depozito_iade_tarihi, depozito_not, mulkiyet_turu, sahip_firma } = req.body;
     await ensureAracKmTable().catch(() => {});
+    const mulkiyet = String(mulkiyet_turu || "KIRALIK").toUpperCase() === "SIRKET" ? "SIRKET" : "KIRALIK";
     const norm = (plaka || "").replace(/\s+/g, "").toUpperCase();
     const { rows } = await pool.query(
       `INSERT INTO araclar (plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
         kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu,
-        depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18,$19,$20,$21,$22)
+        depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not,mulkiyet_turu,sahip_firma)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18,$19,$20,$21,$22,$23,$24)
        ON CONFLICT (plaka) DO UPDATE SET
          marka=$2,model=$3,yil=$4,tip=$5,kiralama_firmasi=$6,sozlesme_no=$7,
          kira_baslangic=$8,kira_bitis=$9,aylik_kira=$10,bolge=$11,surucu=$12,
          sigorta_bitis=$13,muayene_bitis=$14,durum=$15,notlar=$16,aktif=true,odeme_tipi=$17,donem_gunu=$18,
-         depozito_tutar=$19,depozito_tarihi=$20,depozito_iade_tarihi=$21,depozito_not=$22
+         depozito_tutar=$19,depozito_tarihi=$20,depozito_iade_tarihi=$21,depozito_not=$22,mulkiyet_turu=$23,sahip_firma=$24
        RETURNING *`,
       // yil integer kolonu: boş string "" gelirse null'a çevrilir (form "Seçin" kalabilir)
       [norm,marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
        sigorta_bitis||null,muayene_bitis||null,durum||'AKTİF',notlar,
        odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN', Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : 15,
-       depozito_tutar ? Number(depozito_tutar) : null, depozito_tarihi||null, depozito_iade_tarihi||null, depozito_not||null]
+       depozito_tutar ? Number(depozito_tutar) : null, depozito_tarihi||null, depozito_iade_tarihi||null, depozito_not||null,
+       mulkiyet, sahip_firma||null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -19975,7 +20009,8 @@ app.put("/hr/araclar/:id", async (req, res) => {
     const { plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
             kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,
             sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu,
-            depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not } = req.body;
+            depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not,mulkiyet_turu,sahip_firma } = req.body;
+    const mulkiyet = mulkiyet_turu === undefined ? null : (String(mulkiyet_turu || "KIRALIK").toUpperCase() === "SIRKET" ? "SIRKET" : "KIRALIK");
     // Geçmiş kaydı: plaka / sürücü / kira / aktiflik değişiyorsa eski hâli sakla
     try {
       await ensureAracKmTable();
@@ -19993,6 +20028,9 @@ app.put("/hr/araclar/:id", async (req, res) => {
           await aracGecmisYaz(eski, "KIRA_DEGISTI", `Aylık kira ${kiraE} → ${kiraY}`);
         else if (eski.aktif && aktif === false)
           await aracGecmisYaz(eski, "PASIFE_ALINDI", notlar || null);
+        // Mülkiyet değişimi: sürücü/kira geçmişi aynen kalır, yalnız günlüğe yazılır
+        if (mulkiyet && mulkiyet !== String(eski.mulkiyet_turu || "KIRALIK").toUpperCase())
+          await aracIslemLog(req, eski.id, "arac", eski.id, "MULKIYET_DEGISTI", `${eski.mulkiyet_turu || "KIRALIK"} → ${mulkiyet}${sahip_firma ? " · sahip " + sahip_firma : ""}`);
       }
     } catch (e) { console.error("[arac-gecmis put]", e.message); }
     const { rows } = await pool.query(
@@ -20001,14 +20039,16 @@ app.put("/hr/araclar/:id", async (req, res) => {
         aylik_kira=$11,bolge=$12,surucu=$13,sigorta_bitis=$14,muayene_bitis=$15,
         durum=$16,notlar=$17,aktif=COALESCE($18,aktif),
         odeme_tipi=COALESCE($19,odeme_tipi),donem_gunu=COALESCE($20,donem_gunu),
-        depozito_tutar=$21,depozito_tarihi=$22,depozito_iade_tarihi=$23,depozito_not=$24 WHERE id=$1 RETURNING *`,
+        depozito_tutar=$21,depozito_tarihi=$22,depozito_iade_tarihi=$23,depozito_not=$24,
+        mulkiyet_turu=COALESCE($25,mulkiyet_turu,'KIRALIK'),sahip_firma=CASE WHEN $25 IS NULL THEN sahip_firma ELSE $26 END WHERE id=$1 RETURNING *`,
       [req.params.id,plaka?plaka.replace(/\s+/g,"").toUpperCase():null,
        marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
        sigorta_bitis||null,muayene_bitis||null,durum,notlar,aktif??null,
        odeme_tipi ? (odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN') : null,
        Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null,
-       depozito_tutar ? Number(depozito_tutar) : null, depozito_tarihi||null, depozito_iade_tarihi||null, depozito_not||null]
+       depozito_tutar ? Number(depozito_tutar) : null, depozito_tarihi||null, depozito_iade_tarihi||null, depozito_not||null,
+       mulkiyet, sahip_firma||null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -20129,6 +20169,324 @@ app.get("/hr/arac-belge/file/:filename", async (req, res) => {
     const b = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
     if (b.rows[0]?.dosya_yolu?.startsWith("http")) return res.redirect(b.rows[0].dosya_yolu);
     res.status(404).json({ error: "Dosya yok" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── ARAÇ: MÜLKİYET · TESLİM FOTOĞRAFLARI · LASTİK TAKİBİ (15.10.2026, Orhan) ─────────────
+// Tablolar ensureAracKmTable() içinde açılır. Fotoğraf/belge dosyaları mevcut Supabase
+// depolama altyapısıyla (uploadToStorage, "arac-belgeler" klasörü) saklanır.
+// Erişim: alt marka kullanıcısı (hw_yukleme=false) yalnız kendi bordro kümesindeki
+// firmanın araçlarına ulaşır; ERC/admin tüm araçları görür (mevcut araç listesi kuralı).
+const ARAC_FOTO_KATEGORILER = ["ON", "ARKA", "SAG", "SOL", "IC_KABIN", "KM_GOSTERGE", "LASTIKLER", "HASAR_DIGER"];
+const ARAC_LASTIK_TURLER = ["YAZLIK", "KISLIK", "DORT_MEVSIM"];
+const ARAC_LASTIK_DURUMLAR = ["ARAC_UZERINDE", "DEPODA", "DEGISIM_GEREKLI", "KULLANIM_DISI"];
+const ARAC_SIL_YETKILI = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "nurcan.kus@simsektel.com", "duzgun.simsek@simsektel.com"];
+const aracFotoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 20 } });
+
+function aracKullanici(req) {
+  const u = optionalAuth(req);
+  return { email: String(u?.email || "").toLowerCase(), role: String(u?.role || "").toLowerCase(), user: u };
+}
+// Araç bu kullanıcının kapsamında mı? (null → araç yok)
+async function aracErisim(req, aracId) {
+  const r = await pool.query(`SELECT id, plaka, firma FROM araclar WHERE id=$1`, [aracId]);
+  const a = r.rows[0];
+  if (!a) return { ok: false, status: 404, error: "Araç bulunamadı" };
+  const k = altMarkaKapsam(req);
+  if (k) {
+    const firma = String(a.firma || "AHY").toUpperCase();
+    if (!k.bordro.map(x => String(x).toUpperCase()).includes(firma))
+      return { ok: false, status: 403, error: "Bu araç firmanızın kapsamında değil" };
+  }
+  return { ok: true, arac: a };
+}
+function aracSilebilir(req) {
+  const { email, role } = aracKullanici(req);
+  return ARAC_SIL_YETKILI.includes(email) || ["admin", "platform_admin", "direktor"].includes(role);
+}
+async function aracIslemLog(req, aracId, kaynak, kaynakId, islem, detay) {
+  const { email } = aracKullanici(req);
+  await pool.query(
+    `INSERT INTO arac_islem_log (arac_id, kaynak, kaynak_id, islem, detay, kullanici) VALUES ($1,$2,$3,$4,$5,$6)`,
+    [aracId, kaynak, kaynakId || null, islem, detay ? String(detay).slice(0, 2000) : null, email || null]
+  ).catch(e => console.error("[arac-islem-log]", e.message));
+}
+const aracTarih = (v) => (String(v || "").match(/^\d{4}-\d{2}-\d{2}$/) ? v : null);
+const aracSayi = (v) => (v === "" || v === null || v === undefined || isNaN(Number(v)) ? null : Number(v));
+
+// Proje/görev listesi: önceki teslim kayıtları + rollout proje kodları (datalist için)
+app.get("/hr/arac-teslim-projeler", async (req, res) => {
+  try {
+    await ensureAracKmTable().catch(() => {});
+    const a = await pool.query(`SELECT DISTINCT proje FROM arac_teslim WHERE COALESCE(proje,'') <> '' ORDER BY 1`).catch(() => ({ rows: [] }));
+    const b = await pool.query(`SELECT DISTINCT project AS proje FROM master_works WHERE COALESCE(project,'') <> '' ORDER BY 1 LIMIT 200`).catch(() => ({ rows: [] }));
+    const set = new Set([...a.rows, ...b.rows].map(r => r.proje).filter(Boolean));
+    res.json([...set].sort());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Teslim kayıtları ──
+app.get("/hr/araclar/:id/teslim", async (req, res) => {
+  try {
+    await ensureAracKmTable().catch(() => {});
+    const er = await aracErisim(req, req.params.id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    const { rows } = await pool.query(`
+      SELECT t.id, t.arac_id, t.tur, t.proje, to_char(t.tarih,'YYYY-MM-DD') AS tarih, t.km, t.teslim_eden, t.teslim_alan,
+             t.aciklama, t.olusturan, to_char(t.created_at,'YYYY-MM-DD HH24:MI') AS olusturma, t.guncelleyen,
+             to_char(t.updated_at,'YYYY-MM-DD HH24:MI') AS guncelleme,
+             COALESCE((SELECT json_agg(json_build_object('id', f.id, 'kategori', f.kategori, 'dosya_adi', f.dosya_adi,
+                        'url', f.dosya_yolu, 'aciklama', f.aciklama, 'yukleyen', f.yukleyen,
+                        'yukleme', to_char(f.created_at,'YYYY-MM-DD HH24:MI')) ORDER BY f.id)
+                       FROM arac_teslim_foto f WHERE f.teslim_id = t.id), '[]'::json) AS fotolar
+      FROM arac_teslim t WHERE t.arac_id=$1
+      ORDER BY t.tarih DESC NULLS LAST, t.id DESC`, [req.params.id]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/hr/araclar/:id/teslim", async (req, res) => {
+  try {
+    await ensureAracKmTable().catch(() => {});
+    const er = await aracErisim(req, req.params.id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    const { tur, proje, tarih, km, teslim_eden, teslim_alan, aciklama } = req.body || {};
+    const t = ["BASLANGIC", "DEVIR", "IADE"].includes(String(tur || "").toUpperCase()) ? String(tur).toUpperCase() : "BASLANGIC";
+    const { email } = aracKullanici(req);
+    const { rows } = await pool.query(
+      `INSERT INTO arac_teslim (arac_id, tur, proje, tarih, km, teslim_eden, teslim_alan, aciklama, olusturan)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [req.params.id, t, proje || null, aracTarih(tarih), aracSayi(km), teslim_eden || null, teslim_alan || null, aciklama || null, email || null]);
+    await aracIslemLog(req, req.params.id, "teslim", rows[0].id, "TESLIM_EKLENDI", `${t} · ${proje || "-"} · ${tarih || "-"} · ${teslim_eden || "-"} → ${teslim_alan || "-"}`);
+    res.json({ ok: true, id: rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put("/hr/arac-teslim/:tid", async (req, res) => {
+  try {
+    const t0 = await pool.query(`SELECT * FROM arac_teslim WHERE id=$1`, [req.params.tid]);
+    if (!t0.rows[0]) return res.status(404).json({ error: "Teslim kaydı yok" });
+    const er = await aracErisim(req, t0.rows[0].arac_id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    const { tur, proje, tarih, km, teslim_eden, teslim_alan, aciklama } = req.body || {};
+    const t = ["BASLANGIC", "DEVIR", "IADE"].includes(String(tur || "").toUpperCase()) ? String(tur).toUpperCase() : t0.rows[0].tur;
+    const { email } = aracKullanici(req);
+    await pool.query(
+      `UPDATE arac_teslim SET tur=$2, proje=$3, tarih=$4, km=$5, teslim_eden=$6, teslim_alan=$7, aciklama=$8, guncelleyen=$9, updated_at=NOW() WHERE id=$1`,
+      [req.params.tid, t, proje || null, aracTarih(tarih), aracSayi(km), teslim_eden || null, teslim_alan || null, aciklama || null, email || null]);
+    await aracIslemLog(req, t0.rows[0].arac_id, "teslim", req.params.tid, "TESLIM_GUNCELLENDI", JSON.stringify({ eski: { tur: t0.rows[0].tur, proje: t0.rows[0].proje, tarih: t0.rows[0].tarih, km: t0.rows[0].km }, yeni: { tur: t, proje, tarih, km } }));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete("/hr/arac-teslim/:tid", async (req, res) => {
+  try {
+    if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
+    const t0 = await pool.query(`SELECT * FROM arac_teslim WHERE id=$1`, [req.params.tid]);
+    if (!t0.rows[0]) return res.status(404).json({ error: "Teslim kaydı yok" });
+    const er = await aracErisim(req, t0.rows[0].arac_id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    const f = await pool.query(`SELECT dosya_yolu FROM arac_teslim_foto WHERE teslim_id=$1`, [req.params.tid]);
+    for (const r of f.rows) await deleteFromStorage(r.dosya_yolu).catch(() => {});
+    await pool.query(`DELETE FROM arac_teslim_foto WHERE teslim_id=$1`, [req.params.tid]);
+    await pool.query(`DELETE FROM arac_teslim WHERE id=$1`, [req.params.tid]);
+    await aracIslemLog(req, t0.rows[0].arac_id, "teslim", req.params.tid, "TESLIM_SILINDI", `${t0.rows[0].tur} · ${t0.rows[0].proje || "-"} · ${f.rows.length} fotoğraf`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Teslim fotoğrafları (çoklu yükleme; her dosya ayrı değerlendirilir, başarısız olan kaydedilmez) ──
+app.post("/hr/arac-teslim/:tid/foto", (req, res, next) => {
+  aracFotoUpload.array("foto", 20)(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "Dosya 15 MB'ı aşıyor" : err.message });
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const t0 = await pool.query(`SELECT * FROM arac_teslim WHERE id=$1`, [req.params.tid]);
+    if (!t0.rows[0]) return res.status(404).json({ error: "Teslim kaydı yok" });
+    const er = await aracErisim(req, t0.rows[0].arac_id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    if (!req.files?.length) return res.status(400).json({ error: "Dosya yok" });
+    let meta = [];
+    try { meta = JSON.parse(req.body.meta || "[]"); } catch { meta = []; }
+    const kategoriOrtak = ARAC_FOTO_KATEGORILER.includes(String(req.body.kategori || "")) ? req.body.kategori : "HASAR_DIGER";
+    const { email } = aracKullanici(req);
+    const eklenen = [], hatalar = [];
+    for (let i = 0; i < req.files.length; i++) {
+      const f = req.files[i];
+      const ad = utf8Name(f.originalname || `foto_${i + 1}`);
+      try {
+        const mt = String(f.mimetype || "");
+        if (!(mt.startsWith("image/") || mt === "application/pdf")) throw new Error("Yalnız görsel veya PDF yüklenebilir");
+        if (!f.size) throw new Error("Boş dosya");
+        const kat = ARAC_FOTO_KATEGORILER.includes(String(meta[i]?.kategori || "")) ? meta[i].kategori : kategoriOrtak;
+        const fname = `teslim_${req.params.tid}_${Date.now()}_${i}-${ad}`;
+        const { url } = await uploadToStorage("arac-belgeler", fname, f.buffer, f.mimetype);
+        const r = await pool.query(
+          `INSERT INTO arac_teslim_foto (teslim_id, arac_id, kategori, dosya_adi, dosya_yolu, aciklama, yukleyen)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [req.params.tid, t0.rows[0].arac_id, kat, ad, url, meta[i]?.aciklama || null, email || null]);
+        eklenen.push({ id: r.rows[0].id, dosya_adi: ad, kategori: kat, url });
+      } catch (e) { hatalar.push({ dosya_adi: ad, hata: e.message }); }
+    }
+    if (eklenen.length) await aracIslemLog(req, t0.rows[0].arac_id, "teslim_foto", req.params.tid, "FOTO_EKLENDI", `${eklenen.length} fotoğraf (${eklenen.map(x => x.kategori).join(", ")})`);
+    res.json({ ok: eklenen.length > 0, eklenen, hatalar });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put("/hr/arac-teslim-foto/:fid", async (req, res) => {
+  try {
+    const f0 = await pool.query(`SELECT * FROM arac_teslim_foto WHERE id=$1`, [req.params.fid]);
+    if (!f0.rows[0]) return res.status(404).json({ error: "Fotoğraf yok" });
+    const er = await aracErisim(req, f0.rows[0].arac_id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    const kat = ARAC_FOTO_KATEGORILER.includes(String(req.body?.kategori || "")) ? req.body.kategori : f0.rows[0].kategori;
+    const acik = req.body?.aciklama === undefined ? f0.rows[0].aciklama : (req.body.aciklama || null);
+    await pool.query(`UPDATE arac_teslim_foto SET kategori=$2, aciklama=$3 WHERE id=$1`, [req.params.fid, kat, acik]);
+    await aracIslemLog(req, f0.rows[0].arac_id, "teslim_foto", req.params.fid, "FOTO_GUNCELLENDI", `${f0.rows[0].kategori}→${kat} · ${acik || ""}`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete("/hr/arac-teslim-foto/:fid", async (req, res) => {
+  try {
+    if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
+    const f0 = await pool.query(`SELECT * FROM arac_teslim_foto WHERE id=$1`, [req.params.fid]);
+    if (!f0.rows[0]) return res.status(404).json({ error: "Fotoğraf yok" });
+    const er = await aracErisim(req, f0.rows[0].arac_id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    await deleteFromStorage(f0.rows[0].dosya_yolu).catch(() => {});
+    await pool.query(`DELETE FROM arac_teslim_foto WHERE id=$1`, [req.params.fid]);
+    await aracIslemLog(req, f0.rows[0].arac_id, "teslim_foto", req.params.fid, "FOTO_SILINDI", `${f0.rows[0].kategori} · ${f0.rows[0].dosya_adi}`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Lastik takımları ──
+const lastikSatir = (b, eski = {}) => ({
+  tur: ARAC_LASTIK_TURLER.includes(String(b.tur || "").toUpperCase()) ? String(b.tur).toUpperCase() : (eski.tur || "YAZLIK"),
+  marka: b.marka ?? eski.marka ?? null, model: b.model ?? eski.model ?? null, ebat: b.ebat ?? eski.ebat ?? null,
+  adet: b.adet === undefined ? (eski.adet ?? null) : aracSayi(b.adet),
+  dot: b.dot ?? eski.dot ?? null,
+  satin_alma_tarihi: b.satin_alma_tarihi === undefined ? (eski.satin_alma_tarihi || null) : aracTarih(b.satin_alma_tarihi),
+  durum: ARAC_LASTIK_DURUMLAR.includes(String(b.durum || "").toUpperCase()) ? String(b.durum).toUpperCase() : (eski.durum || "DEPODA"),
+  takilma_tarihi: b.takilma_tarihi === undefined ? (eski.takilma_tarihi || null) : aracTarih(b.takilma_tarihi),
+  takilma_km: b.takilma_km === undefined ? (eski.takilma_km ?? null) : aracSayi(b.takilma_km),
+  sokulme_tarihi: b.sokulme_tarihi === undefined ? (eski.sokulme_tarihi || null) : aracTarih(b.sokulme_tarihi),
+  sokulme_km: b.sokulme_km === undefined ? (eski.sokulme_km ?? null) : aracSayi(b.sokulme_km),
+  depolama_yeri: b.depolama_yeri ?? eski.depolama_yeri ?? null, teslim_kisi: b.teslim_kisi ?? eski.teslim_kisi ?? null,
+  notlar: b.notlar ?? eski.notlar ?? null,
+});
+async function lastikGecmisYaz(req, lastikId, aracId, olay, tarih, km, aciklama) {
+  const { email } = aracKullanici(req);
+  await pool.query(`INSERT INTO arac_lastik_gecmis (lastik_id, arac_id, olay, tarih, km, aciklama, kullanici) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [lastikId, aracId, olay, tarih || null, km ?? null, aciklama || null, email || null]).catch(e => console.error("[lastik-gecmis]", e.message));
+}
+app.get("/hr/araclar/:id/lastik", async (req, res) => {
+  try {
+    await ensureAracKmTable().catch(() => {});
+    const er = await aracErisim(req, req.params.id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    const { rows } = await pool.query(`
+      SELECT l.*, to_char(l.satin_alma_tarihi,'YYYY-MM-DD') AS satin_alma_tarihi, to_char(l.takilma_tarihi,'YYYY-MM-DD') AS takilma_tarihi,
+             to_char(l.sokulme_tarihi,'YYYY-MM-DD') AS sokulme_tarihi, to_char(l.created_at,'YYYY-MM-DD HH24:MI') AS olusturma,
+             COALESCE((SELECT json_agg(json_build_object('id', g.id, 'olay', g.olay, 'tarih', to_char(g.tarih,'YYYY-MM-DD'), 'km', g.km,
+                        'aciklama', g.aciklama, 'kullanici', g.kullanici, 'zaman', to_char(g.created_at,'YYYY-MM-DD HH24:MI')) ORDER BY g.id DESC)
+                       FROM arac_lastik_gecmis g WHERE g.lastik_id = l.id), '[]'::json) AS gecmis
+      FROM arac_lastik l WHERE l.arac_id=$1 ORDER BY (l.durum='ARAC_UZERINDE') DESC, l.id`, [req.params.id]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/hr/araclar/:id/lastik", async (req, res) => {
+  try {
+    await ensureAracKmTable().catch(() => {});
+    const er = await aracErisim(req, req.params.id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    const v = lastikSatir(req.body || {});
+    const { email } = aracKullanici(req);
+    const { rows } = await pool.query(
+      `INSERT INTO arac_lastik (arac_id, tur, marka, model, ebat, adet, dot, satin_alma_tarihi, durum, takilma_tarihi, takilma_km,
+         sokulme_tarihi, sokulme_km, depolama_yeri, teslim_kisi, notlar, olusturan)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+      [req.params.id, v.tur, v.marka, v.model, v.ebat, v.adet, v.dot, v.satin_alma_tarihi, v.durum, v.takilma_tarihi, v.takilma_km,
+       v.sokulme_tarihi, v.sokulme_km, v.depolama_yeri, v.teslim_kisi, v.notlar, email || null]);
+    const lid = rows[0].id;
+    await lastikGecmisYaz(req, lid, req.params.id, "EKLENDI", null, null, `${v.tur} · ${[v.marka, v.model, v.ebat].filter(Boolean).join(" ")} · durum ${v.durum}`);
+    if (v.durum === "ARAC_UZERINDE") await lastikGecmisYaz(req, lid, req.params.id, "TAKILDI", v.takilma_tarihi, v.takilma_km, "Kayıt açılışında araç üzerinde");
+    await aracIslemLog(req, req.params.id, "lastik", lid, "LASTIK_EKLENDI", `${v.tur} ${v.ebat || ""} · ${v.durum}`);
+    res.json({ ok: true, id: lid });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put("/hr/arac-lastik/:lid", async (req, res) => {
+  try {
+    const l0 = await pool.query(`SELECT * FROM arac_lastik WHERE id=$1`, [req.params.lid]);
+    const eski = l0.rows[0];
+    if (!eski) return res.status(404).json({ error: "Lastik kaydı yok" });
+    const er = await aracErisim(req, eski.arac_id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    const v = lastikSatir(req.body || {}, eski);
+    await pool.query(
+      `UPDATE arac_lastik SET tur=$2, marka=$3, model=$4, ebat=$5, adet=$6, dot=$7, satin_alma_tarihi=$8, durum=$9, takilma_tarihi=$10,
+         takilma_km=$11, sokulme_tarihi=$12, sokulme_km=$13, depolama_yeri=$14, teslim_kisi=$15, notlar=$16, updated_at=NOW() WHERE id=$1`,
+      [req.params.lid, v.tur, v.marka, v.model, v.ebat, v.adet, v.dot, v.satin_alma_tarihi, v.durum, v.takilma_tarihi, v.takilma_km,
+       v.sokulme_tarihi, v.sokulme_km, v.depolama_yeri, v.teslim_kisi, v.notlar]);
+    // Takma / sökme geçmişi — önceki bilgi kaybolmaz
+    if (eski.durum !== "ARAC_UZERINDE" && v.durum === "ARAC_UZERINDE")
+      await lastikGecmisYaz(req, eski.id, eski.arac_id, "TAKILDI", v.takilma_tarihi, v.takilma_km, `${eski.durum} → ARAC_UZERINDE`);
+    else if (eski.durum === "ARAC_UZERINDE" && v.durum !== "ARAC_UZERINDE")
+      await lastikGecmisYaz(req, eski.id, eski.arac_id, "SOKULDU", v.sokulme_tarihi, v.sokulme_km, `ARAC_UZERINDE → ${v.durum}${v.depolama_yeri ? " · " + v.depolama_yeri : ""}`);
+    else {
+      const degisen = Object.keys(v).filter(k => String(v[k] ?? "") !== String(eski[k] instanceof Date ? ymdYerel(eski[k]) : (eski[k] ?? "")));
+      if (degisen.length) await lastikGecmisYaz(req, eski.id, eski.arac_id, "GUNCELLENDI", null, null, degisen.map(k => `${k}: ${eski[k] instanceof Date ? ymdYerel(eski[k]) : (eski[k] ?? "—")} → ${v[k] ?? "—"}`).join("; "));
+    }
+    await aracIslemLog(req, eski.arac_id, "lastik", eski.id, "LASTIK_GUNCELLENDI", `${v.tur} · ${eski.durum} → ${v.durum}`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete("/hr/arac-lastik/:lid", async (req, res) => {
+  try {
+    if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
+    const l0 = await pool.query(`SELECT * FROM arac_lastik WHERE id=$1`, [req.params.lid]);
+    if (!l0.rows[0]) return res.status(404).json({ error: "Lastik kaydı yok" });
+    const er = await aracErisim(req, l0.rows[0].arac_id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    for (const y of [l0.rows[0].foto_yolu, l0.rows[0].belge_yolu]) if (y) await deleteFromStorage(y).catch(() => {});
+    await pool.query(`DELETE FROM arac_lastik WHERE id=$1`, [req.params.lid]);
+    await aracIslemLog(req, l0.rows[0].arac_id, "lastik", req.params.lid, "LASTIK_SILINDI", `${l0.rows[0].tur} ${l0.rows[0].ebat || ""} (geçmiş kayıtları tutuldu)`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Lastik fotoğrafı / belgesi (tip=foto | belge)
+app.post("/hr/arac-lastik/:lid/dosya", (req, res, next) => {
+  aracFotoUpload.single("dosya")(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "Dosya 15 MB'ı aşıyor" : err.message });
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const l0 = await pool.query(`SELECT * FROM arac_lastik WHERE id=$1`, [req.params.lid]);
+    if (!l0.rows[0]) return res.status(404).json({ error: "Lastik kaydı yok" });
+    const er = await aracErisim(req, l0.rows[0].arac_id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    if (!req.file) return res.status(400).json({ error: "Dosya yok" });
+    const tip = req.body?.tip === "belge" ? "belge" : "foto";
+    const mt = String(req.file.mimetype || "");
+    if (tip === "foto" && !mt.startsWith("image/")) return res.status(400).json({ error: "Fotoğraf için yalnız görsel yüklenebilir" });
+    if (tip === "belge" && !(mt.startsWith("image/") || mt === "application/pdf")) return res.status(400).json({ error: "Belge için görsel veya PDF yükleyin" });
+    const kol = tip === "belge" ? "belge_yolu" : "foto_yolu";
+    if (l0.rows[0][kol]) await deleteFromStorage(l0.rows[0][kol]).catch(() => {});
+    const fname = `lastik_${req.params.lid}_${tip}_${Date.now()}-${utf8Name(req.file.originalname)}`;
+    const { url } = await uploadToStorage("arac-belgeler", fname, req.file.buffer, req.file.mimetype);
+    await pool.query(`UPDATE arac_lastik SET ${kol}=$2, updated_at=NOW() WHERE id=$1`, [req.params.lid, url]);
+    await aracIslemLog(req, l0.rows[0].arac_id, "lastik", req.params.lid, tip === "belge" ? "LASTIK_BELGE" : "LASTIK_FOTO", utf8Name(req.file.originalname));
+    res.json({ ok: true, url });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// İşlem geçmişi (teslim / foto / lastik / mülkiyet)
+app.get("/hr/araclar/:id/islem-log", async (req, res) => {
+  try {
+    const er = await aracErisim(req, req.params.id);
+    if (!er.ok) return res.status(er.status).json({ error: er.error });
+    const { rows } = await pool.query(`SELECT id, kaynak, kaynak_id, islem, detay, kullanici, to_char(created_at,'YYYY-MM-DD HH24:MI') AS zaman
+      FROM arac_islem_log WHERE arac_id=$1 ORDER BY id DESC LIMIT 200`, [req.params.id]);
+    res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
