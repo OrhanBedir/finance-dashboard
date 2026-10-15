@@ -21242,10 +21242,15 @@ pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS taseron_adi TEXT`).catc
 pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS aktif BOOLEAN DEFAULT true`).catch(() => {});
 pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS sablon_kodu TEXT`).catch(() => {});
 pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ekipler_sablon_kodu_uq ON ekipler (sablon_kodu) WHERE sablon_kodu IS NOT NULL`).catch(() => {});
+// 16.10.2026 (Orhan): TEKNO (TEK/Teknocenter) ekipleri bölgeden bağımsız tek sıra: "TEKNO Ekip1, Ekip2 …".
+// ekip_sira kalıcıdır — bölge ya da sıralama değişince numara değişmez; ad ve bölge ayrı alanlardır.
+pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS ekip_sira INTEGER`).catch(() => {});
+pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ekipler_tekno_sira_uq ON ekipler (ekip_sira) WHERE ekip_sira IS NOT NULL`).catch(() => {});
+const TEKNO_FIRMA_MI = (t) => /^(TEK|TEKNO|TEKNOCENTER)$/i.test(String(t || "").trim());
 
 app.get("/hr/ekipler", async (req, res) => {
   try {
-    const r = await pool.query(`SELECT * FROM ekipler ORDER BY ekip_no`);
+    const r = await pool.query(`SELECT * FROM ekipler ORDER BY (ekip_sira IS NULL), ekip_sira, ekip_no`);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -21256,14 +21261,28 @@ app.post("/hr/ekipler", async (req, res) => {
     if (!no || no < 1) return res.status(400).json({ error: "Geçerli ekip no gerekli" });
     // aktif gönderilmediyse mevcut değer korunur; sablon_kodu bu uçtan değiştirilmez
     const aktif = typeof req.body.aktif === "boolean" ? req.body.aktif : null;
+    // TEKNO ekibi: ad boşsa sıradaki numara verilir (TEKNO EkipN); TEKNO adları benzersiz
+    let ad = String(req.body.ad || "").trim() || null;
+    const mevcut = (await pool.query(`SELECT ekip_sira, ad FROM ekipler WHERE ekip_no=$1`, [no])).rows[0];
+    let yeniSira = null;
+    if (TEKNO_FIRMA_MI(req.body.taseron_adi) && !ad && !mevcut?.ekip_sira) {
+      const nx = (await pool.query(`SELECT COALESCE(MAX(ekip_sira),0)+1 AS n FROM ekipler`)).rows[0].n;
+      ad = `TEKNO Ekip${nx}`; yeniSira = nx;
+    }
+    if (ad && /^TEKNO\b/i.test(ad)) {
+      const ayni = await pool.query(`SELECT ekip_no FROM ekipler WHERE ekip_no<>$1 AND LOWER(TRIM(ad))=LOWER($2)`, [no, ad]);
+      if (ayni.rows.length) return res.status(409).json({ error: `"${ad}" adı Ekip ${ayni.rows[0].ekip_no} tarafından kullanılıyor — TEKNO ekip adları benzersizdir` });
+    }
+    if (yeniSira) await pool.query(`UPDATE ekipler SET ekip_sira=$2 WHERE ekip_no=$1`, [no, yeniSira]).catch(() => {});
     const r = await pool.query(
       `INSERT INTO ekipler (ekip_no, plaka, bolge, aciklama, ad, taseron_adi, aktif)
        VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true))
        ON CONFLICT (ekip_no) DO UPDATE SET plaka=$2, bolge=$3, aciklama=$4, ad=$5, taseron_adi=$6,
          aktif=COALESCE($7, ekipler.aktif), updated_at=NOW()
        RETURNING *`,
-      [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null, req.body.ad || null,
+      [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null, ad,
        (req.body.taseron_adi || "").trim() || null, aktif]);
+    if (yeniSira && !r.rows[0].ekip_sira) { await pool.query(`UPDATE ekipler SET ekip_sira=$2 WHERE ekip_no=$1`, [no, yeniSira]).catch(() => {}); r.rows[0].ekip_sira = yeniSira; }
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -21286,12 +21305,12 @@ app.delete("/hr/ekipler/:no", async (req, res) => {
 const EKIP_SABLONLARI = [
   { kod: "IZM-FERRUMX-1",      ad: "Ekip 1",      taseron: "Ferrumx",      bolge: "İzmir"  },
   { kod: "IZM-FERRUMX-2",      ad: "Ekip 2",      taseron: "Ferrumx",      bolge: "İzmir"  },
-  { kod: "IZM-TEK-RF-1",       ad: "RF Ekibi 1",  taseron: "TEK",          bolge: "İzmir"  },
+  { kod: "IZM-TEK-RF-1",       ad: "TEKNO Ekip1", sira: 1, taseron: "TEK", bolge: "İzmir"  },
   { kod: "IZM-AKCAN-1",        ad: "Ekip 1",      taseron: "Akçan",        bolge: "İzmir"  },
-  { kod: "ANK-TEK-RF-1",       ad: "RF Ekibi 1",  taseron: "TEK",          bolge: "Ankara" },
-  { kod: "ANK-TEK-RF-2",       ad: "RF Ekibi 2",  taseron: "TEK",          bolge: "Ankara" },
-  { kod: "BUR-TEK-RF-1",       ad: "RF Ekibi 1",  taseron: "TEK",          bolge: "Bursa"  },
-  { kod: "BUR-TEK-RF-2",       ad: "RF Ekibi 2",  taseron: "TEK",          bolge: "Bursa"  },
+  { kod: "ANK-TEK-RF-1",       ad: "TEKNO Ekip2", sira: 2, taseron: "TEK", bolge: "Ankara" },
+  { kod: "ANK-TEK-RF-2",       ad: "TEKNO Ekip3", sira: 3, taseron: "TEK", bolge: "Ankara" },
+  { kod: "BUR-TEK-RF-1",       ad: "TEKNO Ekip4", sira: 4, taseron: "TEK", bolge: "Bursa"  },
+  { kod: "BUR-TEK-RF-2",       ad: "TEKNO Ekip5", sira: 5, taseron: "TEK", bolge: "Bursa"  },
   { kod: "BUR-NETWORKGROUP-1", ad: "Ekip 1",      taseron: "Networkgroup", bolge: "Bursa"  },
 ];
 // Org şemasını düzenleyebilenler (frontend canEdit listesiyle aynı)
@@ -21307,11 +21326,14 @@ app.post("/hr/ekipler/sablon-kur", authMiddleware, async (req, res) => {
     for (const s of EKIP_SABLONLARI) {
       const mevcut = await pool.query(`SELECT ekip_no FROM ekipler WHERE sablon_kodu = $1`, [s.kod]);
       if (mevcut.rows.length) {
-        await pool.query(`UPDATE ekipler SET ad=$2, taseron_adi=$3, bolge=$4, aktif=true, updated_at=NOW() WHERE sablon_kodu=$1`, [s.kod, s.ad, s.taseron, s.bolge]);
+        // 16.10.2026: var olan ekibin ADI ve BÖLGESİ kullanıcıya aittir (Ekip Yönetimi'nden değişir) — kurulum ezmez
+        await pool.query(`UPDATE ekipler SET taseron_adi=COALESCE(taseron_adi,$2), aktif=true, updated_at=NOW() WHERE sablon_kodu=$1`, [s.kod, s.taseron]);
         guncellenen++;
       } else {
         const nx = await pool.query(`SELECT COALESCE(MAX(ekip_no), 0) + 1 AS n FROM ekipler`);
-        await pool.query(`INSERT INTO ekipler (ekip_no, ad, taseron_adi, bolge, aktif, sablon_kodu) VALUES ($1,$2,$3,$4,true,$5)`, [nx.rows[0].n, s.ad, s.taseron, s.bolge, s.kod]);
+        const siraBos = s.sira ? !(await pool.query(`SELECT 1 FROM ekipler WHERE ekip_sira=$1`, [s.sira])).rows.length : false;
+        await pool.query(`INSERT INTO ekipler (ekip_no, ad, taseron_adi, bolge, aktif, sablon_kodu, ekip_sira) VALUES ($1,$2,$3,$4,true,$5,$6)`,
+          [nx.rows[0].n, siraBos || !s.sira ? s.ad : null, s.taseron, s.bolge, s.kod, siraBos ? s.sira : null]);
         eklenen++;
       }
     }
@@ -21339,7 +21361,22 @@ app.put("/hr/personel/:id/ekip", async (req, res) => {
     }
     if ("ekip_arac_plaka" in req.body) {
       const a = req.body.ekip_arac_plaka;
-      vals.push(a === null || a === undefined || a === "" ? null : String(a).trim().toUpperCase());
+      const plk = a === null || a === undefined || a === "" ? null : String(a).trim().toUpperCase().replace(/\s+/g, "");
+      // 16.10.2026: yeni araç ataması yalnız AKTİF araca yapılır (pasif/serviste/silinmiş reddedilir); alt marka
+      // kullanıcısı yalnız kendi firma kapsamındaki aracı atayabilir. Mevcut atamanın aynısı tekrar gelirse dokunulmaz.
+      if (plk) {
+        const cur = (await pool.query(`SELECT ekip_arac_plaka FROM personel WHERE id=$1`, [req.params.id])).rows[0];
+        if (String(cur?.ekip_arac_plaka || "").toUpperCase() !== plk) {
+          const ar = (await pool.query(`SELECT plaka, durum, aktif, firma FROM araclar WHERE UPPER(REPLACE(plaka,' ',''))=$1`, [plk])).rows[0];
+          if (!ar) return res.status(409).json({ error: `${plk} araç kaydı bulunamadı — listeyi yenileyin`, yenile: true });
+          if (ar.durum !== "AKTİF" || ar.aktif === false)
+            return res.status(409).json({ error: `${plk} artık aktif değil (${ar.durum || "pasif"}) — aktif bir araç seçin ya da "Araç yok" bırakın`, yenile: true });
+          const k = altMarkaKapsam(req);
+          if (k && !k.bordro.map((x) => String(x).toUpperCase()).includes(String(ar.firma || "AHY").toUpperCase()))
+            return res.status(403).json({ error: `${plk} firmanızın kapsamında değil` });
+        }
+      }
+      vals.push(plk);
       sets.push(`ekip_arac_plaka=$${vals.length}`);
     }
     if (!sets.length) return res.status(400).json({ error: "Güncellenecek alan yok" });
