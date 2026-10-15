@@ -426,6 +426,17 @@ const kullaniciBordro = (u) => {
 };
 // Devir tarihi metni (DD.MM.YYYY) — kullanıcının markasından
 const devirMetni = (u) => String(u?.marka_devir || "2026-07-15").split("-").reverse().join(".");
+// Masraf/avans uçları kapsam için kimlik ister (15.10.2026): başlık yardımcıları
+const AUTH_H = () => ({ Authorization: `Bearer ${localStorage.getItem("token") || ""}` });
+// Tarayıcı indirmelerinde (Excel/PDF <a href>) başlık gönderilemez; alt marka
+// kullanıcısı için token sorgu parametresiyle eklenir ki sunucu kapsamı uygulasın
+const dlUrl = (path) => {
+  try {
+    const u = JSON.parse(localStorage.getItem("user") || "null");
+    if (u && u.hw_yukleme === false) return `${API_BASE}${path}?t=${encodeURIComponent(localStorage.getItem("token") || "")}`;
+  } catch {}
+  return `${API_BASE}${path}`;
+};
 // kasadan_dus=false etiketi: markanın kendi ödediği kira/fatura
 const kasaDisiEtiket = (u) => `${altMarkaKisa(u?.hw_yukleme === false ? u?.marka : GUNCEL_ALT_MARKA) || "Firma"} ödedi`;
 
@@ -20217,7 +20228,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
   const load = async () => {
     try {
-      const r = await fetch(`${API_BASE}/hr/masraf-form`);
+      const r = await fetch(`${API_BASE}/hr/masraf-form`, { headers: AUTH_H() });
       const data = await r.json();
       const safeData = Array.isArray(data) ? data : [];
       setList(safeData);
@@ -20237,7 +20248,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
   const loadDetail = async (id) => {
     try {
-      const r = await fetch(`${API_BASE}/hr/masraf-form/${id}`);
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${id}`, { headers: AUTH_H() });
       const data = await r.json();
       setViewForm(data);
     } catch (err) {
@@ -20281,7 +20292,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
   // Reload kalemler when activeForm changes
   const refreshActive = async (fid) => {
-    const r = await fetch(`${API_BASE}/hr/masraf-form/${fid}`);
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${fid}`, { headers: AUTH_H() });
     const data = await r.json();
     setActiveForm(data);
     setKalemler(data.kalemler || []);
@@ -20689,7 +20700,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
         body: JSON.stringify({ ceza_personel_id: cezaPersonelId || null }),
       });
       // Formu yenile
-      const r = await fetch(`${API_BASE}/hr/masraf-form/${viewForm.id}`);
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${viewForm.id}`, { headers: AUTH_H() });
       setViewForm(await r.json());
     };
 
@@ -20716,9 +20727,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
             </div>
             <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
               {durumBadge(viewForm.durum)}
-              <a href={`${API_BASE}/hr/masraf-form/${viewForm.id}/excel`} style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>📥 Excel</a>
+              <a href={dlUrl(`/hr/masraf-form/${viewForm.id}/excel`)} style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>📥 Excel</a>
               {(viewForm.kalemler||[]).some(k=>(k.belgeler||[]).length>0) && (
-                <a href={`${API_BASE}/hr/masraf-form/${viewForm.id}/pdf`} style={{ padding:"8px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>📄 PDF Fişler</a>
+                <a href={dlUrl(`/hr/masraf-form/${viewForm.id}/pdf`)} style={{ padding:"8px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>📄 PDF Fişler</a>
               )}
             </div>
           </div>
@@ -20926,8 +20937,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
               style={{ padding:"6px 14px", background:"none", border:"1px solid #d1d5db", borderRadius:"8px", fontSize:"13px", cursor:"pointer", color:"#374151" }}>← Geri</button>
             {isLocked && <span style={{ fontSize:"12px", color:"#dc2626", fontWeight:600 }}>🔒 Onaya gönderildi — düzenleme kapalı</span>}
             <div style={{ marginLeft:"auto", display:"flex", gap:"8px" }}>
-              {canDownload && <a href={`${API_BASE}/hr/masraf-form/${activeForm.id}/excel`} style={{ padding:"7px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>📥 Excel</a>}
-              {canDownload && <a href={`${API_BASE}/hr/masraf-form/${activeForm.id}/pdf`} style={{ padding:"7px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>📄 PDF Fişler</a>}
+              {canDownload && <a href={dlUrl(`/hr/masraf-form/${activeForm.id}/excel`)} style={{ padding:"7px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>📥 Excel</a>}
+              {canDownload && <a href={dlUrl(`/hr/masraf-form/${activeForm.id}/pdf`)} style={{ padding:"7px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>📄 PDF Fişler</a>}
             </div>
           </div>
         </div>
@@ -21555,7 +21566,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
             <div style={{ display:"flex", gap:"8px", alignItems:"center", marginLeft:"auto" }}>
               <input type="month" value={nfDonem} onChange={e=>setNfDonem(e.target.value)}
                 style={{ padding:"8px 10px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"13px" }} />
-              <a href={`${API_BASE}/hr/masraf-form/donem/${nfDonem}/excel`}
+              <a href={dlUrl(`/hr/masraf-form/donem/${nfDonem}/excel`)}
                 style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"10px", fontSize:"13px", fontWeight:700, textDecoration:"none", whiteSpace:"nowrap" }}>
                 📥 Dönem Excel ({nfDonem})
               </a>
@@ -21667,7 +21678,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                             style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                         </>
                       )}
-                      {(isPM || isDirektor || isMuhasebe) && <a href={`${API_BASE}/hr/masraf-form/${f.id}/excel`} style={{ padding:"4px 10px", background:"#f0fdf4", color:"#166534", borderRadius:"6px", fontSize:"12px", fontWeight:600, textDecoration:"none" }}>Excel</a>}
+                      {(isPM || isDirektor || isMuhasebe) && <a href={dlUrl(`/hr/masraf-form/${f.id}/excel`)} style={{ padding:"4px 10px", background:"#f0fdf4", color:"#166534", borderRadius:"6px", fontSize:"12px", fontWeight:600, textDecoration:"none" }}>Excel</a>}
                       {isMuhasebe && f.durum==="TAMAMLANDI" && (
                         <button onClick={async()=>{ if(window.confirm("Bu formu arşivlendi olarak işaretleyeceksiniz. Emin misiniz?")){ await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`,{method:"PUT"}); load(); } }}
                           style={{ padding:"4px 10px", background:"#ede9fe", color:"#5b21b6", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>🗂 Arşivle</button>
@@ -21804,7 +21815,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
       const qs = isRequester && _email ? `?email=${encodeURIComponent(_email)}` : "";
       const [ra, rf] = await Promise.all([
         fetch(`${API_BASE}/hr/is-avans${qs}`, { headers: _auth }).then(r => r.json()).catch(() => []),
-        fetch(`${API_BASE}/hr/masraf-formlari${qs}`).then(r => r.json()).catch(() => []),
+        fetch(`${API_BASE}/hr/masraf-formlari${qs}`, { headers: _auth }).then(r => r.json()).catch(() => []),
       ]);
       let av = Array.isArray(ra) ? ra : [];
       if (_altMarka && !isRequester) av = av.filter(t => String(t.firma || "").toUpperCase() === _marka);
@@ -21828,7 +21839,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
   useEffect(() => {
     if (!formModal?.id) { setFormDetay(null); return; }
     setFormDetay(null); setFormNot("");
-    fetch(`${API_BASE}/hr/masraf-form/${formModal.id}`).then(r => r.json())
+    fetch(`${API_BASE}/hr/masraf-form/${formModal.id}`, { headers: AUTH_H() }).then(r => r.json())
       .then(d => setFormDetay(d && !d.error ? d : null)).catch(() => setFormDetay(null));
   }, [formModal]);
   const formAksiyon = async (yol, govde, onayMetni) => {
@@ -22275,7 +22286,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "genel", onPending
                 </div>
                 <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
                   {f && <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[d] || d}</span>}
-                  {f && <a href={`${API_BASE}/hr/masraf-form/${formModal.id}/pdf`} target="_blank" rel="noreferrer" style={{ ...btn, padding:"6px 11px", fontSize:"12px", background:"#f3f5f8", color:"#0f1c2e", border:"1px solid #cfd7e2", textDecoration:"none" }}>📄 PDF Fişler</a>}
+                  {f && <a href={dlUrl(`/hr/masraf-form/${formModal.id}/pdf`)} target="_blank" rel="noreferrer" style={{ ...btn, padding:"6px 11px", fontSize:"12px", background:"#f3f5f8", color:"#0f1c2e", border:"1px solid #cfd7e2", textDecoration:"none" }}>📄 PDF Fişler</a>}
                   <button onClick={() => setFormModal(null)} style={{ ...btn, padding:"6px 10px", fontSize:"13px", background:"#fff", color:"#3c4a5d", border:"1px solid #cfd7e2" }}>✕</button>
                 </div>
               </div>
@@ -32803,7 +32814,7 @@ function App() {
     const fetchPending = async () => {
       try {
         // İş avansı bekleyenleri say
-        const r = await fetch(`${API_BASE}/hr/is-avans`);
+        const r = await fetch(`${API_BASE}/hr/is-avans`, { headers: { Authorization: `Bearer ${token}` } });
         const data = await r.json();
         if (Array.isArray(data)) {
           const email = (user.email || "").toLowerCase();
@@ -32821,7 +32832,7 @@ function App() {
           setPendingAvansCount(count);
         }
         // Masraf formu bekleyenleri say
-        const mr = await fetch(`${API_BASE}/hr/masraf-form`);
+        const mr = await fetch(`${API_BASE}/hr/masraf-form`, { headers: { Authorization: `Bearer ${token}` } });
         const mdata = await mr.json();
         if (Array.isArray(mdata)) {
           const email = user.email;

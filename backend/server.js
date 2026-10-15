@@ -18043,6 +18043,49 @@ const pmAvansSahibiSql = (t = "t", p = "p") =>
 const pmAvansSahibiMi = (r) => String(r.personel_email || "").toLowerCase().trim() === PM_KISISEL_EMAIL
   || (!r.personel_id && String(r.talep_eden_email || "").toLowerCase().trim() === PM_KISISEL_EMAIL);
 
+// ── ALT MARKA KAPSAMI (15.10.2026, Orhan): Teknocenter gibi alt marka panelleri
+// masraf/avans/ödeme kayıtlarını yalnız (a) kendi firmasına ait ve (b) markanın
+// operasyon başlangıcından (markalar.devir_baslangic, TR günü) itibaren görür.
+// Tarih alanı: iş avansında t.tarih (talep tarihi), masrafta masraf_kalem.tarih
+// (kalem/işlem tarihi) — oluşturma/güncelleme/onay/ödeme tarihi esas alınmaz.
+// Firma etiketi henüz verilmemiş (onay bekleyen) avanslar personel bordro
+// kapsamındaysa görünür (onay için). Ana yönetim/muhasebe etkilenmez (kapsam null).
+function optionalAuth(req) {
+  if (req.user) return req.user;
+  try {
+    const h = req.headers.authorization || "";
+    const tok = h.startsWith("Bearer ") ? h.slice(7) : (req.query?.t ? String(req.query.t) : null);
+    if (!tok) return null;
+    req.user = jwt.verify(tok, process.env.JWT_SECRET || "simsek_secret_degistir");
+    return req.user;
+  } catch { return null; }
+}
+function altMarkaKapsam(req) {
+  const u = optionalAuth(req);
+  if (!u || u.hw_yukleme !== false || !altMarkaMi(u.marka)) return null;
+  const P = markaProfil(u.marka);
+  return { kod: P.kod, devir: P.devir, bordro: P.bordro };
+}
+// Avans satırı kapsamda mı (JS tarafı)
+// pg DATE/TIMESTAMP kolonları JS Date döner — yerel (TR) güne göre YYYY-MM-DD
+function ymdYerel(v) {
+  if (!v) return "";
+  if (v instanceof Date) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+  return String(v).slice(0, 10);
+}
+function avansKapsamda(k, t) {
+  if (!k) return true;
+  const tarih = ymdYerel(t.tarih);
+  if (!tarih || tarih < k.devir) return false;
+  const firma = String(t.firma || "").toUpperCase();
+  if (firma) return firma === k.kod;
+  return k.bordro.includes(String(t.personel_marka || "ERC").toUpperCase());
+}
+// SQL parçaları: masraf formu personeli bordro kapsamında mı, kalem tarihi devirden sonra mı
+const kapsamPersonelSql = (k, mf = "mf", p = "p") => `(UPPER(COALESCE(${p}.marka,'ERC')) = ANY('{${k.bordro.join(",")}}'::text[])
+  OR EXISTS (SELECT 1 FROM personel pp WHERE LOWER(TRIM(COALESCE(pp.email,''))) = LOWER(TRIM(COALESCE(${mf}.talep_eden_email,''))) AND UPPER(COALESCE(pp.marka,'ERC')) = ANY('{${k.bordro.join(",")}}'::text[])))`;
+const kapsamKalemSql = (k, mk = "mk") => `${mk}.tarih IS NOT NULL AND ${mk}.tarih >= DATE '${k.devir}'`;
+
 function avansTamGorus(req) {
   const email = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
@@ -18102,6 +18145,11 @@ app.get("/hr/is-avans/bakiye", authMiddleware, async (req, res) => {
 app.get("/hr/is-avans/bakiyeler", authMiddleware, async (req, res) => {
   try {
     if (!avansTamGorus(req)) return res.status(403).json({ error: "Yetkiniz yok" });
+    const k = altMarkaKapsam(req);
+    const dOd = k ? `AND o.tarih >= DATE '${k.devir}' AND UPPER(COALESCE(o.firma,'ERC')) = '${k.kod}'` : "";
+    const dAv = k ? `AND t.tarih >= DATE '${k.devir}' AND UPPER(COALESCE(t.firma,'')) = '${k.kod}'` : "";
+    const dMk = k ? `AND ${kapsamKalemSql(k)}` : "";
+    const dP = k ? `AND UPPER(COALESCE(p.marka,'ERC')) = ANY('{${k.bordro.join(",")}}'::text[])` : "";
     const r = await pool.query(`
       SELECT p.id, p.ad_soyad, p.aktif, COALESCE(p.marka,'ERC') AS marka,
         LOWER(TRIM(COALESCE(p.email,''))) AS email,
@@ -18116,22 +18164,23 @@ app.get("/hr/is-avans/bakiyeler", authMiddleware, async (req, res) => {
                SUM(CASE WHEN o.tip='MASRAF_ODEME' THEN o.tutar ELSE 0 END) AS odeme,
                SUM(CASE WHEN o.tip='AVANS_IADE' THEN o.tutar ELSE 0 END) AS iade
         FROM personel_odeme o LEFT JOIN personel p2 ON LOWER(p2.email)=LOWER(COALESCE(o.email,''))
+        WHERE true ${dOd}
         GROUP BY 1
       ) po ON po.pid = p.id
       LEFT JOIN (
         SELECT t.personel_id, SUM(t.tutar) AS toplam
         FROM is_avans_talep t
-        WHERE t.durum='TAMAMLANDI' AND t.personel_id IS NOT NULL AND ${yemekHaricAvans("t")}
+        WHERE t.durum='TAMAMLANDI' AND t.personel_id IS NOT NULL AND ${yemekHaricAvans("t")} ${dAv}
         GROUP BY t.personel_id
       ) av ON av.personel_id = p.id
       LEFT JOIN (
         SELECT LOWER(mf.talep_eden_email) AS email, SUM(mk.tutar) AS toplam
         FROM masraf_kalem mk JOIN masraf_form mf ON mf.id = mk.form_id
-        WHERE mf.durum='ARSIVLENDI' AND ${yemekHaricKalem("mk", "mf")}
+        WHERE mf.durum='ARSIVLENDI' AND ${yemekHaricKalem("mk", "mf")} ${dMk}
         GROUP BY 1
       ) ms ON ms.email = LOWER(COALESCE(p.email,''))
       WHERE (COALESCE(av.toplam,0) <> 0 OR COALESCE(ms.toplam,0) <> 0 OR COALESCE(po.odeme,0) <> 0 OR COALESCE(po.iade,0) <> 0)
-        AND ($1::bool OR LOWER(COALESCE(p.email,'')) <> $2)
+        AND ($1::bool OR LOWER(COALESCE(p.email,'')) <> $2) ${dP}
       ORDER BY bakiye ASC, p.ad_soyad ASC
     `, [pmKisiselGorur(req), PM_KISISEL_EMAIL]);
     res.json({ ok: true, rows: r.rows });
@@ -18257,6 +18306,7 @@ app.get("/hr/personel-odeme", authMiddleware, async (req, res) => {
        FROM personel_odeme o LEFT JOIN personel p ON p.id = o.personel_id
        WHERE ($1 = '' OR LOWER(COALESCE(o.email,'')) = $1 OR LOWER(COALESCE(p.email,'')) = $1)
          AND ($2::bool OR LOWER(COALESCE(o.email, p.email, '')) <> $3)
+         ${(() => { const k = altMarkaKapsam(req); return k ? `AND o.tarih >= DATE '${k.devir}' AND UPPER(COALESCE(o.firma,'ERC')) = '${k.kod}'` : ""; })()}
        ORDER BY o.tarih DESC, o.id DESC`, [email, pmKisiselGorur(req), PM_KISISEL_EMAIL]);
     res.json({ ok: true, rows: r.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -18348,14 +18398,25 @@ app.get("/hr/is-avans", authMiddleware, async (req, res) => {
         params = [email];
       }
     } else {
-      query = `SELECT t.*, p.ad_soyad as personel_ad, p.email as personel_email
+      query = `SELECT t.*, p.ad_soyad as personel_ad, p.email as personel_email, COALESCE(p.marka,'ERC') AS personel_marka
                FROM is_avans_talep t
                LEFT JOIN personel p ON t.personel_id = p.id
                ORDER BY t.created_at DESC`;
       params = [];
     }
     const r = await pool.query(query, params);
-    res.json(pmKisiselGorur(req) ? r.rows : r.rows.filter(t => !pmAvansSahibiMi(t)));
+    const kapsam = altMarkaKapsam(req);
+    let rows = pmKisiselGorur(req) ? r.rows : r.rows.filter(t => !pmAvansSahibiMi(t));
+    if (kapsam) {
+      // personel_marka tam listede seçilmiş olmayabilir (email sorguları) — eksikse tamamla
+      if (rows.length && rows[0].personel_marka === undefined) {
+        const pm = await pool.query(`SELECT id, COALESCE(marka,'ERC') AS marka FROM personel`);
+        const m = new Map(pm.rows.map((x) => [String(x.id), x.marka]));
+        rows = rows.map((t) => ({ ...t, personel_marka: m.get(String(t.personel_id)) || "ERC" }));
+      }
+      rows = rows.filter((t) => avansKapsamda(kapsam, t));
+    }
+    res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -18724,6 +18785,11 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
       params.push(personelKilidi);
     }
     if (firma) { conditions.push(`UPPER(COALESCE(t.firma,'')) = $${params.length+1}`); params.push(String(firma).toUpperCase()); }
+    const kapsamX = altMarkaKapsam(req);
+    if (kapsamX) {
+      conditions.push(`t.tarih >= DATE '${kapsamX.devir}'`);
+      conditions.push(`(UPPER(COALESCE(t.firma,'')) = '${kapsamX.kod}' OR (COALESCE(t.firma,'') = '' AND UPPER(COALESCE(p.marka,'ERC')) = ANY('{${kapsamX.bordro.join(",")}}'::text[])))`);
+    }
     if (!pmKisiselGorur(req)) conditions.push(`NOT ${pmAvansSahibiSql("t", "p")}`);
     if (durum) { conditions.push(`t.durum = $${params.length+1}`); params.push(durum); }
     if (gider_turu) { conditions.push(`t.gider_turu = $${params.length+1}`); params.push(gider_turu); }
@@ -18903,6 +18969,24 @@ const masrafUpload = multer({
 // GET all forms (with totals)
 app.get("/hr/masraf-form", async (req, res) => {
   try {
+    const k = altMarkaKapsam(req);
+    if (k) {
+      // Alt marka: yalnız bordro kapsamındaki personelin formları ve devirden sonraki kalemler;
+      // toplam ve kalem sayısı kapsam içi kalemlerden hesaplanır, eski kalemler sızmaz
+      const { rows } = await pool.query(`
+        SELECT mf.*, p.ad_soyad as personel_ad,
+          COALESCE(SUM(mk.tutar) FILTER (WHERE ${kapsamKalemSql(k)}),0) as genel_toplam,
+          COUNT(mk.id) FILTER (WHERE ${kapsamKalemSql(k)})::int AS kapsam_kalem,
+          COUNT(mk.id) FILTER (WHERE NOT (${kapsamKalemSql(k)}))::int AS kapsam_disi_kalem
+        FROM masraf_form mf
+        LEFT JOIN personel p ON p.id = mf.personel_id
+        LEFT JOIN masraf_kalem mk ON mk.form_id = mf.id
+        WHERE ${kapsamPersonelSql(k)}
+        GROUP BY mf.id, p.ad_soyad
+        HAVING COUNT(mk.id) FILTER (WHERE ${kapsamKalemSql(k)}) > 0
+        ORDER BY mf.created_at DESC`);
+      return res.json(rows);
+    }
     const { rows } = await pool.query(`
       SELECT mf.*, p.ad_soyad as personel_ad,
         COALESCE(SUM(mk.tutar),0) as genel_toplam
@@ -19181,17 +19265,23 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
 app.get("/hr/masraf-formlari", async (req, res) => {
   try {
     const { email } = req.query;
-    const whereClause = email ? `WHERE mf.talep_eden_email = $1` : '';
-    const params = email ? [email] : [];
+    const k = altMarkaKapsam(req);
+    const conds = []; const params = [];
+    if (email) { conds.push(`mf.talep_eden_email = $1`); params.push(email); }
+    if (k) conds.push(kapsamPersonelSql(k));
+    const whereClause = conds.length ? `WHERE ${conds.join(" AND ")}` : '';
+    const kalemKosul = k ? ` FILTER (WHERE ${kapsamKalemSql(k)})` : "";
     const { rows } = await pool.query(`
       SELECT mf.id, mf.durum, mf.created_at, mf.donem, mf.form_no,
         mf.talep_eden_email, mf.talep_eden_ad,
-        COALESCE(SUM(mk.tutar),0) as toplam_tutar,
-        COUNT(mk.id)::int as kalem_sayisi
+        COALESCE(SUM(mk.tutar)${kalemKosul},0) as toplam_tutar,
+        COUNT(mk.id)${kalemKosul}::int as kalem_sayisi
       FROM masraf_form mf
+      LEFT JOIN personel p ON p.id = mf.personel_id
       LEFT JOIN masraf_kalem mk ON mk.form_id = mf.id
       ${whereClause}
       GROUP BY mf.id
+      ${k ? `HAVING COUNT(mk.id)${kalemKosul} > 0` : ""}
       ORDER BY mf.created_at DESC
     `, params);
     res.json(rows);
@@ -19232,16 +19322,19 @@ app.get("/hr/masraf-form/bakiye/:personelId", async (req, res) => {
 app.get("/hr/masraf-form/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    const k = altMarkaKapsam(req);
     const form = await pool.query(`
       SELECT mf.*, p.ad_soyad as personel_ad FROM masraf_form mf
-      LEFT JOIN personel p ON p.id = mf.personel_id WHERE mf.id=$1`, [id]);
-    if (!form.rows[0]) return res.status(404).json({ error: "Bulunamadı" });
+      LEFT JOIN personel p ON p.id = mf.personel_id WHERE mf.id=$1
+      ${k ? `AND ${kapsamPersonelSql(k)}` : ""}`, [id]);
+    if (!form.rows[0]) return res.status(k ? 403 : 404).json({ error: k ? "Bu form firmanızın kapsamında değil" : "Bulunamadı" });
     const kalemler = await pool.query(`
       SELECT mk.*, COALESCE(json_agg(mb.*) FILTER (WHERE mb.id IS NOT NULL), '[]') as belgeler
       FROM masraf_kalem mk
       LEFT JOIN masraf_belge mb ON mb.kalem_id = mk.id
-      WHERE mk.form_id=$1 GROUP BY mk.id ORDER BY mk.tarih, mk.id`, [id]);
-    res.json({ ...form.rows[0], kalemler: kalemler.rows });
+      WHERE mk.form_id=$1 ${k ? `AND ${kapsamKalemSql(k)}` : ""} GROUP BY mk.id ORDER BY mk.tarih, mk.id`, [id]);
+    if (k && !kalemler.rows.length) return res.status(403).json({ error: "Bu formda firmanızın dönemine ait kalem yok" });
+    res.json({ ...form.rows[0], kalemler: kalemler.rows, ...(k ? { kapsam: { marka: k.kod, baslangic: k.devir } } : {}) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -20477,12 +20570,14 @@ app.put("/hr/masraf-form/:id/direktor-reddet", async (req, res) => {
 // GET masraf-form Excel (single form)
 app.get("/hr/masraf-form/:id/excel", async (req, res) => {
   try {
+    const k = altMarkaKapsam(req);
     const formRes = await pool.query(`
       SELECT mf.*, p.ad_soyad as personel_ad FROM masraf_form mf
-      LEFT JOIN personel p ON p.id = mf.personel_id WHERE mf.id=$1`, [req.params.id]);
-    if (!formRes.rows[0]) return res.status(404).json({ error: "Bulunamadı" });
+      LEFT JOIN personel p ON p.id = mf.personel_id WHERE mf.id=$1 ${k ? `AND ${kapsamPersonelSql(k)}` : ""}`, [req.params.id]);
+    if (!formRes.rows[0]) return res.status(k ? 403 : 404).json({ error: k ? "Kapsam dışı" : "Bulunamadı" });
     const form = formRes.rows[0];
-    const kalemler = await pool.query("SELECT * FROM masraf_kalem WHERE form_id=$1 ORDER BY tarih,id", [form.id]);
+    const kalemler = await pool.query(`SELECT * FROM masraf_kalem mk WHERE form_id=$1 ${k ? `AND ${kapsamKalemSql(k)}` : ""} ORDER BY tarih,id`, [form.id]);
+    if (k && !kalemler.rows.length) return res.status(403).json({ error: "Kapsam dışı" });
 
     // Mobil'den gelen Türkçe kategori adlarını Excel key'lerine normalize et
     const MOBIL_KAT_MAP = {
@@ -20692,13 +20787,21 @@ app.get("/hr/masraf-form/:id/excel", async (req, res) => {
 app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
   try {
     const PDFDocument = require("pdfkit");
+    const k = altMarkaKapsam(req);
+    const formRes = await pool.query(`SELECT mf.* FROM masraf_form mf LEFT JOIN personel p ON p.id = mf.personel_id
+      WHERE mf.id=$1 ${k ? `AND ${kapsamPersonelSql(k)}` : ""}`, [req.params.id]);
+    const form = formRes.rows[0];
+    if (!form) return res.status(k ? 403 : 404).json({ error: k ? "Kapsam dışı" : "Bulunamadı" });
+    if (k) {
+      // Alt marka: formda dönem kapsamında kalem yoksa PDF de verilmez (boş/eski fiş sızmasın)
+      const kk = await pool.query(`SELECT 1 FROM masraf_kalem mk WHERE mk.form_id=$1 AND ${kapsamKalemSql(k)} LIMIT 1`, [req.params.id]);
+      if (!kk.rows.length) return res.status(403).json({ error: "Kapsam dışı" });
+    }
     const belgeler = await pool.query(
       `SELECT mb.*, mk.kategori, mk.tutar, mk.tarih FROM masraf_belge mb
        JOIN masraf_kalem mk ON mk.id = mb.kalem_id
-       WHERE mb.form_id=$1 ORDER BY mk.tarih, mb.id`, [req.params.id]
+       WHERE mb.form_id=$1 ${k ? `AND ${kapsamKalemSql(k)}` : ""} ORDER BY mk.tarih, mb.id`, [req.params.id]
     );
-    const formRes = await pool.query("SELECT * FROM masraf_form WHERE id=$1", [req.params.id]);
-    const form = formRes.rows[0];
 
     const doc = new PDFDocument({ size: "A4", margin: 20 });
     res.setHeader("Content-Type", "application/pdf");
@@ -20830,10 +20933,12 @@ app.put("/hr/masraf-form/:id/arsivle", async (req, res) => {
 app.get("/hr/masraf-form/donem/:donem/excel", async (req, res) => {
   try {
     const { donem } = req.params;
+    const k = altMarkaKapsam(req);
     const formsRes = await pool.query(`
       SELECT mf.*, p.ad_soyad as personel_ad FROM masraf_form mf
       LEFT JOIN personel p ON p.id = mf.personel_id
       WHERE mf.donem=$1 AND mf.durum IN ('TAMAMLANDI','ARSIVLENDI')
+      ${k ? `AND ${kapsamPersonelSql(k)} AND EXISTS (SELECT 1 FROM masraf_kalem mk WHERE mk.form_id = mf.id AND ${kapsamKalemSql(k)})` : ""}
       ORDER BY mf.talep_eden_ad, mf.id`, [donem]);
     const forms = formsRes.rows;
 
@@ -20847,7 +20952,7 @@ app.get("/hr/masraf-form/donem/:donem/excel", async (req, res) => {
 
     for (const form of forms) {
       const kalemler = await pool.query(
-        "SELECT * FROM masraf_kalem WHERE form_id=$1 ORDER BY tarih,id", [form.id]
+        `SELECT * FROM masraf_kalem mk WHERE form_id=$1 ${k ? `AND ${kapsamKalemSql(k)}` : ""} ORDER BY tarih,id`, [form.id]
       );
       const rows = kalemler.rows;
       const sheetName = `${form.talep_eden_ad.slice(0,15)}_${form.id}`.replace(/[\\/*?:\[\]]/g,"");
