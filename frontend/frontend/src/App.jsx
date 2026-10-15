@@ -36882,26 +36882,52 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
 }
 const ARAC_BOLGELER = ["İzmir", "Ankara", "Bursa", "Antalya", "Eskişehir", "İstanbul", "Muğla", "Aydın", "Manisa", "Denizli", "Balıkesir", "Diğer"];
 const ARAC_MARKALAR = {
-  "Dacia":         ["Duster","Sandero","Logan","Jogger","Spring"],
-  "Fiat":          ["Doblo","Fiorino","Egea","Tipo","Panda","500","Ducato","Scudo"],
-  "Ford":          ["Transit","Transit Custom","Transit Connect","Focus","Fiesta","Ranger","Kuga","Puma","Tourneo"],
-  "Hyundai":       ["i10","i20","i30","Tucson","Santa Fe","Kona","Ioniq","H-1","H350"],
-  "Isuzu":         ["D-Max","N35","N75","NLR","NPR"],
-  "Kia":           ["Picanto","Rio","Ceed","Sportage","Sorento","Stonic","Niro","Carnival"],
-  "Mercedes-Benz": ["Sprinter","Vito","Citan","A Serisi","C Serisi","E Serisi","GLA","GLC","Axor","Actros"],
-  "Mitsubishi":    ["L200","Outlander","ASX","Eclipse Cross","Colt","Pajero"],
-  "Nissan":        ["Navara","NV200","NV400","Qashqai","Juke","Micra","X-Trail"],
-  "Opel":          ["Combo","Vivaro","Movano","Astra","Corsa","Insignia","Crossland","Mokka"],
-  "Peugeot":       ["Boxer","Partner","Expert","208","308","3008","5008","2008"],
-  "Renault":       ["Master","Trafic","Kangoo","Clio","Megane","Captur","Duster","Taliant","Zoe"],
-  "Skoda":         ["Octavia","Fabia","Karoq","Kodiaq","Superb","Scala"],
-  "Suzuki":        ["Swift","Vitara","S-Cross","Jimny","Ignis"],
-  "Toyota":        ["HiAce","ProAce","Land Cruiser","RAV4","C-HR","Corolla","Yaris","Hilux","Proace City"],
-  "Volkswagen":    ["Transporter","Caravelle","Crafter","Caddy","Polo","Golf","Passat","Tiguan","T-Roc","T-Cross"],
-  "Volvo":         ["FH","FM","FMX","FE","FL","XC60","XC90"],
-  "Citroen":       ["Berlingo","Dispatch","Jumper","Jumpy","C3","C4","C5"],
-  "Iveco":         ["Daily","Eurocargo","Stralis","S-Way"],
-  "MAN":           ["TGE","TGL","TGM","TGS","TGX"],
+  // 15.10.2026 (Orhan): Türkiye pazarı tam model listeleri (301 eksikti) — ticari araçlar önce
+  "Dacia":         ["Dokker","Dokker Van","Duster","Sandero","Sandero Stepway","Logan","Logan MCV","Lodgy","Jogger","Spring","Bigster"],
+  "Fiat":          ["Doblo","Doblo Cargo","Fiorino","Fiorino Cargo","Ducato","Scudo","Talento","Pratico","Egea","Egea Cross","Egea Hatchback","Egea Station Wagon","Tipo","Linea","Punto","Panda","500","500L","500X","Albea","Palio","Freemont","Fullback"],
+  "Ford":          ["Transit","Transit Custom","Transit Connect","Transit Courier","Tourneo Custom","Tourneo Connect","Tourneo Courier","Tourneo","Ranger","Focus","Fiesta","Mondeo","Kuga","Puma","EcoSport","Explorer","Mustang","B-Max","C-Max","S-Max","Galaxy","Cargo"],
+  "Hyundai":       ["H-1","H-100","H350","Staria","i10","i20","i20 N","i30","i30 N","i40","ix35","Tucson","Santa Fe","Kona","Bayon","Elantra","Accent Blue","Accent Era","Getz","Ioniq","Ioniq 5","Ioniq 6","Venue","Creta"],
+  "Isuzu":         ["D-Max","N35","N75","NLR","NMR","NNR","NPR","NQR","FSR","Novo","Citibus","Turquoise"],
+  "Kia":           ["Picanto","Rio","Ceed","Ceed SW","ProCeed","XCeed","Cerato","Stonic","Sportage","Sorento","Niro","Soul","Carnival","Carens","EV6","EV9","K2500","K2700","Bongo"],
+  "Mercedes-Benz": ["Sprinter","Vito","Citan","V Serisi","EQV","A Serisi","B Serisi","C Serisi","CLA","E Serisi","S Serisi","GLA","GLB","GLC","GLE","GLS","G Serisi","EQA","EQB","EQC","EQE","EQS","Atego","Axor","Actros","Arocs","Unimog"],
+  "Mitsubishi":    ["L200","Outlander","ASX","Eclipse Cross","Space Star","Colt","Lancer","Pajero","Pajero Sport","Canter","Fuso"],
+  "Nissan":        ["Navara","NV200","NV300","NV400","Primastar","Interstar","Townstar","Qashqai","Juke","Micra","Note","X-Trail","Pathfinder","Pulsar","Leaf","Ariya","Skystar","Terrano"],
+  "Opel":          ["Combo","Combo Cargo","Vivaro","Movano","Zafira Life","Astra","Corsa","Insignia","Crossland","Crossland X","Grandland","Grandland X","Mokka","Mokka X","Meriva","Zafira","Vectra","Antara","Adam","Karl","Frontera"],
+  "Peugeot":       ["Boxer","Partner","Partner Tepee","Rifter","Expert","Expert Traveller","Bipper","Bipper Tepee","Traveller","Landtrek","106","107","108","206","206+","207","208","301","306","307","308","405","406","407","408","508","2008","3008","4008","5008","RCZ","e-208","e-2008","e-308","e-Partner","e-Expert","e-Boxer"],
+  "Renault":       ["Master","Trafic","Kangoo","Kangoo Express","Express","Express Van","Clio","Clio Sport Tourer","Symbol","Megane","Megane Sedan","Megane E-Tech","Fluence","Latitude","Talisman","Laguna","Captur","Kadjar","Koleos","Austral","Arkana","Scenic","Grand Scenic","Espace","Taliant","Duster","Zoe","Twingo","Modus"],
+  "Skoda":         ["Octavia","Octavia Combi","Fabia","Fabia Combi","Scala","Rapid","Rapid Spaceback","Kamiq","Karoq","Kodiaq","Superb","Superb Combi","Yeti","Roomster","Enyaq","Citigo"],
+  "Suzuki":        ["Swift","Vitara","Grand Vitara","S-Cross","SX4","Jimny","Ignis","Baleno","Celerio","Alto","Splash","Across","Swace"],
+  "Toyota":        ["HiAce","HiLux","ProAce","Proace City","Proace Verso","Land Cruiser","Land Cruiser Prado","RAV4","C-HR","Corolla","Corolla Cross","Corolla Sedan","Corolla Hatchback","Corolla Verso","Auris","Yaris","Yaris Cross","Avensis","Camry","Prius","Verso","Aygo","Aygo X","bZ4X","Dyna","Coaster"],
+  "Volkswagen":    ["Transporter","Caravelle","Multivan","Crafter","Caddy","Caddy Cargo","Amarok","ID. Buzz","Polo","Golf","Golf Variant","Jetta","Passat","Passat Variant","Arteon","Tiguan","Tiguan Allspace","Touareg","Taigo","T-Roc","T-Cross","Touran","Sharan","Scirocco","Beetle","Bora","ID.3","ID.4","ID.5","ID.7","Up!"],
+  "Volvo":         ["FH","FH16","FM","FMX","FE","FL","XC40","XC60","XC90","S60","S90","V40","V60","V90","EX30","EX90"],
+  "Citroen":       ["Berlingo","Berlingo Van","Nemo","Dispatch","Jumpy","Jumper","SpaceTourer","C-Elysée","C1","C2","C3","C3 Aircross","C4","C4 Cactus","C4 Picasso","C4 X","C5","C5 Aircross","C5 X","DS3","DS4","DS5","ë-C4","ë-Berlingo","ë-Jumpy"],
+  "Iveco":         ["Daily","Daily Van","Eurocargo","Stralis","S-Way","Trakker","T-Way","Massif"],
+  "MAN":           ["TGE","TGL","TGM","TGS","TGX","Lion's City","Lion's Coach"],
+  "Honda":         ["Civic","Civic Sedan","Civic Hatchback","City","Jazz","Accord","CR-V","HR-V","ZR-V","e:Ny1"],
+  "Seat":          ["Ibiza","Leon","Leon ST","Toledo","Ateca","Arona","Tarraco","Alhambra","Altea","Altea XL","Cordoba"],
+  "Cupra":         ["Formentor","Leon","Ateca","Born","Terramar","Tavascan"],
+  "Audi":          ["A1","A3","A4","A5","A6","A7","A8","Q2","Q3","Q5","Q7","Q8","e-tron","Q4 e-tron"],
+  "BMW":           ["1 Serisi","2 Serisi","3 Serisi","4 Serisi","5 Serisi","7 Serisi","X1","X2","X3","X4","X5","X6","X7","i4","iX","iX1","iX3"],
+  "Chery":         ["Tiggo 4","Tiggo 7","Tiggo 7 Pro","Tiggo 8","Tiggo 8 Pro","Omoda 5","Jaecoo 7","Alia","Kimo","Niche"],
+  "MG":            ["ZS","HS","MG4","MG5","Marvel R","Cyberster"],
+  "Tesla":         ["Model 3","Model Y","Model S","Model X"],
+  "BYD":           ["Atto 3","Dolphin","Seal","Seal U","Han","Tang"],
+  "TOGG":          ["T10X","T10F"],
+  "Karsan":        ["Jest","Atak","J10","Star","Jest Electric","Atak Electric"],
+  "Otokar":        ["Sultan","Navigo","Doruk","Kent","Centro","Territo"],
+  "BMC":           ["Tuğra","Pro","Fatih","Levend","Megastar","Neocity","Procity"],
+  "Temsa":         ["Prestij","Safir","Maraton","Avenue","MD9","LD"],
+  "DFSK":          ["K01","K01S","C31","C32","C35","Glory 580","Glory 500","Seres 3"],
+  "SsangYong":     ["Korando","Tivoli","Rexton","Musso","Torres","Actyon"],
+  "Jeep":          ["Renegade","Compass","Avenger","Cherokee","Grand Cherokee","Wrangler"],
+  "Land Rover":    ["Defender","Discovery","Discovery Sport","Range Rover","Range Rover Sport","Range Rover Evoque","Range Rover Velar","Freelander"],
+  "Lada":          ["Niva","Vesta","Granta","Samara"],
+  "Mazda":         ["2","3","6","CX-3","CX-30","CX-5","CX-60","MX-30","BT-50"],
+  "Subaru":        ["Forester","Outback","XV","Crosstrek","Impreza","Legacy","Levorg"],
+  "Alfa Romeo":    ["Giulietta","Giulia","Stelvio","Tonale","MiTo","159"],
+  "Lexus":         ["UX","NX","RX","ES","IS","LBX"],
+  "Mini":          ["Cooper","Cooper S","Countryman","Clubman","Aceman"],
+  "Porsche":       ["Cayenne","Macan","Panamera","Taycan","911"],
   "Diger":         ["Diger"],
 };
 const ARAC_YIL = Array.from({length: 25}, (_, i) => 2026 - i);
@@ -37554,7 +37580,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                 <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Marka</label>
                 <select value={form.marka||""} onChange={e=>setForm(f=>({...f,marka:e.target.value,model:""}))} style={aSelSt}>
                   <option value="">Seçin</option>
-                  {Object.keys(ARAC_MARKALAR).map(m => <option key={m} value={m}>{m}</option>)}
+                  {Object.keys(ARAC_MARKALAR).sort((x, y) => (x === "Diger") - (y === "Diger") || x.localeCompare(y, "tr")).map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
               <div>
