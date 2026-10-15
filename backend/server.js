@@ -7965,6 +7965,8 @@ async function ensureMarkaBorcTable() {
       aciklama TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+  // 15.10.2026 (Orhan): borç kayıtlarına da kasadaki gibi dekont eklenebilsin
+  await pool.query(`ALTER TABLE marka_borc ADD COLUMN IF NOT EXISTS belge_yolu TEXT`).catch(() => {});
 }
 app.get("/finance/marka-borc", authMiddleware, async (req, res) => {
   try {
@@ -7973,7 +7975,8 @@ app.get("/finance/marka-borc", authMiddleware, async (req, res) => {
     await ensureMarkaBorcTable();
     const marka = String(req.query.marka || "AHY").toUpperCase();
     const r = await pool.query(
-      `SELECT id, tip, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama
+      `SELECT id, tip, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama,
+              COALESCE(belge_yolu,'') AS belge_yolu
        FROM marka_borc WHERE UPPER(marka)=$1 ORDER BY tarih DESC, id DESC`, [marka]);
     const alinan = r.rows.filter(x => x.tip !== 'ODEME').reduce((s, x) => s + Number(x.tutar || 0), 0);
     const odenen = r.rows.filter(x => x.tip === 'ODEME').reduce((s, x) => s + Number(x.tutar || 0), 0);
@@ -8001,6 +8004,29 @@ app.delete("/finance/marka-borc/:id", authMiddleware, async (req, res) => {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     await pool.query(`DELETE FROM marka_borc WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Borç kaydına dekont ekle/kaldır (görsel/PDF) — 15.10.2026 Orhan talebi, kasa girişiyle aynı
+app.post("/finance/marka-borc/:id/belge", authMiddleware, upload.single("belge"), async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
+    await ensureMarkaBorcTable();
+    const ext = (req.file.originalname || "").split(".").pop() || "pdf";
+    const fname = `borc_dekont_${req.params.id}_${Date.now()}.${ext}`;
+    const { url } = await uploadToStorage("kasa-dekontlar", fname, req.file.buffer, req.file.mimetype);
+    const r = await pool.query(`UPDATE marka_borc SET belge_yolu=$1 WHERE id=$2 RETURNING id, belge_yolu`, [url, req.params.id]);
+    res.json({ ok: true, row: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/marka-borc/:id/belge", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await pool.query(`UPDATE marka_borc SET belge_yolu=NULL WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

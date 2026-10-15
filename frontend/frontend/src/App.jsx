@@ -2541,6 +2541,41 @@ function MarkaNakitPanel({ currentUser }) {
                     </div>
                     <div style={{ fontSize: "11.5px", color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.tarih}{r.aciklama ? ` · ${r.aciklama}` : ""}</div>
                   </div>
+                  {/* 15.10.2026 (Orhan): borç kaydına dekont — kasa girişiyle aynı düzen */}
+                  {r.belge_yolu ? (
+                    <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                      <a href={r.belge_yolu} target="_blank" rel="noreferrer"
+                        style={{ background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1d4ed8", borderRadius: "8px", padding: "4px 10px", fontSize: "11px", fontWeight: 700, textDecoration: "none" }}
+                      >📎 Dekont</a>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm("Dekont kaldırılsın mı?")) return;
+                          try {
+                            await fetch(`${API_BASE}/finance/marka-borc/${r.id}/belge`, { method: "DELETE", headers: _auth });
+                            loadBorc();
+                          } catch {}
+                        }}
+                        style={{ background: "#f8fafc", border: "1px solid #e2e8f0", color: "#94a3b8", borderRadius: "8px", padding: "4px 8px", fontSize: "11px", cursor: "pointer" }}
+                      >✕</button>
+                    </div>
+                  ) : (
+                    <label style={{ background: "#fffbeb", border: "1px dashed #fbbf24", color: "#92400e", borderRadius: "8px", padding: "4px 10px", fontSize: "11px", fontWeight: 700, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>
+                      📎 Dekont Ekle
+                      <input type="file" accept="image/*,application/pdf" style={{ display: "none" }}
+                        onChange={async (ev) => {
+                          const f = ev.target.files?.[0];
+                          if (!f) return;
+                          const fd = new FormData();
+                          fd.append("belge", f);
+                          try {
+                            const rr = await fetch(`${API_BASE}/finance/marka-borc/${r.id}/belge`, { method: "POST", headers: _auth, body: fd });
+                            const dd = await rr.json();
+                            if (!rr.ok || !dd.ok) throw new Error(dd.error || "Yüklenemedi");
+                            loadBorc();
+                          } catch (e2) { alert(e2.message); }
+                        }} />
+                    </label>
+                  )}
                   <button
                     onClick={async () => {
                       if (!window.confirm(`₺${fk(r.tutar)} tutarındaki ${r.tip === "ODEME" ? "geri ödeme" : "borç"} kaydı silinsin mi?`)) return;
