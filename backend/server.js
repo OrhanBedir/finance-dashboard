@@ -6792,6 +6792,24 @@ app.get("/finance/personel-aylik-ozet", async (req, res) => {
 const PL_KIRA_TUTAR_SQL = `(CASE WHEN o.donem = '2026-07' THEN COALESCE(o.tutar,0) * 0.5 ELSE COALESCE(o.tutar,0) END)`;
 pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS firma TEXT DEFAULT 'AHY'`).catch(() => {});
 pool.query(`ALTER TABLE masraf_belge ADD COLUMN IF NOT EXISTS ocr_para TEXT`).catch(() => {});
+// 15.10.2026 (Orhan): araç DEPOZİTOSU nakit akışında "Araç Kiraları" satırına düşer —
+// ödeme tarihinde gider, iade tarihinde eksi (geri dönüş). Parametreler kira sorgusuyla aynı:
+// $1 başlangıç, $2 marka listesi, $3 son.
+const ARAC_DEPOZITO_FILTRE_SQL = `COALESCE(a.depozito_tutar,0) > 0 AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = ANY($2::text[])`;
+const ARAC_DEPOZITO_AY_SQL = `
+          SELECT to_char(a.depozito_tarihi,'YYYY-MM') AS ay, COALESCE(a.depozito_tutar,0) AS t FROM araclar a
+          WHERE a.depozito_tarihi >= $1::date AND a.depozito_tarihi < $3::date AND ${ARAC_DEPOZITO_FILTRE_SQL}
+          UNION ALL
+          SELECT to_char(a.depozito_iade_tarihi,'YYYY-MM') AS ay, -COALESCE(a.depozito_tutar,0) AS t FROM araclar a
+          WHERE a.depozito_iade_tarihi >= $1::date AND a.depozito_iade_tarihi < $3::date AND ${ARAC_DEPOZITO_FILTRE_SQL}`;
+const ARAC_DEPOZITO_GUN_SQL = `
+        SELECT to_char(a.depozito_tarihi,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad, 'ARAC_KIRA' AS tip,
+          COALESCE(a.depozito_tutar,0) AS tutar, ('Depozito' || COALESCE(' · '||NULLIF(a.depozito_not,''),'')) AS aciklama, true AS kasadan_dus
+        FROM araclar a WHERE a.depozito_tarihi >= $1::date AND a.depozito_tarihi < $3::date AND ${ARAC_DEPOZITO_FILTRE_SQL}
+        UNION ALL
+        SELECT to_char(a.depozito_iade_tarihi,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad, 'ARAC_KIRA' AS tip,
+          -COALESCE(a.depozito_tutar,0) AS tutar, 'Depozito iadesi (geri geldi)' AS aciklama, true AS kasadan_dus
+        FROM araclar a WHERE a.depozito_iade_tarihi >= $1::date AND a.depozito_iade_tarihi < $3::date AND ${ARAC_DEPOZITO_FILTRE_SQL}`;
 const TASERON_LOG_DAGILIM_SQL = `(SELECT (d->>'fatura_id')::int AS fid, SUM((d->>'odeme')::numeric) AS t
   FROM taseron_odeme_log l,
        jsonb_array_elements(CASE WHEN jsonb_typeof(l.dagilim) = 'array' THEN l.dagilim ELSE '[]'::jsonb END) d
@@ -6850,10 +6868,13 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           FROM personel_odeme o
           WHERE UPPER(COALESCE(o.firma,'ERC'))=$1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2
         ) x GROUP BY 1`, [marka, DEVIR]),
-      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
-        FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
-        WHERE o.created_at >= $1::date AND o.created_at < $3::date
-          AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = ANY($2::text[]) GROUP BY 1`, [DEVIR, P.bordro, SON]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT ay, SUM(t) AS t FROM (
+          SELECT to_char(o.tarih,'YYYY-MM') AS ay, ${PL_KIRA_TUTAR_SQL} AS t
+          FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
+          WHERE o.created_at >= $1::date AND o.created_at < $3::date
+            AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = ANY($2::text[])
+          UNION ALL ${ARAC_DEPOZITO_AY_SQL}
+        ) x GROUP BY 1`, [DEVIR, P.bordro, SON]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
         FROM ofis_kira_odemeler o
         WHERE o.created_at >= $1::date AND o.created_at < $2::date GROUP BY 1`, [DEVIR, SON]).catch(() => ({ rows: [] })),
@@ -7362,7 +7383,8 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           COALESCE(o.kasadan_dus, true) AS kasadan_dus
         FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
         WHERE o.created_at >= $1::date AND o.created_at < $3::date
-          AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = ANY($2::text[])`, [girisBaslangic, P.bordro, son]),
+          AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = ANY($2::text[])
+        UNION ALL ${ARAC_DEPOZITO_GUN_SQL}`, [girisBaslangic, P.bordro, son]),
       // Ofis/Depo kiraları: devirden sonra girilen ödemeler (araç kira kuralıyla aynı).
       // kasadan_dus=false → AHY kendi ödedi: nakit akışında görünür ama kasa bakiyesinden düşmez
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, d.ad AS ad_soyad,
@@ -8785,10 +8807,13 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
           FROM personel_odeme o
           WHERE UPPER(COALESCE(o.firma,'ERC'))=$1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2
         ) x GROUP BY 1`, [marka, DEVIR]),
-      pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
-        FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
-        WHERE o.created_at >= $1::date AND o.created_at < $3::date
-          AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = ANY($2::text[]) GROUP BY 1`, [DEVIR, P.bordro, SON]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT ay, SUM(t) AS t FROM (
+          SELECT to_char(o.tarih,'YYYY-MM') AS ay, ${PL_KIRA_TUTAR_SQL} AS t
+          FROM arac_kira_odemeler o JOIN araclar a ON a.id = o.arac_id
+          WHERE o.created_at >= $1::date AND o.created_at < $3::date
+            AND UPPER(COALESCE(NULLIF(a.firma,''),'AHY')) = ANY($2::text[])
+          UNION ALL ${ARAC_DEPOZITO_AY_SQL}
+        ) x GROUP BY 1`, [DEVIR, P.bordro, SON]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM') AS ay, SUM(${PL_KIRA_TUTAR_SQL}) AS t
         FROM ofis_kira_odemeler o
         WHERE o.created_at >= $1::date AND o.created_at < $2::date GROUP BY 1`, [DEVIR, SON]).catch(() => ({ rows: [] })),
@@ -19859,6 +19884,12 @@ async function ensureAracKmTable() {
      ile borç hesabı vade tarihine göre yapılır; vadesi gelmemiş dönem borç sayılmaz. */
   await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS odeme_tipi TEXT DEFAULT 'PESIN'`).catch(() => {});
   await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS donem_gunu INTEGER DEFAULT 15`).catch(() => {});
+  // 15.10.2026 (Orhan): kiralama firmasına ödenen DEPOZİTO — tutar, ödeme tarihi, iade tarihi, not.
+  // Nakit akışında "Araç Kiraları" satırına ödeme günü gider, iade günü eksi (geri dönüş) olarak düşer.
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS depozito_tutar NUMERIC`).catch(() => {});
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS depozito_tarihi DATE`).catch(() => {});
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS depozito_iade_tarihi DATE`).catch(() => {});
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS depozito_not TEXT`).catch(() => {});
 }
 
 // Eski araç satırını geçmişe yazar (olay: PLAKA_DEGISTI / SURUCU_DEGISTI / KIRA_DEGISTI / PASIFE_ALINDI)
@@ -19913,23 +19944,27 @@ app.post("/hr/araclar", async (req, res) => {
   try {
     const { plaka, marka, model, yil, tip, kiralama_firmasi, sozlesme_no,
             kira_baslangic, kira_bitis, aylik_kira, bolge, surucu,
-            sigorta_bitis, muayene_bitis, durum, notlar, odeme_tipi, donem_gunu } = req.body;
+            sigorta_bitis, muayene_bitis, durum, notlar, odeme_tipi, donem_gunu,
+            depozito_tutar, depozito_tarihi, depozito_iade_tarihi, depozito_not } = req.body;
     await ensureAracKmTable().catch(() => {});
     const norm = (plaka || "").replace(/\s+/g, "").toUpperCase();
     const { rows } = await pool.query(
       `INSERT INTO araclar (plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
-        kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18)
+        kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu,
+        depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18,$19,$20,$21,$22)
        ON CONFLICT (plaka) DO UPDATE SET
          marka=$2,model=$3,yil=$4,tip=$5,kiralama_firmasi=$6,sozlesme_no=$7,
          kira_baslangic=$8,kira_bitis=$9,aylik_kira=$10,bolge=$11,surucu=$12,
-         sigorta_bitis=$13,muayene_bitis=$14,durum=$15,notlar=$16,aktif=true,odeme_tipi=$17,donem_gunu=$18
+         sigorta_bitis=$13,muayene_bitis=$14,durum=$15,notlar=$16,aktif=true,odeme_tipi=$17,donem_gunu=$18,
+         depozito_tutar=$19,depozito_tarihi=$20,depozito_iade_tarihi=$21,depozito_not=$22
        RETURNING *`,
       // yil integer kolonu: boş string "" gelirse null'a çevrilir (form "Seçin" kalabilir)
       [norm,marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
        sigorta_bitis||null,muayene_bitis||null,durum||'AKTİF',notlar,
-       odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN', Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : 15]
+       odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN', Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : 15,
+       depozito_tutar ? Number(depozito_tutar) : null, depozito_tarihi||null, depozito_iade_tarihi||null, depozito_not||null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -19939,7 +19974,8 @@ app.put("/hr/araclar/:id", async (req, res) => {
   try {
     const { plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
             kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,
-            sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu } = req.body;
+            sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu,
+            depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not } = req.body;
     // Geçmiş kaydı: plaka / sürücü / kira / aktiflik değişiyorsa eski hâli sakla
     try {
       await ensureAracKmTable();
@@ -19964,13 +20000,15 @@ app.put("/hr/araclar/:id", async (req, res) => {
         kiralama_firmasi=$7,sozlesme_no=$8,kira_baslangic=$9,kira_bitis=$10,
         aylik_kira=$11,bolge=$12,surucu=$13,sigorta_bitis=$14,muayene_bitis=$15,
         durum=$16,notlar=$17,aktif=COALESCE($18,aktif),
-        odeme_tipi=COALESCE($19,odeme_tipi),donem_gunu=COALESCE($20,donem_gunu) WHERE id=$1 RETURNING *`,
+        odeme_tipi=COALESCE($19,odeme_tipi),donem_gunu=COALESCE($20,donem_gunu),
+        depozito_tutar=$21,depozito_tarihi=$22,depozito_iade_tarihi=$23,depozito_not=$24 WHERE id=$1 RETURNING *`,
       [req.params.id,plaka?plaka.replace(/\s+/g,"").toUpperCase():null,
        marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
        sigorta_bitis||null,muayene_bitis||null,durum,notlar,aktif??null,
        odeme_tipi ? (odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN') : null,
-       Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null]
+       Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null,
+       depozito_tutar ? Number(depozito_tutar) : null, depozito_tarihi||null, depozito_iade_tarihi||null, depozito_not||null]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }

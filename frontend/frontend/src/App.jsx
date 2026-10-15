@@ -36947,7 +36947,8 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     plaka:"", marka:"", model:"", yil:"", tip:"Binek",
     kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
     aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
-    durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15
+    durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15,
+    depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:""
   });
   const [belgeUpload, setBelgeUpload] = useState({ turu:null, file:null }); // {turu, file}
   const [filter, setFilter] = useState("TUMU"); // TUMU | AKTİF | PASİF
@@ -37004,7 +37005,8 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     setForm({ plaka:"", marka:"", model:"", yil:"", tip:"Binek",
       kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
       aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
-      durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15 });
+      durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15,
+      depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:"" });
     setSelected(null);
     setShowForm(true);
   };
@@ -37019,7 +37021,9 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       aylik_kira: a.aylik_kira||"", bolge: a.bolge||"", surucu: a.surucu||"",
       sigorta_bitis: fmt(a.sigorta_bitis), muayene_bitis: fmt(a.muayene_bitis),
       durum: a.durum||"AKTİF", notlar: a.notlar||"",
-      odeme_tipi: a.odeme_tipi||"PESIN", donem_gunu: a.donem_gunu||15
+      odeme_tipi: a.odeme_tipi||"PESIN", donem_gunu: a.donem_gunu||15,
+      depozito_tutar: a.depozito_tutar||"", depozito_tarihi: fmt(a.depozito_tarihi),
+      depozito_iade_tarihi: fmt(a.depozito_iade_tarihi), depozito_not: a.depozito_not||""
     });
     setSelected(a);
     setShowForm(true);
@@ -37164,9 +37168,10 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     const hepsi = [...gecmisRows, ...pasifler].sort((x, y) => String(y._sira).localeCompare(String(x._sira)));
     exportStandardExcel({
       title: "Araç Filosu — Aktif Araçlar", sheetName: "Araçlar", fileBase: "Arac_Filosu",
-      headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira (₺)", "Ödeme", "Kiralama Firması", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
-      colWidths: [12, 12, 14, 8, 10, 12, 26, 14, 14, 20, 13, 13, 13, 13, 10], numericCols: [7],
+      headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira (₺)", "Depozito (₺)", "Depozito Durumu", "Ödeme", "Kiralama Firması", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
+      colWidths: [12, 12, 14, 8, 10, 12, 26, 14, 14, 22, 14, 20, 13, 13, 13, 13, 10], numericCols: [7, 8],
       rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", a.bolge || "", a.surucu || "", Number(a.aylik_kira || 0),
+        Number(a.depozito_tutar || 0), Number(a.depozito_tutar || 0) > 0 ? (a.depozito_iade_tarihi ? `İade alındı ${fT(a.depozito_iade_tarihi)}` : `Ödendi ${fT(a.depozito_tarihi) || ""} · iade bekleniyor`) : "",
         (a.odeme_tipi || "PESIN") === "SONRADAN" ? `Ay sonu (${a.donem_gunu || 1})` : `Peşin (${a.donem_gunu || 15})`, a.kiralama_firmasi || "",
         fT(a.kira_baslangic), fT(a.kira_bitis), fT(a.sigorta_bitis), fT(a.muayene_bitis), a.durum || ""]),
       extraSheets: [{
@@ -37419,6 +37424,13 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                                 <div>Kira: {fT(a.kira_baslangic) || "—"} → {fT(a.kira_bitis) || "süresiz"}</div>
                                 <div>Sigorta: <span style={{ color: expiryColor(a.sigorta_bitis), fontWeight:600 }}>{fT(a.sigorta_bitis) || "girilmedi"}</span> · Muayene: <span style={{ color: expiryColor(a.muayene_bitis), fontWeight:600 }}>{fT(a.muayene_bitis) || "girilmedi"}</span></div>
                                 {a.sozlesme_no && <div>Sözleşme: {a.sozlesme_no}</div>}
+                                {Number(a.depozito_tutar || 0) > 0 && (
+                                  <div style={{ color: a.depozito_iade_tarihi ? "#15803d" : "#92400e", fontWeight:600 }}>
+                                    🔒 Depozito ₺{Number(a.depozito_tutar).toLocaleString("tr-TR")}{a.depozito_tarihi ? ` · ödendi ${fT(a.depozito_tarihi)}` : ""}
+                                    {a.depozito_iade_tarihi ? ` · iade alındı ${fT(a.depozito_iade_tarihi)}` : " · iade bekleniyor"}
+                                    {a.depozito_not ? ` · ${a.depozito_not}` : ""}
+                                  </div>
+                                )}
                                 {a.notlar && <div style={{ color:"#3c4a5d" }}>{a.notlar}</div>}
                               </div>
                               {canEdit && (
@@ -37622,6 +37634,26 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
               <div>
                 <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Dönem Günü (ayın kaçı)</label>
                 <input type="number" min="1" max="28" value={form.donem_gunu||15} onChange={e=>setForm(f=>({...f,donem_gunu:e.target.value}))} style={aInpSt} />
+              </div>
+              {/* 15.10.2026 (Orhan): kiralama firmasına ödenen depozito — nakit akışında Araç Kiraları satırına düşer */}
+              <div style={{ gridColumn:"1/-1", display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"10px", padding:"10px", background:"#fffbeb", border:"1px dashed #fbbf24", borderRadius:"10px" }}>
+                <div style={{ gridColumn:"1/-1", fontSize:"12px", fontWeight:800, color:"#92400e" }}>🔒 Depozito (kiralama firmasına ödenen, iade edilecek)</div>
+                <div>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Depozito (₺)</label>
+                  <input type="number" value={form.depozito_tutar||""} onChange={e=>setForm(f=>({...f,depozito_tutar:e.target.value}))} style={aInpSt} placeholder="0" />
+                </div>
+                <div>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Ödeme Tarihi</label>
+                  <input type="date" value={form.depozito_tarihi||""} onChange={e=>setForm(f=>({...f,depozito_tarihi:e.target.value}))} style={aInpSt} />
+                </div>
+                <div>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>İade Tarihi (geri gelince)</label>
+                  <input type="date" value={form.depozito_iade_tarihi||""} onChange={e=>setForm(f=>({...f,depozito_iade_tarihi:e.target.value}))} style={aInpSt} />
+                </div>
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Depozito Notu</label>
+                  <input value={form.depozito_not||""} onChange={e=>setForm(f=>({...f,depozito_not:e.target.value}))} style={aInpSt} placeholder="Havale / kime ödendi / şart" />
+                </div>
               </div>
               <div>
                 <label style={{ display:"block", fontSize:"12px", fontWeight:600, color:"#374151", marginBottom:"4px" }}>Sürücü / Kullanan</label>
