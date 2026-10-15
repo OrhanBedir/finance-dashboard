@@ -10125,6 +10125,13 @@ function parseTLInput(value) {
   return String(value || "").replace(/[^\d]/g, "");
 }
 
+// Çalışma dönemi (16.10.2026): /hr/personel?donem= yanıtı seçili ayla kesişen dönemi verir —
+// arşivlenmiş eski dönem (yeniden işe girişte) geçmiş aylarda aynen kullanılır.
+function ikDonemTarih(p) {
+  const g = p && p.donem_giris !== undefined ? p.donem_giris : p?.ise_giris_tarihi;
+  const a = p && p.donem_ayrilma !== undefined ? p.donem_ayrilma : p?.isten_ayrilma_tarihi;
+  return { disi: !!p?.donem_disi, giris: String(g || "").split("T")[0], ayrilma: String(a || "").split("T")[0] };
+}
 function formatDonemLabel(value) {
   if (!value) return "";
 
@@ -16809,8 +16816,8 @@ function PuantajPanel({ currentUser, onBack }) {
       if ((p.firma_tipi || "simsek") !== "simsek") return false;
       // Bordro dışı kayıtlar (patron, test hesabı vb.) puantajda görünmez
       if (p.puantaj_haric) return false;
-      const giris = (p.ise_giris_tarihi || "").split("T")[0];
-      const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
+      const { giris, ayrilma, disi } = ikDonemTarih(p);
+      if (disi) return false; // hiçbir çalışma dönemi bu ayla kesişmiyor
       if (giris && giris > monthEnd) return false; // o ay henüz işe girmemiş
       if (ayrilma && ayrilma < monthStart) return false; // bu aydan önce ayrılmış
       // Pasif personel ayrılma tarihi girilmeden sisteme öylece kalmışsa listede sürünmesin
@@ -17288,7 +17295,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   };
   // 15.10.2026: aktif ama maaşı / işe giriş tarihi eksik (ya da yeniden giriş bekleyen) personel —
   // kadroda "Bilgileri tamamlanacak" rozetiyle görünür, hakediş/bütçe toplamlarına GİRMEZ
-  const kadroEksik = (p) => !!p?.bilgi_eksik && !!p?.aktif && firmaUygun(p);
+  const kadroEksik = (p) => !!p?.bilgi_eksik && !!p?.aktif && !p?.donem_disi && firmaUygun(p);
   const _esitleYetkili = _hrYetkili || ["admin", "platform_admin", "direktor", "muhasebe"].includes(String(currentUser?.role || "").toLowerCase());
   const [esitleBusy, setEsitleBusy] = useState(false);
   const aktifPersonelEsitle = async () => {
@@ -17399,8 +17406,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     const [py, pm] = puantajAy.split("-");
     const mStart = `${puantajAy}-01`;
     const mEnd = `${puantajAy}-${String(new Date(Number(py), Number(pm), 0).getDate()).padStart(2, "0")}`;
-    const giris = (p.ise_giris_tarihi || "").split("T")[0];
-    const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
+    const { giris, ayrilma, disi } = ikDonemTarih(p);
+    if (disi) return false;                         // hiçbir çalışma dönemi bu ayla kesişmiyor
     if (giris && giris > mEnd) return false;        // o ay henüz işe girmemiş
     if (ayrilma && ayrilma < mStart) return false;  // bu aydan önce ayrılmış
     return true;
@@ -17965,7 +17972,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     if (AHY_BITIS && ayKey > AHY_BITIS.slice(0, 7)) return 0; // bitmiş marka (AHY) sonraki ayları ödemez
     if (ayKey > devirAy) return 1;
     if (Number(AHY_DEVIR.slice(8, 10)) <= 1) return 1;       // ay başı devir (TEKNO 01.10): ilk ay tam
-    const giris = String(p?.ise_giris_tarihi || "").split("T")[0];
+    const giris = ikDonemTarih(p).giris;
     if (giris && giris >= AHY_DEVIR) return 1;
     return 0.5;
   };
@@ -17974,7 +17981,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   // Bağcı 55.000 → 27.500), hakediş giriş gününe göre kırpılmış olsa bile.
   // Pay hakedişi aşamaz; diğer herkeste pay = hakediş × ahyMaasOran.
   const ahyMaasPay = (p, base) => {
-    const giris = String(p?.ise_giris_tarihi || "").split("T")[0];
+    const giris = ikDonemTarih(p).giris;
     const g = Number((giris || "").slice(8, 10));
     if (_hrMarka === "AHY" && `${yilStr}-${ayStr}` === "2026-07"
         && giris && giris.slice(0, 7) === "2026-07" && g > 1 && g < 15) {
@@ -18783,15 +18790,20 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}<FirmaRozet p={p} kucuk />
                                       {p.bilgi_eksik && (
                                         <div style={{ display:"flex", gap:"6px", alignItems:"center", marginTop:"3px", flexWrap:"wrap" }}>
-                                          <span title={`Eksik: ${(p.eksik_alanlar||[]).join(", ")}`} style={{ background:"#fef3c7", color:"#92400e", padding:"1px 8px", borderRadius:"999px", fontSize:"10.5px", fontWeight:800 }}>⚠ Bilgileri tamamlanacak</span>
-                                          <span style={{ fontSize:"10.5px", color:"#92400e" }}>{(p.eksik_alanlar||[]).join(" · ")}</span>
-                                          {!_maasGizli && <button onClick={()=>handleEditPersonel(p)} style={{ padding:"2px 9px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"7px", fontSize:"10.5px", fontWeight:700, cursor:"pointer" }}>Maaş Bilgilerini Tamamla</button>}
+                                          {((p.eksik_alanlar||[]).length ? p.eksik_alanlar : ["Bilgiler eksik"]).map(e => (
+                                            <span key={e} title="Tamamlanana kadar hakediş, borç ve ödeme oluşturulmaz; toplamlara dahil değil" style={{ background:"#fef3c7", color:"#92400e", padding:"1px 8px", borderRadius:"999px", fontSize:"10.5px", fontWeight:800 }}>⚠ {e}</span>
+                                          ))}
+                                          {(p.donemler||[]).length > 0 && (
+                                            <span title={(p.donemler||[]).map(d => `${d.ise_giris ? d.ise_giris.split("-").reverse().join(".") : "?"} – ${d.isten_ayrilma.split("-").reverse().join(".")}${d.teyit_gerekli ? " (giriş teyit edilecek)" : ""}`).join("\n")}
+                                              style={{ fontSize:"10.5px", color:"#64748b" }}>önceki dönem: {(p.donemler||[]).map(d => `${d.ise_giris ? d.ise_giris.split("-").reverse().join(".") : "?"} – ${d.isten_ayrilma.split("-").reverse().join(".")}`).join(", ")}</span>
+                                          )}
+                                          {!_maasGizli && <button onClick={()=>handleEditPersonel(p)} style={{ padding:"2px 9px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"7px", fontSize:"10.5px", fontWeight:700, cursor:"pointer" }}>Bilgileri Tamamla</button>}
                                         </div>
                                       )}
                                     </td>
                                     <td style={{ padding:"7px 12px", color:"#6b7280", whiteSpace:"nowrap" }}>{p.unvan||"-"}</td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.bilgi_eksik ? "#9ca3af" : "#0369a1", fontWeight:600 }}
-                                      title={p.bilgi_eksik ? "Maaş girilmedi" : "Aylık net maaş (tam ay)"}>{p.bilgi_eksik && !(Number(p.net_maas||0) > 0) ? "girilmedi" : `₺${Number(p.net_maas||0).toLocaleString("tr-TR")}`}</td>
+                                      title={p.bilgi_eksik ? ((Number(p.net_maas||0) > 0) ? "Kayıtlı maaş — bilgiler tamamlanana kadar hesaba girmez" : "Maaş girilmedi") : "Aylık net maaş (tam ay)"}>{p.bilgi_eksik && !(Number(p.net_maas||0) > 0) ? "girilmedi" : `₺${Number(p.net_maas||0).toLocaleString("tr-TR")}`}</td>
                                     <td
                                       onClick={async ()=>{
                                         const mevcut = p.hakManuel ? String(p.hakEdis) : "";
@@ -18815,7 +18827,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                       title={p.hakManuel
                                         ? `Manuel girildi (otomatik hesap: ₺${(p.hakOto??0).toLocaleString("tr-TR")}). Tıkla: değiştir; boş bırak = otomatiğe dön`
                                         : "Bu ayki hakediş (işe giriş / puantaj / devir payına göre). Tıkla: manuel tutar gir"}
-                                    >₺{p.hakEdis.toLocaleString("tr-TR")}{p.hakManuel && <span> ✏️</span>}</td>
+                                    >{p.bilgi_eksik && !p.hakManuel
+                                      ? <span style={{ color:"#9ca3af", fontWeight:600 }} title="Bilgiler tamamlanınca hesaplanır — şimdilik hakediş/borç oluşturulmaz">—</span>
+                                      : <>₺{p.hakEdis.toLocaleString("tr-TR")}</>}{p.hakManuel && <span> ✏️</span>}</td>
                                     <td style={{ padding:"7px 12px", textAlign:"right", color: p.banka>0?"#1d4ed8":"#9ca3af", fontWeight:600 }}>
                                       {p.banka>0 ? `₺${p.banka.toLocaleString("tr-TR")}` : "—"}
                                     </td>
@@ -19255,6 +19269,16 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <div style={gridSt}>
                       {[["Unvan","unvan"],["Bölge","bolge"]].map(metin)}
                       {[["İşe Giriş","ise_giris_tarihi"],["İşten Ayrılma","isten_ayrilma_tarihi"]].map(tarih)}
+                      {((editingPersonel?.donemler||[]).length > 0 || (pForm.ise_giris_tarihi && pForm.isten_ayrilma_tarihi && pForm.ise_giris_tarihi > pForm.isten_ayrilma_tarihi)) && (
+                        <div style={{ gridColumn:"1 / -1", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"8px 12px", fontSize:"12px", color:"#334155" }}>
+                          {(editingPersonel?.donemler||[]).length > 0 && (
+                            <div><b>Önceki çalışma dönemleri</b> (arşiv — geçmiş aylar bu tarihlerle hesaplanır): {(editingPersonel.donemler||[]).map(d => `${d.ise_giris ? d.ise_giris.split("-").reverse().join(".") : "giriş ?"} – ${d.isten_ayrilma.split("-").reverse().join(".")}${d.teyit_gerekli ? " (giriş tarihi teyit edilecek)" : ""}`).join(" · ")}</div>
+                          )}
+                          {pForm.ise_giris_tarihi && pForm.isten_ayrilma_tarihi && pForm.ise_giris_tarihi > pForm.isten_ayrilma_tarihi && (
+                            <div style={{ color:"#0f766e", fontWeight:700, marginTop:"3px" }}>Yeniden işe giriş: kaydedince önceki dönem arşivlenir, ayrılma tarihi boşalır ve kişi kadroda aktif kalır.</div>
+                          )}
+                        </div>
+                      )}
                       <div>
                         <label style={labelSt}>Firma Tipi</label>
                         {/* Personel Maaş yalnız Şimşek içindir; taşeron personeli ISG/Belgeler'den eklenir */}
@@ -19821,7 +19845,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               <tbody>
                 {personelList.filter(p=>puantajIstihdam(p) && !p.puantaj_haric && (!hrPersonelFilter || String(p.id)===String(hrPersonelFilter))).map((p,pi) => {
                   // İşten ayrılma sonrası günler sayılmaz (17.09.2026)
-                  const _ayrP = (p.isten_ayrilma_tarihi||"").split("T")[0];
+                  const _ayrP = ikDonemTarih(p).ayrilma;
                   const _gecerliGun = (g) => !_ayrP || `${puantajAy}-${String(g).padStart(2,"0")}` <= _ayrP;
                   const calisilan = ayGunleri.filter(g => _gecerliGun(g) && getPuantaj(p.id,g)?.durum==="CALISDI").length;
                   const gelmediCount = ayGunleri.filter(g => _gecerliGun(g) && getPuantaj(p.id,g)?.durum==="GELMEDI" && new Date(Number(yilStr), Number(ayStr)-1, g).getDay()!==0).length; // pazar kesilmez
