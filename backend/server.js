@@ -308,8 +308,8 @@ function canonSub(name) {
 // okunamazsa buradaki varsayılanlar geçerlidir.
 const ALT_MARKA_VARSAYILAN = [
   { kod: "AHY",   ad: "AHY Elektrik", onek: "AHY",   devir: "2026-07-15", bitis: "2026-09-30", pay: 0.90, devralinan: null },
-  // 14.10.2026 anlaşması: AHY 30.09'a kadar; 01–14.10 arası Şimşek; TEKNO 15.10'dan itibaren
-  { kod: "TEKNO", ad: "Teknocenter",  onek: "TEKNO", devir: "2026-10-15", bitis: null,         pay: 0.90, devralinan: "AHY" },
+  // 14.10.2026 anlaşması: AHY 30.09'a kadar; 01–13.10 arası Şimşek; TEKNO 14.10'dan itibaren (Orhan 15.10 kararı)
+  { kod: "TEKNO", ad: "Teknocenter",  onek: "TEKNO", devir: "2026-10-14", bitis: null,         pay: 0.90, devralinan: "AHY" },
 ];
 let ALT_MARKALAR = ALT_MARKA_VARSAYILAN.map((x) => ({ ...x }));
 const _ertesiGun = (d) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10); };
