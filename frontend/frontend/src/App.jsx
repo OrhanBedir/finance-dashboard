@@ -16920,6 +16920,28 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     const marka = String(p?.marka || "ERC").toUpperCase();
     return hrFirmaFiltre === "TUMU" || hrFirmaFiltre === marka;
   };
+  // 15.10.2026: aktif ama maaşı / işe giriş tarihi eksik (ya da yeniden giriş bekleyen) personel —
+  // kadroda "Bilgileri tamamlanacak" rozetiyle görünür, hakediş/bütçe toplamlarına GİRMEZ
+  const kadroEksik = (p) => !!p?.bilgi_eksik && !!p?.aktif && firmaUygun(p);
+  const _esitleYetkili = _hrYetkili || ["admin", "platform_admin", "direktor", "muhasebe"].includes(String(currentUser?.role || "").toLowerCase());
+  const [esitleBusy, setEsitleBusy] = useState(false);
+  const aktifPersonelEsitle = async () => {
+    if (!window.confirm("Admin Paneli'ndeki aktif hesaplar İK kadrosuyla eşitlensin mi?\n\nİK kaydı olmayan saha personeli için profil açılır (maaş ve işe giriş tarihi boş kalır), mevcut kayıtlar kimlik/e-posta ile bağlanır. Maaş ve ödeme geçmişi değişmez, tekrar basılınca mükerrer kayıt oluşmaz.")) return;
+    setEsitleBusy(true);
+    try {
+      const r = await fetch(`${API_BASE}/hr/personel/esitle`, { method:"POST", headers:{ "Content-Type":"application/json", ...AUTH_H() } });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Eşitleme başarısız");
+      const satir = (x) => `• ${x.ad} (${x.email})${x.ad_soyad && x.ad_soyad !== x.ad ? ` → ${x.ad_soyad}` : ""}${x.neden ? ` — ${x.neden}` : ""}`;
+      const blok = [];
+      if (d.eklenen?.length) blok.push(`EKLENEN (${d.eklenen.length}):\n${d.eklenen.map(satir).join("\n")}`);
+      if (d.baglanan?.length) blok.push(`İLİŞKİLENDİRİLEN (${d.baglanan.length}):\n${d.baglanan.map(satir).join("\n")}`);
+      if (d.kontrol?.length) blok.push(`KONTROL GEREKTİREN (${d.kontrol.length}):\n${d.kontrol.map(satir).join("\n")}`);
+      alert(`${d.ozet}\n\n${blok.join("\n\n")}`);
+      await loadPersonel();
+    } catch (e) { alert(e.message || "Eşitleme başarısız"); }
+    finally { setEsitleBusy(false); }
+  };
   const FirmaRozet = ({ p, kucuk }) => {
     // Alt marka panelinde (Teknocenter/AHY) rozet gösterilmez — kadro zaten o markanındır (13.10.2026, Orhan)
     if (_hrMarka !== "ERC") return null;
@@ -17220,7 +17242,18 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       _pBody.elden_verilen = editingPersonel.elden_verilen;
       delete _pBody.maas_donem;
     }
-    await fetch(url, { method, headers: { "Content-Type":"application/json" }, body: JSON.stringify(_pBody) });
+    const _res = await fetch(url, { method, headers: { "Content-Type":"application/json" }, body: JSON.stringify(_pBody) });
+    if (_res.status === 409) {
+      // 15.10.2026: aynı e-postalı personel zaten var — ikinci kayıt açılmaz, mevcut kayıt düzenlemeye açılır
+      const d = await _res.json().catch(() => ({}));
+      alert(d.error || "Bu e-posta ile kayıtlı personel var");
+      const fresh = await (await fetch(`${API_BASE}/hr/personel?donem=${puantajAy}`)).json().catch(() => []);
+      const mevcut = (Array.isArray(fresh) ? fresh : []).find(x => String(x.id) === String(d.mevcut_id));
+      setPersonelList(_markaFiltre(fresh));
+      if (mevcut) handleEditPersonel(mevcut);
+      return;
+    }
+    if (!_res.ok) { const d = await _res.json().catch(() => ({})); alert(d.error || "Kaydedilemedi"); return; }
     setShowPersonelForm(false); setEditingPersonel(null);
     loadPersonel();
     loadAylikOdemeler();
@@ -17949,6 +17982,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       {/* Alttaki kart listesiyle aynı küme: aktif Şimşek kadrosu */}
                       {personelList.filter(p=>firmaUygun(p) && p.aktif).length} aktif
                     </span>
+                    {personelList.filter(kadroEksik).length > 0 && (
+                      <span title="Maaş veya işe giriş tarihi girilmemiş; hakediş ve bütçe toplamlarına dahil değil" style={{ marginLeft:"8px", background:"#fef3c7", color:"#92400e", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:700, verticalAlign:"middle" }}>
+                        ⚠ {personelList.filter(kadroEksik).length} personelin maaş bilgileri eksik — toplamlara dahil değil
+                      </span>
+                    )}
                   </h2>
                   {/* Tam ay tahmini bütçe + an itibariyle — alt alta, aynı format */}
                   {!_maasGizli && (() => {
@@ -17960,7 +17998,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         <div style={labelSt}>
                           📊 {ayAdi} {yilStr} Maaş Bütçesi (tavan):
                           <span style={amountSt("#1e40af")}>
-                            ₺{Math.round(personelList.filter(p=>puantajIstihdam(p)).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)).toLocaleString("tr-TR")}
+                            ₺{Math.round(personelList.filter(p=>puantajIstihdam(p) && !p.bilgi_eksik).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)).toLocaleString("tr-TR")}
                           </span>
                           <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:500 }}>
                             {_hrMarka === "ERC" ? "(tüm personel tam çalışırsa)" : `(${altMarkaKisa(_hrMarka)} payı — ${AHY_DEVIR.split("-").reverse().join(".")} devri sonrası dönem)`}
@@ -17980,7 +18018,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                 odemeByPer[o.personel_id] = (odemeByPer[o.personel_id]||0) + Number(o.bankadan||0) + Number(o.elden||0);
                               });
                               let toplamKalan = 0;
-                              personelList.filter(pp => puantajIstihdam(pp)).forEach(pp => {
+                              personelList.filter(pp => puantajIstihdam(pp) && !pp.bilgi_eksik).forEach(pp => {
                                 const oz = ozet.find(o => String(o.personel_id) === String(pp.id));
                                 const hak = Math.round(ahyMaasPay(pp, oz ? Number(oz.hakedilen_maas||0) : Number(pp.net_maas||0)));
                                 const gereken = Math.max(0, hak - getDevirFazla(pp.id) - getKapamaDus(pp.id));
@@ -17996,7 +18034,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           // Her personel için: bankadan_gosterilen üzerinden brüt (vergi var),
                           // elden_verilen doğrudan eklenir (vergi yok).
                           // ozet varsa çalışılan güne göre orantılı hesaplanır.
-                          const aktifP = personelList.filter(p => puantajIstihdam(p));
+                          const aktifP = personelList.filter(p => puantajIstihdam(p) && !p.bilgi_eksik);
                           let _toplamIsverenMal = 0;
                           let _toplamSgkIsv = 0;
                           // Banka/Elden dağılımı girilmemiş personelde (ikisi de 0)
@@ -18087,10 +18125,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       });
 
                     // Aktif personel + hakedişleri
-                    const aktifPer = personelList.filter(p=>puantajIstihdam(p));
+                    const aktifPer = personelList.filter(p=>puantajIstihdam(p) || kadroEksik(p));
                     const allRows = aktifPer.map(p => {
                       const ozO    = ozet.find(o=>String(o.personel_id)===String(p.id));
-                      const hakEdis  = Math.round(ahyMaasPay(p, ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0)));
+                      // Bilgisi eksik personele hakediş yazılmaz (sıfır maaş gibi sunulmaz; rozetle gösterilir)
+                      const hakEdis  = p.bilgi_eksik ? 0 : Math.round(ahyMaasPay(p, ozO ? Number(ozO.hakedilen_maas||0) : Number(p.net_maas||0)));
                       // Manuel hakediş işareti (25.08.2026): hücreye tıklayıp elle girilen tutar
                       const hakManuel = !!(ozO && ozO.hakedis_manuel);
                       const hakOto    = ozO ? Math.round(ahyMaasPay(p, Number(ozO.hakedis_otomatik||0))) : null;
@@ -18168,7 +18207,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                     onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                                     onMouseLeave={e=>e.currentTarget.style.background=""}
                                   >👥 Tüm Personel</div>
-                                  {personelList.filter(p=>puantajIstihdam(p) && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
+                                  {personelList.filter(p=>(puantajIstihdam(p) || kadroEksik(p)) && (!hrSearchText || p.ad_soyad.toLowerCase().includes(hrSearchText.toLowerCase()))).map(p=>(
                                     <div key={p.id}
                                       onMouseDown={()=>{ setHrPersonelFilter(String(p.id)); setHrSearchText(p.ad_soyad); setHrSearchOpen(false); setOdemeTabloAcik(true); }}
                                       style={{ padding:"8px 12px", fontSize:"13px", color:"#1f2937", cursor:"pointer", borderBottom:"1px solid #f9fafb" }}
@@ -18298,6 +18337,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                             <button style={{ padding:"5px 12px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
                               onClick={()=>{ setEditingPersonel(null); setPForm({ ad_soyad:"",tc_no:"",dogum_tarihi:"",telefon:"",email:"",unvan:"",bolge:"",ise_giris_tarihi:"",isten_ayrilma_tarihi:"",net_maas:"",bankadan_gosterilen:"",elden_verilen:"",iban:"",banka_adi:"",banka_hesap_no:"",aktif:true }); setShowPersonelForm(true); }}>
                               + Personel Ekle</button>
+                            {_esitleYetkili && <button disabled={esitleBusy} title="Admin Paneli'nde aktif olan hesapları İK kadrosuyla eşitler; mükerrer kayıt oluşturmaz, maaş/ödeme geçmişine dokunmaz"
+                              style={{ padding:"5px 12px", background: esitleBusy ? "#9ca3af" : "#0f766e", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor: esitleBusy ? "wait" : "pointer", whiteSpace:"nowrap" }}
+                              onClick={aktifPersonelEsitle}>{esitleBusy ? "⏳ Eşitleniyor…" : "🔄 Aktif Personelleri Eşitle"}</button>}
                         </div>
                         {/* ── Kart kutusu: başlık + accordion ── */}
                         <div style={{ background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"14px", overflow:"hidden" }}>
@@ -18372,10 +18414,18 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               <tbody>
                                 {perRows.map((p,i)=>(
                                   <tr key={p.id} style={{ background: i%2===0?"#fff":"#f9fafb" }}>
-                                    <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}<FirmaRozet p={p} kucuk /></td>
+                                    <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}<FirmaRozet p={p} kucuk />
+                                      {p.bilgi_eksik && (
+                                        <div style={{ display:"flex", gap:"6px", alignItems:"center", marginTop:"3px", flexWrap:"wrap" }}>
+                                          <span title={`Eksik: ${(p.eksik_alanlar||[]).join(", ")}`} style={{ background:"#fef3c7", color:"#92400e", padding:"1px 8px", borderRadius:"999px", fontSize:"10.5px", fontWeight:800 }}>⚠ Bilgileri tamamlanacak</span>
+                                          <span style={{ fontSize:"10.5px", color:"#92400e" }}>{(p.eksik_alanlar||[]).join(" · ")}</span>
+                                          {!_maasGizli && <button onClick={()=>handleEditPersonel(p)} style={{ padding:"2px 9px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"7px", fontSize:"10.5px", fontWeight:700, cursor:"pointer" }}>Maaş Bilgilerini Tamamla</button>}
+                                        </div>
+                                      )}
+                                    </td>
                                     <td style={{ padding:"7px 12px", color:"#6b7280", whiteSpace:"nowrap" }}>{p.unvan||"-"}</td>
-                                    <td style={{ padding:"7px 12px", textAlign:"right", color:"#0369a1", fontWeight:600 }}
-                                      title="Aylık net maaş (tam ay)">₺{Number(p.net_maas||0).toLocaleString("tr-TR")}</td>
+                                    <td style={{ padding:"7px 12px", textAlign:"right", color: p.bilgi_eksik ? "#9ca3af" : "#0369a1", fontWeight:600 }}
+                                      title={p.bilgi_eksik ? "Maaş girilmedi" : "Aylık net maaş (tam ay)"}>{p.bilgi_eksik && !(Number(p.net_maas||0) > 0) ? "girilmedi" : `₺${Number(p.net_maas||0).toLocaleString("tr-TR")}`}</td>
                                     <td
                                       onClick={async ()=>{
                                         const mevcut = p.hakManuel ? String(p.hakEdis) : "";
@@ -18921,7 +18971,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 {(() => {
                   const gizliMod = _maasGizli;
                   const kisiler = personelList.filter(p => firmaUygun(p) && (!hrPersonelFilter || String(p.id) === String(hrPersonelFilter))
-                    && (gizliMod || !puantajIstihdam(p)));
+                    && (gizliMod || (!puantajIstihdam(p) && !kadroEksik(p))));
                   if (!kisiler.length) return null;
                   const acik = gizliMod || pasifAcik;
                   return (
@@ -33068,6 +33118,14 @@ function App() {
       }
 
       await loadAdminUsers();
+      // 15.10.2026: aktif edilen hesap İK kadrosuna bağlandı mı? (maaş paneli personel tablosundan beslenir)
+      if (data.user?.is_active && data.personel) {
+        const p = data.personel;
+        const msg = p.islem === "OLUSTURULDU" ? `İK profili açıldı: ${p.ad_soyad}. Personel Maaş panelinde "Bilgileri tamamlanacak" olarak görünür — maaş ve işe giriş tarihini girin.`
+          : p.islem === "BAGLANDI" ? `İK kaydına bağlandı: ${p.ad_soyad} (${p.neden}). Maaş panelinde görünür.`
+          : p.islem === "KONTROL" ? `İK kaydı otomatik bağlanamadı: ${p.neden}` : null;
+        if (msg) alert(msg);
+      }
     } catch (err) {
       alert(err.message || "Durum güncellenemedi");
     }
@@ -33386,6 +33444,8 @@ function App() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok || d.ok === false) throw new Error(d.error || "Durum güncellenemedi");
       fetchPlatformOverview();
+      if (d.user?.is_active && d.personel && ["OLUSTURULDU", "BAGLANDI", "KONTROL"].includes(d.personel.islem))
+        alert(d.personel.islem === "KONTROL" ? `İK kaydı otomatik bağlanamadı: ${d.personel.neden}` : `İK kadrosu: ${d.personel.ad_soyad} — ${d.personel.islem === "OLUSTURULDU" ? "profil açıldı, maaş ve işe giriş tarihi girilecek" : d.personel.neden}`);
     } catch (e) { alert(e.message || "Durum güncellenemedi"); }
   };
 

@@ -727,41 +727,14 @@ app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
       );
     }
 
-    // Personel rolündeki kullanıcı için İK personel kaydını da aç/güncelle —
-    // İş Avansı ve diğer İK listeleri users değil personel tablosundan beslenir.
-    // Kayıt açılmazsa yeni eklenen kullanıcı avans formlarında görünmez.
-    if (String(role).toLowerCase() === "user") {
-      try {
-        const normName = String(name).trim().toLowerCase()
-          .replace(/ı/g, "i").replace(/İ/g, "i").replace(/ğ/g, "g")
-          .replace(/ü/g, "u").replace(/ş/g, "s").replace(/ö/g, "o").replace(/ç/g, "c");
-        const pr = await pool.query(
-          `SELECT id FROM personel
-           WHERE LOWER(TRIM(email)) = $1
-              OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                   TRIM(ad_soyad),'İ','I'),'Ş','S'),'Ğ','G'),'Ü','U'),'Ö','O'),'Ç','C'))
-                 = REPLACE($2,'ı','i')
-           LIMIT 1`,
-          [email, normName]
-        );
-        if (pr.rows.length > 0) {
-          await pool.query(
-            `UPDATE personel SET email=$1, marka=$2, aktif=true WHERE id=$3`,
-            [email, marka, pr.rows[0].id]
-          );
-        } else {
-          await pool.query(
-            `INSERT INTO personel (ad_soyad, email, marka, aktif, ise_giris_tarihi)
-             VALUES ($1, $2, $3, true, CURRENT_DATE)`,
-            [name, email, marka]
-          );
-        }
-      } catch (e) {
-        console.error("ADMIN USER PERSONEL SYNC ERROR:", e.message);
-      }
-    }
+    // 15.10.2026: İK bağlantısı kimlik/e-posta esaslı (ikPersonelBagla) — ad benzerliğiyle
+    // birleştirme yok, işe giriş tarihi aktivasyon tarihinden türetilmez (İK tamamlar).
+    let personel = null;
+    try {
+      personel = await ikPersonelBagla({ id: result.rows[0].id, name, email, role, marka }, { kullanici: String(req.user?.email || "").toLowerCase() });
+    } catch (e) { console.error("ADMIN USER PERSONEL SYNC ERROR:", e.message); }
 
-    res.json({ ok: true, user: result.rows[0] });
+    res.json({ ok: true, user: result.rows[0], personel });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -795,7 +768,16 @@ app.put(
 
       console.log("ACTIVE TOGGLED:", result.rows[0]);
 
-      res.json({ ok: true, user: result.rows[0] });
+      // 15.10.2026: hesap aktif edildiyse İK personel kaydına bağla / profil aç (maaş paneline düşsün).
+      // Pasife almak İK kaydına, maaş ve ödeme geçmişine dokunmaz (çıkış İK'daki ayrılma tarihiyle yönetilir).
+      let personel = null;
+      if (result.rows[0].is_active) {
+        try {
+          const u = await pool.query(`SELECT id, name, email, role, marka FROM users WHERE id=$1`, [id]);
+          if (u.rows[0]) personel = await ikPersonelBagla(u.rows[0], { kullanici: String(req.user?.email || "").toLowerCase(), yenidenGiris: true });
+        } catch (e) { console.error("ACTIVE → IK BAGLA:", e.message); personel = { islem: "HATA", neden: e.message }; }
+      }
+      res.json({ ok: true, user: result.rows[0], personel });
     } catch (err) {
       console.error("ACTIVE TOGGLE ERROR:", err);
       res.status(500).json({ ok: false, error: err.message });
@@ -7043,7 +7025,8 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
             WHERE personel_id = p.id AND donem <= $2
             ORDER BY donem DESC LIMIT 1
           ) g ON true
-          WHERE p.aktif = true AND UPPER(COALESCE(p.marka,'ERC')) = ANY($1::text[])`, [P.bordro, donem]);
+          WHERE p.aktif = true AND UPPER(COALESCE(p.marka,'ERC')) = ANY($1::text[])
+            AND p.ise_giris_tarihi IS NOT NULL AND COALESCE(g.net_maas, p.net_maas, 0) > 0`, [P.bordro, donem]);
         const gm = await pool.query(`
           SELECT personel_id, COUNT(*) FILTER (WHERE durum = 'GELMEDI' AND EXTRACT(DOW FROM tarih) <> 0) AS gelmedi
           FROM puantaj WHERE to_char(tarih,'YYYY-MM') = $1 GROUP BY personel_id`, [donem]);
@@ -16690,6 +16673,134 @@ pool.query(`
 `).catch(e => console.error("HR tablo hatası:", e.message));
 
 // ---- PERSONEL CRUD ----
+// ─── ADMIN KULLANICISI ↔ İK PERSONEL BAĞLANTISI (15.10.2026, Orhan) ───────────────────────────
+// Sorun: Admin Paneli "Aktif Et" yalnız users.is_active'i çeviriyordu; maaş paneli personel
+// tablosundan beslendiği için aktif edilen kişi kadroda görünmüyordu. Çözüm: kimlik esaslı
+// bağlantı (personel.user_id → e-posta), aktivasyonda otomatik bağlama/profil açma ve
+// "Aktif Personelleri Eşitle" ucu. Maaş, işe giriş, avans, ödeme ve puantaj verisi hiç yazılmaz.
+const IK_OTOMATIK_ROLLER = ["user"];                               // İK kaydı yoksa profil açılır (yalnız saha personeli rolü)
+const IK_ERISIM_ROLLERI = ["subcon", "platform_admin"];            // firma / erişim hesabı: otomatik kadroya alınmaz
+const ikAdNormalize = (s) => String(s || "").trim()
+  .replace(/İ/g, "i").replace(/I/g, "i").toLowerCase() // Türkçe İ/I: toLowerCase'den ÖNCE (JS 'İ' → 'i̇' birleşik nokta üretir)
+  .replace(/ı/g, "i").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ş/g, "s").replace(/ö/g, "o").replace(/ç/g, "c")
+  .replace(/\s+/g, " ");
+// Personel listesinde "bilgi eksik" ölçütü: aktif Şimşek personeli, bordro dışı değil, ve
+// net maaş yok / işe giriş tarihi yok / ayrılma tarihi geçmişte (yeniden giriş girilmeli)
+const ikEksikSql = (net, p = "p") => `
+  (${p}.aktif AND COALESCE(${p}.firma_tipi,'simsek') = 'simsek' AND COALESCE(${p}.puantaj_haric,false) = false
+   AND (COALESCE(${net},0) <= 0 OR ${p}.ise_giris_tarihi IS NULL
+        OR (${p}.isten_ayrilma_tarihi IS NOT NULL AND ${p}.isten_ayrilma_tarihi <= CURRENT_DATE))) AS bilgi_eksik,
+  ARRAY_REMOVE(ARRAY[
+    CASE WHEN COALESCE(${net},0) <= 0 THEN 'net maaş' END,
+    CASE WHEN ${p}.ise_giris_tarihi IS NULL THEN 'işe giriş tarihi' END,
+    CASE WHEN ${p}.isten_ayrilma_tarihi IS NOT NULL AND ${p}.isten_ayrilma_tarihi <= CURRENT_DATE THEN 'yeniden işe giriş (ayrılma tarihi geçmişte)' END
+  ]::text[], NULL) AS eksik_alanlar`;
+async function ikIslemLog(personelId, userId, islem, detay, kullanici) {
+  await pool.query(`INSERT INTO ik_islem_log (personel_id, user_id, islem, detay, kullanici) VALUES ($1,$2,$3,$4,$5)`,
+    [personelId || null, userId || null, islem, detay ? String(detay).slice(0, 1000) : null, kullanici || null]).catch(e => console.error("[ik-islem-log]", e.message));
+}
+/* Kullanıcıyı İK personel kaydına bağlar. Sıra: personel.user_id → e-posta (küçük harf) →
+   ad benzerliği YALNIZ "kontrol gerektirir" olarak raporlanır, otomatik birleştirme yapılmaz.
+   Dönüş: { islem: ZATEN | BAGLANDI | OLUSTURULDU | KONTROL | ATLANDI, personel_id, neden, adaylar } */
+async function ikPersonelBagla(user, opts = {}) {
+  const kullanici = opts.kullanici || null;
+  const kuru = !!opts.kuru; // önizleme: yazma yok
+  const email = String(user.email || "").trim().toLowerCase();
+  const rol = String(user.role || "user").toLowerCase();
+  const ad = String(user.name || "").trim();
+  const marka = String(user.marka || "ERC").toUpperCase();
+  const erisimHesabi = IK_ERISIM_ROLLERI.includes(rol) || !email.includes("@");
+  // 1) Mevcut bağlantı / e-posta eşleşmesi
+  let p = null;
+  const byId = await pool.query(`SELECT * FROM personel WHERE user_id = $1 ORDER BY aktif DESC, id LIMIT 1`, [user.id]);
+  if (byId.rows[0]) p = byId.rows[0];
+  else if (email) {
+    const byMail = await pool.query(`SELECT * FROM personel WHERE LOWER(TRIM(email)) = $1 ORDER BY aktif DESC, id`, [email]);
+    if (byMail.rows.length > 1) {
+      if (!kuru) await ikIslemLog(null, user.id, "KONTROL", `${ad} (${email}): aynı e-postayla ${byMail.rows.length} İK kaydı var (#${byMail.rows.map(r => r.id).join(", #")}) — elle birleştirin`, kullanici);
+      return { islem: "KONTROL", neden: `aynı e-postayla ${byMail.rows.length} İK kaydı var — elle birleştirin`, adaylar: byMail.rows.map(r => ({ id: r.id, ad_soyad: r.ad_soyad, aktif: r.aktif, marka: r.marka })) };
+    }
+    if (byMail.rows[0]) p = byMail.rows[0];
+  }
+  if (p) {
+    const degisiklik = [];
+    // İK'da pasif kişi: toplu eşitlemede sessizce kadroya alınmaz (yöneticiye gösterilir, kimlik bağlanır);
+    // Admin Paneli'nde açıkça "Aktif Et" denirse kadroya döner (ayrılmışsa "yeniden işe giriş girilecek" rozetiyle).
+    if (!p.aktif && !opts.yenidenGiris) {
+      if (!p.user_id && !kuru) await pool.query(`UPDATE personel SET user_id=$1 WHERE id=$2`, [user.id, p.id]);
+      const neden = p.isten_ayrilma_tarihi
+        ? `İK'da ${ymdYerel(p.isten_ayrilma_tarihi)} tarihinde işten ayrılmış görünüyor — hesabı pasife alın ya da yeniden işe giriş için İK kaydını düzenleyin`
+        : "İK kaydı pasif (ayrılma tarihi yok) — kadroya alınacaksa Admin'de Aktif Et ya da İK kaydını düzenleyin";
+      return { islem: "KONTROL", personel_id: p.id, ad_soyad: p.ad_soyad, neden };
+    }
+    if (!p.user_id) { if (!kuru) await pool.query(`UPDATE personel SET user_id=$1 WHERE id=$2`, [user.id, p.id]); degisiklik.push("kimlik bağlandı"); }
+    if (!p.email && email) { if (!kuru) await pool.query(`UPDATE personel SET email=$1 WHERE id=$2`, [email, p.id]); degisiklik.push("e-posta yazıldı"); }
+    if (!p.aktif && opts.aktifEt !== false) {
+      // Kadroda görünsün; maaş/işe giriş/ayrılma tarihine DOKUNULMAZ — ayrılma geçmişteyse
+      // "yeniden işe giriş girilecek" olarak eksik bilgi rozetiyle görünür (İK çalışma dönemi mantığı)
+      if (!kuru) await pool.query(`UPDATE personel SET aktif=true WHERE id=$1`, [p.id]);
+      degisiklik.push("İK kaydı yeniden aktif (maaş/tarihler korundu)");
+    }
+    if (degisiklik.length) {
+      if (!kuru) await ikIslemLog(p.id, user.id, "BAGLANDI", `${ad} (${email}) → personel #${p.id} ${p.ad_soyad}: ${degisiklik.join(", ")}`, kullanici);
+      return { islem: "BAGLANDI", personel_id: p.id, ad_soyad: p.ad_soyad, neden: degisiklik.join(", ") };
+    }
+    return { islem: "ZATEN", personel_id: p.id, ad_soyad: p.ad_soyad };
+  }
+  // 2) Erişim hesabı (taşeron/platform/firma hesabı) → kadroya alınmaz
+  if (erisimHesabi) return { islem: "ATLANDI", neden: `erişim hesabı (${rol})` };
+  // 3) Ad benzerliği → yöneticiye göster, birleştirme yapma
+  const normAd = ikAdNormalize(ad);
+  if (normAd) {
+    const adaylar = await pool.query(`SELECT id, ad_soyad, email, aktif, marka, to_char(ise_giris_tarihi,'YYYY-MM-DD') AS ise_giris_tarihi
+      FROM personel WHERE user_id IS NULL AND COALESCE(firma_tipi,'simsek') = 'simsek'`);
+    const benzer = adaylar.rows.filter(r => ikAdNormalize(r.ad_soyad) === normAd);
+    if (benzer.length) {
+      if (!kuru) await ikIslemLog(null, user.id, "KONTROL", `${ad} (${email}): aynı adlı ${benzer.length} İK kaydı var (#${benzer.map(b => b.id).join(", #")}) — e-posta farklı, elle eşleştirin`, kullanici);
+      return { islem: "KONTROL", neden: "aynı adlı İK kaydı var, e-posta farklı — elle eşleştirin", adaylar: benzer };
+    }
+  }
+  // 4) Kayıt yok: saha rollerinde profil aç (maaş/işe giriş BOŞ → "bilgileri tamamlanacak")
+  if (!IK_OTOMATIK_ROLLER.includes(rol)) return { islem: "KONTROL", neden: `İK kaydı yok; ${rol} rolünde profil otomatik açılmaz — gerekiyorsa Personel Ekle` };
+  if (opts.olustur === false) return { islem: "KONTROL", neden: "İK kaydı yok (oluşturma kapalı)" };
+  if (kuru) return { islem: "OLUSTURULDU", neden: "önizleme: profil açılacak (maaş ve işe giriş tarihi girilecek)" };
+  const ins = await pool.query(
+    `INSERT INTO personel (ad_soyad, email, marka, firma_tipi, aktif, user_id, net_maas, bankadan_gosterilen, elden_verilen)
+     VALUES ($1,$2,$3,'simsek',true,$4,0,0,0) RETURNING id, ad_soyad`,
+    [ad || email, email, marka, user.id]);
+  await ikIslemLog(ins.rows[0].id, user.id, "OLUSTURULDU", `${ad} (${email}) için İK profili açıldı — maaş ve işe giriş tarihi girilecek`, kullanici);
+  return { islem: "OLUSTURULDU", personel_id: ins.rows[0].id, ad_soyad: ins.rows[0].ad_soyad, neden: "maaş ve işe giriş tarihi girilecek" };
+}
+const IK_ESITLE_ROLLER = ["admin", "platform_admin", "direktor", "muhasebe"];
+const IK_ESITLE_EMAIL = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "duzgun.simsek@simsektel.com", "erencan.simsek@simsektel.com", "info@ahyelektrik.com", "teknocenter", "nurcan.kus@simsektel.com"];
+// "Aktif Personelleri Eşitle": yetkili olunan firma kapsamındaki aktif hesapları İK ile hizalar.
+// Tekrar çalıştırılınca mükerrer kayıt oluşmaz (ZATEN). Rol/erişim yetkisi değiştirmez.
+app.post("/hr/personel/esitle", authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || "").toLowerCase();
+    const rol = String(req.user?.role || "").toLowerCase();
+    if (!IK_ESITLE_ROLLER.includes(rol) && !IK_ESITLE_EMAIL.includes(email)) return res.status(403).json({ ok: false, error: "Eşitleme yetkiniz yok" });
+    const k = altMarkaKapsam(req); // alt marka: yalnız kendi bordro kümesindeki hesaplar
+    const params = [];
+    let where = `is_active = true AND COALESCE(status,'active') <> 'deleted' AND COALESCE(status,'active') <> 'rejected'`;
+    if (k) { where += ` AND UPPER(COALESCE(marka,'ERC')) = ANY($1::text[])`; params.push(k.bordro); }
+    const users = await pool.query(`SELECT id, name, email, role, marka FROM users WHERE ${where} ORDER BY name`, params);
+    const sonuc = { eklenen: [], baglanan: [], zaten: [], kontrol: [], atlanan: [] };
+    for (const u of users.rows) {
+      try {
+        const r = await ikPersonelBagla(u, { kullanici: email, kuru: String(req.query.onizle || "") === "1" });
+        const satir = { user_id: u.id, ad: u.name, email: u.email, rol: u.role, ...r };
+        if (r.islem === "OLUSTURULDU") sonuc.eklenen.push(satir);
+        else if (r.islem === "BAGLANDI") sonuc.baglanan.push(satir);
+        else if (r.islem === "ZATEN") sonuc.zaten.push(satir);
+        else if (r.islem === "KONTROL") sonuc.kontrol.push(satir);
+        else sonuc.atlanan.push(satir);
+      } catch (e) { sonuc.kontrol.push({ user_id: u.id, ad: u.name, email: u.email, rol: u.role, islem: "HATA", neden: e.message }); }
+    }
+    res.json({ ok: true, onizleme: String(req.query.onizle || "") === "1", ozet: `${sonuc.eklenen.length} personel eklendi, ${sonuc.baglanan.length} kayıt ilişkilendirildi, ${sonuc.zaten.length} personel zaten kayıtlı, ${sonuc.kontrol.length} kayıt kontrol gerektiriyor`, ...sonuc });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.get("/hr/personel", async (req, res) => {
   try {
     const donem = String(req.query.donem || "").trim(); // 'YYYY-MM' — o ay geçerli maaşla döner
@@ -16699,7 +16810,8 @@ app.get("/hr/personel", async (req, res) => {
           COALESCE(g.net_maas, p.net_maas) AS net_maas,
           COALESCE(g.bankadan_gosterilen, p.bankadan_gosterilen) AS bankadan_gosterilen,
           COALESCE(g.elden_verilen, p.elden_verilen) AS elden_verilen,
-          g.donem AS maas_gecerli_donem
+          g.donem AS maas_gecerli_donem,
+          ${ikEksikSql("COALESCE(g.net_maas, p.net_maas)")}
         FROM personel p
         LEFT JOIN LATERAL (
           SELECT net_maas, bankadan_gosterilen, elden_verilen, donem
@@ -16710,7 +16822,7 @@ app.get("/hr/personel", async (req, res) => {
         ORDER BY p.aktif DESC, p.ad_soyad ASC`, [donem]);
       return res.json(r.rows);
     }
-    const r = await pool.query("SELECT * FROM personel ORDER BY aktif DESC, ad_soyad ASC");
+    const r = await pool.query(`SELECT p.*, ${ikEksikSql("p.net_maas")} FROM personel p ORDER BY p.aktif DESC, p.ad_soyad ASC`);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -16733,6 +16845,12 @@ app.post("/hr/personel", async (req, res) => {
       ekip_bilgisi, alt_yuklenici, firma_tipi, isdp_account, iresource_giris,
       kkd_zimmet_tarihi, mesleki_yeterlilik_durum, mesleki_yeterlilik_tarihi,
       elektrik_isi, yuksekte_calisma, arac_kullanim, marka } = req.body;
+    // 15.10.2026: aynı e-postayla ikinci personel açılmaz — mevcut kaydı düzenleyin (409 + mevcut_id)
+    const _mail = String(email || "").trim().toLowerCase();
+    if (_mail) {
+      const dup = await pool.query(`SELECT id, ad_soyad, aktif FROM personel WHERE LOWER(TRIM(email)) = $1 ORDER BY aktif DESC, id LIMIT 1`, [_mail]);
+      if (dup.rows[0] && !req.body.zorla) return res.status(409).json({ error: `Bu e-posta ile kayıtlı personel var: ${dup.rows[0].ad_soyad} (#${dup.rows[0].id}). Mevcut kaydı düzenleyin.`, mevcut_id: dup.rows[0].id, mevcut: dup.rows[0] });
+    }
     const r = await pool.query(
       `INSERT INTO personel (ad_soyad,tc_no,dogum_tarihi,telefon,email,unvan,bolge,ise_giris_tarihi,
         net_maas,bankadan_gosterilen,elden_verilen,iban,banka_adi,banka_hesap_no,
@@ -16746,6 +16864,13 @@ app.post("/hr/personel", async (req, res) => {
        kkd_zimmet_tarihi||null,mesleki_yeterlilik_durum||null,mesleki_yeterlilik_tarihi||null,
        elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,String(marka||"ERC").toUpperCase()]
     );
+    // Aynı e-postalı sistem hesabı varsa kimlik bağlanır (mükerrer profil oluşmaz)
+    if (_mail) {
+      try {
+        const u = await pool.query(`SELECT id FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1`, [_mail]);
+        if (u.rows[0]) await pool.query(`UPDATE personel SET user_id=$1 WHERE id=$2 AND user_id IS NULL`, [u.rows[0].id, r.rows[0].id]);
+      } catch {}
+    }
     // Taban maaş kaydı: tüm aylar için geçerli başlangıç değeri
     try {
       await pool.query(
@@ -17154,7 +17279,9 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
       }
       if (_gd && !Number.isNaN(_gd.getTime()) && _gd.getTime() > _aySon) istihdamda = false;
       // Pazar/resmi tatil bonusu maaşa EKLENMEZ — dinlenme bakiyesine birikir
-      const hakedilenOto = Math.max(0, Math.round(netMaas * girisFactor - gelmedi * dailyRate));
+      // 15.10.2026: maaşı ya da işe giriş tarihi girilmemiş personele otomatik hakediş yazılmaz (sıfır maaş gibi sunulmaz, "bilgi eksik")
+      const bilgiEksik = !p.puantaj_haric && (!p.ise_giris_tarihi || netMaas <= 0);
+      const hakedilenOto = bilgiEksik ? 0 : Math.max(0, Math.round(netMaas * girisFactor - gelmedi * dailyRate));
       const pazarBonus = 0; // Artık maaşa yansımıyor, dinlenme hakkı olarak birikiyor
 
       const bankaDailyRate = (Number(p.bankadan_gosterilen) || 0) / REFERANS_GUN;
@@ -17192,7 +17319,7 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
         calisilan_gun: calisilan, gelmedi_gun: gelmedi, pazar_calisdi: pazarCalisdi,
         pazar_bonus: pazarBonus, dinlenme_gun: dinlenme, toplam_gun: totalDays,
         hakedilen_maas: hakedilen, bankadan, elden, avans,
-        hakedis_manuel: hakedisManuel, hakedis_otomatik: hakedilenOto,
+        hakedis_manuel: hakedisManuel, hakedis_otomatik: hakedilenOto, bilgi_eksik: bilgiEksik,
         kalan: hakedilen - avans,
         dinlenme_bakiye: dinlenmeBakiye,
         toplam_pazar_calisdi: toplamPazarCalisdi,
@@ -22502,6 +22629,8 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS ekip_bilgisi TEXT",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS alt_yuklenici TEXT",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS firma_tipi TEXT DEFAULT 'simsek'",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS user_id INTEGER",
+  "CREATE TABLE IF NOT EXISTS ik_islem_log (id SERIAL PRIMARY KEY, personel_id INTEGER, user_id INTEGER, islem TEXT, detay TEXT, kullanici TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS isdp_account TEXT",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS iresource_giris TEXT",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS kkd_zimmet_tarihi DATE",
