@@ -37322,7 +37322,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
     aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
     durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15,
-    depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:"", mulkiyet_turu:"KIRALIK", sahip_firma:""
+    depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:"", mulkiyet_turu:"KIRALIK", sahip_firma:"", kira_kdv_haric:"", kira_kdv_orani:20, kira_gecerli_donem:""
   });
   const [belgeUpload, setBelgeUpload] = useState({ turu:null, file:null }); // {turu, file}
   // 15.10.2026: sekmeli düzenleme penceresi — sekme, açılış anındaki form kopyası (kirli kontrolü), proje listesi
@@ -37387,7 +37387,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       kiralama_firmasi:"", sozlesme_no:"", kira_baslangic:"", kira_bitis:"",
       aylik_kira:"", bolge:"", surucu:"", sigorta_bitis:"", muayene_bitis:"",
       durum:"AKTİF", notlar:"", odeme_tipi:"PESIN", donem_gunu:15,
-      depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:"", mulkiyet_turu:"KIRALIK", sahip_firma:"" });
+      depozito_tutar:"", depozito_tarihi:"", depozito_iade_tarihi:"", depozito_not:"", mulkiyet_turu:"KIRALIK", sahip_firma:"", kira_kdv_haric:"", kira_kdv_orani:20, kira_gecerli_donem:"" });
     setSelected(null);
     setShowForm(true);
   };
@@ -37405,7 +37405,8 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       odeme_tipi: a.odeme_tipi||"PESIN", donem_gunu: a.donem_gunu||15,
       depozito_tutar: a.depozito_tutar||"", depozito_tarihi: fmt(a.depozito_tarihi),
       depozito_iade_tarihi: fmt(a.depozito_iade_tarihi), depozito_not: a.depozito_not||"",
-      mulkiyet_turu: aracSirketMi(a) ? "SIRKET" : "KIRALIK", sahip_firma: a.sahip_firma||""
+      mulkiyet_turu: aracSirketMi(a) ? "SIRKET" : "KIRALIK", sahip_firma: a.sahip_firma||"",
+      kira_kdv_haric: a.kira_kdv_haric||"", kira_kdv_orani: a.kira_kdv_orani ?? 20, kira_gecerli_donem: a.kira_gecerli_donem||""
     });
     setSelected(a);
     setShowForm(true);
@@ -37489,6 +37490,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   // Dönem listesi: başlangıç (2026-07 ya da kira başlangıç ayı) → vadesi gelmiş son dönem + sıradaki.
   // Peşin: vade = dönem başı (ayın donem_gunu'sü). Sonradan: vade = bir sonraki dönem başı.
   const donemListesi = (a) => {
+    const kiraA = aracSirketMi(a) ? 0 : Number(a.aylik_kira || 0); // KDV dahil aylık bedel
     const gun = Number(a.donem_gunu || 15);
     const pesin = (a.odeme_tipi || "PESIN") !== "SONRADAN";
     let bas = "2026-07";
@@ -37501,7 +37503,11 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       const vade = `${vy}-${pad2(vm)}-${pad2(gun)}`;
       const odeme = kiraOdemeler.find(o => String(o.arac_id) === String(a.id) && o.donem === donem);
       const vadesiGeldi = vade <= bugunStr;
-      out.push({ donem, vade, odeme, durum: odeme ? "ODENDI" : vadesiGeldi ? "GECIKTI" : "BEKLIYOR" });
+      // 15.10.2026: kayıtlı ödeme KDV dahil bedelin altındaysa dönem KISMI sayılır, kalan borç olarak görünür (ödenmiş kabul edilmez)
+      // Kalan yalnız bedelin geçerli olduğu dönemden itibaren hesaplanır (kira_gecerli_donem yoksa eski ödemeler tam sayılır)
+      const gecerli = a.kira_gecerli_donem && /^\d{4}-\d{2}$/.test(a.kira_gecerli_donem) ? donem >= a.kira_gecerli_donem : false;
+      const eksik = odeme && gecerli ? Math.max(0, kiraA - Number(odeme.tutar || 0)) : 0;
+      out.push({ donem, vade, odeme, eksik, durum: odeme ? (eksik > 0 && vadesiGeldi ? "KISMI" : "ODENDI") : vadesiGeldi ? "GECIKTI" : "BEKLIYOR" });
       if (!vadesiGeldi) break;
       m++; if (m > 12) { m = 1; y++; }
     }
@@ -37511,8 +37517,10 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     const kira = aracSirketMi(a) ? 0 : Number(a.aylik_kira || 0); // şirket aracı: kira takibi uygulanmaz
     if (!a.aktif || kira <= 0) return { aylar: [], tutar: 0, siradaki: null, liste: [] };
     const liste = donemListesi(a);
-    const aylar = liste.filter(x => x.durum === "GECIKTI").map(x => x.donem);
-    return { aylar, tutar: aylar.length * kira, siradaki: liste.find(x => x.durum === "BEKLIYOR") || null, liste };
+    const gecikenler = liste.filter(x => x.durum === "GECIKTI"), kismiler = liste.filter(x => x.durum === "KISMI");
+    const aylar = [...gecikenler, ...kismiler].map(x => x.donem).sort();
+    const tutar = gecikenler.length * kira + kismiler.reduce((s, x) => s + x.eksik, 0);
+    return { aylar, tutar, gecikti: gecikenler.length, kismi: kismiler.length, siradaki: liste.find(x => x.durum === "BEKLIYOR") || null, liste };
   };
 
   const aktifAraclar = araclar.filter(a => a.durum === "AKTİF");
@@ -37557,7 +37565,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     const hepsi = [...gecmisRows, ...pasifler].sort((x, y) => String(y._sira).localeCompare(String(x._sira)));
     exportStandardExcel({
       title: "Araç Filosu — Aktif Araçlar", sheetName: "Araçlar", fileBase: "Arac_Filosu",
-      headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Mülkiyet", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira (₺)", "Depozito (₺)", "Depozito Durumu", "Ödeme", "Kiralama Firması / Sahibi", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
+      headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Mülkiyet", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira KDV Dahil (₺)", "Depozito (₺)", "Depozito Durumu", "Ödeme", "Kiralama Firması / Sahibi", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
       colWidths: [12, 12, 14, 8, 10, 13, 12, 26, 14, 14, 22, 14, 22, 13, 13, 13, 13, 10], numericCols: [8, 9],
       rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", aracSirketMi(a) ? "Şirket aracı" : "Kiralık", a.bolge || "", a.surucu || "", aracSirketMi(a) ? 0 : Number(a.aylik_kira || 0),
         aracSirketMi(a) ? 0 : Number(a.depozito_tutar || 0), !aracSirketMi(a) && Number(a.depozito_tutar || 0) > 0 ? (a.depozito_iade_tarihi ? `İade alındı ${fT(a.depozito_iade_tarihi)}` : `Ödendi ${fT(a.depozito_tarihi) || ""} · iade bekleniyor`) : "",
@@ -37589,7 +37597,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     const rows = [];
     kiralikAraclar.slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka))).forEach(a => {
       const liste = donemListesi(a);
-      const donemler = new Set(liste.filter(x => x.durum === "GECIKTI").map(x => x.donem));
+      const donemler = new Set(liste.filter(x => x.durum === "GECIKTI" || x.durum === "KISMI").map(x => x.donem));
       donemler.add(donemSec);
       [...donemler].sort().forEach(donem => {
         const d = liste.find(x => x.donem === donem);
@@ -37597,9 +37605,13 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
         let [y, m] = donem.split("-").map(Number); if (!pesin) { m++; if (m > 12) { m = 1; y++; } }
         const vade = d ? d.vade : `${y}-${pad2(m)}-${pad2(gun)}`;
         const odeme = d ? d.odeme : kiraOdemeler.find(o => String(o.arac_id) === String(a.id) && o.donem === donem);
+        const kiraA = Number(a.aylik_kira || 0);
+        const gecerli = a.kira_gecerli_donem && /^\d{4}-\d{2}$/.test(a.kira_gecerli_donem) ? donem >= a.kira_gecerli_donem : false;
+        const eksik = odeme && gecerli ? Math.max(0, kiraA - Number(odeme.tutar || 0)) : 0;
+        const kismi = !!odeme && eksik > 0;
         rows.push({ key: `${a.id}_${donem}`, arac_id: a.id, plaka: a.plaka, arac: `${a.marka || ""} ${a.model || ""}`.trim(), surucu: a.surucu, donem, vade,
-          kira: Number(a.aylik_kira || 0), odendi: !!odeme, odeme, gecikti: !odeme && vade <= bugunStr,
-          sec: !odeme && vade <= bugunStr, tutar: Math.round(Number(a.aylik_kira || 0)).toLocaleString("tr-TR"), kasadan: false, tarih: bugunStr });
+          kira: kiraA, odendi: !!odeme && !kismi, kismi, eksik, odeme, gecikti: (!odeme || kismi) && vade <= bugunStr,
+          sec: (!odeme || kismi) && vade <= bugunStr, tutar: Math.round(kismi ? eksik : kiraA).toLocaleString("tr-TR"), kasadan: false, tarih: bugunStr });
       });
     });
     return rows;
@@ -37617,8 +37629,9 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
     for (const r of paySecili) {
       try {
         const res = await fetch(`${API_BASE}/hr/araclar/${r.arac_id}/kira-ode`, { method:"POST", headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ donem: r.donem, tutar: tutarSayi(r.tutar), kasadan_dus: !!r.kasadan, tarih: r.tarih || null,
-            aciklama: tutarSayi(r.tutar) < r.kira ? `Fark ödemesi (kira ₺${r.kira.toLocaleString("tr-TR")})` : null }) });
+          // Kısmi dönemde kayıt (arac_id, dönem) tekildir: yeni ödeme eski tutarın ÜZERİNE eklenir, eski ödeme korunur
+          body: JSON.stringify({ donem: r.donem, tutar: r.kismi ? Number(r.odeme?.tutar || 0) + tutarSayi(r.tutar) : tutarSayi(r.tutar), kasadan_dus: !!r.kasadan, tarih: r.tarih || null,
+            aciklama: r.kismi ? `Fark ödemesi +₺${tutarSayi(r.tutar).toLocaleString("tr-TR")} (önceki ₺${Number(r.odeme?.tutar || 0).toLocaleString("tr-TR")} · ${fT(r.odeme?.tarih)})${r.odeme?.aciklama ? " · " + r.odeme.aciklama : ""}` : tutarSayi(r.tutar) < r.kira ? `Fark ödemesi (kira ₺${r.kira.toLocaleString("tr-TR")})` : null }) });
         if (!res.ok) hata++;
       } catch { hata++; }
     }
@@ -37684,7 +37697,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       {(borcluAraclar.length > 0 || belgeUyari.length > 0) && (
         <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginTop:"12px" }}>
           {borcluAraclar.map(a => (
-            <span key={"b"+a.id} onClick={() => setAcikSatir(a.id)} style={{ ...chip, background:"#fee2e2", color:"#b91c1c", cursor:"pointer" }}>● {a.plaka} · {borcHesap(a).aylar.length} dönem ödenmedi</span>
+            <span key={"b"+a.id} onClick={() => setAcikSatir(a.id)} style={{ ...chip, background:"#fee2e2", color:"#b91c1c", cursor:"pointer" }}>● {a.plaka} · {(() => { const b = borcHesap(a); return `${b.gecikti ? `${b.gecikti} dönem ödenmedi` : ""}${b.gecikti && b.kismi ? ", " : ""}${b.kismi ? `${b.kismi} dönem kısmi · kalan ₺${b.tutar.toLocaleString("tr-TR")}` : ""}`; })()}</span>
           ))}
           {belgeUyari.slice(0, 6).map(a => (
             <span key={"d"+a.id} onClick={() => openEdit(a)} style={{ ...chip, background:"#fef3c7", color:"#b45309", cursor:"pointer" }}>● {a.plaka} · {a.uyari}</span>
@@ -37714,7 +37727,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
           <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"1120px" }}>
             <thead>
               <tr>
-                {["Plaka", "Araç", "Kullanan", "Bölge", "Aylık kira", "Kira takibi", "Durum", "Son KM", "Belgeler", ""].map((h, i) => (
+                {["Plaka", "Araç", "Kullanan", "Bölge", "Aylık kira (KDV dahil)", "Kira takibi", "Durum", "Son KM", "Belgeler", ""].map((h, i) => (
                   <th key={h + i} style={{ ...thSt, textAlign: (i === 4 || i === 7) ? "right" : "left" }}>{h}</th>
                 ))}
               </tr>
@@ -37730,7 +37743,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                   ? { bg:"#f3f5f8", c:"#6b7a90", t: a.durum === "SERVİSTE" ? "Serviste" : "Pasif / iade" }
                   : aracSirketMi(a) ? { bg:"#e0e7ff", c:"#3730a3", t:"Şirket mülkiyeti" }
                   : kira <= 0 ? { bg:"#f3f5f8", c:"#6b7a90", t:"Kira yok" }
-                  : borc.tutar > 0 ? { bg:"#fee2e2", c:"#b91c1c", t:`Borç ₺${borc.tutar.toLocaleString("tr-TR")} · ${borc.aylar.length} dönem` }
+                  : borc.tutar > 0 ? { bg: borc.gecikti ? "#fee2e2" : "#fef3c7", c: borc.gecikti ? "#b91c1c" : "#b45309", t: borc.gecikti ? `Borç ₺${borc.tutar.toLocaleString("tr-TR")} · ${borc.gecikti} dönem${borc.kismi ? ` + ${borc.kismi} kısmi` : ""}` : `Kalan ₺${borc.tutar.toLocaleString("tr-TR")} · ${borc.kismi} dönem kısmi` }
                   : borc.siradaki ? { bg:"#dcfce7", c:"#15803d", t:`Ödendi · sıradaki ${borc.siradaki.vade.split("-").reverse().slice(0, 2).join(".")}` }
                   : { bg:"#dcfce7", c:"#15803d", t:"Ödendi" };
                 return (
@@ -37750,10 +37763,10 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                         {a.aktif && kira > 0 ? (
                           <div style={{ display:"flex", gap:"4px" }}>
                             {borc.liste.slice(-5).map(d => (
-                              <span key={d.donem} title={`${d.donem} · vade ${fT(d.vade)} · ${d.durum === "ODENDI" ? `ödendi ₺${Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} (${fT(d.odeme.tarih)})` : d.durum === "GECIKTI" ? "ÖDENMEDİ" : "vadesi gelmedi"}`}
+                              <span key={d.donem} title={`${d.donem} · vade ${fT(d.vade)} · ${d.durum === "ODENDI" ? `ödendi ₺${Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} (${fT(d.odeme.tarih)})` : d.durum === "KISMI" ? `kısmi ödendi ₺${Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} (${fT(d.odeme.tarih)}) · kalan ₺${d.eksik.toLocaleString("tr-TR")}` : d.durum === "GECIKTI" ? "ÖDENMEDİ" : "vadesi gelmedi"}`}
                                 style={{ width:"24px", height:"24px", borderRadius:"6px", display:"grid", placeItems:"center", fontSize:"10px", fontWeight:800,
-                                  background: d.durum === "ODENDI" ? "#dcfce7" : d.durum === "GECIKTI" ? "#fee2e2" : "#fff",
-                                  color: d.durum === "ODENDI" ? "#15803d" : d.durum === "GECIKTI" ? "#b91c1c" : "#6b7a90",
+                                  background: d.durum === "ODENDI" ? "#dcfce7" : d.durum === "KISMI" ? "#fef3c7" : d.durum === "GECIKTI" ? "#fee2e2" : "#fff",
+                                  color: d.durum === "ODENDI" ? "#15803d" : d.durum === "KISMI" ? "#b45309" : d.durum === "GECIKTI" ? "#b91c1c" : "#6b7a90",
                                   border: d.durum === "BEKLIYOR" ? "1px dashed #cfd7e2" : "1px solid transparent" }}>
                                 {AY_KISA[Number(d.donem.slice(5, 7)) - 1]}
                               </span>
@@ -37792,6 +37805,10 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                                     ? <span style={{ color:"#15803d", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)}{d.odeme.kasadan_dus === false ? " · AHY" : ""}
                                         {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
                                       </span>
+                                    : d.durum === "KISMI"
+                                      ? <span style={{ color:"#b45309", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)} · kalan ₺{d.eksik.toLocaleString("tr-TR")}
+                                          {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
+                                        </span>
                                     : d.durum === "GECIKTI"
                                       ? <span style={{ color:"#b91c1c", fontWeight:700 }}>Ödenmedi</span>
                                       : <span style={{ color:"#6b7a90" }}>Vadesi gelmedi</span>}
@@ -37936,6 +37953,8 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                       <td style={tdSt}>
                         {r.odendi
                           ? <span style={{ display:"inline-flex", gap:"6px", alignItems:"center" }}><span style={{ ...pill, background:"#dcfce7", color:"#15803d" }}>Ödendi</span>{canEdit && <button onClick={() => odemeGeriAl({ id:r.arac_id, plaka:r.plaka }, r.donem, r.odeme, true)} title="Geri al" style={{ ...icoBtn, width:"24px", height:"24px", fontSize:"11px" }}>↩︎</button>}</span>
+                          : r.kismi
+                            ? <span style={{ ...pill, background:"#fef3c7", color:"#b45309" }} title={`Kayıtlı ₺${Number(r.odeme?.tutar || 0).toLocaleString("tr-TR")} · ${fT(r.odeme?.tarih)}`}>Kısmi · kalan ₺{Number(r.eksik || 0).toLocaleString("tr-TR")}</span>
                           : r.gecikti
                             ? <span style={{ ...pill, background:"#fee2e2", color:"#b91c1c" }}>Vadesi geçti</span>
                             : Number(String(r.tutar).replace(/\./g, "").replace(",", ".")) > 0 && Number(String(r.tutar).replace(/\./g, "").replace(",", ".")) < Number(r.kira)
@@ -38103,8 +38122,24 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                   <input value={form.sozlesme_no||""} onChange={e=>setForm(f=>({...f,sozlesme_no:e.target.value}))} style={aInpSt} />
                 </div>
                 <div>
-                  <label style={lblSt}>Aylık Kira (₺)</label>
-                  <input type="number" value={form.aylik_kira||""} onChange={e=>setForm(f=>({...f,aylik_kira:e.target.value}))} style={aInpSt} />
+                  <label style={lblSt}>Kira KDV Hariç (₺)</label>
+                  <input type="number" value={form.kira_kdv_haric||""} placeholder="isteğe bağlı"
+                    onChange={e=>setForm(f=>{ const h = Number(e.target.value || 0), o = Number(f.kira_kdv_orani ?? 20); return { ...f, kira_kdv_haric: e.target.value, aylik_kira: h > 0 ? String(Math.round(h * (1 + o / 100))) : f.aylik_kira }; })} style={aInpSt} />
+                </div>
+                <div>
+                  <label style={lblSt}>KDV Oranı (%)</label>
+                  <input type="number" min="0" max="100" value={form.kira_kdv_orani ?? 20}
+                    onChange={e=>setForm(f=>{ const h = Number(f.kira_kdv_haric || 0), o = Number(e.target.value || 0); return { ...f, kira_kdv_orani: e.target.value, aylik_kira: h > 0 ? String(Math.round(h * (1 + o / 100))) : f.aylik_kira }; })} style={aInpSt} />
+                </div>
+                <div>
+                  <label style={lblSt}>Aylık Kira — KDV DAHİL (₺)</label>
+                  <input type="number" value={form.aylik_kira||""} onChange={e=>setForm(f=>({...f,aylik_kira:e.target.value}))} style={{ ...aInpSt, fontWeight:700 }} />
+                  <div style={{ fontSize:"11px", color:"#6b7a90", marginTop:"3px" }}>Listede ve borç hesabında bu tutar kullanılır. KDV hariç bedel girilirse otomatik hesaplanır.</div>
+                </div>
+                <div>
+                  <label style={lblSt}>Bedelin geçerli olduğu dönem (YYYY-AA)</label>
+                  <input type="month" value={form.kira_gecerli_donem||""} onChange={e=>setForm(f=>({...f,kira_gecerli_donem:e.target.value}))} style={aInpSt} />
+                  <div style={{ fontSize:"11px", color:"#6b7a90", marginTop:"3px" }}>Bu dönemden önceki ödemeler eski bedele göre tam sayılır; kira değişince boşsa içinde bulunulan ay yazılır.</div>
                 </div>
                 <div>
                   <label style={lblSt}>Kira Ödeme Şekli</label>

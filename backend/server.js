@@ -19895,6 +19895,14 @@ async function ensureAracKmTable() {
      Araç sahibi (sahip_firma) ile sürücü (surucu) ayrı alanlardır. */
   await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS mulkiyet_turu TEXT DEFAULT 'KIRALIK'`).catch(() => {});
   await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS sahip_firma TEXT`).catch(() => {});
+  /* 15.10.2026 (Orhan): aylik_kira = KDV DAHİL aylık bedel (listede gösterilen). KDV hariç bedel ve oran
+     ayrı tutulur; borç/vade hesapları aylik_kira (KDV dahil) üzerinden yapılır. */
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS kira_kdv_haric NUMERIC`).catch(() => {});
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS kira_kdv_orani NUMERIC DEFAULT 20`).catch(() => {});
+  /* kira_gecerli_donem (YYYY-MM): mevcut aylik_kira bu dönemden itibaren geçerlidir. Kayıtlı ödeme < bedel
+     karşılaştırması (kısmi ödeme / kalan) yalnız bu dönem ve sonrası için yapılır; eski sözleşme dönemlerine
+     yeni bedel geriye yayılmaz. Kira değişince PUT otomatik olarak içinde bulunulan ayı yazar. */
+  await pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS kira_gecerli_donem TEXT`).catch(() => {});
   /* Teslim / proje başlangıç kayıtları + fotoğrafları. Teslim tarihi (tarih) ile yükleme
      zamanı (created_at) ayrı tutulur; her teslim ayrı kayıt, eski fotoğraflar üzerine yazılmaz. */
   await pool.query(`CREATE TABLE IF NOT EXISTS arac_teslim (
@@ -19977,20 +19985,23 @@ app.post("/hr/araclar", async (req, res) => {
     const { plaka, marka, model, yil, tip, kiralama_firmasi, sozlesme_no,
             kira_baslangic, kira_bitis, aylik_kira, bolge, surucu,
             sigorta_bitis, muayene_bitis, durum, notlar, odeme_tipi, donem_gunu,
-            depozito_tutar, depozito_tarihi, depozito_iade_tarihi, depozito_not, mulkiyet_turu, sahip_firma } = req.body;
+            depozito_tutar, depozito_tarihi, depozito_iade_tarihi, depozito_not, mulkiyet_turu, sahip_firma,
+            kira_kdv_haric, kira_kdv_orani, kira_gecerli_donem } = req.body;
     await ensureAracKmTable().catch(() => {});
+    const gecerliDonem = /^\d{4}-\d{2}$/.test(String(kira_gecerli_donem || "")) ? kira_gecerli_donem : null;
     const mulkiyet = String(mulkiyet_turu || "KIRALIK").toUpperCase() === "SIRKET" ? "SIRKET" : "KIRALIK";
     const norm = (plaka || "").replace(/\s+/g, "").toUpperCase();
     const { rows } = await pool.query(
       `INSERT INTO araclar (plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
         kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu,
-        depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not,mulkiyet_turu,sahip_firma)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18,$19,$20,$21,$22,$23,$24)
+        depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not,mulkiyet_turu,sahip_firma,kira_kdv_haric,kira_kdv_orani,kira_gecerli_donem)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
        ON CONFLICT (plaka) DO UPDATE SET
          marka=$2,model=$3,yil=$4,tip=$5,kiralama_firmasi=$6,sozlesme_no=$7,
          kira_baslangic=$8,kira_bitis=$9,aylik_kira=$10,bolge=$11,surucu=$12,
          sigorta_bitis=$13,muayene_bitis=$14,durum=$15,notlar=$16,aktif=true,odeme_tipi=$17,donem_gunu=$18,
-         depozito_tutar=$19,depozito_tarihi=$20,depozito_iade_tarihi=$21,depozito_not=$22,mulkiyet_turu=$23,sahip_firma=$24
+         depozito_tutar=$19,depozito_tarihi=$20,depozito_iade_tarihi=$21,depozito_not=$22,mulkiyet_turu=$23,sahip_firma=$24,
+         kira_kdv_haric=$25,kira_kdv_orani=COALESCE($26,araclar.kira_kdv_orani,20),kira_gecerli_donem=COALESCE($27,araclar.kira_gecerli_donem)
        RETURNING *`,
       // yil integer kolonu: boş string "" gelirse null'a çevrilir (form "Seçin" kalabilir)
       [norm,marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
@@ -19998,7 +20009,8 @@ app.post("/hr/araclar", async (req, res) => {
        sigorta_bitis||null,muayene_bitis||null,durum||'AKTİF',notlar,
        odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN', Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : 15,
        depozito_tutar ? Number(depozito_tutar) : null, depozito_tarihi||null, depozito_iade_tarihi||null, depozito_not||null,
-       mulkiyet, sahip_firma||null]
+       mulkiyet, sahip_firma||null,
+       kira_kdv_haric ? Number(kira_kdv_haric) : null, kira_kdv_orani === undefined || kira_kdv_orani === "" ? null : Number(kira_kdv_orani), gecerliDonem]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -20009,7 +20021,8 @@ app.put("/hr/araclar/:id", async (req, res) => {
     const { plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
             kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,
             sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu,
-            depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not,mulkiyet_turu,sahip_firma } = req.body;
+            depozito_tutar,depozito_tarihi,depozito_iade_tarihi,depozito_not,mulkiyet_turu,sahip_firma,kira_kdv_haric,kira_kdv_orani,kira_gecerli_donem } = req.body;
+    let gecerliDonem = /^\d{4}-\d{2}$/.test(String(kira_gecerli_donem || "")) ? kira_gecerli_donem : null;
     const mulkiyet = mulkiyet_turu === undefined ? null : (String(mulkiyet_turu || "KIRALIK").toUpperCase() === "SIRKET" ? "SIRKET" : "KIRALIK");
     // Geçmiş kaydı: plaka / sürücü / kira / aktiflik değişiyorsa eski hâli sakla
     try {
@@ -20026,6 +20039,8 @@ app.put("/hr/araclar/:id", async (req, res) => {
           await aracGecmisYaz(eski, "SURUCU_DEGISTI", `Sürücü değişti → ${surucu || "—"}`);
         else if (aylik_kira != null && kiraE !== kiraY && kiraE > 0)
           await aracGecmisYaz(eski, "KIRA_DEGISTI", `Aylık kira ${kiraE} → ${kiraY}`);
+        // Kira bedeli değiştiyse ve dönem verilmediyse: yeni bedel bu aydan itibaren geçerli (geriye yayılmaz)
+        if (aylik_kira != null && kiraE !== kiraY && !gecerliDonem) gecerliDonem = new Date().toISOString().slice(0, 7);
         else if (eski.aktif && aktif === false)
           await aracGecmisYaz(eski, "PASIFE_ALINDI", notlar || null);
         // Mülkiyet değişimi: sürücü/kira geçmişi aynen kalır, yalnız günlüğe yazılır
@@ -20040,7 +20055,10 @@ app.put("/hr/araclar/:id", async (req, res) => {
         durum=$16,notlar=$17,aktif=COALESCE($18,aktif),
         odeme_tipi=COALESCE($19,odeme_tipi),donem_gunu=COALESCE($20,donem_gunu),
         depozito_tutar=$21,depozito_tarihi=$22,depozito_iade_tarihi=$23,depozito_not=$24,
-        mulkiyet_turu=COALESCE($25,mulkiyet_turu,'KIRALIK'),sahip_firma=CASE WHEN $25 IS NULL THEN sahip_firma ELSE $26 END WHERE id=$1 RETURNING *`,
+        mulkiyet_turu=COALESCE($25,mulkiyet_turu,'KIRALIK'),sahip_firma=CASE WHEN $25 IS NULL THEN sahip_firma ELSE $26 END,
+        kira_kdv_haric=CASE WHEN $27::text IS NULL THEN kira_kdv_haric ELSE NULLIF($27,'')::numeric END,
+        kira_kdv_orani=CASE WHEN $28::text IS NULL THEN kira_kdv_orani ELSE COALESCE(NULLIF($28,'')::numeric, 20) END,
+        kira_gecerli_donem=COALESCE($29,kira_gecerli_donem) WHERE id=$1 RETURNING *`,
       [req.params.id,plaka?plaka.replace(/\s+/g,"").toUpperCase():null,
        marka,model,yil||null,tip,kiralama_firmasi,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,bolge,surucu,
@@ -20048,7 +20066,8 @@ app.put("/hr/araclar/:id", async (req, res) => {
        odeme_tipi ? (odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN') : null,
        Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null,
        depozito_tutar ? Number(depozito_tutar) : null, depozito_tarihi||null, depozito_iade_tarihi||null, depozito_not||null,
-       mulkiyet, sahip_firma||null]
+       mulkiyet, sahip_firma||null,
+       kira_kdv_haric === undefined ? null : String(kira_kdv_haric ?? ""), kira_kdv_orani === undefined ? null : String(kira_kdv_orani ?? ""), gecerliDonem]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
