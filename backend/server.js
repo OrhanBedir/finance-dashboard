@@ -690,8 +690,10 @@ app.get("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
 });
 app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   try {
-    const { name, password, role = "user" } = req.body;
+    const { name: _nameRaw, password, role = "user" } = req.body;
     const email = String(req.body.email || "").trim().toLowerCase();
+    // 19.10.2026: kişi adları Türkçe büyük harf standardında kaydedilir; firma/sistem hesapları (taşeron, @'siz) dokunulmaz
+    const name = (String(role) === "subcon" || !email.includes("@")) ? String(_nameRaw || "").replace(/\s+/g, " ").trim() : adSoyadStandart(_nameRaw);
 
     // Kısıtlı yönetici (users_admin) yetki yükseltemez: admin/direktor rolünde
     // kullanıcı yalnız tam admin oluşturabilir (17.08.2026).
@@ -725,6 +727,12 @@ app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
       `SELECT id FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1`,
       [email]
     );
+    // Aynı ad-soyad uyarısı (yeni hesapta; e-posta zaten varsa mevcut hesap güncellenir, isim kontrolü yapılmaz)
+    if (existing.rows.length === 0 && !req.body.ayni_isim_onay && String(role) !== "subcon" && email.includes("@")) {
+      const k = altMarkaKapsam(req);
+      const es = [...await ayniIsimUsers(name, 0, k), ...await ayniIsimPersonel(name, 0, k)];
+      if (es.length) return res.status(409).json({ ok: false, error: AYNI_ISIM_MESAJ, ayni_isim: es });
+    }
     let result;
     if (existing.rows.length > 0) {
       result = await pool.query(
@@ -823,13 +831,14 @@ app.delete(
 app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   try {
     const {
-      name,
+      name: _nameRaw2,
       email,
       password,
       role = "user",
       subcon_name = null,
       payment_rate = null,
     } = req.body;
+    const name = (String(role) === "subcon" || !String(email || "").includes("@")) ? String(_nameRaw2 || "").trim() : adSoyadStandart(_nameRaw2);
 
     if (!name || !email || !password) {
       return res
@@ -16997,6 +17006,25 @@ function ikDonemSec(p, arsiv, ayBas, aySon) {
   if (guncelKesisir) return { giris: gir, ayrilma: ayr, arsiv: false };
   return { disinda: true };
 }
+// Ad-soyad yazım standardı (19.10.2026, Orhan): baş/son boşluk temizlenir, çoklu boşluk teke iner, Türkçe büyük
+// harf (i→İ, ı→I, ş→Ş, ğ→Ğ…). Yazım DEĞİŞTİRİLMEZ (Seyhmus → Şeyhmus yapılmaz). Firma/sistem hesaplarına uygulanmaz.
+const adSoyadStandart = (v) => String(v || "").replace(/\s+/g, " ").trim().toLocaleUpperCase("tr-TR");
+// Aynı kişi karşılaştırma anahtarı: kelimeler sıralı (Acar Seyhmus = Seyhmus Acar), büyük/küçük ve Türkçe harf farkı yok
+const adAnahtar = (v) => ikAdNormalize(v).split(" ").filter(Boolean).sort().join(" ");
+// 409 yanıtı için eşleşme satırı (firma, kod, aktif/pasif)
+const ayniIsimSatirP = (p) => ({ tip: "personel", id: p.id, ad: p.ad_soyad, firma: String(p.marka || "ERC").toUpperCase(), kod: `Personel #${p.id}`, aktif: !!p.aktif, email: p.email || "" });
+const ayniIsimSatirU = (u) => ({ tip: "user", id: u.id, ad: u.name, firma: String(u.marka || "ERC").toUpperCase(), kod: `Kullanıcı #${u.id} · ${u.email || ""}`, aktif: !!u.is_active, email: u.email || "" });
+const AYNI_ISIM_MESAJ = "Bu ad ve soyadla kayıtlı bir kişi zaten bulunuyor. Aynı kişiyi ikinci kez ekliyor olabilirsiniz. Devam etmek istiyor musunuz?";
+async function ayniIsimPersonel(ad, haricId = 0, kapsam = null) {
+  const key = adAnahtar(ad); if (!key) return [];
+  const r = await pool.query(`SELECT id, ad_soyad, email, aktif, marka, unvan FROM personel WHERE birlestirildi_personel_id IS NULL AND id <> $1`, [Number(haricId) || 0]);
+  return r.rows.filter(p => adAnahtar(p.ad_soyad) === key && (!kapsam || kapsam.bordro.includes(String(p.marka || "ERC").toUpperCase()))).map(ayniIsimSatirP);
+}
+async function ayniIsimUsers(ad, haricId = 0, kapsam = null) {
+  const key = adAnahtar(ad); if (!key) return [];
+  const r = await pool.query(`SELECT id, name, email, role, is_active, marka FROM users WHERE COALESCE(status,'active') <> 'deleted' AND id <> $1`, [Number(haricId) || 0]);
+  return r.rows.filter(u => adAnahtar(u.name) === key && (!kapsam || kapsam.bordro.includes(String(u.marka || "ERC").toUpperCase()))).map(ayniIsimSatirU);
+}
 async function ikIslemLog(personelId, userId, islem, detay, kullanici) {
   await pool.query(`INSERT INTO ik_islem_log (personel_id, user_id, islem, detay, kullanici) VALUES ($1,$2,$3,$4,$5)`,
     [personelId || null, userId || null, islem, detay ? String(detay).slice(0, 1000) : null, kullanici || null]).catch(e => console.error("[ik-islem-log]", e.message));
@@ -17062,11 +17090,13 @@ async function ikPersonelBagla(user, opts = {}) {
   // 2) Erişim hesabı (taşeron/platform/firma hesabı) → kadroya alınmaz
   if (erisimHesabi) return { islem: "ATLANDI", neden: `erişim hesabı (${rol})` };
   // 3) Ad benzerliği → yöneticiye göster, birleştirme yapma
-  const normAd = ikAdNormalize(ad);
+  // 19.10.2026 (Seyhmus Acar vakası): "Acar Seyhmus" = "Seyhmus Acar"; başka hesaba bağlı aynı adlı kayıt da
+  // KONTROL'dür — ikinci profil AÇILMAZ, otomatik BİRLEŞTİRİLMEZ (aynı adlı farklı kişi olabilir), yönetici karar verir.
+  const normAd = adAnahtar(ad);
   if (normAd) {
-    const adaylar = await pool.query(`SELECT id, ad_soyad, email, aktif, marka, to_char(ise_giris_tarihi,'YYYY-MM-DD') AS ise_giris_tarihi
-      FROM personel WHERE user_id IS NULL AND COALESCE(firma_tipi,'simsek') = 'simsek'`);
-    const benzer = adaylar.rows.filter(r => ikAdNormalize(r.ad_soyad) === normAd);
+    const adaylar = await pool.query(`SELECT id, ad_soyad, email, aktif, marka, user_id, to_char(ise_giris_tarihi,'YYYY-MM-DD') AS ise_giris_tarihi
+      FROM personel WHERE COALESCE(firma_tipi,'simsek') = 'simsek' AND birlestirildi_personel_id IS NULL`);
+    const benzer = adaylar.rows.filter(r => adAnahtar(r.ad_soyad) === normAd);
     if (benzer.length) {
       if (!kuru) await ikIslemLog(null, user.id, "KONTROL", `${ad} (${email}): aynı adlı ${benzer.length} İK kaydı var (#${benzer.map(b => b.id).join(", #")}) — e-posta farklı, elle eşleştirin`, kullanici);
       return { islem: "KONTROL", neden: "aynı adlı İK kaydı var, e-posta farklı — elle eşleştirin", adaylar: benzer };
@@ -17079,7 +17109,7 @@ async function ikPersonelBagla(user, opts = {}) {
   const ins = await pool.query(
     `INSERT INTO personel (ad_soyad, email, marka, firma_tipi, aktif, user_id, net_maas, bankadan_gosterilen, elden_verilen)
      VALUES ($1,$2,$3,'simsek',true,$4,0,0,0) RETURNING id, ad_soyad`,
-    [ad || email, email, marka, user.id]);
+    [adSoyadStandart(ad) || email, email, marka, user.id]);
   await ikIslemLog(ins.rows[0].id, user.id, "OLUSTURULDU", `${ad} (${email}) için İK profili açıldı — maaş ve işe giriş tarihi girilecek`, kullanici);
   return { islem: "OLUSTURULDU", personel_id: ins.rows[0].id, ad_soyad: ins.rows[0].ad_soyad, neden: "maaş ve işe giriş tarihi girilecek" };
 }
@@ -17113,6 +17143,18 @@ app.post("/hr/personel/esitle", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// Aynı ad-soyad kontrolü (19.10.2026): yalnız UYARI — isme benzersizlik kısıtı yok. Kapsam: alt marka kendi
+// bordro personelini görür; kullanıcı eşleşmeleri yalnız kullanıcı yöneticisine döner.
+app.get("/hr/ayni-isim", authMiddleware, async (req, res) => {
+  try {
+    const ad = String(req.query.ad || "");
+    const k = altMarkaKapsam(req);
+    const personel = await ayniIsimPersonel(ad, req.query.haric_personel_id, k);
+    const rol = String(req.user?.role || "").toLowerCase();
+    const users = (rol === "admin" || rol === "platform_admin" || req.user?.users_admin === true) ? await ayniIsimUsers(ad, req.query.haric_user_id, k) : [];
+    res.json({ ok: true, ad_standart: adSoyadStandart(ad), personel, users });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 app.get("/hr/personel", async (req, res) => {
   try {
     const donem = String(req.query.donem || "").trim(); // 'YYYY-MM' — o ay geçerli maaşla döner
@@ -17131,6 +17173,7 @@ app.get("/hr/personel", async (req, res) => {
           WHERE personel_id = p.id AND donem <= $1
           ORDER BY donem DESC LIMIT 1
         ) g ON true
+        WHERE p.birlestirildi_personel_id IS NULL
         ORDER BY p.aktif DESC, p.ad_soyad ASC`, [donem]);
       const dm = await ikDonemleriYukle(r.rows.map(x => x.id));
       const [_y, _m] = donem.split("-").map(Number);
@@ -17149,7 +17192,7 @@ app.get("/hr/personel", async (req, res) => {
       });
       return res.json(r.rows);
     }
-    const r = await pool.query(`SELECT p.*, ${ikEksikSql("p.net_maas")} FROM personel p ORDER BY p.aktif DESC, p.ad_soyad ASC`);
+    const r = await pool.query(`SELECT p.*, ${ikEksikSql("p.net_maas")} FROM personel p WHERE p.birlestirildi_personel_id IS NULL ORDER BY p.aktif DESC, p.ad_soyad ASC`);
     const dm = await ikDonemleriYukle(r.rows.map(x => x.id));
     r.rows.forEach(row => { row.donemler = dm.get(row.id) || []; });
     res.json(r.rows);
@@ -17176,9 +17219,16 @@ app.post("/hr/personel", async (req, res) => {
       elektrik_isi, yuksekte_calisma, arac_kullanim, marka } = req.body;
     // 15.10.2026: aynı e-postayla ikinci personel açılmaz — mevcut kaydı düzenleyin (409 + mevcut_id)
     const _mail = String(email || "").trim().toLowerCase();
+    const adStd = adSoyadStandart(ad_soyad);
+    if (!adStd) return res.status(400).json({ error: "Ad soyad zorunlu" });
     if (_mail) {
+      // e-posta sistemde benzersizdir — "Farklı Kişi Olarak Devam Et" bunu AŞAMAZ (19.10.2026)
       const dup = await pool.query(`SELECT id, ad_soyad, aktif FROM personel WHERE LOWER(TRIM(email)) = $1 ORDER BY aktif DESC, id LIMIT 1`, [_mail]);
-      if (dup.rows[0] && !req.body.zorla) return res.status(409).json({ error: `Bu e-posta ile kayıtlı personel var: ${dup.rows[0].ad_soyad} (#${dup.rows[0].id}). Mevcut kaydı düzenleyin.`, mevcut_id: dup.rows[0].id, mevcut: dup.rows[0] });
+      if (dup.rows[0]) return res.status(409).json({ error: `Bu e-posta ile kayıtlı personel var: ${dup.rows[0].ad_soyad} (#${dup.rows[0].id}). Mevcut kaydı düzenleyin.`, mevcut_id: dup.rows[0].id, mevcut: dup.rows[0] });
+    }
+    if (!req.body.ayni_isim_onay) {
+      const es = await ayniIsimPersonel(adStd, 0, altMarkaKapsam(req));
+      if (es.length) return res.status(409).json({ error: AYNI_ISIM_MESAJ, ayni_isim: es });
     }
     const r = await pool.query(
       `INSERT INTO personel (ad_soyad,tc_no,dogum_tarihi,telefon,email,unvan,bolge,ise_giris_tarihi,
@@ -17187,7 +17237,7 @@ app.post("/hr/personel", async (req, res) => {
         kkd_zimmet_tarihi,mesleki_yeterlilik_durum,mesleki_yeterlilik_tarihi,
         elektrik_isi,yuksekte_calisma,arac_kullanim,marka)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
-      [ad_soyad,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
+      [adStd,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
        net_maas||0,bankadan_gosterilen||0,elden_verilen||0,iban,banka_adi,banka_hesap_no,
        ekip_bilgisi||null,alt_yuklenici||null,firma_tipi||"simsek",isdp_account||null,iresource_giris||null,
        kkd_zimmet_tarihi||null,mesleki_yeterlilik_durum||null,mesleki_yeterlilik_tarihi||null,
@@ -17252,6 +17302,15 @@ app.put("/hr/personel/:id", async (req, res) => {
         }
       }
     } catch (e) { console.error("maas gecmisi:", e.message); }
+    const adStd = adSoyadStandart(ad_soyad);
+    if (!adStd) return res.status(400).json({ error: "Ad soyad zorunlu" });
+    if (!req.body.ayni_isim_onay) {
+      const cur = await pool.query(`SELECT ad_soyad FROM personel WHERE id=$1`, [id]);
+      if (cur.rows[0] && adAnahtar(cur.rows[0].ad_soyad) !== adAnahtar(adStd)) { // kendi kaydıyla eşleşip uyarı üretmez
+        const es = await ayniIsimPersonel(adStd, id, altMarkaKapsam(req));
+        if (es.length) return res.status(409).json({ error: AYNI_ISIM_MESAJ, ayni_isim: es });
+      }
+    }
     // 16.10.2026 (Selamettin Sönmez vakası): yeni işe giriş tarihi ayrılma tarihinden SONRAYSA bu
     // bir yeniden işe giriştir — eski (giriş, çıkış) arşive taşınır, ayrılma boşalır, kayıt aktif kalır.
     // Eskiden ayrılma geçmişte kaldığı için aşağıdaki kural kaydı otomatik pasife düşürüyordu.
@@ -17279,7 +17338,7 @@ app.put("/hr/personel/:id", async (req, res) => {
         kkd_zimmet_tarihi=$22,mesleki_yeterlilik_durum=$23,mesleki_yeterlilik_tarihi=$24,
         elektrik_isi=$25,yuksekte_calisma=$26,arac_kullanim=$27,marka=COALESCE($28,marka)
        WHERE id=$29 RETURNING *`,
-      [ad_soyad,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
+      [adStd,tc_no||null,dogum_tarihi||null,telefon,email,unvan,bolge,ise_giris_tarihi||null,
        _ayrYeni,net_maas||0,bankadan_gosterilen||0,elden_verilen||0,
        iban,banka_adi,banka_hesap_no,_aktifYeni,
        ekip_bilgisi||null,alt_yuklenici||null,firma_tipi||"simsek",isdp_account||null,iresource_giris||null,
@@ -23530,6 +23589,7 @@ const AUTO_MIGRATIONS = [
   // 16.10.2026: kapanmış (arşiv) çalışma dönemleri — yeniden işe girişte eski giriş/çıkış silinmez, buraya taşınır
   "CREATE TABLE IF NOT EXISTS personel_calisma_donemi (id SERIAL PRIMARY KEY, personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE, ise_giris DATE, isten_ayrilma DATE NOT NULL, kaynak TEXT, aciklama TEXT, teyit_gerekli BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (personel_id, isten_ayrilma))",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS isdp_account TEXT",
+  "ALTER TABLE personel ADD COLUMN IF NOT EXISTS birlestirildi_personel_id INTEGER", // 19.10.2026: mükerrer kayıt → ana kayıt (arşiv; listelenmez)
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS iresource_giris TEXT",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS kkd_zimmet_tarihi DATE",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS mesleki_yeterlilik_durum TEXT",

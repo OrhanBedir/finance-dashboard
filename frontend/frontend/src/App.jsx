@@ -17332,6 +17332,37 @@ const mavTarihTr = (t) => String(t || "").slice(0, 10).split("-").reverse().join
 const _trNorm = (v) => String(v || "").toLocaleLowerCase("tr").replace(/ı/g, "i").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ş/g, "s").replace(/ö/g, "o").replace(/ç/g, "c").replace(/\s+/g, " ").trim();
 /* Aramalı personel seçimi: "Serdar", "Altınova" ya da "Serdar Altınova" yazınca eşleşenler listelenir,
    tıklanınca id seçilir. Seçim yapılmadan yazılan metin kaydı değiştirmez. */
+// Ad-soyad yazım standardı (19.10.2026): boşluk temizliği + Türkçe büyük harf; yazım değiştirilmez (sunucu da aynı kuralı uygular)
+const adSoyadStandart = (v) => String(v || "").replace(/\s+/g, " ").trim().toLocaleUpperCase("tr-TR");
+/* Aynı ad-soyad uyarısı: veri = { eslesmeler:[{ad, firma, kod, aktif}], onAc?, onDevam } */
+function AyniIsimUyari({ veri, onKapat }) {
+  if (!veri) return null;
+  const { eslesmeler = [], onAc, onDevam } = veri;
+  const btn = (bg, fg, bd) => ({ padding: "8px 14px", background: bg, color: fg, border: `1px solid ${bd}`, borderRadius: "9px", fontWeight: 700, fontSize: "12.5px", cursor: "pointer" });
+  return (
+    <div onClick={onKapat} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 3000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: "min(580px, 96vw)", padding: "20px 22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ fontWeight: 800, fontSize: "15px", color: "#92400e" }}>⚠ Aynı ad ve soyad</div>
+        <div style={{ fontSize: "13px", color: "#334155", marginTop: "6px", lineHeight: 1.5 }}>Bu ad ve soyadla kayıtlı bir kişi zaten bulunuyor. Aynı kişiyi ikinci kez ekliyor olabilirsiniz. Devam etmek istiyor musunuz?</div>
+        <div style={{ marginTop: "10px", border: "1px solid #e5e7eb", borderRadius: "10px", overflow: "hidden" }}>
+          {eslesmeler.map((m, i) => (
+            <div key={i} style={{ display: "flex", gap: "10px", alignItems: "center", padding: "8px 12px", borderTop: i ? "1px solid #f1f5f9" : "none", fontSize: "12.5px", flexWrap: "wrap" }}>
+              <span style={{ fontWeight: 700, flex: 1, minWidth: "140px" }}>{m.ad}</span>
+              <span style={{ color: "#475569" }}>{m.firma}</span>
+              <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: "#64748b", fontSize: "11.5px" }}>{m.kod}</span>
+              <span style={{ background: m.aktif ? "#dcfce7" : "#f1f5f9", color: m.aktif ? "#166534" : "#64748b", borderRadius: "999px", padding: "1px 8px", fontSize: "11px", fontWeight: 700 }}>{m.aktif ? "Aktif" : "Pasif"}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px", flexWrap: "wrap" }}>
+          {onAc && <button onClick={onAc} style={btn("#eff6ff", "#1d4ed8", "#bfdbfe")}>Mevcut Kaydı Aç</button>}
+          <button onClick={onKapat} style={btn("#f1f5f9", "#475569", "#e2e8f0")}>Vazgeç</button>
+          <button onClick={onDevam} style={btn("#fef3c7", "#92400e", "#fcd34d")}>Farklı Kişi Olarak Devam Et</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function PersonelAramaSecim({ value, onChange, personeller, placeholder = "Personel adı yazın…", style }) {
   const secili = (personeller || []).find(p => String(p.id) === String(value));
   const seciliAd = secili ? secili.ad_soyad : "";
@@ -17750,12 +17781,13 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     }
   }, [tab, hrPersonelFilter, puantajAy]);
 
-  const handleSavePersonel = async (e) => {
-    e.preventDefault();
+  const handleSavePersonel = async (e, ayniIsimOnay = false) => {
+    if (e && e.preventDefault) e.preventDefault();
     const method = editingPersonel ? "PUT" : "POST";
     const url = editingPersonel ? `${API_BASE}/hr/personel/${editingPersonel.id}` : `${API_BASE}/hr/personel`;
     // Yeni personel, ekleyen kullanıcının markasına yazılır (İK marka izolasyonu)
-    const _pBody = { ...pForm, marka: pForm.marka || _hrMarka };
+    // Ad-soyad standardı (19.10.2026): kaydedilen değer de büyük harf; aynı isim uyarısı sunucudan (409 + ayni_isim)
+    const _pBody = { ...pForm, ad_soyad: adSoyadStandart(pForm.ad_soyad), marka: pForm.marka || _hrMarka, ayni_isim_onay: !!ayniIsimOnay };
     // Maaş gizli modda (muhasebe) maaş alanları forma hiç gelmez — mevcut
     // değerler aynen korunur, versiyonlama tetiklenmez
     if (_maasGizli && editingPersonel) {
@@ -17766,8 +17798,24 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     }
     const _res = await fetch(url, { method, headers: { "Content-Type":"application/json" }, body: JSON.stringify(_pBody) });
     if (_res.status === 409) {
-      // 15.10.2026: aynı e-postalı personel zaten var — ikinci kayıt açılmaz, mevcut kayıt düzenlemeye açılır
       const d = await _res.json().catch(() => ({}));
+      if (Array.isArray(d.ayni_isim) && d.ayni_isim.length) {
+        // Aynı ad-soyad: uyarı penceresi — Mevcut Kaydı Aç / Vazgeç / Farklı Kişi Olarak Devam Et
+        const ilk = d.ayni_isim.find(x => x.tip === "personel");
+        setAyniIsim({
+          eslesmeler: d.ayni_isim,
+          onAc: ilk ? async () => {
+            setAyniIsim(null);
+            const fresh = await (await fetch(`${API_BASE}/hr/personel?donem=${puantajAy}`)).json().catch(() => []);
+            const mevcut = (Array.isArray(fresh) ? fresh : []).find(x => String(x.id) === String(ilk.id));
+            setPersonelList(_markaFiltre(fresh));
+            if (mevcut) handleEditPersonel(mevcut);
+          } : null,
+          onDevam: () => { setAyniIsim(null); handleSavePersonel(null, true); },
+        });
+        return;
+      }
+      // 15.10.2026: aynı e-postalı personel zaten var — ikinci kayıt açılmaz, mevcut kayıt düzenlemeye açılır
       alert(d.error || "Bu e-posta ile kayıtlı personel var");
       const fresh = await (await fetch(`${API_BASE}/hr/personel?donem=${puantajAy}`)).json().catch(() => []);
       const mevcut = (Array.isArray(fresh) ? fresh : []).find(x => String(x.id) === String(d.mevcut_id));
@@ -17788,6 +17836,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     loadMaasOde(p.id);
   };
   const [pasifAcik, setPasifAcik] = useState(false);
+  const [ayniIsim, setAyniIsim] = useState(null); // aynı ad-soyad uyarısı (19.10.2026)
   const handleEditPersonel = (p) => {
     setEditingPersonel(p);
     setPForm({ ...p,
@@ -19401,7 +19450,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 const metin = ([l,n,zorunlu]) => (
                   <div key={n}>
                     <label style={labelSt}>{l}</label>
-                    <input value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} required={!!zorunlu} />
+                    <input value={pForm[n]||""} onChange={e=>setPForm(f=>({...f,[n]:e.target.value}))} style={inputSt} required={!!zorunlu}
+                      onBlur={n === "ad_soyad" ? (e => setPForm(f => ({ ...f, ad_soyad: adSoyadStandart(e.target.value) }))) : undefined}
+                      title={n === "ad_soyad" ? "Türkçe büyük harfle kaydedilir (yazım değiştirilmez)" : undefined} />
                   </div>
                 );
                 const tarih = ([l,n]) => (
@@ -20620,6 +20671,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
         </div>
       )}
 
+      <AyniIsimUyari veri={ayniIsim} onKapat={() => setAyniIsim(null)} />
       {/* ===== AVANS SEKMESİ ===== */}
       {(tab==="maas_avans") && personelUnlocked && (() => {
         const isMaas = tab === "maas_avans";
@@ -33670,19 +33722,31 @@ function App() {
     }
   };
 
-  const handleCreateUser = async () => {
+  const [adminAyniIsim, setAdminAyniIsim] = useState(null); // aynı ad-soyad uyarısı (19.10.2026)
+  const handleCreateUser = async (ayniIsimOnay = false) => {
     try {
+      // Kişi adı Türkçe büyük harf standardında (taşeron/firma hesabı hariç); aynı isimde sunucu 409 + ayni_isim döner
+      const govde = { ...newUser, name: newUser.role === "subcon" ? String(newUser.name || "").trim() : adSoyadStandart(newUser.name), ayni_isim_onay: ayniIsimOnay === true };
       const res = await fetch(`${API_BASE}/admin/users`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(newUser),
+        body: JSON.stringify(govde),
       });
 
       const data = await res.json();
 
+      if (res.status === 409 && Array.isArray(data.ayni_isim) && data.ayni_isim.length) {
+        const ilkU = data.ayni_isim.find(x => x.tip === "user");
+        setAdminAyniIsim({
+          eslesmeler: data.ayni_isim,
+          onAc: ilkU ? () => { setAdminAyniIsim(null); setAdminUserSearch(ilkU.ad); } : null,
+          onDevam: () => { setAdminAyniIsim(null); handleCreateUser(true); },
+        });
+        return;
+      }
       if (!res.ok) throw new Error(data.error);
 
       setNewUser({ name: "", email: "", password: "", role: "user", marka: "ERC", subcon_name: "" });
@@ -34972,7 +35036,7 @@ function App() {
                       <span style={{background:"#f3f4f6",borderRadius:"8px",padding:"6px 8px"}}>➕</span> Yeni Kullanıcı
                     </h3>
                     <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-                      <input placeholder="Ad Soyad" autoComplete="off" name="yeni_kullanici_ad" value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
+                      <input placeholder="Ad Soyad" autoComplete="off" name="yeni_kullanici_ad" value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})} onBlur={e=>{ if (newUser.role !== "subcon") setNewUser(u=>({...u, name: adSoyadStandart(e.target.value)})); }} title="Türkçe büyük harfle kaydedilir (yazım değiştirilmez)" style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
                       <input placeholder="E-posta adresi" autoComplete="off" name="yeni_kullanici_eposta" inputMode="email" value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
                       <input placeholder="Şifre" type="password" autoComplete="new-password" name="yeni_kullanici_sifre" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
                       <select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",background:"#fff",cursor:"pointer"}}>
@@ -34996,9 +35060,10 @@ function App() {
                           {adminMarkalar.map(m=>(<option key={m.kod} value={m.kod}>🏢 {m.ad}</option>))}
                         </select>
                       )}
-                      <button onClick={handleCreateUser} style={{padding:"11px",background:"#1f2937",color:"#fff",border:"none",borderRadius:"10px",fontWeight:"700",fontSize:"14px",cursor:"pointer",marginTop:"4px"}}>
+                      <button onClick={() => handleCreateUser(false)} style={{padding:"11px",background:"#1f2937",color:"#fff",border:"none",borderRadius:"10px",fontWeight:"700",fontSize:"14px",cursor:"pointer",marginTop:"4px"}}>
                         Kullanıcı Ekle
                       </button>
+                      <AyniIsimUyari veri={adminAyniIsim} onKapat={() => setAdminAyniIsim(null)} />
                     </div>
                     {adminError && <div style={{marginTop:"12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:"8px",padding:"10px 14px",color:"#b91c1c",fontSize:"13px",fontWeight:600}}>{adminError}</div>}
                   </div>
