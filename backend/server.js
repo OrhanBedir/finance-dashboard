@@ -17475,9 +17475,13 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
       });
     }
 
+    // 19.10.2026 (Orhan): maaş avansı, ödendiği ayın değil "maaştan kesilecek dönem"in (avans.donem)
+    // hakedişinden düşer — 17.10'da verilen Eylül avansı Ekim'den değil Eylül'den kesilir, Ekim'e
+    // ikinci kez yazılmaz. Dönemi boş eski kayıtlar ödeme ayına sayılır. (İK tablosuyla aynı kural.)
     const avansList = await pool.query(
       `SELECT personel_id, SUM(tutar) as toplam FROM avans
-       WHERE EXTRACT(MONTH FROM tarih)=$1 AND EXTRACT(YEAR FROM tarih)=$2 AND avans_turu='MAAS' GROUP BY personel_id`, [ay, yil]
+       WHERE COALESCE(NULLIF(donem,''), to_char(tarih,'YYYY-MM')) = $1 AND avans_turu='MAAS' GROUP BY personel_id`,
+      [`${yil}-${String(ay).padStart(2, "0")}`]
     );
 
     // Manuel hakediş (25.08.2026): bu ay için elle girilmiş tutarlar sistem
@@ -17610,8 +17614,15 @@ app.get("/hr/avans", async (req, res) => {
     if (personel_id) { params.push(personel_id); conditions.push(`a.personel_id=$${params.length}`); }
     if (turu) { params.push(turu); conditions.push(`a.avans_turu=$${params.length}`); }
     const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
+    // 19.10.2026: DATE kolonları metin döner (YYYY-MM-DD) — JS Date'e çevrilince saat dilimi
+    // bir gün geri kaydırıyordu (17.10 kaydı ekranda 16.10 görünüyor, düzenlemede geri kayıyordu).
+    // kayit_zamani = sisteme kayıt anı (otomatik işlem bilgisi); donem = maaştan kesilecek ay.
     const r = await pool.query(
-      `SELECT a.*, p.ad_soyad FROM avans a JOIN personel p ON a.personel_id=p.id ${where} ORDER BY a.tarih DESC`,
+      `SELECT a.*, p.ad_soyad,
+              to_char(a.tarih,'YYYY-MM-DD') AS tarih,
+              to_char(a.odeme_tarihi,'YYYY-MM-DD') AS odeme_tarihi,
+              to_char(a.created_at,'YYYY-MM-DD HH24:MI') AS kayit_zamani
+       FROM avans a JOIN personel p ON a.personel_id=p.id ${where} ORDER BY a.tarih DESC, a.id DESC`,
       params
     );
     res.json(r.rows);
@@ -17633,11 +17644,27 @@ app.post("/hr/avans", async (req, res) => {
 
 app.put("/hr/avans/:id", async (req, res) => {
   try {
-    const { odendi, odeme_tarihi } = req.body;
+    // 19.10.2026: düzenleme desteği — yalnız gönderilen alanlar değişir. Maaş dönemi (donem) ile
+    // ödeme tarihi (tarih) ayrı alanlardır; biri diğerine uydurulmaz. odendi gönderilmezse dokunulmaz.
+    const { odendi, odeme_tarihi, tarih, tutar, aciklama, donem, personel_id } = req.body;
+    if (donem !== undefined && donem !== null && donem !== "" && !/^\d{4}-\d{2}$/.test(String(donem)))
+      return res.status(400).json({ error: "Dönem YYYY-AA biçiminde olmalı" });
     const r = await pool.query(
-      "UPDATE avans SET odendi=$1, odeme_tarihi=$2 WHERE id=$3 RETURNING *",
-      [odendi, odeme_tarihi||null, req.params.id]
+      `UPDATE avans SET
+         odendi = COALESCE($1::boolean, odendi),
+         odeme_tarihi = CASE WHEN $1::boolean IS NULL THEN odeme_tarihi ELSE $2::date END,
+         tarih = COALESCE($3::date, tarih),
+         tutar = COALESCE($4::numeric, tutar),
+         aciklama = COALESCE($5::text, aciklama),
+         donem = COALESCE(NULLIF($6::text,''), donem),
+         personel_id = COALESCE($7::int, personel_id)
+       WHERE id=$8 RETURNING *`,
+      [odendi === undefined ? null : !!odendi, odeme_tarihi || null, tarih || null,
+       (tutar === undefined || tutar === null || tutar === "") ? null : Number(tutar),
+       aciklama === undefined ? null : String(aciklama), donem || null,
+       personel_id ? Number(personel_id) : null, req.params.id]
     );
+    if (!r.rows[0]) return res.status(404).json({ error: "Avans kaydı bulunamadı" });
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -17219,6 +17219,44 @@ function IkModalKabuk({ onKapat, baslik, altBaslik, adSoyad, ikon, rozet, genisl
   );
 }
 
+// ── Maaş avansı yardımcıları (19.10.2026, Orhan) ─────────────────────────────────────────
+const MAV_AYLAR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+// "2026-09" → "Eylül 2026" (sıralama metinle değil YYYY-MM değeriyle yapılır)
+const mavDonemAdi = (d) => { const m = String(d || "").match(/^(\d{4})-(\d{2})$/); return m ? `${MAV_AYLAR[Number(m[2]) - 1]} ${m[1]}` : (d || "—"); };
+const mavTarihTr = (t) => String(t || "").slice(0, 10).split("-").reverse().join(".");
+const _trNorm = (v) => String(v || "").toLocaleLowerCase("tr").replace(/ı/g, "i").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ş/g, "s").replace(/ö/g, "o").replace(/ç/g, "c").replace(/\s+/g, " ").trim();
+/* Aramalı personel seçimi: "Serdar", "Altınova" ya da "Serdar Altınova" yazınca eşleşenler listelenir,
+   tıklanınca id seçilir. Seçim yapılmadan yazılan metin kaydı değiştirmez. */
+function PersonelAramaSecim({ value, onChange, personeller, placeholder = "Personel adı yazın…", style }) {
+  const secili = (personeller || []).find(p => String(p.id) === String(value));
+  const seciliAd = secili ? secili.ad_soyad : "";
+  const [metin, setMetin] = useState(seciliAd);
+  const [acik, setAcik] = useState(false);
+  useEffect(() => { setMetin(seciliAd); }, [value, seciliAd]);
+  const kelimeler = _trNorm(metin).split(" ").filter(Boolean);
+  const eslesen = (personeller || []).filter(p => { const ad = _trNorm(p.ad_soyad); return kelimeler.every(k => ad.includes(k)); }).slice(0, 50);
+  return (
+    <div style={{ position: "relative" }}>
+      <input value={metin} placeholder={placeholder} autoComplete="off"
+        onChange={e => { setMetin(e.target.value); setAcik(true); if (value) onChange(""); }}
+        onFocus={() => setAcik(true)}
+        onBlur={() => setTimeout(() => { setAcik(false); setMetin(seciliAd); }, 150)}
+        style={style} />
+      {acik && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 999, maxHeight: "220px", overflowY: "auto" }}>
+          {eslesen.length === 0 && <div style={{ padding: "8px 12px", fontSize: "12.5px", color: "#9ca3af" }}>Eşleşen personel yok</div>}
+          {eslesen.map(p => (
+            <div key={p.id} onMouseDown={() => { onChange(String(p.id)); setMetin(p.ad_soyad); setAcik(false); }}
+              style={{ padding: "8px 12px", fontSize: "13px", color: "#1f2937", cursor: "pointer", borderBottom: "1px solid #f9fafb", background: String(p.id) === String(value) ? "#eff6ff" : "" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#eff6ff"} onMouseLeave={e => e.currentTarget.style.background = String(p.id) === String(value) ? "#eff6ff" : ""}>
+              {p.ad_soyad}{p.unvan ? <span style={{ color: "#9ca3af", fontSize: "11.5px" }}> · {p.unvan}</span> : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   // Maaş görünürlüğü (21.07.2026): ERC'de YALNIZ Orhan Bedir + Düzgün Şimşek.
@@ -17334,7 +17372,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     const n = new Date();
     return { bas: `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-01`, bit: n.toISOString().slice(0, 10) };
   });
-  const [avansForm, setAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
+  const [avansForm, setAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "", donem: "" });
+  const [avansDuzenle, setAvansDuzenle] = useState(null);      // düzenlenen maaş avansı id'si
+  const [avansDonemFiltre, setAvansDonemFiltre] = useState(""); // liste: maaş dönemi (YYYY-MM) filtresi
   const [isAvansList, setIsAvansList] = useState([]);
   const [isAvansForm, setIsAvansForm] = useState({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "" });
   const [trafikCezaList, setTrafikCezaList] = useState([]);
@@ -17936,22 +17976,41 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     setNotModal(null);
   };
 
+  // Varsayılan maaş dönemi: bir önceki (henüz kapatılmamış) ay; personel daha sonra işe girdiyse giriş ayı.
+  // Formdaki görünen değer ile kaydedilen değer AYNI fonksiyondan gelir (19.10.2026) — dönem bugünün ayına kaymaz.
+  const mavVarsayilanDonem = (personelId) => {
+    const d = new Date(); d.setMonth(d.getMonth() - 1);
+    let def = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const _p = personelList.find(p => String(p.id) === String(personelId));
+    const g = _p?.ise_giris_tarihi ? String(_p.ise_giris_tarihi).slice(0, 7) : null;
+    if (g && g > def) def = g;
+    return def;
+  };
+  const avansFormuSifirla = () => { setAvansDuzenle(null); setAvansForm({ personel_id: "", tarih: new Date().toISOString().split("T")[0], tutar: "", aciklama: "", donem: "" }); };
+  const avansDuzenleBaslat = (a) => {
+    // Kayıtlı dönem ve ödeme tarihi olduğu gibi forma gelir; hiçbiri bugüne/uydurulmuş değere çekilmez
+    setAvansDuzenle(a.id);
+    setAvansForm({ personel_id: String(a.personel_id), tarih: String(a.tarih || "").slice(0, 10), tutar: String(a.tutar ?? ""), aciklama: a.aciklama || "", donem: a.donem || String(a.tarih || "").slice(0, 7) });
+  };
   const handleSaveAvans = async (e) => {
     e.preventDefault();
-    // Dönem boşsa varsayılan bir önceki ay (henüz kapatılmamış maaş dönemi)
-    let donem = avansForm.donem;
-    if (!donem) { const d = new Date(); d.setMonth(d.getMonth()-1); donem = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
-    // İşe giriş emniyeti: personel o dönemde henüz çalışmıyorduysa avans
-    // en erken işe giriş ayının maaşından kesilir (elle seçilse bile).
+    if (!avansForm.personel_id) { alert("Personel seçin (listeden tıklayarak)."); return; }
+    const donem = avansForm.donem || mavVarsayilanDonem(avansForm.personel_id);
+    // İşe giriş emniyeti: personel o ay çalışmıyorduysa sessizce kaydırmak yerine uyar
     const _sp = personelList.find(p => String(p.id) === String(avansForm.personel_id));
     const _girisAy = _sp?.ise_giris_tarihi ? String(_sp.ise_giris_tarihi).slice(0, 7) : null;
-    if (_girisAy && donem < _girisAy) donem = _girisAy;
-    await fetch(`${API_BASE}/hr/avans`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ...avansForm, avans_turu:"MAAS", donem }) });
-    setAvansForm({ personel_id:"", tarih: new Date().toISOString().split("T")[0], tutar:"", aciklama:"", donem:"" });
+    if (_girisAy && donem < _girisAy) { alert(`${_sp.ad_soyad} ${mavDonemAdi(_girisAy)} ayında işe girdi — avans en erken ${mavDonemAdi(_girisAy)} maaşından kesilebilir. Dönemi düzeltin.`); return; }
+    const govde = { personel_id: avansForm.personel_id, tarih: avansForm.tarih, tutar: avansForm.tutar, aciklama: avansForm.aciklama, avans_turu: "MAAS", donem };
+    const r = avansDuzenle
+      ? await fetch(`${API_BASE}/hr/avans/${avansDuzenle}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(govde) })
+      : await fetch(`${API_BASE}/hr/avans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(govde) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Kaydedilemedi"); return; }
+    avansFormuSifirla();
     loadAvans();
   };
   const handleSaveIsAvans = async (e) => {
     e.preventDefault();
+    if (!isAvansForm.personel_id) { alert("Personel seçin (listeden tıklayarak)."); return; }
     await fetch(`${API_BASE}/hr/avans`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ...isAvansForm, avans_turu:"IS" }) });
     setIsAvansForm({ personel_id:"", tarih: new Date().toISOString().split("T")[0], tutar:"", aciklama:"" });
     loadIsAvans();
@@ -20458,11 +20517,16 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
         const _tumList = isMaas ? avansList : isAvansList;
         // Tarih aralığı filtresi (varsayılan: içinde bulunulan ay)
         const _f = avansFiltre.bas, _t = avansFiltre.bit;
+        // Maaş dönemi (kesilecek ay) ile ödeme tarihi ayrı alanlardır; dönemi boş eski kayıt ödeme ayına sayılır
+        const _mavDonem = (a) => String(a.donem || String(a.tarih || "").slice(0, 7));
         const list = _tumList.filter(a => {
           const d = String(a.tarih || "").slice(0, 10);
           if (!d) return false;
+          if (isMaas && avansDonemFiltre && _mavDonem(a) !== avansDonemFiltre) return false;
           return (!_f || d >= _f) && (!_t || d <= _t);
-        });
+        }).sort((a, b) => !isMaas ? 0
+          // Varsayılan sıra: maaş dönemi (YYYY-MM, eskiden yeniye) → ödeme tarihi (eskiden yeniye) → kayıt no
+          : (_mavDonem(a).localeCompare(_mavDonem(b)) || String(a.tarih || "").slice(0, 10).localeCompare(String(b.tarih || "").slice(0, 10)) || (Number(a.id) - Number(b.id))));
         const _topTutar = list.reduce((sm, a) => sm + Number(a.tutar || 0), 0);
         const _kisiSayisi = new Set(list.map(a => a.ad_soyad)).size;
         const form = isMaas ? avansForm : isAvansForm;
@@ -20474,39 +20538,36 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           <div style={{ display:"grid", gridTemplateColumns:"340px 1fr", gap:"20px", alignItems:"start" }}>
             <div style={secSt}>
               <div style={{ fontWeight:700, fontSize:"15px", marginBottom:"16px" }}>
-                {isMaas ? "➕ Maaş Avansı Girişi" : "➕ İş Avansı Girişi"}
+                {isMaas ? (avansDuzenle ? `✏️ Maaş Avansı Düzenle (#${avansDuzenle})` : "➕ Maaş Avansı Girişi") : "➕ İş Avansı Girişi"}
               </div>
               {!isMaas && <div style={{ fontSize:"12px", color:"#6b7280", marginBottom:"12px", background:"#f0fdf4", padding:"8px 12px", borderRadius:"8px" }}>İş avansı maaştan kesilmez. Ayrı takip edilir.</div>}
               <form onSubmit={onSave}>
                 <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
                   <div>
                     <label style={labelSt}>Personel</label>
-                    <select value={form.personel_id} onChange={e=>setForm(f=>({...f,personel_id:e.target.value}))} style={inputSt} required>
-                      <option value="">Seç...</option>
-                      {personelList.filter(p=>p.aktif).map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
-                    </select>
+                    <PersonelAramaSecim value={form.personel_id} onChange={id=>setForm(f=>({...f,personel_id:id}))}
+                      personeller={personelList.filter(p=>p.aktif || String(p.id)===String(form.personel_id))} style={inputSt} />
                   </div>
                   <div>
                     <label style={labelSt}>Ödeme Tarihi</label>
                     <input type="date" value={form.tarih} onChange={e=>setForm(f=>({...f,tarih:e.target.value}))} style={inputSt} required />
                   </div>
                   {isMaas && (() => {
-                    const _d = new Date(); _d.setMonth(_d.getMonth()-1);
-                    let defDonem = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,"0")}`;
-                    // İşe giriş kontrolü: personel önceki ay çalışmadıysa (giriş ayı
-                    // daha yeni) avans en erken giriş ayının maaşından kesilebilir.
+                    // Görünen varsayılan = kaydedilen varsayılan (mavVarsayilanDonem); düzenlemede kayıtlı dönem gelir
+                    const defDonem = mavVarsayilanDonem(form.personel_id);
                     const _p = personelList.find(p => String(p.id) === String(form.personel_id));
                     const _giris = _p?.ise_giris_tarihi ? String(_p.ise_giris_tarihi).slice(0, 7) : null;
-                    const yeniGiris = _giris && _giris > defDonem;
-                    if (yeniGiris) defDonem = _giris;
+                    const yeniGiris = !!(_giris && _giris === defDonem && !form.donem);
                     return (
                       <div>
-                        <label style={labelSt}>Hangi ay maaşından kesilecek? (Dönem)</label>
+                        <label style={labelSt}>Maaştan Kesilecek Dönem (ay/yıl)</label>
                         <input type="month" value={form.donem || defDonem} onChange={e=>setForm(f=>({...f,donem:e.target.value}))} style={inputSt} />
                         <div style={{ fontSize:"11px", color:"#92400e", marginTop:"3px", lineHeight:1.4 }}>
-                          {yeniGiris
-                            ? <>💡 {_p.ad_soyad} {_giris.split("-").reverse().join("/")} ayında işe girdi — avans giriş ayının maaşından kesilir.</>
-                            : <>💡 Avansı bugün versen de, seçtiğin ayın maaşından kesilir. Varsayılan: bir önceki (henüz kapatılmamış) ay.</>}
+                          {avansDuzenle
+                            ? <>💡 Kayıtlı dönem: <b>{mavDonemAdi(form.donem)}</b> · ödeme tarihi <b>{mavTarihTr(form.tarih)}</b>. İkisi ayrı tutulur; değiştirmezsen aynen kalır.</>
+                            : yeniGiris
+                            ? <>💡 {_p.ad_soyad} {mavDonemAdi(_giris)} ayında işe girdi — avans giriş ayının maaşından kesilir.</>
+                            : <>💡 Avansı bugün versen de, seçtiğin ayın ({mavDonemAdi(form.donem || defDonem)}) maaşından kesilir; ödeme tarihi nakit akışında ayrı görünür. Varsayılan: bir önceki ay.</>}
                         </div>
                       </div>
                     );
@@ -20519,7 +20580,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <label style={labelSt}>Açıklama</label>
                     <input value={form.aciklama} onChange={e=>setForm(f=>({...f,aciklama:e.target.value}))} style={inputSt} />
                   </div>
-                  <button type="submit" className="saveButton">Kaydet</button>
+                  <div style={{ display:"flex", gap:"8px" }}>
+                    <button type="submit" className="saveButton" style={{ flex:1 }}>{isMaas && avansDuzenle ? "Değişikliği Kaydet" : "Kaydet"}</button>
+                    {isMaas && avansDuzenle && <button type="button" onClick={avansFormuSifirla} style={{ padding:"8px 14px", background:"#f1f5f9", color:"#475569", border:"none", borderRadius:"8px", fontWeight:700, cursor:"pointer" }}>Vazgeç</button>}
+                  </div>
                 </div>
               </form>
             </div>
@@ -20533,6 +20597,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   </span>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+                  {isMaas && <>
+                    <span style={{ fontSize:"12px", color:"#6b7280", fontWeight:600 }}>Maaş dönemi</span>
+                    <input type="month" value={avansDonemFiltre} onChange={e=>setAvansDonemFiltre(e.target.value)}
+                      style={{ padding:"5px 8px", border:"1px solid #e5e7eb", borderRadius:"7px", fontSize:"12px" }} />
+                    <span style={{ fontSize:"12px", color:"#6b7280", fontWeight:600, marginLeft:"6px" }}>Ödeme tarihi</span>
+                  </>}
                   <input type="date" value={avansFiltre.bas} onChange={e=>setAvansFiltre(f=>({...f, bas:e.target.value}))}
                     style={{ padding:"5px 8px", border:"1px solid #e5e7eb", borderRadius:"7px", fontSize:"12px" }} />
                   <span style={{ fontSize:"12px", color:"#9ca3af" }}>—</span>
@@ -20540,18 +20610,18 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     style={{ padding:"5px 8px", border:"1px solid #e5e7eb", borderRadius:"7px", fontSize:"12px" }} />
                   <button type="button" onClick={()=>{ const y=new Date(); setAvansFiltre({ bas:`${y.getFullYear()}-${String(y.getMonth()+1).padStart(2,"0")}-01`, bit:y.toISOString().slice(0,10) }); }}
                     style={{ padding:"5px 10px", background:"#eef2ff", color:"#3730a3", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>Bu ay</button>
-                  <button type="button" onClick={()=>setAvansFiltre({ bas:"", bit:"" })}
+                  <button type="button" onClick={()=>{ setAvansFiltre({ bas:"", bit:"" }); setAvansDonemFiltre(""); }}
                     style={{ padding:"5px 10px", background:"#f1f5f9", color:"#475569", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>Tümü</button>
                   <button type="button" onClick={()=>exportStandardExcel({
-                    title: `${isMaas ? "Maaş Avansı" : "İş Avansı"} Kayıtları${_f||_t ? ` (${_f||"başlangıç"} — ${_t||"bugün"})` : " (tüm dönem)"}`,
+                    title: `${isMaas ? "Maaş Avansı" : "İş Avansı"} Kayıtları${isMaas && avansDonemFiltre ? ` · Maaş dönemi ${mavDonemAdi(avansDonemFiltre)}` : ""}${_f||_t ? ` · Ödeme tarihi ${mavTarihTr(_f)||"başlangıç"} — ${mavTarihTr(_t)||"bugün"}` : (isMaas && avansDonemFiltre ? "" : " (tüm dönem)")}`,
                     sheetName: isMaas ? "Maaş Avansı" : "İş Avansı",
                     fileBase: isMaas ? "Maas_Avansi" : "Is_Avansi",
-                    headers: ["Personel","Ödeme Tarihi","Kesilecek Dönem","Tutar (₺)","Açıklama","Durum"],
-                    colWidths: [30, 14, 16, 14, 34, 12],
+                    headers: ["Personel","Maaş Dönemi","Ödeme Tarihi","Tutar (₺)","Ödeme Durumu","Açıklama"],
+                    colWidths: [30, 16, 14, 14, 14, 34],
                     numericCols: [3],
                     rows: (() => {
-                      const sirali = list.slice().sort((a,b)=> String(a.ad_soyad||"").localeCompare(String(b.ad_soyad||""),"tr") || String(a.tarih||"").localeCompare(String(b.tarih||"")));
-                      const out = sirali.map(a => [a.ad_soyad||"", String(a.tarih||"").slice(0,10), a.donem||"", Number(a.tutar||0), a.aciklama||"", a.odendi?"Ödendi":"Bekliyor"]);
+                      const sirali = list.slice(); // liste sırası: maaş dönemi → ödeme tarihi → kayıt no
+                      const out = sirali.map(a => [a.ad_soyad||"", isMaas ? mavDonemAdi(_mavDonem(a)) : (a.donem||""), mavTarihTr(a.tarih), Number(a.tutar||0), a.odendi?"Ödendi":"Bekliyor", a.aciklama||""]);
                       // Kişi bazlı özet: kim ne kadar almış
                       const kisi = {};
                       sirali.forEach(a => { kisi[a.ad_soyad||"?"] = (kisi[a.ad_soyad||"?"]||0) + Number(a.tutar||0); });
@@ -20569,7 +20639,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 <table style={{ width:"100%", borderCollapse:"collapse" }}>
                   <thead>
                     <tr style={{ background:"#f8fafc" }}>
-                      {["Personel","Tarih","Tutar","Açıklama","Durum",""].map(h=>(
+                      {(isMaas ? ["Personel","Maaş Dönemi","Ödeme Tarihi","Tutar","Ödeme Durumu","Açıklama","İşlemler"] : ["Personel","Tarih","Tutar","Açıklama","Durum",""]).map(h=>(
                         <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontSize:"12px", fontWeight:700, color:"#6b7280" }}>{h}</th>
                       ))}
                     </tr>
@@ -20578,15 +20648,23 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     {list.map((a,i) => (
                       <tr key={a.id} style={{ borderTop:"1px solid #f3f4f6", background: i%2===0?"#fff":"#fafafa" }}>
                         <td style={{ padding:"10px 14px", fontWeight:600, fontSize:"14px" }}>{a.ad_soyad}</td>
-                        <td style={{ padding:"10px 14px", fontSize:"13px" }}>{a.tarih?.split("T")[0]}</td>
+                        {isMaas && <td style={{ padding:"10px 14px", fontSize:"13px", fontWeight:700, color:"#1e3a5f", whiteSpace:"nowrap" }} title={`Maaştan kesilecek dönem: ${_mavDonem(a)}`}>{mavDonemAdi(_mavDonem(a))}</td>}
+                        <td style={{ padding:"10px 14px", fontSize:"13px", whiteSpace:"nowrap" }} title={`Gerçek ödeme tarihi (nakit akışında bu gün görünür)${a.kayit_zamani ? ` · sisteme kayıt: ${mavTarihTr(a.kayit_zamani.slice(0,10))} ${a.kayit_zamani.slice(11)}` : ""}`}>{isMaas ? mavTarihTr(a.tarih) : a.tarih?.split("T")[0]}</td>
                         <td style={{ padding:"10px 14px", fontWeight:700, color:"#1f2937" }}>₺{Number(a.tutar).toLocaleString("tr-TR")}</td>
-                        <td style={{ padding:"10px 14px", fontSize:"13px", color:"#6b7280" }}>{a.aciklama}</td>
+                        {!isMaas && <td style={{ padding:"10px 14px", fontSize:"13px", color:"#6b7280" }}>{a.aciklama}</td>}
                         <td style={{ padding:"10px 14px" }}>
                           <span style={{ background:a.odendi?"#dcfce7":"#fef3c7", color:a.odendi?"#166534":"#92400e", padding:"3px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:600 }}>
                             {a.odendi?"Ödendi":"Bekliyor"}
                           </span>
                         </td>
-                        <td style={{ padding:"10px 14px" }}>
+                        {isMaas && <td style={{ padding:"10px 14px", fontSize:"13px", color:"#6b7280" }}>{a.aciklama}</td>}
+                        <td style={{ padding:"10px 14px", whiteSpace:"nowrap" }}>
+                          {isMaas && (
+                            <button onClick={()=>avansDuzenleBaslat(a)} title="Dönem, ödeme tarihi, tutar ve açıklamayı düzenle"
+                              style={{ marginRight:"6px", padding:"4px 10px", background:"#eef2ff", color:"#3730a3", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
+                              Düzenle
+                            </button>
+                          )}
                           {!a.odendi && (
                             <button onClick={async()=>{ await fetch(`${API_BASE}/hr/avans/${a.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({odendi:true,odeme_tarihi:new Date().toISOString().split("T")[0]})}); reload(); }}
                               style={{ padding:"4px 10px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>
@@ -20600,7 +20678,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         </td>
                       </tr>
                     ))}
-                    {list.length===0 && <tr><td colSpan={6} style={{ padding:"24px", textAlign:"center", color:"#9ca3af" }}>Kayıt yok</td></tr>}
+                    {list.length===0 && <tr><td colSpan={7} style={{ padding:"24px", textAlign:"center", color:"#9ca3af" }}>Kayıt yok</td></tr>}
                   </tbody>
                 </table>
               </div>
