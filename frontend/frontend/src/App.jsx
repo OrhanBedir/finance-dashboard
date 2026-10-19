@@ -17608,7 +17608,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     // görmez — o kayıtlar ERC dönemine aittir. ERC tarafı her şeyi görür.
     const all = await r.json();
     const arr = Array.isArray(all) ? all : [];
-    setAvansList(_hrMarka === "ERC" ? arr : arr.filter(a => { const t = (a.tarih || "").split("T")[0]; return t >= AHY_DEVIR && (!AHY_BITIS || t <= AHY_BITIS); }));
+    // 19.10.2026: alt marka, avansın MAAŞ DÖNEMİNE göre kendi avanslarını görür (sunucu odeyen_marka);
+    // Eylül dönemi avansı 17.10'da ödense de AHY'nin, TEKNO'nun değil. Eski sunucu yanıtı (alan yoksa) tarih kuralı.
+    setAvansList(_hrMarka === "ERC" ? arr : arr.filter(a => a.odeyen_marka
+      ? String(a.odeyen_marka).toUpperCase() === _hrMarka
+      : (() => { const t = (a.tarih || "").split("T")[0]; return t >= AHY_DEVIR && (!AHY_BITIS || t <= AHY_BITIS); })()));
   };
   const loadIsAvans = async () => {
     const r = await fetch(`${API_BASE}/hr/avans?turu=IS`);

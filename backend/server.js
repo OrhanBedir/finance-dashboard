@@ -342,6 +342,17 @@ function odeyenTarihSql(tarihCol) {
 }
 // Tarih herhangi bir alt markanın aktif penceresinde mi (Şimşek tarafı hariç tutmalarında)
 const altMarkaAktifSql = (tarihCol) => "(" + ALT_MARKALAR.map((m) => `(${_pencereSql(m, tarihCol)})`).join(" OR ") + ")";
+// Maaş avansı hangi markanın? (19.10.2026, Orhan): ödeme tarihi değil MAAŞ DÖNEMİ (avans.donem) belirler —
+// Eylül dönemi avansı 17.10'da ödense de AHY'nin (AHY 30.09'da bitti, TEKNO 14.10'da başladı; Ekim dönemi TEKNO).
+// Dönemin son günü hangi markanın penceresine düşüyorsa o marka. Hiçbir pencereye düşmüyorsa (ör. 2026-06,
+// devir öncesi dönem) ya da dönem boşsa eski kural: ödeme tarihi penceresi → geçmiş kayıtlar değişmez.
+const _donemSonSql = (donemCol) => `(to_date(${donemCol} || '-01','YYYY-MM-DD') + INTERVAL '1 month - 1 day')::date`;
+function avansOdeyenSql(a = "a", tarihExpr = null) {
+  const d = `NULLIF(${a}.donem,'')`;
+  const ds = _donemSonSql(d);
+  const t = tarihExpr || `${a}.tarih`;
+  return `(CASE WHEN ${d} ~ '^\\d{4}-\\d{2}$' AND ${altMarkaAktifSql(ds)} THEN ${odeyenTarihSql(ds)} ELSE ${odeyenTarihSql(t)} END)`;
+}
 function odeyenVarsayilan(tarih) {
   const t = String(tarih || "").slice(0, 10);
   const sirali = [...ALT_MARKALAR].sort((a, b) => b.devir.localeCompare(a.devir));
@@ -6906,8 +6917,8 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         [marka, DEVIR]),
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
         FROM avans a JOIN personel p ON p.id=a.personel_id
-        WHERE COALESCE(p.marka,'ERC') = ANY($1::text[]) AND a.tarih >= $2 AND a.tarih < $3
-          AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`, [P.bordro, DEVIR, SON]),
+        WHERE UPPER(COALESCE(p.marka,'ERC')) IN (${altMarkaInSql()}) AND ${avansOdeyenSql("a")} = '${P.kod}'
+          AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`),
       // İş avansları + personel masraf ödemeleri (10.09.2026: avanssız masrafın ödemesi de giderdir)
       pool.query(`SELECT ay, SUM(t) AS t FROM (
           SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, t.tutar AS t
@@ -7116,11 +7127,11 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
               AND COALESCE(NULLIF(odeyen,''), ${odeyenTarihSql("tarih")}) = '${P.kod}'
             GROUP BY personel_id`, [donem]);
         const av = await pool.query(
-          `SELECT personel_id, SUM(COALESCE(tutar,0)) AS t
-             FROM avans
-            WHERE UPPER(COALESCE(avans_turu,'MAAS')) = 'MAAS'
-              AND COALESCE(NULLIF(donem,''), to_char(tarih,'YYYY-MM')) = $1
-              AND tarih >= '${P.devir}' AND tarih < '${P.son}'
+          `SELECT a.personel_id, SUM(COALESCE(a.tutar,0)) AS t
+             FROM avans a
+            WHERE UPPER(COALESCE(a.avans_turu,'MAAS')) = 'MAAS'
+              AND COALESCE(NULLIF(a.donem,''), to_char(a.tarih,'YYYY-MM')) = $1
+              AND ${avansOdeyenSql("a")} = '${P.kod}'
             GROUP BY personel_id`, [donem]);
         const gmM = new Map(gm.rows.map(r => [String(r.personel_id), Number(r.gelmedi || 0)]));
         const odM = new Map(od.rows.map(r => [String(r.personel_id), Number(r.t || 0)]));
@@ -7410,7 +7421,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           'MAAS_AVANSI' AS tip, a.tutar, COALESCE(a.aciklama,'') AS aciklama,
           (LOWER(COALESCE(p.email,'')) = '${PM_KISISEL_EMAIL}') AS pm_kisisel
         FROM avans a JOIN personel p ON p.id = a.personel_id
-        WHERE COALESCE(p.marka,'ERC') = ANY($3::text[]) AND a.tarih >= $2 AND a.tarih < $4
+        WHERE UPPER(COALESCE(p.marka,'ERC')) IN (${altMarkaInSql()}) AND ${avansOdeyenSql("a")} = '${P.kod}'
           AND UPPER(COALESCE(a.avans_turu,'MAAS')) = 'MAAS'
         UNION ALL
         SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM-DD') AS tarih,
@@ -7438,7 +7449,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           ('Masraf alacağı ödemesi' || COALESCE(' · '||NULLIF(o.aciklama,''),'')) AS aciklama,
           (LOWER(COALESCE(NULLIF(pp.email,''), o.email, '')) = '${PM_KISISEL_EMAIL}') AS pm_kisisel
         FROM personel_odeme o LEFT JOIN personel pp ON pp.id = o.personel_id
-        WHERE UPPER(COALESCE(o.firma,'ERC')) = $1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2`, [marka, baslangic, P.bordro, son]),
+        WHERE UPPER(COALESCE(o.firma,'ERC')) = $1 AND o.tip='MASRAF_ODEME' AND o.tarih >= $2`, [marka, baslangic]),
       pool.query(`SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih, a.plaka AS ad_soyad,
           'ARAC_KIRA' AS tip, o.tutar,
           COALESCE(o.aciklama,'') AS aciklama,
@@ -8015,7 +8026,7 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
          FROM avans a JOIN personel p ON p.id = a.personel_id
          WHERE a.odendi=true AND a.avans_turu='MAAS'
            AND COALESCE(a.odeme_tarihi, a.tarih) >= $1::date
-           AND (UPPER(COALESCE(p.marka,'ERC')) NOT IN (${altMarkaInSql()}) OR NOT ${altMarkaAktifSql("COALESCE(a.odeme_tarihi, a.tarih)")})`),
+           AND (UPPER(COALESCE(p.marka,'ERC')) NOT IN (${altMarkaInSql()}) OR ${avansOdeyenSql("a", "COALESCE(a.odeme_tarihi, a.tarih)")} = 'SIMSEK')`),
       q(`SELECT COALESCE(SUM(t),0) t FROM (
            SELECT tutar AS t FROM is_avans_talep
            WHERE durum='TAMAMLANDI' AND COALESCE(odeme_tarihi, direktor_onay_tarihi)::date >= $1::date
@@ -8899,8 +8910,8 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
         [marka, DEVIR]),
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM') AS ay, SUM(a.tutar) AS t
         FROM avans a JOIN personel p ON p.id=a.personel_id
-        WHERE COALESCE(p.marka,'ERC') = ANY($1::text[]) AND a.tarih >= $2 AND a.tarih < $3
-          AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`, [P.bordro, DEVIR, SON]),
+        WHERE UPPER(COALESCE(p.marka,'ERC')) IN (${altMarkaInSql()}) AND ${avansOdeyenSql("a")} = '${P.kod}'
+          AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`),
       // İş avansları + personel masraf ödemeleri (10.09.2026: avanssız masrafın ödemesi de giderdir)
       pool.query(`SELECT ay, SUM(t) AS t FROM (
           SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, t.tutar AS t
@@ -15670,7 +15681,7 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
        FROM avans a JOIN personel p ON p.id = a.personel_id
        WHERE UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS'
          AND EXTRACT(YEAR FROM a.tarih)=$1 AND EXTRACT(MONTH FROM a.tarih)=$2
-         AND (UPPER(COALESCE(p.marka,'ERC')) NOT IN (${altMarkaInSql()}) OR NOT ${altMarkaAktifSql("a.tarih")})`,
+         AND (UPPER(COALESCE(p.marka,'ERC')) NOT IN (${altMarkaInSql()}) OR ${avansOdeyenSql("a")} = 'SIMSEK')`,
       [yil, ay]).catch(() => ({ rows: [] }));
     // İş avansları: PD (Direktör) onayından geçenler — otomatik gider
     // Tarih: ödeme tarihi varsa o, yoksa direktör onay tarihi
@@ -17621,7 +17632,8 @@ app.get("/hr/avans", async (req, res) => {
       `SELECT a.*, p.ad_soyad,
               to_char(a.tarih,'YYYY-MM-DD') AS tarih,
               to_char(a.odeme_tarihi,'YYYY-MM-DD') AS odeme_tarihi,
-              to_char(a.created_at,'YYYY-MM-DD HH24:MI') AS kayit_zamani
+              to_char(a.created_at,'YYYY-MM-DD HH24:MI') AS kayit_zamani,
+              ${avansOdeyenSql("a")} AS odeyen_marka
        FROM avans a JOIN personel p ON a.personel_id=p.id ${where} ORDER BY a.tarih DESC, a.id DESC`,
       params
     );
