@@ -462,9 +462,10 @@ const pool = require("./db");
 async function altMarkalariYenile() {
   try {
     // Tarihler metin olarak okunur — DATE → JS Date dönüşümü saat dilimiyle bir gün kayıyordu
+    await pool.query(`ALTER TABLE markalar ADD COLUMN IF NOT EXISTS fon_modeli TEXT`).catch(() => {});
     const r = await pool.query(`SELECT kod, ad, kirilim_yuzde, taseron_onek,
         to_char(devir_baslangic,'YYYY-MM-DD') AS devir_baslangic,
-        to_char(devir_bitis,'YYYY-MM-DD') AS devir_bitis, devralinan
+        to_char(devir_bitis,'YYYY-MM-DD') AS devir_bitis, devralinan, fon_modeli
       FROM markalar WHERE aktif = true AND hw_yukleme = false ORDER BY id`);
     if (!r.rows.length) return;
     ALT_MARKALAR = r.rows.map((x) => {
@@ -476,6 +477,10 @@ async function altMarkalariYenile() {
         bitis: x.devir_bitis || v.bitis || null,
         pay: (100 - Number(x.kirilim_yuzde ?? 10)) / 100,
         devralinan: x.devralinan ? String(x.devralinan).toUpperCase() : (v.devralinan ?? null),
+        // 19.10.2026 (Orhan): fon modeli — PROJE: projeye gelen para tek kasa, ödeme yöntemi ne olursa
+        // olsun (nakit/banka/firma hesabı) tüm gerçek ödemeler bu kasadan düşer; yalnız açıkça
+        // "fon dışı" işaretlenen ödeme hariç. FIRMA (AHY eski kurgu): kasadan_dus=false = firma kendi ödedi.
+        fonModeli: String(x.fon_modeli || v.fonModeli || "FIRMA").toUpperCase() === "PROJE" ? "PROJE" : "FIRMA",
       };
     });
   } catch (e) { console.error("[alt marka] profil yenileme:", e.message); }
@@ -7388,13 +7393,8 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
   }
 });
 
-app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
-  try {
-    const rol = String(req.user?.role || "").toLowerCase();
-    if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(rol)) {
-      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-    }
-    const marka = String(req.query.marka || "AHY").toUpperCase();
+// Marka nakit akışı satırları (gerçek ödemeler, ödeme tarihinde). marka-nakit ve marka-proje-kasa ortak kullanır.
+async function markaNakitSatirlari(marka, req) {
     const P = markaProfil(marka);
     const baslangic = P.devir, son = P.son;  // maaş/avans devri (AHY 15.07.2026, TEKNO 01.10.2026) — ödeme tarihi bazlı
     // Kira/manuel ödemeler: devirden SONRA sisteme girilen kayıtlar görünür
@@ -7480,21 +7480,24 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
           c.arac_id, 'manuel' AS kaynak, c.id AS kaynak_id, ar.kiralama_firmasi AS tedarikci
         FROM cashflow_odeme c LEFT JOIN araclar ar ON ar.id = c.arac_id
         WHERE UPPER(COALESCE(c.marka,'ERC')) = $1`, [marka]).catch(() => ({ rows: [] })),
-      // Taşeron ödemeleri: AVANSLAR kasadaki nakitten çıkar (kasadan düşer);
-      // FATURA ödemelerini AHY kendisi yapar — nakit akışında/giderde görünür,
-      // kasa bakiyesinden DÜŞMEZ (araç/ofis kirasındaki kasadan_dus kurgusu)
+      // Taşeron ödemeleri: AVANSLAR kasadaki nakitten çıkar (kasadan düşer).
+      // FATURA ödemeleri: FIRMA modelinde (AHY eski kurgu) markanın kendi ödemesi → kasadan DÜŞMEZ;
+      // PROJE modelinde (TEKNO, 19.10.2026) gerçek ödeme proje fonundan → ödeme tarihinde, ödenen
+      // (KDV dahil, kısmi ise yalnız ödenen) tutarla kasadan DÜŞER. Faturanın girilmesi/onayı çıkış değildir.
       pool.query(`SELECT to_char(tarih,'YYYY-MM-DD') AS tarih, taseron_adi AS ad_soyad,
           'TASERON' AS tip, tutar,
-          ((CASE UPPER(COALESCE(tip,'AVANS')) WHEN 'AVANS' THEN 'Avans' ELSE 'Fatura ödemesi (${P.kod} ödedi)' END)
+          ((CASE UPPER(COALESCE(tip,'AVANS')) WHEN 'AVANS' THEN 'Avans' ELSE 'Fatura ödemesi${P.fonModeli === "PROJE" ? "" : ` (${P.kod} ödedi)`}' END)
             || COALESCE(' · '||NULLIF(aciklama,''),'')) AS aciklama,
-          (UPPER(COALESCE(tip,'AVANS')) = 'AVANS') AS kasadan_dus
+          (UPPER(COALESCE(tip,'AVANS')) = 'AVANS' OR ${P.fonModeli === "PROJE" ? "true" : "false"}) AS kasadan_dus,
+          'marka_taseron_odeme' AS kaynak, id AS kaynak_id, NULL::text AS fatura_no
         FROM marka_taseron_odeme
         WHERE UPPER(marka) = $1
         UNION ALL
         SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM-DD') AS tarih,
           COALESCE(i.tedarikci,'') AS ad_soyad, 'TASERON' AS tip, ${TASERON_NAKIT_SQL} AS tutar,
-          ('Fatura ödemesi (${P.kod} ödedi) · fatura girişinden: ' || COALESCE(i.fatura_no,'')) AS aciklama,
-          false AS kasadan_dus
+          ('Fatura ödemesi${P.fonModeli === "PROJE" ? "" : ` (${P.kod} ödedi)`} · fatura girişinden: ' || COALESCE(i.fatura_no,'')) AS aciklama,
+          ${P.fonModeli === "PROJE" ? "true" : "false"} AS kasadan_dus,
+          'invoice_entries' AS kaynak, i.id AS kaynak_id, i.fatura_no
         FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id ${ARAC_FATURA_BAG_JOIN}
         WHERE UPPER(COALESCE(i.firma,'')) = $1 AND ${TASERON_NAKIT_SQL} > 0
           -- Aynı ödeme AHY panelinden de girildiyse çift sayma (taşeron ilk kelime + tutar eşleşmesi)
@@ -7507,7 +7510,8 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         UNION ALL
         SELECT to_char(k.tarih,'YYYY-MM-DD') AS tarih, COALESCE(NULLIF(i2.rf_montaj_firma,''), i2.tedarikci, k.tedarikci, '') AS ad_soyad,
           'TASERON' AS tip, d.tutar, ('Fatura ödemesi · ' || COALESCE(i2.fatura_no,'') || ' · ortak ödeme #' || k.id || ' (araç kirası dışı kısım)') AS aciklama,
-          COALESCE(k.kasadan_dus, false) AS kasadan_dus
+          COALESCE(k.kasadan_dus, false) AS kasadan_dus,
+          'odeme_kayit' AS kaynak, k.id AS kaynak_id, i2.fatura_no
         ${ORTAK_FATURA_ODEME_FROM} AND UPPER(COALESCE(i2.firma,'')) = $1`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const _pmGor = pmKisiselGorur(req);
@@ -7517,14 +7521,102 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
         // Orhan'ın avansı/ödemesi: tutar toplamlarda kalır, kimlik yetkisizlere gizlenir
         if (pm_kisisel && !_pmGor) { x.ad_soyad = "Yönetim (gizli)"; x.aciklama = ""; }
         const y = { ...x, tutar: Number(x.tutar || 0) };
-        y.odeme_yontemi = y.kasadan_dus === false ? `${P.kod} ödedi` : "Kasadan";
+        // Ödeme yöntemi (detay) ile fon kaynağı (kasadan düşer mi) ayrı: PROJE modelinde yöntem gösterilir,
+        // kasadan_dus=false yalnız "fon dışı" (proje parasından ödenmedi) demektir.
+        y.odeme_yontemi = y.kasadan_dus === false
+          ? (P.fonModeli === "PROJE" ? "Fon dışı" : `${P.kod} ödedi`)
+          : (P.fonModeli === "PROJE" ? (NAKIT_YONTEM_AD[String(y.yontem || "").toUpperCase()] || "Kasadan") : "Kasadan");
         return aracNakitSatiri(y, P.kod);
       })
       .sort((a, b) => b.tarih.localeCompare(a.tarih));
-    res.json({ ok: true, baslangic, rows });
+    return { baslangic, rows, P };
+}
+const NAKIT_YONTEM_AD = { KASA: "Kasa (nakit)", BANKA: "Banka", HAVALE: "Havale/EFT", FIRMA: "Firma hesabı", CEK: "Çek", KART: "Kart" };
+app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
+  try {
+    const rol = String(req.user?.role || "").toLowerCase();
+    if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(rol)) {
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    }
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const { baslangic, rows, P } = await markaNakitSatirlari(marka, req);
+    res.json({ ok: true, baslangic, fon_modeli: P.fonModeli, rows });
   } catch (e) {
     console.error("MARKA NAKIT ERROR:", e.message);
     res.status(500).json({ ok: false, error: "Nakit akışı alınamadı" });
+  }
+});
+
+/* ── PROJE KASASI DEFTERİ (19.10.2026, Orhan) ─────────────────────────────────────────────
+   Kalan Bakiye = Açılış/Devir + gerçekleşmiş girişler − gerçekleşmiş çıkışlar (ödeme yöntemi fark etmez).
+   Girişler: manuel kasa girişleri (marka_kasa) + kasa işaretli borç geri ödemeleri + depozito iadeleri.
+   Çıkışlar: nakit akışı satırları (maaş, avans, araç/depo kirası, depozito, taşeron FATURA ödemesi — yalnız
+   gerçekten ödenen tutar, ödeme tarihinde; ortak ödeme tek kimlikle bir kez) + kasa işaretli verilen borç.
+   Fon dışı (kasadan_dus=false) ödemeler bakiyeye GİRMEZ; inceleme listesinde ayrıca gösterilir.
+   Beklenen alacaklar / HW ödedi-aktarılmadı tutarları bakiyeye eklenmez. Masraf formları çıkış değildir
+   (iş avansını kapatır). Borç bakiyesinin kendisi kasaya eklenmez/çıkarılmaz; yalnız kasa işaretli hareketler. */
+const PK_KATEGORI_AD = { NAKIT_GIRIS: "Kasa girişi", BORC_GERI: "Borç geri ödemesi (giriş)", BORC_VERILEN: "Şimşek'e borç verildi",
+  MAAS_ODEME: "Maaş ödemesi", MAAS_AVANSI: "Maaş avansı", IS_AVANSI: "İş avansı", ARAC_KIRA: "Araç kirası",
+  ARAC_DEPOZITO: "Araç depozitosu", OFIS_KIRA: "Depo/Ofis kirası", TICKET: "Ticket/Yemek", TASERON: "Taşeron ödemesi", DIGER: "Diğer ödeme" };
+app.get("/finance/marka-proje-kasa", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
+      return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const marka = String(req.query.marka || "AHY").toUpperCase();
+    const ay = /^\d{4}-\d{2}$/.test(String(req.query.ay || "")) ? String(req.query.ay) : new Date().toISOString().slice(0, 7);
+    await ensureMarkaKasaTable(); await ensureMarkaBorcTable();
+    const { rows: nakit, P } = await markaNakitSatirlari(marka, req);
+    const [kasa, borc, sao] = await Promise.all([
+      pool.query(`SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama, COALESCE(belge_yolu,'') AS belge_yolu
+                  FROM marka_kasa WHERE UPPER(marka)=$1`, [marka]),
+      pool.query(`SELECT id, tip, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama, COALESCE(belge_yolu,'') AS belge_yolu,
+                  COALESCE(kasa_hareketi,false) AS kasa_hareketi FROM marka_borc WHERE UPPER(marka)=$1`, [marka]),
+      pool.query(`SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama FROM simsek_ahy_odeme WHERE UPPER(marka)=$1`, [marka]).catch(() => ({ rows: [] })),
+    ]);
+    const h = [];
+    kasa.rows.forEach(r => h.push({ tarih: r.tarih, yon: "GIRIS", kategori: "NAKIT_GIRIS", kisi: "", aciklama: r.aciklama, referans: r.belge_yolu ? "Dekont" : "", belge_url: r.belge_yolu || "",
+      odeme_yontemi: "", tutar: Number(r.tutar || 0), kaynak: "marka_kasa", kaynak_id: r.id, dahil: true }));
+    borc.rows.forEach(r => {
+      if (!r.kasa_hareketi) return; // kasaya girmeyen/çıkmayan borç kaydı (yalnız mutabakat) — bakiyeye katılmaz
+      const geri = String(r.tip).toUpperCase() === "ODEME";
+      h.push({ tarih: r.tarih, yon: geri ? "GIRIS" : "CIKIS", kategori: geri ? "BORC_GERI" : "BORC_VERILEN", kisi: "Şimşek Haberleşme", aciklama: r.aciklama,
+        referans: `Borç #${r.id}`, belge_url: r.belge_yolu || "", odeme_yontemi: "", tutar: Number(r.tutar || 0), kaynak: "marka_borc", kaynak_id: r.id, dahil: true });
+    });
+    nakit.forEach(r => {
+      const t = Number(r.tutar || 0); if (!t) return;
+      const fonDisi = r.kasadan_dus === false;
+      h.push({ tarih: r.tarih, yon: t < 0 ? "GIRIS" : "CIKIS", kategori: PK_KATEGORI_AD[r.tip] ? r.tip : "DIGER", kisi: r.ad_soyad || "",
+        aciklama: r.aciklama || "", plaka: r.plaka || "", fatura_no: r.fatura_no || "",
+        referans: r.fatura_no ? `Fatura ${r.fatura_no}` : (r.plaka ? r.plaka : (r.kaynak_id ? `${r.kaynak || "kayıt"} #${r.kaynak_id}` : "")),
+        belge_url: "", odeme_yontemi: r.odeme_yontemi || "", tutar: Math.abs(t), kaynak: r.kaynak || r.tip, kaynak_id: r.kaynak_id || null, dahil: !fonDisi, fon_disi: fonDisi });
+    });
+    const yonSira = { GIRIS: 0, CIKIS: 1 };
+    h.sort((a, b) => a.tarih.localeCompare(b.tarih) || (yonSira[a.yon] - yonSira[b.yon]) || String(a.kaynak).localeCompare(String(b.kaynak)) || (Number(a.kaynak_id || 0) - Number(b.kaynak_id || 0)));
+    let bakiye = 0;
+    h.forEach(x => { x.kategori_ad = PK_KATEGORI_AD[x.kategori] || x.kategori; if (x.dahil) bakiye += x.yon === "GIRIS" ? x.tutar : -x.tutar; x.bakiye_sonrasi = x.dahil ? Math.round(bakiye * 100) / 100 : null; });
+    const dahil = h.filter(x => x.dahil);
+    const sum = (arr, yon) => Math.round(arr.filter(x => x.yon === yon).reduce((a, x) => a + x.tutar, 0) * 100) / 100;
+    const ayBas = `${ay}-01`, aySon = `${ay}-31`;
+    const once = dahil.filter(x => x.tarih < ayBas), icinde = dahil.filter(x => x.tarih >= ayBas && x.tarih <= aySon);
+    const devir = sum(once, "GIRIS") - sum(once, "CIKIS");
+    const ayGiris = sum(icinde, "GIRIS"), ayCikis = sum(icinde, "CIKIS");
+    // İnceleme: fon dışı ödemeler + Şimşek'ten gönderilen bakiye kayıtları (kasaya ayrıca işlenmemişse)
+    const inceleme = h.filter(x => x.fon_disi).map(x => ({ ...x, neden: "Fon dışı işaretli — proje kasasından düşülmedi" }));
+    sao.rows.forEach(r => {
+      const t = Number(r.tutar || 0);
+      const eslesen = kasa.rows.find(k => Math.abs(Number(k.tutar || 0) - t) < 1 && Math.abs((new Date(k.tarih) - new Date(r.tarih)) / 86400000) <= 5);
+      if (!eslesen) inceleme.push({ tarih: r.tarih, yon: "GIRIS", kategori: "SIMSEK_GONDERIM", kategori_ad: "Şimşek'ten gönderilen bakiye", kisi: "Şimşek Haberleşme",
+        aciklama: r.aciklama, referans: `Gönderim #${r.id}`, tutar: t, kaynak: "simsek_ahy_odeme", kaynak_id: r.id, dahil: false,
+        neden: "Kasa girişi olarak işlenmemiş — proje fonuna ulaştıysa 'Nakit Ekle' ile girin" });
+    });
+    res.json({ ok: true, marka, fon_modeli: P.fonModeli, baslangic: P.devir, hareketler: h,
+      toplam_gelen: sum(dahil, "GIRIS"), toplam_odenen: sum(dahil, "CIKIS"), kalan: Math.round(bakiye * 100) / 100,
+      fon_disi_toplam: sum(h.filter(x => x.fon_disi), "CIKIS"),
+      ay: { ay, devir: Math.round(devir * 100) / 100, giris: ayGiris, cikis: ayCikis, son: Math.round((devir + ayGiris - ayCikis) * 100) / 100 },
+      inceleme });
+  } catch (e) {
+    console.error("MARKA PROJE KASA ERROR:", e.message);
+    res.status(500).json({ ok: false, error: "Proje kasası hesaplanamadı" });
   }
 });
 
@@ -8074,6 +8166,9 @@ async function ensureMarkaBorcTable() {
     )`);
   // 15.10.2026 (Orhan): borç kayıtlarına da kasadaki gibi dekont eklenebilsin
   await pool.query(`ALTER TABLE marka_borc ADD COLUMN IF NOT EXISTS belge_yolu TEXT`).catch(() => {});
+  // 19.10.2026: kasa_hareketi=true → bu borç proje kasasından verildi / kasaya geri ödendi (kasa bakiyesini etkiler);
+  // false (varsayılan, eski kayıtlar) → yalnız mutabakat kaydı, para kasadan geçmedi
+  await pool.query(`ALTER TABLE marka_borc ADD COLUMN IF NOT EXISTS kasa_hareketi BOOLEAN DEFAULT false`).catch(() => {});
 }
 app.get("/finance/marka-borc", authMiddleware, async (req, res) => {
   try {
@@ -8083,7 +8178,7 @@ app.get("/finance/marka-borc", authMiddleware, async (req, res) => {
     const marka = String(req.query.marka || "AHY").toUpperCase();
     const r = await pool.query(
       `SELECT id, tip, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama,
-              COALESCE(belge_yolu,'') AS belge_yolu
+              COALESCE(belge_yolu,'') AS belge_yolu, COALESCE(kasa_hareketi,false) AS kasa_hareketi
        FROM marka_borc WHERE UPPER(marka)=$1 ORDER BY tarih DESC, id DESC`, [marka]);
     const alinan = r.rows.filter(x => x.tip !== 'ODEME').reduce((s, x) => s + Number(x.tutar || 0), 0);
     const odenen = r.rows.filter(x => x.tip === 'ODEME').reduce((s, x) => s + Number(x.tutar || 0), 0);
@@ -8097,12 +8192,12 @@ app.post("/finance/marka-borc", authMiddleware, async (req, res) => {
     await ensureMarkaBorcTable();
     const marka = String(req.body.marka || "AHY").toUpperCase();
     const tip = String(req.body.tip || "BORC").toUpperCase() === "ODEME" ? "ODEME" : "BORC";
-    const { tarih, tutar, aciklama } = req.body;
+    const { tarih, tutar, aciklama, kasa_hareketi } = req.body;
     const t = Number(tutar || 0);
     if (!tarih || !t) return res.status(400).json({ ok: false, error: "tarih ve tutar zorunlu" });
     const r = await pool.query(
-      `INSERT INTO marka_borc (marka, tip, tarih, tutar, aciklama) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [marka, tip, tarih, t, aciklama || null]);
+      `INSERT INTO marka_borc (marka, tip, tarih, tutar, aciklama, kasa_hareketi) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [marka, tip, tarih, t, aciklama || null, !!kasa_hareketi]);
     res.json({ ok: true, row: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

@@ -1831,6 +1831,8 @@ function MarkaNakitPanel({ currentUser }) {
   const [ay, setAy] = useState(() => new Date().toISOString().slice(0, 7)); // görüntülenen ay (YYYY-MM)
   const [kasa, setKasa] = useState({ rows: [], toplam: 0 }); // manuel nakit girişleri
   const [kasaModal, setKasaModal] = useState(false);
+  const [pk, setPk] = useState(null);          // proje kasası defteri (19.10.2026): gelen − ödenen = kalan, aylık devir, hareketler
+  const [pkModal, setPkModal] = useState(false);
   const [hucreDetay, setHucreDetay] = useState(null); // 16.10.2026: tıklanan hücrenin kalem detayı {tip, gun, items}
   // Gelecek bakiye: HW'ye faturalanmış, ödenmemiş kalemlerin AHY payı (vade gününde)
   const [gelecek, setGelecek] = useState({ gunler: [], onay_bekleyen: 0, toplam: 0, gelen_gunluk: [] });
@@ -1877,6 +1879,7 @@ function MarkaNakitPanel({ currentUser }) {
       const d = await r.json().catch(() => ({}));
       if (r.ok && d.ok) setBorc({ rows: d.rows || [], alinan: Number(d.alinan || 0), odenen: Number(d.odenen || 0), kalan: Number(d.kalan || 0) });
     } catch {}
+    loadProjeKasa(); // kasa işaretli borç hareketleri bakiyeyi etkiler
   };
   const borcEkle = async (tip) => {
     const t = prompt(tip === "ODEME" ? "Geri ödenen tutar (₺):" : `${altMarkaKisa(marka)}'den alınan borç tutarı (₺):`);
@@ -1887,10 +1890,15 @@ function MarkaNakitPanel({ currentUser }) {
     const bugunS = new Date().toISOString().slice(0, 10);
     const tarih = prompt("Tarih (YYYY-AA-GG):", bugunS) || bugunS;
     const acikl = prompt("Açıklama (opsiyonel):", "") || "";
+    // 19.10.2026: gerçek para yönü — kasadan verildi / kasaya geri geldi ise proje kasası bakiyesini etkiler;
+    // aksi halde yalnız mutabakat kaydıdır (borç bakiyesi kasaya eklenmez/çıkarılmaz)
+    const kasaHareketi = window.confirm(tip === "ODEME"
+      ? "Geri ödeme PROJE KASASINA mı girdi?\n\nTamam = kasa bakiyesine eklenir · İptal = yalnız borç kaydı (kasa değişmez)"
+      : "Borç PROJE KASASINDAN mı verildi?\n\nTamam = kasa bakiyesinden düşer · İptal = yalnız borç kaydı (para kasadan geçmedi)");
     try {
       const r = await fetch(`${API_BASE}/finance/marka-borc`, {
         method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
-        body: JSON.stringify({ marka, tip, tarih, tutar: tutarN, aciklama: acikl }),
+        body: JSON.stringify({ marka, tip, tarih, tutar: tutarN, aciklama: acikl, kasa_hareketi: kasaHareketi }),
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
@@ -1901,13 +1909,22 @@ function MarkaNakitPanel({ currentUser }) {
   const marka = String(currentUser?.marka || "AHY").toUpperCase();
   const markaAd = currentUser?.marka_ad || marka;
   const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const loadProjeKasa = async (ayArg) => {
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-proje-kasa?marka=${marka}&ay=${ayArg || ay}`, { headers: _auth });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) setPk(d);
+    } catch {}
+  };
   const loadKasa = async () => {
     try {
       const r = await fetch(`${API_BASE}/finance/marka-kasa?marka=${marka}`, { headers: _auth });
       const d = await r.json().catch(() => ({}));
       if (r.ok && d.ok) setKasa({ rows: d.rows || [], toplam: Number(d.toplam || 0) });
     } catch {}
+    loadProjeKasa(); // kart + hareket listesi girişle birlikte güncellensin
   };
+  useEffect(() => { if (!loading) loadProjeKasa(ay); }, [ay]); // ay değişince devir/ay içi/ay sonu
   useEffect(() => {
     (async () => {
       try {
@@ -2039,15 +2056,19 @@ function MarkaNakitPanel({ currentUser }) {
           </div>
           {/* Kasa + borç kartları yan yana */}
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "stretch" }}>
-          {/* Kasa kartı: manuel nakit girişleri − kasadan yapılan harcamalar = bakiye
-              (AHY'nin kendi cebinden ödedikleri hariç tutulur) */}
+          {/* Proje kasası kartı (19.10.2026, Orhan): Kalan = devir + gerçekleşmiş girişler − gerçekleşmiş çıkışlar.
+              Ödeme yöntemi (nakit/banka/firma hesabı) fark etmez; yalnız "fon dışı" işaretli ödeme hesap dışıdır.
+              Hesap sunucuda (/finance/marka-proje-kasa) — kart, günlük tablo, hareket listesi ve Excel aynı kaynaktan. */}
           {(() => {
-            const bakiye = kasa.toplam - kasaHarcama;
-            const eksi = bakiye < 0;
+            const kalan = pk ? Number(pk.kalan || 0) : (kasa.toplam - kasaHarcama);
+            const gelen = pk ? Number(pk.toplam_gelen || 0) : kasa.toplam;
+            const odenen = pk ? Number(pk.toplam_odenen || 0) : kasaHarcama;
+            const eksi = kalan < 0;
+            const ayB = pk?.ay;
             return (
-              <div style={{ background: eksi ? "#fef2f2" : "#f0fdf4", border: `2px solid ${eksi ? "#fca5a5" : "#86efac"}`, borderRadius: "14px", padding: "10px 16px", minWidth: "250px" }}>
+              <div style={{ background: eksi ? "#fef2f2" : "#f0fdf4", border: `2px solid ${eksi ? "#fca5a5" : "#86efac"}`, borderRadius: "14px", padding: "10px 16px", minWidth: "300px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
-                  <div style={{ fontSize: "11px", fontWeight: 800, color: eksi ? "#b91c1c" : "#15803d", letterSpacing: "0.04em" }}>💰 KASAYA NAKİT GELEN</div>
+                  <div style={{ fontSize: "11px", fontWeight: 800, color: eksi ? "#b91c1c" : "#15803d", letterSpacing: "0.04em" }}>💼 PROJE KASASI — KALAN BAKİYE</div>
                   <div style={{ display: "flex", gap: "6px" }}>
                     <button
                       onClick={async () => {
@@ -2074,16 +2095,30 @@ function MarkaNakitPanel({ currentUser }) {
                       <button onClick={() => setKasaModal(true)} title="Girişleri gör / sil"
                         style={{ padding: "3px 8px", background: "#fff", color: "#374151", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>🧾 {kasa.rows.length}</button>
                     )}
+                    <button onClick={() => { loadProjeKasa(); setPkModal(true); }} title="Hesabı açıklayan hareket listesi: tarih, giriş/çıkış, kategori, referans, hareket sonrası bakiye"
+                      style={{ padding: "3px 8px", background: "#ecfdf5", color: "#166534", border: "1px solid #86efac", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>📒 Hareketler</button>
                   </div>
                 </div>
-                <div style={{ fontSize: "24px", fontWeight: 900, color: eksi ? "#b91c1c" : "#15803d", marginTop: "4px", textAlign: "right" }}>
-                  {eksi ? "-" : ""}₺{fk(Math.abs(bakiye))}
+                <div style={{ fontSize: "24px", fontWeight: 900, color: eksi ? "#b91c1c" : "#15803d", marginTop: "4px", textAlign: "right" }}
+                  title={eksi ? "Negatif bakiye: ödemeler gelen parayı aştı" : "Proje başlangıcından bugüne: toplam gelen − toplam ödenen"}>
+                  {eksi ? "−" : ""}₺{fk(Math.abs(kalan))}
                 </div>
-                <div style={{ fontSize: "11px", color: "#6b7280", textAlign: "right" }}
-                  title={kasaDisi > 0 ? `${altMarkaKisa(marka)}'nın kendi ödediği ₺${fk(kasaDisi)} kasa hesabına dahil değildir (nakit akışında görünür)` : undefined}>
-                  Giren ₺{fk(kasa.toplam)} − Kasadan harcanan ₺{fk(kasaHarcama)}
-                  {kasaDisi > 0 && <span style={{ color: "#b45309", fontWeight: 700 }}> · {altMarkaKisa(marka)} ödedi: ₺{fk(kasaDisi)}</span>}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "14px", fontSize: "11px", color: "#374151", marginTop: "2px" }}>
+                  <span>Toplam gelen <b style={{ color: "#15803d" }}>₺{fk(gelen)}</b></span>
+                  <span>Toplam ödenen <b style={{ color: "#b91c1c" }}>₺{fk(odenen)}</b></span>
                 </div>
+                {ayB && (
+                  <div style={{ fontSize: "10.5px", color: "#6b7280", textAlign: "right", marginTop: "2px" }}
+                    title="Seçili ay: ay başı devreden + ay içi girişler − ay içi çıkışlar = ay sonu bakiye">
+                    {ayBaslik}: devir ₺{fk(ayB.devir)} · giriş ₺{fk(ayB.giris)} · çıkış ₺{fk(ayB.cikis)} · ay sonu <b style={{ color: Number(ayB.son) < 0 ? "#b91c1c" : "#0f172a" }}>{Number(ayB.son) < 0 ? "−" : ""}₺{fk(Math.abs(Number(ayB.son || 0)))}</b>
+                  </div>
+                )}
+                {pk && Number(pk.fon_disi_toplam || 0) > 0 && (
+                  <div style={{ fontSize: "10.5px", color: "#b45309", fontWeight: 700, textAlign: "right", marginTop: "2px" }}
+                    title="Fon dışı işaretli ödemeler proje parasından yapılmadı; bakiyeye girmez — Hareketler penceresindeki inceleme listesinde">
+                    ⚠ fon dışı ödeme ₺{fk(pk.fon_disi_toplam)} hesap dışı
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -2384,6 +2419,76 @@ function MarkaNakitPanel({ currentUser }) {
         );
       })()}
 
+      {/* Proje kasası hareket listesi (19.10.2026): hesabı açıklayan defter + Excel (aynı kapsam ve hesap) */}
+      {pkModal && pk && (() => {
+        const tTR = (t) => String(t || "").split("-").reverse().join(".");
+        const bak = (v) => `${Number(v) < 0 ? "−" : ""}₺${fk(Math.abs(Number(v || 0)))}`;
+        return (
+        <div onClick={() => setPkModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: "min(1140px, 97vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", padding: "14px 20px", background: "linear-gradient(135deg,#14532d 0%,#166534 60%,#15803d 100%)" }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: "16px", color: "#fff" }}>📒 Proje Kasası — Hareketler</div>
+                <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.82)", marginTop: "2px" }}>
+                  {devirMetni(currentUser)} başlangıç · gelen <b>₺{fk(pk.toplam_gelen)}</b> − ödenen <b>₺{fk(pk.toplam_odenen)}</b> = kalan <b>{bak(pk.kalan)}</b>
+                  {pk.ay && <> · {ayBaslik}: devir {bak(pk.ay.devir)} + giriş ₺{fk(pk.ay.giris)} − çıkış ₺{fk(pk.ay.cikis)} = ay sonu <b>{bak(pk.ay.son)}</b></>}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                <button onClick={() => exportStandardExcel({
+                  title: `Proje Kasası — ${altMarkaKisa(marka)} · gelen ₺${fk(pk.toplam_gelen)} − ödenen ₺${fk(pk.toplam_odenen)} = kalan ${bak(pk.kalan)}`,
+                  sheetName: "Proje Kasası", fileBase: `Proje_Kasasi_${marka}`,
+                  headers: ["Tarih", "Giriş/Çıkış", "Kategori", "Kişi/Firma", "Açıklama", "Belge/Ödeme Referansı", "Ödeme Yöntemi", "Tutar (₺)", "Hareket Sonrası Bakiye (₺)", "Hesaba Dahil"],
+                  colWidths: [12, 11, 22, 30, 48, 26, 16, 14, 20, 16], numericCols: [7, 8],
+                  rows: (pk.hareketler || []).map(x => [tTR(x.tarih), x.yon === "GIRIS" ? "Giriş" : "Çıkış", x.kategori_ad || "", x.kisi || "", x.aciklama || "", x.referans || "", x.odeme_yontemi || "", x.yon === "GIRIS" ? Number(x.tutar) : -Number(x.tutar), x.dahil ? Number(x.bakiye_sonrasi) : "", x.dahil ? "Evet" : "Hayır (fon dışı)"]),
+                }).catch(e => alert("Excel indirilemedi: " + e.message))}
+                  style={{ background: "rgba(255,255,255,0.92)", border: "none", borderRadius: "9px", padding: "8px 14px", cursor: "pointer", fontWeight: 700, fontSize: "13px", color: "#166534" }}>📥 Excel</button>
+                <button onClick={() => setPkModal(false)} style={{ background: "rgba(255,255,255,0.2)", border: "none", borderRadius: "9px", padding: "8px 12px", cursor: "pointer", fontWeight: 700, color: "#fff" }}>✕</button>
+              </div>
+            </div>
+            <div style={{ overflow: "auto", padding: "10px 16px 18px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px", minWidth: "1000px" }}>
+                <thead><tr style={{ background: "#f8fafc" }}>{["Tarih", "Giriş/Çıkış", "Kategori", "Kişi/Firma", "Açıklama", "Belge/Ödeme Ref.", "Yöntem", "Tutar", "Hareket Sonrası Bakiye"].map(hh => (
+                  <th key={hh} style={{ padding: "8px 10px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap", position: "sticky", top: 0, background: "#f8fafc" }}>{hh}</th>
+                ))}</tr></thead>
+                <tbody>
+                  {(pk.hareketler || []).map((x, i) => {
+                    const giris = x.yon === "GIRIS";
+                    return (
+                      <tr key={i} style={{ borderBottom: "1px solid #f1f5f9", background: !x.dahil ? "#fffbeb" : (i % 2 ? "#fafafa" : "#fff"), color: !x.dahil ? "#92400e" : undefined }}
+                        title={!x.dahil ? "Fon dışı — proje kasasından düşülmedi" : `${x.kaynak || ""}${x.kaynak_id ? " #" + x.kaynak_id : ""}`}>
+                        <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>{tTR(x.tarih)}</td>
+                        <td style={{ padding: "7px 10px", fontWeight: 800, color: giris ? "#15803d" : "#b91c1c" }}>{giris ? "Giriş" : "Çıkış"}</td>
+                        <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>{x.kategori_ad}</td>
+                        <td style={{ padding: "7px 10px" }}>{x.kisi || "—"}</td>
+                        <td style={{ padding: "7px 10px", color: "#475569" }}>{x.aciklama || ""}</td>
+                        <td style={{ padding: "7px 10px", fontFamily: "ui-monospace, Menlo, monospace", fontSize: "11.5px", whiteSpace: "nowrap" }}>
+                          {x.belge_url ? <a href={x.belge_url} target="_blank" rel="noreferrer" style={{ color: "#1d4ed8" }}>📎 {x.referans || "Belge"}</a> : (x.referans || "—")}
+                        </td>
+                        <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>{x.odeme_yontemi || "—"}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 800, color: giris ? "#15803d" : "#b91c1c", whiteSpace: "nowrap" }}>{giris ? "+" : "−"}₺{fk(x.tutar)}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700, whiteSpace: "nowrap", color: x.dahil ? (Number(x.bakiye_sonrasi) < 0 ? "#b91c1c" : "#0f172a") : "#94a3b8" }}>{x.dahil ? bak(x.bakiye_sonrasi) : "hesap dışı"}</td>
+                      </tr>
+                    );
+                  })}
+                  {(pk.hareketler || []).length === 0 && <tr><td colSpan={9} style={{ padding: "20px", textAlign: "center", color: "#9ca3af" }}>Hareket yok</td></tr>}
+                </tbody>
+              </table>
+              {pk.inceleme && pk.inceleme.length > 0 && (
+                <div style={{ marginTop: "14px", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "10px", padding: "10px 14px" }}>
+                  <div style={{ fontWeight: 800, fontSize: "12.5px", color: "#92400e", marginBottom: "6px" }}>⚠ İnceleme listesi ({pk.inceleme.length}) — bakiyeye dahil edilmeyen kayıtlar</div>
+                  {pk.inceleme.map((x, i) => (
+                    <div key={i} style={{ fontSize: "12px", color: "#78350f", padding: "4px 0", borderTop: i ? "1px dashed #fde68a" : "none" }}>
+                      {tTR(x.tarih)} · {x.kategori_ad} · {x.kisi || ""} · ₺{fk(x.tutar)} · {x.referans || ""} — <i>{x.neden}</i>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
       {/* Kasa girişleri modalı — sıralı liste + dekont + Excel (17.08.2026) */}
       {kasaModal && (
         <div onClick={() => setKasaModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
@@ -3120,7 +3225,7 @@ function OrtakOdemeModal({ faturaId, onClose, onDone }) {
   const [hata, setHata] = useState("");
   const [busy, setBusy] = useState(false);
   const [girdi, setGirdi] = useState({});         // kalemId → tutar, "DISI" → tutar
-  const [form, setForm] = useState({ tarih: "", yontem: "BANKA", kasadan_dus: false, referans: "", aciklama: "" });
+  const [form, setForm] = useState({ tarih: "", yontem: "BANKA", kasadan_dus: true, referans: "", aciklama: "" }); // 19.10.2026: ödeme yöntemi ne olursa olsun varsayılan proje fonu
   const [idem, setIdem] = useState(() => odmIdem("fat"));
   const [uyarilar, setUyarilar] = useState([]);
   const [logAcik, setLogAcik] = useState(false);
@@ -3245,10 +3350,10 @@ function OrtakOdemeModal({ faturaId, onClose, onDone }) {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px", marginTop: "12px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "12px" }}>
               <div><label style={{ fontSize: "11px", fontWeight: 700, color: "#334155" }}>Gerçek ödeme tarihi *</label><input type="date" value={form.tarih} onChange={e => setForm(x => ({ ...x, tarih: e.target.value }))} style={{ ...odmInp, borderColor: form.tarih ? "#e5e7eb" : "#f59e0b" }} /></div>
-              <div><label style={{ fontSize: "11px", fontWeight: 700, color: "#334155" }}>Ödeme yöntemi</label><select value={form.yontem} onChange={e => setForm(x => ({ ...x, yontem: e.target.value, kasadan_dus: e.target.value === "KASA" }))} style={odmInp}>{ODM_YONTEM.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+              <div><label style={{ fontSize: "11px", fontWeight: 700, color: "#334155" }}>Ödeme yöntemi</label><select value={form.yontem} onChange={e => setForm(x => ({ ...x, yontem: e.target.value }))} style={odmInp}>{ODM_YONTEM.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
               <div><label style={{ fontSize: "11px", fontWeight: 700, color: "#334155" }}>Dekont / referans no</label><input value={form.referans} onChange={e => setForm(x => ({ ...x, referans: e.target.value }))} style={odmInp} placeholder="Dekont, EFT ref." /></div>
               <div><label style={{ fontSize: "11px", fontWeight: 700, color: "#334155" }}>Açıklama</label><input value={form.aciklama} onChange={e => setForm(x => ({ ...x, aciklama: e.target.value }))} style={odmInp} /></div>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600, color: "#334155" }}><input type="checkbox" checked={!!form.kasadan_dus} onChange={e => setForm(x => ({ ...x, kasadan_dus: e.target.checked }))} /> Kasa bakiyesinden düşsün</label>
+              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600, color: "#334155" }}><input type="checkbox" checked={!!form.kasadan_dus} onChange={e => setForm(x => ({ ...x, kasadan_dus: e.target.checked }))} /> Proje kasasından düşsün <span style={{ color: "#64748b", fontWeight: 500 }}>(proje fonu dışından ödendiyse işareti kaldır)</span></label>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "12px" }}>
               <div style={{ fontSize: "13px", color: "#334155" }}>Bu ödeme: <b style={{ fontSize: "16px" }}>₺{odmTL(toplam)}</b> · {dagilim.filter(x => x.tur === "ARAC_KIRA").length} araç satırı{dagilim.some(x => x.tur === "FATURA") ? " + araç dışı kısım" : ""}</div>
@@ -38178,7 +38283,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
         // 16.10.2026: gerçek ödeme tarihi boş başlar (dekonttaki tarih girilir); idem anahtarı tekrar tıklamada ikinci ödemeyi önler
         rows.push({ key: `${a.id}_${donem}`, arac_id: a.id, plaka: a.plaka, arac: `${a.marka || ""} ${a.model || ""}`.trim(), surucu: a.surucu, donem, vade,
           kira: kiraA, odendi: !!odeme && !kismi, kismi, eksik, odeme, gecikti: (!odeme || kismi) && vade <= bugunStr, fatSatir,
-          sec: (!odeme || kismi) && vade <= bugunStr, tutar: Math.round(kismi ? eksik : kiraA).toLocaleString("tr-TR"), kasadan: false, tarih: "",
+          sec: (!odeme || kismi) && vade <= bugunStr, tutar: Math.round(kismi ? eksik : kiraA).toLocaleString("tr-TR"), kasadan: true, tarih: "",
           idem: `kira-${a.id}-${donem}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` });
       });
     });
