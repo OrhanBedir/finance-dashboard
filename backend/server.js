@@ -1803,11 +1803,14 @@ app.get("/po/saha-oneri", authMiddleware, async (req, res) => {
     for (const grup of MUADIL_GRUPLAR) {
       if (grup.some(k => sahadaOlan.has(k))) grup.forEach(k => muadilHaric.add(k));
     }
+    // Co-Located paketi (PR'da girilmiş veya PO'lu) varsa paket kapsamındaki kalemler önerilmez
+    const colocPaket = COLOC_PAKET_KODLARI.some(k => sahadaOlan.has(k));
     const oneriler = benzer.rows
       .filter(x => !girilenSet.has(x.item_code) && !poSet.has(x.item_code))
       .filter(x => !ONERI_HARIC_KOD.has(x.item_code) && !ONERI_HARIC_RE.test(x.item_description || ""))
       .filter(x => !muadilHaric.has(x.item_code))
       .filter(x => !(kafesKule && x.item_code === "8818249053"))
+      .filter(x => !(colocPaket && COLOC_DAHIL_KALEMLER[x.item_code]))
       .map(x => ({ ...x, yuzde: toplamSaha ? Math.round((100 * x.kac_sahada) / toplamSaha) : 0 }))
       .filter(x => x.yuzde >= 40)
       .sort((a, b) => b.yuzde - a.yuzde);
@@ -1837,6 +1840,17 @@ app.get("/po/saha-oneri", authMiddleware, async (req, res) => {
    3) Benzer saha istatistiği (mevcut /po/saha-oneri) — frontend ayrıca alır.
    Amaç: PO talebinde gözden kaçan kalem kalmasın. */
 const ASISTAN_HW_RX = /huawei|^hw$/i;
+// Co-Located paket kapsamı (BoQ L4-All Items SOW + 2026-27 Frame BoQ; Mikail
+// Akbas/Huawei 16.10.2026; Orhan 19.10.2026): antensiz/antenli Co-Located
+// paketinde etiketleme, alüminyum TK plaka ve As-built DAHİL — paket olan
+// sahada bu kalemler önerilmez, PR'da girilmişse UYARI verilir.
+const COLOC_PAKET_KODLARI = ["8818274542", "8818274543"];
+const COLOC_DAHIL_KALEMLER = {
+  "8812184863": "3M etiket",
+  "8812184928": "TK Certificate plaka",
+  "8812184927": "As-built",
+};
+const COLOC_DAHIL_MESAJ = "Co-Located paketine dahil (BoQ), ayrıca talep edilmez";
 const BELGE_KALEM_KURALLARI = [
   { tip: "TSSR", etiket: "TSSR", subcon: "tssr_subcon",
     veri: ["tssr_plan_start_date", "tssr_actual_end_date", "tssr_belge_url"],
@@ -2011,6 +2025,15 @@ app.get("/po/akilli-asistan", authMiddleware, async (req, res) => {
     const poSet = new Set(po.rows.map((r) => r.ic));
     const bulgular = [];
     const belge_durumu = [];
+    const colocPaket = COLOC_PAKET_KODLARI.some((k) => prSet.has(k) || poSet.has(k));
+
+    // ── 0) Co-Located paket kapsamı: dahil kalemler PR'da girilmişse UYARI ────
+    if (colocPaket) {
+      for (const [kod, ad] of Object.entries(COLOC_DAHIL_KALEMLER)) {
+        if (prSet.has(kod)) bulgular.push({ tip: "UYARI", kaynak: "COLOC", item_code: kod, adet: 0, kisa: "Co-Located paketine dahil",
+          mesaj: `"${ad}" — ${COLOC_DAHIL_MESAJ}.` });
+      }
+    }
 
     // ── 1) Belge kuralları ──────────────────────────────────────────────────
     if (rollout) {
@@ -2021,9 +2044,10 @@ app.get("/po/akilli-asistan", authMiddleware, async (req, res) => {
         const hw = ASISTAN_HW_RX.test(subcon);
         belge_durumu.push({ tip: k.tip, etiket: k.etiket, veri_var: true, subcon: subcon || "(boş — Şimşek varsayıldı)", hw });
         for (const kal of k.kalemler) {
+          if (colocPaket && COLOC_DAHIL_KALEMLER[kal.kod]) continue; // paket kapsamında — yukarıda ele alındı
           const girildi = prSet.has(kal.kod);
           if (hw && girildi) {
-            bulgular.push({ tip: "UYARI", kaynak: k.tip, item_code: kal.kod, adet: 0,
+            bulgular.push({ tip: "UYARI", kaynak: k.tip, item_code: kal.kod, adet: 0, kisa: "Huawei yaptı — talep etme",
               mesaj: `${k.etiket} işini Huawei yaptı (subcon: ${subcon}) — "${kal.ad}" kalemi PR'da girilmiş, talep edilmemeli.` });
           } else if (!hw && !girildi) {
             bulgular.push({ tip: kal.zorunlu ? "EKSIK" : "ONERI", kaynak: k.tip, item_code: kal.kod, adet: kal.adet,
@@ -2088,7 +2112,7 @@ app.get("/po/akilli-asistan", authMiddleware, async (req, res) => {
           }));
           // Kafes kule + PR'da vinç varsa uyar (kafes kulede vinç talep edilmez)
           if (tssr.tespitler.some((t) => t.anahtar === "Kafes kule") && prSet.has("8818249053")) {
-            bulgular.push({ tip: "UYARI", kaynak: "TSSR", item_code: "8818249053", adet: 0,
+            bulgular.push({ tip: "UYARI", kaynak: "TSSR", item_code: "8818249053", adet: 0, kisa: "Kafes kule — vinç talep etme",
               mesaj: "TSSR'a göre saha KAFES KULE — kafes kulede vinç talep edilmez, PR'daki vinç kalemini kaldır." });
           }
           for (const t of tssr.tespitler) {

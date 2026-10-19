@@ -6684,7 +6684,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
   }, [siteCode]);
   const asistanUyari = useMemo(() => {
     const m = {};
-    (asistan?.bulgular || []).forEach((b) => { if (b.tip === "UYARI" && b.item_code) m[b.item_code] = b.mesaj; });
+    (asistan?.bulgular || []).forEach((b) => { if (b.tip === "UYARI" && b.item_code) m[b.item_code] = b; });
     return m;
   }, [asistan]);
 
@@ -6983,8 +6983,8 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
                         {r.item_code}
                         {r.yeni && <span style={{ marginLeft:6, background:"#f3e8ff", color:"#7c3aed", borderRadius:5, padding:"1px 6px", fontSize:9.5, fontWeight:700 }}>YENİ</span>}
                         {asistanUyari[r.item_code] && (
-                          <div title={asistanUyari[r.item_code]} style={{ marginTop:3, fontSize:10, color:"#dc2626", fontWeight:700, fontFamily:"inherit", whiteSpace:"nowrap" }}>
-                            ⚠ Huawei yaptı — talep etme
+                          <div title={asistanUyari[r.item_code].mesaj} style={{ marginTop:3, fontSize:10, color:"#dc2626", fontWeight:700, fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                            ⚠ {asistanUyari[r.item_code].kisa || "Talep etme"}
                           </div>
                         )}
                       </td>
@@ -7123,7 +7123,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
             {asistan && !asistan.rollout_var && (
               <div style={{ fontSize:12, color:"#64748b", padding:"4px 0 8px" }}>Bu saha Rollout Data'da yok — belge kuralları uygulanamadı.</div>
             )}
-            <Grup baslik="Uyarı — Huawei yaptı, talep edilmemeli" liste={uyarilar} renk={R.uyari} buton={false} />
+            <Grup baslik="Uyarı — talep edilmemeli" liste={uyarilar} renk={R.uyari} buton={false} />
             <Grup baslik="Eksik — talep edilmeli" liste={eksikler} renk={R.eksik} buton={true} />
             <Grup baslik="TSSR bulguları" liste={tssrB} renk={R.tssr} buton={true}
                   not="TSSR'da yazan işler PR listesiyle karşılaştırıldı; PR'da olmayanlar aşağıda." />
