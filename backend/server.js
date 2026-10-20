@@ -20721,6 +20721,11 @@ async function ensureYemekKartiTables() {
   await pool.query(`CREATE TABLE IF NOT EXISTS yemek_donem_hak (
     id SERIAL PRIMARY KEY, kart_id INTEGER REFERENCES yemek_kartlari(id) ON DELETE CASCADE, donem TEXT NOT NULL,
     tutar NUMERIC, aciklama TEXT, guncelleyen TEXT, updated_at TIMESTAMP DEFAULT now(), UNIQUE (kart_id, donem))`).catch(() => {});
+  await pool.query(`ALTER TABLE yemek_donem_hak ADD COLUMN IF NOT EXISTS gerekce TEXT`).catch(() => {});
+  // Dönem hakkı değişiklik geçmişi (20.10.2026, Murat Tetik vakası): önceki/yeni hak, gerekçe, kim, ne zaman
+  await pool.query(`CREATE TABLE IF NOT EXISTS yemek_donem_hak_log (
+    id SERIAL PRIMARY KEY, kart_id INTEGER, donem TEXT, onceki_tutar NUMERIC, yeni_tutar NUMERIC, gerekce TEXT, aciklama TEXT,
+    kullanici TEXT, created_at TIMESTAMP DEFAULT now())`).catch(() => {});
   _yemekTablolarHazir = true;
 }
 // Dönem ödeme tercihi (öneri): Ekim 2026 ve öncesi NAKIT, Kasım 2026'dan itibaren KART; kullanıcı değiştirebilir,
@@ -20731,6 +20736,23 @@ async function yemekDonemTercih(donem) {
   return { yontem: donem <= "2026-10" ? "NAKIT" : "KART", kaynak: "varsayilan" };
 }
 const YEMEK_YONTEM_AD = { NAKIT: "Nakit / Elden", KART: "Yemek kartına yükleme" };
+const YEMEK_GEREKCE_AD = { UCRETSIZ_IZIN: "Ücretsiz izin", AY_ICI_GIRIS_CIKIS: "Ay içinde işe başlama/ayrılma", DIGER: "Diğer" };
+// Dönem hakkını (yalnız o ay) yazar ve geçmişe kaydeder; yeni ödeme/kasa hareketi oluşturmaz
+async function yemekDonemHakYaz(db, kartId, donem, tutar, gerekce, aciklama, kullanici) {
+  const g = String(gerekce || "").toUpperCase();
+  if (!YEMEK_GEREKCE_AD[g]) throw new Error("Gerekçe zorunlu: ücretsiz izin, ay içinde işe başlama/ayrılma ya da diğer");
+  const onceki = await db.query(`SELECT tutar FROM yemek_donem_hak WHERE kart_id=$1 AND donem=$2`, [kartId, donem]);
+  const std = await db.query(`SELECT aylik_tutar FROM yemek_kartlari WHERE id=$1`, [kartId]);
+  const oncekiTutar = onceki.rows[0] ? Number(onceki.rows[0].tutar) : (std.rows[0]?.aylik_tutar === null ? null : Number(std.rows[0]?.aylik_tutar));
+  if (tutar === null) await db.query(`DELETE FROM yemek_donem_hak WHERE kart_id=$1 AND donem=$2`, [kartId, donem]);
+  else await db.query(
+    `INSERT INTO yemek_donem_hak (kart_id, donem, tutar, aciklama, gerekce, guncelleyen) VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (kart_id, donem) DO UPDATE SET tutar=$3, aciklama=$4, gerekce=$5, guncelleyen=$6, updated_at=now()`,
+    [kartId, donem, Number(tutar), aciklama || null, g, kullanici]);
+  await db.query(`INSERT INTO yemek_donem_hak_log (kart_id, donem, onceki_tutar, yeni_tutar, gerekce, aciklama, kullanici) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [kartId, donem, oncekiTutar, tutar === null ? null : Number(tutar), g, aciklama || null, kullanici]);
+  return { onceki: oncekiTutar, yeni: tutar === null ? null : Number(tutar) };
+}
 // ── Yemek kartı gider firması kuralı (20.10.2026): 01–14.10.2026 Şimşek, 15.10.2026'dan itibaren Teknocenter;
 //    01.10.2026 öncesi tarihsel kayıt (kart/ödeme firması) korunur. Yalnız GİDER firmasını belirler — bordro
 //    şirketi, yasal işveren ve kullanıcı hesabına dokunmaz. (Diğer modüllerin 14.10 devir tarihi değişmedi.)
@@ -20798,8 +20820,10 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
     pool.query(`SELECT o.*, to_char(o.tarih,'YYYY-MM-DD') AS tarih_str FROM yemek_karti_odemeler o WHERE o.donem=$1`, [donem]),
     pool.query(`SELECT h.*, to_char(h.tarih,'YYYY-MM-DD') AS tarih_str FROM yemek_odeme_hareket h WHERE h.donem=$1 ORDER BY h.tarih, h.id`, [donem]),
   ]);
-  const donemHak = await pool.query(`SELECT kart_id, tutar, aciklama FROM yemek_donem_hak WHERE donem=$1`, [donem]).catch(() => ({ rows: [] }));
+  const donemHak = await pool.query(`SELECT kart_id, tutar, aciklama, gerekce, guncelleyen, updated_at FROM yemek_donem_hak WHERE donem=$1`, [donem]).catch(() => ({ rows: [] }));
   const hakByKart = new Map(); donemHak.rows.forEach(x => hakByKart.set(x.kart_id, x));
+  const hakLog = await pool.query(`SELECT * FROM yemek_donem_hak_log WHERE donem=$1 ORDER BY id`, [donem]).catch(() => ({ rows: [] }));
+  const logByKart = new Map(); hakLog.rows.forEach(x => { if (!logByKart.has(x.kart_id)) logByKart.set(x.kart_id, []); logByKart.get(x.kart_id).push(x); });
   const harByKart = new Map(); hareketler.rows.forEach(h => { if (!harByKart.has(h.kart_id)) harByKart.set(h.kart_id, []); harByKart.get(h.kart_id).push(h); });
   // Hak kaydının ödeme özeti: eski (yöntemi belirsiz) kayıt + yeni hareketler (iptal edilenler toplama girmez, listede kalır)
   const odemeOzeti = (kart, eskiOdeme) => {
@@ -20814,12 +20838,17 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
     const toplam = nakit + kartY + belirsiz;
     const ozel = kart ? hakByKart.get(kart.id) : null;
     const standart = kart && kart.aylik_tutar !== null && Number(kart.aylik_tutar) > 0 ? Number(kart.aylik_tutar) : null;
-    const hak = ozel && ozel.tutar !== null && Number(ozel.tutar) > 0 ? Number(ozel.tutar) : standart;
+    // Aya özel hak (0 dahil) standart tutarı yalnız o ay için ezer; durum tutarlardan hesaplanır (elle etiket yok)
+    const hak = ozel && ozel.tutar !== null ? Number(ozel.tutar) : standart;
     const kalan = hak === null ? null : Math.max(0, hak - toplam);
-    const durum = hak === null ? (toplam > 0 ? "ODENDI" : "TANIMSIZ") : toplam <= 0 ? "ODENMEDI" : toplam + 0.5 >= hak ? "ODENDI" : "KISMI";
+    const fazla = hak === null ? 0 : Math.max(0, toplam - hak);
+    const durum = hak === null ? (toplam > 0 ? "ODENDI" : "TANIMSIZ")
+      : hak === 0 ? (toplam > 0 ? "FAZLA" : "HAK_YOK")
+      : toplam <= 0 ? "ODENMEDI" : toplam > hak + 0.5 ? "FAZLA" : toplam + 0.5 >= hak ? "ODENDI" : "KISMI";
     const yontemler = [...new Set(aktif.map(h => h.yontem || "BELIRSIZ"))];
-    return { hareketler: har, odenen_toplam: toplam, nakit_odenen: nakit, kart_odenen: kartY, belirsiz_odenen: belirsiz, hak, kalan, durum, yontemler,
-      hak_standart: standart, hak_ozel: ozel ? Number(ozel.tutar) : null, hak_ozel_not: ozel?.aciklama || null };
+    return { hareketler: har, odenen_toplam: toplam, nakit_odenen: nakit, kart_odenen: kartY, belirsiz_odenen: belirsiz, hak, kalan, fazla, durum, yontemler,
+      hak_standart: standart, hak_ozel: ozel ? Number(ozel.tutar) : null, hak_ozel_not: ozel?.aciklama || null, hak_ozel_gerekce: ozel?.gerekce || null,
+      hak_gecmisi: kart ? (logByKart.get(kart.id) || []).map(l => ({ onceki: l.onceki_tutar == null ? null : Number(l.onceki_tutar), yeni: l.yeni_tutar == null ? null : Number(l.yeni_tutar), gerekce: l.gerekce, aciklama: l.aciklama, kullanici: l.kullanici, tarih: l.created_at })) : [] };
   };
   const kartByPid = new Map(); kartlar.rows.forEach(c => { if (c.personel_id) kartByPid.set(c.personel_id, c); });
   const kartByAd = new Map(); kartlar.rows.forEach(c => { if (!c.personel_id) kartByAd.set(adAnahtar(c.ad_soyad), c); });
@@ -20850,7 +20879,7 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
       hak_araliklari: aralik.map(a => ({ bas: a[0], bit: a[1] })),
       kart: kart ? { id: kart.id, kart_no: kart.kart_no, aylik_tutar: kart.aylik_tutar, firma: kart.firma, aktif: kart.aktif, ad_soyad: kart.ad_soyad } : null,
       baglanti, kart_eksik: !kart || !String(kart.kart_no || "").trim(),
-      tutar_tanimsiz: !kart || !((kart.aylik_tutar !== null && Number(kart.aylik_tutar) > 0) || Number(hakByKart.get(kart.id)?.tutar || 0) > 0),
+      tutar_tanimsiz: !kart || !((kart.aylik_tutar !== null && Number(kart.aylik_tutar) > 0) || (hakByKart.get(kart.id) && hakByKart.get(kart.id).tutar !== null)),
       gider_firmalari: tarihsel ? [{ firma: (odeme?.firma || kart?.firma || null), tarihsel: true }] : firmalar,
       dagilim_gerekli: !tarihsel && firmalar.length > 1,
       odeme: odeme ? { id: odeme.id, tutar: Number(odeme.tutar), tarih: odeme.tarih_str, firma: odeme.firma, odeyen_firma: odeme.odeyen_firma, dagilim: odeme.dagilim, cashflow_id: odeme.cashflow_id, aciklama: odeme.aciklama } : null,
@@ -20919,14 +20948,27 @@ app.post("/hr/yemek-kartlari/:id/hareket", async (req, res) => {
     const kq = await client.query(`SELECT * FROM yemek_kartlari WHERE id=$1 FOR UPDATE`, [kartId]);
     const kart = kq.rows[0];
     if (!kart) { await client.query("ROLLBACK"); client.release(); return res.status(404).json({ ok: false, error: "Hak kaydı bulunamadı" }); }
-    const hak = kadroSatir ? kadroSatir.hak : (kart.aylik_tutar === null ? null : Number(kart.aylik_tutar));
-    if (!(hak > 0)) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: "Yemek tutarı tanımlanmamış — önce dönemlik hakkı tanımlayın" }); }
+    let hak = kadroSatir ? kadroSatir.hak : (kart.aylik_tutar === null ? null : Number(kart.aylik_tutar));
+    const kullaniciMail = String(u?.email || "").toLowerCase() || null;
+    // Seçenek B (20.10.2026): "bu ayın toplam yemek hakkı farklı" → aya özel hak + gerekçe aynı işlemde, geçmişe yazılır
+    if (b.donem_hak_yeni !== undefined && b.donem_hak_yeni !== null && b.donem_hak_yeni !== "") {
+      if (!(IK_ESITLE_ROLLER.includes(String(u?.role || "").toLowerCase()) || IK_ESITLE_EMAIL.includes(kullaniciMail || ""))) { await client.query("ROLLBACK"); client.release(); return res.status(403).json({ ok: false, error: "Dönem hakkını değiştirme yetkiniz yok" }); }
+      try { await yemekDonemHakYaz(client, kart.id, donem, Number(b.donem_hak_yeni), b.gerekce, b.gerekce_aciklama, kullaniciMail); }
+      catch (e) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: e.message }); }
+      hak = Number(b.donem_hak_yeni);
+    }
+    if (!(hak > 0)) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: hak === 0 ? "Bu dönem için yemek hakkı 0 — ödeme yapılamaz" : "Yemek tutarı tanımlanmamış — önce dönemlik hakkı tanımlayın" }); }
     if (yontem === "KART" && !String(kart.kart_no || "").trim()) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: "Kart yüklemesi için geçerli kart numarası gerekli — kart bilgisini girin ya da Nakit / Elden seçin" }); }
     const odenmis = await client.query(
       `SELECT COALESCE((SELECT SUM(tutar) FROM yemek_odeme_hareket WHERE kart_id=$1 AND donem=$2 AND iptal_at IS NULL),0)
             + COALESCE((SELECT SUM(tutar) FROM yemek_karti_odemeler WHERE kart_id=$1 AND donem=$2),0) AS t`, [kart.id, donem]);
     const kalan = hak - Number(odenmis.rows[0].t || 0);
     if (tutar > kalan + 0.5) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: `Kalan hakkı aşıyor: ${donem} için kalan ₺${kalan.toLocaleString("tr-TR")}` }); }
+    // Ödeme kalandan düşükse kullanıcı niyetini açıkça seçmiş olmalı: A) kısmi ödeme (kismi_onay) ya da B) aya özel hak
+    if (tutar < kalan - 0.5 && !b.kismi_onay && (b.donem_hak_yeni === undefined || b.donem_hak_yeni === null || b.donem_hak_yeni === "")) {
+      await client.query("ROLLBACK"); client.release();
+      return res.status(400).json({ ok: false, error: `Tutar kalan haktan (₺${kalan.toLocaleString("tr-TR")}) düşük — "kısmi ödeme" ya da "bu ayın toplam hakkı farklı" seçimi gerekli`, secim_gerekli: true, kalan });
+    }
     // Gider dağılımı (iki firmalı ay): bu hareketin tutarı firmalara bölünür, toplam = tutar; tek firmalı ay otomatik
     const dilimler = yemekAyDilimleri(donem);
     let dagilim = null, giderFirma = null;
@@ -20999,17 +21041,19 @@ app.put("/hr/yemek-kartlari/:id/donem-hak", authMiddleware, async (req, res) => 
     const donem = String((req.body || {}).donem || "").trim();
     if (!/^\d{4}-\d{2}$/.test(donem)) return res.status(400).json({ ok: false, error: "Dönem gerekli" });
     const t = (req.body || {}).tutar;
-    const email = String(req.user?.email || "").toLowerCase();
-    if (t === null || t === "" || t === undefined) {
-      await pool.query(`DELETE FROM yemek_donem_hak WHERE kart_id=$1 AND donem=$2`, [req.params.id, donem]);
-      return res.json({ ok: true, hak_ozel: null });
-    }
-    if (!(Number(t) >= 0)) return res.status(400).json({ ok: false, error: "Geçerli bir tutar girin" });
-    const r = await pool.query(
-      `INSERT INTO yemek_donem_hak (kart_id, donem, tutar, aciklama, guncelleyen) VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (kart_id, donem) DO UPDATE SET tutar=$3, aciklama=$4, guncelleyen=$5, updated_at=now() RETURNING *`,
-      [req.params.id, donem, Number(t), (req.body || {}).aciklama || null, email]);
-    res.json({ ok: true, hak_ozel: r.rows[0] });
+    const email = String(req.user?.email || "").toLowerCase(), rol = String(req.user?.role || "").toLowerCase();
+    if (!IK_ESITLE_ROLLER.includes(rol) && !IK_ESITLE_EMAIL.includes(email)) return res.status(403).json({ ok: false, error: "Dönem hakkını değiştirme yetkiniz yok" });
+    const bos = t === null || t === "" || t === undefined;
+    if (!bos && !(Number(t) >= 0)) return res.status(400).json({ ok: false, error: "Geçerli bir tutar girin" });
+    let sonuc;
+    try { sonuc = await yemekDonemHakYaz(pool, Number(req.params.id), donem, bos ? null : Number(t), (req.body || {}).gerekce, (req.body || {}).aciklama, email); }
+    catch (e) { return res.status(400).json({ ok: false, error: e.message }); }
+    const od = await pool.query(`SELECT COALESCE((SELECT SUM(tutar) FROM yemek_odeme_hareket WHERE kart_id=$1 AND donem=$2 AND iptal_at IS NULL),0)
+      + COALESCE((SELECT SUM(tutar) FROM yemek_karti_odemeler WHERE kart_id=$1 AND donem=$2),0) AS t`, [req.params.id, donem]);
+    const odenen = Number(od.rows[0].t || 0);
+    const yeni = bos ? null : Number(t);
+    res.json({ ok: true, ...sonuc, odenen, fazla_odeme: yeni !== null && odenen > yeni + 0.5 ? odenen - yeni : 0,
+      uyari: yeni !== null && odenen > yeni + 0.5 ? `Ödenen (₺${odenen}) yeni haktan (₺${yeni}) fazla — fark ayrı düzeltme/iade sürecini gerektirir, otomatik "Ödendi" yapılmadı` : null });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // Dönem ödeme tercihi (öneri): para hareketi oluşturmaz, kart kaydını değiştirmez

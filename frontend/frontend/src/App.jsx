@@ -17610,6 +17610,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [yemekDagilimAcik, setYemekDagilimAcik] = useState(() => new Set());
   const [yemekEsitleBusy, setYemekEsitleBusy] = useState(false);
   const [yemekOdeBusy, setYemekOdeBusy] = useState(false);
+  const [yemekHakModal, setYemekHakModal] = useState(null); // { r, tutar, gerekce, aciklama, busy }
   const loadYemek = async () => {
     try {
       const r = await fetch(`${API_BASE}/hr/yemek-kartlari?donem=${puantajAy}&gorunum=${yemekGorunum}`, { headers: AUTH_H() });
@@ -18548,12 +18549,15 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
         const tdY = { padding:"10px 13px", fontSize:"13px", color:"#374151", borderBottom:"1px solid #f1f5f9", whiteSpace:"nowrap" };
         const rozet = (bg, c, t, title) => <span key={t} title={title} style={{ marginLeft:"6px", background:bg, color:c, padding:"1px 8px", borderRadius:"999px", fontSize:"10.5px", fontWeight:700 }}>{t}</span>;
         const inpY = { padding:"7px 10px", borderRadius:"8px", border:"1.5px solid #e5e7eb", fontSize:"12.5px", background:"#fff" };
+        const GEREKCE_AD = { UCRETSIZ_IZIN: "Ücretsiz izin", AY_ICI_GIRIS_CIKIS: "Ay içinde işe başlama/ayrılma", DIGER: "Diğer" };
+        const durumMetni = (r) => r.durum === "TANIMSIZ" ? "Yemek hakkı tanımlanmamış" : r.durum === "HAK_YOK" ? "Bu dönem yemek hakkı yok"
+          : r.durum === "ODENDI" ? "Ödendi" : r.durum === "KISMI" ? `Kısmi ödendi · Alacaklı ₺${fmtY(r.kalan)}`
+          : r.durum === "FAZLA" ? `Fazla ödeme ₺${fmtY(r.fazla)} — iade/düzeltme gerekir` : `Ödenmedi · ₺${fmtY(r.hak)}`;
         const durumRozet = (r) => {
-          const st = r.tutar_tanimsiz && r.durum !== "ODENDI" ? ["#fef3c7", "#92400e", "Yemek tutarı tanımlanmamış"]
-            : r.durum === "ODENDI" ? ["#dcfce7", "#166534", "✓ Ödendi"]
-            : r.durum === "KISMI" ? ["#fef9c3", "#854d0e", `Kısmi · kalan ₺${fmtY(r.kalan)}`]
-            : ["#fee2e2", "#b91c1c", `Ödenmedi · ₺${fmtY(r.hak)}`];
-          return <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:st[0], color:st[1] }}>{st[2]}</span>;
+          const st = r.durum === "TANIMSIZ" ? ["#fef3c7", "#92400e"] : r.durum === "HAK_YOK" ? ["#f1f5f9", "#475569"]
+            : r.durum === "ODENDI" ? ["#dcfce7", "#166534"] : r.durum === "KISMI" ? ["#fef9c3", "#854d0e"]
+            : r.durum === "FAZLA" ? ["#fee2e2", "#991b1b"] : ["#fee2e2", "#b91c1c"];
+          return <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:st[0], color:st[1] }}>{r.durum === "ODENDI" ? "✓ " : ""}{durumMetni(r)}</span>;
         };
         const indirYemekExcel = () => exportStandardExcel({
           title: `Yemek Hakları ve Ödemeleri — ${donemAd} · ${gorunumAd}`,
@@ -18563,7 +18567,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           numericCols: [5, 6, 7, 8, 9],
           rows: liste.map(r => [
             r.ad_soyad, r.kart?.kart_no || "", etiket(r), donem,
-            r.tutar_tanimsiz ? "TUTAR TANIMLANMAMIŞ" : r.durum === "ODENDI" ? "ÖDENDİ" : r.durum === "KISMI" ? "KISMİ ÖDENDİ" : "ÖDENMEDİ",
+            durumMetni(r).toLocaleUpperCase("tr-TR"),
             r.hak, Number(r.odenen_toplam||0), Number(r.nakit_odenen||0), Number(r.kart_odenen||0), r.kalan, yontemEtiket(r),
             (r.hareketler||[]).map(h => `${fmtTar(h.tarih)} ${yontemAd(h.yontem)} ₺${fmtY(h.tutar)} ${firmaAd(h.odeyen_firma)}${h.kasa ? " " + (KASA_AD[h.kasa]||h.kasa) : ""}${h.iptal ? " (İPTAL)" : ""}${h.aciklama ? " " + h.aciklama : ""}`).join(" | ") ]),
         }).catch(e => alert("Excel indirilemedi: " + e.message));
@@ -18591,7 +18595,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           setYemekOdeModal({ ...r.kart, ad_soyad: r.ad_soyad, _row: r });
           setYemekOdeForm({ yontem: tercih.yontem, tutar: r.kalan != null ? String(r.kalan) : "", tarih: new Date().toISOString().slice(0,10), firma: firmalar[0] || r.kart?.firma || _hrVarsayilanFirma,
             odeyen: firmalar.length ? firmalar[firmalar.length - 1] : (r.kart?.firma || _hrVarsayilanFirma), kasa: tercih.yontem === "NAKIT" ? "KASA" : "BANKA", aciklama: "", dosya: null,
-            istek_anahtari: anahtar, dagilim: firmalar.length > 1 ? Object.fromEntries(firmalar.map(f => [f, ""])) : null });
+            istek_anahtari: anahtar, dagilim: firmalar.length > 1 ? Object.fromEntries(firmalar.map(f => [f, ""])) : null, secim: "", yeni_hak: "", gerekce: "", gerekce_aciklama: "" });
         };
         const hareketIptal = async (h) => {
           const neden = window.prompt(`Bu ödeme hareketi iptal edilsin mi? (₺${fmtY(h.tutar)} · ${yontemAd(h.yontem)} · ${fmtTar(h.tarih)})\nNakit akışındaki kasa etkisi geri alınır, kayıt iptal olarak kalır.\n\nİptal nedeni:`);
@@ -18684,12 +18688,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           <td style={{ ...tdY, fontFamily:"monospace", fontSize:"12.5px", color:"#64748b" }}>{r.kart?.kart_no || "—"}</td>
                           <td style={{ ...tdY, textAlign:"right" }}>
                             {r.kart ? <>
-                              <input type="number" key={`${r.kart.id}-${donem}-${r.hak ?? ""}`} defaultValue={r.hak ?? ""} placeholder="tanımsız" title={`${donemAd} dönemlik hak — yalnız bu ay; standart tutar: ${r.hak_standart != null ? "₺" + fmtY(r.hak_standart) : "tanımsız"} (Tutar/Kart Tanımla ile değişir)`}
-                                onBlur={async e => { const v = e.target.value === "" ? null : Number(e.target.value); if (v === (r.hak ?? null)) return;
-                                  const rr = await fetch(`${API_BASE}/hr/yemek-kartlari/${r.kart.id}/donem-hak`, { method:"PUT", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify({ donem, tutar: v === r.hak_standart ? null : v }) });
-                                  const d = await rr.json().catch(() => ({})); if (!rr.ok || !d.ok) alert(d.error || "Dönem hakkı kaydedilemedi"); loadYemek(); }}
-                                style={{ width:"96px", padding:"5px 8px", border:`1.5px solid ${r.tutar_tanimsiz ? "#fcd34d" : r.hak_ozel != null ? "#0f766e" : "#e5e7eb"}`, borderRadius:"7px", fontSize:"13px", textAlign:"right" }} />
-                              {r.hak_ozel != null && r.hak_ozel !== r.hak_standart && <div style={{ fontSize:"10px", color:"#0f766e", fontWeight:700 }}>bu aya özel · standart ₺{fmtY(r.hak_standart)}</div>}
+                              <div style={{ fontWeight:700 }}>{r.hak != null ? `₺${fmtY(r.hak)}` : <span style={{ color:"#b45309" }}>tanımsız</span>}</div>
+                              {r.hak_ozel != null && <div style={{ fontSize:"10px", color:"#0f766e", fontWeight:700 }} title={`${GEREKCE_AD[r.hak_ozel_gerekce] || ""}${r.hak_ozel_not ? " — " + r.hak_ozel_not : ""}`}>Bu aya özel ₺{fmtY(r.hak_ozel)} · Standart {r.hak_standart != null ? "₺" + fmtY(r.hak_standart) : "tanımsız"}</div>}
+                              {_esitleYetkili && <button type="button" onClick={() => setYemekHakModal({ r, tutar: r.hak != null ? String(r.hak) : "", gerekce: "", aciklama: "", busy: false })} style={{ marginTop:"2px", padding:"2px 8px", background:"#f1f5f9", color:"#334155", border:"none", borderRadius:"6px", fontSize:"10.5px", fontWeight:700, cursor:"pointer" }}>Bu Ayın Hakkını Düzenle</button>}
                             </> : <span style={{ color:"#9ca3af" }}>—</span>}
                           </td>
                           <td style={tdY}>
@@ -18714,6 +18715,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         {acik && (
                           <tr><td colSpan={9} style={{ padding:"6px 16px 10px", background:"#f8fafc", borderBottom:"1px solid #f1f5f9", fontSize:"12px", color:"#334155" }}>
                             {firmalar.length > 1 && <div><b>Gider dağılımı ({donemAd}):</b> {(r.gider_firmalari||[]).map(g => `${firmaAd(g.firma)} ${fmtTar(g.hak_bas || g.bas)}–${fmtTar(g.hak_bit || g.bit)}`).join(" · ")} — günlük hak kuralı tanımlı değil; paylar ödeme sırasında elle girilir, toplam hareket tutarına eşit olmalı</div>}
+                            {(r.hak_gecmisi||[]).length > 0 && <div style={{ marginTop:"4px" }}><b>Dönem hakkı değişiklikleri:</b> {r.hak_gecmisi.map((l, i) => <span key={i} style={{ marginLeft:"6px" }}>{l.onceki != null ? `₺${fmtY(l.onceki)}` : "—"} → {l.yeni != null ? `₺${fmtY(l.yeni)}` : "standart"} ({GEREKCE_AD[l.gerekce] || l.gerekce}{l.aciklama ? `: ${l.aciklama}` : ""}) · {l.kullanici} · {fmtTar(l.tarih)}</span>)}</div>}
                             <div style={{ marginTop: firmalar.length > 1 ? "6px" : 0 }}><b>Ödeme hareketleri:</b> {har.length === 0 && <span style={{ color:"#94a3b8" }}>yok</span>}</div>
                             {har.map(h => (
                               <div key={h.kaynak + h.id} style={{ display:"flex", gap:"10px", alignItems:"center", padding:"4px 0", borderTop:"1px dashed #e2e8f0", textDecoration: h.iptal ? "line-through" : "none", color: h.iptal ? "#94a3b8" : "#334155", flexWrap:"wrap" }}>
@@ -18751,6 +18753,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               const tutar = f.dagilim ? dagToplam : sayi(f.tutar || 0);
               const kartYok = f.yontem === "KART" && !String(r.kart?.kart_no || "").trim();
               const asiyor = r.kalan != null && tutar > r.kalan + 0.5;
+              // Tutar kalandan düşükse niyet seçimi zorunlu (kullanıcı adına seçilmez): A kısmi ödeme / B bu ayın hakkı farklı
+              const kismi = r.kalan != null && tutar > 0 && tutar < r.kalan - 0.5;
+              const yeniHak = f.secim === "B" ? sayi(f.yeni_hak || 0) : null;
+              const onceden = Number(r.odenen_toplam || 0);
+              const secimEksik = kismi && !f.secim;
+              const bHata = f.secim === "B" ? (!(yeniHak >= 0) || !f.yeni_hak ? "Bu aya özel toplam hakkı girin" : !f.gerekce ? "Gerekçe seçin" : yeniHak + 0.5 < onceden + tutar ? `Toplam hak (₺${fmtY(yeniHak)}) önceki ödeme + bu ödemeden (₺${fmtY(onceden + tutar)}) küçük olamaz` : "") : "";
               const btnF = (v, l, k) => <button key={v} type="button" onClick={() => setYemekOdeForm(x => ({ ...x, [k]: v, ...(k === "yontem" ? { kasa: v === "NAKIT" ? "KASA" : "BANKA" } : {}) }))}
                 style={{ flex:1, padding:"8px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${f[k]===v?"#1e3a5f":"#e5e7eb"}`, background: f[k]===v?"#1e3a5f":"#fff", color: f[k]===v?"#fff":"#334155" }}>{l}</button>;
               const lbl = { fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" };
@@ -18807,6 +18815,30 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       <div><span style={lbl}>Kasa / hesap</span>
                         <select value={f.kasa} onChange={e => setYemekOdeForm(x => ({ ...x, kasa: e.target.value }))} style={inp}><option value="KASA">Kasa (nakit)</option><option value="BANKA">Banka</option><option value="HAVALE">Havale/EFT</option></select></div>
                     </div>
+                    {kismi && (
+                      <div style={{ background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:"10px", padding:"10px 12px" }}>
+                        <div style={{ fontSize:"12.5px", fontWeight:800, color:"#92400e", marginBottom:"6px" }}>Tutar kalan haktan (₺{fmtY(r.kalan)}) düşük. Bu ödeme sonrasında personelin kalan yemek alacağı olacak mı? *</div>
+                        <div style={{ display:"grid", gap:"6px" }}>
+                          {[["A", "Evet, bu kısmi ödeme", `Hak ₺${fmtY(r.hak)} değişmez · ödeme sonrası alacaklı ₺${fmtY(Math.max(0, r.kalan - tutar))}`], ["B", "Hayır, bu ayın toplam yemek hakkı farklı", "Aya özel toplam hak + gerekçe girilir; standart tutar ve sonraki aylar değişmez"]].map(([k, l, alt]) => (
+                            <label key={k} style={{ display:"flex", gap:"8px", alignItems:"flex-start", cursor:"pointer", background: f.secim === k ? "#fff" : "transparent", borderRadius:"8px", padding:"6px 8px", border:`1px solid ${f.secim === k ? "#1e3a5f" : "transparent"}` }}>
+                              <input type="radio" name="yemekSecim" checked={f.secim === k} onChange={() => setYemekOdeForm(x => ({ ...x, secim: k }))} style={{ marginTop:"3px" }} />
+                              <span><b style={{ fontSize:"12.5px" }}>{l}</b><div style={{ fontSize:"11px", color:"#64748b" }}>{alt}</div></span>
+                            </label>
+                          ))}
+                        </div>
+                        {f.secim === "B" && (
+                          <div style={{ marginTop:"8px", display:"grid", gap:"8px" }}>
+                            <div><span style={lbl}>Bu aya özel toplam yemek hakkı ({donemAd}) *</span>
+                              <input type="text" inputMode="decimal" value={fmtGiris(f.yeni_hak || "")} onChange={e => setYemekOdeForm(x => ({ ...x, yeni_hak: parseGiris(e.target.value) }))} placeholder="₺" style={{ ...inp, textAlign:"right", fontWeight:700 }} /></div>
+                            <div style={{ fontSize:"12px", color:"#334155", background:"#fff", borderRadius:"8px", padding:"6px 10px" }}>Daha önce ödenen <b>₺{fmtY(onceden)}</b> · bu işlemde <b>₺{fmtY(tutar)}</b> · işlem sonrası kalan <b>₺{fmtY(Math.max(0, (yeniHak || 0) - onceden - tutar))}</b>{yeniHak ? ` · sonuç: ${(yeniHak - onceden - tutar) <= 0.5 ? "Ödendi" : "Kısmi ödendi"}` : ""}</div>
+                            <div><span style={lbl}>Gerekçe *</span>
+                              <select value={f.gerekce || ""} onChange={e => setYemekOdeForm(x => ({ ...x, gerekce: e.target.value }))} style={inp}><option value="">Seçin</option><option value="UCRETSIZ_IZIN">Ücretsiz izin</option><option value="AY_ICI_GIRIS_CIKIS">Ay içinde işe başlama/ayrılma</option><option value="DIGER">Diğer</option></select></div>
+                            <div><span style={lbl}>Gerekçe açıklaması</span><input value={f.gerekce_aciklama || ""} onChange={e => setYemekOdeForm(x => ({ ...x, gerekce_aciklama: e.target.value }))} placeholder="Örn. ücretsiz izin nedeniyle bu aya özel yemek hakkı" style={inp} /></div>
+                            {bHata && <div style={{ fontSize:"11.5px", color:"#b91c1c", fontWeight:700 }}>{bHata}</div>}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div><span style={lbl}>Açıklama</span><input value={f.aciklama} onChange={e => setYemekOdeForm(x => ({ ...x, aciklama: e.target.value }))} placeholder="Örn. elden teslim, imzalı liste" style={inp} /></div>
                     <div><span style={lbl}>Makbuz / dekont / teslim belgesi <span style={{ fontWeight:500, color:"#94a3b8" }}>(isteğe bağlı)</span></span>
                       <input type="file" accept="image/*,.pdf" onChange={e => setYemekOdeForm(x => ({ ...x, dosya: e.target.files?.[0] || null }))} style={{ fontSize:"12.5px" }} /></div>
@@ -18814,15 +18846,19 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   </div>
                   <div style={{ display:"flex", gap:"8px", marginTop:"16px", justifyContent:"flex-end" }}>
                     <button onClick={() => setYemekOdeModal(null)} disabled={yemekOdeBusy} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer", color:"#4b5563" }}>Vazgeç</button>
-                    <button disabled={yemekOdeBusy || kartYok || asiyor} onClick={async () => {
+                    <button disabled={yemekOdeBusy || kartYok || asiyor || secimEksik || !!bHata} onClick={async () => {
                       if (yemekOdeBusy) return;
                       if (!Number(tutar || 0)) { alert("Ödenecek tutarı girin"); return; }
+                      if (secimEksik) { alert("Kısmi ödeme mi, yoksa bu ayın toplam hakkı mı farklı — seçin"); return; }
+                      if (bHata) { alert(bHata); return; }
                       if (!f.tarih) { alert("Gerçek ödeme tarihini girin"); return; }
                       if (f.dagilim && Object.values(f.dagilim).some(v => v === "")) { alert("Her firma için dağılım tutarını girin (0 olabilir)"); return; }
                       setYemekOdeBusy(true);
                       try {
                         const body = { donem, yontem: f.yontem, tutar: Number(tutar), tarih: f.tarih, odeyen_firma: f.odeyen, kasa: f.kasa, aciklama: f.aciklama, istek_anahtari: f.istek_anahtari,
-                          gider_firmasi: tarihsel ? f.firma : (firmalar.length === 1 ? firmalar[0] : undefined), dagilim: f.dagilim ? Object.entries(f.dagilim).map(([firma, t]) => ({ firma, tutar: sayi(t || 0) })) : undefined };
+                          gider_firmasi: tarihsel ? f.firma : (firmalar.length === 1 ? firmalar[0] : undefined), dagilim: f.dagilim ? Object.entries(f.dagilim).map(([firma, t]) => ({ firma, tutar: sayi(t || 0) })) : undefined,
+                          kismi_onay: kismi && f.secim === "A" ? true : undefined,
+                          donem_hak_yeni: kismi && f.secim === "B" ? yeniHak : undefined, gerekce: kismi && f.secim === "B" ? f.gerekce : undefined, gerekce_aciklama: kismi && f.secim === "B" ? f.gerekce_aciklama : undefined };
                         const rr = await fetch(`${API_BASE}/hr/yemek-kartlari/${yemekOdeModal.id}/hareket`, { method:"POST", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify(body) });
                         const d = await rr.json().catch(() => ({}));
                         if (!rr.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi — ödeme kaydı oluşmadı");
@@ -18834,7 +18870,47 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         setYemekOdeModal(null); loadYemek();
                       } catch (e) { setYemekOdeBusy(false); alert(e.message); return; } // girilenler korunur, buton yeniden kullanılabilir
                       setYemekOdeBusy(false);
-                    }} style={{ padding:"9px 18px", background: (yemekOdeBusy || kartYok || asiyor) ? "#9ca3af" : "#166534", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>{yemekOdeBusy ? "Kaydediliyor…" : "Ödemeyi Kaydet"}</button>
+                    }} style={{ padding:"9px 18px", background: (yemekOdeBusy || kartYok || asiyor || secimEksik || !!bHata) ? "#9ca3af" : "#166534", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>{yemekOdeBusy ? "Kaydediliyor…" : "Ödemeyi Kaydet"}</button>
+                  </div>
+                </div>
+              </div>
+              );
+            })()}
+
+            {/* Bu ayın hakkını düzenle (20.10.2026): mevcut ödeme korunur, yalnız seçili dönemin hakkı; gerekçe zorunlu; kasa hareketi yok */}
+            {yemekHakModal && (() => {
+              const m = yemekHakModal; const r = m.r; const yeni = m.tutar === "" ? null : parseTrNumber(String(m.tutar).replace(/\./g, "").replace(",", "."));
+              const odenen = Number(r.odenen_toplam || 0);
+              const sonuc = yeni === null ? `standart ₺${fmtY(r.hak_standart)} geçerli olur` : yeni === 0 ? (odenen > 0 ? `Fazla ödeme ₺${fmtY(odenen)} — iade/düzeltme gerekir` : "Bu dönem yemek hakkı yok") : odenen <= 0 ? "Ödenmedi" : odenen > yeni + 0.5 ? `Fazla ödeme ₺${fmtY(odenen - yeni)} — iade/düzeltme süreci gerekir, otomatik "Ödendi" yapılmaz` : odenen + 0.5 >= yeni ? "Ödendi · kalan ₺0" : `Kısmi ödendi · Alacaklı ₺${fmtY(yeni - odenen)}`;
+              const inp = { width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" };
+              const lbl = { fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" };
+              const fmtG = (v) => { const raw = String(v ?? "").replace(/\./g, "").replace(/[^\d,]/g, ""); if (!raw) return ""; const [t, k] = raw.split(","); return (t ? Number(t).toLocaleString("tr-TR") : "") + (k !== undefined ? "," + k.slice(0, 2) : ""); };
+              return (
+              <div onClick={() => !m.busy && setYemekHakModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+                <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(460px, 94vw)", padding:"22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)" }}>
+                  <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"3px" }}>🍽 Bu Ayın Hakkını Düzenle</div>
+                  <div style={{ fontSize:"12.5px", color:"#64748b", marginBottom:"12px" }}>{r.ad_soyad} · {donemAd} · standart aylık hak {r.hak_standart != null ? `₺${fmtY(r.hak_standart)}` : "tanımsız"} (değişmez) · ödenen ₺{fmtY(odenen)}</div>
+                  <div style={{ display:"grid", gap:"10px" }}>
+                    <div><span style={lbl}>Önceki dönem hakkı</span><div style={{ fontSize:"14px", fontWeight:700 }}>{r.hak != null ? `₺${fmtY(r.hak)}` : "tanımsız"}{r.hak_ozel != null ? " (aya özel)" : " (standart)"}</div></div>
+                    <div><span style={lbl}>Bu aya özel toplam yemek hakkı * <span style={{ fontWeight:500, color:"#94a3b8" }}>(boş = standarta dön; 0 = bu dönem hak yok)</span></span>
+                      <input type="text" inputMode="decimal" value={fmtG(m.tutar)} onChange={e => setYemekHakModal(x => ({ ...x, tutar: e.target.value.replace(/\./g, "").replace(/[^\d,]/g, "") }))} style={{ ...inp, textAlign:"right", fontWeight:700 }} /></div>
+                    <div><span style={lbl}>Gerekçe *</span>
+                      <select value={m.gerekce} onChange={e => setYemekHakModal(x => ({ ...x, gerekce: e.target.value }))} style={inp}><option value="">Seçin</option><option value="UCRETSIZ_IZIN">Ücretsiz izin</option><option value="AY_ICI_GIRIS_CIKIS">Ay içinde işe başlama/ayrılma</option><option value="DIGER">Diğer</option></select></div>
+                    <div><span style={lbl}>Açıklama</span><input value={m.aciklama} onChange={e => setYemekHakModal(x => ({ ...x, aciklama: e.target.value }))} placeholder="Örn. ücretsiz izin nedeniyle bu aya özel yemek hakkı" style={inp} /></div>
+                    <div style={{ fontSize:"12px", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"8px", padding:"8px 10px" }}>Sonuç: <b>{sonuc}</b><div style={{ color:"#64748b", marginTop:"3px" }}>Mevcut ödemeler, kasa çıkışları ve firma dağılımları değişmez; yeni ödeme oluşmaz; sonraki aylar standart tutarla devam eder. Değişiklik geçmişe kim/ne zaman/gerekçe ile yazılır.</div></div>
+                  </div>
+                  <div style={{ display:"flex", gap:"8px", marginTop:"16px", justifyContent:"flex-end" }}>
+                    <button onClick={() => setYemekHakModal(null)} disabled={m.busy} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer", color:"#4b5563" }}>Vazgeç</button>
+                    <button disabled={m.busy || !m.gerekce} onClick={async () => {
+                      setYemekHakModal(x => ({ ...x, busy: true }));
+                      try {
+                        const rr = await fetch(`${API_BASE}/hr/yemek-kartlari/${r.kart.id}/donem-hak`, { method:"PUT", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify({ donem, tutar: yeni, gerekce: m.gerekce, aciklama: m.aciklama }) });
+                        const d = await rr.json().catch(() => ({}));
+                        if (!rr.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
+                        setYemekHakModal(null); loadYemek();
+                        if (d.uyari) alert(d.uyari);
+                      } catch (e) { setYemekHakModal(x => ({ ...x, busy: false })); alert(e.message); }
+                    }} style={{ padding:"9px 18px", background: (m.busy || !m.gerekce) ? "#9ca3af" : "#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>{m.busy ? "Kaydediliyor…" : "Hakkı Kaydet"}</button>
                   </div>
                 </div>
               </div>
