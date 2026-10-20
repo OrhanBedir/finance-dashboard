@@ -506,15 +506,18 @@ function IslemGecmisiPanel({ modul, id, onClose }) {
     </div>
   );
 }
-// Tarayıcı indirmelerinde (Excel/PDF <a href>) başlık gönderilemez; alt marka
-// kullanıcısı için token sorgu parametresiyle eklenir ki sunucu kapsamı uygulasın
-const dlUrl = (path) => {
+// Tarayıcı indirmelerinde (Excel/PDF <a href>, window.open, <img src>) başlık
+// gönderilemez; token sorgu parametresiyle eklenir. 20.10.2026: sunucuda
+// varsayılan-red kimlik kapısı var — bu linkler token'sız 401 alır (alt marka
+// kullanıcısında sunucu kapsamı da bu token'dan uygular).
+const tokenliUrl = (url) => {
   try {
-    const u = JSON.parse(localStorage.getItem("user") || "null");
-    if (u && u.hw_yukleme === false) return `${API_BASE}${path}?t=${encodeURIComponent(localStorage.getItem("token") || "")}`;
-  } catch {}
-  return `${API_BASE}${path}`;
+    const tk = localStorage.getItem("token") || "";
+    if (!tk || !String(url || "").startsWith(API_BASE)) return url;
+    return `${url}${String(url).includes("?") ? "&" : "?"}t=${encodeURIComponent(tk)}`;
+  } catch { return url; }
 };
+const dlUrl = (path) => tokenliUrl(`${API_BASE}${path}`);
 // kasadan_dus=false etiketi: markanın kendi ödediği kira/fatura
 const kasaDisiEtiket = (u) => `${altMarkaKisa(u?.hw_yukleme === false ? u?.marka : GUNCEL_ALT_MARKA) || "Firma"} ödedi`;
 
@@ -5946,7 +5949,7 @@ function RolloutDashboard({ currentUser }) {
 
     const url = `${API_BASE}/export/excel?region=${regionParam}`;
 
-    window.open(url, "_blank");
+    window.open(tokenliUrl(url), "_blank");
   };
   const formatDate = (dateStr) => {
     if (!dateStr) return "";
@@ -17149,7 +17152,7 @@ function PuantajPanel({ currentUser, onBack }) {
 
         <span style={{ fontSize:"12px", color:"#9ca3af" }}>Tıkla: ✅→❌→🏖→☪️→⭕→💤→🎌</span>
 
-        <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`}
+        <a href={tokenliUrl(`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`)}
           style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none", marginLeft:"auto" }}>
           📥 Excel İndir
         </a>
@@ -20781,7 +20784,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               )}
             </div>
             <div style={{ fontSize:"13px", color:"#6b7280" }}>Hücreye tıkla: ✅→❌→🏖→☪️→⭕→💤→🎌</div>
-            <a href={`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}${hrPersonelFilter ? `&personel_id=${hrPersonelFilter}` : ""}`}
+            <a href={tokenliUrl(`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}${hrPersonelFilter ? `&personel_id=${hrPersonelFilter}` : ""}`)}
               style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>
               📥 Excel İndir
             </a>
@@ -20994,16 +20997,16 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           {/* ── Üst bar: başlık + Excel butonları ── */}
           <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"14px", flexWrap:"wrap" }}>
             <h2 style={{ margin:0, fontSize:"20px" }}>🎓 ISG / Belgeler</h2>
-            <a href={`${API_BASE}/hr/excel/isg?tip=hw`}
+            <a href={tokenliUrl(`${API_BASE}/hr/excel/isg?tip=hw`)}
               style={{ padding:"7px 14px", background:"#1e3a5f", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>
               📥 HW RFQ Excel
             </a>
-            <a href={`${API_BASE}/hr/excel/isg?tip=simsek`}
+            <a href={tokenliUrl(`${API_BASE}/hr/excel/isg?tip=simsek`)}
               style={{ padding:"7px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>
               📥 Şimşek RFQ Excel
             </a>
             {selectedPersonel && (
-              <a href={`${API_BASE}/hr/excel/isg?personel_id=${selectedPersonel.id}`}
+              <a href={tokenliUrl(`${API_BASE}/hr/excel/isg?personel_id=${selectedPersonel.id}`)}
                 style={{ padding:"7px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>
                 📥 {selectedPersonel.ad_soyad.split(" ")[0]} Excel
               </a>
@@ -22028,7 +22031,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
   //    birden fazla fişte alt şeritten seçim; görüntü = mobilde onaylanan dosyanın kendisi (küçük resim yok)
   const renderFisGoster = () => {
     if (!fisGoster) return null;
-    const fisUrl = (b) => String(b.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`;
+    const fisUrl = (b) => String(b.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : tokenliUrl(`${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`);
     const form = viewForm || activeForm;
     const y = kalemYetki(form);
     const silinebilir = y.duzenlenebilir;
@@ -24136,7 +24139,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
                             <td style={{ ...td, color:"#3c4a5d" }}>{k.aciklama || k.belge_aciklama || "—"}{k.plaka ? <span style={{ fontSize:"11.5px", color:"#6b7a90" }}> · {k.plaka}</span> : null}{k.fis_olmadan_aciklama ? <div style={{ fontSize:"11.5px", color:"#b91c1c" }}>Fişsiz: {k.fis_olmadan_aciklama}</div> : null}</td>
                             <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums" }}>₺{Number(k.tutar || 0).toLocaleString("tr-TR", { minimumFractionDigits:2 })}</td>
                             <td style={td}>{bel.length > 0
-                              ? bel.map((b, i) => <a key={b.id || i} href={String(b.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`} target="_blank" rel="noreferrer" style={{ display:"inline-block", marginRight:"5px", padding:"3px 8px", borderRadius:"7px", background:"#d9f2ee", color:"#0f766e", fontSize:"11.5px", fontWeight:700, textDecoration:"none" }}>📷 Fiş{bel.length > 1 ? ` ${i + 1}` : ""}</a>)
+                              ? bel.map((b, i) => <a key={b.id || i} href={String(b.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : tokenliUrl(`${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`)} target="_blank" rel="noreferrer" style={{ display:"inline-block", marginRight:"5px", padding:"3px 8px", borderRadius:"7px", background:"#d9f2ee", color:"#0f766e", fontSize:"11.5px", fontWeight:700, textDecoration:"none" }}>📷 Fiş{bel.length > 1 ? ` ${i + 1}` : ""}</a>)
                               : <span style={{ padding:"3px 8px", borderRadius:"7px", background:"#fee2e2", color:"#b91c1c", fontSize:"11.5px", fontWeight:700 }}>Fiş yok</span>}</td>
                           </tr>
                         );
@@ -39927,7 +39930,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                             const b = getBelge(a, turu);
                             const harf = label.replace(/^[^ ]+ /, "")[0];
                             return b
-                              ? <a key={turu} onClick={e => e.stopPropagation()} href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`} title={label} style={{ width:"26px", height:"26px", borderRadius:"7px", background:"#d9f2ee", color:"#0f766e", display:"grid", placeItems:"center", fontSize:"11px", fontWeight:800, textDecoration:"none" }}>{harf}</a>
+                              ? <a key={turu} onClick={e => e.stopPropagation()} href={tokenliUrl(`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`)} title={label} style={{ width:"26px", height:"26px", borderRadius:"7px", background:"#d9f2ee", color:"#0f766e", display:"grid", placeItems:"center", fontSize:"11px", fontWeight:800, textDecoration:"none" }}>{harf}</a>
                               : <span key={turu} title={`${label} yüklenmedi`} style={{ width:"26px", height:"26px", borderRadius:"7px", border:"1px dashed #cfd7e2", color:"#9ca3af", display:"grid", placeItems:"center", fontSize:"11px" }}>{harf}</span>;
                           })}
                         </div>
@@ -40377,7 +40380,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                         <span style={{ fontWeight:700, fontSize:"13px", color:"#374151", minWidth:"150px" }}>{label}</span>
                         {b ? (
                           <>
-                            <a href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
+                            <a href={tokenliUrl(`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`)}
                               style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1, minWidth:"120px", overflowWrap:"anywhere" }}>
                               📥 {b.dosya_adi}
                             </a>
@@ -40405,7 +40408,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                   {(detailArac.belgeler||[]).filter(b=>b.belge_turu==="DIGER").map(b => (
                     <div key={b.id} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
                       <span style={{ fontSize:"12px", color:"#6b7280", minWidth:"150px" }}>📎 Ek Belge</span>
-                      <a href={`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`}
+                      <a href={tokenliUrl(`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`)}
                         style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1, minWidth:"120px", overflowWrap:"anywhere" }}>📥 {b.dosya_adi}</a>
                       {canEdit && (
                         <button onClick={()=>handleBelgeSil(b.id)}
@@ -40545,7 +40548,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac }) {
   const sozlesmesiz = aktifler.filter(o => !(o.belgeler || []).some(b => b.belge_turu === "SOZLESME"));
   const bitisYakin = aktifler.filter(o => { const d = dayDiff(o.kira_bitis); return d !== null && d <= 60; });
 
-  const belgeUrl = (b) => String(b?.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/ofis-belge/file/${encodeURIComponent(b?.dosya_adi || "")}`;
+  const belgeUrl = (b) => String(b?.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : tokenliUrl(`${API_BASE}/hr/ofis-belge/file/${encodeURIComponent(b?.dosya_adi || "")}`);
   const getSozlesme = (o) => (o.belgeler || []).find(b => b.belge_turu === "SOZLESME");
   const getEkler = (o) => (o.belgeler || []).filter(b => b.belge_turu !== "SOZLESME");
 

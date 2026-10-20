@@ -676,6 +676,46 @@ app.use((req, res, next) => {
   });
 });
 
+// ── VARSAYILAN-RED KİMLİK KAPISI (20.10.2026) ───────────────────────────────
+// Bu noktadan sonra tanımlanan TÜM uçlar geçerli bir JWT ister. Tanımında
+// authMiddleware unutulmuş 231 uç vardı (113'ü veri yazıyordu; /hr/personel
+// kimliksiz IBAN/maaş döndürüyordu). Uç bazındaki authMiddleware / requireAdmin /
+// requireFinanceAuth aynen çalışır; kapı yalnız "geçerli token var mı"ya bakar,
+// req.user'a dokunmaz (uçların mevcut kapsam davranışı değişmez).
+// Token kaynağı: "Authorization: Bearer …"; GET/HEAD'de ayrıca ?t= / ?token=
+// (tarayıcıda <a href>/<img>/window.open ile açılan Excel/PDF/belge linkleri
+// başlık gönderemez — web istemcisi bu linklere ?t= ekler).
+// Kimliksiz geçen uçlar YALNIZ bu liste (yöntem + tam yol, büyük/küçük harf ve
+// sondaki "/" Express gibi yok sayılır). /health bu kapıdan önce tanımlı.
+const KIMLIKSIZ_UCLAR = new Set([
+  "POST /auth/login",                  // web + mobil giriş
+  "POST /auth/register",               // web "Kayıt ol": hesap pasif + pending açılır, platform onayı gerekir
+  "POST /auth/reset-password-request", // web "Şifremi unuttum"
+  "POST /auth/reset-password",         // e-postadaki ?reset= linkiyle yeni şifre (tek kullanımlık reset_token)
+  "GET /mobil",                        // APK indirme sayfası (app.omnix.global/mobil yönlendirmesi)
+  "GET /mobil/apk",
+]);
+function kapiTokeni(req) {
+  const h = String(req.headers.authorization || "");
+  if (h.startsWith("Bearer ") && h.slice(7).trim()) return h.slice(7).trim();
+  if (req.method === "GET" || req.method === "HEAD") {
+    const q = req.query?.t ?? req.query?.token;
+    if (typeof q === "string" && q) return q;
+  }
+  return null;
+}
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") return next();
+  const yontem = req.method === "HEAD" ? "GET" : req.method;
+  const yol = (req.path.replace(/\/+$/, "") || "/").toLowerCase();
+  if (KIMLIKSIZ_UCLAR.has(`${yontem} ${yol}`)) return next();
+  const tok = kapiTokeni(req);
+  if (tok) {
+    try { jwt.verify(tok, JWT_SECRET); return next(); } catch {}
+  }
+  return res.status(401).json({ ok: false, error: tok ? "Oturum süresi dolmuş veya geçersiz — lütfen tekrar giriş yapın" : "Oturum gerekli" });
+});
+
 // TÜM KULLANICILARI LİSTELE
 app.get("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   try {
@@ -3993,6 +4033,7 @@ app.get("/debug/counts", async (req, res) => {
   }
 });
 /* ================== FIX SITE TYPES ================== */
+// Web her açılışta çağırıyor (App.jsx loadData) — 20.10.2026'dan beri kimlik kapısının arkasında.
 app.get("/rollout/fix-site-types", async (req, res) => {
   try {
     // Tüm "DİĞER" veya boş site_type kayıtlarını site_code'dan yeniden türet
@@ -4024,6 +4065,7 @@ app.get("/rollout/fix-site-types", async (req, res) => {
 });
 
 /* ================== INSTANT MIGRATION ================== */
+// Web her açılışta çağırıyor (App.jsx loadData) — 20.10.2026'dan beri kimlik kapısının arkasında.
 app.get("/migrate", async (req, res) => {
   const migrations = [
     "ALTER TABLE rollout_progress ADD COLUMN IF NOT EXISTS bolge TEXT",
@@ -4117,7 +4159,9 @@ app.get("/migrate", async (req, res) => {
 });
 
 /* ================== DB SETUP ================== */
-app.get("/setup-db", async (req, res) => {
+// Temel tabloların (master_works, rollout_progress, po_rows, boq_items …) tek CREATE kaynağı;
+// istemci kullanımı yok. 20.10.2026: kimliksizdi → yalnız platform sahibi çalıştırabilir.
+app.get("/setup-db", authMiddleware, requirePlatformAdmin, async (req, res) => {
   try {
     await pool.query(`
      CREATE TABLE IF NOT EXISTS supplier_advances (
@@ -4605,16 +4649,7 @@ app.get("/test-boq", async (req, res) => {
   }
 });
 
-app.get("/test-po-rows", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM po_rows ORDER BY id DESC LIMIT 20",
-    );
-    res.json({ ok: true, rows: result.rows });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// /test-po-rows kaldırıldı (20.10.2026): kimliksiz po_rows dökümü veriyordu; istemci kullanımı yok.
 
 // /force-reset-boq kaldırıldı (20.10.2026): kimlik doğrulamasız GET ile boq_items tablosunu DROP ediyordu.
 
@@ -6029,40 +6064,7 @@ app.delete("/finance/salary/:id", async (req, res) => {
 
 // silinecek excel yükleme//
 
-app.get("/debug/subcon-check", async (req, res) => {
-  try {
-    const totalWorks = await pool.query(`
-      SELECT COUNT(*)::int AS total
-      FROM master_works
-    `);
-
-    const filledSubcons = await pool.query(`
-      SELECT COUNT(*)::int AS total
-      FROM master_works
-      WHERE COALESCE(TRIM(subcon_name), '') <> ''
-    `);
-
-    const sampleSubcons = await pool.query(`
-      SELECT
-        site_code,
-        item_code,
-        subcon_name,
-        done_qty
-      FROM master_works
-      ORDER BY id DESC
-      LIMIT 20
-    `);
-
-    res.json({
-      ok: true,
-      total_works: totalWorks.rows[0]?.total || 0,
-      filled_subcon_count: filledSubcons.rows[0]?.total || 0,
-      sample_rows: sampleSubcons.rows || [],
-    });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// /debug/subcon-check kaldırıldı (20.10.2026): kimliksiz master_works örneği veriyordu; istemci kullanımı yok.
 
 /* ================== MANUAL INVOICE EXCEL IMPORT ================== */
 app.post(
@@ -15788,25 +15790,7 @@ app.get("/finance/expenses/list", async (req, res) => {
   }
 });
 
-app.get("/debug/db-check", async (req, res) => {
-  try {
-    const dbName = await pool.query(`SELECT current_database() AS db`);
-    const sample = await pool.query(`
-      SELECT invoice_no, payment_date, due_date
-      FROM hw_payment_rows
-      ORDER BY due_date ASC
-      LIMIT 10
-    `);
-
-    res.json({
-      ok: true,
-      db: dbName.rows[0]?.db,
-      rows: sample.rows,
-    });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// /debug/db-check kaldırıldı (20.10.2026): kimliksiz hw_payment_rows örneği veriyordu; istemci kullanımı yok.
 
 /* ================== NAKİT AKIŞI MANUEL ÖDEMELER ==================
    Araç kirası / ticket-yemek / diğer ödemeler ödendikçe buradan girilir.
@@ -16300,22 +16284,7 @@ app.get("/finance/overdue-invoices", async (req, res) => {
 });
 const PORT = process.env.PORT || 5001;
 
-app.get("/test-db", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT NOW() as now");
-    res.json({
-      ok: true,
-      message: "Local DB bağlantısı başarılı",
-      time: result.rows[0].now,
-    });
-  } catch (err) {
-    res.status(500).json({
-      ok: false,
-      message: "DB bağlantı hatası",
-      error: err.message,
-    });
-  }
-});
+// /test-db kaldırıldı (20.10.2026): bağlantı testi; istemci kullanımı yok (/health yeterli).
 
 /* ===== TAŞERON FATURA TABLOSU — STARTUP MIGRATION ===== */
 pool.query(`
@@ -25191,9 +25160,12 @@ const AUTO_MIGRATIONS = [
 })();
 
 // ─── TAŞERON KULLANICI SEED ───────────────────────────────────────────────────
+// 20.10.2026: seed artık şifre ve aktiflik durumunu EZMEZ (eskiden her açılışta
+// iki hesabı 123456 şifresine ve is_active=true'ya geri çekiyordu). Yeni eklenen
+// hesap rastgele şifreyle açılır; giriş için Admin → Kullanıcılar'dan şifre belirlenir.
 const SUBCON_USERS = [
-  { name: "Zeki Sandal",     email: "zsandal@ubstasarimmakine.com.tr", subcon_name: "UBS",     payment_rate: 0.75, password: "123456" },
-  { name: "Burhan Koçak",    email: "b.kocak@federalgroups.com",       subcon_name: "Federal", payment_rate: 0.80, password: "123456" },
+  { name: "Zeki Sandal",     email: "zsandal@ubstasarimmakine.com.tr", subcon_name: "UBS",     payment_rate: 0.75 },
+  { name: "Burhan Koçak",    email: "b.kocak@federalgroups.com",       subcon_name: "Federal", payment_rate: 0.80 },
   // AHY teknik kullanıcısı ("ahy") kaldırıldı (16.07.2026): giriş artık
   // yalnız info@ahyelektrik.com ile — aşağıdaki cleanup eski kaydı siler.
   // Serdar Altınova seed'den çıkarıldı (14.07.2026): simsektel hesabı artık
@@ -25203,15 +25175,13 @@ const SUBCON_USERS = [
 (async () => {
   for (const u of SUBCON_USERS) {
     try {
-      const hash = await bcrypt.hash(u.password || "123456", 10);
+      const hash = await bcrypt.hash(require("crypto").randomBytes(24).toString("hex"), 10);
       await pool.query(
         `INSERT INTO users (name, email, password_hash, role, is_active, subcon_name, payment_rate)
          VALUES ($1, $2, $3, 'subcon', true, $4, $5)
          ON CONFLICT (email) DO UPDATE SET
            name          = EXCLUDED.name,
-           password_hash = EXCLUDED.password_hash,
            role          = 'subcon',
-           is_active     = true,
            subcon_name   = EXCLUDED.subcon_name,
            payment_rate  = EXCLUDED.payment_rate`,
         [u.name, u.email, hash, u.subcon_name, u.payment_rate]
