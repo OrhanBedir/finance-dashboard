@@ -18743,8 +18743,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
             {yemekOdeModal && (() => {
               const r = yemekOdeModal._row || {}; const firmalar = satirFirma(r); const tarihsel = !kadro.dilimler;
               const f = yemekOdeForm;
-              const dagToplam = f.dagilim ? Object.values(f.dagilim).reduce((a, v) => a + (Number(v) || 0), 0) : null;
-              const tutar = f.dagilim ? dagToplam : Number(f.tutar || 0);
+              // Tutar kutuları binlik ayraçlı gösterilir (10.000); state'te ham rakam tutulur (virgül = ondalık)
+              const parseGiris = (v) => String(v ?? "").replace(/\./g, "").replace(/[^\d,]/g, "").replace(/,(?=.*,)/g, "");
+              const fmtGiris = (v) => { const raw = parseGiris(v); if (!raw) return ""; const [t, k] = raw.split(","); return (t ? Number(t).toLocaleString("tr-TR") : "") + (k !== undefined ? "," + k.slice(0, 2) : ""); };
+              const sayi = (v) => parseTrNumber(String(v ?? "").replace(/\./g, "").replace(",", "."));
+              const dagToplam = f.dagilim ? Object.values(f.dagilim).reduce((a, v) => a + (sayi(v) || 0), 0) : null;
+              const tutar = f.dagilim ? dagToplam : sayi(f.tutar || 0);
               const kartYok = f.yontem === "KART" && !String(r.kart?.kart_no || "").trim();
               const asiyor = r.kalan != null && tutar > r.kalan + 0.5;
               const btnF = (v, l, k) => <button key={v} type="button" onClick={() => setYemekOdeForm(x => ({ ...x, [k]: v, ...(k === "yontem" ? { kasa: v === "NAKIT" ? "KASA" : "BANKA" } : {}) }))}
@@ -18778,19 +18782,19 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         {(r.gider_firmalari||[]).map(g => (
                           <div key={g.firma} style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"6px" }}>
                             <span style={{ flex:1, fontSize:"12.5px" }}><b>{firmaAd(g.firma)}</b> <span style={{ color:"#64748b" }}>{fmtTar(g.hak_bas || g.bas)}–{fmtTar(g.hak_bit || g.bit)}</span></span>
-                            <input type="number" value={f.dagilim[g.firma] ?? ""} onChange={e => setYemekOdeForm(x => ({ ...x, dagilim: { ...x.dagilim, [g.firma]: e.target.value } }))} placeholder="₺"
+                            <input type="text" inputMode="decimal" value={fmtGiris(f.dagilim[g.firma] ?? "")} onChange={e => setYemekOdeForm(x => ({ ...x, dagilim: { ...x.dagilim, [g.firma]: parseGiris(e.target.value) } }))} placeholder="₺"
                               style={{ width:"120px", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", textAlign:"right" }} />
                           </div>
                         ))}
-                        <div style={{ fontSize:"11px", color:"#64748b" }}>Günlük hak kuralı tanımlı değil; paylar elle girilir, toplam ödeme tutarını oluşturur.</div>
+                        <div style={{ fontSize:"11px", color:"#64748b" }}>Günlük hak kuralı tanımlı değil; paylar elle girilir, toplam ödeme tutarını oluşturur. Toplam: <b>₺{fmtY(dagToplam)}</b>{r.kalan != null ? ` · kalan hak ₺${fmtY(r.kalan)}` : ""}</div>
                       </div>
                     ) : (
                       <div style={{ fontSize:"12.5px" }}>Gider firması: <b>{firmaAd(firmalar[0])}</b> <span style={{ color:"#64748b" }}>(hak dönemi kuralı)</span></div>
                     )}
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
                       <div><span style={lbl}>Ödenecek tutar *</span>
-                        <input type="number" value={f.dagilim ? dagToplam : f.tutar} readOnly={!!f.dagilim} onChange={e => setYemekOdeForm(x => ({ ...x, tutar: e.target.value }))}
-                          style={{ ...inp, borderColor: asiyor ? "#fca5a5" : "#e5e7eb", background: f.dagilim ? "#f8fafc" : "#fff" }} />
+                        <input type="text" inputMode="decimal" value={f.dagilim ? `₺${fmtY(dagToplam)}` : fmtGiris(f.tutar)} readOnly={!!f.dagilim} onChange={e => setYemekOdeForm(x => ({ ...x, tutar: parseGiris(e.target.value) }))}
+                          style={{ ...inp, borderColor: asiyor ? "#fca5a5" : "#e5e7eb", background: f.dagilim ? "#f8fafc" : "#fff", textAlign:"right", fontWeight:700 }} />
                         {asiyor && <div style={{ fontSize:"11px", color:"#b91c1c", fontWeight:700, marginTop:"3px" }}>Kalan hakkı (₺{fmtY(r.kalan)}) aşıyor</div>}</div>
                       <div><span style={lbl}>Gerçek ödeme tarihi *</span>
                         <input type="date" value={f.tarih} onChange={e => setYemekOdeForm(x => ({ ...x, tarih: e.target.value }))} style={inp} /></div>
@@ -18818,7 +18822,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       setYemekOdeBusy(true);
                       try {
                         const body = { donem, yontem: f.yontem, tutar: Number(tutar), tarih: f.tarih, odeyen_firma: f.odeyen, kasa: f.kasa, aciklama: f.aciklama, istek_anahtari: f.istek_anahtari,
-                          gider_firmasi: tarihsel ? f.firma : (firmalar.length === 1 ? firmalar[0] : undefined), dagilim: f.dagilim ? Object.entries(f.dagilim).map(([firma, t]) => ({ firma, tutar: Number(t || 0) })) : undefined };
+                          gider_firmasi: tarihsel ? f.firma : (firmalar.length === 1 ? firmalar[0] : undefined), dagilim: f.dagilim ? Object.entries(f.dagilim).map(([firma, t]) => ({ firma, tutar: sayi(t || 0) })) : undefined };
                         const rr = await fetch(`${API_BASE}/hr/yemek-kartlari/${yemekOdeModal.id}/hareket`, { method:"POST", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify(body) });
                         const d = await rr.json().catch(() => ({}));
                         if (!rr.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi — ödeme kaydı oluşmadı");
