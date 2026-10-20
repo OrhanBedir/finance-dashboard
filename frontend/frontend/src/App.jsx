@@ -18683,9 +18683,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           </td>
                           <td style={{ ...tdY, fontFamily:"monospace", fontSize:"12.5px", color:"#64748b" }}>{r.kart?.kart_no || "—"}</td>
                           <td style={{ ...tdY, textAlign:"right" }}>
-                            {r.kart ? <input type="number" defaultValue={r.kart.aylik_tutar ?? ""} placeholder="tanımsız"
-                              onBlur={e => { const v = e.target.value === "" ? null : Number(e.target.value); if (v !== (r.kart.aylik_tutar === null ? null : Number(r.kart.aylik_tutar))) yemekKartGuncelle(r.kart.id, { aylik_tutar: v }); }}
-                              style={{ width:"96px", padding:"5px 8px", border:`1.5px solid ${r.tutar_tanimsiz ? "#fcd34d" : "#e5e7eb"}`, borderRadius:"7px", fontSize:"13px", textAlign:"right" }} /> : <span style={{ color:"#9ca3af" }}>—</span>}
+                            {r.kart ? <>
+                              <input type="number" key={`${r.kart.id}-${donem}-${r.hak ?? ""}`} defaultValue={r.hak ?? ""} placeholder="tanımsız" title={`${donemAd} dönemlik hak — yalnız bu ay; standart tutar: ${r.hak_standart != null ? "₺" + fmtY(r.hak_standart) : "tanımsız"} (Tutar/Kart Tanımla ile değişir)`}
+                                onBlur={async e => { const v = e.target.value === "" ? null : Number(e.target.value); if (v === (r.hak ?? null)) return;
+                                  const rr = await fetch(`${API_BASE}/hr/yemek-kartlari/${r.kart.id}/donem-hak`, { method:"PUT", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify({ donem, tutar: v === r.hak_standart ? null : v }) });
+                                  const d = await rr.json().catch(() => ({})); if (!rr.ok || !d.ok) alert(d.error || "Dönem hakkı kaydedilemedi"); loadYemek(); }}
+                                style={{ width:"96px", padding:"5px 8px", border:`1.5px solid ${r.tutar_tanimsiz ? "#fcd34d" : r.hak_ozel != null ? "#0f766e" : "#e5e7eb"}`, borderRadius:"7px", fontSize:"13px", textAlign:"right" }} />
+                              {r.hak_ozel != null && r.hak_ozel !== r.hak_standart && <div style={{ fontSize:"10px", color:"#0f766e", fontWeight:700 }}>bu aya özel · standart ₺{fmtY(r.hak_standart)}</div>}
+                            </> : <span style={{ color:"#9ca3af" }}>—</span>}
                           </td>
                           <td style={tdY}>
                             <button type="button" onClick={() => setYemekDagilimAcik(p => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n; })} title="Dağılım ve ödeme hareketleri"
@@ -18813,7 +18818,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       setYemekOdeBusy(true);
                       try {
                         const body = { donem, yontem: f.yontem, tutar: Number(tutar), tarih: f.tarih, odeyen_firma: f.odeyen, kasa: f.kasa, aciklama: f.aciklama, istek_anahtari: f.istek_anahtari,
-                          gider_firmasi: tarihsel ? f.firma : undefined, dagilim: f.dagilim ? Object.entries(f.dagilim).map(([firma, t]) => ({ firma, tutar: Number(t || 0) })) : undefined };
+                          gider_firmasi: tarihsel ? f.firma : (firmalar.length === 1 ? firmalar[0] : undefined), dagilim: f.dagilim ? Object.entries(f.dagilim).map(([firma, t]) => ({ firma, tutar: Number(t || 0) })) : undefined };
                         const rr = await fetch(`${API_BASE}/hr/yemek-kartlari/${yemekOdeModal.id}/hareket`, { method:"POST", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify(body) });
                         const d = await rr.json().catch(() => ({}));
                         if (!rr.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi — ödeme kaydı oluşmadı");
@@ -18823,7 +18828,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           if (!ur.ok) alert("Ödeme kaydedildi ancak belge yüklenemedi — satırdan tekrar deneyebilirsiniz");
                         }
                         setYemekOdeModal(null); loadYemek();
-                      } catch (e) { alert(e.message); }
+                      } catch (e) { setYemekOdeBusy(false); alert(e.message); return; } // girilenler korunur, buton yeniden kullanılabilir
                       setYemekOdeBusy(false);
                     }} style={{ padding:"9px 18px", background: (yemekOdeBusy || kartYok || asiyor) ? "#9ca3af" : "#166534", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>{yemekOdeBusy ? "Kaydediliyor…" : "Ödemeyi Kaydet"}</button>
                   </div>
