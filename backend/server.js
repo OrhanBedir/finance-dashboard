@@ -1,5 +1,13 @@
 require("dotenv").config();
 
+// JWT_SECRET zorunlu (20.10.2026): yoksa tahmin edilebilir varsayılan anahtarla
+// token üretilip doğrulanıyordu. Tanımlı değilse sunucu hiç açılmaz.
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error("❌ JWT_SECRET ortam değişkeni tanımlı değil — sunucu başlatılmadı.");
+  process.exit(1);
+}
+
 // ── Global hata yakalayıcılar – server çökmesini önler ──────────────────────
 process.on("unhandledRejection", (reason, promise) => {
   console.error("⚠️  Unhandled Promise Rejection:", reason?.message || reason);
@@ -1219,7 +1227,7 @@ app.post("/auth/login", async (req, res) => {
         hw_yukleme: hwYukleme,
         users_admin: user.users_admin === true,
       },
-      process.env.JWT_SECRET || "simsek_secret_degistir",
+      JWT_SECRET,
       // 29.08.2026: 7 gün çok kısaydı — mobilde token sessizce süresi dolunca
       // ana ekran (auth'suz mobile-dashboard) çalışmaya devam ediyor ama onay
       // uçları 401 dönüyordu; eski build hatayı yutunca "onaylanmıyor" gibi
@@ -1657,19 +1665,7 @@ app.get("/rollout/mismatch-check", async (req, res) => {
   }
 });
 
-app.get("/create-admin", async (req, res) => {
-  const bcrypt = require("bcrypt");
-
-  const hash = await bcrypt.hash("123456", 10);
-
-  await pool.query(
-    `INSERT INTO users (name, email, password_hash, role, is_active)
-     VALUES ($1, $2, $3, $4, $5)`,
-    ["Orhan", "orhan.bedir@simsektel.com", hash, "admin", true],
-  );
-
-  res.send("ADMIN CREATED");
-});
+// /create-admin kaldırıldı (20.10.2026): kimlik doğrulamasız, sabit şifreli admin ekliyordu.
 // PO'su açık olup iş girişi yapılmamış kalemler — Günlük İş Girişi'ndeki
 // "Eksik Kalem" kartını besler. Varsayılan olarak 01.07.2026 sonrası açılan
 // PO'lara bakar; eski PO'lar için aksiyon alınmadığından kapsam dışıdır (15.08.2026).
@@ -2786,7 +2782,7 @@ function getAllowedFinanceUsers() {
 function createFinanceToken(email) {
   return jwt.sign(
     { email, scope: "finance" },
-    process.env.JWT_SECRET || "finance_secret",
+    JWT_SECRET,
     { expiresIn: "12h" },
   );
 }
@@ -2801,9 +2797,7 @@ async function requireHwYukleme(req, res, next) {
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return next();
     let decoded = null;
-    for (const secret of [process.env.JWT_SECRET || "simsek_secret_degistir", process.env.JWT_SECRET || "finance_secret"]) {
-      try { decoded = jwt.verify(token, secret); break; } catch {}
-    }
+    try { decoded = jwt.verify(token, JWT_SECRET); } catch {}
     if (!decoded || !decoded.email) return next();
     // Platform sahibi her şeyi yapabilir — marka kısıtına tabi değildir
     if (String(decoded.role || "") === "platform_admin") return next();
@@ -2836,7 +2830,7 @@ function requireFinanceAuth(req, res, next) {
 
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET || "finance_secret",
+      JWT_SECRET,
     );
 
     // Finans yetkisi: scope=finance VEYA hardcoded finans e-postaları
@@ -4559,27 +4553,7 @@ app.get("/test-po-rows", async (req, res) => {
   }
 });
 
-/* ================== FORCE RESET BOQ ================== */
-app.get("/force-reset-boq", async (req, res) => {
-  try {
-    await pool.query(`DROP TABLE IF EXISTS boq_items`);
-
-    await pool.query(`
-      CREATE TABLE boq_items (
-        id SERIAL PRIMARY KEY,
-        s_bom_code TEXT,
-        boq_items_en TEXT,
-        currency TEXT,
-        unit_price NUMERIC,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    res.json({ ok: true, message: "boq_items sıfırlandı ✅" });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// /force-reset-boq kaldırıldı (20.10.2026): kimlik doğrulamasız GET ile boq_items tablosunu DROP ediyordu.
 
 /* ================== FINANCE SUMMARY ================== */
 app.get("/finance/summary", async (req, res) => {
@@ -18944,7 +18918,7 @@ function optionalAuth(req) {
     const h = req.headers.authorization || "";
     const tok = h.startsWith("Bearer ") ? h.slice(7) : (req.query?.t ? String(req.query.t) : null);
     if (!tok) return null;
-    req.user = jwt.verify(tok, process.env.JWT_SECRET || "simsek_secret_degistir");
+    req.user = jwt.verify(tok, JWT_SECRET);
     return req.user;
   } catch { return null; }
 }
