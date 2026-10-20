@@ -18437,7 +18437,9 @@ app.get("/hr/excel/puantaj", async (req, res) => {
          AND (
            ((ise_giris_tarihi IS NULL OR ise_giris_tarihi <= $2)
              AND (isten_ayrilma_tarihi IS NULL OR isten_ayrilma_tarihi >= $1)
-             AND (ise_giris_tarihi IS NOT NULL OR NOT EXISTS (SELECT 1 FROM personel_calisma_donemi d0 WHERE d0.personel_id = personel.id AND d0.isten_ayrilma >= $2)))
+             AND (ise_giris_tarihi IS NOT NULL OR NOT EXISTS (SELECT 1 FROM personel_calisma_donemi d0 WHERE d0.personel_id = personel.id AND d0.isten_ayrilma >= $2))
+             -- 20.10.2026: "Pasife al" ile kapatılan kayıt (çıkış tarihi yok ya da hiç başlamamış) puantajda görünmez
+             AND (COALESCE(aktif, true) OR (isten_ayrilma_tarihi IS NOT NULL AND (ise_giris_tarihi IS NULL OR ise_giris_tarihi <= CURRENT_DATE))))
            OR EXISTS (SELECT 1 FROM personel_calisma_donemi d WHERE d.personel_id = personel.id
                       AND (d.ise_giris IS NULL OR d.ise_giris <= $2) AND d.isten_ayrilma >= $1))`;
     if (personel_id) {

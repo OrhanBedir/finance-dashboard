@@ -17720,6 +17720,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     const mEnd = `${puantajAy}-${String(new Date(Number(py), Number(pm), 0).getDate()).padStart(2, "0")}`;
     const { giris, ayrilma, disi } = ikDonemTarih(p);
     if (disi) return false;                         // hiçbir çalışma dönemi bu ayla kesişmiyor
+    // 20.10.2026 (Yıldıray Turhan vakası): "Pasife al" ile kapatılan kayıt tabloda kalıyordu, çünkü tablo yalnız
+    // dönem tarihlerine bakıyordu. Çıkış tarihi olmayan pasif kayıt ve hiç başlamamış (ileri tarihli giriş) pasif
+    // kayıt kadroda görünmez; çıkış tarihi girilen pasif kayıt ayrıldığı aya kadar görünmeye devam eder.
+    if (!p.aktif && !ayrilma) return false;
+    if (!p.aktif && giris && giris > _bugunYmd) return false;
     if (giris && giris > mEnd) return false;        // o ay henüz işe girmemiş
     if (ayrilma && ayrilma < mStart) return false;  // bu aydan önce ayrılmış
     return true;
@@ -18054,8 +18059,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
     const guncelArsivde = ayr && kapali.some(d => d.isten_ayrilma === ayr);
     const guncel = (gir || ayr) && !guncelArsivde ? [{ ise_giris: gir, isten_ayrilma: ayr || null, unvan: p.unvan, bolge: p.bolge, firma_tipi: p.firma_tipi, marka: p.marka, net_maas: p.net_maas,
       ayrilma_nedeni: null, guncel: true,
-      durum: ayr ? (ayr <= _bugunYmd ? "Ayrıldı" : "Ayrılacak") : gir > _bugunYmd ? "İşe başlayacak" : p.aktif ? "Çalışıyor" : "Pasif (hesap)",
-      renk: ayr ? ["#fee2e2", "#991b1b"] : gir > _bugunYmd ? ["#dbeafe", "#1d4ed8"] : p.aktif ? ["#dcfce7", "#166534"] : ["#f3f4f6", "#6b7280"] }] : [];
+      durum: ayr ? (ayr <= _bugunYmd ? "Ayrıldı" : "Ayrılacak") : !p.aktif ? (gir > _bugunYmd ? "Pasif — işe başlamadı" : "Pasif (hesap)") : gir > _bugunYmd ? "İşe başlayacak" : "Çalışıyor",
+      renk: ayr ? ["#fee2e2", "#991b1b"] : !p.aktif ? ["#f3f4f6", "#6b7280"] : gir > _bugunYmd ? ["#dbeafe", "#1d4ed8"] : ["#dcfce7", "#166534"] }] : [];
     return [...kapali, ...guncel].map((d, i) => ({ ...d, sira: i + 1 }));
   };
   const renderYenidenModal = () => {
