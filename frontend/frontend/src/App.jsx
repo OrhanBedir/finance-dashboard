@@ -17602,15 +17602,21 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [yemekOdeModal, setYemekOdeModal] = useState(null); // ödenen kart
   const [yemekOdeForm, setYemekOdeForm] = useState({ tutar: "", tarih: "", firma: _hrVarsayilanFirma });
   const [yemekKartModal, setYemekKartModal] = useState(false);
-  const [yemekKartForm, setYemekKartForm] = useState({ ad_soyad: "", kart_no: "", aylik_tutar: "", firma: _hrVarsayilanFirma });
+  const [yemekKartForm, setYemekKartForm] = useState({ ad_soyad: "", kart_no: "", aylik_tutar: "", firma: _hrVarsayilanFirma, personel_id: null });
+  // 20.10.2026 (Orhan): liste güncel kadrodan; görünüm kadro / donem / arsiv; gider firması hak dönemine göre
+  const [yemekGorunum, setYemekGorunum] = useState("kadro");
+  const [yemekKadro, setYemekKadro] = useState(null);     // { liste, dilimler, ayBas, aySon }
+  const [yemekFiltre, setYemekFiltre] = useState({ ad: "", firma: "", kart: "", odeme: "" });
+  const [yemekDagilimAcik, setYemekDagilimAcik] = useState(() => new Set());
+  const [yemekEsitleBusy, setYemekEsitleBusy] = useState(false);
   const loadYemek = async () => {
     try {
-      const r = await fetch(`${API_BASE}/hr/yemek-kartlari`);
+      const r = await fetch(`${API_BASE}/hr/yemek-kartlari?donem=${puantajAy}&gorunum=${yemekGorunum}`, { headers: AUTH_H() });
       const d = await r.json();
-      if (d.ok) { setYemekKartlar(d.kartlar || []); setYemekOdemeler(d.odemeler || []); }
+      if (d.ok) { setYemekKartlar(d.kartlar || []); setYemekOdemeler(d.odemeler || []); setYemekKadro(d.kadro || null); }
     } catch {}
   };
-  useEffect(() => { loadYemek(); }, []);
+  useEffect(() => { loadYemek(); }, [puantajAy, yemekGorunum]);
   const yemekKartGuncelle = async (id, patch) => {
     try {
       await fetch(`${API_BASE}/hr/yemek-kartlari/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
@@ -18504,108 +18510,182 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       {/* ===== YEMEK KARTLARI SEKMESİ ===== */}
       {tab==="yemek" && (() => {
         const donem = puantajAy;
-        // Alt marka görünümü (AHY) yalnız kendi firmasının kartlarını görür;
-        // ERC görünümü tümünü firma rozetleriyle görür
-        const aktifKartlar = yemekKartlar.filter(k => k.aktif && (_hrMarka === "ERC" || _hrBordro.includes(String(k.firma || "AHY").toUpperCase())));
-        const odemeOf = (k) => yemekOdemeler.find(o => String(o.kart_id) === String(k.id) && o.donem === donem);
-        const topGereken = aktifKartlar.reduce((sm,k) => sm + Number(k.aylik_tutar||0), 0);
-        const topOdenen = aktifKartlar.reduce((sm,k) => { const o = odemeOf(k); return sm + (o ? Number(o.tutar||0) : 0); }, 0);
-        const topBorc = aktifKartlar.reduce((sm,k) => { const o = odemeOf(k); return sm + (o ? 0 : Number(k.aylik_tutar||0)); }, 0);
         const fmtY = (n) => Number(n||0).toLocaleString("tr-TR");
         const fmtTar = (t) => t ? String(t).slice(0,10).split("-").reverse().join(".") : "—";
+        const firmaAd = (f) => f === "SIMSEK" ? "Şimşek" : f === "TEKNO" ? "Teknocenter" : f === "AHY" ? "AHY" : f === "KARMA" ? "Şimşek / Teknocenter" : (f ? altMarkaKisa(f) : "—");
+        const firmaRenk = (f) => f === "SIMSEK" ? ["#fffbeb", "#92400e"] : f === "TEKNO" ? ["#ecfdf5", "#065f46"] : f === "AHY" ? ["#eff6ff", "#1e40af"] : ["#f1f5f9", "#475569"];
+        const kadro = yemekKadro || { liste: [], dilimler: null };
+        const gorunumAd = { kadro: "Güncel kadro", donem: "Seçili dönemde çalışanlar", arsiv: "Arşiv" }[yemekGorunum];
+        const donemAd = (() => { const [y, m] = donem.split("-"); return `${["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(m)-1]} ${y}`; })();
+        const satirFirma = (r) => (r.gider_firmalari || []).map(g => g.firma).filter(Boolean);
+        const etiket = (r) => { const f = satirFirma(r); return f.length ? f.map(firmaAd).join(" / ") : "—"; };
+        const liste = (kadro.liste || []).filter(r => {
+          if (yemekFiltre.ad && !_trNorm(r.ad_soyad).includes(_trNorm(yemekFiltre.ad))) return false;
+          if (yemekFiltre.firma && !satirFirma(r).includes(yemekFiltre.firma)) return false;
+          if (yemekFiltre.kart === "eksik" && !r.kart_eksik) return false;
+          if (yemekFiltre.kart === "var" && r.kart_eksik) return false;
+          if (yemekFiltre.kart === "tutarsiz" && !r.tutar_tanimsiz) return false;
+          if (yemekFiltre.odeme === "odendi" && !r.odeme) return false;
+          if (yemekFiltre.odeme === "odenmedi" && (r.odeme || r.tutar_tanimsiz)) return false;
+          if (yemekFiltre.odeme === "dagilim" && !(r.dagilim_gerekli && r.odeme && !(r.odeme.dagilim || []).length)) return false;
+          return true;
+        });
+        const topGereken = liste.reduce((sm, r) => sm + (r.tutar_tanimsiz ? 0 : Number(r.kart.aylik_tutar)), 0);
+        const topOdenen = liste.reduce((sm, r) => sm + (r.odeme ? Number(r.odeme.tutar || 0) : 0), 0);
+        const topBorc = liste.reduce((sm, r) => sm + (!r.odeme && !r.tutar_tanimsiz ? Number(r.kart.aylik_tutar) : 0), 0);
+        const eksikSayisi = liste.filter(r => r.kart_eksik || r.tutar_tanimsiz).length;
+        const dagilimEksik = liste.filter(r => r.dagilim_gerekli && r.odeme && !(r.odeme.dagilim || []).length).length;
         const thY = { padding:"10px 13px", textAlign:"left", fontSize:"11px", fontWeight:700, color:"#64748b", background:"#f8fafc", borderBottom:"1.5px solid #e5e7eb", textTransform:"uppercase", letterSpacing:"0.4px", whiteSpace:"nowrap" };
         const tdY = { padding:"10px 13px", fontSize:"13px", color:"#374151", borderBottom:"1px solid #f1f5f9", whiteSpace:"nowrap" };
+        const rozet = (bg, c, t, title) => <span key={t} title={title} style={{ marginLeft:"6px", background:bg, color:c, padding:"1px 8px", borderRadius:"999px", fontSize:"10.5px", fontWeight:700 }}>{t}</span>;
+        const inpY = { padding:"7px 10px", borderRadius:"8px", border:"1.5px solid #e5e7eb", fontSize:"12.5px", background:"#fff" };
         const indirYemekExcel = () => exportStandardExcel({
-          title: `Yemek Kartları (Pluxee) — ${donem}`,
+          title: `Yemek Kartları (Pluxee) — ${donemAd} · ${gorunumAd}`,
           sheetName: "Yemek Kartları", fileBase: `Yemek_Kartlari_${donem.replace("-","_")}`,
-          headers: ["Kart Sahibi","Kart No","Firma","Dönem","Durum","Aylık Tutar","Ödenen","Ödeme Tarihi"],
-          colWidths: [28, 22, 10, 10, 12, 14, 14, 14],
+          headers: ["Personel","Kart No","Gider Firması","Dönem","Durum","Aylık Tutar","Ödenen","Ödeme Tarihi","Ödeyen","Dağılım"],
+          colWidths: [28, 22, 22, 10, 18, 14, 14, 14, 12, 40],
           numericCols: [5, 6],
-          rows: aktifKartlar.map(k => { const o = odemeOf(k); return [
-            k.ad_soyad, k.kart_no || "", (o?.firma || k.firma) === "SIMSEK" ? "Şimşek" : altMarkaKisa(o?.firma || k.firma), donem,
-            o ? "ÖDENDİ" : "ÖDENMEDİ", Number(k.aylik_tutar||0), o ? Number(o.tutar||0) : 0,
-            o ? fmtTar(o.tarih_str || o.tarih) : "" ]; }),
+          rows: liste.map(r => { const o = r.odeme; return [
+            r.ad_soyad, r.kart?.kart_no || "", etiket(r), donem,
+            r.kart_eksik ? "KART BİLGİSİ EKSİK" : r.tutar_tanimsiz ? "TUTAR TANIMLANMAMIŞ" : o ? "ÖDENDİ" : "ÖDENMEDİ",
+            r.tutar_tanimsiz ? null : Number(r.kart.aylik_tutar), o ? Number(o.tutar||0) : 0,
+            o ? fmtTar(o.tarih) : "", o ? firmaAd(o.odeyen_firma || o.firma) : "",
+            o && (o.dagilim||[]).length ? o.dagilim.map(x => `${firmaAd(x.firma)} ₺${fmtY(x.tutar)}`).join(" + ") : "" ]; }),
         }).catch(e => alert("Excel indirilemedi: " + e.message));
+        const kadroEsitle = async () => {
+          setYemekEsitleBusy(true);
+          try {
+            const r = await fetch(`${API_BASE}/hr/yemek-kartlari/esitle?donem=${donem}`, { method:"POST", headers: AUTH_H() });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok || !d.ok) throw new Error(d.error || "Eşitleme başarısız");
+            alert(`${d.ozet}\n\n${d.baglanan.length ? "Bağlanan: " + d.baglanan.join("; ") + "\n" : ""}${d.kart_eksik.length ? "Kart bilgisi eksik: " + d.kart_eksik.join(", ") + "\n" : ""}${d.tutar_tanimsiz.length ? "Tutar tanımsız: " + d.tutar_tanimsiz.join(", ") + "\n" : ""}${d.kontrol.length ? "Kontrol: " + d.kontrol.join(" | ") : ""}`);
+            loadYemek();
+          } catch (e) { alert(e.message); }
+          setYemekEsitleBusy(false);
+        };
+        const kartEkle = (r) => { setYemekKartForm({ ad_soyad: r.ad_soyad, kart_no: r.kart?.kart_no || "", aylik_tutar: r.kart && r.kart.aylik_tutar !== null ? String(r.kart.aylik_tutar) : "", firma: _hrVarsayilanFirma, personel_id: r.personel_id, kart_id: r.kart?.id || null }); setYemekKartModal(true); };
+        const odeAc = (r) => {
+          const tut = r.tutar_tanimsiz ? "" : String(r.kart.aylik_tutar);
+          const firmalar = satirFirma(r);
+          setYemekOdeModal({ ...r.kart, ad_soyad: r.ad_soyad, _row: r });
+          setYemekOdeForm({ tutar: tut, tarih: new Date().toISOString().slice(0,10), firma: firmalar[0] || r.kart?.firma || _hrVarsayilanFirma,
+            odeyen: firmalar.length ? firmalar[firmalar.length - 1] : (r.kart?.firma || _hrVarsayilanFirma), dagilim: firmalar.length > 1 ? Object.fromEntries(firmalar.map(f => [f, ""])) : null });
+        };
         return (
           <div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:"10px", marginBottom:"14px" }}>
               <div>
-                <div style={{ fontSize:"18px", fontWeight:800, color:"#0f172a" }}>🍽 Yemek Kartları (Pluxee) — {donem}</div>
-                <div style={{ fontSize:"12px", color:"#64748b", marginTop:"2px" }}>Ödemeler seçilen firmanın Nakit Akışı'na (Ticket/Yemek) otomatik işlenir ve Kâr/Zarar giderine yansır · takip Ağustos 2026 itibarıyla</div>
+                <div style={{ fontSize:"18px", fontWeight:800, color:"#0f172a" }}>🍽 Yemek Kartları (Pluxee) — {donemAd}</div>
+                <div style={{ fontSize:"12px", color:"#64748b", marginTop:"2px" }}>Liste güncel kadrodan gelir (personel ID ile) · gider firması hak dönemine göre: 01–14.10.2026 Şimşek, 15.10.2026'dan itibaren Teknocenter; 01.10.2026 öncesi tarihsel kayıt korunur · ödeme tek nakit çıkışı</div>
               </div>
-              <div style={{ display:"flex", gap:"8px" }}>
+              <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
                 <button onClick={indirYemekExcel} style={{ padding:"9px 16px", background:"#166534", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>📥 Excel İndir</button>
-                <button onClick={() => { setYemekKartForm({ ad_soyad:"", kart_no:"", aylik_tutar:"", firma:_hrVarsayilanFirma }); setYemekKartModal(true); }} style={{ padding:"9px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>+ Kart Ekle</button>
+                {_esitleYetkili && <button disabled={yemekEsitleBusy} onClick={kadroEsitle} title="Kartları personel kimliğine bağlar, eksikleri raporlar; kart/hak kaydı çoğaltmaz" style={{ padding:"9px 16px", background: yemekEsitleBusy ? "#9ca3af" : "#0f766e", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>{yemekEsitleBusy ? "⏳ Eşitleniyor…" : "🔄 Kadroyu Eşitle"}</button>}
+                <button onClick={() => { setYemekKartForm({ ad_soyad:"", kart_no:"", aylik_tutar:"", firma:_hrVarsayilanFirma, personel_id: null }); setYemekKartModal(true); }} style={{ padding:"9px 16px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>+ Kart Ekle</button>
               </div>
             </div>
 
-            {/* Özet bar — maaş tablosu görsel dili */}
-            <div style={{ background:"linear-gradient(120deg,#1e3a5f,#1e40af)", borderRadius:"14px", padding:"16px 22px", marginBottom:"16px", display:"flex", flexWrap:"wrap", gap:"10px" }}>
-              {[["Aylık Gereken", topGereken, "#93c5fd"], ["Bu Dönem Ödenen", topOdenen, "#6ee7b7"], ["Kalan Borç", topBorc, topBorc > 0 ? "#fca5a5" : "#6ee7b7"]].map(([l, v, c]) => (
-                <div key={l} style={{ flex:"1 1 160px", textAlign:"center" }}>
-                  <div style={{ fontSize:"11px", fontWeight:700, color:"#bfdbfe", letterSpacing:"0.06em", textTransform:"uppercase" }}>{l}</div>
-                  <div style={{ fontSize:"22px", fontWeight:800, color:c }}>₺{fmtY(v)}</div>
-                </div>
-              ))}
+            {/* Görünüm + filtreler */}
+            <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center", marginBottom:"12px" }}>
+              <div style={{ display:"inline-flex", border:"1.5px solid #1e3a5f", borderRadius:"9px", overflow:"hidden" }}>
+                {[["kadro","Güncel Kadro"],["donem","Seçili Dönemde Çalışanlar"],["arsiv","Arşiv"]].map(([k,l]) => (
+                  <button key={k} onClick={() => setYemekGorunum(k)} style={{ padding:"7px 12px", border:"none", cursor:"pointer", fontSize:"12.5px", fontWeight:700, background: yemekGorunum===k ? "#1e3a5f" : "#fff", color: yemekGorunum===k ? "#fff" : "#1e3a5f" }}>{l}</button>
+                ))}
+              </div>
+              <input value={yemekFiltre.ad} onChange={e => setYemekFiltre(f => ({ ...f, ad: e.target.value }))} placeholder="İsim ara" style={{ ...inpY, minWidth:"150px" }} />
+              <select value={yemekFiltre.firma} onChange={e => setYemekFiltre(f => ({ ...f, firma: e.target.value }))} style={inpY}><option value="">Gider firması (tümü)</option><option value="SIMSEK">Şimşek</option><option value="TEKNO">Teknocenter</option><option value="AHY">AHY (tarihsel)</option></select>
+              <select value={yemekFiltre.kart} onChange={e => setYemekFiltre(f => ({ ...f, kart: e.target.value }))} style={inpY}><option value="">Kart bilgisi (tümü)</option><option value="var">Kart var</option><option value="eksik">Kart bilgisi eksik</option><option value="tutarsiz">Tutar tanımlanmamış</option></select>
+              <select value={yemekFiltre.odeme} onChange={e => setYemekFiltre(f => ({ ...f, odeme: e.target.value }))} style={inpY}><option value="">Ödeme durumu (tümü)</option><option value="odendi">Ödendi</option><option value="odenmedi">Ödenmedi</option><option value="dagilim">Dağılım girilmedi</option></select>
+              {(yemekFiltre.ad || yemekFiltre.firma || yemekFiltre.kart || yemekFiltre.odeme) && <button onClick={() => setYemekFiltre({ ad:"", firma:"", kart:"", odeme:"" })} style={{ ...inpY, cursor:"pointer", background:"#f3f4f6", border:"none" }}>Filtreleri Temizle</button>}
+              <span style={{ fontSize:"12px", color:"#64748b", marginLeft:"auto" }}>{gorunumAd} · {donemAd} — {liste.length} kişi</span>
+            </div>
+
+            {/* Özet bar — kapsam açıkça yazılır */}
+            <div style={{ background:"linear-gradient(120deg,#1e3a5f,#1e40af)", borderRadius:"14px", padding:"14px 22px", marginBottom:"16px" }}>
+              <div style={{ fontSize:"11px", color:"#bfdbfe", fontWeight:700, marginBottom:"6px" }}>Toplamlar: {gorunumAd} · {donemAd}{yemekFiltre.ad || yemekFiltre.firma || yemekFiltre.kart || yemekFiltre.odeme ? " · filtre uygulanmış" : ""} · eksik bilgisi olan kişiler toplama girmez</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:"10px" }}>
+                {[["Aylık Gereken", `₺${fmtY(topGereken)}`, "#93c5fd"], ["Bu Dönem Ödenen", `₺${fmtY(topOdenen)}`, "#6ee7b7"], ["Kalan Borç", `₺${fmtY(topBorc)}`, topBorc > 0 ? "#fca5a5" : "#6ee7b7"], ["Eksik Bilgi", `${eksikSayisi} kişi`, eksikSayisi ? "#fcd34d" : "#6ee7b7"], ...(kadro.dilimler && kadro.dilimler.length > 1 ? [["Dağılım Girilmemiş", `${dagilimEksik} ödeme`, dagilimEksik ? "#fcd34d" : "#6ee7b7"]] : [])].map(([l, v, c]) => (
+                  <div key={l} style={{ flex:"1 1 150px", textAlign:"center" }}>
+                    <div style={{ fontSize:"11px", fontWeight:700, color:"#bfdbfe", letterSpacing:"0.06em", textTransform:"uppercase" }}>{l}</div>
+                    <div style={{ fontSize:"21px", fontWeight:800, color:c }}>{v}</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div style={{ background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:"14px", overflow:"hidden" }}>
               <div style={{ overflowX:"auto" }}>
                 <table style={{ width:"100%", borderCollapse:"collapse" }}>
                   <thead><tr>
-                    <th style={thY}>Kart Sahibi</th><th style={thY}>Kart No</th>
+                    <th style={thY}>Personel</th><th style={thY}>Kart No</th>
                     <th style={{ ...thY, textAlign:"right" }}>Aylık Tutar</th>
-                    <th style={thY}>Firma</th><th style={thY}>Durum</th>
+                    <th style={thY}>Gider Firması</th><th style={thY}>Durum</th>
                     <th style={{ ...thY, textAlign:"right" }}>Ödenen</th>
-                    <th style={thY}>Ödeme Tarihi</th><th style={thY}>Dönem</th><th style={thY}></th>
+                    <th style={thY}>Ödeme Tarihi</th><th style={thY}>Ödeyen</th><th style={thY}></th>
                   </tr></thead>
                   <tbody>
-                    {aktifKartlar.length === 0 && (
-                      <tr><td colSpan={9} style={{ padding:"26px", textAlign:"center", color:"#94a3b8", fontSize:"13px" }}>Kart yok — "+ Kart Ekle" ile başlayın</td></tr>
+                    {!yemekKadro && <tr><td colSpan={9} style={{ padding:"26px", textAlign:"center", color:"#94a3b8", fontSize:"13px" }}>Yükleniyor…</td></tr>}
+                    {yemekKadro && liste.length === 0 && (
+                      <tr><td colSpan={9} style={{ padding:"26px", textAlign:"center", color:"#94a3b8", fontSize:"13px" }}>Bu görünümde kişi yok</td></tr>
                     )}
-                    {aktifKartlar.map(k => {
-                      const o = odemeOf(k);
+                    {liste.map(r => {
+                      const o = r.odeme; const firmalar = satirFirma(r); const acik = yemekDagilimAcik.has(r.personel_id || `k${r.kart?.id}`);
+                      const key = r.personel_id || `k${r.kart?.id}`;
+                      const hak = (r.hak_araliklari || [])[0]; const hakKismi = hak && (hak.bas > kadro.ayBas || hak.bit < kadro.aySon);
                       return (
-                        <tr key={k.id}>
-                          <td style={{ ...tdY, fontWeight:700 }}>{k.ad_soyad}</td>
-                          <td style={{ ...tdY, fontFamily:"monospace", fontSize:"12.5px", color:"#64748b" }}>{k.kart_no || "—"}</td>
+                        <React.Fragment key={key}>
+                        <tr>
+                          <td style={{ ...tdY, fontWeight:700 }}>{r.ad_soyad}
+                            {r.baslayacak && rozet("#dbeafe", "#1d4ed8", `İşe başlayacak ${fmtTar(r.giris)}`)}
+                            {!r.calisiyor && r.cikis && rozet("#fee2e2", "#991b1b", `Ayrıldı ${fmtTar(r.cikis)}`)}
+                            {r.personelsiz && rozet("#f1f5f9", "#475569", "Personele bağlı değil", "Güncel kadroda bu adla kişi yok — Kadroyu Eşitle ile kontrol edin")}
+                            {r.kart_eksik && rozet("#fef3c7", "#92400e", "Kart bilgisi eksik")}
+                            {!r.kart_eksik && r.tutar_tanimsiz && rozet("#fef3c7", "#92400e", "Tutar tanımlanmamış")}
+                            {r.baglanti === "ad" && rozet("#f1f5f9", "#475569", "ad eşleşmesi", "Kart personel kimliğine bağlı değil — Kadroyu Eşitle bağlar")}
+                            {hakKismi && <div style={{ fontSize:"10.5px", color:"#64748b", marginTop:"2px" }}>hak: {(r.hak_araliklari||[]).map(a => `${fmtTar(a.bas)}–${fmtTar(a.bit)}`).join(", ")}</div>}
+                          </td>
+                          <td style={{ ...tdY, fontFamily:"monospace", fontSize:"12.5px", color:"#64748b" }}>{r.kart?.kart_no || "—"}</td>
                           <td style={{ ...tdY, textAlign:"right" }}>
-                            <input type="number" defaultValue={k.aylik_tutar || ""} placeholder="0"
-                              onBlur={e => { const v = Number(e.target.value || 0); if (v !== Number(k.aylik_tutar || 0)) yemekKartGuncelle(k.id, { aylik_tutar: v }); }}
-                              style={{ width:"90px", padding:"5px 8px", border:"1.5px solid #e5e7eb", borderRadius:"7px", fontSize:"13px", textAlign:"right" }} />
+                            {r.kart ? <input type="number" defaultValue={r.kart.aylik_tutar ?? ""} placeholder="tanımsız"
+                              onBlur={e => { const v = e.target.value === "" ? null : Number(e.target.value); if (v !== (r.kart.aylik_tutar === null ? null : Number(r.kart.aylik_tutar))) yemekKartGuncelle(r.kart.id, { aylik_tutar: v }); }}
+                              style={{ width:"96px", padding:"5px 8px", border:`1.5px solid ${r.tutar_tanimsiz ? "#fcd34d" : "#e5e7eb"}`, borderRadius:"7px", fontSize:"13px", textAlign:"right" }} /> : <span style={{ color:"#9ca3af" }}>—</span>}
                           </td>
                           <td style={tdY}>
-                            <button onClick={_hrMarka === "ERC" ? () => yemekKartGuncelle(k.id, { firma: k.firma === "SIMSEK" ? GUNCEL_ALT_MARKA : (k.firma === GUNCEL_ALT_MARKA ? "AHY" : "SIMSEK") }) : undefined}
-                              title={_hrMarka === "ERC" ? "Değiştirmek için tıklayın" : undefined}
-                              style={{ padding:"4px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, cursor: _hrMarka === "ERC" ? "pointer" : "default", border:"none",
-                                background: k.firma === "SIMSEK" ? "#fffbeb" : "#eff6ff", color: k.firma === "SIMSEK" ? "#92400e" : "#1e40af" }}>
-                              {k.firma === "SIMSEK" ? "🟨 Şimşek" : `${altMarkaBilgi(k.firma)?.ikon || "⚡"} ${altMarkaKisa(k.firma)}`}
+                            <button type="button" onClick={() => setYemekDagilimAcik(p => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n; })} title="Dağılım detayı"
+                              style={{ padding:"4px 10px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, cursor:"pointer", border:"none", background: firmalar.length > 1 ? "#f0fdf4" : firmaRenk(firmalar[0])[0], color: firmalar.length > 1 ? "#166534" : firmaRenk(firmalar[0])[1] }}>
+                              {etiket(r)}{firmalar.length > 1 ? (acik ? " ▴" : " ▾") : ""}
                             </button>
+                            {r.dagilim_gerekli && o && !(o.dagilim||[]).length && <div style={{ fontSize:"10.5px", color:"#b45309", fontWeight:700, marginTop:"2px" }}>⚠ dağılım girilmedi</div>}
                           </td>
                           <td style={tdY}>
-                            {o ? (
-                              <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:"#dcfce7", color:"#166534" }}>✓ Ödendi</span>
-                            ) : (
-                              <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:"#fee2e2", color:"#b91c1c" }}>
-                                Ödenmedi{Number(k.aylik_tutar||0) > 0 ? ` · ₺${fmtY(k.aylik_tutar)}` : ""}
-                              </span>
-                            )}
+                            {r.kart_eksik ? <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:"#fef3c7", color:"#92400e" }}>Kart bilgisi eksik</span>
+                              : r.tutar_tanimsiz && !o ? <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:"#fef3c7", color:"#92400e" }}>Tutar tanımlanmamış</span>
+                              : o ? <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:"#dcfce7", color:"#166534" }}>✓ Ödendi</span>
+                              : <span style={{ padding:"3px 12px", borderRadius:"999px", fontSize:"11.5px", fontWeight:800, background:"#fee2e2", color:"#b91c1c" }}>Ödenmedi · ₺{fmtY(r.kart.aylik_tutar)}</span>}
                           </td>
                           <td style={{ ...tdY, textAlign:"right", fontWeight:700, color: o ? "#166534" : "#9ca3af" }}>{o ? `₺${fmtY(o.tutar)}` : "—"}</td>
-                          <td style={tdY}>{o ? fmtTar(o.tarih_str || o.tarih) : "—"}</td>
-                          <td style={{ ...tdY, color:"#64748b" }}>{donem}</td>
+                          <td style={tdY}>{o ? fmtTar(o.tarih) : "—"}</td>
+                          <td style={tdY}>{o ? firmaAd(o.odeyen_firma || o.firma) : "—"}</td>
                           <td style={{ ...tdY }}>
-                            {o ? (
-                              <button onClick={async () => { if (!window.confirm("Bu dönem ödemesi geri alınsın mı? (Nakit akışından da silinir)")) return; await fetch(`${API_BASE}/hr/yemek-kartlari/${k.id}/ode/${donem}`, { method:"DELETE" }); loadYemek(); }}
+                            {(!r.kart || r.kart_eksik) && r.personel_id && <button onClick={() => kartEkle(r)} style={{ padding:"5px 10px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer", marginRight:"4px" }}>＋ Kart Bilgisi Ekle</button>}
+                            {r.kart && (o ? (
+                              <button onClick={async () => { if (!window.confirm("Bu dönem ödemesi geri alınsın mı? (Nakit akışından da silinir)")) return; await fetch(`${API_BASE}/hr/yemek-kartlari/${r.kart.id}/ode/${donem}`, { method:"DELETE" }); loadYemek(); }}
                                 style={{ padding:"5px 10px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>↩ Geri Al</button>
                             ) : (
-                              <button onClick={() => { setYemekOdeModal(k); setYemekOdeForm({ tutar: String(k.aylik_tutar || ""), tarih: new Date().toISOString().slice(0,10), firma: k.firma || _hrVarsayilanFirma }); }}
+                              <button onClick={() => odeAc(r)} disabled={!r.calisiyor && !r.donemde_calisti}
                                 style={{ padding:"5px 12px", background:"#166534", color:"#fff", border:"none", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>💸 Öde</button>
-                            )}
-                            <button onClick={async () => { if (!window.confirm(`${k.ad_soyad} kartı silinsin mi? (Tüm dönem ödemeleri ve nakit akışı kayıtları da silinir)`)) return; await fetch(`${API_BASE}/hr/yemek-kartlari/${k.id}`, { method:"DELETE" }); loadYemek(); }}
-                              style={{ padding:"5px 8px", background:"none", border:"none", cursor:"pointer", fontSize:"13px" }} title="Kartı sil">🗑</button>
+                            ))}
+                            {r.kart && <button onClick={async () => { if (!window.confirm(`${r.ad_soyad} kartı silinsin mi? (Tüm dönem ödemeleri ve nakit akışı kayıtları da silinir)`)) return; await fetch(`${API_BASE}/hr/yemek-kartlari/${r.kart.id}`, { method:"DELETE" }); loadYemek(); }}
+                              style={{ padding:"5px 8px", background:"none", border:"none", cursor:"pointer", fontSize:"13px" }} title="Kartı sil">🗑</button>}
                           </td>
                         </tr>
+                        {acik && firmalar.length > 1 && (
+                          <tr><td colSpan={9} style={{ padding:"6px 16px 10px", background:"#f8fafc", borderBottom:"1px solid #f1f5f9", fontSize:"12px", color:"#334155" }}>
+                            <b>Gider dağılımı ({donemAd}):</b> {(r.gider_firmalari||[]).map(g => `${firmaAd(g.firma)} ${fmtTar(g.hak_bas || g.bas)}–${fmtTar(g.hak_bit || g.bit)}`).join(" · ")}
+                            {o && (o.dagilim||[]).length ? <> — ödeme: {o.dagilim.map(x => `${firmaAd(x.firma)} ₺${fmtY(x.tutar)}`).join(" + ")} = ₺{fmtY(o.tutar)}</> : o ? <> — <span style={{ color:"#b45309", fontWeight:700 }}>dağılım tutarları girilmedi (Geri Al → yeniden Öde ile girin)</span></> : <> — günlük hak kuralı tanımlı değil: tutarlar ödeme sırasında elle girilir, toplam aylık tutara eşit olmalı</>}
+                          </td></tr>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -18614,80 +18694,99 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
             </div>
 
             {/* Ödeme modalı */}
-            {yemekOdeModal && (
+            {yemekOdeModal && (() => {
+              const r = yemekOdeModal._row || {}; const firmalar = satirFirma(r); const tarihsel = !kadro.dilimler;
+              const dagToplam = yemekOdeForm.dagilim ? Object.values(yemekOdeForm.dagilim).reduce((a, v) => a + (Number(v) || 0), 0) : null;
+              const tutar = yemekOdeForm.dagilim ? dagToplam : Number(yemekOdeForm.tutar || 0);
+              const btnF = (v, l, k) => <button key={v} type="button" onClick={() => setYemekOdeForm(f => ({ ...f, [k]: v }))}
+                style={{ flex:1, padding:"8px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekOdeForm[k]===v?"#1e3a5f":"#e5e7eb"}`, background: yemekOdeForm[k]===v?"#1e3a5f":"#fff", color: yemekOdeForm[k]===v?"#fff":"#334155" }}>{l}</button>;
+              return (
               <div onClick={() => setYemekOdeModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
-                <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(420px, 94vw)", padding:"22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)" }}>
+                <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(460px, 94vw)", padding:"22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)" }}>
                   <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"3px" }}>💸 Yemek Kartı Ödemesi</div>
-                  <div style={{ fontSize:"12.5px", color:"#64748b", marginBottom:"14px" }}>{yemekOdeModal.ad_soyad} · dönem {donem}</div>
+                  <div style={{ fontSize:"12.5px", color:"#64748b", marginBottom:"14px" }}>{yemekOdeModal.ad_soyad} · dönem {donemAd}{r.hak_araliklari?.length ? ` · hak ${(r.hak_araliklari).map(a => `${fmtTar(a.bas)}–${fmtTar(a.bit)}`).join(", ")}` : ""}</div>
                   <div style={{ display:"grid", gap:"10px" }}>
-                    <div>
-                      <span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Firma</span>
-                      <div style={{ display:"flex", gap:"6px" }}>
-                        {[...ALT_MARKA_LISTE.filter(m => m.kod === GUNCEL_ALT_MARKA).map(m => [m.kod, `${m.ikon} ${m.kisa}`]), ["SIMSEK","🟨 Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
-                          <button key={v} type="button" onClick={() => setYemekOdeForm(f => ({ ...f, firma: v }))}
-                            style={{ flex:1, padding:"8px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekOdeForm.firma===v?"#1e3a5f":"#e5e7eb"}`, background: yemekOdeForm.firma===v?"#1e3a5f":"#fff", color: yemekOdeForm.firma===v?"#fff":"#6b7280" }}>{l}</button>
-                        ))}
+                    {tarihsel ? (
+                      <div>
+                        <span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Gider firması (tarihsel dönem)</span>
+                        <div style={{ display:"flex", gap:"6px" }}>{[...ALT_MARKA_LISTE.map(m => [m.kod, `${m.ikon} ${m.kisa}`]), ["SIMSEK","🟨 Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => btnF(v, l, "firma"))}</div>
                       </div>
-                    </div>
+                    ) : yemekOdeForm.dagilim ? (
+                      <div>
+                        <span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Gider dağılımı (hak dönemine göre) *</span>
+                        {(r.gider_firmalari||[]).map(g => (
+                          <div key={g.firma} style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"6px" }}>
+                            <span style={{ flex:1, fontSize:"12.5px" }}><b>{firmaAd(g.firma)}</b> <span style={{ color:"#64748b" }}>{fmtTar(g.hak_bas || g.bas)}–{fmtTar(g.hak_bit || g.bit)}</span></span>
+                            <input type="number" value={yemekOdeForm.dagilim[g.firma] ?? ""} onChange={e => setYemekOdeForm(f => ({ ...f, dagilim: { ...f.dagilim, [g.firma]: e.target.value } }))} placeholder="₺"
+                              style={{ width:"120px", padding:"8px 10px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", textAlign:"right" }} />
+                          </div>
+                        ))}
+                        <div style={{ fontSize:"12px", color: (!r.tutar_tanimsiz && Math.abs(dagToplam - Number(r.kart.aylik_tutar)) > 0.5) ? "#b45309" : "#166534", fontWeight:700 }}>Toplam ₺{fmtY(dagToplam)}{!r.tutar_tanimsiz ? ` · aylık tutar ₺${fmtY(r.kart.aylik_tutar)}${Math.abs(dagToplam - Number(r.kart.aylik_tutar)) > 0.5 ? " — eşit değil" : " ✓"}` : ""}</div>
+                        <div style={{ fontSize:"11px", color:"#64748b", marginTop:"4px" }}>Günlük hak kuralı tanımlı olmadığı için paylar otomatik bölünmez; tutarları siz girin.</div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize:"12.5px" }}>Gider firması: <b>{firmaAd(firmalar[0])}</b> <span style={{ color:"#64748b" }}>(hak dönemi kuralı)</span></div>
+                    )}
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
                       <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Tutar *</span>
-                        <input type="number" value={yemekOdeForm.tutar} onChange={e => setYemekOdeForm(f => ({ ...f, tutar: e.target.value }))}
-                          style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
+                        <input type="number" value={yemekOdeForm.dagilim ? dagToplam : yemekOdeForm.tutar} readOnly={!!yemekOdeForm.dagilim} onChange={e => setYemekOdeForm(f => ({ ...f, tutar: e.target.value }))}
+                          style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box", background: yemekOdeForm.dagilim ? "#f8fafc" : "#fff" }} /></div>
                       <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Ödeme Tarihi</span>
                         <input type="date" value={yemekOdeForm.tarih} onChange={e => setYemekOdeForm(f => ({ ...f, tarih: e.target.value }))}
                           style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
                     </div>
+                    {!tarihsel && (
+                      <div>
+                        <span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Ödeyen firma / kasa (nakit akışına tek kayıt)</span>
+                        <div style={{ display:"flex", gap:"6px" }}>{[["SIMSEK","🟨 Şimşek"],["TEKNO","🏢 Teknocenter"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => btnF(v, l, "odeyen"))}</div>
+                      </div>
+                    )}
                   </div>
                   <div style={{ display:"flex", gap:"8px", marginTop:"16px", justifyContent:"flex-end" }}>
                     <button onClick={() => setYemekOdeModal(null)} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer", color:"#4b5563" }}>Vazgeç</button>
                     <button onClick={async () => {
-                      if (!Number(yemekOdeForm.tutar || 0)) { alert("Tutar giriniz"); return; }
-                      const r = await fetch(`${API_BASE}/hr/yemek-kartlari/${yemekOdeModal.id}/ode`, {
-                        method:"POST", headers:{ "Content-Type":"application/json" },
-                        body: JSON.stringify({ donem, tutar: Number(yemekOdeForm.tutar), tarih: yemekOdeForm.tarih, firma: yemekOdeForm.firma }),
-                      });
-                      const d = await r.json().catch(() => ({}));
-                      if (!r.ok || !d.ok) { alert(d.error || "Kaydedilemedi"); return; }
+                      if (!Number(tutar || 0)) { alert("Tutar giriniz"); return; }
+                      if (yemekOdeForm.dagilim && Object.values(yemekOdeForm.dagilim).some(v => v === "" || Number(v) < 0)) { alert("Her firma için dağılım tutarını girin (0 olabilir)"); return; }
+                      const body = { donem, tutar: Number(tutar), tarih: yemekOdeForm.tarih, firma: yemekOdeForm.firma, odeyen_firma: tarihsel ? undefined : yemekOdeForm.odeyen,
+                        dagilim: yemekOdeForm.dagilim ? Object.entries(yemekOdeForm.dagilim).map(([firma, t]) => ({ firma, tutar: Number(t || 0) })) : undefined };
+                      const rr = await fetch(`${API_BASE}/hr/yemek-kartlari/${yemekOdeModal.id}/ode`, { method:"POST", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify(body) });
+                      const d = await rr.json().catch(() => ({}));
+                      if (!rr.ok || !d.ok) { alert(d.error || "Kaydedilemedi"); return; }
                       setYemekOdeModal(null); loadYemek();
                     }} style={{ padding:"9px 18px", background:"#166534", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>Ödendi Kaydet</button>
                   </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
-            {/* Kart ekleme modalı */}
+            {/* Kart ekleme / kart bilgisi modalı */}
             {yemekKartModal && (
               <div onClick={() => setYemekKartModal(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
                 <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(440px, 94vw)", padding:"22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)" }}>
-                  <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"14px" }}>🍽 Yeni Yemek Kartı</div>
+                  <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"3px" }}>🍽 {yemekKartForm.personel_id ? "Kart Bilgisi" : "Yeni Yemek Kartı"}</div>
+                  <div style={{ fontSize:"12px", color:"#64748b", marginBottom:"14px" }}>{yemekKartForm.personel_id ? "Kart personel kimliğine bağlanır; aynı kişiye ikinci kart açılmaz" : "Kadrodaki kişiler listede zaten var — kart bilgisi için satırdaki düğmeyi kullanın"}</div>
                   <div style={{ display:"grid", gap:"10px" }}>
                     <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Kart Sahibi *</span>
-                      <input value={yemekKartForm.ad_soyad} onChange={e => setYemekKartForm(f => ({ ...f, ad_soyad: e.target.value }))}
-                        style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
+                      <input value={yemekKartForm.ad_soyad} readOnly={!!yemekKartForm.personel_id} onChange={e => setYemekKartForm(f => ({ ...f, ad_soyad: e.target.value }))}
+                        style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box", background: yemekKartForm.personel_id ? "#f8fafc" : "#fff" }} /></div>
                     <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Kart No</span>
                       <input value={yemekKartForm.kart_no} onChange={e => setYemekKartForm(f => ({ ...f, kart_no: e.target.value }))} placeholder="6273 …"
                         style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
-                      <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Aylık Tutar</span>
-                        <input type="number" value={yemekKartForm.aylik_tutar} onChange={e => setYemekKartForm(f => ({ ...f, aylik_tutar: e.target.value }))} placeholder="0"
-                          style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
-                      <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Firma</span>
-                        <div style={{ display:"flex", gap:"6px" }}>
-                          {[...ALT_MARKA_LISTE.filter(m => m.kod === GUNCEL_ALT_MARKA).map(m => [m.kod, m.kisa]), ["SIMSEK","Şimşek"]].filter(([v]) => _hrMarka === "ERC" || v === _hrMarka).map(([v,l]) => (
-                            <button key={v} type="button" onClick={() => setYemekKartForm(f => ({ ...f, firma: v }))}
-                              style={{ flex:1, padding:"8px 4px", borderRadius:"8px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${yemekKartForm.firma===v?"#1e3a5f":"#e5e7eb"}`, background: yemekKartForm.firma===v?"#1e3a5f":"#fff", color: yemekKartForm.firma===v?"#fff":"#6b7280" }}>{l}</button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                    <div><span style={{ fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" }}>Aylık Tutar <span style={{ fontWeight:500, color:"#94a3b8" }}>(boş = tanımlanmamış; otomatik 10.000 yazılmaz)</span></span>
+                      <input type="number" value={yemekKartForm.aylik_tutar} onChange={e => setYemekKartForm(f => ({ ...f, aylik_tutar: e.target.value }))} placeholder="tanımlanmamış"
+                        style={{ width:"100%", padding:"9px 11px", border:"1.5px solid #e5e7eb", borderRadius:"9px", fontSize:"13.5px", boxSizing:"border-box" }} /></div>
                   </div>
                   <div style={{ display:"flex", gap:"8px", marginTop:"16px", justifyContent:"flex-end" }}>
                     <button onClick={() => setYemekKartModal(false)} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer", color:"#4b5563" }}>Vazgeç</button>
                     <button onClick={async () => {
                       if (!yemekKartForm.ad_soyad.trim()) { alert("Kart sahibi zorunlu"); return; }
-                      const r = await fetch(`${API_BASE}/hr/yemek-kartlari`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ ...yemekKartForm, aylik_tutar: Number(yemekKartForm.aylik_tutar || 0) }) });
-                      const d = await r.json().catch(() => ({}));
-                      if (!r.ok || !d.ok) { alert(d.error || "Kaydedilemedi"); return; }
+                      const body = { ad_soyad: yemekKartForm.ad_soyad, kart_no: yemekKartForm.kart_no, personel_id: yemekKartForm.personel_id || undefined, aylik_tutar: yemekKartForm.aylik_tutar === "" ? null : Number(yemekKartForm.aylik_tutar) };
+                      const rr = yemekKartForm.kart_id
+                        ? await fetch(`${API_BASE}/hr/yemek-kartlari/${yemekKartForm.kart_id}`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ kart_no: body.kart_no, aylik_tutar: body.aylik_tutar, personel_id: yemekKartForm.personel_id }) })
+                        : await fetch(`${API_BASE}/hr/yemek-kartlari`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+                      const d = await rr.json().catch(() => ({}));
+                      if (!rr.ok || !d.ok) { alert(d.error || "Kaydedilemedi"); return; }
                       setYemekKartModal(false); loadYemek();
                     }} style={{ padding:"9px 18px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>Kaydet</button>
                   </div>

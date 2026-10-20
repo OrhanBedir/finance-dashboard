@@ -20681,6 +20681,131 @@ async function ensureYemekKartiTables() {
     aciklama TEXT,
     created_at TIMESTAMP DEFAULT now(),
     UNIQUE (kart_id, donem))`);
+  // 20.10.2026 (Orhan): kart ↔ personel ID bağı (isim yerine), bir personele tek kart; ödemede gider
+  // dağılımı (hak dönemine göre firma payları) ve ödeyen firma/kasa ayrı tutulur. Aylık tutar NULL olabilir
+  // ("Tutar tanımlanmamış" — otomatik 10.000 borç yok).
+  await pool.query(`ALTER TABLE yemek_kartlari ADD COLUMN IF NOT EXISTS personel_id INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE yemek_kartlari ALTER COLUMN aylik_tutar DROP DEFAULT`).catch(() => {});
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS yemek_kartlari_personel_uq ON yemek_kartlari(personel_id) WHERE personel_id IS NOT NULL`).catch(() => {});
+  await pool.query(`ALTER TABLE yemek_karti_odemeler ADD COLUMN IF NOT EXISTS dagilim JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE yemek_karti_odemeler ADD COLUMN IF NOT EXISTS odeyen_firma TEXT`).catch(() => {});
+}
+// ── Yemek kartı gider firması kuralı (20.10.2026): 01–14.10.2026 Şimşek, 15.10.2026'dan itibaren Teknocenter;
+//    01.10.2026 öncesi tarihsel kayıt (kart/ödeme firması) korunur. Yalnız GİDER firmasını belirler — bordro
+//    şirketi, yasal işveren ve kullanıcı hesabına dokunmaz. (Diğer modüllerin 14.10 devir tarihi değişmedi.)
+const YEMEK_SIMSEK_BAS = "2026-10-01", YEMEK_TEKNO_BAS = "2026-10-15";
+function yemekGiderFirmasi(tarih) {
+  const t = String(tarih || "").slice(0, 10);
+  if (!t || t < YEMEK_SIMSEK_BAS) return null;         // tarihsel
+  return t < YEMEK_TEKNO_BAS ? "SIMSEK" : "TEKNO";
+}
+// Ayın firma dilimleri: [{firma, bas, bit}] — tarihsel aylar için null (kart/ödeme firması geçerli)
+function yemekAyDilimleri(donem) {
+  const [y, m] = donem.split("-").map(Number);
+  const ayBas = `${donem}-01`, aySon = `${donem}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+  if (aySon < YEMEK_SIMSEK_BAS) return null;
+  const d = [];
+  if (ayBas < YEMEK_TEKNO_BAS) d.push({ firma: "SIMSEK", bas: ayBas < YEMEK_SIMSEK_BAS ? YEMEK_SIMSEK_BAS : ayBas, bit: aySon < YEMEK_TEKNO_BAS ? aySon : "2026-10-14" });
+  if (aySon >= YEMEK_TEKNO_BAS) d.push({ firma: "TEKNO", bas: ayBas < YEMEK_TEKNO_BAS ? YEMEK_TEKNO_BAS : ayBas, bit: aySon });
+  return d;
+}
+const yemekFirmaAd = (f) => f === "SIMSEK" ? "Şimşek" : f === "TEKNO" ? "Teknocenter" : f === "AHY" ? "AHY" : (f || "—");
+// Kartları personele bağla: önce personel_id, yoksa ad anahtarı (kelime sırası/Türkçe harf farkı yok) TEK eşleşme ise;
+// birden fazla aday → KONTROL (otomatik birleştirme yok). Tekrar çalıştırılınca kayıt çoğalmaz.
+async function yemekKartBagla() {
+  await ensureYemekKartiTables();
+  const [kartlar, personel] = await Promise.all([
+    pool.query(`SELECT id, ad_soyad, personel_id, kart_no FROM yemek_kartlari`),
+    pool.query(`SELECT id, ad_soyad, aktif FROM personel WHERE birlestirildi_personel_id IS NULL AND COALESCE(firma_tipi,'simsek') = 'simsek'`),
+  ]);
+  const sonuc = { baglanan: [], zaten: [], kontrol: [], eslesmeyen: [] };
+  for (const k of kartlar.rows) {
+    if (k.personel_id) { sonuc.zaten.push(k.ad_soyad); continue; }
+    const key = adAnahtar(k.ad_soyad);
+    const aday = personel.rows.filter(p => adAnahtar(p.ad_soyad) === key);
+    if (aday.length === 1) {
+      const cakisma = kartlar.rows.find(x => x.personel_id === aday[0].id);
+      if (cakisma) { sonuc.kontrol.push(`${k.ad_soyad}: personel #${aday[0].id} zaten "${cakisma.ad_soyad}" kartına bağlı`); continue; }
+      await pool.query(`UPDATE yemek_kartlari SET personel_id=$1 WHERE id=$2 AND personel_id IS NULL`, [aday[0].id, k.id]);
+      k.personel_id = aday[0].id; sonuc.baglanan.push(`${k.ad_soyad} → #${aday[0].id} ${aday[0].ad_soyad}`);
+    } else if (aday.length > 1) sonuc.kontrol.push(`${k.ad_soyad}: ${aday.length} aynı adlı personel (#${aday.map(a => a.id).join(", #")}) — elle bağlayın`);
+    else sonuc.eslesmeyen.push(k.ad_soyad);
+  }
+  // Aynı kart numarası birden fazla kişide → kontrol (otomatik değiştirilmez)
+  const kn = {};
+  kartlar.rows.forEach(k => { const n = String(k.kart_no || "").replace(/\s+/g, ""); if (n) (kn[n] = kn[n] || []).push(k.ad_soyad); });
+  Object.entries(kn).filter(([, v]) => v.length > 1).forEach(([n, v]) => sonuc.kontrol.push(`Kart no ${n} birden fazla kişide: ${v.join(", ")}`));
+  return sonuc;
+}
+/* Kadro satırları (20.10.2026): liste yemek kartı tablosundan değil GÜNCEL KADRODAN (personel + çalışma
+   dönemleri) kurulur; kart yoksa "kart bilgisi eksik". Görünüm: kadro (bugün çalışan), donem (seçili ayda
+   çalışmış — ayrılanlar dahil), arsiv (bugün çalışmayan ya da personele bağlı olmayan kartlar). */
+async function yemekKadroSatirlari(req, donem, gorunum) {
+  await ensureYemekKartiTables();
+  const k = altMarkaKapsam(req);
+  const [y, m] = donem.split("-").map(Number);
+  const ayBas = `${donem}-01`, aySon = `${donem}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+  const bugun = ymdYerel(new Date());
+  const per = await pool.query(
+    `SELECT p.id, p.ad_soyad, p.aktif, to_char(p.ise_giris_tarihi,'YYYY-MM-DD') AS giris, to_char(p.isten_ayrilma_tarihi,'YYYY-MM-DD') AS cikis,
+            p.marka, p.firma_tipi, p.unvan, p.bolge
+       FROM personel p WHERE p.birlestirildi_personel_id IS NULL AND COALESCE(p.firma_tipi,'simsek') = 'simsek'
+       ${k ? `AND UPPER(COALESCE(p.marka,'ERC')) = ANY($1::text[])` : ""} ORDER BY p.ad_soyad`, k ? [k.bordro] : []);
+  const dm = await ikDonemleriYukle(per.rows.map(p => p.id));
+  const [kartlar, odemeler] = await Promise.all([
+    pool.query(`SELECT * FROM yemek_kartlari ORDER BY ad_soyad`),
+    pool.query(`SELECT o.*, to_char(o.tarih,'YYYY-MM-DD') AS tarih_str FROM yemek_karti_odemeler o WHERE o.donem=$1`, [donem]),
+  ]);
+  const kartByPid = new Map(); kartlar.rows.forEach(c => { if (c.personel_id) kartByPid.set(c.personel_id, c); });
+  const kartByAd = new Map(); kartlar.rows.forEach(c => { if (!c.personel_id) kartByAd.set(adAnahtar(c.ad_soyad), c); });
+  const odemeByKart = new Map(); odemeler.rows.forEach(o => odemeByKart.set(o.kart_id, o));
+  const dilimler = yemekAyDilimleri(donem);
+  const kesisim = (a1, a2, b1, b2) => (a1 <= b2 && b1 <= a2) ? [a1 > b1 ? a1 : b1, a2 < b2 ? a2 : b2] : null;
+  const satirlar = [];
+  for (const p of per.rows) {
+    const arsiv = dm.get(p.id) || [];
+    const calisiyor = !!p.aktif && (!p.cikis || p.cikis > bugun);
+    const baslayacak = calisiyor && !!p.giris && p.giris > bugun;
+    // Seçili ayda çalışılan aralıklar (güncel dönem + arşiv dönemleri), ay sınırlarına kırpılmış
+    const aralik = [];
+    const g = kesisim(p.giris || "0000-01-01", p.cikis || "9999-12-31", ayBas, aySon); if (g && (p.aktif || p.cikis)) aralik.push(g);
+    arsiv.forEach(d => { const a = kesisim(d.ise_giris || "0000-01-01", d.isten_ayrilma, ayBas, aySon); if (a && !aralik.some(x => x[0] === a[0] && x[1] === a[1])) aralik.push(a); });
+    aralik.sort();
+    const donemdeCalisti = aralik.length > 0;
+    const kart = kartByPid.get(p.id) || kartByAd.get(adAnahtar(p.ad_soyad)) || null;
+    const baglanti = kart ? (kart.personel_id === p.id ? "id" : "ad") : null;
+    const odeme = kart ? odemeByKart.get(kart.id) || null : null;
+    // Ayın gider firmaları: çalışılan aralık ∩ firma dilimleri
+    let firmalar = [];
+    if (dilimler) dilimler.forEach(d => { if (aralik.some(a => kesisim(a[0], a[1], d.bas, d.bit))) firmalar.push({ ...d, hak_bas: aralik.map(a => kesisim(a[0], a[1], d.bas, d.bit)).filter(Boolean)[0]?.[0], hak_bit: aralik.map(a => kesisim(a[0], a[1], d.bas, d.bit)).filter(Boolean).pop()?.[1] }); });
+    const tarihsel = !dilimler;
+    satirlar.push({
+      personel_id: p.id, ad_soyad: p.ad_soyad, marka: p.marka, unvan: p.unvan, bolge: p.bolge,
+      giris: p.giris, cikis: p.cikis, calisiyor, baslayacak, donemde_calisti: donemdeCalisti,
+      hak_araliklari: aralik.map(a => ({ bas: a[0], bit: a[1] })),
+      kart: kart ? { id: kart.id, kart_no: kart.kart_no, aylik_tutar: kart.aylik_tutar, firma: kart.firma, aktif: kart.aktif, ad_soyad: kart.ad_soyad } : null,
+      baglanti, kart_eksik: !kart || !String(kart.kart_no || "").trim(),
+      tutar_tanimsiz: !kart || kart.aylik_tutar === null || Number(kart.aylik_tutar) <= 0,
+      gider_firmalari: tarihsel ? [{ firma: (odeme?.firma || kart?.firma || null), tarihsel: true }] : firmalar,
+      dagilim_gerekli: !tarihsel && firmalar.length > 1,
+      odeme: odeme ? { id: odeme.id, tutar: Number(odeme.tutar), tarih: odeme.tarih_str, firma: odeme.firma, odeyen_firma: odeme.odeyen_firma, dagilim: odeme.dagilim, cashflow_id: odeme.cashflow_id, aciklama: odeme.aciklama } : null,
+    });
+  }
+  // Personele bağlı olmayan kartlar (ad eşleşmesi de yok) → arşiv/kontrol satırı
+  const kullanilan = new Set(satirlar.filter(r => r.kart).map(r => r.kart.id));
+  const bagsiz = kartlar.rows.filter(c => !kullanilan.has(c.id)).map(c => {
+    const o = odemeByKart.get(c.id) || null;
+    return { personel_id: null, ad_soyad: c.ad_soyad, calisiyor: false, baslayacak: false, donemde_calisti: false, hak_araliklari: [],
+      kart: { id: c.id, kart_no: c.kart_no, aylik_tutar: c.aylik_tutar, firma: c.firma, aktif: c.aktif, ad_soyad: c.ad_soyad }, baglanti: null,
+      kart_eksik: !String(c.kart_no || "").trim(), tutar_tanimsiz: c.aylik_tutar === null || Number(c.aylik_tutar) <= 0,
+      gider_firmalari: [{ firma: o?.firma || c.firma || null, tarihsel: true }], dagilim_gerekli: false, personelsiz: true,
+      odeme: o ? { id: o.id, tutar: Number(o.tutar), tarih: o.tarih_str, firma: o.firma, odeyen_firma: o.odeyen_firma, dagilim: o.dagilim, cashflow_id: o.cashflow_id } : null };
+  });
+  let liste;
+  if (gorunum === "donem") liste = satirlar.filter(r => r.donemde_calisti);
+  else if (gorunum === "arsiv") liste = [...satirlar.filter(r => !r.calisiyor), ...bagsiz];
+  else liste = satirlar.filter(r => r.calisiyor);
+  return { liste, dilimler, ayBas, aySon, bugun, kartSayisi: kartlar.rows.length, bagsiz: bagsiz.length };
 }
 
 app.get("/hr/yemek-kartlari", async (req, res) => {
@@ -20690,19 +20815,51 @@ app.get("/hr/yemek-kartlari", async (req, res) => {
       pool.query(`SELECT * FROM yemek_kartlari ORDER BY ad_soyad`),
       pool.query(`SELECT o.*, to_char(o.tarih,'YYYY-MM-DD') AS tarih_str FROM yemek_karti_odemeler o ORDER BY o.donem DESC, o.id`),
     ]);
-    res.json({ ok: true, kartlar: kartlar.rows, odemeler: odemeler.rows });
+    const donem = String(req.query.donem || "").trim();
+    let kadro = null;
+    if (/^\d{4}-\d{2}$/.test(donem)) kadro = await yemekKadroSatirlari(req, donem, String(req.query.gorunum || "kadro"));
+    res.json({ ok: true, kartlar: kartlar.rows, odemeler: odemeler.rows, kadro, kural: { simsek_bas: YEMEK_SIMSEK_BAS, tekno_bas: YEMEK_TEKNO_BAS } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Kadroyu eşitle: kartları personel ID'sine bağlar, eksikleri ve kontrol gerektirenleri raporlar; kart/hak kaydı ÜRETMEZ
+app.post("/hr/yemek-kartlari/esitle", authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || "").toLowerCase(), rol = String(req.user?.role || "").toLowerCase();
+    if (!IK_ESITLE_ROLLER.includes(rol) && !IK_ESITLE_EMAIL.includes(email)) return res.status(403).json({ ok: false, error: "Eşitleme yetkiniz yok" });
+    const sonuc = await yemekKartBagla();
+    const donem = String(req.query.donem || "").trim() || ymdYerel(new Date()).slice(0, 7);
+    const kadro = await yemekKadroSatirlari(req, donem, "kadro");
+    const eksik = kadro.liste.filter(r => r.kart_eksik).map(r => `${r.ad_soyad}${r.kart ? " (kart no yok)" : " (kart kaydı yok)"}`);
+    const tutarsiz = kadro.liste.filter(r => !r.kart_eksik && r.tutar_tanimsiz).map(r => r.ad_soyad);
+    res.json({ ok: true, ...sonuc, kart_eksik: eksik, tutar_tanimsiz: tutarsiz,
+      ozet: `${sonuc.baglanan.length} kart personele bağlandı, ${sonuc.zaten.length} zaten bağlı, ${sonuc.kontrol.length} kontrol, ${sonuc.eslesmeyen.length} personelsiz kart; güncel kadroda kart bilgisi eksik ${eksik.length}, tutar tanımsız ${tutarsiz.length}` });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.post("/hr/yemek-kartlari", async (req, res) => {
   try {
     await ensureYemekKartiTables();
-    const { ad_soyad, kart_no, aylik_tutar, firma } = req.body;
+    const { kart_no, aylik_tutar, firma } = req.body;
+    let { ad_soyad, personel_id } = req.body;
+    // 20.10.2026: personel ID ile bağ — ad yerine kimlik; aynı personele ikinci kart açılmaz (mevcut kart döner)
+    if (personel_id) {
+      const p = await pool.query(`SELECT id, ad_soyad FROM personel WHERE id=$1 AND birlestirildi_personel_id IS NULL`, [Number(personel_id)]);
+      if (!p.rows[0]) return res.status(404).json({ ok: false, error: "Personel bulunamadı" });
+      ad_soyad = p.rows[0].ad_soyad;
+      const mevcut = await pool.query(`SELECT * FROM yemek_kartlari WHERE personel_id=$1`, [p.rows[0].id]);
+      if (mevcut.rows[0]) {
+        const u = await pool.query(`UPDATE yemek_kartlari SET kart_no=COALESCE($1, kart_no), aylik_tutar=COALESCE($2, aylik_tutar) WHERE id=$3 RETURNING *`,
+          [kart_no ? String(kart_no).trim() : null, aylik_tutar === undefined || aylik_tutar === null || aylik_tutar === "" ? null : Number(aylik_tutar), mevcut.rows[0].id]);
+        return res.json({ ok: true, kart: u.rows[0], zaten: true });
+      }
+    }
     if (!String(ad_soyad || "").trim()) return res.status(400).json({ ok: false, error: "Ad soyad zorunlu" });
+    const tutar = aylik_tutar === undefined || aylik_tutar === null || aylik_tutar === "" ? null : Number(aylik_tutar);
+    const bugunF = yemekGiderFirmasi(ymdYerel(new Date()));
     const r = await pool.query(
-      `INSERT INTO yemek_kartlari (ad_soyad, kart_no, aylik_tutar, firma) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [String(ad_soyad).trim().toUpperCase(), kart_no || null, Number(aylik_tutar || 0),
-       String(firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(firma) || guncelMarka("AHY") || "SIMSEK")]);
+      `INSERT INTO yemek_kartlari (ad_soyad, kart_no, aylik_tutar, firma, personel_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [String(ad_soyad).trim().toUpperCase(), kart_no ? String(kart_no).trim() : null, tutar,
+       bugunF || (String(firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(firma) || guncelMarka("AHY") || "SIMSEK")), personel_id ? Number(personel_id) : null]);
     res.json({ ok: true, kart: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -20712,11 +20869,12 @@ app.put("/hr/yemek-kartlari/:id", async (req, res) => {
     await ensureYemekKartiTables();
     const alanlar = [];
     const vals = [];
-    const izinli = { ad_soyad: "text", kart_no: "text", aylik_tutar: "num", firma: "firma", aktif: "bool" };
+    const izinli = { ad_soyad: "text", kart_no: "text", aylik_tutar: "num", firma: "firma", aktif: "bool", personel_id: "pid" };
     for (const [k, tip] of Object.entries(izinli)) {
       if (!(k in req.body)) continue;
       let v = req.body[k];
-      if (tip === "num") v = Number(v || 0);
+      if (tip === "num") v = (v === null || v === "" || v === undefined) ? null : Number(v); // NULL = tutar tanımlanmamış
+      if (tip === "pid") v = v ? Number(v) : null;
       if (tip === "bool") v = !!v;
       if (tip === "firma") v = String(v || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(v) || guncelMarka("AHY") || "SIMSEK");
       if (tip === "text") v = v === null ? null : String(v);
@@ -20745,15 +20903,40 @@ app.post("/hr/yemek-kartlari/:id/ode", async (req, res) => {
   try {
     await ensureYemekKartiTables();
     await ensureCashflowOdemeTable();
-    const { donem, tutar, tarih, firma } = req.body;
+    const { donem, tutar, tarih, firma, odeyen_firma } = req.body;
+    let { dagilim } = req.body;
     if (!donem || !Number(tutar || 0)) return res.status(400).json({ ok: false, error: "Dönem ve tutar zorunlu" });
     const kq = await pool.query(`SELECT * FROM yemek_kartlari WHERE id=$1`, [req.params.id]);
     if (!kq.rows[0]) return res.status(404).json({ ok: false, error: "Kart bulunamadı" });
     const kart = kq.rows[0];
-    const f = String(firma || kart.firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(firma || kart.firma, tarih) || guncelMarka("AHY", tarih) || "SIMSEK");
-    const cfMarka = f === "SIMSEK" ? "ERC" : f; // Şimşek ödemeleri ERC nakit akışında
+    // 20.10.2026: gider firması HAK DÖNEMİNE göre (ödeme gününe göre değil). 01.10.2026+ aylarda AHY yazılmaz;
+    // iki firmaya bölünen ayda (Ekim 2026) dağılım kullanıcıdan gelir ve toplamı tutara eşit olmalı (30/31 ya da
+    // yarı yarıya varsayımı yapılmaz). Ödeyen firma/kasa ayrı tutulur; nakit akışına TEK kayıt düşer.
+    const dilimler = yemekAyDilimleri(donem);
+    let f;
+    if (!dilimler) {
+      f = String(firma || kart.firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(firma || kart.firma, tarih) || guncelMarka("AHY", tarih) || "SIMSEK");
+      dagilim = null;
+    } else {
+      const izinli = dilimler.map(d => d.firma);
+      if (Array.isArray(dagilim) && dagilim.length) {
+        dagilim = dagilim.map(x => ({ firma: String(x.firma || "").toUpperCase(), tutar: Number(x.tutar || 0) })).filter(x => x.tutar > 0);
+        const yabanci = dagilim.find(x => !izinli.includes(x.firma));
+        if (yabanci) return res.status(400).json({ ok: false, error: `${donem} döneminde ${yemekFirmaAd(yabanci.firma)} gideri yazılamaz (kural: ${izinli.map(yemekFirmaAd).join(" / ")})` });
+        const top = dagilim.reduce((a, x) => a + x.tutar, 0);
+        if (Math.abs(top - Number(tutar)) > 0.5) return res.status(400).json({ ok: false, error: `Dağılım toplamı (₺${top}) ödeme tutarına (₺${Number(tutar)}) eşit olmalı` });
+        f = dagilim.length === 1 ? dagilim[0].firma : "KARMA";
+      } else if (izinli.length === 1) { f = izinli[0]; dagilim = null; }
+      else {
+        const istek = String(firma || "").toUpperCase();
+        if (!izinli.includes(istek)) return res.status(400).json({ ok: false, error: `${donem} iki firmayı kapsıyor (${izinli.map(yemekFirmaAd).join(" / ")}) — dağılım tutarlarını girin` });
+        f = istek; dagilim = null;
+      }
+    }
+    const odeyen = String(odeyen_firma || (f === "KARMA" ? "TEKNO" : f) || "").toUpperCase();
+    const cfMarka = odeyen === "SIMSEK" ? "ERC" : odeyen; // Şimşek ödemeleri ERC nakit akışında
     const t = tarih || new Date().toISOString().slice(0, 10);
-    const acik = `${kart.ad_soyad} · yemek kartı`;
+    const acik = `${kart.ad_soyad} · yemek kartı${dagilim ? ` · gider: ${dagilim.map(x => `${yemekFirmaAd(x.firma)} ₺${x.tutar}`).join(" + ")}` : f !== odeyen ? ` · gider ${yemekFirmaAd(f)}` : ""}`;
     const mevcut = await pool.query(`SELECT * FROM yemek_karti_odemeler WHERE kart_id=$1 AND donem=$2`, [req.params.id, donem]);
     let cashflowId = mevcut.rows[0]?.cashflow_id || null;
     if (cashflowId) {
@@ -20766,10 +20949,10 @@ app.post("/hr/yemek-kartlari/:id/ode", async (req, res) => {
       cashflowId = cf.rows[0].id;
     }
     const r = await pool.query(`
-      INSERT INTO yemek_karti_odemeler (kart_id, donem, tutar, tarih, firma, cashflow_id)
-      VALUES ($1,$2,$3,$4,$5,$6)
-      ON CONFLICT (kart_id, donem) DO UPDATE SET tutar=$3, tarih=$4, firma=$5, cashflow_id=$6
-      RETURNING *`, [req.params.id, donem, Number(tutar), t, f, cashflowId]);
+      INSERT INTO yemek_karti_odemeler (kart_id, donem, tutar, tarih, firma, cashflow_id, dagilim, odeyen_firma)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (kart_id, donem) DO UPDATE SET tutar=$3, tarih=$4, firma=$5, cashflow_id=$6, dagilim=$7, odeyen_firma=$8
+      RETURNING *`, [req.params.id, donem, Number(tutar), t, f, cashflowId, dagilim ? JSON.stringify(dagilim) : null, odeyen]);
     res.json({ ok: true, odeme: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -23964,6 +24147,8 @@ const AUTO_MIGRATIONS = [
     }
     console.log("✅ Auto-migrations tamamlandı");
     await ikDonemGecis().catch(e => console.error("[ik-donem-gecis]", e.message));
+    // Yemek kartlarını personel ID'sine bağla (tekrarlanabilir; kart/hak kaydı üretmez)
+    await yemekKartBagla().then(r => { if (r.baglanan.length || r.kontrol.length) console.log(`[yemek-kart-bagla] bağlanan ${r.baglanan.length}, kontrol: ${r.kontrol.join(" | ") || "yok"}`); }).catch(e => console.error("[yemek-kart-bagla]", e.message));
 
     // Finans paneli kullanıcıları — bireysel şifre ile
     const FINANCE_USERS_SEED = [
