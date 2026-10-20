@@ -21041,7 +21041,19 @@ app.put("/hr/yemek-kartlari/hareket/:id", authMiddleware, async (req, res) => {
       kasa: b.kasa ? String(b.kasa).toUpperCase() : h.kasa,
       aciklama: b.aciklama === undefined ? h.aciklama : (String(b.aciklama).trim() || null),
     };
-    if (!(yeni.tutar > 0)) { client.release(); return res.status(400).json({ ok: false, error: "Geçerli bir tutar girin" }); }
+    // Tutar 0 = ödeme hiç yapılmamış, sisteme yanlış girilmiş → kayıt iptal edilir (silinmez), kasa kaydı kaldırılır,
+    // geçmişe eski tutar → 0 yazılır. Gerçek para iadesi değildir.
+    if (yeni.tutar === 0 || (b.tutar !== undefined && Number(b.tutar) === 0)) {
+      await client.query("BEGIN");
+      const r0 = await client.query(`UPDATE yemek_odeme_hareket SET iptal_at=now(), iptal_by=$2, iptal_neden=$3 WHERE id=$1 AND iptal_at IS NULL RETURNING *`, [h.id, email, `Düzeltme: ödeme yapılmamış (0) — ${gerekce}`]);
+      if (!r0.rows[0]) { await client.query("ROLLBACK"); client.release(); return res.status(409).json({ ok: false, error: "Hareket zaten iptal edilmiş" }); }
+      if (h.cashflow_id) await client.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [h.cashflow_id]);
+      await client.query(`INSERT INTO yemek_odeme_duzeltme_log (hareket_id, eski, yeni, gerekce, kullanici) VALUES ($1,$2,$3,$4,$5)`,
+        [h.id, JSON.stringify({ tutar: Number(h.tutar), tarih: ymdYerel(h.tarih), yontem: h.yontem, odeyen_firma: h.odeyen_firma, kasa: h.kasa, aciklama: h.aciklama, dagilim: h.dagilim }), JSON.stringify({ tutar: 0, iptal: true }), gerekce, email]);
+      await client.query("COMMIT"); client.release();
+      return res.json({ ok: true, degisiklik: true, iptal: true, hareket: r0.rows[0], eski: { tutar: Number(h.tutar) }, yeni: { tutar: 0 } });
+    }
+    if (!(yeni.tutar > 0)) { client.release(); return res.status(400).json({ ok: false, error: "Geçerli bir tutar girin (0 = ödeme yapılmadı, kayıt iptal edilir)" }); }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(yeni.tarih)) { client.release(); return res.status(400).json({ ok: false, error: "Geçerli bir ödeme tarihi girin" }); }
     if (!["NAKIT", "KART"].includes(yeni.yontem)) { client.release(); return res.status(400).json({ ok: false, error: "Ödeme yöntemi geçersiz" }); }
     if (yeni.yontem === "KART" && !String(h.kart_no || "").trim()) { client.release(); return res.status(400).json({ ok: false, error: "Kart yüklemesi için kart numarası gerekli" }); }

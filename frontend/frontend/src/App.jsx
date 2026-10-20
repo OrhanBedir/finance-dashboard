@@ -18928,7 +18928,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               const asiyor = r.hak != null && yeniToplam > r.hak + 0.5;
               const kartYok = f.yontem === "KART" && !String(r.kart?.kart_no || "").trim();
               const degisti = yeniTutar !== Number(h.tutar) || f.tarih !== h.tarih || f.yontem !== h.yontem || f.odeyen !== (h.odeyen_firma || "TEKNO") || f.kasa !== (h.kasa || "KASA") || (f.aciklama || "") !== (h.aciklama || "") || !!f.dagilim;
-              const ok = !m.busy && !!m.gerekce.trim() && yeniTutar > 0 && !asiyor && !kartYok && degisti && !!f.tarih;
+              const sifir = !f.dagilim && f.tutar !== "" && yeniTutar === 0; // ödeme hiç yapılmamış → kayıt iptal
+              const ok = !m.busy && !!m.gerekce.trim() && (sifir || (yeniTutar > 0 && !asiyor && !kartYok && degisti && !!f.tarih));
               const setF = (k, v) => setYemekDuzeltModal(x => ({ ...x, form: { ...x.form, [k]: v } }));
               const btnF = (v, l, k) => <button key={v} type="button" onClick={() => setF(k, v)} style={{ flex:1, padding:"8px", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer", border:`1.5px solid ${f[k]===v?"#1e3a5f":"#e5e7eb"}`, background: f[k]===v?"#1e3a5f":"#fff", color: f[k]===v?"#fff":"#334155" }}>{l}</button>;
               const lbl = { fontSize:"11.5px", fontWeight:700, color:"#475569", display:"block", marginBottom:"4px" };
@@ -18966,7 +18967,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     </div>
                     <div><span style={lbl}>Açıklama <span style={{ fontWeight:500, color:"#94a3b8" }}>— tutarı değiştirmez</span></span><input value={f.aciklama} onChange={e => setF("aciklama", e.target.value)} style={inp} /></div>
                     <div><span style={lbl}>Düzeltme gerekçesi *</span><input value={m.gerekce} onChange={e => setYemekDuzeltModal(x => ({ ...x, gerekce: e.target.value }))} placeholder="Örn. gerçekte 5.000 ödendi, sisteme yanlışlıkla 10.000 girildi" style={inp} /></div>
-                    <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"9px 12px", fontSize:"12.5px", color:"#0f172a" }}>
+                    <div style={{ background: sifir ? "#fff7ed" : "#f8fafc", border:`1px solid ${sifir ? "#fed7aa" : "#e2e8f0"}`, borderRadius:"10px", padding:"9px 12px", fontSize:"12.5px", color:"#0f172a" }}>
+                      {sifir && <div style={{ fontWeight:800, color:"#9a3412", marginBottom:"4px" }}>Tutar 0: ödeme hiç yapılmamış → bu kayıt iptal edilir (silinmez), bağlı kasa kaydı kaldırılır, eski tutar geçmişte kalır.</div>}
                       <div>Eski tutar <b>{P(h.tutar)}</b> → yeni tutar <b>{P(yeniTutar)}</b></div>
                       <div>Dönem toplam ödeme: {P(r.odenen_toplam)} → <b>{P(yeniToplam)}</b> · hak {r.hak != null ? P(r.hak) : "—"} · kalan {yeniKalan != null ? P(yeniKalan) : "—"} → <b>{durumSonra}</b></div>
                       <div style={{ color:"#64748b", fontSize:"11px", marginTop:"3px" }}>Bağlı nakit akışı kaydı aynı işlemde {P(yeniTutar)} olarak güncellenir; eski değer geçmişte saklanır; ikinci ödeme ya da iade oluşmaz.</div>
@@ -18978,14 +18980,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       if (!ok) return;
                       setYemekDuzeltModal(x => ({ ...x, busy: true }));
                       try {
-                        const body = { tutar: yeniTutar, tarih: f.tarih, yontem: f.yontem, odeyen_firma: f.odeyen, kasa: f.kasa, aciklama: f.aciklama, gerekce: m.gerekce.trim(),
+                        const body = { tutar: sifir ? 0 : yeniTutar, tarih: f.tarih, yontem: f.yontem, odeyen_firma: f.odeyen, kasa: f.kasa, aciklama: f.aciklama, gerekce: m.gerekce.trim(),
                           dagilim: f.dagilim ? Object.entries(f.dagilim).map(([firma, t]) => ({ firma, tutar: tutarSayi(t) || 0 })) : undefined };
                         const rr = await fetch(`${API_BASE}/hr/yemek-kartlari/hareket/${h.id}`, { method:"PUT", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify(body) });
                         const d = await rr.json().catch(() => ({}));
                         if (!rr.ok || !d.ok) throw new Error(d.error || "Düzeltilemedi");
                         setYemekDuzeltModal(null); loadYemek();
                       } catch (e) { setYemekDuzeltModal(x => ({ ...x, busy: false })); alert(e.message); }
-                    }} style={{ padding:"9px 18px", background: ok ? "#9a3412" : "#9ca3af", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>{m.busy ? "Kaydediliyor…" : "Düzeltmeyi Kaydet"}</button>
+                    }} style={{ padding:"9px 18px", background: ok ? "#9a3412" : "#9ca3af", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>{m.busy ? "Kaydediliyor…" : sifir ? "Ödeme Yapılmadı — Kaydı İptal Et" : "Düzeltmeyi Kaydet"}</button>
                   </div>
                 </div>
               </div>
