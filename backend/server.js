@@ -20729,7 +20729,15 @@ async function ensureYemekKartiTables() {
   // Ödeme düzeltme geçmişi (20.10.2026, Selamettin Sönmez vakası): eski/yeni değerler, gerekçe, kim, ne zaman
   await pool.query(`CREATE TABLE IF NOT EXISTS yemek_odeme_duzeltme_log (
     id SERIAL PRIMARY KEY, hareket_id INTEGER, eski JSONB, yeni JSONB, gerekce TEXT, kullanici TEXT, created_at TIMESTAMP DEFAULT now())`).catch(() => {});
+  // Kayıt bazında işlem geçmişi (20.10.2026): kart oluşturma/güncelleme; kimlik sunucudaki oturumdan (istemciye güvenilmez)
+  await pool.query(`ALTER TABLE yemek_kartlari ADD COLUMN IF NOT EXISTS olusturan TEXT`).catch(() => {});
+  await pool.query(`CREATE TABLE IF NOT EXISTS yemek_islem_log (
+    id SERIAL PRIMARY KEY, kart_id INTEGER, donem TEXT, tip TEXT NOT NULL, eski JSONB, yeni JSONB, aciklama TEXT, kullanici TEXT, created_at TIMESTAMP DEFAULT now())`).catch(() => {});
   _yemekTablolarHazir = true;
+}
+async function yemekIslemLog(db, kartId, donem, tip, eski, yeni, aciklama, kullanici) {
+  await db.query(`INSERT INTO yemek_islem_log (kart_id, donem, tip, eski, yeni, aciklama, kullanici) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [kartId || null, donem || null, tip, eski ? JSON.stringify(eski) : null, yeni ? JSON.stringify(yeni) : null, aciklama || null, kullanici || null]).catch(e => console.error("[yemek-islem-log]", e.message));
 }
 // Dönem ödeme tercihi (öneri): Ekim 2026 ve öncesi NAKIT, Kasım 2026'dan itibaren KART; kullanıcı değiştirebilir,
 // personelin kart kaydını ve eski ödemeleri değiştirmez — yalnız ödeme penceresinin varsayılanıdır
@@ -21160,6 +21168,69 @@ app.put("/hr/yemek-kartlari/donem-tercih", authMiddleware, async (req, res) => {
     res.json({ ok: true, tercih: { yontem, kaynak: "kullanici" } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// ── Kayıt bazında işlem geçmişi (20.10.2026): oluşturma, kart güncelleme, hak değişikliği, ödeme kaydı, ödeme
+//    düzeltmesi, iptal — en yeniden eskiye. Kimlik sunucudaki oturum kayıtlarından; eski kayıtlarda kullanıcı
+//    bilinmiyorsa açıkça belirtilir (mevcut kullanıcı atanmaz). Görüntüleme yetkisi: firma kapsamı + rol.
+app.get("/hr/yemek-kartlari/:id/gecmis", authMiddleware, async (req, res) => {
+  try {
+    await ensureYemekKartiTables();
+    const kq = await pool.query(`SELECT k.*, p.ad_soyad AS personel_ad, p.marka AS personel_marka FROM yemek_kartlari k LEFT JOIN personel p ON p.id = k.personel_id WHERE k.id=$1`, [req.params.id]);
+    const kart = kq.rows[0];
+    if (!kart) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    const k = altMarkaKapsam(req);
+    if (k && !k.bordro.includes(String(kart.personel_marka || kart.firma || "ERC").toUpperCase())) return res.status(403).json({ ok: false, error: "Bu kaydı görüntüleme yetkiniz yok" });
+    const rol = String(req.user?.role || "").toLowerCase(), email = String(req.user?.email || "").toLowerCase();
+    if (!IK_ESITLE_ROLLER.includes(rol) && !IK_ESITLE_EMAIL.includes(email) && !["rollout_mudur", "bolge_mudur", "pm"].includes(rol)) return res.status(403).json({ ok: false, error: "İşlem geçmişini görüntüleme yetkiniz yok" });
+    const donem = String(req.query.donem || "").trim() || null;
+    const [har, dz, hak, islem, eski] = await Promise.all([
+      pool.query(`SELECT * FROM yemek_odeme_hareket WHERE kart_id=$1 ${donem ? "AND donem=$2" : ""} ORDER BY id`, donem ? [kart.id, donem] : [kart.id]),
+      pool.query(`SELECT l.* FROM yemek_odeme_duzeltme_log l JOIN yemek_odeme_hareket h ON h.id = l.hareket_id WHERE h.kart_id=$1 ${donem ? "AND h.donem=$2" : ""} ORDER BY l.id`, donem ? [kart.id, donem] : [kart.id]),
+      pool.query(`SELECT * FROM yemek_donem_hak_log WHERE kart_id=$1 ${donem ? "AND donem=$2" : ""} ORDER BY id`, donem ? [kart.id, donem] : [kart.id]),
+      pool.query(`SELECT * FROM yemek_islem_log WHERE kart_id=$1 ${donem ? "AND (donem=$2 OR donem IS NULL)" : ""} ORDER BY id`, donem ? [kart.id, donem] : [kart.id]),
+      pool.query(`SELECT * FROM yemek_karti_odemeler WHERE kart_id=$1 ${donem ? "AND donem=$2" : ""} ORDER BY id`, donem ? [kart.id, donem] : [kart.id]),
+    ]);
+    // Kullanıcı adı eşlemesi: e-posta → ad soyad (users); sistem / veri aktarımı ayrı
+    const mailler = new Set();
+    const topla = (v) => { if (v) mailler.add(String(v).toLowerCase()); };
+    har.rows.forEach(h => { topla(h.created_by); topla(h.iptal_by); }); dz.rows.forEach(l => topla(l.kullanici)); hak.rows.forEach(l => topla(l.kullanici)); islem.rows.forEach(l => topla(l.kullanici)); topla(kart.olusturan);
+    const users = mailler.size ? await pool.query(`SELECT LOWER(email) AS email, name FROM users WHERE LOWER(email) = ANY($1::text[])`, [[...mailler]]) : { rows: [] };
+    const adMap = new Map(users.rows.map(u => [u.email, u.name]));
+    const kim = (v) => {
+      const e = String(v || "").toLowerCase().trim();
+      if (!e) return { ad: "Eski kayıt — kullanıcı bilgisi bulunmuyor", hesap: null, tip: "bilinmiyor" };
+      if (e === "sistem") return { ad: "Sistem", hesap: null, tip: "sistem" };
+      if (e.startsWith("gecis") || e === "veri_aktarimi") return { ad: "Veri aktarımı", hesap: null, tip: "aktarim" };
+      return { ad: adMap.get(e) || e, hesap: e, tip: "kullanici" };
+    };
+    const para = (v) => v === null || v === undefined ? "—" : "₺" + Number(v).toLocaleString("tr-TR");
+    const olaylar = [];
+    // Kart/hak kaydı oluşturma (log varsa ondan; yoksa created_at ile, kullanıcı bilinmiyor)
+    const olusturmaLog = islem.rows.find(l => l.tip === "OLUSTURMA");
+    if (!olusturmaLog) olaylar.push({ zaman: kart.created_at, tip: "OLUSTURMA", baslik: "Hak/kart kaydı oluşturuldu", detay: [`Standart tutar: ${para(kart.aylik_tutar)}`, kart.kart_no ? `Kart no: ${kart.kart_no}` : "Kart no: —"], kim: kim(kart.olusturan) });
+    islem.rows.forEach(l => olaylar.push({ zaman: l.created_at, tip: l.tip, baslik: l.tip === "OLUSTURMA" ? "Hak/kart kaydı oluşturuldu" : "Kart/hak bilgisi güncellendi",
+      detay: l.tip === "OLUSTURMA" ? [`Standart tutar: ${para(l.yeni?.aylik_tutar)}`, `Kart no: ${l.yeni?.kart_no || "—"}`]
+        : Object.keys(l.yeni || {}).map(f => `${({ kart_no: "Kart no", aylik_tutar: "Standart tutar", firma: "Firma", aktif: "Aktif", personel_id: "Personel bağı" })[f] || f}: ${f === "aylik_tutar" ? para(l.eski?.[f]) : (l.eski?.[f] ?? "—")} → ${f === "aylik_tutar" ? para(l.yeni?.[f]) : (l.yeni?.[f] ?? "—")}`),
+      gerekce: l.aciklama, kim: kim(l.kullanici) }));
+    hak.rows.forEach(l => olaylar.push({ zaman: l.created_at, tip: "HAK", baslik: `Dönem hakkı değişti (${l.donem})`, detay: [`${para(l.onceki_tutar)} → ${l.yeni_tutar === null ? "standart" : para(l.yeni_tutar)}`], gerekce: [YEMEK_GEREKCE_AD[l.gerekce] || l.gerekce, l.aciklama].filter(Boolean).join(" — "), kim: kim(l.kullanici) }));
+    har.rows.forEach(h => {
+      olaylar.push({ zaman: h.created_at, tip: "ODEME", baslik: `Ödeme kaydı (${h.donem})`, hareket_id: h.id,
+        detay: [`${para(h.tutar)} · ${YEMEK_YONTEM_AD[h.yontem] || h.yontem} · ödeme tarihi ${ymdYerel(h.tarih).split("-").reverse().join(".")}`, `Ödeyen firma: ${yemekFirmaAd(h.odeyen_firma)} · ${NAKIT_YONTEM_AD[h.kasa] || h.kasa || "—"}`,
+          ...(Array.isArray(h.dagilim) && h.dagilim.length ? [`Gider dağılımı: ${h.dagilim.map(x => `${yemekFirmaAd(x.firma)} ${para(x.tutar)}`).join(" + ")}`] : []), ...(h.aciklama ? [`Açıklama: ${h.aciklama}`] : [])], kim: kim(h.created_by) });
+      if (h.iptal_at && !dz.rows.some(l => l.hareket_id === h.id && l.yeni?.iptal)) olaylar.push({ zaman: h.iptal_at, tip: "IPTAL", baslik: `Ödeme iptal edildi (${para(h.tutar)})`, hareket_id: h.id, detay: ["Bağlı nakit akışı kaydı kaldırıldı"], gerekce: h.iptal_neden, kim: kim(h.iptal_by) });
+    });
+    dz.rows.forEach(l => {
+      const e = l.eski || {}, y = l.yeni || {};
+      const alan = { tutar: "Tutar", tarih: "Ödeme tarihi", yontem: "Yöntem", odeyen_firma: "Ödeyen firma", kasa: "Kasa/hesap", aciklama: "Açıklama" };
+      const fark = y.iptal ? [`Ödeme tutarı ${para(e.tutar)} → ₺0 (ödeme yapılmamış — kayıt iptal edildi)`]
+        : Object.keys(alan).filter(f => String(e[f] ?? "") !== String(y[f] ?? "")).map(f => `${alan[f]}: ${f === "tutar" ? para(e[f]) : (e[f] ?? "—")} → ${f === "tutar" ? para(y[f]) : (y[f] ?? "—")}`);
+      if (JSON.stringify(e.dagilim || null) !== JSON.stringify(y.dagilim || null) && !y.iptal) fark.push(`Gider dağılımı: ${(e.dagilim || []).map(x => `${yemekFirmaAd(x.firma)} ${para(x.tutar)}`).join(" + ") || "—"} → ${(y.dagilim || []).map(x => `${yemekFirmaAd(x.firma)} ${para(x.tutar)}`).join(" + ") || "—"}`);
+      olaylar.push({ zaman: l.created_at, tip: y.iptal ? "IPTAL" : "DUZELTME", baslik: y.iptal ? "Ödeme kaydı iptal edildi (düzeltme: ₺0)" : "Ödeme düzeltildi", hareket_id: l.hareket_id, detay: fark, gerekce: l.gerekce, kim: kim(l.kullanici) });
+    });
+    eski.rows.forEach(o => olaylar.push({ zaman: o.created_at, tip: "ODEME", baslik: `Ödeme kaydı — eski sistem (${o.donem})`, detay: [`${para(o.tutar)} · yöntem belirsiz · ödeme tarihi ${ymdYerel(o.tarih).split("-").reverse().join(".")}`, `Firma: ${yemekFirmaAd(o.firma)}`], kim: kim(null) }));
+    olaylar.sort((a, b) => new Date(b.zaman) - new Date(a.zaman));
+    res.json({ ok: true, kart: { id: kart.id, ad_soyad: kart.personel_ad || kart.ad_soyad, personel_id: kart.personel_id, kart_no: kart.kart_no, aylik_tutar: kart.aylik_tutar }, donem, olaylar });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 // Kadroyu eşitle: kartları personel ID'sine bağlar, eksikleri ve kontrol gerektirenleri raporlar; kart/hak kaydı ÜRETMEZ
 app.post("/hr/yemek-kartlari/esitle", authMiddleware, async (req, res) => {
   try {
@@ -21189,16 +21260,21 @@ app.post("/hr/yemek-kartlari", async (req, res) => {
       if (mevcut.rows[0]) {
         const u = await pool.query(`UPDATE yemek_kartlari SET kart_no=COALESCE($1, kart_no), aylik_tutar=COALESCE($2, aylik_tutar) WHERE id=$3 RETURNING *`,
           [kart_no ? String(kart_no).trim() : null, aylik_tutar === undefined || aylik_tutar === null || aylik_tutar === "" ? null : Number(aylik_tutar), mevcut.rows[0].id]);
+        const e0 = mevcut.rows[0], y0 = u.rows[0];
+        if (e0.kart_no !== y0.kart_no || String(e0.aylik_tutar) !== String(y0.aylik_tutar))
+          await yemekIslemLog(pool, y0.id, null, "KART_GUNCELLEME", { kart_no: e0.kart_no, aylik_tutar: e0.aylik_tutar }, { kart_no: y0.kart_no, aylik_tutar: y0.aylik_tutar }, null, String(optionalAuth(req)?.email || "").toLowerCase() || null);
         return res.json({ ok: true, kart: u.rows[0], zaten: true });
       }
     }
     if (!String(ad_soyad || "").trim()) return res.status(400).json({ ok: false, error: "Ad soyad zorunlu" });
     const tutar = aylik_tutar === undefined || aylik_tutar === null || aylik_tutar === "" ? null : Number(aylik_tutar);
     const bugunF = yemekGiderFirmasi(ymdYerel(new Date()));
+    const kullanici = String(optionalAuth(req)?.email || "").toLowerCase() || null;
     const r = await pool.query(
-      `INSERT INTO yemek_kartlari (ad_soyad, kart_no, aylik_tutar, firma, personel_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      `INSERT INTO yemek_kartlari (ad_soyad, kart_no, aylik_tutar, firma, personel_id, olusturan) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [String(ad_soyad).trim().toUpperCase(), kart_no ? String(kart_no).trim() : null, tutar,
-       bugunF || (String(firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(firma) || guncelMarka("AHY") || "SIMSEK")), personel_id ? Number(personel_id) : null]);
+       bugunF || (String(firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(firma) || guncelMarka("AHY") || "SIMSEK")), personel_id ? Number(personel_id) : null, kullanici]);
+    await yemekIslemLog(pool, r.rows[0].id, null, "OLUSTURMA", null, { kart_no: r.rows[0].kart_no, aylik_tutar: r.rows[0].aylik_tutar, personel_id: r.rows[0].personel_id }, null, kullanici);
     res.json({ ok: true, kart: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -21221,7 +21297,11 @@ app.put("/hr/yemek-kartlari/:id", async (req, res) => {
     }
     if (!alanlar.length) return res.status(400).json({ ok: false, error: "Güncellenecek alan yok" });
     vals.push(req.params.id);
+    const eskiK = await pool.query(`SELECT kart_no, aylik_tutar, firma, aktif, personel_id FROM yemek_kartlari WHERE id=$1`, [req.params.id]);
     const r = await pool.query(`UPDATE yemek_kartlari SET ${alanlar.join(", ")} WHERE id=$${vals.length} RETURNING *`, vals);
+    const yk = r.rows[0] || {}, ek = eskiK.rows[0] || {};
+    const degisen = Object.keys(ek).filter(k => String(ek[k]) !== String(yk[k]));
+    if (degisen.length) await yemekIslemLog(pool, Number(req.params.id), null, "KART_GUNCELLEME", Object.fromEntries(degisen.map(k => [k, ek[k]])), Object.fromEntries(degisen.map(k => [k, yk[k]])), null, String(optionalAuth(req)?.email || "").toLowerCase() || null);
     res.json({ ok: true, kart: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

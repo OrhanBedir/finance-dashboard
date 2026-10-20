@@ -17623,7 +17623,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [yemekEsitleBusy, setYemekEsitleBusy] = useState(false);
   const [yemekOdeBusy, setYemekOdeBusy] = useState(false);
   const [yemekHakModal, setYemekHakModal] = useState(null); // { r, tutar, gerekce, aciklama, busy }
-  const [yemekDuzeltModal, setYemekDuzeltModal] = useState(null); // { r, h, form, gerekce, busy }
+  const [yemekDuzeltModal, setYemekDuzeltModal] = useState(null); // { r, h, form, gerekce, busy, hata }
+  const [yemekGecmis, setYemekGecmis] = useState(null);   // { r, yukleniyor, hata, kart, olaylar }
+  const [yemekMenu, setYemekMenu] = useState(null);       // açık ⋯ menüsünün satır anahtarı
   const yemekMobil = typeof window !== "undefined" && window.innerWidth < 768;
   const loadYemek = async () => {
     try {
@@ -17635,7 +17637,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   useEffect(() => { loadYemek(); }, [puantajAy, yemekGorunum]);
   const yemekKartGuncelle = async (id, patch) => {
     try {
-      await fetch(`${API_BASE}/hr/yemek-kartlari/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      await fetch(`${API_BASE}/hr/yemek-kartlari/${id}`, { method: "PUT", headers: { "Content-Type": "application/json", ...AUTH_H() }, body: JSON.stringify(patch) });
       loadYemek();
     } catch {}
   };
@@ -18638,9 +18640,30 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               {r.kart && _esitleYetkili && aktifHar.length > 0 && <button onClick={() => aktifHar.length === 1 ? duzeltAc(r, aktifHar[0]) : (setYemekDagilimAcik(p => new Set(p).add(key)))} title={aktifHar.length > 1 ? "Birden fazla ödeme var — detaydan düzeltilecek işlemi seçin" : "Yanlış girilmiş ödeme kaydını düzelt"} style={btnS("#fff7ed", "#9a3412")}>✏️ Ödemeyi Düzelt</button>}
               {r.kart && _esitleYetkili && <button onClick={() => setYemekHakModal({ r, tutar: r.hak != null ? String(r.hak).replace(".", ",") : "", gerekce: "", aciklama: "", busy: false })} style={btnS("#f1f5f9", "#334155")}>Hakkı Düzenle</button>}
               <button onClick={() => toggleDetay(key)} style={btnS("#fff", "#1e3a5f", { border:"1.5px solid #cbd5e1" })}>{yemekDagilimAcik.has(key) ? "Detayı Kapat" : "Detay"}</button>
+              <span style={{ position:"relative" }}>
+                <button type="button" aria-label="Diğer işlemler" aria-haspopup="menu" aria-expanded={yemekMenu === key} onClick={() => setYemekMenu(m => m === key ? null : key)} style={btnS("#fff", "#334155", { border:"1.5px solid #cbd5e1", padding:"5px 9px", fontSize:"14px", lineHeight:1 })}>⋯</button>
+                {yemekMenu === key && (
+                  <div role="menu" style={{ position:"absolute", right:0, top:"calc(100% + 4px)", zIndex:50, background:"#fff", border:"1px solid #e2e8f0", borderRadius:"10px", boxShadow:"0 10px 30px rgba(0,0,0,.15)", minWidth:"190px", padding:"4px" }}>
+                    <button role="menuitem" onClick={() => { setYemekMenu(null); gecmisAc(r); }} style={{ display:"block", width:"100%", textAlign:"left", padding:"8px 10px", background:"none", border:"none", borderRadius:"8px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", color:"#0f172a" }}>🕘 İşlem Geçmişi</button>
+                    <button role="menuitem" onClick={() => { setYemekMenu(null); toggleDetay(key); }} style={{ display:"block", width:"100%", textAlign:"left", padding:"8px 10px", background:"none", border:"none", borderRadius:"8px", fontSize:"12.5px", fontWeight:700, cursor:"pointer", color:"#0f172a" }}>{yemekDagilimAcik.has(key) ? "Detayı Kapat" : "Detay"}</button>
+                  </div>
+                )}
+              </span>
             </div>
           );
         };
+        // İşlem geçmişi (20.10.2026): kayıt bazında, sunucudan; kim/hesap/saat (TR) + önceki → sonraki değerler + gerekçe
+        const gecmisAc = async (r) => {
+          if (!r.kart) { setYemekGecmis({ r, yukleniyor: false, hata: "Bu personel için hak/kart kaydı yok — henüz işlem geçmişi oluşmadı", olaylar: [] }); return; }
+          setYemekGecmis({ r, yukleniyor: true, olaylar: [] });
+          try {
+            const rr = await fetch(`${API_BASE}/hr/yemek-kartlari/${r.kart.id}/gecmis?donem=${donem}`, { headers: AUTH_H() });
+            const d = await rr.json().catch(() => ({}));
+            if (!rr.ok || !d.ok) throw new Error(d.error || "Geçmiş alınamadı");
+            setYemekGecmis({ r, yukleniyor: false, kart: d.kart, olaylar: d.olaylar || [] });
+          } catch (e) { setYemekGecmis({ r, yukleniyor: false, hata: e.message, olaylar: [] }); }
+        };
+        const trZaman = (t) => t ? new Date(t).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
         const detayIcerik = (r) => {
           const firmalar = satirFirma(r); const har = (r.hareketler || []);
           return (
@@ -18653,7 +18676,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 {(r.hak_araliklari||[]).length > 0 && <span><b>Hak aralığı:</b> {(r.hak_araliklari||[]).map(a => `${fmtTar(a.bas)}–${fmtTar(a.bit)}`).join(", ")}</span>}
               </div>
               {(r.hak_gecmisi||[]).length > 0 && <div><b>Dönem hakkı değişiklikleri:</b> {r.hak_gecmisi.map((l, i) => <span key={i} style={{ marginLeft:"6px" }}>{l.onceki != null ? P(l.onceki) : "—"} → {l.yeni != null ? P(l.yeni) : "standart"} ({GEREKCE_AD[l.gerekce] || l.gerekce}{l.aciklama ? `: ${l.aciklama}` : ""}) · {l.kullanici} · {fmtTar(l.tarih)}</span>)}</div>}
-              <div><b>Ödeme hareketleri:</b> {har.length === 0 && <span style={{ color:"#94a3b8" }}>yok</span>}</div>
+              <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}><b>Ödeme hareketleri:</b> {har.length === 0 && <span style={{ color:"#94a3b8" }}>yok</span>}<button onClick={() => gecmisAc(r)} style={btnS("#eef2f7", "#1e3a5f", { marginLeft:"auto", padding:"3px 9px", fontSize:"11.5px" })}>🕘 İşlem Geçmişi</button></div>
               {har.map(h => (
                 <div key={h.kaynak + h.id} style={{ display:"flex", gap:"10px", alignItems:"center", padding:"4px 0", borderTop:"1px dashed #e2e8f0", textDecoration: h.iptal ? "line-through" : "none", color: h.iptal ? "#94a3b8" : "#334155", flexWrap:"wrap" }}>
                   <span style={{ fontWeight:700, minWidth:"80px" }}>{P(h.tutar)}</span>
@@ -18769,7 +18792,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   <tbody>
                     {liste.map(r => { const key = r.personel_id || `k${r.kart?.id}`; const acik = yemekDagilimAcik.has(key); return (
                       <React.Fragment key={key}>
-                        <tr>
+                        <tr onContextMenu={e => { e.preventDefault(); setYemekMenu(key); }}>
                           <td style={{ ...tdY, position:"sticky", left:0, zIndex:2, background:"#fff", boxShadow:"1px 0 0 #f1f5f9", maxWidth:"300px" }}>{adHucresi(r)}</td>
                           <td style={{ ...tdY, textAlign:"right", fontWeight:700, whiteSpace:"nowrap" }}>{r.hak != null ? P(r.hak) : <span style={{ color:"#b45309", fontWeight:600 }}>tanımsız</span>}</td>
                           <td style={{ ...tdY, textAlign:"right", fontWeight:700, whiteSpace:"nowrap", color: r.odenen_toplam > 0 ? "#166534" : "#9ca3af" }}>{r.odenen_toplam > 0 ? P(r.odenen_toplam) : "—"}{r.odenen_toplam > 0 && r.nakit_odenen > 0 && r.kart_odenen > 0 && <div style={{ fontSize:"10.5px", color:"#64748b", fontWeight:500 }}>nakit {P(r.nakit_odenen)} · kart {P(r.kart_odenen)}</div>}</td>
@@ -18937,9 +18960,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               const durumSonra = r.hak == null ? "—" : yeniToplam <= 0 ? "Ödenmedi" : yeniToplam > r.hak + 0.5 ? "Fazla ödeme" : yeniToplam + 0.5 >= r.hak ? "Ödendi · Kalan ₺0" : `Kısmi ödendi · Alacaklı ${P(r.hak - yeniToplam)}`;
               return (
               <div onClick={() => !m.busy && setYemekDuzeltModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
-                <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(540px, 94vw)", padding:"22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)", maxHeight:"92vh", overflowY:"auto" }}>
-                  <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"3px" }}>✏️ Ödemeyi Düzelt</div>
-                  <div style={{ fontSize:"12.5px", color:"#64748b", marginBottom:"10px" }}>{r.ad_soyad} · {donemAd} · kayıtlı ödeme {P(h.tutar)} · {yontemAd(h.yontem)} · {fmtTar(h.tarih)}</div>
+                <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(540px, 94vw)", padding:"0 22px 22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)", maxHeight:"92vh", overflowY:"auto" }}>
+                  <div style={{ position:"sticky", top:0, zIndex:5, background:"#fff", padding:"18px 0 8px", borderBottom:"1px solid #f1f5f9", marginBottom:"10px" }}>
+                    <div style={{ fontWeight:800, fontSize:"16px", marginBottom:"3px" }}>✏️ Ödemeyi Düzelt — {r.ad_soyad}</div>
+                    <div style={{ fontSize:"12.5px", color:"#64748b" }}>{donemAd} · kayıtlı ödeme {P(h.tutar)} · {yontemAd(h.yontem)} · {fmtTar(h.tarih)}</div>
+                  </div>
                   <div style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:"9px", padding:"8px 10px", fontSize:"12px", color:"#9a3412", marginBottom:"10px" }}>Bu işlem <b>kayıt düzeltmesidir</b> (gerçekte ödenen ile sisteme girilen farklıysa). Para gerçekten ödendiyse ve geri alınacaksa tutarı düşürmeyin — ayrı iade/mahsup akışını kullanın; kasa girişi burada oluşturulmaz. Dönem hakkı bu işlemle değişmez.</div>
                   <div style={{ display:"grid", gap:"10px" }}>
                     <div><span style={lbl}>Ödeme yöntemi</span><div style={{ display:"flex", gap:"6px" }}>{btnF("NAKIT", "💵 Nakit / Elden", "yontem")}{btnF("KART", "💳 Kart yüklemesi", "yontem")}</div>{kartYok && <div style={{ fontSize:"11.5px", color:"#b45309", fontWeight:700, marginTop:"4px" }}>Kart yüklemesi için kart numarası gerekli</div>}</div>
@@ -18967,22 +18992,23 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     </div>
                     <div><span style={lbl}>Açıklama <span style={{ fontWeight:500, color:"#94a3b8" }}>— tutarı değiştirmez</span></span><input value={f.aciklama} onChange={e => setF("aciklama", e.target.value)} style={inp} /></div>
                     <div><span style={lbl}>Düzeltme gerekçesi *</span><input value={m.gerekce} onChange={e => setYemekDuzeltModal(x => ({ ...x, gerekce: e.target.value }))} placeholder={sifir ? "Örn. ödeme yapılmadı, sisteme yanlışlıkla girildi" : "Örn. gerçekte 5.000 ödendi, sisteme yanlışlıkla 10.000 girildi"} style={{ ...inp, borderColor: m.gerekce.trim() ? "#e5e7eb" : "#fca5a5", background: m.gerekce.trim() ? "#fff" : "#fff7f7" }} />
-                      {!m.gerekce.trim() && <div style={{ fontSize:"11.5px", color:"#b91c1c", fontWeight:700, marginTop:"4px" }}>Kaydetmek için düzeltme gerekçesi yazın — düğme gerekçe girilince açılır.</div>}</div>
+                      {!m.gerekce.trim() && <div style={{ fontSize:"11.5px", color:"#b91c1c", fontWeight:700, marginTop:"4px" }}>Devam etmek için düzeltme gerekçesini girin.</div>}</div>
                     <div style={{ background: sifir ? "#fff7ed" : "#f8fafc", border:`1px solid ${sifir ? "#fed7aa" : "#e2e8f0"}`, borderRadius:"10px", padding:"9px 12px", fontSize:"12.5px", color:"#0f172a" }}>
-                      {sifir && <div style={{ fontWeight:800, color:"#9a3412", marginBottom:"4px" }}>Tutar 0: ödeme hiç yapılmamış → bu kayıt iptal edilir (silinmez), bağlı kasa kaydı kaldırılır, eski tutar geçmişte kalır.</div>}
+                      {sifir && <div style={{ fontWeight:800, color:"#9a3412", marginBottom:"4px" }}>Tutar 0 = yanlış girilmiş ödeme kaydını iptal etme: ödeme hiç yapılmamış sayılır, kayıt iptal edilir (silinmez), bağlı kasa kaydı kaldırılır, eski tutar işlem geçmişinde kalır.</div>}
                       <div>Eski tutar <b>{P(h.tutar)}</b> → yeni tutar <b>{P(yeniTutar)}</b></div>
                       <div>Dönem toplam ödeme: {P(r.odenen_toplam)} → <b>{P(yeniToplam)}</b> · hak {r.hak != null ? P(r.hak) : "—"} · kalan {yeniKalan != null ? P(yeniKalan) : "—"} → <b>{durumSonra}</b></div>
                       <div style={{ color:"#64748b", fontSize:"11px", marginTop:"3px" }}>Bağlı nakit akışı kaydı aynı işlemde {P(yeniTutar)} olarak güncellenir; eski değer geçmişte saklanır; ikinci ödeme ya da iade oluşmaz.</div>
                     </div>
                   </div>
+                  {m.hata && <div style={{ marginTop:"10px", background:"#fee2e2", color:"#991b1b", borderRadius:"8px", padding:"8px 12px", fontSize:"12.5px", fontWeight:700 }}>Kaydedilemedi: {m.hata} — bilgileriniz korundu, düzeltip yeniden deneyin.</div>}
                   {!ok && !m.busy && <div style={{ marginTop:"10px", fontSize:"12px", color:"#b91c1c", fontWeight:700, textAlign:"right" }}>
-                    {!m.gerekce.trim() ? "Eksik: düzeltme gerekçesi" : kartYok ? "Eksik: kart numarası" : asiyor ? "Toplam ödeme hakkı aşıyor" : !f.tarih ? "Eksik: ödeme tarihi" : !(yeniTutar > 0) && !sifir ? "Eksik: doğru tutar" : !degisti ? "Değişiklik yok" : ""}
+                    {!m.gerekce.trim() ? "Devam etmek için düzeltme gerekçesini girin" : kartYok ? "Eksik: kart numarası" : asiyor ? "Toplam ödeme hakkı aşıyor" : !f.tarih ? "Eksik: ödeme tarihi" : !(yeniTutar > 0) && !sifir ? "Eksik: doğru tutar (boş alan 0 sayılmaz)" : !degisti ? "Değişiklik yok" : ""}
                   </div>}
                   <div style={{ display:"flex", gap:"8px", marginTop:"10px", justifyContent:"flex-end" }}>
                     <button onClick={() => setYemekDuzeltModal(null)} disabled={m.busy} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer", color:"#4b5563" }}>Vazgeç</button>
                     <button disabled={!ok} onClick={async () => {
                       if (!ok) return;
-                      setYemekDuzeltModal(x => ({ ...x, busy: true }));
+                      setYemekDuzeltModal(x => ({ ...x, busy: true, hata: "" }));
                       try {
                         const body = { tutar: sifir ? 0 : yeniTutar, tarih: f.tarih, yontem: f.yontem, odeyen_firma: f.odeyen, kasa: f.kasa, aciklama: f.aciklama, gerekce: m.gerekce.trim(),
                           dagilim: f.dagilim ? Object.entries(f.dagilim).map(([firma, t]) => ({ firma, tutar: tutarSayi(t) || 0 })) : undefined };
@@ -18990,7 +19016,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         const d = await rr.json().catch(() => ({}));
                         if (!rr.ok || !d.ok) throw new Error(d.error || "Düzeltilemedi");
                         setYemekDuzeltModal(null); loadYemek();
-                      } catch (e) { setYemekDuzeltModal(x => ({ ...x, busy: false })); alert(e.message); }
+                      } catch (e) { setYemekDuzeltModal(x => ({ ...x, busy: false, hata: e.message })); }
                     }} style={{ padding:"9px 18px", background: ok ? "#9a3412" : "#9ca3af", color:"#fff", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>{m.busy ? "Kaydediliyor…" : sifir ? "Ödeme Yapılmadı — Kaydı İptal Et" : "Düzeltmeyi Kaydet"}</button>
                   </div>
                 </div>
@@ -19037,6 +19063,50 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               );
             })()}
 
+            {/* İşlem geçmişi paneli (20.10.2026): en yeniden eskiye zaman çizelgesi */}
+            {yemekGecmis && (() => {
+              const g = yemekGecmis; const r = g.r || {};
+              const TIP = { OLUSTURMA: ["Oluşturma", "#dbeafe", "#1e40af"], KART_GUNCELLEME: ["Kart/hak bilgisi", "#f1f5f9", "#475569"], HAK: ["Hak değişikliği", "#ecfdf5", "#065f46"], ODEME: ["Ödeme kaydı", "#dcfce7", "#166534"], DUZELTME: ["Ödeme düzeltmesi", "#fff7ed", "#9a3412"], IPTAL: ["İptal", "#fee2e2", "#991b1b"] };
+              return (
+              <div onClick={() => setYemekGecmis(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2100, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
+                <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"14px", width:"min(640px, 94vw)", padding:"0 22px 22px", boxShadow:"0 25px 60px rgba(0,0,0,0.3)", maxHeight:"92vh", overflowY:"auto" }}>
+                  <div style={{ position:"sticky", top:0, zIndex:5, background:"#fff", padding:"18px 0 10px", borderBottom:"1px solid #f1f5f9", marginBottom:"12px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px" }}>
+                      <div>
+                        <div style={{ fontWeight:800, fontSize:"16px" }}>🕘 İşlem Geçmişi — {r.ad_soyad}</div>
+                        <div style={{ fontSize:"12.5px", color:"#64748b", marginTop:"3px" }}>{donemAd}{g.kart?.kart_no ? ` · kart ${g.kart.kart_no}` : " · kart no —"}{r.hak != null ? ` · hak ${P(r.hak)} · ödenen ${P(r.odenen_toplam)} · kalan ${P(r.kalan)}` : ""}</div>
+                        <div style={{ fontSize:"11px", color:"#94a3b8", marginTop:"2px" }}>Saatler Türkiye saatidir · "işlemi yapan hesap" ile "ödeyen firma / kasa" ayrı bilgilerdir · geçmiş kayıtları değiştirilemez</div>
+                      </div>
+                      <button onClick={() => setYemekGecmis(null)} style={btnS("#f3f4f6", "#4b5563")}>Kapat</button>
+                    </div>
+                  </div>
+                  {g.yukleniyor && <div style={{ color:"#94a3b8", padding:"20px", textAlign:"center" }}>Yükleniyor…</div>}
+                  {g.hata && <div style={{ background:"#fee2e2", color:"#991b1b", borderRadius:"8px", padding:"8px 12px", fontSize:"12.5px", fontWeight:700 }}>{g.hata}</div>}
+                  {!g.yukleniyor && !g.hata && g.olaylar.length === 0 && <div style={{ color:"#94a3b8", padding:"20px", textAlign:"center" }}>Bu dönem için işlem kaydı yok</div>}
+                  <div style={{ display:"grid", gap:"0" }}>
+                    {g.olaylar.map((o, i) => { const t = TIP[o.tip] || [o.tip, "#f1f5f9", "#475569"]; return (
+                      <div key={i} style={{ display:"grid", gridTemplateColumns:"18px 1fr", gap:"10px", padding:"10px 0", borderBottom: i < g.olaylar.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                        <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}><span style={{ width:"10px", height:"10px", borderRadius:"50%", background:t[2], marginTop:"5px" }} />{i < g.olaylar.length - 1 && <span style={{ flex:1, width:"2px", background:"#e2e8f0", marginTop:"4px" }} />}</div>
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+                            <span style={{ background:t[1], color:t[2], padding:"1px 8px", borderRadius:"999px", fontSize:"10.5px", fontWeight:800 }}>{t[0]}</span>
+                            <span style={{ fontWeight:800, fontSize:"13px" }}>{o.baslik}</span>
+                            <span style={{ fontSize:"11.5px", color:"#64748b", marginLeft:"auto" }}>{trZaman(o.zaman)}</span>
+                          </div>
+                          <div style={{ fontSize:"12px", color:"#334155", marginTop:"3px" }}>
+                            <b>{o.kim?.ad}</b>{o.kim?.hesap ? <span style={{ color:"#64748b" }}> · hesap: {o.kim.hesap}</span> : null}{o.kim?.tip === "bilinmiyor" ? <span style={{ color:"#94a3b8" }}> (eski kayıt)</span> : null}
+                          </div>
+                          {(o.detay || []).map((d, j) => <div key={j} style={{ fontSize:"12.5px", color:"#0f172a", marginTop:"2px" }}>{d}</div>)}
+                          {o.gerekce && <div style={{ fontSize:"12px", color:"#9a3412", marginTop:"3px" }}>Gerekçe: {o.gerekce}</div>}
+                        </div>
+                      </div>
+                    ); })}
+                  </div>
+                </div>
+              </div>
+              );
+            })()}
+
             {/* Hak / kart bilgisi penceresi */}
             {yemekKartModal && (
               <div onClick={() => setYemekKartModal(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
@@ -19059,8 +19129,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       if (!yemekKartForm.ad_soyad.trim()) { alert("Personel zorunlu"); return; }
                       const body = { ad_soyad: yemekKartForm.ad_soyad, kart_no: yemekKartForm.kart_no, personel_id: yemekKartForm.personel_id || undefined, aylik_tutar: tutarSayi(yemekKartForm.aylik_tutar) };
                       const rr = yemekKartForm.kart_id
-                        ? await fetch(`${API_BASE}/hr/yemek-kartlari/${yemekKartForm.kart_id}`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ kart_no: body.kart_no, aylik_tutar: body.aylik_tutar, personel_id: yemekKartForm.personel_id }) })
-                        : await fetch(`${API_BASE}/hr/yemek-kartlari`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+                        ? await fetch(`${API_BASE}/hr/yemek-kartlari/${yemekKartForm.kart_id}`, { method:"PUT", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify({ kart_no: body.kart_no, aylik_tutar: body.aylik_tutar, personel_id: yemekKartForm.personel_id }) })
+                        : await fetch(`${API_BASE}/hr/yemek-kartlari`, { method:"POST", headers:{ "Content-Type":"application/json", ...AUTH_H() }, body: JSON.stringify(body) });
                       const d = await rr.json().catch(() => ({}));
                       if (!rr.ok || !d.ok) { alert(d.error || "Kaydedilemedi"); return; }
                       setYemekKartModal(false); loadYemek();
