@@ -21692,9 +21692,9 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
           {viewForm.direktor_not && <div style={{ marginTop:"8px", background:"#d1fae5", borderRadius:"8px", padding:"8px 12px", color:"#065f46", fontSize:"13px" }}>Direktör Notu: {viewForm.direktor_not}</div>}
         </div>
 
-        {/* Kalemler */}
-        <div style={{ ...cardSt, marginBottom:"16px" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+        {/* Kalemler — 20.10.2026: dar ekranda tablo kart içinde yatay kaydırılır (sütunlar kesilmesin) */}
+        <div style={{ ...cardSt, marginBottom:"16px", overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px", minWidth:"760px" }}>
             <thead>
               <tr style={{ background:"#f9fafb" }}>
                 {["Kategori","Tarih","Belge No","Açıklama","Tutar","Fiş","İşlemler"].map(h=>(
