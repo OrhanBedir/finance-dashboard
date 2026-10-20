@@ -16970,26 +16970,75 @@ const ikEksikSql = (net, p = "p") => `
    personel.ise_giris_tarihi / isten_ayrilma_tarihi = GÜNCEL dönem. Yeniden işe girişte eski
    (giriş, çıkış) personel_calisma_donemi'ne arşivlenir; silinmez. Ay hesapları (puantaj özeti,
    kadro listesi, Excel arşivi) o ayla kesişen dönemi kullanır → geçmiş ayların hakedişi değişmez. */
+// 20.10.2026: kapanan dönem, kapandığı andaki görev/firma/bordro/maaş/ekip bilgisiyle saklanır
+// (anlık görüntü) — yeni dönemde değişen bilgiler geçmişi değiştirmez. Aynı çıkış tarihi ikinci kez
+// gelirse kayıt çoğalmaz; yalnız BOŞ olan künye alanları doldurulur (var olan üzerine yazılmaz).
 async function ikDonemArsivle(db, personel, ayrilma, opts = {}) {
   const ayr = ymdYerel(ayrilma);
   if (!ayr) return false;
   let gir = ymdYerel(personel.ise_giris_tarihi) || null;
   if (gir && gir > ayr) gir = null; // güncel giriş zaten yeni dönemin girişi
+  const n = (v) => (v === undefined || v === null || v === "" ? null : Number(v));
   const r = await db.query(
-    `INSERT INTO personel_calisma_donemi (personel_id, ise_giris, isten_ayrilma, kaynak, aciklama, teyit_gerekli)
-     VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (personel_id, isten_ayrilma) DO NOTHING RETURNING id`,
-    [personel.id, gir, ayr, opts.kaynak || "yeniden_giris", opts.aciklama || null, !!opts.teyit || !gir]);
-  return !!r.rows[0];
+    `INSERT INTO personel_calisma_donemi (personel_id, ise_giris, isten_ayrilma, kaynak, aciklama, teyit_gerekli,
+       unvan, bolge, firma_tipi, marka, net_maas, bankadan_gosterilen, elden_verilen, ayrilma_nedeni, ekip_bilgisi, ekip_arac_plaka, olusturan)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+     ON CONFLICT (personel_id, isten_ayrilma) DO UPDATE SET
+       ise_giris = COALESCE(personel_calisma_donemi.ise_giris, EXCLUDED.ise_giris),
+       unvan = COALESCE(personel_calisma_donemi.unvan, EXCLUDED.unvan),
+       bolge = COALESCE(personel_calisma_donemi.bolge, EXCLUDED.bolge),
+       firma_tipi = COALESCE(personel_calisma_donemi.firma_tipi, EXCLUDED.firma_tipi),
+       marka = COALESCE(personel_calisma_donemi.marka, EXCLUDED.marka),
+       net_maas = COALESCE(personel_calisma_donemi.net_maas, EXCLUDED.net_maas),
+       bankadan_gosterilen = COALESCE(personel_calisma_donemi.bankadan_gosterilen, EXCLUDED.bankadan_gosterilen),
+       elden_verilen = COALESCE(personel_calisma_donemi.elden_verilen, EXCLUDED.elden_verilen),
+       ayrilma_nedeni = COALESCE(personel_calisma_donemi.ayrilma_nedeni, EXCLUDED.ayrilma_nedeni),
+       ekip_bilgisi = COALESCE(personel_calisma_donemi.ekip_bilgisi, EXCLUDED.ekip_bilgisi),
+       ekip_arac_plaka = COALESCE(personel_calisma_donemi.ekip_arac_plaka, EXCLUDED.ekip_arac_plaka),
+       olusturan = COALESCE(personel_calisma_donemi.olusturan, EXCLUDED.olusturan)
+     RETURNING id, (xmax = 0) AS yeni`,
+    [personel.id, gir, ayr, opts.kaynak || "yeniden_giris", opts.aciklama || null, !!opts.teyit || !gir,
+     personel.unvan || null, personel.bolge || null, personel.firma_tipi || null, personel.marka ? String(personel.marka).toUpperCase() : null,
+     n(personel.net_maas) || null, n(personel.bankadan_gosterilen) || null, n(personel.elden_verilen) || null,
+     opts.ayrilma_nedeni || null, personel.ekip_bilgisi || null, personel.ekip_arac_plaka || null, opts.olusturan || null]);
+  return !!(r.rows[0] && r.rows[0].yeni);
+}
+/* Veri geçişi (20.10.2026): tek giriş/çıkış alanı dolu, işten AYRILMIŞ (pasif) personelin kapanmış dönemi
+   personel_calisma_donemi'ne taşınır — mevcut bilgilerle (unvan, bölge, firma, bordro, maaş). Tekrar
+   çalıştırılınca ON CONFLICT ile kayıt çoğalmaz. Çıkış tarihi bilinmeyen pasif kayıtlar TAHMİN EDİLMEZ,
+   yalnız loga yazılır. personel'deki güncel giriş/çıkış silinmez (güncel dönemin kaynağı). */
+async function ikDonemGecis() {
+  const r = await pool.query(`SELECT * FROM personel WHERE birlestirildi_personel_id IS NULL AND aktif = false AND isten_ayrilma_tarihi IS NOT NULL`);
+  let yeni = 0;
+  for (const p of r.rows) {
+    const ok = await ikDonemArsivle(pool, p, p.isten_ayrilma_tarihi, { kaynak: "gecis_20261020", aciklama: "Tek giriş/çıkış alanlarından çalışma dönemine taşındı (veri geçişi)", olusturan: "sistem" });
+    if (ok) yeni++;
+  }
+  const eksik = await pool.query(`SELECT id, ad_soyad FROM personel WHERE birlestirildi_personel_id IS NULL AND aktif = false AND isten_ayrilma_tarihi IS NULL AND ise_giris_tarihi IS NOT NULL`);
+  if (yeni || eksik.rows.length)
+    console.log(`[ik-donem-gecis] ${yeni} kapanmış dönem taşındı; çıkış tarihi bilinmeyen pasif kayıt: ${eksik.rows.map(x => `#${x.id} ${x.ad_soyad}`).join(", ") || "yok"}`);
 }
 async function ikDonemleriYukle(ids) {
   const m = new Map();
   if (!ids || !ids.length) return m;
   const r = await pool.query(
-    `SELECT personel_id, to_char(ise_giris,'YYYY-MM-DD') AS ise_giris, to_char(isten_ayrilma,'YYYY-MM-DD') AS isten_ayrilma,
-            kaynak, aciklama, teyit_gerekli
+    `SELECT id, personel_id, to_char(ise_giris,'YYYY-MM-DD') AS ise_giris, to_char(isten_ayrilma,'YYYY-MM-DD') AS isten_ayrilma,
+            kaynak, aciklama, teyit_gerekli, unvan, bolge, firma_tipi, marka, net_maas, bankadan_gosterilen, elden_verilen,
+            ayrilma_nedeni, olusturan, created_at
        FROM personel_calisma_donemi WHERE personel_id = ANY($1::int[]) ORDER BY isten_ayrilma`, [ids]).catch(() => ({ rows: [] }));
   r.rows.forEach(d => { if (!m.has(d.personel_id)) m.set(d.personel_id, []); m.get(d.personel_id).push(d); });
   return m;
+}
+// Aynı ay içinde ayrılıp yeniden başlama (20.10.2026): güncel dönem o ayda başlıyorsa ve aynı ayda kapanmış
+// bir dönem varsa, o kapanmış dönem (kendi maaş künyesiyle) ek segment olarak döner — günler iki kez sayılmaz,
+// aradaki boşluk hakedişe girmez. Künyede maaş yoksa segment "bilgi eksik" sayılır (tahmin yok).
+function ikAyniAyEkDonem(p, arsiv, ayBas, aySon) {
+  const gir = ymdYerel(p.ise_giris_tarihi) || null;
+  if (!gir || gir < ayBas || gir > aySon || !arsiv || !arsiv.length) return null;
+  const a = arsiv.filter(d => d.isten_ayrilma >= ayBas && d.isten_ayrilma < gir).sort((x, y) => (x.isten_ayrilma < y.isten_ayrilma ? 1 : -1))[0];
+  if (!a) return null;
+  return { giris: a.ise_giris, ayrilma: a.isten_ayrilma, net_maas: a.net_maas == null ? null : Number(a.net_maas),
+    bankadan_gosterilen: Number(a.bankadan_gosterilen || 0), elden_verilen: Number(a.elden_verilen || 0) };
 }
 // Ay için geçerli dönem: null → arşiv yok (eski davranış aynen); {giris, ayrilma, arsiv} ya da {disinda:true}
 function ikDonemSec(p, arsiv, ayBas, aySon) {
@@ -17059,24 +17108,22 @@ async function ikPersonelBagla(user, opts = {}) {
     if (!p.aktif && !opts.yenidenGiris) {
       if (!p.user_id && !kuru) await pool.query(`UPDATE personel SET user_id=$1 WHERE id=$2`, [user.id, p.id]);
       const neden = p.isten_ayrilma_tarihi
-        ? `İK'da ${ymdYerel(p.isten_ayrilma_tarihi)} tarihinde işten ayrılmış görünüyor — hesabı pasife alın ya da yeniden işe giriş için İK kaydını düzenleyin`
+        ? `İK'da ${ymdYerel(p.isten_ayrilma_tarihi)} tarihinde işten ayrılmış görünüyor — hesabı pasife alın ya da kadroya dönecekse İK'da "Yeniden İşe Başlat" kullanın (çıkış tarihi silinmez)`
         : "İK kaydı pasif (ayrılma tarihi yok) — kadroya alınacaksa Admin'de Aktif Et ya da İK kaydını düzenleyin";
       return { islem: "KONTROL", personel_id: p.id, ad_soyad: p.ad_soyad, neden };
     }
     if (!p.user_id) { if (!kuru) await pool.query(`UPDATE personel SET user_id=$1 WHERE id=$2`, [user.id, p.id]); degisiklik.push("kimlik bağlandı"); }
     if (!p.email && email) { if (!kuru) await pool.query(`UPDATE personel SET email=$1 WHERE id=$2`, [email, p.id]); degisiklik.push("e-posta yazıldı"); }
-    // Geçmiş çıkışı olan kişi yeniden aktif edildiğinde (Admin "Aktif Et"): eski dönem arşivlenir,
-    // güncel giriş/çıkış boşalır → "İşe giriş bilgisi eksik" rozetiyle kadroda görünür. Maaş, puantaj,
-    // avans, ödeme hiç değişmez. Ayrılma tarihi geçmişte kalsaydı PUT kuralı kaydı yeniden pasife düşürürdü.
+    // 20.10.2026 (Orhan): hesap aktifliği ile istihdam AYRI kavramlar. Admin "Aktif Et" ya da eşitleme
+    // işten ayrılmış kişinin çıkış tarihini SİLMEZ ve çalışma dönemi AÇMAZ — kadroya dönüş yalnız
+    // "Yeniden İşe Başlat" akışıyla (yeni giriş tarihi kullanıcıdan). Burada yalnız kimlik bağlanır.
     const _ayr = ymdYerel(p.isten_ayrilma_tarihi);
-    const _yenidenGiris = (opts.yenidenGiris || p.aktif) && _ayr && _ayr <= ymdYerel(new Date());
-    if (_yenidenGiris && (!p.aktif || opts.yenidenGiris)) {
-      if (!kuru) {
-        await ikDonemArsivle(pool, p, p.isten_ayrilma_tarihi, { kaynak: "admin_aktif_et", aciklama: `Admin Paneli'nde yeniden aktif edildi (${kullanici || "-"})` });
-        await pool.query(`UPDATE personel SET aktif=true, ise_giris_tarihi=NULL, isten_ayrilma_tarihi=NULL WHERE id=$1`, [p.id]);
-      }
-      degisiklik.push(`önceki çalışma dönemi (${ymdYerel(p.ise_giris_tarihi) || "?"} – ${_ayr}) arşivlendi; yeniden işe giriş tarihi girilecek`);
-    } else if (!p.aktif && opts.aktifEt !== false) {
+    if (_ayr && _ayr <= ymdYerel(new Date())) {
+      if (degisiklik.length && !kuru) await ikIslemLog(p.id, user.id, "BAGLANDI", `${ad} (${email}) → personel #${p.id} ${p.ad_soyad}: ${degisiklik.join(", ")}`, kullanici);
+      return { islem: "KONTROL", personel_id: p.id, ad_soyad: p.ad_soyad,
+        neden: `İK'da ${_ayr} tarihinde işten ayrılmış — hesap aktif; kadroya dönüş için İK'da "Yeniden İşe Başlat" kullanın (çıkış tarihi ve önceki dönem korunur)` };
+    }
+    if (!p.aktif && opts.aktifEt !== false) {
       // Kadroda görünsün; maaş/işe giriş tarihine DOKUNULMAZ
       if (!kuru) await pool.query(`UPDATE personel SET aktif=true WHERE id=$1`, [p.id]);
       degisiklik.push("İK kaydı yeniden aktif (maaş/tarihler korundu)");
@@ -17143,6 +17190,120 @@ app.post("/hr/personel/esitle", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ─── YENİDEN İŞE BAŞLAT (20.10.2026, Orhan — ADEM KARHAN vakası) ─────────────────────────────
+// Tek personel kartı, ayrı çalışma dönemleri: ayrılmış personel aynı ID altında yeni dönemle kadroya
+// döner. Eski (giriş, çıkış) + o dönemin görev/firma/bordro/maaş künyesi arşivde kalır; yeni giriş
+// tarihi KULLANICIDAN gelir (tahmin yok). Açık dönem varsa engellenir; tekrar istek ikinci dönem açmaz.
+function ikYonetimYetkisi(req, personel) {
+  const email = String(req.user?.email || "").toLowerCase();
+  const rol = String(req.user?.role || "").toLowerCase();
+  if (IK_ESITLE_ROLLER.includes(rol) || IK_ESITLE_EMAIL.includes(email)) {
+    const k = altMarkaKapsam(req);
+    return !k || k.bordro.includes(String(personel?.marka || "ERC").toUpperCase());
+  }
+  return false;
+}
+app.post("/hr/personel/:id/yeniden-ise-baslat", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    const b = req.body || {};
+    const giris = String(b.ise_giris || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(giris) || isNaN(new Date(`${giris}T00:00:00Z`))) { client.release(); return res.status(400).json({ error: "Yeni işe giriş tarihi zorunlu (YYYY-AA-GG)" }); }
+    await client.query("BEGIN");
+    const pr = await client.query(`SELECT * FROM personel WHERE id=$1 FOR UPDATE`, [id]);
+    const p = pr.rows[0];
+    if (!p) { await client.query("ROLLBACK"); client.release(); return res.status(404).json({ error: "Personel bulunamadı" }); }
+    if (!ikYonetimYetkisi(req, p)) { await client.query("ROLLBACK"); client.release(); return res.status(403).json({ error: "Yeniden işe başlatma yetkiniz yok" }); }
+    if (p.birlestirildi_personel_id) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ error: `Bu kayıt #${p.birlestirildi_personel_id} ile birleştirilmiş — ana kaydı kullanın` }); }
+    const eskiGir = ymdYerel(p.ise_giris_tarihi) || null, eskiAyr = ymdYerel(p.isten_ayrilma_tarihi) || null;
+    // Tekrar istek: aynı giriş tarihiyle dönem zaten açık → ikinci dönem açılmaz
+    if (!eskiAyr && p.aktif && eskiGir === giris) {
+      await client.query("ROLLBACK"); client.release();
+      return res.json({ ok: true, zaten: true, personel: p, mesaj: `Bu personelin ${giris} girişli dönemi zaten açık` });
+    }
+    if (!eskiAyr && (p.aktif || eskiGir)) {
+      await client.query("ROLLBACK"); client.release();
+      return res.status(409).json({ error: p.aktif ? "Açık çalışma dönemi var — personel zaten kadroda" : "Açık dönem var: işten ayrılma tarihi girilmemiş — önce ayrılma tarihini girin",
+        acik_donem: { ise_giris: eskiGir, aktif: p.aktif } });
+    }
+    const arsiv = await client.query(`SELECT to_char(isten_ayrilma,'YYYY-MM-DD') AS c FROM personel_calisma_donemi WHERE personel_id=$1`, [id]);
+    const sonCikis = [eskiAyr, ...arsiv.rows.map(x => x.c)].filter(Boolean).sort().pop() || null;
+    if (sonCikis && giris <= sonCikis) {
+      await client.query("ROLLBACK"); client.release();
+      return res.status(400).json({ error: `Yeni giriş tarihi (${giris}) önceki dönemin çıkışından (${sonCikis}) SONRA olmalı — dönemler çakışamaz` });
+    }
+    const kullanici = String(req.user?.email || "").toLowerCase() || null;
+    // 1) Kapanmış dönemi künyesiyle arşivle (çıkış tarihi biliniyorsa; bilinmiyorsa tahmin edilmez)
+    let arsivNot = "önceki dönem tarihleri bilinmiyor — arşive yazılmadı";
+    if (eskiAyr) {
+      await ikDonemArsivle(client, p, eskiAyr, { kaynak: "yeniden_ise_baslat", aciklama: b.ayrilma_nedeni ? null : `Yeniden işe başlatıldı: yeni giriş ${giris}`,
+        ayrilma_nedeni: b.ayrilma_nedeni ? String(b.ayrilma_nedeni).trim() : null, olusturan: kullanici });
+      arsivNot = `önceki dönem ${eskiGir || "?"} – ${eskiAyr} arşivlendi`;
+    }
+    // 2) Yeni dönem: kullanıcı ne gönderdiyse o (boş maaş = bilgi eksik, 0 maaş gibi hesaplanmaz)
+    const num = (v) => (v === undefined || v === null || v === "" ? 0 : parseFinanceNumber(v));
+    const net = num(b.net_maas), banka = num(b.bankadan_gosterilen), elden = num(b.elden_verilen);
+    const up = await client.query(
+      `UPDATE personel SET ise_giris_tarihi=$2, isten_ayrilma_tarihi=NULL, aktif=true,
+         unvan=COALESCE(NULLIF($3,''), unvan), bolge=COALESCE(NULLIF($4,''), bolge),
+         firma_tipi=COALESCE(NULLIF($5,''), firma_tipi), marka=COALESCE(NULLIF($6,''), marka),
+         net_maas=$7, bankadan_gosterilen=$8, elden_verilen=$9,
+         ekip_bilgisi=NULL, ekip_arac_plaka=NULL
+       WHERE id=$1 RETURNING *`,
+      [id, giris, b.unvan == null ? "" : String(b.unvan).trim(), b.bolge == null ? "" : String(b.bolge).trim(),
+       b.firma_tipi == null ? "" : String(b.firma_tipi).trim(), b.marka == null ? "" : String(b.marka).toUpperCase().trim(), net, banka, elden]);
+    // 3) Maaş: yeni dönemin maaşı yalnız giriş ayından ve giriş tarihinden itibaren (geçmiş aylar değişmez).
+    //    Maaş girilmediyse de giriş ayına 0'lık satır yazılır — eski dönemin maaşı yeni döneme SIZMASIN,
+    //    kayıt "Maaş bilgileri eksik" olarak görünsün (ay bazlı maaş geçmişi son kaydı ileri taşıdığı için).
+    {
+      await client.query(
+        `INSERT INTO personel_maas_gecmisi (personel_id, donem, net_maas, bankadan_gosterilen, elden_verilen, gecerli_tarih)
+         VALUES ($1,$2,$3,$4,$5,$6::date)
+         ON CONFLICT (personel_id, donem) DO UPDATE SET net_maas=$3, bankadan_gosterilen=$4, elden_verilen=$5, gecerli_tarih=$6::date`,
+        [id, giris.slice(0, 7), net, banka, elden, giris]);
+    }
+    await client.query("COMMIT");
+    const detay = `${p.ad_soyad}: ${arsivNot}; yeni dönem giriş ${giris}` +
+      `${giris > ymdYerel(new Date()) ? " (ileri tarihli — işe başlayacak)" : ""}; unvan ${up.rows[0].unvan || "—"}, bölge ${up.rows[0].bolge || "—"}, firma ${up.rows[0].firma_tipi || "—"}, bordro ${up.rows[0].marka || "—"}; ` +
+      (net > 0 ? `maaş ₺${net}` : "maaş BİLGİ EKSİK") + `; ekip/araç ataması sıfırlandı${b.aciklama ? `; not: ${String(b.aciklama).trim()}` : ""}`;
+    await ikIslemLog(id, p.user_id, "YENIDEN_ISE_BASLAT", detay, kullanici);
+    const dm = await ikDonemleriYukle([id]);
+    res.json({ ok: true, personel: { ...up.rows[0], donemler: dm.get(id) || [] }, mesaj: detay });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally { try { client.release(); } catch {} }
+});
+// Çalışma geçmişi / arşiv listesi: kapanmış dönemler + o kişinin güncel durumu (yeniden başladı mı)
+app.get("/hr/calisma-donemleri", authMiddleware, async (req, res) => {
+  try {
+    const k = altMarkaKapsam(req);
+    const q = req.query || {};
+    const conds = [`p.birlestirildi_personel_id IS NULL`]; const params = [];
+    const add = (sql, v) => { params.push(v); conds.push(sql.replace("?", `$${params.length}`)); };
+    if (k) add(`UPPER(COALESCE(p.marka,'ERC')) = ANY(?::text[])`, k.bordro);
+    if (q.ad) add(`p.ad_soyad ILIKE ?`, `%${String(q.ad).trim()}%`);
+    if (q.giris_bas) add(`d.ise_giris >= ?::date`, String(q.giris_bas).slice(0, 10));
+    if (q.giris_bit) add(`d.ise_giris <= ?::date`, String(q.giris_bit).slice(0, 10));
+    if (q.cikis_bas) add(`d.isten_ayrilma >= ?::date`, String(q.cikis_bas).slice(0, 10));
+    if (q.cikis_bit) add(`d.isten_ayrilma <= ?::date`, String(q.cikis_bit).slice(0, 10));
+    if (q.marka) add(`UPPER(COALESCE(d.marka, p.marka, 'ERC')) = ?`, String(q.marka).toUpperCase());
+    if (q.bolge) add(`COALESCE(d.bolge, p.bolge) ILIKE ?`, `%${String(q.bolge).trim()}%`);
+    const r = await pool.query(
+      `SELECT d.id, d.personel_id, p.ad_soyad, to_char(d.ise_giris,'YYYY-MM-DD') AS ise_giris, to_char(d.isten_ayrilma,'YYYY-MM-DD') AS isten_ayrilma,
+              d.unvan, d.bolge, d.firma_tipi, d.marka, d.ayrilma_nedeni, d.aciklama, d.kaynak, d.teyit_gerekli, d.olusturan, d.created_at,
+              p.aktif AS personel_aktif, to_char(p.ise_giris_tarihi,'YYYY-MM-DD') AS guncel_giris, to_char(p.isten_ayrilma_tarihi,'YYYY-MM-DD') AS guncel_cikis,
+              p.marka AS guncel_marka, p.unvan AS guncel_unvan, p.bolge AS guncel_bolge,
+              (p.ise_giris_tarihi IS NOT NULL AND p.ise_giris_tarihi > d.isten_ayrilma) AS yeniden_basladi,
+              (p.isten_ayrilma_tarihi IS NOT NULL AND p.isten_ayrilma_tarihi <= CURRENT_DATE) AS yeniden_baslanabilir
+         FROM personel_calisma_donemi d JOIN personel p ON p.id = d.personel_id
+        WHERE ${conds.join(" AND ")}
+        ORDER BY d.isten_ayrilma DESC, p.ad_soyad`, params);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Aynı ad-soyad kontrolü (19.10.2026): yalnız UYARI — isme benzersizlik kısıtı yok. Kapsam: alt marka kendi
 // bordro personelini görür; kullanıcı eşleşmeleri yalnız kullanıcı yöneticisine döner.
 app.get("/hr/ayni-isim", authMiddleware, async (req, res) => {
@@ -17185,6 +17346,8 @@ app.get("/hr/personel", async (req, res) => {
         if (!sec) return;
         if (sec.disinda) { row.donem_disi = true; return; }
         row.donem_giris = sec.giris; row.donem_ayrilma = sec.ayrilma; row.donem_arsiv = sec.arsiv;
+        // 20.10.2026: aynı ay içinde ayrılıp yeniden başlayan kişi — ayın başındaki kapanmış dönem de hesaba girer
+        if (!sec.arsiv) { const ek = ikAyniAyEkDonem(row, arsiv, ayBas, aySon); if (ek) row.ek_donem = ek; }
         // Arşiv ayında hesap o dönemin giriş/çıkışıyla yapılır; "giriş eksik" rozeti güncel döneme aittir
         if (sec.arsiv && row.bilgi_eksik && sec.giris && Number(row.net_maas || 0) > 0) {
           row.bilgi_eksik = false; row.eksik_alanlar = []; row.guncel_bilgi_eksik = true;
@@ -17324,7 +17487,7 @@ app.put("/hr/personel/:id", async (req, res) => {
         const eski = eskiR.rows[0];
         const _eskiGir = ymdYerel(eski.ise_giris_tarihi);
         await ikDonemArsivle(pool, { ...eski, ise_giris_tarihi: _eskiGir && _eskiGir <= _ayrStr ? eski.ise_giris_tarihi : null }, _ayrStr,
-          { kaynak: "yeniden_giris", aciklama: `Yeni işe giriş ${_girStr} girildi` });
+          { kaynak: "yeniden_giris", aciklama: `Yeni işe giriş ${_girStr} girildi (personel kartı)`, olusturan: req.user?.email || null });
         await ikIslemLog(Number(id), eski.user_id, "YENIDEN_GIRIS",
           `${eski.ad_soyad}: önceki dönem (${_eskiGir && _eskiGir <= _ayrStr ? _eskiGir : "?"} – ${_ayrStr}) arşivlendi, yeni giriş ${_girStr}`, req.user?.email || null);
       }
@@ -17607,7 +17770,8 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
         if (!sec) return p;
         if (sec.disinda) return { ...p, _donemDisi: true };
         const _d = (s) => (s ? new Date(`${s}T00:00:00`) : null);
-        return { ...p, ise_giris_tarihi: _d(sec.giris), isten_ayrilma_tarihi: _d(sec.ayrilma), aktif: sec.arsiv ? true : p.aktif };
+        const ek = sec.arsiv ? null : ikAyniAyEkDonem(p, dm.get(p.id), _ab, _as);
+        return { ...p, ise_giris_tarihi: _d(sec.giris), isten_ayrilma_tarihi: _d(sec.ayrilma), aktif: sec.arsiv ? true : p.aktif, _ekDonem: ek };
       });
     }
 
@@ -17718,13 +17882,30 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
       // Pazar/resmi tatil bonusu maaşa EKLENMEZ — dinlenme bakiyesine birikir
       // 15.10.2026: maaşı ya da işe giriş tarihi girilmemiş personele otomatik hakediş yazılmaz (sıfır maaş gibi sunulmaz, "bilgi eksik")
       const bilgiEksik = !p.puantaj_haric && (!p.ise_giris_tarihi || netMaas <= 0);
-      const hakedilenOto = bilgiEksik ? 0 : Math.max(0, Math.round(netMaas * girisFactor - gelmedi * dailyRate));
+      let hakedilenOto = bilgiEksik ? 0 : Math.max(0, Math.round(netMaas * girisFactor - gelmedi * dailyRate));
+      // 20.10.2026: aynı ay içinde ayrılıp yeniden başlayan — ayın başındaki kapanmış dönem kendi maaşıyla eklenir;
+      // giriş öncesi günler yukarıdaki girisFactor'de zaten düşülmüş, bu segment yalnız [eski giriş..eski çıkış] günlerini sayar
+      let ekHakedis = 0, ekBilgiEksik = false, ekBanka = 0, ekElden = 0;
+      if (p._ekDonem && !p.puantaj_haric) {
+        const ek = p._ekDonem;
+        const ekBasGun = (ek.giris && ek.giris.slice(0, 7) === `${yil}-${String(ay).padStart(2, "0")}`) ? Number(ek.giris.slice(8, 10)) : 1;
+        const ekSonGun = Number(ek.ayrilma.slice(8, 10));
+        const ekFactor = Math.min(1, Math.max(0, ekSonGun - ekBasGun + 1) / REFERANS_GUN);
+        const ekGelmedi = pRows.filter(r => { const g = new Date(r.tarih).getDate(); return r.durum === "GELMEDI" && new Date(r.tarih).getDay() !== 0 && g >= ekBasGun && g <= ekSonGun; }).length;
+        if (ek.net_maas == null || ek.net_maas <= 0) ekBilgiEksik = true;
+        else {
+          ekHakedis = Math.max(0, Math.round(ek.net_maas * ekFactor - ekGelmedi * (ek.net_maas / REFERANS_GUN)));
+          ekBanka = Math.max(0, Math.round(ek.bankadan_gosterilen * ekFactor - ekGelmedi * (ek.bankadan_gosterilen / REFERANS_GUN)));
+          ekElden = Math.max(0, Math.round(ek.elden_verilen * ekFactor - ekGelmedi * (ek.elden_verilen / REFERANS_GUN)));
+        }
+        hakedilenOto += ekHakedis;
+      }
       const pazarBonus = 0; // Artık maaşa yansımıyor, dinlenme hakkı olarak birikiyor
 
       const bankaDailyRate = (Number(p.bankadan_gosterilen) || 0) / REFERANS_GUN;
       const eldenDailyRate = (Number(p.elden_verilen) || 0) / REFERANS_GUN;
-      let bankadan = Math.max(0, Math.round((Number(p.bankadan_gosterilen) || 0) * girisFactor - gelmedi * bankaDailyRate));
-      let elden = Math.max(0, Math.round((Number(p.elden_verilen) || 0) * girisFactor - gelmedi * eldenDailyRate));
+      let bankadan = Math.max(0, Math.round((Number(p.bankadan_gosterilen) || 0) * girisFactor - gelmedi * bankaDailyRate)) + ekBanka;
+      let elden = Math.max(0, Math.round((Number(p.elden_verilen) || 0) * girisFactor - gelmedi * eldenDailyRate)) + ekElden;
 
       // Manuel hakediş varsa sistem hesabını ezer; banka/elden ayrımı da
       // manuel tutarın net maaşa oranıyla ölçeklenir
@@ -17757,6 +17938,7 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
         pazar_bonus: pazarBonus, dinlenme_gun: dinlenme, toplam_gun: totalDays,
         hakedilen_maas: hakedilen, bankadan, elden, avans,
         hakedis_manuel: hakedisManuel, hakedis_otomatik: hakedilenOto, bilgi_eksik: bilgiEksik,
+        ek_donem: p._ekDonem ? { giris: p._ekDonem.giris, ayrilma: p._ekDonem.ayrilma, hakedis: ekHakedis, bilgi_eksik: ekBilgiEksik } : null,
         kalan: hakedilen - avans,
         dinlenme_bakiye: dinlenmeBakiye,
         toplam_pazar_calisdi: toplamPazarCalisdi,
@@ -23745,6 +23927,20 @@ const AUTO_MIGRATIONS = [
   "CREATE TABLE IF NOT EXISTS ik_islem_log (id SERIAL PRIMARY KEY, personel_id INTEGER, user_id INTEGER, islem TEXT, detay TEXT, kullanici TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
   // 16.10.2026: kapanmış (arşiv) çalışma dönemleri — yeniden işe girişte eski giriş/çıkış silinmez, buraya taşınır
   "CREATE TABLE IF NOT EXISTS personel_calisma_donemi (id SERIAL PRIMARY KEY, personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE, ise_giris DATE, isten_ayrilma DATE NOT NULL, kaynak TEXT, aciklama TEXT, teyit_gerekli BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (personel_id, isten_ayrilma))",
+  // 20.10.2026 (Orhan — ADEM KARHAN vakası): her çalışma döneminde görev/firma/bordro/maaş anlık görüntüsü,
+  // ayrılma notu, işlemi yapan; maaş geçmişinde ay yanında geçerlilik tarihi (yeniden giriş günü)
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS unvan TEXT",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS bolge TEXT",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS firma_tipi TEXT",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS marka TEXT",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS net_maas NUMERIC",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS bankadan_gosterilen NUMERIC",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS elden_verilen NUMERIC",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS ayrilma_nedeni TEXT",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS ekip_bilgisi TEXT",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS ekip_arac_plaka TEXT",
+  "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS olusturan TEXT",
+  "ALTER TABLE personel_maas_gecmisi ADD COLUMN IF NOT EXISTS gecerli_tarih DATE",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS isdp_account TEXT",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS birlestirildi_personel_id INTEGER", // 19.10.2026: mükerrer kayıt → ana kayıt (arşiv; listelenmez)
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS iresource_giris TEXT",
@@ -23767,6 +23963,7 @@ const AUTO_MIGRATIONS = [
       await pool.query(sql).catch(() => {});
     }
     console.log("✅ Auto-migrations tamamlandı");
+    await ikDonemGecis().catch(e => console.error("[ik-donem-gecis]", e.message));
 
     // Finans paneli kullanıcıları — bireysel şifre ile
     const FINANCE_USERS_SEED = [

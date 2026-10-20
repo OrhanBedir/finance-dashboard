@@ -17528,6 +17528,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [notModal, setNotModal] = useState(null); // { puantajRow, personelAd, tarih }
   const [maasOdeModal, setMaasOdeModal] = useState(null); // personel object
   const [personelListeModal, setPersonelListeModal] = useState(false); // aktif personel künye listesi
+  // 20.10.2026 (Orhan — ADEM KARHAN): yeniden işe başlatma penceresi + çalışma geçmişi / arşiv penceresi
+  const [yenidenModal, setYenidenModal] = useState(null); // { p, form, hata, kaydediyor, acikDonem }
+  const [arsivModal, setArsivModal] = useState(false);
+  const [arsivRows, setArsivRows] = useState([]);
+  const [arsivYukleniyor, setArsivYukleniyor] = useState(false);
+  const [arsivFiltre, setArsivFiltre] = useState({ ad: "", giris_bas: "", giris_bit: "", cikis_bas: "", cikis_bit: "", marka: "", bolge: "" });
   const [maasOdeHak, setMaasOdeHak] = useState(0); // bu ay gerçek hakediş (pazar primiyle)
   const [maasOdeList, setMaasOdeList] = useState([]);
   const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"", odeyen:"SIMSEK" });
@@ -17856,6 +17862,151 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const handleToggleAktif = async (p) => {
     await fetch(`${API_BASE}/hr/personel/${p.id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify({...p, aktif: !p.aktif}) });
     loadPersonel();
+  };
+  // ── Yeniden işe başlat (20.10.2026): tek kart, ayrı çalışma dönemleri. Yeni giriş tarihi kullanıcıdan;
+  //    eski bilgiler yalnız ÖNERİ olarak gelir, sunucu açık dönem/çakışma/tekrar isteği engeller. ──
+  const _bugunYmd = new Date().toISOString().slice(0, 10);
+  // pg DATE sunucu saat dilimiyle (…T21:00Z) gelebilir → yerel güne çevir, bir gün kaymasın
+  const _ymd = (v) => { if (!v) return ""; const t = String(v); if (!t.includes("T")) return t.slice(0, 10); const d = new Date(t); return isNaN(d) ? t.slice(0, 10) : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const _trT = (v) => (_ymd(v) ? _ymd(v).split("-").reverse().join(".") : "—");
+  const _tl = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
+  const ayrilmisMi = (p) => !!p && !p.aktif && !!_ymd(p.isten_ayrilma_tarihi);
+  const iseBaslayacakMi = (p) => !!p && !!p.aktif && !_ymd(p.isten_ayrilma_tarihi) && _ymd(p.ise_giris_tarihi) > _bugunYmd;
+  const acYeniden = (p) => setYenidenModal({ p, hata: "", kaydediyor: false, acikDonem: null,
+    form: { ise_giris: "", unvan: p.unvan || "", bolge: p.bolge || "", firma_tipi: p.firma_tipi || "simsek", marka: String(p.marka || "ERC").toUpperCase(),
+      net_maas: _tl(p.net_maas) > 0 ? String(p.net_maas) : "", bankadan_gosterilen: _tl(p.bankadan_gosterilen) > 0 ? String(p.bankadan_gosterilen) : "",
+      elden_verilen: _tl(p.elden_verilen) > 0 ? String(p.elden_verilen) : "", ayrilma_nedeni: "", aciklama: "" } });
+  const yenidenKaydet = async () => {
+    const m = yenidenModal; if (!m || m.kaydediyor) return;
+    const f = m.form;
+    if (!f.ise_giris) { setYenidenModal(x => ({ ...x, hata: "Yeni işe giriş tarihi zorunlu" })); return; }
+    const sonCikis = [_ymd(m.p.isten_ayrilma_tarihi), ...(m.p.donemler || []).map(d => d.isten_ayrilma)].filter(Boolean).sort().pop();
+    if (sonCikis && f.ise_giris <= sonCikis) { setYenidenModal(x => ({ ...x, hata: `Yeni giriş (${_trT(f.ise_giris)}) önceki çıkıştan (${_trT(sonCikis)}) sonra olmalı` })); return; }
+    setYenidenModal(x => ({ ...x, kaydediyor: true, hata: "" }));
+    try {
+      const r = await fetch(`${API_BASE}/hr/personel/${m.p.id}/yeniden-ise-baslat`, { method: "POST", headers: { "Content-Type": "application/json", ...AUTH_H() },
+        body: JSON.stringify({ ...f, net_maas: f.net_maas === "" ? "" : parseTrNumber(f.net_maas), bankadan_gosterilen: f.bankadan_gosterilen === "" ? "" : parseTrNumber(f.bankadan_gosterilen), elden_verilen: f.elden_verilen === "" ? "" : parseTrNumber(f.elden_verilen) }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) { setYenidenModal(x => ({ ...x, kaydediyor: false, hata: d.error || `Sunucu hatası (${r.status})`, acikDonem: d.acik_donem || null })); return; }
+      setYenidenModal(null);
+      await loadPersonel();
+      if (arsivModal) loadArsivDonemler();
+      alert(d.zaten ? d.mesaj : `Yeniden işe başlatıldı — ${d.mesaj}`);
+    } catch (e) { setYenidenModal(x => ({ ...x, kaydediyor: false, hata: e.message })); }
+  };
+  const loadArsivDonemler = async (filtre = arsivFiltre) => {
+    setArsivYukleniyor(true);
+    try {
+      const q = new URLSearchParams(Object.entries(filtre).filter(([, v]) => v)).toString();
+      const r = await fetch(`${API_BASE}/hr/calisma-donemleri${q ? "?" + q : ""}`, { headers: AUTH_H() });
+      const d = await r.json(); setArsivRows(Array.isArray(d) ? d : []);
+    } catch { setArsivRows([]); }
+    setArsivYukleniyor(false);
+  };
+  // Çalışma geçmişi satırları: kapanmış dönemler (arşiv) + güncel dönem (personel kartı alanları)
+  const calismaGecmisi = (p) => {
+    const kapali = (p?.donemler || []).slice().sort((a, b) => (a.isten_ayrilma < b.isten_ayrilma ? -1 : 1)).map(d => ({
+      ...d, durum: "Kapandı (arşiv)", renk: ["#f1f5f9", "#475569"] }));
+    const gir = _ymd(p?.ise_giris_tarihi), ayr = _ymd(p?.isten_ayrilma_tarihi);
+    // güncel alanlar arşivdeki son dönemle aynıysa (henüz yeniden başlamamış) ikinci kez listelenmez
+    const guncelArsivde = ayr && kapali.some(d => d.isten_ayrilma === ayr);
+    const guncel = (gir || ayr) && !guncelArsivde ? [{ ise_giris: gir, isten_ayrilma: ayr || null, unvan: p.unvan, bolge: p.bolge, firma_tipi: p.firma_tipi, marka: p.marka, net_maas: p.net_maas,
+      ayrilma_nedeni: null, guncel: true,
+      durum: ayr ? (ayr <= _bugunYmd ? "Ayrıldı" : "Ayrılacak") : gir > _bugunYmd ? "İşe başlayacak" : p.aktif ? "Çalışıyor" : "Pasif (hesap)",
+      renk: ayr ? ["#fee2e2", "#991b1b"] : gir > _bugunYmd ? ["#dbeafe", "#1d4ed8"] : p.aktif ? ["#dcfce7", "#166534"] : ["#f3f4f6", "#6b7280"] }] : [];
+    return [...kapali, ...guncel].map((d, i) => ({ ...d, sira: i + 1 }));
+  };
+  const renderYenidenModal = () => {
+    const m = yenidenModal; if (!m) return null;
+    const f = m.form; const p = m.p;
+    const setF = (k, v) => setYenidenModal(x => ({ ...x, form: { ...x.form, [k]: v } }));
+    const inp = { width: "100%", padding: "8px 10px", borderRadius: "8px", border: "1.5px solid #d1d5db", fontSize: "13px", boxSizing: "border-box", background: "#fff" };
+    const lbl = { display: "block", fontSize: "11.5px", fontWeight: 700, color: "#374151", marginBottom: "4px" };
+    const gecmis = calismaGecmisi(p);
+    const maasEksik = !(parseTrNumber(f.net_maas) > 0);
+    return (
+      <IkModalKabuk onKapat={() => !m.kaydediyor && setYenidenModal(null)} genislik={760} baslik="Yeniden işe başlat" adSoyad={p.ad_soyad} ikon="🔄"
+        altBaslik="Aynı personel kartı altında yeni çalışma dönemi açılır; önceki dönem ve finansal geçmiş korunur"
+        rozet={<FirmaRozet p={p} kucuk />}
+        footer={<>
+          <div style={{ flex: 1, fontSize: "12px", color: "#64748b" }}>Hesap erişimi, ekip ve araç ataması kendiliğinden geri verilmez — gerekiyorsa karttan ayrıca atayın.</div>
+          <button type="button" onClick={() => setYenidenModal(null)} disabled={m.kaydediyor} style={{ padding: "10px 18px", background: "#fff", color: "#334155", border: "1.5px solid #cbd5e1", borderRadius: "10px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Vazgeç</button>
+          <button type="button" onClick={yenidenKaydet} disabled={m.kaydediyor} style={{ padding: "10px 22px", background: "linear-gradient(135deg,#0f2a47,#2d5a8e)", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 800, fontSize: "13px", cursor: "pointer" }}>{m.kaydediyor ? "Kaydediliyor…" : "🔄 Yeni dönemi aç"}</button>
+        </>}>
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px 12px", marginBottom: "14px", fontSize: "12.5px", color: "#334155" }}>
+          <b>Önceki çalışma dönemleri:</b> {gecmis.length ? gecmis.map(d => `${d.sira}. ${_trT(d.ise_giris)} – ${_trT(d.isten_ayrilma)}${d.unvan ? ` · ${d.unvan}` : ""}`).join("  |  ") : "kayıtlı dönem yok (tarihler bilinmiyor)"}
+        </div>
+        {m.acikDonem && <div style={{ background: "#fef3c7", color: "#92400e", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", fontWeight: 600, marginBottom: "12px" }}>Mevcut açık dönem: giriş {_trT(m.acikDonem.ise_giris) || "?"} · {m.acikDonem.aktif ? "kadroda aktif" : "ayrılma tarihi girilmemiş"}</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px 14px" }}>
+          <div><label style={{ ...lbl, color: "#b91c1c" }}>Yeni işe giriş tarihi *</label><input type="date" value={f.ise_giris} onChange={e => setF("ise_giris", e.target.value)} style={{ ...inp, borderColor: "#fca5a5" }} />
+            {f.ise_giris && f.ise_giris > _bugunYmd && <div style={{ fontSize: "11px", color: "#1d4ed8", marginTop: "3px" }}>İleri tarihli — kadroda "İşe başlayacak" görünür, tarih gelmeden çalışmış sayılmaz</div>}</div>
+          <div><label style={lbl}>Unvan</label><input value={f.unvan} onChange={e => setF("unvan", e.target.value)} style={inp} /></div>
+          <div><label style={lbl}>Bölge / Proje</label><input value={f.bolge} onChange={e => setF("bolge", e.target.value)} style={inp} /></div>
+          <div><label style={lbl}>Firma</label><select value={f.firma_tipi} onChange={e => setF("firma_tipi", e.target.value)} style={inp}><option value="simsek">Şimşek</option><option value="taseron">Taşeron (sadece ISG)</option></select></div>
+          {_hrMarka === "ERC" && <div><label style={lbl}>Bordro Şirketi</label><select value={f.marka} onChange={e => setF("marka", e.target.value)} style={inp}><option value="ERC">Şimşek</option><option value="TEKNO">Teknocenter</option><option value="AHY">AHY</option></select></div>}
+          {!_maasGizli && <>
+            <div><label style={lbl}>Net Maaş (₺)</label><input value={f.net_maas} onChange={e => setF("net_maas", e.target.value)} inputMode="decimal" style={{ ...inp, borderColor: maasEksik ? "#fcd34d" : inp.border }} placeholder="boş = bilgi eksik" /></div>
+            <div><label style={lbl}>Bankadan Gösterilen (₺)</label><input value={f.bankadan_gosterilen} onChange={e => setF("bankadan_gosterilen", e.target.value)} inputMode="decimal" style={inp} /></div>
+            <div><label style={lbl}>Elden Verilen (₺)</label><input value={f.elden_verilen} onChange={e => setF("elden_verilen", e.target.value)} inputMode="decimal" style={inp} /></div>
+          </>}
+          <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>Önceki dönemin ayrılma notu (arşive yazılır, isteğe bağlı)</label><input value={f.ayrilma_nedeni} onChange={e => setF("ayrilma_nedeni", e.target.value)} style={inp} placeholder="Örn. proje bitti, kendi isteğiyle ayrıldı…" /></div>
+          <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>Yeni dönem notu (işlem geçmişine yazılır)</label><input value={f.aciklama} onChange={e => setF("aciklama", e.target.value)} style={inp} /></div>
+        </div>
+        <div style={{ marginTop: "10px", fontSize: "12px", color: maasEksik ? "#92400e" : "#64748b", background: maasEksik ? "#fffbeb" : "transparent", borderRadius: "8px", padding: maasEksik ? "8px 10px" : 0 }}>
+          {maasEksik ? "⚠ Maaş girilmedi: kayıt \"Bilgi eksik\" olarak açılır — sıfır maaşla hakediş hesaplanmaz, tahmini maaş üretilmez." : "Görev / firma / maaş alanları önceki dönemden ÖNERİ olarak dolduruldu — kontrol edip kaydedin; eski dönem değişmez."}
+        </div>
+        {m.hata && <div style={{ marginTop: "10px", background: "#fee2e2", color: "#991b1b", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", fontWeight: 600 }}>{m.hata}</div>}
+      </IkModalKabuk>
+    );
+  };
+  const renderArsivModal = () => {
+    if (!arsivModal) return null;
+    const inp = { padding: "7px 10px", borderRadius: "8px", border: "1.5px solid #d1d5db", fontSize: "12.5px", background: "#fff" };
+    const th = { padding: "8px 10px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#fff", background: "#1e3a5f", whiteSpace: "nowrap" };
+    const td = { padding: "7px 10px", fontSize: "12.5px", color: "#374151", borderBottom: "1px solid #f1f5f9", verticalAlign: "top" };
+    const setFi = (k, v) => setArsivFiltre(x => ({ ...x, [k]: v }));
+    return (
+      <IkModalKabuk onKapat={() => setArsivModal(false)} genislik={1180} baslik="Çalışma geçmişi · arşiv" adSoyad="Kapanmış çalışma dönemleri" ikon="📂"
+        altBaslik="Her işe giriş–ayrılma aralığı ayrı dönem; yeniden işe başlayan kişinin kapanmış dönemleri burada kalır"
+        footer={<><div style={{ flex: 1 }} /><button type="button" onClick={() => setArsivModal(false)} style={{ padding: "10px 18px", background: "#fff", color: "#334155", border: "1.5px solid #cbd5e1", borderRadius: "10px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Kapat</button></>}>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginBottom: "12px" }}>
+          <input value={arsivFiltre.ad} onChange={e => setFi("ad", e.target.value)} placeholder="Ad soyad" style={{ ...inp, minWidth: "160px" }} />
+          <label style={{ fontSize: "11.5px", color: "#64748b", display: "inline-flex", gap: "4px", alignItems: "center" }}>Giriş <input type="date" value={arsivFiltre.giris_bas} onChange={e => setFi("giris_bas", e.target.value)} style={inp} /> – <input type="date" value={arsivFiltre.giris_bit} onChange={e => setFi("giris_bit", e.target.value)} style={inp} /></label>
+          <label style={{ fontSize: "11.5px", color: "#64748b", display: "inline-flex", gap: "4px", alignItems: "center" }}>Çıkış <input type="date" value={arsivFiltre.cikis_bas} onChange={e => setFi("cikis_bas", e.target.value)} style={inp} /> – <input type="date" value={arsivFiltre.cikis_bit} onChange={e => setFi("cikis_bit", e.target.value)} style={inp} /></label>
+          {_hrMarka === "ERC" && <select value={arsivFiltre.marka} onChange={e => setFi("marka", e.target.value)} style={inp}><option value="">Tüm firmalar</option><option value="ERC">Şimşek</option><option value="TEKNO">Teknocenter</option><option value="AHY">AHY</option></select>}
+          <input value={arsivFiltre.bolge} onChange={e => setFi("bolge", e.target.value)} placeholder="Bölge" style={{ ...inp, width: "120px" }} />
+          <button type="button" onClick={() => loadArsivDonemler()} style={{ padding: "8px 14px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "12.5px", cursor: "pointer" }}>Filtrele</button>
+          {Object.values(arsivFiltre).some(Boolean) && <button type="button" onClick={() => { const b = { ad: "", giris_bas: "", giris_bit: "", cikis_bas: "", cikis_bit: "", marka: "", bolge: "" }; setArsivFiltre(b); loadArsivDonemler(b); }} style={{ padding: "8px 12px", background: "#f3f4f6", border: "none", borderRadius: "8px", fontSize: "12.5px", cursor: "pointer" }}>Temizle</button>}
+          <span style={{ fontSize: "12px", color: "#64748b", marginLeft: "auto" }}>{arsivYukleniyor ? "Yükleniyor…" : `${arsivRows.length} dönem`}</span>
+        </div>
+        <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "10px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1000px" }}>
+            <thead><tr>{["Personel", "İşe Giriş", "İşten Ayrılma", "Unvan", "Bölge/Proje", "Bordro Şirketi", "Durum", "Ayrılma Notu", ""].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {!arsivYukleniyor && arsivRows.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: "24px" }}>Kayıt yok</td></tr>}
+              {arsivRows.map(d => (
+                <tr key={d.id}>
+                  <td style={{ ...td, fontWeight: 700, whiteSpace: "nowrap" }}>{d.ad_soyad}{d.teyit_gerekli && <span title="Giriş tarihi teyit edilmeli" style={{ marginLeft: "6px", fontSize: "10px", color: "#b45309" }}>teyit</span>}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{_trT(d.ise_giris)}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{_trT(d.isten_ayrilma)}</td>
+                  <td style={td}>{d.unvan || "—"}</td>
+                  <td style={td}>{d.bolge || "—"}</td>
+                  <td style={td}>{d.marka || "—"}{d.firma_tipi === "taseron" ? " · taşeron" : ""}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>
+                    <span style={{ background: "#f1f5f9", color: "#475569", padding: "2px 8px", borderRadius: "20px", fontSize: "11px", fontWeight: 700 }}>Kapandı</span>
+                    {d.yeniden_basladi && <div style={{ fontSize: "11px", color: "#15803d", fontWeight: 700, marginTop: "3px" }}>Personel yeniden işe başladı ({_trT(d.guncel_giris)}{d.guncel_giris > _bugunYmd ? " · başlayacak" : ""})</div>}
+                  </td>
+                  <td style={{ ...td, maxWidth: "240px" }}>{d.ayrilma_nedeni || d.aciklama || "—"}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>
+                    {d.yeniden_baslanabilir && !d.yeniden_basladi && (() => { const p = personelList.find(x => x.id === d.personel_id); return p ? <button type="button" onClick={() => acYeniden(p)} style={{ padding: "4px 10px", background: "#0f766e", color: "#fff", border: "none", borderRadius: "7px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer" }}>🔄 Yeniden İşe Başlat</button> : null; })()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </IkModalKabuk>
+    );
   };
   const handleDeletePersonel = async (p) => {
     if (!window.confirm(`${p.ad_soyad} silinsin mi?`)) return;
@@ -18924,6 +19075,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               }}>📋 Excel İndir</button>}
                             <button style={{ padding:"5px 12px", background:"#7c3aed", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
                               onClick={()=>setPersonelListeModal(true)}>👥 Personel Listesi</button>
+                            <button style={{ padding:"5px 12px", background:"#475569", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
+                              title="Kapanmış çalışma dönemleri (arşiv) — filtre: ad, giriş/çıkış tarihi, firma, bölge"
+                              onClick={()=>{ setArsivModal(true); loadArsivDonemler(); }}>📂 Çalışma Geçmişi</button>
                             <button style={{ padding:"5px 12px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
                               onClick={()=>{ setEditingPersonel(null); setPForm({ ad_soyad:"",tc_no:"",dogum_tarihi:"",telefon:"",email:"",unvan:"",bolge:"",ise_giris_tarihi:"",isten_ayrilma_tarihi:"",net_maas:"",bankadan_gosterilen:"",elden_verilen:"",iban:"",banka_adi:"",banka_hesap_no:"",aktif:true }); setShowPersonelForm(true); }}>
                               + Personel Ekle</button>
@@ -19005,6 +19159,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                                 {perRows.map((p,i)=>(
                                   <tr key={p.id} style={{ background: i%2===0?"#fff":"#f9fafb" }}>
                                     <td style={{ padding:"7px 12px", fontWeight:600, color:"#111827", whiteSpace:"nowrap" }}>{p.ad_soyad}<FirmaRozet p={p} kucuk />
+                                      {iseBaslayacakMi(p) && <span title={`İşe giriş ${_trT(p.ise_giris_tarihi)} — tarih gelmeden çalışmış sayılmaz`} style={{ marginLeft:"6px", background:"#dbeafe", color:"#1d4ed8", padding:"1px 7px", borderRadius:"20px", fontSize:"10.5px", fontWeight:700 }}>İşe başlayacak {_trT(p.ise_giris_tarihi)}</span>}
+                                      {(p.donemler||[]).length > 0 && !p.bilgi_eksik && <span title={(p.donemler||[]).map(d => `${_trT(d.ise_giris)} – ${_trT(d.isten_ayrilma)}`).join(", ")} style={{ marginLeft:"6px", fontSize:"10.5px", color:"#64748b" }}>{(p.donemler||[]).length + 1}. dönem</span>}
                                       {p.bilgi_eksik && (
                                         <div style={{ display:"flex", gap:"6px", alignItems:"center", marginTop:"3px", flexWrap:"wrap" }}>
                                           {((p.eksik_alanlar||[]).length ? p.eksik_alanlar : ["Bilgiler eksik"]).map(e => (
@@ -19470,7 +19626,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                   footer={<>
                     {editingPersonel && (
                       <div style={{ display:"flex", gap:"14px", fontSize:"12px", fontWeight:600 }}>
-                        <span onClick={async ()=>{ await handleToggleAktif(editingPersonel); kapat(); }} style={{ color:"#92400e", cursor:"pointer" }}>{editingPersonel.aktif ? "Pasife al" : "Aktif et"}</span>
+                        {ayrilmisMi(editingPersonel)
+                          ? <span onClick={()=>{ kapat(); acYeniden(editingPersonel); }} title="İşten ayrılmış personel: aynı kart altında yeni çalışma dönemi açar (çıkış tarihi ve önceki dönem korunur)" style={{ color:"#0f766e", cursor:"pointer" }}>🔄 Yeniden işe başlat</span>
+                          : <span onClick={async ()=>{ await handleToggleAktif(editingPersonel); kapat(); }} style={{ color:"#92400e", cursor:"pointer" }}>{editingPersonel.aktif ? "Pasife al" : "Aktif et"}</span>}
                         <span onClick={async ()=>{ await handleDeletePersonel(editingPersonel); kapat(); }} style={{ color:"#b91c1c", cursor:"pointer" }}>Kaydı sil</span>
                       </div>
                     )}
@@ -19488,14 +19646,35 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                     <div style={gridSt}>
                       {[["Unvan","unvan"],["Bölge","bolge"]].map(metin)}
                       {[["İşe Giriş","ise_giris_tarihi"],["İşten Ayrılma","isten_ayrilma_tarihi"]].map(tarih)}
-                      {((editingPersonel?.donemler||[]).length > 0 || (pForm.ise_giris_tarihi && pForm.isten_ayrilma_tarihi && pForm.ise_giris_tarihi > pForm.isten_ayrilma_tarihi)) && (
+                      {editingPersonel && calismaGecmisi(editingPersonel).length > 0 && (
                         <div style={{ gridColumn:"1 / -1", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"8px 12px", fontSize:"12px", color:"#334155" }}>
-                          {(editingPersonel?.donemler||[]).length > 0 && (
-                            <div><b>Önceki çalışma dönemleri</b> (arşiv — geçmiş aylar bu tarihlerle hesaplanır): {(editingPersonel.donemler||[]).map(d => `${d.ise_giris ? d.ise_giris.split("-").reverse().join(".") : "giriş ?"} – ${d.isten_ayrilma.split("-").reverse().join(".")}${d.teyit_gerekli ? " (giriş tarihi teyit edilecek)" : ""}`).join(" · ")}</div>
-                          )}
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"6px" }}>
+                            <b>Çalışma geçmişi</b>
+                            <span style={{ fontSize:"11px", color:"#64748b" }}>geçmiş aylar kendi döneminin tarihleriyle hesaplanır; kapanmış dönemler silinmez</span>
+                          </div>
+                          <div style={{ overflowX:"auto" }}>
+                            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11.5px" }}>
+                              <thead><tr>{["Dönem","İşe Giriş","İşten Ayrılma","Unvan","Bölge/Proje","Bordro Şirketi","Durum","Ayrılma Notu"].map(h => <th key={h} style={{ textAlign:"left", padding:"4px 8px", color:"#475569", fontWeight:700, borderBottom:"1px solid #e2e8f0", whiteSpace:"nowrap" }}>{h}</th>)}</tr></thead>
+                              <tbody>
+                                {calismaGecmisi(editingPersonel).map(d => (
+                                  <tr key={(d.id || "g") + "-" + d.sira} style={{ background: d.guncel ? "#fff" : "transparent" }}>
+                                    <td style={{ padding:"4px 8px", fontWeight:700 }}>{d.sira}. dönem{d.guncel ? " (güncel)" : ""}</td>
+                                    <td style={{ padding:"4px 8px", whiteSpace:"nowrap" }}>{_trT(d.ise_giris)}{d.teyit_gerekli ? " ?" : ""}</td>
+                                    <td style={{ padding:"4px 8px", whiteSpace:"nowrap" }}>{_trT(d.isten_ayrilma)}</td>
+                                    <td style={{ padding:"4px 8px" }}>{d.unvan || "—"}</td>
+                                    <td style={{ padding:"4px 8px" }}>{d.bolge || "—"}</td>
+                                    <td style={{ padding:"4px 8px" }}>{d.marka || "—"}</td>
+                                    <td style={{ padding:"4px 8px", whiteSpace:"nowrap" }}><span style={{ background:d.renk[0], color:d.renk[1], padding:"1px 8px", borderRadius:"20px", fontWeight:700 }}>{d.durum}</span></td>
+                                    <td style={{ padding:"4px 8px", maxWidth:"220px" }}>{d.ayrilma_nedeni || d.aciklama || "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                           {pForm.ise_giris_tarihi && pForm.isten_ayrilma_tarihi && pForm.ise_giris_tarihi > pForm.isten_ayrilma_tarihi && (
-                            <div style={{ color:"#0f766e", fontWeight:700, marginTop:"3px" }}>Yeniden işe giriş: kaydedince önceki dönem arşivlenir, ayrılma tarihi boşalır ve kişi kadroda aktif kalır.</div>
+                            <div style={{ color:"#0f766e", fontWeight:700, marginTop:"6px" }}>Yeniden işe giriş: kaydedince önceki dönem arşivlenir, ayrılma tarihi boşalır ve kişi kadroda aktif kalır.</div>
                           )}
+                          {ayrilmisMi(editingPersonel) && <div style={{ color:"#0f766e", fontWeight:700, marginTop:"6px" }}>Kişi yeniden işe başlayacaksa alttaki "🔄 Yeniden işe başlat" ile yeni dönem açın — eski tarihleri silmeyin, ikinci kart açmayın.</div>}
                         </div>
                       )}
                       <div>
@@ -19596,7 +19775,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                             <span style={{ fontWeight:700, fontSize:"13px", color:"#0f1c2e" }}>{p.ad_soyad}</span><FirmaRozet p={p} kucuk />
                             <span style={{ fontSize:"12px", color:"#94a3b8", marginLeft:"8px" }}>{[p.unvan, p.bolge].filter(Boolean).join(" · ")}</span>
                           </div>
-                          <span style={{ background:p.aktif?"#dcfce7":"#f3f4f6", color:p.aktif?"#166534":"#6b7280", padding:"2px 10px", borderRadius:"20px", fontSize:"11px", fontWeight:700 }}>{p.aktif?"Aktif":"Pasif"}</span>
+                          <span style={{ background:p.aktif?"#dcfce7":"#f3f4f6", color:p.aktif?"#166534":"#6b7280", padding:"2px 10px", borderRadius:"20px", fontSize:"11px", fontWeight:700 }}>{p.aktif ? (iseBaslayacakMi(p) ? "İşe başlayacak" : "Aktif") : (ayrilmisMi(p) ? `Ayrıldı ${_trT(p.isten_ayrilma_tarihi)}` : "Pasif")}</span>
+                          {(p.donemler||[]).length > 0 && <span title={(p.donemler||[]).map(d => `${_trT(d.ise_giris)} – ${_trT(d.isten_ayrilma)}`).join(", ")} style={{ fontSize:"11px", color:"#64748b" }}>{(p.donemler||[]).length} kapanmış dönem</span>}
+                          {!gizliMod && ayrilmisMi(p) && <button onClick={()=>acYeniden(p)} title="Aynı kart altında yeni çalışma dönemi aç" style={{ padding:"5px 12px", background:"#0f766e", color:"#fff", border:"none", borderRadius:"8px", fontSize:"11.5px", fontWeight:700, cursor:"pointer" }}>🔄 Yeniden İşe Başlat</button>}
                           {!gizliMod && <button onClick={()=>openMaasOde(p)} style={{ padding:"5px 12px", background:"#0f2a47", color:"#fff", border:"none", borderRadius:"8px", fontSize:"11.5px", fontWeight:700, cursor:"pointer" }}>💰 Öde</button>}
                           <button onClick={()=>handleEditPersonel(p)} style={{ padding:"5px 11px", background:"#fff", color:"#334155", border:"1.5px solid #cbd5e1", borderRadius:"8px", fontSize:"11.5px", fontWeight:700, cursor:"pointer" }}>✏️ Düzenle</button>
                         </div>
@@ -19608,6 +19789,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
               </div>
         </div>
       )}
+
+      {renderYenidenModal()}
+      {renderArsivModal()}
 
       {/* ===== PERSONEL KÜNYE LİSTESİ MODAL ===== */}
       {personelListeModal && (() => {
