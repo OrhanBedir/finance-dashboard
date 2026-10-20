@@ -20689,7 +20689,40 @@ async function ensureYemekKartiTables() {
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS yemek_kartlari_personel_uq ON yemek_kartlari(personel_id) WHERE personel_id IS NOT NULL`).catch(() => {});
   await pool.query(`ALTER TABLE yemek_karti_odemeler ADD COLUMN IF NOT EXISTS dagilim JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE yemek_karti_odemeler ADD COLUMN IF NOT EXISTS odeyen_firma TEXT`).catch(() => {});
+  // 20.10.2026 (Orhan): yemek HAKKI karttan ayrıldı — yemek_kartlari satırı = personelin hak/kart kaydı (kart_no
+  // boş olabilir). Ödemeler çoklu hareket: NAKIT (elden) ya da KART (yükleme); kısmi + karma; her hareket
+  // tek nakit akışı kaydı; iptal geçmişi korunur. Eski yemek_karti_odemeler satırları yöntemi belirsiz
+  // tarihsel hareket olarak okunur (tahmin edilmez).
+  await pool.query(`CREATE TABLE IF NOT EXISTS yemek_odeme_hareket (
+    id SERIAL PRIMARY KEY,
+    kart_id INTEGER REFERENCES yemek_kartlari(id) ON DELETE CASCADE,
+    personel_id INTEGER,
+    donem TEXT NOT NULL,
+    tutar NUMERIC NOT NULL,
+    yontem TEXT NOT NULL,
+    tarih DATE NOT NULL,
+    odeyen_firma TEXT,
+    kasa TEXT,
+    aciklama TEXT,
+    belge_url TEXT,
+    dagilim JSONB,
+    cashflow_id INTEGER,
+    istek_anahtari TEXT UNIQUE,
+    created_by TEXT,
+    created_at TIMESTAMP DEFAULT now(),
+    iptal_at TIMESTAMP,
+    iptal_by TEXT,
+    iptal_neden TEXT)`).catch(() => {});
+  await pool.query(`CREATE TABLE IF NOT EXISTS yemek_donem_tercih (donem TEXT PRIMARY KEY, yontem TEXT NOT NULL, guncelleyen TEXT, updated_at TIMESTAMP DEFAULT now())`).catch(() => {});
 }
+// Dönem ödeme tercihi (öneri): Ekim 2026 ve öncesi NAKIT, Kasım 2026'dan itibaren KART; kullanıcı değiştirebilir,
+// personelin kart kaydını ve eski ödemeleri değiştirmez — yalnız ödeme penceresinin varsayılanıdır
+async function yemekDonemTercih(donem) {
+  const r = await pool.query(`SELECT yontem FROM yemek_donem_tercih WHERE donem=$1`, [donem]).catch(() => ({ rows: [] }));
+  if (r.rows[0]) return { yontem: r.rows[0].yontem, kaynak: "kullanici" };
+  return { yontem: donem <= "2026-10" ? "NAKIT" : "KART", kaynak: "varsayilan" };
+}
+const YEMEK_YONTEM_AD = { NAKIT: "Nakit / Elden", KART: "Yemek kartına yükleme" };
 // ── Yemek kartı gider firması kuralı (20.10.2026): 01–14.10.2026 Şimşek, 15.10.2026'dan itibaren Teknocenter;
 //    01.10.2026 öncesi tarihsel kayıt (kart/ödeme firması) korunur. Yalnız GİDER firmasını belirler — bordro
 //    şirketi, yasal işveren ve kullanıcı hesabına dokunmaz. (Diğer modüllerin 14.10 devir tarihi değişmedi.)
@@ -20752,10 +20785,29 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
        FROM personel p WHERE p.birlestirildi_personel_id IS NULL AND COALESCE(p.firma_tipi,'simsek') = 'simsek'
        ${k ? `AND UPPER(COALESCE(p.marka,'ERC')) = ANY($1::text[])` : ""} ORDER BY p.ad_soyad`, k ? [k.bordro] : []);
   const dm = await ikDonemleriYukle(per.rows.map(p => p.id));
-  const [kartlar, odemeler] = await Promise.all([
+  const [kartlar, odemeler, hareketler] = await Promise.all([
     pool.query(`SELECT * FROM yemek_kartlari ORDER BY ad_soyad`),
     pool.query(`SELECT o.*, to_char(o.tarih,'YYYY-MM-DD') AS tarih_str FROM yemek_karti_odemeler o WHERE o.donem=$1`, [donem]),
+    pool.query(`SELECT h.*, to_char(h.tarih,'YYYY-MM-DD') AS tarih_str FROM yemek_odeme_hareket h WHERE h.donem=$1 ORDER BY h.tarih, h.id`, [donem]),
   ]);
+  const harByKart = new Map(); hareketler.rows.forEach(h => { if (!harByKart.has(h.kart_id)) harByKart.set(h.kart_id, []); harByKart.get(h.kart_id).push(h); });
+  // Hak kaydının ödeme özeti: eski (yöntemi belirsiz) kayıt + yeni hareketler (iptal edilenler toplama girmez, listede kalır)
+  const odemeOzeti = (kart, eskiOdeme) => {
+    const har = (kart ? harByKart.get(kart.id) || [] : []).map(h => ({ id: h.id, tutar: Number(h.tutar), yontem: h.yontem, tarih: h.tarih_str, odeyen_firma: h.odeyen_firma, kasa: h.kasa,
+      aciklama: h.aciklama, belge_url: h.belge_url, dagilim: h.dagilim, cashflow_id: h.cashflow_id, created_by: h.created_by, iptal: !!h.iptal_at, iptal_neden: h.iptal_neden, iptal_by: h.iptal_by, kaynak: "hareket" }));
+    if (eskiOdeme) har.unshift({ id: eskiOdeme.id, tutar: Number(eskiOdeme.tutar), yontem: null, tarih: eskiOdeme.tarih_str, odeyen_firma: eskiOdeme.odeyen_firma, kasa: null, aciklama: eskiOdeme.aciklama,
+      dagilim: eskiOdeme.dagilim, cashflow_id: eskiOdeme.cashflow_id, iptal: false, kaynak: "eski", firma: eskiOdeme.firma });
+    const aktif = har.filter(h => !h.iptal);
+    const nakit = aktif.filter(h => h.yontem === "NAKIT").reduce((a, h) => a + h.tutar, 0);
+    const kartY = aktif.filter(h => h.yontem === "KART").reduce((a, h) => a + h.tutar, 0);
+    const belirsiz = aktif.filter(h => !h.yontem).reduce((a, h) => a + h.tutar, 0);
+    const toplam = nakit + kartY + belirsiz;
+    const hak = kart && kart.aylik_tutar !== null && Number(kart.aylik_tutar) > 0 ? Number(kart.aylik_tutar) : null;
+    const kalan = hak === null ? null : Math.max(0, hak - toplam);
+    const durum = hak === null ? (toplam > 0 ? "ODENDI" : "TANIMSIZ") : toplam <= 0 ? "ODENMEDI" : toplam + 0.5 >= hak ? "ODENDI" : "KISMI";
+    const yontemler = [...new Set(aktif.map(h => h.yontem || "BELIRSIZ"))];
+    return { hareketler: har, odenen_toplam: toplam, nakit_odenen: nakit, kart_odenen: kartY, belirsiz_odenen: belirsiz, hak, kalan, durum, yontemler };
+  };
   const kartByPid = new Map(); kartlar.rows.forEach(c => { if (c.personel_id) kartByPid.set(c.personel_id, c); });
   const kartByAd = new Map(); kartlar.rows.forEach(c => { if (!c.personel_id) kartByAd.set(adAnahtar(c.ad_soyad), c); });
   const odemeByKart = new Map(); odemeler.rows.forEach(o => odemeByKart.set(o.kart_id, o));
@@ -20789,6 +20841,7 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
       gider_firmalari: tarihsel ? [{ firma: (odeme?.firma || kart?.firma || null), tarihsel: true }] : firmalar,
       dagilim_gerekli: !tarihsel && firmalar.length > 1,
       odeme: odeme ? { id: odeme.id, tutar: Number(odeme.tutar), tarih: odeme.tarih_str, firma: odeme.firma, odeyen_firma: odeme.odeyen_firma, dagilim: odeme.dagilim, cashflow_id: odeme.cashflow_id, aciklama: odeme.aciklama } : null,
+      ...odemeOzeti(kart, odeme),
     });
   }
   // Personele bağlı olmayan kartlar (ad eşleşmesi de yok) → arşiv/kontrol satırı
@@ -20799,13 +20852,15 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
       kart: { id: c.id, kart_no: c.kart_no, aylik_tutar: c.aylik_tutar, firma: c.firma, aktif: c.aktif, ad_soyad: c.ad_soyad }, baglanti: null,
       kart_eksik: !String(c.kart_no || "").trim(), tutar_tanimsiz: c.aylik_tutar === null || Number(c.aylik_tutar) <= 0,
       gider_firmalari: [{ firma: o?.firma || c.firma || null, tarihsel: true }], dagilim_gerekli: false, personelsiz: true,
-      odeme: o ? { id: o.id, tutar: Number(o.tutar), tarih: o.tarih_str, firma: o.firma, odeyen_firma: o.odeyen_firma, dagilim: o.dagilim, cashflow_id: o.cashflow_id } : null };
+      odeme: o ? { id: o.id, tutar: Number(o.tutar), tarih: o.tarih_str, firma: o.firma, odeyen_firma: o.odeyen_firma, dagilim: o.dagilim, cashflow_id: o.cashflow_id } : null,
+      ...odemeOzeti(c, o) };
   });
   let liste;
   if (gorunum === "donem") liste = satirlar.filter(r => r.donemde_calisti);
   else if (gorunum === "arsiv") liste = [...satirlar.filter(r => !r.calisiyor), ...bagsiz];
   else liste = satirlar.filter(r => r.calisiyor);
-  return { liste, dilimler, ayBas, aySon, bugun, kartSayisi: kartlar.rows.length, bagsiz: bagsiz.length };
+  const tercih = await yemekDonemTercih(donem);
+  return { liste, dilimler, ayBas, aySon, bugun, kartSayisi: kartlar.rows.length, bagsiz: bagsiz.length, tercih };
 }
 
 app.get("/hr/yemek-kartlari", async (req, res) => {
@@ -20819,6 +20874,112 @@ app.get("/hr/yemek-kartlari", async (req, res) => {
     let kadro = null;
     if (/^\d{4}-\d{2}$/.test(donem)) kadro = await yemekKadroSatirlari(req, donem, String(req.query.gorunum || "kadro"));
     res.json({ ok: true, kartlar: kartlar.rows, odemeler: odemeler.rows, kadro, kural: { simsek_bas: YEMEK_SIMSEK_BAS, tekno_bas: YEMEK_TEKNO_BAS } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// ── Ödeme hareketi (20.10.2026): NAKIT ya da KART; kısmi/karma; kalan hakkı aşamaz; aynı istek anahtarı
+//    ikinci kez gelirse mevcut hareket döner (mükerrer yok). Gider firması HAK dönemine göre (yöntemden bağımsız),
+//    ödeyen firma/kasa ayrı; nakit akışına (TICKET) TEK kayıt, gerçek ödeme tarihinde. Maaş/avansa yazılmaz.
+app.post("/hr/yemek-kartlari/:id/hareket", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureYemekKartiTables(); await ensureCashflowOdemeTable();
+    const u = optionalAuth(req);
+    const b = req.body || {};
+    const donem = String(b.donem || "").trim(), yontem = String(b.yontem || "").toUpperCase();
+    const tutar = Number(b.tutar || 0);
+    if (!/^\d{4}-\d{2}$/.test(donem)) { client.release(); return res.status(400).json({ ok: false, error: "Dönem zorunlu" }); }
+    if (!["NAKIT", "KART"].includes(yontem)) { client.release(); return res.status(400).json({ ok: false, error: "Ödeme yöntemi seçin: Nakit / Elden ya da Yemek Kartına Yükleme" }); }
+    if (!(tutar > 0)) { client.release(); return res.status(400).json({ ok: false, error: "Ödenecek tutar girin" }); }
+    const tarih = String(b.tarih || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(tarih)) { client.release(); return res.status(400).json({ ok: false, error: "Gerçek ödeme tarihi zorunlu" }); }
+    if (b.istek_anahtari) {
+      const ayni = await pool.query(`SELECT * FROM yemek_odeme_hareket WHERE istek_anahtari=$1`, [String(b.istek_anahtari)]);
+      if (ayni.rows[0]) { client.release(); return res.json({ ok: true, hareket: ayni.rows[0], zaten: true }); }
+    }
+    await client.query("BEGIN");
+    const kq = await client.query(`SELECT * FROM yemek_kartlari WHERE id=$1 FOR UPDATE`, [req.params.id]);
+    const kart = kq.rows[0];
+    if (!kart) { await client.query("ROLLBACK"); client.release(); return res.status(404).json({ ok: false, error: "Hak kaydı bulunamadı" }); }
+    const hak = kart.aylik_tutar === null ? null : Number(kart.aylik_tutar);
+    if (!(hak > 0)) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: "Yemek tutarı tanımlanmamış — önce dönemlik hakkı tanımlayın" }); }
+    if (yontem === "KART" && !String(kart.kart_no || "").trim()) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: "Kart yüklemesi için geçerli kart numarası gerekli — kart bilgisini girin ya da Nakit / Elden seçin" }); }
+    const odenmis = await client.query(
+      `SELECT COALESCE((SELECT SUM(tutar) FROM yemek_odeme_hareket WHERE kart_id=$1 AND donem=$2 AND iptal_at IS NULL),0)
+            + COALESCE((SELECT SUM(tutar) FROM yemek_karti_odemeler WHERE kart_id=$1 AND donem=$2),0) AS t`, [kart.id, donem]);
+    const kalan = hak - Number(odenmis.rows[0].t || 0);
+    if (tutar > kalan + 0.5) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: `Kalan hakkı aşıyor: ${donem} için kalan ₺${kalan.toLocaleString("tr-TR")}` }); }
+    // Gider dağılımı (iki firmalı ay): bu hareketin tutarı firmalara bölünür, toplam = tutar; tek firmalı ay otomatik
+    const dilimler = yemekAyDilimleri(donem);
+    let dagilim = null, giderFirma = null;
+    if (dilimler) {
+      const izinli = dilimler.map(d => d.firma);
+      if (Array.isArray(b.dagilim) && b.dagilim.length) {
+        dagilim = b.dagilim.map(x => ({ firma: String(x.firma || "").toUpperCase(), tutar: Number(x.tutar || 0) })).filter(x => x.tutar > 0);
+        const yabanci = dagilim.find(x => !izinli.includes(x.firma));
+        if (yabanci) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: `${donem} döneminde ${yemekFirmaAd(yabanci.firma)} gideri yazılamaz` }); }
+        const top = dagilim.reduce((a, x) => a + x.tutar, 0);
+        if (Math.abs(top - tutar) > 0.5) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: `Dağılım toplamı (₺${top}) ödeme tutarına (₺${tutar}) eşit olmalı` }); }
+        giderFirma = dagilim.length === 1 ? dagilim[0].firma : "KARMA";
+      } else if (izinli.length === 1 || b.gider_firmasi) {
+        giderFirma = izinli.length === 1 ? izinli[0] : String(b.gider_firmasi).toUpperCase();
+        if (!izinli.includes(giderFirma)) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: `${donem} iki firmayı kapsıyor — dağılım tutarlarını girin` }); }
+        dagilim = [{ firma: giderFirma, tutar }];
+      } else { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ ok: false, error: `${donem} iki firmayı kapsıyor (${izinli.map(yemekFirmaAd).join(" / ")}) — dağılım tutarlarını girin` }); }
+    } else {
+      giderFirma = String(b.gider_firmasi || kart.firma || "").toUpperCase() === "SIMSEK" ? "SIMSEK" : (aktifAltMarkaKodu(b.gider_firmasi || kart.firma, tarih) || "SIMSEK");
+    }
+    const odeyen = String(b.odeyen_firma || (giderFirma === "KARMA" ? "TEKNO" : giderFirma)).toUpperCase();
+    const kasa = String(b.kasa || (yontem === "NAKIT" ? "KASA" : "BANKA")).toUpperCase();
+    const cfMarka = odeyen === "SIMSEK" ? "ERC" : odeyen;
+    const acik = `${kart.ad_soyad} · yemek ${yontem === "NAKIT" ? "nakit/elden" : "kart yüklemesi"} · ${NAKIT_YONTEM_AD[kasa] || kasa}` +
+      (dagilim ? ` · gider: ${dagilim.map(x => `${yemekFirmaAd(x.firma)} ₺${x.tutar}`).join(" + ")}` : "") + (b.aciklama ? ` · ${String(b.aciklama).trim()}` : "");
+    const cf = await client.query(`INSERT INTO cashflow_odeme (kategori, tarih, tutar, donem, aciklama, marka) VALUES ('TICKET',$1,$2,$3,$4,$5) RETURNING id`,
+      [tarih, tutar, donem, acik, cfMarka]);
+    const h = await client.query(
+      `INSERT INTO yemek_odeme_hareket (kart_id, personel_id, donem, tutar, yontem, tarih, odeyen_firma, kasa, aciklama, dagilim, cashflow_id, istek_anahtari, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [kart.id, kart.personel_id, donem, tutar, yontem, tarih, odeyen, kasa, b.aciklama ? String(b.aciklama).trim() : null, dagilim ? JSON.stringify(dagilim) : null,
+       cf.rows[0].id, b.istek_anahtari ? String(b.istek_anahtari) : null, String(u?.email || "").toLowerCase() || null]);
+    await client.query("COMMIT");
+    res.json({ ok: true, hareket: h.rows[0], kalan: Math.max(0, kalan - tutar) });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    if (String(e.message || "").includes("istek_anahtari")) return res.status(200).json({ ok: true, zaten: true });
+    res.status(500).json({ ok: false, error: e.message });
+  } finally { try { client.release(); } catch {} }
+});
+// Hareket iptali: kayıt silinmez (iptal_at/by/neden), kasa etkisi geri alınır (nakit akışı satırı kaldırılır)
+app.delete("/hr/yemek-kartlari/hareket/:id", authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || "").toLowerCase(), rol = String(req.user?.role || "").toLowerCase();
+    if (!IK_ESITLE_ROLLER.includes(rol) && !IK_ESITLE_EMAIL.includes(email)) return res.status(403).json({ ok: false, error: "İptal yetkiniz yok" });
+    const neden = String((req.body || {}).neden || req.query.neden || "").trim();
+    if (!neden) return res.status(400).json({ ok: false, error: "İptal nedeni zorunlu" });
+    const r = await pool.query(`UPDATE yemek_odeme_hareket SET iptal_at=now(), iptal_by=$2, iptal_neden=$3 WHERE id=$1 AND iptal_at IS NULL RETURNING *`, [req.params.id, email, neden]);
+    if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Hareket bulunamadı ya da zaten iptal" });
+    if (r.rows[0].cashflow_id) await pool.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [r.rows[0].cashflow_id]).catch(() => {});
+    res.json({ ok: true, hareket: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Makbuz / dekont / teslim belgesi (isteğe bağlı)
+app.post("/hr/yemek-kartlari/hareket/:id/belge", masrafUpload.single("dosya"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
+    const fname = `yemek-${req.params.id}-${Date.now()}-${utf8Name(req.file.originalname)}`;
+    const { url } = await uploadToStorage("kasa-dekontlar", fname, req.file.buffer, req.file.mimetype);
+    const r = await pool.query(`UPDATE yemek_odeme_hareket SET belge_url=$1 WHERE id=$2 RETURNING *`, [url, req.params.id]);
+    res.json({ ok: true, hareket: r.rows[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Dönem ödeme tercihi (öneri): para hareketi oluşturmaz, kart kaydını değiştirmez
+app.put("/hr/yemek-kartlari/donem-tercih", authMiddleware, async (req, res) => {
+  try {
+    await ensureYemekKartiTables();
+    const donem = String((req.body || {}).donem || "").trim(), yontem = String((req.body || {}).yontem || "").toUpperCase();
+    if (!/^\d{4}-\d{2}$/.test(donem) || !["NAKIT", "KART"].includes(yontem)) return res.status(400).json({ ok: false, error: "Dönem ve yöntem gerekli" });
+    await pool.query(`INSERT INTO yemek_donem_tercih (donem, yontem, guncelleyen) VALUES ($1,$2,$3) ON CONFLICT (donem) DO UPDATE SET yontem=$2, guncelleyen=$3, updated_at=now()`,
+      [donem, yontem, String(req.user?.email || "").toLowerCase()]);
+    res.json({ ok: true, tercih: { yontem, kaynak: "kullanici" } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // Kadroyu eşitle: kartları personel ID'sine bağlar, eksikleri ve kontrol gerektirenleri raporlar; kart/hak kaydı ÜRETMEZ
@@ -20890,8 +21051,9 @@ app.put("/hr/yemek-kartlari/:id", async (req, res) => {
 app.delete("/hr/yemek-kartlari/:id", async (req, res) => {
   try {
     await ensureYemekKartiTables();
-    // Karta bağlı ödemelerin nakit akışı kayıtlarını da temizle
-    const cfs = await pool.query(`SELECT cashflow_id FROM yemek_karti_odemeler WHERE kart_id=$1 AND cashflow_id IS NOT NULL`, [req.params.id]);
+    // Karta bağlı ödemelerin (eski kayıt + hareketler) nakit akışı kayıtlarını da temizle
+    const cfs = await pool.query(`SELECT cashflow_id FROM yemek_karti_odemeler WHERE kart_id=$1 AND cashflow_id IS NOT NULL
+      UNION SELECT cashflow_id FROM yemek_odeme_hareket WHERE kart_id=$1 AND cashflow_id IS NOT NULL AND iptal_at IS NULL`, [req.params.id]);
     for (const r of cfs.rows) await pool.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [r.cashflow_id]).catch(() => {});
     await pool.query(`DELETE FROM yemek_kartlari WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
