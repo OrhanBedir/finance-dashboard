@@ -680,7 +680,7 @@ app.use((req, res, next) => {
 app.get("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, email, role, is_active, created_at, tenant, marka, subcon_name
+      SELECT id, name, email, role, is_active, created_at, tenant, marka, subcon_name, users_admin
       FROM users
       ORDER BY id DESC
     `);
@@ -759,6 +759,10 @@ app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
       );
     }
 
+    // 20.10.2026: kullanıcı işlem geçmişi (şifre yazılmaz)
+    await islemGecmisiYaz(req, "kullanici", result.rows[0].id, existing.rows.length > 0 ? "DUZENLEME" : "OLUSTURMA",
+      existing.rows.length > 0 ? { not: "Mevcut e-posta ile yeniden eklendi: şifre yenilendi, hesap aktif edildi" } : null,
+      { name, email, role, marka }, null);
     // 15.10.2026: İK bağlantısı kimlik/e-posta esaslı (ikPersonelBagla) — ad benzerliğiyle
     // birleştirme yok, işe giriş tarihi aktivasyon tarihinden türetilmez (İK tamamlar).
     let personel = null;
@@ -799,6 +803,7 @@ app.put(
       }
 
       console.log("ACTIVE TOGGLED:", result.rows[0]);
+      await islemGecmisiYaz(req, "kullanici", id, "DURUM", { is_active: !result.rows[0].is_active }, { is_active: result.rows[0].is_active }, req.body?.gerekce || null);
 
       // 15.10.2026: hesap aktif edildiyse İK personel kaydına bağla / profil aç (maaş paneline düşsün).
       // Pasife almak İK kaydına, maaş ve ödeme geçmişine dokunmaz (çıkış İK'daki ayrılma tarihiyle yönetilir).
@@ -825,8 +830,10 @@ app.delete(
     try {
       const { id } = req.params;
       if (!(await guardUserScope(req, res, id))) return;
+      const eskiU = (await pool.query(`SELECT name, email, role, subcon_name, marka, is_active FROM users WHERE id=$1`, [id])).rows[0];
 
       await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
+      if (eskiU) await islemGecmisiYaz(req, "kullanici", id, "SILME", { name: eskiU.name, email: eskiU.email, role: eskiU.role, subcon_name: eskiU.subcon_name || null, marka: eskiU.marka || null, is_active: eskiU.is_active }, null, req.body?.gerekce || null);
 
       res.json({ ok: true });
     } catch (err) {
@@ -880,6 +887,56 @@ app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   }
 });
 
+// GENEL DÜZENLEME (20.10.2026, Orhan): Admin → Kullanıcılar yan paneli tek "Kaydet" ile ad, e-posta, rol,
+// taşeron/bağlı firma ve markayı günceller. Yetki kuralları /role ve /marka uçlarıyla aynı; şifre burada değişmez.
+const ADMIN_ROLLER = ["admin", "user", "subcon", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe"];
+app.put("/admin/users/:id", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!(await guardUserScope(req, res, id))) return;
+    const cur = (await pool.query(`SELECT id, name, email, role, subcon_name, marka, tenant, is_active FROM users WHERE id=$1`, [id])).rows[0];
+    if (!cur) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
+    const role = String(req.body.role || cur.role || "user");
+    if (!ADMIN_ROLLER.includes(role) && role !== cur.role) return res.status(400).json({ ok: false, error: "Geçersiz rol", alan: "role" });
+    if (role === "platform_admin" && req.user.role !== "platform_admin") return res.status(403).json({ ok: false, error: "Bu rolü yalnız platform yöneticisi verebilir", alan: "role" });
+    const email = String(req.body.email ?? cur.email ?? "").trim().toLowerCase();
+    if (!email) return res.status(400).json({ ok: false, error: "E-posta / kullanıcı adı zorunlu", alan: "email" });
+    if (email !== String(cur.email || "").trim().toLowerCase()) {
+      const dup = await pool.query(`SELECT id FROM users WHERE LOWER(TRIM(email)) = $1 AND id <> $2 LIMIT 1`, [email, id]);
+      if (dup.rows.length) return res.status(409).json({ ok: false, error: "Bu e-posta / kullanıcı adı başka bir hesapta kayıtlı", alan: "email" });
+    }
+    const nameRaw = req.body.name ?? cur.name;
+    const name = (role === "subcon" || !email.includes("@")) ? String(nameRaw || "").replace(/\s+/g, " ").trim() : adSoyadStandart(nameRaw);
+    if (!name) return res.status(400).json({ ok: false, error: "Ad soyad zorunlu", alan: "name" });
+    let subcon = cur.subcon_name;
+    if (req.body.subcon_name !== undefined) {
+      const v = String(req.body.subcon_name || "").trim();
+      // Değer değişmediyse kayıttaki yazım korunur (Federal → FEDERAL olmaz); yeni değer büyük harfle yazılır
+      subcon = !v ? null : (v.toUpperCase() === String(cur.subcon_name || "").trim().toUpperCase() ? cur.subcon_name : v.toUpperCase());
+    }
+    if (role === "subcon" && !subcon) return res.status(400).json({ ok: false, error: "Taşeron rolü için taşeron adı zorunlu", alan: "subcon_name" });
+    let marka = cur.marka;
+    if (req.body.marka !== undefined && String(req.body.marka || "").trim()) {
+      const m = String(req.body.marka).trim().toUpperCase();
+      if (m !== String(cur.marka || "").toUpperCase()) {
+        const mr = await pool.query("SELECT kod FROM markalar WHERE kod=$1 AND aktif=true", [m]);
+        if (!mr.rows.length) return res.status(400).json({ ok: false, error: "Geçersiz firma", alan: "marka" });
+        marka = m;
+      }
+    }
+    const r = await pool.query(
+      `UPDATE users SET name=$1, email=$2, role=$3, subcon_name=$4, marka=$5 WHERE id=$6
+       RETURNING id, name, email, role, subcon_name, marka, tenant, is_active, users_admin, created_at`,
+      [name, email, role, subcon, marka, id]);
+    const ozet = (u) => ({ name: u.name, email: u.email, role: u.role, subcon_name: u.subcon_name || null, marka: u.marka || null });
+    if (JSON.stringify(ozet(cur)) !== JSON.stringify(ozet(r.rows[0]))) await islemGecmisiYaz(req, "kullanici", id, "DUZENLEME", ozet(cur), ozet(r.rows[0]), null);
+    res.json({ ok: true, user: r.rows[0] });
+  } catch (err) {
+    console.error("ADMIN USER UPDATE ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ROL GÜNCELLE
 app.put(
   "/admin/users/:id/role",
@@ -897,6 +954,7 @@ app.put(
         return res.status(400).json({ ok: false, error: "Taşeron rolü için taşeron adı zorunlu" });
       }
       if (!(await guardUserScope(req, res, id))) return;
+      const eskiR = (await pool.query(`SELECT role, subcon_name FROM users WHERE id=$1`, [id])).rows[0];
 
       // Taşeron rolünde firma adı da yazılır; başka role geçilirse kapsam temizlenir
       const result = await pool.query(
@@ -915,6 +973,7 @@ app.put(
           .status(404)
           .json({ ok: false, error: "Kullanıcı bulunamadı" });
       }
+      await islemGecmisiYaz(req, "kullanici", id, "ROL", { role: eskiR?.role, subcon_name: eskiR?.subcon_name || null }, { role: result.rows[0].role, subcon_name: result.rows[0].subcon_name || null }, null);
 
       res.json({ ok: true, user: result.rows[0] });
     } catch (err) {
@@ -936,11 +995,13 @@ app.put(
       const mr = await pool.query("SELECT kod FROM markalar WHERE kod=$1 AND aktif=true", [marka]);
       if (!mr.rows.length) return res.status(400).json({ ok: false, error: "Geçersiz marka" });
       if (!(await guardUserScope(req, res, id))) return;
+      const eskiM = (await pool.query(`SELECT marka FROM users WHERE id=$1`, [id])).rows[0];
       const result = await pool.query(
         "UPDATE users SET marka=$1 WHERE id=$2 RETURNING id, name, email, role, marka",
         [marka, id],
       );
       if (!result.rows.length) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
+      await islemGecmisiYaz(req, "kullanici", id, "MARKA", { marka: eskiM?.marka || null }, { marka: result.rows[0].marka }, null);
       res.json({ ok: true, user: result.rows[0] });
     } catch (err) {
       console.error("ADMIN USER MARKA UPDATE ERROR:", err);
@@ -987,6 +1048,7 @@ app.put(
           .status(404)
           .json({ ok: false, error: "Kullanıcı bulunamadı" });
       }
+      await islemGecmisiYaz(req, "kullanici", id, "DURUM", { is_active: !result.rows[0].is_active }, { is_active: result.rows[0].is_active }, req.body?.gerekce || null);
 
       res.json({ ok: true, user: result.rows[0] });
     } catch (err) {
@@ -1040,6 +1102,7 @@ app.put(
           .json({ ok: false, error: "Kullanıcı bulunamadı" });
       }
 
+      await islemGecmisiYaz(req, "kullanici", id, "SIFRE", null, { not: "Yönetici tarafından yeni şifre belirlendi" }, null);
       res.json({ ok: true, user: result.rows[0] });
     } catch (err) {
       console.error("ADMIN USER PASSWORD RESET ERROR:", err);
@@ -18993,21 +19056,24 @@ const GECMIS_DURUM_TR = { TALEP: "Talep", ROLLOUT_MUDUR_ONAY: "Rollout müdürü
   TASLAK: "Taslak", ROLLOUT_BEKLE: "Rollout onayı bekliyor", MUHASEBE_BEKLE: "Muhasebe onayı bekliyor", PM_BEKLE: "PM onayı bekliyor", DIREKTOR_BEKLE: "Direktör onayı bekliyor", ARSIVLENDI: "Arşivlendi" };
 const GECMIS_ETIKET = { tutar: "Tutar", tarih: "Tarih", durum: "Durum", firma: "Firma", aciklama: "Açıklama", not_aciklama: "Not", gider_turu: "Gider türü", bolge: "Bölge", proje: "Proje", plaka: "Plaka",
   donem: "Dönem", bankadan: "Bankadan", elden: "Elden", odeyen: "Ödeyen", kategori: "Kategori", belge_no: "Belge no", belge_aciklama: "Belge açıklaması", dosya: "Dosya",
-  form_no: "Form no", talep_eden: "Talep eden", kalem_sayisi: "Kalem sayısı", fis_var: "Fiş var", adim: "Adım", kalem: "Kalem" };
+  form_no: "Form no", talep_eden: "Talep eden", kalem_sayisi: "Kalem sayısı", fis_var: "Fiş var", adim: "Adım", kalem: "Kalem",
+  name: "Ad soyad", email: "E-posta / kullanıcı adı", role: "Rol", subcon_name: "Taşeron / bağlı firma", marka: "Firma", is_active: "Durum", not: "Not" };
+const GECMIS_ROL_TR = { user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
 const GECMIS_BASLIK = { OLUSTURMA: "Oluşturuldu", DUZENLEME: "Düzenlendi", ONAY: "Onaylandı", ODEME: "Ödendi / tamamlandı", RED: "Reddedildi", SILME: "Silindi", GONDERIM: "Onaya gönderildi",
-  GERI_GONDER: "Geri gönderildi (iade)", ARSIV: "Arşivlendi", KALEM_EKLE: "Kalem eklendi", KALEM_DUZENLE: "Kalem düzenlendi", KALEM_SIL: "Kalem silindi", BELGE_EKLE: "Fiş / belge eklendi", BELGE_SIL: "Fiş / belge kaldırıldı", NOT: "Ek açıklama", DUZELTME: "Düzeltme" };
+  GERI_GONDER: "Geri gönderildi (iade)", ARSIV: "Arşivlendi", KALEM_EKLE: "Kalem eklendi", KALEM_DUZENLE: "Kalem düzenlendi", KALEM_SIL: "Kalem silindi", BELGE_EKLE: "Fiş / belge eklendi", BELGE_SIL: "Fiş / belge kaldırıldı", NOT: "Ek açıklama", DUZELTME: "Düzeltme",
+  ROL: "Rol değiştirildi", MARKA: "Firma değiştirildi", DURUM: "Erişim durumu değiştirildi", SIFRE: "Şifre yenilendi", IK: "İK kaydı" };
 // Kayıt bazında işlem geçmişi: islem_gecmisi + eski kayıtlardan sentezlenen olaylar (onay tarihi kolonları, kalem notları)
 app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
   try {
     const modul = String(req.params.modul || "").toLowerCase();
     const id = Number(req.params.id);
-    if (!["avans", "maas_odeme", "masraf"].includes(modul) || !Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Geçersiz istek" });
+    if (!["avans", "maas_odeme", "masraf", "kullanici"].includes(modul) || !Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Geçersiz istek" });
     const email = String(req.user?.email || "").toLowerCase().trim();
     const rol = String(req.user?.role || "").toLowerCase();
     const kap = altMarkaKapsam(req);
     const tr = (d) => d ? ymdYerel(d).split("-").reverse().join(".") : "—";
     const para = (v) => "₺" + Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör" })[v] || v : String(v);
+    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör" })[v] || v : String(v);
     const fark = (eski, yeni) => {
       const out = []; const y = yeni || {}; const e = eski || {};
       for (const k of Object.keys(GECMIS_ETIKET)) {
@@ -19050,6 +19116,17 @@ app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
       kayit = { id: m.id, baslik: `Maaş ödemesi #${m.id}`, alt: `${m.ad_soyad || "—"} · ${m.donem} · ${para(Number(m.bankadan || 0) + Number(m.elden || 0))} · ${tr(m.tarih)}` };
       if (!logVar("OLUSTURMA")) olaylar.push({ zaman: m.created_at, tip: "OLUSTURMA", baslik: "Ödeme kaydı oluşturuldu", kaynak: "kayit", kim: m.created_by ? KAYIT(m.created_by, m.created_by) : K(null),
         detay: fark(null, maasOzet(m)) });
+    } else if (modul === "kullanici") {
+      const uq = (await pool.query(`SELECT id, name, email, role, subcon_name, marka, tenant, is_active, users_admin, created_at FROM users WHERE id=$1`, [id])).rows[0];
+      if (!uq) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+      const yetkili = ["admin", "platform_admin"].includes(rol) || req.user?.users_admin === true;
+      if (!yetkili || !adminCanSeeUserTenant(req.user, uq.tenant) || (uq.role === "platform_admin" && rol !== "platform_admin")) return res.status(403).json({ ok: false, error: "Bu kaydın geçmişini görüntüleme yetkiniz yok" });
+      kayit = { id: uq.id, baslik: `Kullanıcı #${uq.id} · ${uq.name}`, alt: `${uq.email} · ${GECMIS_ROL_TR[uq.role] || uq.role} · Firma: ${uq.marka || "ERC"}${uq.subcon_name ? ` · Bağlantı: ${uq.subcon_name}` : ""} · ${uq.is_active ? "Aktif" : "Pasif"}`,
+        kullanici: { id: uq.id, name: uq.name, email: uq.email, role: uq.role, subcon_name: uq.subcon_name, marka: uq.marka, tenant: uq.tenant, is_active: uq.is_active, users_admin: uq.users_admin, created_at: uq.created_at } };
+      if (!logVar("OLUSTURMA")) olaylar.push({ zaman: uq.created_at, tip: "OLUSTURMA", baslik: "Hesap oluşturuldu", kaynak: "kayit", kim: K(null), detay: [`${uq.name} (${uq.email})`] });
+      // İK günlüğünde bu hesaba bağlı kayıtlar (aktif et → İK profili açma / bağlama)
+      const ik = (await pool.query(`SELECT * FROM ik_islem_log WHERE user_id=$1 ORDER BY id`, [id]).catch(() => ({ rows: [] }))).rows;
+      for (const l of ik) olaylar.push({ zaman: l.created_at, tip: "IK", baslik: `İK: ${l.islem}`, kaynak: "ik", kim: K(l.kullanici), detay: [l.detay].filter(Boolean) });
     } else {
       const f = (await pool.query(`SELECT mf.*, p.ad_soyad AS personel_ad, COALESCE(p.marka,'ERC') AS marka FROM masraf_form mf LEFT JOIN personel p ON p.id=mf.personel_id WHERE mf.id=$1`, [id])).rows[0];
       if (!f) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });

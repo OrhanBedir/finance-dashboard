@@ -463,6 +463,7 @@ function IslemGecmisiPanel({ modul, id, onClose }) {
     ONAY: ["Onay", "#dcfce7", "#166534"], ODEME: ["Ödeme", "#ccfbf1", "#0f766e"], GONDERIM: ["Gönderim", "#e0f2fe", "#0369a1"],
     RED: ["Red", "#fee2e2", "#991b1b"], GERI_GONDER: ["İade", "#ffedd5", "#9a3412"], SILME: ["Silme", "#fee2e2", "#991b1b"], KALEM_SIL: ["Silme", "#fee2e2", "#991b1b"], BELGE_SIL: ["Belge", "#fff7ed", "#9a3412"],
     ARSIV: ["Arşiv", "#ede9fe", "#5b21b6"], KALEM_EKLE: ["Kalem", "#ecfdf5", "#065f46"], BELGE_EKLE: ["Belge", "#ecfdf5", "#065f46"], NOT: ["Açıklama", "#f1f5f9", "#475569"],
+    ROL: ["Rol", "#fef3c7", "#92400e"], MARKA: ["Firma", "#eff6ff", "#1d4ed8"], DURUM: ["Erişim", "#e0f2fe", "#0369a1"], SIFRE: ["Şifre", "#f1f5f9", "#475569"], IK: ["İK", "#ecfdf5", "#065f46"],
   };
   const z = (o) => !o.zaman ? "tarih bilinmiyor"
     : o.sadeceTarih ? String(o.zaman).slice(0, 10).split("-").reverse().join(".")
@@ -36172,183 +36173,427 @@ function App() {
             )}
 
             {page === "admin" && canOpenAdminPanel && (
-              <div style={{maxWidth:"1440px",margin:"24px auto",padding:"0 20px"}}>
-                <div style={{background:"linear-gradient(135deg,#1f2937 0%,#374151 100%)",borderRadius:"16px",padding:"28px 32px",marginBottom:"24px",display:"flex",alignItems:"center",gap:"16px",color:"#fff"}}>
-                  <div style={{fontSize:"40px"}}>👑</div>
-                  <div>
-                    <h2 style={{margin:0,fontSize:"24px",fontWeight:700}}>Admin Panel</h2>
-                    <p style={{margin:"4px 0 0",color:"#9ca3af",fontSize:"14px"}}>Kullanıcı yönetimi ve sistem ayarları</p>
-                  </div>
-                  <div style={{marginLeft:"auto",textAlign:"right"}}>
-                    <div style={{fontSize:"28px",fontWeight:700}}>{adminUsers.length}</div>
-                    <div style={{fontSize:"12px",color:"#9ca3af"}}>Toplam Kullanıcı</div>
-                  </div>
-                </div>
-
-                <div style={{display:"grid",gridTemplateColumns:"320px 1fr",gap:"24px",alignItems:"start"}}>
-                  <div style={{background:"#fff",borderRadius:"16px",padding:"24px",boxShadow:"0 4px 20px rgba(0,0,0,0.07)",border:"1px solid #f3f4f6"}}>
-                    <h3 style={{margin:"0 0 20px",fontSize:"16px",fontWeight:700,color:"#1f2937",display:"flex",alignItems:"center",gap:"8px"}}>
-                      <span style={{background:"#f3f4f6",borderRadius:"8px",padding:"6px 8px"}}>➕</span> Yeni Kullanıcı
-                    </h3>
-                    <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-                      <input placeholder="Ad Soyad" autoComplete="off" name="yeni_kullanici_ad" value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})} onBlur={e=>{ if (newUser.role !== "subcon") setNewUser(u=>({...u, name: adSoyadStandart(e.target.value)})); }} title="Türkçe büyük harfle kaydedilir (yazım değiştirilmez)" style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
-                      <input placeholder="E-posta adresi" autoComplete="off" name="yeni_kullanici_eposta" inputMode="email" value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
-                      <input placeholder="Şifre" type="password" autoComplete="new-password" name="yeni_kullanici_sifre" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",outline:"none"}} />
-                      <select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})} style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",background:"#fff",cursor:"pointer"}}>
-                        <option value="user">👤 Personel</option>
-                        <option value="subcon">🔧 Taşeron</option>
-                        <option value="admin">👑 Admin</option>
-                        <option value="rollout_mudur">🏗 Bölge Müdürü</option>
-                        <option value="pm">📋 Proje Müdürü</option>
-                        <option value="direktor">🎯 Direktör</option>
-                        <option value="muhasebe">💼 Muhasebe</option>
-                      </select>
-                      {/* Taşeron rolünde firma adı zorunlu: kullanıcı yalnız bu
-                          taşerona ait satırları görür (FERRUMX → AHY_FERRUMX dahil) */}
-                      {newUser.role === "subcon" && (
-                        <input placeholder="Taşeron Adı (ör. FERRUMX)" value={newUser.subcon_name||""}
-                          onChange={e=>setNewUser({...newUser, subcon_name: e.target.value.toUpperCase()})}
-                          style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #f59e0b",fontSize:"14px",outline:"none",background:"#fffbeb"}} />
-                      )}
-                      {adminMarkalar.length > 1 && (
-                        <select value={newUser.marka||"ERC"} onChange={e=>setNewUser({...newUser,marka:e.target.value})} title="Firma markası" style={{padding:"10px 14px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"14px",background:"#fff",cursor:"pointer"}}>
-                          {adminMarkalar.map(m=>(<option key={m.kod} value={m.kod}>🏢 {m.ad}</option>))}
-                        </select>
-                      )}
-                      <button onClick={() => handleCreateUser(false)} style={{padding:"11px",background:"#1f2937",color:"#fff",border:"none",borderRadius:"10px",fontWeight:"700",fontSize:"14px",cursor:"pointer",marginTop:"4px"}}>
-                        Kullanıcı Ekle
-                      </button>
-                      <AyniIsimUyari veri={adminAyniIsim} onKapat={() => setAdminAyniIsim(null)} />
-                    </div>
-                    {adminError && <div style={{marginTop:"12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:"8px",padding:"10px 14px",color:"#b91c1c",fontSize:"13px",fontWeight:600}}>{adminError}</div>}
-                  </div>
-
-                  <div style={{background:"#fff",borderRadius:"16px",boxShadow:"0 4px 20px rgba(0,0,0,0.07)",border:"1px solid #f3f4f6",overflow:"hidden"}}>
-                    <div style={{padding:"20px 24px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:"12px",flex:"1 1 auto",minWidth:0}}>
-                        <h3 style={{margin:0,fontSize:"16px",fontWeight:700,color:"#1f2937",whiteSpace:"nowrap"}}>Kullanıcılar</h3>
-                        <input
-                          type="text"
-                          placeholder="🔍 İsim veya e-posta ara..."
-                          value={adminUserSearch}
-                          onChange={e=>setAdminUserSearch(e.target.value)}
-                          style={{padding:"8px 14px",border:"1.5px solid #e5e7eb",borderRadius:"10px",fontSize:"13px",flex:"1 1 180px",maxWidth:"300px",minWidth:"140px"}}
-                        />
-                      </div>
-                      <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
-                        <span style={{background:"#dcfce7",color:"#166534",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>u.is_active).length} Aktif</span>
-                        <span style={{background:"#fee2e2",color:"#991b1b",fontSize:"12px",fontWeight:600,padding:"4px 10px",borderRadius:"20px"}}>{adminUsers.filter(u=>!u.is_active).length} Pasif</span>
-                        <button
-                          onClick={() => {
-                            const rolAdi = (u) =>
-                              u.role==="platform_admin"?"Platform Admin":u.role==="admin"?"Admin"
-                              :u.role==="rollout_mudur"?(u.email?.toLowerCase()==="serdar.altinova@simsektel.com"?"Bölge Müdürü":"Rollout Müdürü")
-                              :u.role==="pm"?"Proje Müdürü":u.role==="direktor"?"Direktör":u.role==="muhasebe"?"Muhasebe":"Personel";
-                            const firmaAdi = (u) =>
-                              altMarkaBilgi(u.marka)?.ad
-                              || ((u.tenant && u.tenant!=="erc") ? u.tenant : "ERC Mühendislik");
-                            const sirali = [...adminUsers].sort((a,b) =>
-                              (b.is_active?1:0)-(a.is_active?1:0) || String(a.name||"").localeCompare(String(b.name||""), "tr"));
-                            exportStandardExcel({
-                              title: "Kullanıcı Listesi",
-                              sheetName: "Kullanıcılar",
-                              fileBase: "Kullanici_Listesi",
-                              headers: ["Ad Soyad", "E-posta", "Firma", "Konum", "Durum"],
-                              colWidths: [26, 34, 20, 18, 10],
-                              numericCols: [],
-                              rows: sirali.map(u => [u.name||"", u.email||"", firmaAdi(u), rolAdi(u), u.is_active?"Aktif":"Pasif"]),
-                            }).catch(e => alert("Excel indirilemedi: " + e.message));
-                          }}
-                          style={{padding:"5px 12px",background:"#166534",color:"#fff",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:"4px"}}>
-                          📥 Excel İndir
-                        </button>
-                      </div>
-                    </div>
-                    {adminLoading ? (
-                      <div style={{padding:"40px",textAlign:"center",color:"#9ca3af"}}>Yükleniyor...</div>
-                    ) : (
-                      <div>
-                        {adminUsers.filter(u => {
-                          const q = adminUserSearch.trim().toLowerCase();
-                          if (!q) return true;
-                          return String(u.name||"").toLowerCase().includes(q) || String(u.email||"").toLowerCase().includes(q);
-                        }).map((u,i) => (
-                          <div key={u.id} style={{display:"grid",gridTemplateColumns:"48px minmax(170px,1fr) 150px minmax(0,auto)",alignItems:"center",gap:"16px",padding:"16px 28px",borderBottom:i<adminUsers.length-1?"1px solid #f3f4f6":"none",background:"#fff",transition:"background 0.15s"}}
-                            onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
-                            onMouseLeave={e=>e.currentTarget.style.background="#fff"}
-                          >
-                            {/* Avatar */}
-                            <div style={{width:"48px",height:"48px",borderRadius:"14px",background:u.role==="admin"?"linear-gradient(135deg,#fbbf24,#f59e0b)":"linear-gradient(135deg,#60a5fa,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"20px",fontWeight:700,color:"#fff",flexShrink:0}}>
-                              {u.name.charAt(0)}
-                            </div>
-                            {/* Ad + email */}
-                            <div style={{minWidth:0}}>
-                              <div style={{fontWeight:700,fontSize:"15px",color:"#1f2937",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name}</div>
-                              <div style={{fontSize:"12px",color:"#9ca3af",marginTop:"2px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
-                            </div>
-                            {/* Rol + Durum badge */}
-                            <div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
-                              <span style={{background:u.role==="admin"?"#fef3c7":u.role==="rollout_mudur"?"#f0fdf4":u.role==="pm"?"#eff6ff":u.role==="direktor"?"#fdf2f8":u.role==="muhasebe"?"#f0f9ff":"#f3f4f6",color:u.role==="admin"?"#92400e":u.role==="rollout_mudur"?"#166534":u.role==="pm"?"#1e40af":u.role==="direktor"?"#7e22ce":u.role==="muhasebe"?"#0369a1":"#374151",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",textTransform:"uppercase",letterSpacing:"0.05em",display:"inline-block",width:"fit-content"}}>
-                                {u.role==="platform_admin"?"🌐 Platform Admin":u.role==="admin"?"👑 Admin":u.role==="rollout_mudur"?(u.email?.toLowerCase()==="serdar.altinova@simsektel.com"?"📍 Bölge Müdürü":"🏗 Rollout Müdürü"):u.role==="pm"?"📋 Proje Müdürü":u.role==="direktor"?"🎯 Direktör":u.role==="muhasebe"?"💼 Muhasebe":"👤 Personel"}
-                              </span>
-                              <span style={{background:u.is_active?"#dcfce7":"#f3f4f6",color:u.is_active?"#166534":"#6b7280",fontSize:"11px",fontWeight:700,padding:"3px 10px",borderRadius:"20px",display:"inline-block",width:"fit-content"}}>
-                                {u.is_active?"✓ Aktif":"Pasif"}
-                              </span>
-                            </div>
-                            {/* Aksiyonlar — dar ekranda sarar, isim sütununu ezmez */}
-                            <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
-                              {!isUsersAdminOnly && (
-                              <button onClick={()=>handleToggleActive(u.id)} style={{padding:"7px 14px",background:u.is_active?"#fef3c7":"#f0fdf4",color:u.is_active?"#92400e":"#166534",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
-                                {u.is_active?"Pasife Al":"Aktif Et"}
-                              </button>
-                              )}
-                              {isUsersAdminOnly ? (
-                                <span style={{padding:"7px 10px",background:"#f1f5f9",color:"#475569",border:"1px solid #e2e8f0",borderRadius:"8px",fontSize:"12px",fontWeight:700}}>
-                                  {({user:"👤 Personel",subcon:"🔧 Taşeron",admin:"👑 Admin",rollout_mudur:"🏗 Bölge Müdürü",pm:"📋 Proje Müdürü",direktor:"🎯 Direktör",muhasebe:"💼 Muhasebe"})[u.role||"user"] || u.role}
-                                </span>
-                              ) : (
-                              <select value={u.role||"user"} onChange={e=>handleAdminRoleChange(u.id,e.target.value,u.subcon_name||"")} style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:(u.role==="subcon")?"#fffbeb":"#f9fafb",color:(u.role==="subcon")?"#92400e":"#374151"}}>
-                                <option value="user">👤 Personel</option>
-                                <option value="subcon">🔧 Taşeron</option>
-                                <option value="admin">👑 Admin</option>
-                                <option value="rollout_mudur">🏗 Bölge Müdürü</option>
-                                <option value="pm">📋 Proje Müdürü</option>
-                                <option value="direktor">🎯 Direktör</option>
-                                <option value="muhasebe">💼 Muhasebe</option>
-                              </select>
-                              )}
-                              {u.role === "subcon" && (
-                                <span onClick={()=>handleAdminRoleChange(u.id,"subcon",u.subcon_name||"")} title="Taşeron adını değiştir"
-                                  style={{padding:"7px 10px",background:"#fef3c7",color:"#92400e",border:"1px solid #fde68a",borderRadius:"8px",fontSize:"11.5px",fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>
-                                  🔧 {u.subcon_name || "taşeron adı yok"}
-                                </span>
-                              )}
-                              {!isUsersAdminOnly && adminMarkalar.length > 1 && (u.tenant||'erc')==='erc' && (
-                                <select value={u.marka||"ERC"} onChange={e=>handleAdminMarkaChange(u.id,e.target.value)} title="Firma markası" style={{padding:"7px 10px",border:"1px solid #e5e7eb",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",background:(u.marka==="AHY")?"#fff7ed":"#f9fafb",color:(u.marka==="AHY")?"#9a3412":"#374151"}}>
-                                  {adminMarkalar.map(m=>(<option key={m.kod} value={m.kod}>🏢 {m.ad}</option>))}
-                                </select>
-                              )}
-                              <button onClick={()=>handleResetPassword(u.id,u.name)} style={{padding:"7px 14px",background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}} title="Şifre değiştir">
-                                🔑 Şifre
-                              </button>
-                              {!isUsersAdminOnly && (
-                              <button onClick={()=>deleteUser(u.id)} style={{padding:"7px 14px",background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:"8px",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
-                                🗑 Sil
-                              </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <AdminKullanicilarPanel token={token} currentUser={user} isUsersAdminOnly={isUsersAdminOnly} onDegisti={loadAdminUsers} />
             )}
           </div>
         </div>
       </div>
     </>
+  );
+}
+
+/* ═══ Admin → Kullanıcılar (20.10.2026, Orhan): kurumsal kullanıcı yönetimi ekranı ═══
+   Kompakt başlık + özet, tek araç çubuğu (arama / durum / rol / firma), düzenli tablo (mobilde kart),
+   satırda "Düzenle" + ⋯ menüsü (Detay-İşlem Geçmişi, Aktif Et/Pasife Al, Şifre, Sil), sağdan açılan ekle/düzenle paneli.
+   Veri modeli korunur: role (erişim rolü), marka (firma: ERC/AHY/TEKNO), subcon_name (taşeron / bağlı firma), tenant, is_active.
+   Yetki: tam admin her şeyi yapar; kısıtlı kullanıcı yöneticisi (users_admin) yalnız ekler, şifre belirler ve detay görür. */
+const ADM_ROL_TR = { user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
+const ADM_ROL_SECENEK = ["user", "subcon", "admin", "rollout_mudur", "pm", "direktor", "muhasebe"]; // sunucunun /role ucunda kabul ettiği roller (genel_mudur yalnız mevcut kayıtta korunur)
+const admNorm = (v) => String(v || "").toLocaleLowerCase("tr-TR").replace(/ı/g, "i").replace(/i̇/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c").normalize("NFD").replace(/[̀-ͯ]/g, "");
+// Sayıya Türkçe iyelik eki (12’si, 30’u, 40’ı, 100’ü): sonuç sayacı doğru okunsun
+const admSayiEki = (n) => { const a = Math.abs(Number(n) || 0); if (a === 0) return "ı"; const b = a % 10 || (a % 100) || (a % 1000) || a; const t = { 1: "i", 2: "si", 3: "ü", 4: "ü", 5: "i", 6: "sı", 7: "si", 8: "i", 9: "u", 10: "u", 20: "si", 30: "u", 40: "ı", 50: "si", 60: "ı", 70: "i", 80: "i", 90: "ı", 100: "ü", 1000: "i" }; return t[a % 10 ? a % 10 : (a % 100 ? a % 100 : (a % 1000 ? a % 1000 : 1000))] || "i"; };
+const admRolAdi = (u) => u?.role === "rollout_mudur" && String(u.email || "").toLowerCase() === "serdar.altinova@simsektel.com" ? "Bölge Müdürü" : (ADM_ROL_TR[u?.role] || u?.role || "Personel");
+function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, onDegisti }) {
+  const H = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${token || localStorage.getItem("token") || ""}` });
+  const [users, setUsers] = useState([]);
+  const [markalar, setMarkalar] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [hata, setHata] = useState("");
+  const [bildirim, setBildirim] = useState(null); // { tip: "ok"|"uyari", metin }
+  const [q, setQ] = useState("");
+  const [fDurum, setFDurum] = useState("");
+  const [fRol, setFRol] = useState("");
+  const [fFirma, setFFirma] = useState("");
+  const [menu, setMenu] = useState(null);        // açık ⋯ menüsünün kullanıcı id'si
+  const [onay, setOnay] = useState(null);        // { tip: "sil"|"durum", u, busy, hata }
+  const [sifre, setSifre] = useState(null);      // { u, p1, p2, hata, busy }
+  const [detay, setDetay] = useState(null);      // kullanıcı id (İşlem Geçmişi paneli)
+  const [panel, setPanel] = useState(null);      // { mod: "yeni"|"duzenle", u, form, hatalar, busy, genel }
+  const [ayniIsim, setAyniIsim] = useState(null);
+  const [dar, setDar] = useState(typeof window !== "undefined" && window.innerWidth < 768);
+  useEffect(() => { const f = () => setDar(window.innerWidth < 768); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
+  useEffect(() => {
+    if (!menu) return;
+    const kapat = (e) => { if (!e.target.closest?.("[data-adm-menu]")) setMenu(null); };
+    const esc = (e) => { if (e.key === "Escape") setMenu(null); };
+    document.addEventListener("mousedown", kapat); document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", kapat); document.removeEventListener("keydown", esc); };
+  }, [menu]);
+  const yukle = async () => {
+    try {
+      setYukleniyor(true); setHata("");
+      const r = await fetch(`${API_BASE}/admin/users`, { headers: H() });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Kullanıcılar alınamadı");
+      setUsers(d.users || []);
+      try { const mr = await fetch(`${API_BASE}/admin/markalar`, { headers: H() }); const md = await mr.json().catch(() => ({})); if (mr.ok && md.markalar) setMarkalar(md.markalar); } catch {}
+    } catch (e) { setHata(e.message || "Kullanıcılar alınamadı"); }
+    finally { setYukleniyor(false); }
+  };
+  useEffect(() => { yukle(); }, []);
+  const degisti = async () => { await yukle(); if (onDegisti) { try { onDegisti(); } catch {} } };
+  const firmaAdi = (u) => markalar.find(m => m.kod === String(u.marka || "ERC").toUpperCase())?.ad || altMarkaBilgi(u.marka)?.ad || ((u.tenant && u.tenant !== "erc") ? u.tenant : "ERC Mühendislik");
+  const firmaKod = (u) => String(u.marka || "ERC").toUpperCase();
+  const firmaSecenekleri = [...new Set(users.map(firmaKod))].sort().map(k => ({ kod: k, ad: markalar.find(m => m.kod === k)?.ad || altMarkaBilgi(k)?.ad || (k === "ERC" ? "ERC Mühendislik" : k) }));
+  const rolSecenekleri = [...new Set(users.map(u => u.role || "user"))].sort((a, b) => (ADM_ROL_TR[a] || a).localeCompare(ADM_ROL_TR[b] || b, "tr"));
+  const qn = admNorm(q.trim());
+  const liste = users.filter(u => {
+    if (fDurum === "aktif" && !u.is_active) return false;
+    if (fDurum === "pasif" && u.is_active) return false;
+    if (fRol && (u.role || "user") !== fRol) return false;
+    if (fFirma && firmaKod(u) !== fFirma) return false;
+    if (qn && !admNorm(u.name).includes(qn) && !admNorm(u.email).includes(qn) && !admNorm(u.subcon_name).includes(qn)) return false;
+    return true;
+  }).sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0) || String(a.name || "").localeCompare(String(b.name || ""), "tr"));
+  const filtreVar = !!(qn || fDurum || fRol || fFirma);
+  const temizle = () => { setQ(""); setFDurum(""); setFRol(""); setFFirma(""); };
+  const toplam = users.length, aktifN = users.filter(u => u.is_active).length, pasifN = toplam - aktifN;
+  const tamAdmin = !isUsersAdminOnly;
+  const bildir = (tip, metin) => { setBildirim({ tip, metin }); window.clearTimeout(bildir._t); bildir._t = window.setTimeout(() => setBildirim(null), 6000); };
+
+  // ── işlemler ──
+  const excelIndir = () => {
+    exportStandardExcel({
+      title: filtreVar ? `Kullanıcı Listesi (filtrelenmiş: ${liste.length} / ${toplam})` : "Kullanıcı Listesi",
+      sheetName: "Kullanıcılar", fileBase: "Kullanici_Listesi",
+      headers: ["Ad Soyad", "E-posta / Kullanıcı adı", "Firma", "Taşeron / Bağlantı", "Rol", "Durum"],
+      colWidths: [26, 34, 20, 28, 18, 10], numericCols: [],
+      rows: liste.map(u => [u.name || "", u.email || "", firmaAdi(u), u.subcon_name || "", admRolAdi(u), u.is_active ? "Aktif" : "Pasif"]),
+    }).catch(e => bildir("uyari", "Excel indirilemedi: " + e.message));
+  };
+  const durumDegistir = async () => {
+    const o = onay; if (!o || o.busy) return;
+    setOnay({ ...o, busy: true, hata: "" });
+    try {
+      const r = await fetch(`${API_BASE}/admin/users/${o.u.id}/active`, { method: "PUT", headers: H() });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Durum güncellenemedi");
+      setOnay(null); await degisti();
+      let ek = "";
+      if (d.user?.is_active && d.personel) {
+        const p = d.personel;
+        ek = p.islem === "OLUSTURULDU" ? ` İK profili açıldı: ${p.ad_soyad} — Personel Maaş panelinde "Bilgileri tamamlanacak" olarak görünür.`
+          : p.islem === "BAGLANDI" ? ` İK kaydına bağlandı: ${p.ad_soyad} (${p.neden}).`
+          : p.islem === "KONTROL" ? ` İK kaydı otomatik bağlanamadı: ${p.neden}` : "";
+      }
+      bildir("ok", `${o.u.name} ${d.user?.is_active ? "aktif edildi" : "pasife alındı"}.${ek}`);
+    } catch (e) { setOnay(x => x ? { ...x, busy: false, hata: e.message } : x); }
+  };
+  const sil = async () => {
+    const o = onay; if (!o || o.busy) return;
+    setOnay({ ...o, busy: true, hata: "" });
+    try {
+      const r = await fetch(`${API_BASE}/admin/users/${o.u.id}`, { method: "DELETE", headers: H() });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Silinemedi");
+      setOnay(null); await degisti(); bildir("ok", `${o.u.name} silindi.`);
+    } catch (e) { setOnay(x => x ? { ...x, busy: false, hata: e.message } : x); }
+  };
+  const sifreKaydet = async () => {
+    const s = sifre; if (!s || s.busy) return;
+    if (!s.p1 || s.p1.length < 6) { setSifre({ ...s, hata: "Şifre en az 6 karakter olmalı" }); return; }
+    if (s.p1 !== s.p2) { setSifre({ ...s, hata: "İki şifre birbirini tutmuyor" }); return; }
+    setSifre({ ...s, busy: true, hata: "" });
+    try {
+      const r = await fetch(`${API_BASE}/admin/users/${s.u.id}/password`, { method: "PUT", headers: H(), body: JSON.stringify({ password: s.p1 }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Şifre değiştirilemedi");
+      setSifre(null); bildir("ok", `${s.u.name} için yeni şifre belirlendi.`);
+    } catch (e) { setSifre(x => x ? { ...x, busy: false, hata: e.message } : x); }
+  };
+  const panelAc = (u) => {
+    const f = u ? { name: u.name || "", email: u.email || "", password: "", role: u.role || "user", subcon_name: u.subcon_name || "", marka: String(u.marka || "ERC").toUpperCase() }
+      : { name: "", email: "", password: "", role: "user", subcon_name: "", marka: markalar[0]?.kod || "ERC" };
+    setPanel({ mod: u ? "duzenle" : "yeni", u: u || null, form: f, hatalar: {}, busy: false, genel: "" });
+    setMenu(null);
+  };
+  const panelForm = (k, v) => setPanel(p => p ? { ...p, form: { ...p.form, [k]: v }, hatalar: { ...p.hatalar, [k]: "" }, genel: "" } : p);
+  const panelKaydet = async (ayniIsimOnay = false) => {
+    const p = panel; if (!p || p.busy) return;
+    const f = p.form; const h = {};
+    if (!String(f.name || "").trim()) h.name = "Ad soyad zorunlu";
+    if (!String(f.email || "").trim()) h.email = "E-posta / kullanıcı adı zorunlu";
+    if (p.mod === "yeni" && (!f.password || f.password.length < 6)) h.password = "Şifre en az 6 karakter olmalı";
+    if (f.role === "subcon" && !String(f.subcon_name || "").trim()) h.subcon_name = "Taşeron rolü için taşeron adı zorunlu";
+    if (Object.keys(h).length) { setPanel({ ...p, hatalar: h }); return; }
+    setPanel({ ...p, busy: true, genel: "" });
+    try {
+      const ad = f.role === "subcon" || !String(f.email).includes("@") ? String(f.name).replace(/\s+/g, " ").trim() : adSoyadStandart(f.name);
+      let r, d;
+      if (p.mod === "yeni") {
+        r = await fetch(`${API_BASE}/admin/users`, { method: "POST", headers: H(),
+          body: JSON.stringify({ name: ad, email: String(f.email).trim(), password: f.password, role: f.role, marka: f.marka, subcon_name: f.role === "subcon" ? String(f.subcon_name).trim().toUpperCase() : "", ayni_isim_onay: ayniIsimOnay === true }) });
+        d = await r.json().catch(() => ({}));
+        if (r.status === 409 && Array.isArray(d.ayni_isim) && d.ayni_isim.length) {
+          const ilkU = d.ayni_isim.find(x => x.tip === "user");
+          setPanel(x => x ? { ...x, busy: false } : x);
+          setAyniIsim({ eslesmeler: d.ayni_isim, onAc: ilkU ? () => { setAyniIsim(null); setPanel(null); temizle(); setQ(ilkU.ad); } : null, onDevam: () => { setAyniIsim(null); panelKaydet(true); } });
+          return;
+        }
+      } else {
+        r = await fetch(`${API_BASE}/admin/users/${p.u.id}`, { method: "PUT", headers: H(),
+          body: JSON.stringify({ name: ad, email: String(f.email).trim(), role: f.role, subcon_name: f.role === "subcon" ? String(f.subcon_name).trim().toUpperCase() : (f.subcon_name || ""), marka: f.marka }) });
+        d = await r.json().catch(() => ({}));
+      }
+      if (!r.ok || d.ok === false) {
+        const alan = d.alan; const msg = d.error || `Sunucu hatası (${r.status})`;
+        setPanel(x => x ? { ...x, busy: false, hatalar: alan ? { ...x.hatalar, [alan]: msg } : x.hatalar, genel: alan ? "" : msg } : x);
+        return;
+      }
+      setPanel(null); await degisti();
+      bildir("ok", p.mod === "yeni" ? `${ad} eklendi.${d.personel?.islem === "OLUSTURULDU" ? ` İK profili açıldı (${d.personel.ad_soyad}).` : ""}` : `${ad} güncellendi.`);
+    } catch (e) { setPanel(x => x ? { ...x, busy: false, genel: e.message } : x); }
+  };
+
+  // ── görünüm yardımcıları ──
+  const LACI = "#1e3a5f";
+  const btn = (tur = "ikincil", ek = {}) => ({
+    padding: "8px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer", lineHeight: 1.2, whiteSpace: "nowrap",
+    ...(tur === "birincil" ? { background: LACI, color: "#fff", border: `1px solid ${LACI}` }
+      : tur === "tehlike" ? { background: "#fff", color: "#b91c1c", border: "1px solid #fecaca" }
+      : { background: "#fff", color: "#1f2937", border: "1px solid #d1d5db" }), ...ek });
+  const inp = (hatali) => ({ width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: "8px", border: `1px solid ${hatali ? "#dc2626" : "#d1d5db"}`, fontSize: "14px", background: "#fff", color: "#111827", outline: "none" });
+  const etiket = { display: "block", fontSize: "12.5px", fontWeight: 700, color: "#374151", marginBottom: "5px" };
+  const durumRozet = (u) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "2px 9px", borderRadius: "999px", fontSize: "12px", fontWeight: 700, background: u.is_active ? "#ecfdf5" : "#f3f4f6", color: u.is_active ? "#065f46" : "#4b5563", border: `1px solid ${u.is_active ? "#a7f3d0" : "#e5e7eb"}` }}>
+      <span aria-hidden="true" style={{ width: "7px", height: "7px", borderRadius: "50%", background: u.is_active ? "#10b981" : "#9ca3af" }} />{u.is_active ? "Aktif" : "Pasif"}
+    </span>);
+  const rolRozet = (u) => (
+    <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: "6px", fontSize: "12px", fontWeight: 700, background: u.role === "admin" || u.role === "platform_admin" ? "#fef3c7" : u.role === "subcon" ? "#fff7ed" : "#eef2f7", color: u.role === "admin" || u.role === "platform_admin" ? "#92400e" : u.role === "subcon" ? "#9a3412" : LACI }}>
+      {admRolAdi(u)}{u.users_admin ? " · Kullanıcı yöneticisi" : ""}
+    </span>);
+  const firmaHucre = (u) => (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: "13px", color: "#111827", fontWeight: 600 }}>{firmaAdi(u)}</div>
+      {u.subcon_name && <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px", overflowWrap: "anywhere" }}>{u.role === "subcon" ? "Taşeron" : "Bağlı firma"}: {u.subcon_name}</div>}
+      {u.tenant && u.tenant !== "erc" && <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "2px" }}>Firma alanı: {u.tenant}</div>}
+    </div>);
+  // ⋯ menüsü: klavye ve dokunmatikte çalışır (düğme + Esc + dışarı tık)
+  const menuDugmesi = (u) => {
+    const acik = menu === u.id;
+    const Oge = ({ onClick, tehlike, children }) => (
+      <button role="menuitem" className="adm-focus" onClick={() => { setMenu(null); onClick(); }}
+        style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", background: "transparent", border: "none", fontSize: "13px", fontWeight: 600, color: tehlike ? "#b91c1c" : "#1f2937", cursor: "pointer" }}
+        onMouseEnter={e => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>{children}</button>);
+    return (
+      <div data-adm-menu style={{ position: "relative", display: "inline-block" }}>
+        <button className="adm-focus" aria-haspopup="menu" aria-expanded={acik} aria-label={`${u.name} için diğer işlemler`} title="Diğer işlemler"
+          onClick={() => setMenu(acik ? null : u.id)} style={btn("ikincil", { padding: "7px 10px", fontSize: "16px", lineHeight: 1 })}>⋯</button>
+        {acik && (
+          <div role="menu" style={{ position: "absolute", ...(dar ? { left: 0 } : { right: 0 }), top: "calc(100% + 4px)", minWidth: "220px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px", boxShadow: "0 10px 30px rgba(15,23,42,0.14)", zIndex: 60, padding: "6px 0" }}>
+            <Oge onClick={() => setDetay(u.id)}>Detay / İşlem Geçmişi</Oge>
+            {tamAdmin && <Oge onClick={() => setOnay({ tip: "durum", u })}>{u.is_active ? "Pasife Al" : "Aktif Et"}</Oge>}
+            <Oge onClick={() => setSifre({ u, p1: "", p2: "", hata: "", busy: false })}>Şifre İşlemleri</Oge>
+            {tamAdmin && <><div style={{ height: "1px", background: "#e5e7eb", margin: "6px 0" }} /><Oge tehlike onClick={() => setOnay({ tip: "sil", u })}>Sil</Oge></>}
+          </div>
+        )}
+      </div>);
+  };
+  const islemler = (u) => (
+    <div style={{ display: "flex", gap: "6px", justifyContent: dar ? "flex-start" : "flex-end", alignItems: "center", flexWrap: "wrap" }}>
+      {tamAdmin && <button className="adm-focus" onClick={() => panelAc(u)} style={btn("ikincil", { padding: "7px 12px" })}>Düzenle</button>}
+      {menuDugmesi(u)}
+    </div>);
+  const sonucMetni = filtreVar ? `${toplam} kullanıcıdan ${liste.length}’${admSayiEki(liste.length)} gösteriliyor` : `${toplam} kullanıcı`;
+
+  return (
+    <div style={{ maxWidth: "1440px", margin: "0 auto", padding: dar ? "16px 12px 40px" : "20px 24px 48px", color: "#111827", textAlign: "left" }}>
+      <style>{`.adm-focus:focus-visible{outline:2px solid ${LACI};outline-offset:2px} .adm-tr:hover{background:#f9fafb} .adm-tablo td,.adm-tablo th{white-space:normal} .adm-tablo td>div{overflow-wrap:anywhere}`}</style>
+      {/* Başlık */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", flexWrap: "wrap", marginBottom: "14px" }}>
+        <div style={{ flex: "1 1 260px", textAlign: "left" }}>
+          <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#111827", textAlign: "left" }}>Kullanıcılar</h2>
+          <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "3px" }}>Kullanıcı hesaplarını, erişim rollerini ve firma bağlantılarını yönetin.</div>
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button className="adm-focus" onClick={excelIndir} title={`Excel: ${filtreVar ? `görüntülenen ${liste.length} kullanıcı` : `tüm ${toplam} kullanıcı`}`} style={btn("ikincil")}>Excel İndir</button>
+          <button className="adm-focus" onClick={() => panelAc(null)} style={btn("birincil")}>+ Kullanıcı Ekle</button>
+        </div>
+      </div>
+      {/* Özet */}
+      <div style={{ display: "grid", gridTemplateColumns: dar ? "repeat(3, 1fr)" : "repeat(3, 160px)", gap: "10px", marginBottom: "14px" }}>
+        {[["Toplam", toplam, "#111827"], ["Aktif", aktifN, "#065f46"], ["Pasif", pasifN, "#4b5563"]].map(([ad, n, renk]) => (
+          <div key={ad} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "10px 14px" }}>
+            <div style={{ fontSize: "11.5px", color: "#6b7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em" }}>{ad}</div>
+            <div style={{ fontSize: "20px", fontWeight: 800, color: renk, marginTop: "2px" }}>{n}</div>
+          </div>
+        ))}
+      </div>
+      {bildirim && (
+        <div role="status" style={{ marginBottom: "12px", padding: "10px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: 600, background: bildirim.tip === "ok" ? "#ecfdf5" : "#fffbeb", color: bildirim.tip === "ok" ? "#065f46" : "#92400e", border: `1px solid ${bildirim.tip === "ok" ? "#a7f3d0" : "#fde68a"}`, display: "flex", justifyContent: "space-between", gap: "10px" }}>
+          <span>{bildirim.metin}</span><button className="adm-focus" onClick={() => setBildirim(null)} aria-label="Bildirimi kapat" style={{ background: "transparent", border: "none", cursor: "pointer", fontWeight: 800, color: "inherit" }}>×</button>
+        </div>
+      )}
+      {hata && <div role="alert" style={{ marginBottom: "12px", padding: "10px 14px", borderRadius: "8px", background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: "13px", fontWeight: 600 }}>{hata}</div>}
+      {/* Araç çubuğu */}
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "12px 14px", marginBottom: "12px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+        <input className="adm-focus" type="search" aria-label="Kullanıcı ara" placeholder="İsim, e-posta veya kullanıcı adı ara" value={q} onChange={e => setQ(e.target.value)}
+          style={{ ...inp(false), flex: dar ? "1 1 100%" : "1 1 260px", maxWidth: dar ? "none" : "360px" }} />
+        <select className="adm-focus" aria-label="Durum filtresi" value={fDurum} onChange={e => setFDurum(e.target.value)} style={{ ...inp(false), width: "auto", flex: dar ? "1 1 30%" : "0 0 auto" }}>
+          <option value="">Durum: Tümü</option><option value="aktif">Aktif</option><option value="pasif">Pasif</option>
+        </select>
+        <select className="adm-focus" aria-label="Rol filtresi" value={fRol} onChange={e => setFRol(e.target.value)} style={{ ...inp(false), width: "auto", flex: dar ? "1 1 30%" : "0 0 auto" }}>
+          <option value="">Rol: Tümü</option>{rolSecenekleri.map(r => <option key={r} value={r}>{ADM_ROL_TR[r] || r}</option>)}
+        </select>
+        <select className="adm-focus" aria-label="Firma filtresi" value={fFirma} onChange={e => setFFirma(e.target.value)} style={{ ...inp(false), width: "auto", flex: dar ? "1 1 30%" : "0 0 auto" }}>
+          <option value="">Firma: Tümü</option>{firmaSecenekleri.map(f => <option key={f.kod} value={f.kod}>{f.ad}</option>)}
+        </select>
+        {filtreVar && <button className="adm-focus" onClick={temizle} style={btn("ikincil", { padding: "8px 12px" })}>Filtreleri temizle</button>}
+        <div style={{ marginLeft: dar ? 0 : "auto", fontSize: "12.5px", color: "#6b7280", fontWeight: 600 }}>{sonucMetni}</div>
+      </div>
+      {/* Liste */}
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "visible" }}>
+        {yukleniyor ? <div style={{ padding: "40px", textAlign: "center", color: "#9ca3af" }}>Yükleniyor…</div>
+        : liste.length === 0 ? (
+          <div style={{ padding: "40px 20px", textAlign: "center" }}>
+            <div style={{ fontWeight: 700, color: "#374151" }}>{filtreVar ? "Bu ölçütlere uyan kullanıcı bulunamadı" : "Henüz kullanıcı yok"}</div>
+            <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>{filtreVar ? "Arama metnini veya filtreleri değiştirmeyi deneyin." : "“+ Kullanıcı Ekle” ile ilk hesabı oluşturun."}</div>
+            {filtreVar && <button className="adm-focus" onClick={temizle} style={btn("ikincil", { marginTop: "12px" })}>Filtreleri temizle</button>}
+          </div>
+        ) : dar ? (
+          <div>
+            {liste.map((u, i) => (
+              <div key={u.id} style={{ padding: "12px 14px", borderBottom: i < liste.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "flex-start" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: "14.5px", overflowWrap: "anywhere" }}>{u.name}</div>
+                    <div style={{ fontSize: "12.5px", color: "#6b7280", overflowWrap: "anywhere" }}>{u.email}</div>
+                  </div>
+                  {durumRozet(u)}
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", flexWrap: "wrap", marginTop: "8px" }}>{rolRozet(u)}{firmaHucre(u)}</div>
+                <div style={{ marginTop: "10px" }}>{islemler(u)}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <table className="adm-tablo" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+            <colgroup><col style={{ width: "32%" }} /><col style={{ width: "17%" }} /><col style={{ width: "25%" }} /><col style={{ width: "10%" }} /><col style={{ width: "16%" }} /></colgroup>
+            <thead>
+              <tr style={{ background: "#f9fafb" }}>
+                {["Kullanıcı", "Rol", "Firma / Bağlantı", "Durum", "İşlemler"].map((h, i) => (
+                  <th key={h} scope="col" style={{ textAlign: i === 4 ? "right" : "left", padding: "10px 14px", fontSize: "11.5px", fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: "1px solid #e5e7eb" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {liste.map((u, i) => (
+                <tr key={u.id} className="adm-tr" style={{ borderBottom: i < liste.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                  <td style={{ padding: "11px 14px", verticalAlign: "top" }}>
+                    <div style={{ fontWeight: 700, fontSize: "14px", color: "#111827", overflowWrap: "anywhere" }}>{u.name}</div>
+                    <div style={{ fontSize: "12.5px", color: "#6b7280", marginTop: "2px", overflowWrap: "anywhere" }}>{u.email}</div>
+                  </td>
+                  <td style={{ padding: "11px 14px", verticalAlign: "top" }}>{rolRozet(u)}</td>
+                  <td style={{ padding: "11px 14px", verticalAlign: "top" }}>{firmaHucre(u)}</td>
+                  <td style={{ padding: "11px 14px", verticalAlign: "top" }}>{durumRozet(u)}</td>
+                  <td style={{ padding: "8px 14px", verticalAlign: "top" }}>{islemler(u)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Onay penceresi (sil / durum) */}
+      {onay && (
+        <div onClick={() => !onay.busy && setOnay(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div role="dialog" aria-modal="true" onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(440px, 96vw)", padding: "20px 22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontWeight: 800, fontSize: "16px" }}>{onay.tip === "sil" ? "Kullanıcıyı sil" : onay.u.is_active ? "Erişimi pasife al" : "Erişimi aktif et"}</div>
+            <div style={{ fontSize: "13.5px", color: "#374151", marginTop: "8px", lineHeight: 1.5 }}>
+              <b>{onay.u.name}</b> <span style={{ color: "#6b7280" }}>({onay.u.email})</span>{" "}
+              {onay.tip === "sil" ? "hesabı kalıcı olarak silinecek. Bu işlem geri alınamaz; geçmiş işlem kayıtları korunur." : onay.u.is_active ? "hesabı sisteme giriş yapamayacak. İK kaydına, maaş ve ödeme geçmişine dokunulmaz." : "hesabı yeniden giriş yapabilecek; gerekiyorsa İK kaydına bağlanır."}
+            </div>
+            {onay.hata && <div role="alert" style={{ marginTop: "10px", background: "#fef2f2", color: "#b91c1c", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", fontWeight: 700 }}>{onay.hata}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "18px" }}>
+              <button className="adm-focus" disabled={onay.busy} onClick={() => setOnay(null)} style={btn("ikincil")}>Vazgeç</button>
+              <button className="adm-focus" disabled={onay.busy} onClick={onay.tip === "sil" ? sil : durumDegistir} style={onay.tip === "sil" ? btn("tehlike", { background: "#b91c1c", color: "#fff", border: "1px solid #b91c1c" }) : btn("birincil")}>
+                {onay.busy ? "İşleniyor…" : onay.tip === "sil" ? "Evet, sil" : onay.u.is_active ? "Pasife al" : "Aktif et"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Şifre penceresi — kayıtlı şifre gösterilmez, sunucu yeni şifreyi hash'ler */}
+      {sifre && (
+        <div onClick={() => !sifre.busy && setSifre(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div role="dialog" aria-modal="true" onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(440px, 96vw)", padding: "20px 22px", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontWeight: 800, fontSize: "16px" }}>Şifre işlemleri</div>
+            <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}><b style={{ color: "#111827" }}>{sifre.u.name}</b> ({sifre.u.email}) için yeni şifre belirlenir. Mevcut şifre görüntülenemez.</div>
+            <form onSubmit={e => { e.preventDefault(); sifreKaydet(); }} style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div><label htmlFor="adm-p1" style={etiket}>Yeni şifre</label><input id="adm-p1" className="adm-focus" type="password" autoComplete="new-password" value={sifre.p1} onChange={e => setSifre({ ...sifre, p1: e.target.value, hata: "" })} style={inp(!!sifre.hata)} /></div>
+              <div><label htmlFor="adm-p2" style={etiket}>Yeni şifre (tekrar)</label><input id="adm-p2" className="adm-focus" type="password" autoComplete="new-password" value={sifre.p2} onChange={e => setSifre({ ...sifre, p2: e.target.value, hata: "" })} style={inp(!!sifre.hata)} /></div>
+              {sifre.hata && <div role="alert" style={{ color: "#b91c1c", fontSize: "12.5px", fontWeight: 700 }}>{sifre.hata}</div>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "4px" }}>
+                <button type="button" className="adm-focus" disabled={sifre.busy} onClick={() => setSifre(null)} style={btn("ikincil")}>Vazgeç</button>
+                <button type="submit" className="adm-focus" disabled={sifre.busy} style={btn("birincil")}>{sifre.busy ? "Kaydediliyor…" : "Şifreyi belirle"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Detay / İşlem geçmişi */}
+      {detay && <IslemGecmisiPanel modul="kullanici" id={detay} onClose={() => setDetay(null)} />}
+      {/* Ekle / Düzenle yan paneli */}
+      {panel && (
+        <div onClick={() => !panel.busy && setPanel(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 1150, display: "flex", justifyContent: "flex-end" }}>
+          <div role="dialog" aria-modal="true" aria-label={panel.mod === "yeni" ? "Kullanıcı ekle" : "Kullanıcıyı düzenle"} onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", width: dar ? "100%" : "min(480px, 96vw)", height: "100%", display: "flex", flexDirection: "column", boxShadow: "-12px 0 40px rgba(15,23,42,0.18)" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: "16px" }}>{panel.mod === "yeni" ? "Kullanıcı Ekle" : "Kullanıcıyı Düzenle"}</div>
+                {panel.u && <div style={{ fontSize: "12.5px", color: "#6b7280", marginTop: "2px" }}>#{panel.u.id} · {panel.u.email}</div>}
+              </div>
+              <button className="adm-focus" aria-label="Paneli kapat" disabled={panel.busy} onClick={() => setPanel(null)} style={btn("ikincil", { padding: "6px 10px" })}>×</button>
+            </div>
+            <form onSubmit={e => { e.preventDefault(); panelKaydet(false); }} style={{ flex: 1, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: "18px" }}>
+              <fieldset style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "12px" }}>
+                <legend style={{ fontSize: "11.5px", fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "4px" }}>Kimlik ve iletişim</legend>
+                <div><label htmlFor="adm-name" style={etiket}>Ad Soyad</label><input id="adm-name" className="adm-focus" autoComplete="off" value={panel.form.name} onChange={e => panelForm("name", e.target.value)} style={inp(!!panel.hatalar.name)} />
+                  {panel.hatalar.name && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.name}</div>}</div>
+                <div><label htmlFor="adm-email" style={etiket}>E-posta / kullanıcı adı</label><input id="adm-email" className="adm-focus" autoComplete="off" inputMode="email" value={panel.form.email} onChange={e => panelForm("email", e.target.value)} style={inp(!!panel.hatalar.email)} />
+                  {panel.hatalar.email && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.email}</div>}</div>
+                {panel.mod === "yeni" && (
+                  <div><label htmlFor="adm-pass" style={etiket}>Şifre</label><input id="adm-pass" className="adm-focus" type="password" autoComplete="new-password" value={panel.form.password} onChange={e => panelForm("password", e.target.value)} style={inp(!!panel.hatalar.password)} />
+                    <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "4px" }}>En az 6 karakter. Daha sonra satır menüsündeki “Şifre İşlemleri” ile yenilenebilir.</div>
+                    {panel.hatalar.password && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.password}</div>}</div>
+                )}
+              </fieldset>
+              <fieldset style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "12px" }}>
+                <legend style={{ fontSize: "11.5px", fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "4px" }}>Rol ve firma bağlantıları</legend>
+                <div><label htmlFor="adm-role" style={etiket}>Erişim rolü</label>
+                  <select id="adm-role" className="adm-focus" value={panel.form.role} onChange={e => panelForm("role", e.target.value)} style={inp(!!panel.hatalar.role)}>
+                    {[...ADM_ROL_SECENEK, ...(!ADM_ROL_SECENEK.includes(panel.form.role) ? [panel.form.role] : [])].map(r => <option key={r} value={r}>{ADM_ROL_TR[r] || r}</option>)}
+                  </select>
+                  {panel.hatalar.role && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.role}</div>}</div>
+                {panel.form.role === "subcon" && (
+                  <div><label htmlFor="adm-subcon" style={etiket}>Taşeron adı</label><input id="adm-subcon" className="adm-focus" placeholder="ör. FERRUMX" value={panel.form.subcon_name} onChange={e => panelForm("subcon_name", e.target.value.toUpperCase())} style={inp(!!panel.hatalar.subcon_name)} />
+                    <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "4px" }}>Kullanıcı yalnız bu taşerona ait işleri görür.</div>
+                    {panel.hatalar.subcon_name && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.subcon_name}</div>}</div>
+                )}
+                {panel.form.role !== "subcon" && panel.form.subcon_name && (
+                  <div><label htmlFor="adm-bagli" style={etiket}>Bağlı firma</label><input id="adm-bagli" className="adm-focus" value={panel.form.subcon_name} onChange={e => panelForm("subcon_name", e.target.value)} style={inp(false)} />
+                    <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "4px" }}>Kayıtta tutulan firma bağlantısı; boş bırakılırsa kaldırılır.</div></div>
+                )}
+                {(markalar.length > 1) && (!panel.u || (panel.u.tenant || "erc") === "erc") && (
+                  <div><label htmlFor="adm-marka" style={etiket}>Firma</label>
+                    <select id="adm-marka" className="adm-focus" value={panel.form.marka} onChange={e => panelForm("marka", e.target.value)} style={inp(!!panel.hatalar.marka)}>
+                      {markalar.map(m => <option key={m.kod} value={m.kod}>{m.ad}</option>)}
+                    </select>
+                    {panel.hatalar.marka && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.marka}</div>}</div>
+                )}
+                {panel.u && (panel.u.tenant && panel.u.tenant !== "erc") && <div style={{ fontSize: "12px", color: "#6b7280" }}>Firma alanı: {panel.u.tenant} (ayrı firma hesabı; firma bağlantısı buradan değiştirilmez)</div>}
+              </fieldset>
+              {panel.genel && <div role="alert" style={{ background: "#fef2f2", color: "#b91c1c", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", fontWeight: 700 }}>{panel.genel}</div>}
+            </form>
+            <div style={{ padding: "12px 20px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "8px", background: "#fff" }}>
+              <button type="button" className="adm-focus" disabled={panel.busy} onClick={() => setPanel(null)} style={btn("ikincil")}>Vazgeç</button>
+              <button type="button" className="adm-focus" disabled={panel.busy} onClick={() => panelKaydet(false)} style={btn("birincil")}>{panel.busy ? "Kaydediliyor…" : "Kaydet"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <AyniIsimUyari veri={ayniIsim} onKapat={() => setAyniIsim(null)} />
+    </div>
   );
 }
 
