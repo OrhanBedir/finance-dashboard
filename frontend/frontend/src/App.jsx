@@ -1843,6 +1843,16 @@ function MarkaNakitPanel({ currentUser }) {
   const [ay, setAy] = useState(() => new Date().toISOString().slice(0, 7)); // görüntülenen ay (YYYY-MM)
   const [kasa, setKasa] = useState({ rows: [], toplam: 0 }); // manuel nakit girişleri
   const [kasaModal, setKasaModal] = useState(false);
+  const [kasaGecmis, setKasaGecmis] = useState(null); // { r, yukleniyor, hata, olaylar } — kasa girişi işlem geçmişi (20.10.2026)
+  const kasaGecmisAc = async (r) => {
+    setKasaGecmis({ r, yukleniyor: true, olaylar: [] });
+    try {
+      const rr = await fetch(`${API_BASE}/finance/marka-kasa/${r.id}/gecmis`, { headers: _auth });
+      const d = await rr.json().catch(() => ({}));
+      if (!rr.ok || !d.ok) throw new Error(d.error || "Geçmiş alınamadı");
+      setKasaGecmis({ r, yukleniyor: false, olaylar: d.olaylar || [], kayit: d.kayit });
+    } catch (e) { setKasaGecmis({ r, yukleniyor: false, hata: e.message, olaylar: [] }); }
+  };
   const [pk, setPk] = useState(null);          // proje kasası defteri (19.10.2026): gelen − ödenen = kalan, aylık devir, hareketler
   const [pkModal, setPkModal] = useState(false);
   const [hucreDetay, setHucreDetay] = useState(null); // 16.10.2026: tıklanan hücrenin kalem detayı {tip, gun, items}
@@ -2585,6 +2595,8 @@ function MarkaNakitPanel({ currentUser }) {
                     }}
                     style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", padding: "5px 10px", fontSize: "11px", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
                   >🗑</button>
+                  <button type="button" aria-label="İşlem geçmişi" title="İşlem geçmişi: kim oluşturdu, dekont/silme işlemleri" onClick={() => kasaGecmisAc(r)}
+                    style={{ background: "#fff", border: "1px solid #cbd5e1", color: "#334155", borderRadius: "8px", padding: "5px 9px", fontSize: "13px", fontWeight: 700, cursor: "pointer", flexShrink: 0, lineHeight: 1 }}>⋯</button>
                 </div>
               ))}
               {kasa.rows.length === 0 && <div style={{ padding: "24px", textAlign: "center", color: "#9ca3af" }}>Henüz nakit girişi yok</div>}
@@ -2592,6 +2604,46 @@ function MarkaNakitPanel({ currentUser }) {
           </div>
         </div>
       )}
+
+      {/* Kasa girişi işlem geçmişi (20.10.2026) */}
+      {kasaGecmis && (() => {
+        const g = kasaGecmis; const r = g.r || {};
+        const TIP = { OLUSTURMA: ["Oluşturma", "#dbeafe", "#1e40af"], BELGE_EKLE: ["Dekont", "#ecfdf5", "#065f46"], BELGE_SIL: ["Dekont", "#fff7ed", "#9a3412"], SILME: ["Silme", "#fee2e2", "#991b1b"] };
+        const z = (t) => t ? new Date(t).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+        return (
+        <div onClick={() => setKasaGecmis(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: "min(600px, 96vw)", maxHeight: "84vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: "15px" }}>🕘 İşlem Geçmişi — kasa girişi #{r.id}</div>
+                <div style={{ fontSize: "12.5px", color: "#64748b", marginTop: "3px" }}>+₺{fk(r.tutar)} · {(r.tarih || "").split("-").reverse().join(".")}{r.aciklama ? ` · ${r.aciklama}` : ""}</div>
+                <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "2px" }}>Saatler Türkiye saatidir · geçmiş kayıtları değiştirilemez</div>
+              </div>
+              <button onClick={() => setKasaGecmis(null)} style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "6px 12px", cursor: "pointer", fontWeight: 700 }}>Kapat</button>
+            </div>
+            <div style={{ overflowY: "auto", padding: "10px 18px 16px" }}>
+              {g.yukleniyor && <div style={{ color: "#94a3b8", padding: "16px", textAlign: "center" }}>Yükleniyor…</div>}
+              {g.hata && <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", fontWeight: 700 }}>{g.hata}</div>}
+              {g.olaylar.map((o, i) => { const t = TIP[o.tip] || [o.tip, "#f1f5f9", "#475569"]; return (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "18px 1fr", gap: "10px", padding: "9px 0", borderBottom: i < g.olaylar.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><span style={{ width: "10px", height: "10px", borderRadius: "50%", background: t[2], marginTop: "5px" }} />{i < g.olaylar.length - 1 && <span style={{ flex: 1, width: "2px", background: "#e2e8f0", marginTop: "4px" }} />}</div>
+                  <div>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ background: t[1], color: t[2], padding: "1px 8px", borderRadius: "999px", fontSize: "10.5px", fontWeight: 800 }}>{t[0]}</span>
+                      <span style={{ fontWeight: 800, fontSize: "13px" }}>{o.baslik}</span>
+                      <span style={{ fontSize: "11.5px", color: "#64748b", marginLeft: "auto" }}>{z(o.zaman)}</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#334155", marginTop: "3px" }}><b>{o.kim?.ad}</b>{o.kim?.hesap ? <span style={{ color: "#64748b" }}> · hesap: {o.kim.hesap}</span> : null}</div>
+                    {(o.detay || []).map((d, j) => <div key={j} style={{ fontSize: "12.5px", color: "#0f172a", marginTop: "2px" }}>{d}</div>)}
+                    {o.gerekce && <div style={{ fontSize: "12px", color: "#9a3412", marginTop: "3px" }}>Not: {o.gerekce}</div>}
+                  </div>
+                </div>
+              ); })}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
       {/* Şimşek → AHY gönderilen bakiye modalı (Bu Ay Gelen Bakiye kartı) */}
       {gelenOdeModal && (

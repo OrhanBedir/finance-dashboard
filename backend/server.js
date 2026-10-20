@@ -7642,8 +7642,43 @@ async function ensureMarkaKasaTable() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
   await pool.query(`ALTER TABLE marka_kasa ADD COLUMN IF NOT EXISTS belge_yolu TEXT`).catch(() => {});
+  // 20.10.2026 (Orhan): kasa girişlerinde kayıt bazında işlem geçmişi — kimlik sunucudaki oturumdan
+  await pool.query(`ALTER TABLE marka_kasa ADD COLUMN IF NOT EXISTS olusturan TEXT`).catch(() => {});
+  await pool.query(`CREATE TABLE IF NOT EXISTS kasa_islem_log (
+    id SERIAL PRIMARY KEY, kasa_id INTEGER, marka TEXT, tip TEXT NOT NULL, eski JSONB, yeni JSONB, aciklama TEXT, kullanici TEXT, created_at TIMESTAMP DEFAULT now())`).catch(() => {});
+}
+async function kasaIslemLog(kasaId, marka, tip, eski, yeni, aciklama, kullanici) {
+  await pool.query(`INSERT INTO kasa_islem_log (kasa_id, marka, tip, eski, yeni, aciklama, kullanici) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [kasaId || null, marka || null, tip, eski ? JSON.stringify(eski) : null, yeni ? JSON.stringify(yeni) : null, aciklama || null, kullanici || null]).catch(e => console.error("[kasa-islem-log]", e.message));
 }
 const MARKA_KASA_ROLLER = ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"];
+// Kasa girişi işlem geçmişi (oluşturma, dekont ekleme/kaldırma, silme) — en yeniden eskiye; eski kayıtlarda kullanıcı bilinmiyor
+app.get("/finance/marka-kasa/:id/gecmis", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase())) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureMarkaKasaTable();
+    const kq = await pool.query(`SELECT id, marka, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, aciklama, belge_yolu, created_at, olusturan FROM marka_kasa WHERE id=$1`, [req.params.id]);
+    const k = kq.rows[0];
+    if (!k) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    const kap = altMarkaKapsam(req);
+    if (kap && !kap.bordro.includes(String(k.marka || "ERC").toUpperCase())) return res.status(403).json({ ok: false, error: "Bu kaydı görüntüleme yetkiniz yok" });
+    const logs = await pool.query(`SELECT * FROM kasa_islem_log WHERE kasa_id=$1 ORDER BY id`, [k.id]);
+    const mailler = [...new Set([k.olusturan, ...logs.rows.map(l => l.kullanici)].filter(Boolean).map(x => String(x).toLowerCase()))];
+    const users = mailler.length ? await pool.query(`SELECT LOWER(email) AS email, name FROM users WHERE LOWER(email) = ANY($1::text[])`, [mailler]) : { rows: [] };
+    const adMap = new Map(users.rows.map(u => [u.email, u.name]));
+    const kim = (v) => { const e = String(v || "").toLowerCase().trim(); if (!e) return { ad: "Eski kayıt — kullanıcı bilgisi bulunmuyor", hesap: null, tip: "bilinmiyor" }; if (e === "sistem") return { ad: "Sistem", hesap: null, tip: "sistem" }; return { ad: adMap.get(e) || e, hesap: e, tip: "kullanici" }; };
+    const para = (v) => "₺" + Number(v || 0).toLocaleString("tr-TR");
+    const olaylar = [];
+    if (!logs.rows.some(l => l.tip === "OLUSTURMA")) olaylar.push({ zaman: k.created_at, tip: "OLUSTURMA", baslik: "Kasa girişi oluşturuldu", detay: [`${para(k.tutar)} · ${k.tarih.split("-").reverse().join(".")}`, k.aciklama ? `Açıklama: ${k.aciklama}` : "Açıklama: —"], kim: kim(k.olusturan) });
+    logs.rows.forEach(l => olaylar.push({ zaman: l.created_at, tip: l.tip,
+      baslik: ({ OLUSTURMA: "Kasa girişi oluşturuldu", BELGE_EKLE: "Dekont eklendi", BELGE_SIL: "Dekont kaldırıldı", SILME: "Kasa girişi silindi" })[l.tip] || l.tip,
+      detay: l.tip === "OLUSTURMA" ? [`${para(l.yeni?.tutar)} · ${String(l.yeni?.tarih || "").slice(0, 10).split("-").reverse().join(".")}`, l.yeni?.aciklama ? `Açıklama: ${l.yeni.aciklama}` : "Açıklama: —"]
+        : l.tip === "BELGE_EKLE" ? [`Dosya: ${l.yeni?.dosya || "—"}`] : l.tip === "BELGE_SIL" ? [`Kaldırılan: ${l.eski?.belge_yolu ? "dekont" : "—"}`] : [],
+      gerekce: l.aciklama, kim: kim(l.kullanici) }));
+    olaylar.sort((a, b) => new Date(b.zaman) - new Date(a.zaman));
+    res.json({ ok: true, kayit: { id: k.id, marka: k.marka, tarih: k.tarih, tutar: k.tutar, aciklama: k.aciklama, belge: !!k.belge_yolu }, olaylar });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 app.get("/finance/marka-kasa", authMiddleware, async (req, res) => {
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
@@ -7667,9 +7702,11 @@ app.post("/finance/marka-kasa", authMiddleware, async (req, res) => {
     const { tarih, tutar, aciklama } = req.body;
     const t = Number(tutar || 0);
     if (!tarih || !t) return res.status(400).json({ ok: false, error: "tarih ve tutar zorunlu" });
+    const kullanici = String(req.user?.email || "").toLowerCase() || null;
     const r = await pool.query(
-      `INSERT INTO marka_kasa (marka, tarih, tutar, aciklama) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [marka, tarih, t, aciklama || null]);
+      `INSERT INTO marka_kasa (marka, tarih, tutar, aciklama, olusturan) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [marka, tarih, t, aciklama || null, kullanici]);
+    await kasaIslemLog(r.rows[0].id, marka, "OLUSTURMA", null, { tarih, tutar: t, aciklama: aciklama || null }, null, kullanici);
     res.json({ ok: true, row: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -7677,7 +7714,9 @@ app.delete("/finance/marka-kasa/:id", authMiddleware, async (req, res) => {
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const eski = await pool.query(`SELECT marka, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, aciklama, belge_yolu FROM marka_kasa WHERE id=$1`, [req.params.id]);
     await pool.query(`DELETE FROM marka_kasa WHERE id=$1`, [req.params.id]);
+    if (eski.rows[0]) await kasaIslemLog(Number(req.params.id), eski.rows[0].marka, "SILME", eski.rows[0], null, null, String(req.user?.email || "").toLowerCase() || null);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -7691,7 +7730,8 @@ app.post("/finance/marka-kasa/:id/belge", authMiddleware, upload.single("belge")
     const ext = (req.file.originalname || "").split(".").pop() || "pdf";
     const fname = `kasa_dekont_${req.params.id}_${Date.now()}.${ext}`;
     const { url } = await uploadToStorage("kasa-dekontlar", fname, req.file.buffer, req.file.mimetype);
-    const r = await pool.query(`UPDATE marka_kasa SET belge_yolu=$1 WHERE id=$2 RETURNING id, belge_yolu`, [url, req.params.id]);
+    const r = await pool.query(`UPDATE marka_kasa SET belge_yolu=$1 WHERE id=$2 RETURNING id, marka, belge_yolu`, [url, req.params.id]);
+    await kasaIslemLog(Number(req.params.id), r.rows[0]?.marka, "BELGE_EKLE", null, { dosya: utf8Name(req.file.originalname) }, null, String(req.user?.email || "").toLowerCase() || null);
     res.json({ ok: true, row: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -7699,7 +7739,9 @@ app.delete("/finance/marka-kasa/:id/belge", authMiddleware, async (req, res) => 
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const e0 = await pool.query(`SELECT marka, belge_yolu FROM marka_kasa WHERE id=$1`, [req.params.id]);
     await pool.query(`UPDATE marka_kasa SET belge_yolu=NULL WHERE id=$1`, [req.params.id]);
+    await kasaIslemLog(Number(req.params.id), e0.rows[0]?.marka, "BELGE_SIL", { belge_yolu: e0.rows[0]?.belge_yolu || null }, null, null, String(req.user?.email || "").toLowerCase() || null);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
