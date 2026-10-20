@@ -20936,6 +20936,11 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
   const [fotoModal, setFotoModal] = useState(null); // kalem id waiting for photo after new kalem add
   const [extraFotoModal, setExtraFotoModal] = useState(null);
   const [fisGoster, setFisGoster] = useState(null); // 17.09.2026: yüklenen fişleri görüntüle / sil
+  // 20.10.2026 (Orhan): fiş görüntüleyici (seçili fiş + yakınlaştırma) ve kalem düzenleme / ek açıklama penceresi
+  const [fisSecili, setFisSecili] = useState(0);
+  const [fisZoom, setFisZoom] = useState(0);           // 0 = sığdır · sayı = genişlik çarpanı · "dogal" = 1:1
+  const [kalemModal, setKalemModal] = useState(null);  // { mod:"duzenle"|"not", k, form, alanlar, gerekce, metin, hata, kaydediyor }
+  const [uzunAcik, setUzunAcik] = useState(() => new Set()); // "Devamını gör" açılan kalemler
   const [cezaBelgeKalemId, setCezaBelgeKalemId] = useState(null); // kalem id for ceza tutanagi upload
   const [showCezaModal, setShowCezaModal] = useState(false);
   const cezaBelgeInputRef = useRef(null);
@@ -21138,27 +21143,216 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
   const handleDeleteKalem = async (kid) => {
     if (!window.confirm("Bu kalemi silmek istediğinize emin misiniz?")) return;
-    await fetch(`${API_BASE}/hr/masraf-kalem/${kid}`, { method:"DELETE" });
+    const r = await fetch(`${API_BASE}/hr/masraf-kalem/${kid}`, { method:"DELETE", headers: AUTH_H() });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Silinemedi"); }
     refreshActive(activeForm.id);
   };
 
-  // Detay ekranında kalem tutarını düzelt (yanlış/eksik girilmişse)
-  const handleEditKalemTutar = async (k) => {
-    const cur = Number(k.tutar || 0);
-    const inp = window.prompt(`Tutarı düzelt (₺):\n${k.belge_no || k.aciklama || k.kategori}`, String(cur).replace(".", ","));
-    if (inp === null) return;
-    const yeni = parseTrNumber(inp);
-    if (!(yeni > 0)) { alert("Geçerli bir tutar gir"); return; }
-    if (Math.abs(yeni - cur) < 0.001) return;
+  // ── Kalem düzenleme / ek açıklama (20.10.2026) — sunucu masrafKalemYetki ile aynı kurallar ──
+  //  TASLAK (iade dahil): sahibi ya da onay zinciri düzenler. Onay sürecinde: yalnız yetkili, gerekçeyle
+  //  düzeltir (geçmişe iz düşer). Onaylı/arşiv: onaya esas alanlar kilitli, yalnız ek açıklama eklenir.
+  const _tamGorus = isApprover || isRollout || isMuhOnay;
+  const MF_ONAYDA_W = ["ROLLOUT_BEKLE", "MUHASEBE_BEKLE", "PM_BEKLE", "DIREKTOR_BEKLE"];
+  const kalemYetki = (form) => {
+    const sahip = !!form && benimMi(form);
+    const taslak = form?.durum === "TASLAK", onayda = MF_ONAYDA_W.includes(form?.durum);
+    return { sahip, tam: _tamGorus, taslak, onayda, duzenlenebilir: taslak && (sahip || _tamGorus), duzeltilebilir: onayda && _tamGorus, notEklenebilir: sahip || _tamGorus };
+  };
+  const PLAKA_KAT = ["YAKIT", "KOPRU", "TRAFIK_CEZA"];
+  const acKalemDuzenle = (k, form) => setKalemModal({ mod: "duzenle", k, form, gerekce: "", hata: "", kaydediyor: false,
+    // pg DATE sunucu saat dilimiyle gelir (…T21:00Z) — yerel güne çevir, bir gün kaymasın
+    alanlar: { tarih: (() => { if (!k.tarih) return ""; const d = new Date(k.tarih); return isNaN(d) ? String(k.tarih).slice(0, 10) : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })(), belge_no: k.belge_no || "", belge_aciklama: k.belge_aciklama || "", plaka: k.plaka || "", aciklama: k.aciklama || "", tutar: String(k.tutar ?? "").replace(".", ",") } });
+  const acKalemNot = (k, form) => setKalemModal({ mod: "not", k, form, metin: "", hata: "", kaydediyor: false });
+  const kalemYenile = async (formId) => {
+    if (viewForm?.id === formId) await loadDetail(formId);
+    if (activeForm?.id === formId) await refreshActive(formId);
+  };
+  const kalemKaydet = async () => {
+    const m = kalemModal; if (!m || m.kaydediyor) return;
+    setKalemModal(p => ({ ...p, kaydediyor: true, hata: "" }));
     try {
-      const r = await fetch(`${API_BASE}/hr/masraf-kalem/${k.id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tutar: yeni }),
-      });
-      const d = await r.json();
-      if (d.error) throw new Error(d.error);
-      if (viewForm?.id) await loadDetail(viewForm.id);
-    } catch (e) { alert("Düzeltilemedi: " + e.message); }
+      let r;
+      if (m.mod === "not") {
+        if (!String(m.metin || "").trim()) throw new Error("Açıklama boş olamaz");
+        r = await fetch(`${API_BASE}/hr/masraf-kalem/${m.k.id}/not`, { method: "POST", headers: { "Content-Type": "application/json", ...AUTH_H() }, body: JSON.stringify({ metin: m.metin.trim() }) });
+      } else {
+        const a = m.alanlar; const tutar = parseTrNumber(a.tutar);
+        if (!a.tarih) throw new Error("Tarih girin");
+        if (!(tutar > 0)) throw new Error("Geçerli bir tutar girin");
+        const y = kalemYetki(m.form);
+        if (!y.duzenlenebilir && y.duzeltilebilir && !String(m.gerekce || "").trim()) throw new Error("Onay sürecindeki kalemde düzeltme için gerekçe zorunlu");
+        r = await fetch(`${API_BASE}/hr/masraf-kalem/${m.k.id}`, { method: "PUT", headers: { "Content-Type": "application/json", ...AUTH_H() },
+          body: JSON.stringify({ tarih: a.tarih, belge_no: a.belge_no, belge_aciklama: a.belge_aciklama, plaka: a.plaka, aciklama: a.aciklama, tutar, gerekce: m.gerekce }) });
+      }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error || `Sunucu hatası (${r.status})`);
+      setKalemModal(null);
+      await kalemYenile(m.form.id);
+    } catch (e) { setKalemModal(p => p ? ({ ...p, kaydediyor: false, hata: e.message }) : p); } // hata: yazılanlar kaybolmaz
+  };
+  // Detay ekranındaki ✏️ (eski window.prompt) artık aynı pencereyi açar
+  const handleEditKalemTutar = (k) => acKalemDuzenle(k, viewForm);
+  const _notZaman = (t) => t ? new Date(t).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  // Satırda açıklama: uzun metin "Devamını gör" ile; sonradan eklenen notlar ayrı geçmiş
+  const aciklamaGoster = (k, kucuk = false) => {
+    const t = String(k.aciklama || ""); const acik = uzunAcik.has(k.id); const uzun = t.length > 120;
+    const notlar = Array.isArray(k.notlar) ? k.notlar : [];
+    const fs = kucuk ? "11px" : "12.5px";
+    return (
+      <>
+        {t ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: fs }}>{uzun && !acik ? t.slice(0, 120) + "…" : t}
+          {uzun && <button type="button" onClick={() => setUzunAcik(p => { const n = new Set(p); n.has(k.id) ? n.delete(k.id) : n.add(k.id); return n; })}
+            style={{ background: "none", border: "none", color: "#1d4ed8", fontSize: "11px", fontWeight: 700, cursor: "pointer", padding: "0 4px" }}>{acik ? "Daralt" : "Devamını gör"}</button>}
+        </div> : null}
+        {notlar.length > 0 && (
+          <div style={{ marginTop: "4px", display: "grid", gap: "3px" }}>
+            {notlar.map(n => (
+              <div key={n.id} title={_notZaman(n.created_at)} style={{ fontSize: "11px", background: n.tip === "DUZELTME" ? "#fff7ed" : "#f0f9ff", borderLeft: `3px solid ${n.tip === "DUZELTME" ? "#ea580c" : "#0ea5e9"}`, borderRadius: "4px", padding: "3px 7px", color: "#334155", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {n.tip === "DUZELTME" ? "✏️" : "💬"} <b>{n.yazan_ad || n.yazan_email || "—"}</b> · {_notZaman(n.created_at)} — {n.metin}
+              </div>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  };
+  const kalemIslemBtn = (k, form, kucuk = false) => {
+    const y = kalemYetki(form);
+    const b = { padding: kucuk ? "4px 7px" : "4px 10px", border: "none", borderRadius: kucuk ? "5px" : "6px", fontSize: kucuk ? "12px" : "11.5px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" };
+    return (
+      <>
+        {y.duzenlenebilir && <button type="button" onClick={() => acKalemDuzenle(k, form)} title="Satırı düzenle" style={{ ...b, background: "#d1fae5", color: "#065f46" }}>✏️{kucuk ? "" : " Düzenle"}</button>}
+        {!y.duzenlenebilir && y.duzeltilebilir && <button type="button" onClick={() => acKalemDuzenle(k, form)} title="Onay sürecinde gerekçeli düzeltme (geçmişe yazılır)" style={{ ...b, background: "#ffedd5", color: "#9a3412" }}>✏️{kucuk ? "" : " Düzelt"}</button>}
+        {y.notEklenebilir && <button type="button" onClick={() => acKalemNot(k, form)} title="Ek açıklama ekle (tutar/durum değişmez)" style={{ ...b, background: "#e0f2fe", color: "#075985" }}>💬{kucuk ? "" : " Ek Açıklama"}</button>}
+      </>
+    );
+  };
+  const renderKalemModal = () => {
+    const m = kalemModal; if (!m) return null;
+    const kat = MASRAF_KATEGORILER.find(x => x.key === m.k.kategori);
+    const y = kalemYetki(m.form);
+    const gerekceli = m.mod === "duzenle" && !y.duzenlenebilir && y.duzeltilebilir;
+    const plakaVar = PLAKA_KAT.includes(m.k.kategori) || !!m.k.plaka;
+    const inp = { width: "100%", padding: "8px 10px", borderRadius: "8px", border: "1.5px solid #d1d5db", fontSize: "13px", boxSizing: "border-box", background: "#fff", color: "#1f2937" };
+    const lbl = { display: "block", fontSize: "11.5px", fontWeight: 700, color: "#374151", marginBottom: "4px" };
+    const setA = (k, v) => setKalemModal(p => ({ ...p, alanlar: { ...p.alanlar, [k]: v } }));
+    return (
+      <div onClick={() => !m.kaydediyor && setKalemModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9700, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", padding: "22px", width: "min(560px,96vw)", maxHeight: "92vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+          <h3 style={{ margin: "0 0 4px", fontSize: "17px", fontWeight: 800 }}>{m.mod === "not" ? "💬 Ek Açıklama Ekle" : gerekceli ? "✏️ Kalemi Düzelt (gerekçeli)" : "✏️ Kalemi Düzenle"}</h3>
+          <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "14px" }}>{kat?.label || m.k.kategori} · {m.k.tarih ? new Date(m.k.tarih).toLocaleDateString("tr-TR") : ""}{m.k.belge_no ? ` · Belge ${m.k.belge_no}` : ""} · ₺{Number(m.k.tutar || 0).toLocaleString("tr-TR")} · Form #{m.form?.form_no || m.form?.id}</div>
+          {m.mod === "not" ? (
+            <>
+              <label style={lbl}>Ek açıklama <span style={{ color: "#94a3b8", fontWeight: 500 }}>— adınız ve saatle geçmişe eklenir; önceki açıklama, tutar ve onay durumu değişmez</span></label>
+              <textarea value={m.metin} onChange={e => setKalemModal(p => ({ ...p, metin: e.target.value }))} rows={4} autoFocus style={{ ...inp, resize: "vertical" }} placeholder="Örn. Fiş ikinci sayfası yüklendi; tutar KDV dahil…" />
+            </>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <div><label style={lbl}>Tarih</label><input type="date" value={m.alanlar.tarih} onChange={e => setA("tarih", e.target.value)} style={inp} /></div>
+              <div><label style={lbl}>Belge No</label><input value={m.alanlar.belge_no} onChange={e => setA("belge_no", e.target.value)} style={inp} /></div>
+              <div style={{ gridColumn: "1/-1" }}><label style={lbl}>Belge Açıklaması</label><input value={m.alanlar.belge_aciklama} onChange={e => setA("belge_aciklama", e.target.value)} placeholder={kat?.belgeAciklamaPlaceholder || ""} style={inp} /></div>
+              {plakaVar && <div><label style={lbl}>Araç Plakası</label><input value={m.alanlar.plaka} onChange={e => setA("plaka", e.target.value.toUpperCase())} placeholder="16GB307" style={inp} /></div>}
+              <div style={plakaVar ? undefined : { gridColumn: "1/-1" }}><label style={lbl}>Tutar (₺)</label><input value={m.alanlar.tutar} onChange={e => setA("tutar", e.target.value)} inputMode="decimal" style={inp} /></div>
+              <div style={{ gridColumn: "1/-1" }}><label style={lbl}>Detaylı Açıklama <span style={{ color: "#94a3b8", fontWeight: 500 }}>({kat?.aciklamaPlaceholder || "işin detayı"})</span></label>
+                <textarea value={m.alanlar.aciklama} onChange={e => setA("aciklama", e.target.value)} rows={3} style={{ ...inp, resize: "vertical" }} /></div>
+              {gerekceli && <div style={{ gridColumn: "1/-1" }}><label style={{ ...lbl, color: "#9a3412" }}>Düzeltme gerekçesi (zorunlu — kalem geçmişine kim/ne zaman ile yazılır)</label>
+                <input value={m.gerekce} onChange={e => setKalemModal(p => ({ ...p, gerekce: e.target.value }))} style={{ ...inp, borderColor: "#fdba74" }} placeholder="Örn. Fişteki tutar 4.400 değil 4.000" /></div>}
+            </div>
+          )}
+          {m.hata && <div style={{ marginTop: "10px", background: "#fee2e2", color: "#991b1b", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", fontWeight: 600 }}>{m.hata}</div>}
+          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "16px" }}>
+            <button type="button" onClick={() => setKalemModal(null)} disabled={m.kaydediyor} style={{ padding: "9px 16px", background: "#f3f4f6", border: "1px solid #d1d5db", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>Vazgeç</button>
+            <button type="button" onClick={kalemKaydet} disabled={m.kaydediyor} style={{ padding: "9px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "9px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>{m.kaydediyor ? "Kaydediliyor…" : "Kaydet"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  // ── Fiş görüntüleyici (20.10.2026): tek fiş geniş ve ortalı, yakınlaştır/uzaklaştır/sığdır/1:1, indir;
+  //    birden fazla fişte alt şeritten seçim; görüntü = mobilde onaylanan dosyanın kendisi (küçük resim yok)
+  const renderFisGoster = () => {
+    if (!fisGoster) return null;
+    const fisUrl = (b) => String(b.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`;
+    const form = viewForm || activeForm;
+    const y = kalemYetki(form);
+    const silinebilir = y.duzenlenebilir;
+    const belgeler = fisGoster.belgeler || [];
+    const idx = Math.min(fisSecili, Math.max(0, belgeler.length - 1));
+    const b = belgeler[idx];
+    const url = b ? fisUrl(b) : "";
+    const pdf = /\.pdf($|\?)/i.test(url);
+    const kunye = !b ? "" : b.kirpildi === true ? "✂️ Mobilde kırpılmış" : b.kirpildi === false ? "Orijinal (kırpılmadan yüklendi)" : "Kırpma bilgisi yok (eski kayıt)";
+    const kunyeRenk = b?.kirpildi === true ? ["#dcfce7", "#166534"] : b?.kirpildi === false ? ["#fef3c7", "#92400e"] : ["#f1f5f9", "#475569"];
+    const olcu = b?.genislik ? `${b.genislik}×${b.yukseklik} px` : "";
+    const indir = async () => {
+      try { const r = await fetch(url); const bl = await r.blob(); const u = URL.createObjectURL(bl); const a = document.createElement("a"); a.href = u; a.download = b?.dosya_adi || "fis.jpg"; a.click(); setTimeout(() => URL.revokeObjectURL(u), 3000); }
+      catch { window.open(url, "_blank", "noopener"); }
+    };
+    const zoomSt = fisZoom === "dogal" ? { width: "auto", height: "auto", maxWidth: "none" }
+      : fisZoom ? { width: `${Math.round(fisZoom * 100)}%`, height: "auto", maxWidth: "none" }
+      : { maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain" };
+    const zb = { padding: "6px 10px", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", fontWeight: 700, fontSize: "12.5px", color: "#0f172a", whiteSpace: "nowrap" };
+    const zoomMetni = fisZoom === "dogal" ? "1:1" : fisZoom ? `${Math.round(fisZoom * 100)}%` : "Sığdır";
+    return (
+      <div onClick={() => setFisGoster(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.8)", zIndex: 9600, display: "flex", alignItems: "center", justifyContent: "center", padding: "10px" }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(1240px,98vw)", height: "min(940px,95vh)", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 70px rgba(0,0,0,.45)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "10px 14px", borderBottom: "1px solid #e2e8f0", flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: "14.5px" }}>📷 Fiş {belgeler.length ? `${idx + 1} / ${belgeler.length}` : "—"} <span style={{ fontWeight: 500, color: "#64748b" }}>· {fisGoster.belge_aciklama || ""}{fisGoster.belge_no ? ` · Belge no ${fisGoster.belge_no}` : ""} · ₺{Number(fisGoster.tutar || 0).toLocaleString("tr-TR")}</span></div>
+              {b && <div style={{ display: "flex", gap: "6px", marginTop: "4px", flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ background: kunyeRenk[0], color: kunyeRenk[1], borderRadius: "999px", padding: "2px 9px", fontSize: "11px", fontWeight: 700 }}>{kunye}</span>
+                {olcu && <span style={{ fontSize: "11px", color: "#64748b" }}>{olcu}</span>}
+                <span style={{ fontSize: "11px", color: "#94a3b8" }}>{b.dosya_adi}{b.created_at ? ` · ${_notZaman(b.created_at)}` : ""}</span>
+              </div>}
+            </div>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+              {!pdf && <>
+                <button type="button" onClick={() => setFisZoom(z => z === "dogal" || !z ? 1 : Math.max(0.5, +(z / 1.25).toFixed(2)))} title="Uzaklaştır" style={zb}>−</button>
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#334155", minWidth: "52px", textAlign: "center" }}>{zoomMetni}</span>
+                <button type="button" onClick={() => setFisZoom(z => z === "dogal" ? 2 : !z ? 1.5 : Math.min(6, +(z * 1.25).toFixed(2)))} title="Yakınlaştır" style={zb}>+</button>
+                <button type="button" onClick={() => setFisZoom(0)} title="Ekrana sığdır" style={{ ...zb, background: fisZoom === 0 ? "#1e3a5f" : zb.background, color: fisZoom === 0 ? "#fff" : zb.color }}>Sığdır</button>
+                <button type="button" onClick={() => setFisZoom("dogal")} title="Gerçek boyut" style={{ ...zb, background: fisZoom === "dogal" ? "#1e3a5f" : zb.background, color: fisZoom === "dogal" ? "#fff" : zb.color }}>1:1</button>
+              </>}
+              {b && <button type="button" onClick={indir} style={{ ...zb, background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" }}>⬇ İndir</button>}
+              {b && <a href={url} target="_blank" rel="noreferrer" style={{ ...zb, textDecoration: "none", background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" }}>↗ Aç</a>}
+              {b && silinebilir && (
+                <button type="button" onClick={async () => {
+                  if (!window.confirm("Bu fiş silinsin mi?")) return;
+                  try {
+                    const r = await fetch(`${API_BASE}/hr/masraf-belge/${b.id}`, { method: "DELETE", headers: AUTH_H() });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok || d.error) throw new Error(d.error || "Silinemedi");
+                    setFisGoster(fg => fg ? { ...fg, belgeler: (fg.belgeler || []).filter(x => x.id !== b.id) } : fg);
+                    setFisSecili(0);
+                    await kalemYenile(form.id);
+                  } catch (err) { alert("Fiş silinemedi: " + err.message); }
+                }} style={{ ...zb, background: "#fee2e2", color: "#991b1b", borderColor: "#fecaca" }}>Sil</button>
+              )}
+              <button type="button" onClick={() => setFisGoster(null)} style={{ ...zb, background: "#0f172a", color: "#fff", borderColor: "#0f172a" }}>Kapat</button>
+            </div>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto", background: "#111827", display: "flex", alignItems: fisZoom ? "flex-start" : "center", justifyContent: fisZoom ? "flex-start" : "center" }}>
+            {!b && <div style={{ color: "#94a3b8", padding: "40px" }}>Bu kalemde fiş kalmadı</div>}
+            {b && pdf && <iframe title="Fiş PDF" src={url} style={{ width: "100%", height: "100%", border: 0, background: "#fff" }} />}
+            {b && !pdf && <img key={b.id} src={url} alt={`Fiş ${idx + 1}`} draggable={false} style={{ ...zoomSt, display: "block", imageOrientation: "from-image", userSelect: "none" }} />}
+          </div>
+          {belgeler.length > 1 && (
+            <div style={{ display: "flex", gap: "8px", padding: "8px 12px", borderTop: "1px solid #e2e8f0", overflowX: "auto", background: "#f8fafc" }}>
+              {belgeler.map((x, i) => {
+                const u = fisUrl(x); const p = /\.pdf($|\?)/i.test(u);
+                return (
+                  <div key={x.id || i} onClick={() => { setFisSecili(i); setFisZoom(0); }} title={x.dosya_adi}
+                    style={{ width: "72px", height: "88px", flex: "none", borderRadius: "8px", overflow: "hidden", cursor: "pointer", border: i === idx ? "3px solid #1e3a5f" : "2px solid #e2e8f0", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {p ? <span style={{ fontSize: "26px" }}>📄</span> : <img src={u} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {!silinebilir && <div style={{ padding: "6px 14px", fontSize: "11.5px", color: "#64748b", borderTop: "1px solid #e2e8f0" }}>{y.taslak ? "Bu formun fişlerini silme yetkiniz yok." : "Form onaya gönderildiği için fiş silinemez; yalnız görüntülenebilir."}</div>}
+        </div>
+      </div>
+    );
   };
 
   const closeFotoModal = () => {
@@ -21196,7 +21390,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
       const uploadTimeout = setTimeout(() => controller.abort(), 60000);
       let r;
       try {
-        r = await fetch(`${API_BASE}/hr/masraf-belge/${kalemId}`, { method:"POST", body:fd, signal: controller.signal });
+        r = await fetch(`${API_BASE}/hr/masraf-belge/${kalemId}`, { method:"POST", body:fd, headers: AUTH_H(), signal: controller.signal });
       } finally {
         clearTimeout(uploadTimeout);
       }
@@ -21503,7 +21697,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
             <thead>
               <tr style={{ background:"#f9fafb" }}>
-                {["Kategori","Tarih","Belge No","Açıklama","Tutar","Fiş"].map(h=>(
+                {["Kategori","Tarih","Belge No","Açıklama","Tutar","Fiş","İşlemler"].map(h=>(
                   <th key={h} style={{ padding:"10px 12px", textAlign:"left", fontWeight:600, color:"#374151", borderBottom:"2px solid #e5e7eb" }}>{h}</th>
                 ))}
               </tr>
@@ -21518,8 +21712,11 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                     <td style={{ padding:"10px 12px" }}>{kat?.label||k.kategori}</td>
                     <td style={{ padding:"10px 12px", whiteSpace:"nowrap" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR") : ""}</td>
                     <td style={{ padding:"10px 12px" }}>{k.belge_no||"—"}</td>
-                    <td style={{ padding:"10px 12px" }}>
-                      {k.aciklama||k.belge_aciklama||"—"}
+                    <td style={{ padding:"10px 12px", maxWidth:"380px" }}>
+                      {k.belge_aciklama && <div style={{ fontWeight:600 }}>{k.belge_aciklama}</div>}
+                      {k.plaka && <div style={{ fontSize:"11px", color:"#1e40af", fontWeight:700 }}>🚗 {k.plaka}</div>}
+                      {!k.aciklama && !k.belge_aciklama && "—"}
+                      {aciklamaGoster(k)}
                       {!k.fis_var&&<div style={{ fontSize:"11px",color:"#dc2626" }}>Fişsiz: {k.fis_olmadan_aciklama}</div>}
                       {/* Trafik cezası ise — ceza kimin üzerine? */}
                       {k.kategori==="TRAFIK_CEZA" && (
@@ -21550,8 +21747,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                     <td style={{ padding:"10px 12px", fontWeight:700 }}>
                       <span style={{ display:"inline-flex", alignItems:"center", gap:"6px" }}>
                         ₺{Number(k.tutar).toLocaleString("tr-TR")}
-                        <button type="button" onClick={()=>handleEditKalemTutar(k)} title="Tutarı düzelt"
-                          style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:"6px", padding:"1px 6px", fontSize:"11px", cursor:"pointer", color:"#1d4ed8", fontWeight:700 }}>✏️</button>
+                        {(kalemYetki(viewForm).duzenlenebilir || kalemYetki(viewForm).duzeltilebilir) && <button type="button" onClick={()=>handleEditKalemTutar(k)} title="Tutarı düzelt"
+                          style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:"6px", padding:"1px 6px", fontSize:"11px", cursor:"pointer", color:"#1d4ed8", fontWeight:700 }}>✏️</button>}
                       </span>
                       {ocrFark && (
                         <div style={{ marginTop:"4px", background:"#dc2626", color:"#fff", borderRadius:"5px", padding:"2px 7px", fontSize:"10px", fontWeight:700, display:"inline-block" }}>
@@ -21564,17 +21761,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                     </td>
                     <td style={{ padding:"10px 12px" }}>
                       {(k.belgeler||[]).length > 0
-                        ? <div style={{ display:"flex", gap:"4px", flexWrap:"wrap" }}>
-                            {k.belgeler.map(b=>(
-                              <a key={b.id} href={b.dosya_yolu?.startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`} target="_blank" rel="noreferrer"
-                                 style={{ fontSize:"11px", background:"#eff6ff", color:"#1d4ed8", padding:"2px 8px", borderRadius:"6px", textDecoration:"none" }}>
-                                📷 Fiş
-                              </a>
-                            ))}
-                          </div>
+                        ? <button type="button" onClick={()=>{ setFisGoster(k); setFisSecili(0); setFisZoom(0); }} title="Fişleri büyük görüntüle"
+                            style={{ fontSize:"11.5px", background:"#eff6ff", color:"#1d4ed8", padding:"4px 9px", borderRadius:"6px", border:"1px solid #bfdbfe", cursor:"pointer", fontWeight:700, whiteSpace:"nowrap" }}>
+                            📷 {k.belgeler.length} fiş{k.belgeler.some(b=>b.kirpildi===true) ? " ✂️" : ""}
+                          </button>
                         : <span style={{ color:"#f59e0b", fontSize:"12px" }}>—</span>
                       }
                     </td>
+                    <td style={{ padding:"10px 8px", whiteSpace:"nowrap" }}><div style={{ display:"flex", gap:"4px", flexWrap:"wrap" }}>{kalemIslemBtn(k, viewForm)}</div></td>
                   </tr>
                 );
               })}
@@ -21583,11 +21777,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
               <tr style={{ background:"#1e3a5f" }}>
                 <td colSpan={4} style={{ padding:"12px", fontWeight:700, color:"#fff", textAlign:"right" }}>TOPLAM</td>
                 <td style={{ padding:"12px", fontWeight:700, color:"#fff", fontSize:"16px" }}>₺{vToplam.toLocaleString("tr-TR")}</td>
-                <td></td>
+                <td></td><td></td>
               </tr>
             </tfoot>
           </table>
         </div>
+
+        {renderFisGoster()}
+        {renderKalemModal()}
 
         {/* Onay aksiyonları */}
         {(needsPMAction || needsDirektorAction || needsRolloutAction || needsMuhasebeAction) && (
@@ -21739,12 +21936,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                         </div>
                       </div>
                       {k.belge_aciklama && <div style={{ fontSize:"13px", color:"#374151", marginBottom:"2px" }}>{k.belge_aciklama}</div>}
-                      {k.aciklama && <div style={{ fontSize:"12px", color:"#6b7280" }}>{k.aciklama}</div>}
+                      {k.plaka && <div style={{ fontSize:"11px", color:"#1e40af", fontWeight:700 }}>🚗 {k.plaka}</div>}
+                      {aciklamaGoster(k)}
                       {!k.fis_var && <div style={{ fontSize:"11px", color:"#dc2626", marginTop:"2px" }}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</div>}
-                      {(k.belgeler||[]).length>0 && <div onClick={()=>setFisGoster(k)} title="Fişleri görüntüle" style={{ fontSize:"11px", color:"#059669", marginTop:"2px", cursor:"pointer", textDecoration:"underline" }}>📷 {k.belgeler.length} fiş eklendi</div>}
+                      {(k.belgeler||[]).length>0 && <div onClick={()=>{ setFisGoster(k); setFisSecili(0); setFisZoom(0); }} title="Fişleri görüntüle" style={{ fontSize:"11px", color:"#059669", marginTop:"2px", cursor:"pointer", textDecoration:"underline" }}>📷 {k.belgeler.length} fiş eklendi</div>}
                       <div style={{ display:"flex", gap:"6px", marginTop:"8px" }}>
                         <button onClick={()=>{ setExtraFotoModal(k.id); setUploadFile(null); }}
                           style={{ padding:"6px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>📷 Fiş Ekle</button>
+                        {kalemIslemBtn(k, activeForm)}
                         {!isLocked && <button onClick={()=>handleDeleteKalem(k.id)}
                           style={{ padding:"6px 12px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"7px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>✕ Sil</button>}
                       </div>
@@ -21755,7 +21954,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
               ) : (
                 <>
                 {/* Sütun başlıkları - sadece masaüstü */}
-                <div style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background:"#dbeafe", borderBottom:"1px solid #bfdbfe" }}>
+                <div style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 128px", background:"#dbeafe", borderBottom:"1px solid #bfdbfe" }}>
                   {["TARİH","BELGE NO","BELGE AÇIKLAMASI",`AÇIKLAMA (${kat.aciklamaPlaceholder.toUpperCase()})`, "MASRAF TUTARI",""].map((h,i)=>(
                     <div key={i} style={{ padding:"5px 8px", fontSize:"10px", fontWeight:800, color:"#1e40af" }}>{h}</div>
                   ))}
@@ -21766,14 +21965,16 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                 {katKalemler.map((k,i)=>{
                   const ocrFarkD = tutarFarkiVar(k);
                   return (
-                  <div key={k.id} style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 72px", background: ocrFarkD ? "#fef2f2" : i%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6", alignItems:"start", borderLeft: ocrFarkD ? "3px solid #dc2626" : "3px solid transparent" }}>
+                  <div key={k.id} style={{ display:"grid", gridTemplateColumns:"108px 80px 180px 1fr 100px 128px", background: ocrFarkD ? "#fef2f2" : i%2===0?"#fff":"#f9fafb", borderBottom:"1px solid #f3f4f6", alignItems:"start", borderLeft: ocrFarkD ? "3px solid #dc2626" : "3px solid transparent" }}>
                     <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.tarih ? new Date(k.tarih).toLocaleDateString("tr-TR"):""}</div>
                     <div style={{ padding:"8px 8px", fontSize:"12px", color:"#6b7280" }}>{k.belge_no||"—"}</div>
                     <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>{k.belge_aciklama||"—"}</div>
-                    <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151" }}>
-                      {k.aciklama||"—"}
+                    <div style={{ padding:"8px 8px", fontSize:"12px", color:"#374151", minWidth:0 }}>
+                      {k.plaka && <span style={{ fontSize:"11px", color:"#1e40af", fontWeight:700, marginRight:"6px" }}>🚗 {k.plaka}</span>}
+                      {!k.aciklama && !k.plaka && "—"}
+                      {aciklamaGoster(k, true)}
                       {!k.fis_var && <div style={{ fontSize:"10px",color:"#dc2626",marginTop:"2px" }}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</div>}
-                      {(k.belgeler||[]).length>0 && <div onClick={()=>setFisGoster(k)} title="Fişleri görüntüle" style={{ fontSize:"10px",color:"#059669",marginTop:"2px",cursor:"pointer",textDecoration:"underline" }}>📷 {k.belgeler.length} fiş</div>}
+                      {(k.belgeler||[]).length>0 && <div onClick={()=>{ setFisGoster(k); setFisSecili(0); setFisZoom(0); }} title="Fişleri görüntüle" style={{ fontSize:"10px",color:"#059669",marginTop:"2px",cursor:"pointer",textDecoration:"underline" }}>📷 {k.belgeler.length} fiş</div>}
                     </div>
                     <div style={{ padding:"8px 8px", fontWeight:700, fontSize:"12px", textAlign:"right" }}>
                       ₺{Number(k.tutar).toLocaleString("tr-TR")}
@@ -21786,6 +21987,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                     <div style={{ padding:"6px 6px", display:"flex", gap:"3px", justifyContent:"center" }}>
                       <button onClick={()=>{ setExtraFotoModal(k.id); setUploadFile(null); }} title="Fiş fotoğrafı ekle"
                         style={{ padding:"4px 7px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>📷</button>
+                      {kalemIslemBtn(k, activeForm, true)}
                       {!isLocked && <button onClick={()=>handleDeleteKalem(k.id)} title="Sil"
                         style={{ padding:"4px 7px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"5px", fontSize:"12px", cursor:"pointer" }}>✕</button>}
                     </div>
@@ -22164,7 +22366,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                   if(!uploadFile){ alert("Lütfen bir dosya seçin"); return; }
                   try {
                     const fd=new FormData(); fd.append("dosya",uploadFile);
-                    const res = await fetch(`${API_BASE}/hr/masraf-belge/${extraFotoModal}`,{method:"POST",body:fd});
+                    const res = await fetch(`${API_BASE}/hr/masraf-belge/${extraFotoModal}`,{method:"POST",body:fd,headers:AUTH_H()});
                     if(!res.ok) throw new Error("Yükleme başarısız");
                     setExtraFotoModal(null); setUploadFile(null);
                     refreshActive(activeForm.id);
@@ -22179,55 +22381,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
             </div>
           </div>
         )}
-        {fisGoster && (() => {
-          const fisUrl = (b) => String(b.dosya_yolu || "").startsWith("http") ? b.dosya_yolu : `${API_BASE}/hr/masraf-belge/file/${b.dosya_yolu}`;
-          const silinebilir = activeForm?.durum === "TASLAK";
-          const belgeler = fisGoster.belgeler || [];
-          return (
-            <div onClick={()=>setFisGoster(null)} style={{ position:"fixed", inset:0, background:"rgba(15,23,42,0.6)", zIndex:9600, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" }}>
-              <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"16px", padding:"20px", width:"min(760px,96vw)", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,.3)" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
-                  <div>
-                    <div style={{ fontWeight:800, fontSize:"15px" }}>📷 Yüklenen fişler ({belgeler.length})</div>
-                    <div style={{ fontSize:"12px", color:"#64748b" }}>{fisGoster.belge_aciklama || ""}{fisGoster.belge_no ? ` · Belge no ${fisGoster.belge_no}` : ""} · ₺{Number(fisGoster.tutar||0).toLocaleString("tr-TR")}</div>
-                  </div>
-                  <button onClick={()=>setFisGoster(null)} style={{ background:"#f1f5f9", border:"none", borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontWeight:700 }}>Kapat</button>
-                </div>
-                {!belgeler.length && <div style={{ color:"#94a3b8", padding:"20px", textAlign:"center" }}>Bu kalemde fiş kalmadı</div>}
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(210px, 1fr))", gap:"12px" }}>
-                  {belgeler.map((b, i) => {
-                    const url = fisUrl(b);
-                    const pdf = /\.pdf($|\?)/i.test(url);
-                    return (
-                      <div key={b.id || i} style={{ border:"1px solid #e2e8f0", borderRadius:"12px", overflow:"hidden", display:"flex", flexDirection:"column" }}>
-                        <a href={url} target="_blank" rel="noreferrer" style={{ display:"block", background:"#f8fafc", height:"220px" }}>
-                          {pdf
-                            ? <div style={{ height:"100%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"40px" }}>📄</div>
-                            : <img src={url} alt={`Fiş ${i+1}`} style={{ width:"100%", height:"100%", objectFit:"contain" }} />}
-                        </a>
-                        <div style={{ display:"flex", gap:"6px", padding:"8px" }}>
-                          <a href={url} target="_blank" rel="noreferrer" style={{ flex:1, textAlign:"center", padding:"6px", borderRadius:"8px", background:"#eff6ff", color:"#1d4ed8", fontSize:"12px", fontWeight:700, textDecoration:"none" }}>Aç</a>
-                          {silinebilir && (
-                            <button onClick={async()=>{
-                              if (!window.confirm("Bu fiş silinsin mi?")) return;
-                              try {
-                                const r = await fetch(`${API_BASE}/hr/masraf-belge/${b.id}`, { method:"DELETE" });
-                                if (!r.ok) throw new Error("Silinemedi");
-                                setFisGoster(fg => fg ? { ...fg, belgeler: (fg.belgeler||[]).filter(x => x.id !== b.id) } : fg);
-                                refreshActive(activeForm.id);
-                              } catch (err) { alert("Fiş silinemedi: " + err.message); }
-                            }} style={{ flex:1, padding:"6px", borderRadius:"8px", background:"#fee2e2", color:"#991b1b", border:"none", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>Sil</button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {!silinebilir && <div style={{ marginTop:"12px", fontSize:"12px", color:"#64748b" }}>Form onaya gönderildiği için fiş silinemez; yalnız görüntülenebilir.</div>}
-              </div>
-            </div>
-          );
-        })()}
+        {renderFisGoster()}
+        {renderKalemModal()}
       </div>
     );
   }

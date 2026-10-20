@@ -20005,7 +20005,8 @@ app.get("/hr/masraf-form/:id", async (req, res) => {
       ${k ? `AND ${kapsamPersonelSql(k)}` : ""}`, [id]);
     if (!form.rows[0]) return res.status(k ? 403 : 404).json({ error: k ? "Bu form firmanızın kapsamında değil" : "Bulunamadı" });
     const kalemler = await pool.query(`
-      SELECT mk.*, COALESCE(json_agg(mb.*) FILTER (WHERE mb.id IS NOT NULL), '[]') as belgeler
+      SELECT mk.*, COALESCE(json_agg(mb.* ORDER BY mb.id) FILTER (WHERE mb.id IS NOT NULL), '[]') as belgeler,
+        COALESCE((SELECT json_agg(n ORDER BY n.created_at) FROM masraf_kalem_not n WHERE n.kalem_id = mk.id), '[]') AS notlar
       FROM masraf_kalem mk
       LEFT JOIN masraf_belge mb ON mb.kalem_id = mk.id
       WHERE mk.form_id=$1 ${k ? `AND ${kapsamKalemSql(k)}` : ""} GROUP BY mk.id ORDER BY mk.tarih, mk.id`, [id]);
@@ -20094,6 +20095,47 @@ app.delete("/hr/masraf-form/:id", async (req, res) => {
 });
 
 // POST add kalem
+// 20.10.2026 (Orhan): kalem / fiş işlemlerinde sunucu tarafı yetki — form durumu + sahiplik.
+//  TASLAK (iade dahil): sahibi ya da tam görüş yetkilisi düzenler/siler.
+//  Onay sürecinde: yalnız tam görüş yetkilisi, GEREKÇE ile düzeltir (geçmişe DUZELTME kaydı düşer).
+//  TAMAMLANDI/ARSIVLENDI/REDDEDILDI: onaya esas alanlar değiştirilemez; yalnız ek açıklama eklenir.
+pool.query(`CREATE TABLE IF NOT EXISTS masraf_kalem_not (
+  id SERIAL PRIMARY KEY,
+  kalem_id INTEGER REFERENCES masraf_kalem(id) ON DELETE CASCADE,
+  form_id INTEGER,
+  tip TEXT DEFAULT 'NOT',
+  metin TEXT NOT NULL,
+  yazan_email TEXT,
+  yazan_ad TEXT,
+  created_at TIMESTAMP DEFAULT now())`).catch(() => {});
+// Fiş dosyası künyesi: piksel ölçüsü, EXIF yönü, mobilde kırpıldı mı, kaynak (mobil-kirpik / mobil-orijinal / web)
+pool.query(`ALTER TABLE masraf_belge
+  ADD COLUMN IF NOT EXISTS genislik INTEGER,
+  ADD COLUMN IF NOT EXISTS yukseklik INTEGER,
+  ADD COLUMN IF NOT EXISTS exif_yon INTEGER,
+  ADD COLUMN IF NOT EXISTS kirpildi BOOLEAN,
+  ADD COLUMN IF NOT EXISTS kaynak TEXT,
+  ADD COLUMN IF NOT EXISTS kirpma JSONB`).catch(() => {});
+const MF_ONAYDA = ["ROLLOUT_BEKLE", "MUHASEBE_BEKLE", "PM_BEKLE", "DIREKTOR_BEKLE"];
+async function masrafKalemYetki(req, kalemId) {
+  const u = optionalAuth(req);
+  if (!u) return { hata: [401, "Oturum gerekli"] };
+  const r = await pool.query(
+    `SELECT mk.id AS kalem_id, mf.id AS form_id, mf.durum, mf.talep_eden_email, p.email AS personel_email
+     FROM masraf_kalem mk JOIN masraf_form mf ON mf.id = mk.form_id
+     LEFT JOIN personel p ON p.id = mf.personel_id WHERE mk.id=$1`, [kalemId]);
+  const f = r.rows[0];
+  if (!f) return { hata: [404, "Kalem bulunamadı"] };
+  const e = String(u.email || "").toLowerCase().trim();
+  const sahip = !!e && [f.talep_eden_email, f.personel_email].some(x => String(x || "").toLowerCase().trim() === e);
+  const tam = masrafTamGorus(req);
+  const taslak = f.durum === "TASLAK", onayda = MF_ONAYDA.includes(f.durum);
+  return { u, form: f, sahip, tam, taslak, onayda,
+    duzenlenebilir: taslak && (sahip || tam), duzeltilebilir: onayda && tam, notEklenebilir: sahip || tam };
+}
+const notYazan = (u) => [String(u?.email || "").toLowerCase().trim(), u?.name || null];
+const tutarMetni = (v) => Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 app.post("/hr/masraf-kalem", async (req, res) => {
   try {
     const { form_id, tarih, belge_no, belge_aciklama, aciklama, tutar, fis_var, fis_olmadan_aciklama, plaka, ceza_personel_id } = req.body;
@@ -20116,23 +20158,83 @@ app.post("/hr/masraf-kalem", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT update kalem (fis_var, tutar_uyari_aciklama etc)
+// PUT update kalem — 20.10.2026: bilgisayardan satır düzenleme (tarih, belge no/açıklama, plaka,
+// detaylı açıklama, tutar) + mobilin fis_var / tutar_uyari_aciklama güncellemeleri. Yetki: masrafKalemYetki.
 app.put("/hr/masraf-kalem/:id", async (req, res) => {
   try {
-    const { fis_var, fis_olmadan_aciklama, tutar_uyari_aciklama, tutar } = req.body;
-    // tutar gönderildiyse düzelt (yanlış/eksik girilen bedeli elle düzeltme)
-    const tutarVal = (tutar === undefined || tutar === null || tutar === "")
-      ? null
-      : parseFinanceNumber(tutar);
+    const y = await masrafKalemYetki(req, req.params.id);
+    if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
+    const { fis_var, fis_olmadan_aciklama, tutar_uyari_aciklama, tutar, tarih, belge_no, belge_aciklama, aciklama, plaka, gerekce } = req.body;
+    const tutarVerildi = !(tutar === undefined || tutar === null || tutar === "");
+    const tutarVal = tutarVerildi ? parseFinanceNumber(tutar) : null;
+    if (tutarVerildi && !(tutarVal > 0)) return res.status(400).json({ error: "Geçerli bir tutar girin" });
+    if (tarih !== undefined && tarih !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(tarih).slice(0, 10)))
+      return res.status(400).json({ error: "Tarih YYYY-AA-GG olmalı" });
+    const yeni = {
+      tarih: tarih == null ? null : String(tarih).slice(0, 10),
+      belge_no: belge_no == null ? null : String(belge_no).trim(),
+      belge_aciklama: belge_aciklama == null ? null : String(belge_aciklama).trim(),
+      aciklama: aciklama == null ? null : String(aciklama).trim(),
+      plaka: plaka == null ? null : String(plaka).toUpperCase().replace(/\s+/g, "").trim(),
+      tutar: tutarVal,
+    };
+    const esasDegisiyor = Object.values(yeni).some(v => v !== null);
+    if (esasDegisiyor) {
+      if (y.duzenlenebilir) { /* taslak / iade: serbest */ }
+      else if (y.duzeltilebilir) {
+        if (!String(gerekce || "").trim()) return res.status(400).json({ error: "Onay sürecindeki kalemde düzeltme için gerekçe zorunlu" });
+      } else {
+        return res.status(403).json({ error: y.taslak
+          ? "Bu kalemi düzenleme yetkiniz yok"
+          : "Onaylanmış / arşivlenmiş formda kalem bilgisi değiştirilemez — iade/düzeltme sürecini kullanın; yalnız ek açıklama eklenebilir" });
+      }
+    } else if (!(y.sahip || y.tam)) return res.status(403).json({ error: "Yetkiniz yok" });
+
+    const eski = (await pool.query("SELECT * FROM masraf_kalem WHERE id=$1", [req.params.id])).rows[0];
     const { rows } = await pool.query(
       `UPDATE masraf_kalem
        SET fis_var = COALESCE($1, fis_var),
            fis_olmadan_aciklama = COALESCE($2, fis_olmadan_aciklama),
            tutar_uyari_aciklama = COALESCE($3, tutar_uyari_aciklama),
-           tutar = COALESCE($5, tutar)
+           tutar = COALESCE($5, tutar),
+           tarih = COALESCE($6::date, tarih),
+           belge_no = COALESCE($7, belge_no),
+           belge_aciklama = COALESCE($8, belge_aciklama),
+           aciklama = COALESCE($9, aciklama),
+           plaka = COALESCE($10, plaka)
        WHERE id=$4 RETURNING *`,
-      [fis_var ?? null, fis_olmadan_aciklama||null, tutar_uyari_aciklama||null, req.params.id, tutarVal]
+      [fis_var ?? null, fis_olmadan_aciklama||null, tutar_uyari_aciklama||null, req.params.id, tutarVal,
+       yeni.tarih, yeni.belge_no, yeni.belge_aciklama, yeni.aciklama, yeni.plaka]
     );
+    // Onay sürecindeki düzeltme iz bırakır: hangi alan neyden neye, kim, gerekçe
+    if (esasDegisiyor && !y.duzenlenebilir && y.duzeltilebilir && eski) {
+      const ETIKET = { tarih: "tarih", belge_no: "belge no", belge_aciklama: "belge açıklaması", aciklama: "açıklama", plaka: "plaka", tutar: "tutar" };
+      const g = (k, v) => k === "tutar" ? "₺" + tutarMetni(v) : k === "tarih" ? ymdYerel(v) : String(v ?? "—");
+      const degisen = Object.keys(yeni).filter(k => yeni[k] !== null && g(k, eski[k]) !== g(k, rows[0][k]))
+        .map(k => `${ETIKET[k]}: ${g(k, eski[k])} → ${g(k, rows[0][k])}`);
+      if (degisen.length) {
+        const [ye, ya] = notYazan(y.u);
+        await pool.query(`INSERT INTO masraf_kalem_not (kalem_id, form_id, tip, metin, yazan_email, yazan_ad) VALUES ($1,$2,'DUZELTME',$3,$4,$5)`,
+          [req.params.id, y.form.form_id, `Düzeltme (${degisen.join("; ")}) — Gerekçe: ${String(gerekce).trim()}`, ye, ya]);
+      }
+    }
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST ek açıklama — her durumda (taslak, onayda, onaylı, arşiv) sahibi ya da yetkili ekler;
+// geçmişe kim/ne zaman ile yazılır, önceki açıklama değişmez; tutar/bakiye/onay durumuna dokunmaz
+app.post("/hr/masraf-kalem/:id/not", async (req, res) => {
+  try {
+    const y = await masrafKalemYetki(req, req.params.id);
+    if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
+    if (!y.notEklenebilir) return res.status(403).json({ error: "Bu kaleme açıklama ekleme yetkiniz yok" });
+    const metin = String(req.body?.metin || "").trim();
+    if (!metin) return res.status(400).json({ error: "Açıklama boş olamaz" });
+    const [ye, ya] = notYazan(y.u);
+    const { rows } = await pool.query(
+      `INSERT INTO masraf_kalem_not (kalem_id, form_id, tip, metin, yazan_email, yazan_ad) VALUES ($1,$2,'NOT',$3,$4,$5) RETURNING *`,
+      [req.params.id, y.form.form_id, metin, ye, ya]);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -20173,6 +20275,9 @@ app.put("/hr/masraf-kalem/:id/ceza-personel", async (req, res) => {
 // DELETE kalem
 app.delete("/hr/masraf-kalem/:id", async (req, res) => {
   try {
+    const y = await masrafKalemYetki(req, req.params.id);
+    if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
+    if (!y.duzenlenebilir) return res.status(403).json({ error: y.taslak ? "Bu kalemi silme yetkiniz yok" : "Yalnız taslak formdaki kalem silinebilir" });
     await pool.query("DELETE FROM masraf_kalem WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -20183,17 +20288,33 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
   try {
     const { kalemId } = req.params;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
-    const kalem = await pool.query("SELECT form_id, kategori, aciklama FROM masraf_kalem WHERE id=$1", [kalemId]);
+    const y = await masrafKalemYetki(req, kalemId);
+    if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
+    if (!(y.duzenlenebilir || (y.onayda && y.tam))) return res.status(403).json({ error: y.taslak ? "Bu kaleme fiş ekleme yetkiniz yok" : "Bu formun durumunda fiş eklenemez" });
+    const kalem = await pool.query("SELECT form_id, kategori, aciklama, plaka FROM masraf_kalem WHERE id=$1", [kalemId]);
     if (!kalem.rows[0]) return res.status(404).json({ error: "Kalem bulunamadı" });
     const { form_id, kategori, aciklama: kalemAciklama } = kalem.rows[0];
+
+    // Dosya künyesi (20.10.2026): piksel ölçüsü + EXIF yönü sharp'tan; kırpma bilgisi mobilden
+    // (kirpildi=1/0, kaynak, kirpma={originX,originY,width,height}). Dosyanın kendisi değiştirilmez.
+    let kunye = { genislik: null, yukseklik: null, exif_yon: null };
+    try {
+      const m = await require("sharp")(req.file.buffer).metadata();
+      const yon = m.orientation || 1, dik = yon >= 5;
+      kunye = { genislik: (dik ? m.height : m.width) || null, yukseklik: (dik ? m.width : m.height) || null, exif_yon: yon };
+    } catch {}
+    const kirpildi = req.body?.kirpildi === undefined ? null : ["1", "true"].includes(String(req.body.kirpildi));
+    const kaynak = req.body?.kaynak ? String(req.body.kaynak).slice(0, 40) : (req.get("user-agent") || "").includes("Mozilla") ? "web" : null;
+    let kirpma = null;
+    try { if (req.body?.kirpma) kirpma = JSON.parse(req.body.kirpma); } catch {}
 
     // 1. Upload first — guaranteed regardless of OCR
     const fname = `${Date.now()}-${utf8Name(req.file.originalname)}`;
     const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype);
     const { rows } = await pool.query(
-      `INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [kalemId, form_id, utf8Name(req.file.originalname), url]
+      `INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu, genislik, yukseklik, exif_yon, kirpildi, kaynak, kirpma)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [kalemId, form_id, utf8Name(req.file.originalname), url, kunye.genislik, kunye.yukseklik, kunye.exif_yon, kirpildi, kaynak, kirpma ? JSON.stringify(kirpma) : null]
     );
     const belgeId = rows[0].id;
 
@@ -20209,7 +20330,7 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
       let ocrPlaka = ocrResult.plaka;
       const rawPlates = ocrResult.rawPlates || [];
       if (kategori === "YAKIT" && (ocrPlaka || rawPlates.length)) {
-        const enteredPlaka = (kalemAciklama || "").replace(/^Site ID:\s*[^|]+\|\s*/i, "").trim();
+        const enteredPlaka = (kalem.rows[0].plaka || "").trim() || (kalemAciklama || "").replace(/^Site ID:\s*[^|]+\|\s*/i, "").trim();
         const candidates = rawPlates.length ? rawPlates : [ocrPlaka];
         if (enteredPlaka) {
           for (const cand of candidates) {
@@ -20240,8 +20361,12 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
 // DELETE belge
 app.delete("/hr/masraf-belge/:id", async (req, res) => {
   try {
-    const b = await pool.query("SELECT dosya_yolu FROM masraf_belge WHERE id=$1", [req.params.id]);
-    if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);
+    const b = await pool.query("SELECT dosya_yolu, kalem_id FROM masraf_belge WHERE id=$1", [req.params.id]);
+    if (!b.rows[0]) return res.json({ ok: true });
+    const y = await masrafKalemYetki(req, b.rows[0].kalem_id);
+    if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
+    if (!y.duzenlenebilir) return res.status(403).json({ error: y.taslak ? "Bu fişi silme yetkiniz yok" : "Form onaya gönderildiği için fiş silinemez" });
+    await deleteFromStorage(b.rows[0].dosya_yolu);
     await pool.query("DELETE FROM masraf_belge WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -22120,6 +22245,10 @@ app.get("/hr/masraf-form/:id/excel", async (req, res) => {
     const form = formRes.rows[0];
     const kalemler = await pool.query(`SELECT * FROM masraf_kalem mk WHERE form_id=$1 ${k ? `AND ${kapsamKalemSql(k)}` : ""} ORDER BY tarih,id`, [form.id]);
     if (k && !kalemler.rows.length) return res.status(403).json({ error: "Kapsam dışı" });
+    // 20.10.2026: sonradan eklenen açıklamalar / düzeltme izleri açıklama hücresinin altına, kim-ne zaman ile
+    const notRes = await pool.query(`SELECT * FROM masraf_kalem_not WHERE form_id=$1 ORDER BY created_at`, [form.id]).catch(() => ({ rows: [] }));
+    const notMetni = (kalemId) => notRes.rows.filter(n => n.kalem_id === kalemId)
+      .map(n => `↳ ${n.tip === "DUZELTME" ? "Düzeltme" : "Ek not"} (${n.yazan_ad || n.yazan_email || "—"}, ${new Date(n.created_at).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}): ${n.metin}`);
 
     // Mobil'den gelen Türkçe kategori adlarını Excel key'lerine normalize et
     const MOBIL_KAT_MAP = {
@@ -22236,8 +22365,10 @@ app.get("/hr/masraf-form/:id/excel", async (req, res) => {
           ws.getCell(currentRow, 3).value = kalem.belge_no || "";
           ws.getCell(currentRow, 4).value = kalem.belge_aciklama || "";
           ws.mergeCells(currentRow, 5, currentRow, 6);
-          ws.getCell(currentRow, 5).value = kalem.aciklama || "";
-          ws.getCell(currentRow, 5).alignment = { wrapText: true };
+          const _notlar = notMetni(kalem.id);
+          ws.getCell(currentRow, 5).value = [kalem.aciklama || "", ..._notlar].filter(Boolean).join("\n");
+          ws.getCell(currentRow, 5).alignment = { wrapText: true, vertical: "top" };
+          if (_notlar.length) ws.getRow(currentRow).height = 16 + 13 * _notlar.length;
           ws.getCell(currentRow, 7).value = Number(kalem.tutar);
           ws.getCell(currentRow, 7).numFmt = "#,##0.00 ₺";
           ws.getCell(currentRow, 7).alignment = { horizontal: "right" };
@@ -22340,7 +22471,9 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
       if (!kk.rows.length) return res.status(403).json({ error: "Kapsam dışı" });
     }
     const belgeler = await pool.query(
-      `SELECT mb.*, mk.kategori, mk.tutar, mk.tarih FROM masraf_belge mb
+      `SELECT mb.*, mk.kategori, mk.tutar, mk.tarih, mk.aciklama AS kalem_aciklama, mk.plaka,
+        (SELECT string_agg(n.metin, ' | ' ORDER BY n.created_at) FROM masraf_kalem_not n WHERE n.kalem_id = mk.id) AS notlar
+       FROM masraf_belge mb
        JOIN masraf_kalem mk ON mk.id = mb.kalem_id
        WHERE mb.form_id=$1 ${k ? `AND ${kapsamKalemSql(k)}` : ""} ORDER BY mk.tarih, mb.id`, [req.params.id]
     );
@@ -22354,7 +22487,7 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
     const sharp = require("sharp");
     const margin = 20;
     const gap = 12;
-    const labelH = 20;
+    const labelH = 30;              // 20.10.2026: 2. satırda açıklama + sonradan eklenen notlar
     const pageW = doc.page.width;   // 595 pt (A4 portrait)
     const pageH = doc.page.height;  // 842 pt
 
@@ -22369,10 +22502,12 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
           rawBuf = Buffer.from(await resp.arrayBuffer());
         } else { continue; }
 
-        // No crop — use full image, rotate landscape to portrait
+        // Kırpma yok — mobilde onaylanan dosya olduğu gibi kullanılır. 20.10.2026: EXIF yönü
+        // uygulanır (iPhone fotoğrafı yan basılmasın); yatay fiş dikeye döndürülür.
         const meta0 = await sharp(rawBuf).metadata();
-        const origW = meta0.width || 800, origH = meta0.height || 1200;
-        let pipeline = sharp(rawBuf);
+        const _dik = (meta0.orientation || 1) >= 5;
+        const origW = (_dik ? meta0.height : meta0.width) || 800, origH = (_dik ? meta0.width : meta0.height) || 1200;
+        let pipeline = sharp(rawBuf).rotate();
         if (origW > origH) pipeline = pipeline.rotate(90);
 
         // PDF'te fiş ~270×360 pt'lik slota basılıyor — telefon fotoğrafını tam
@@ -22429,9 +22564,12 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
         doc.image(buf, x, y, { width: imgW, height: imgH });
         doc.fontSize(7).font("Helvetica").fillColor("#444")
            .text(
-             `${meta.kategori} · ₺${Number(meta.tutar).toLocaleString("tr-TR")} · ${new Date(meta.tarih).toLocaleDateString("tr-TR")}`,
+             `${meta.kategori} · ₺${Number(meta.tutar).toLocaleString("tr-TR")} · ${new Date(meta.tarih).toLocaleDateString("tr-TR")}${meta.plaka ? ` · ${meta.plaka}` : ""}`,
              x, y + imgH + 3, { width: imgW, align: "center" }
            );
+        // Açıklama + sonradan eklenen notlar fişin ALTINA (görüntünün üzerine değil), "sonradan eklendi" ibaresiyle
+        const _alt = [meta.kalem_aciklama ? String(meta.kalem_aciklama).slice(0, 90) : "", meta.notlar ? `Sonradan eklenen not: ${String(meta.notlar).slice(0, 110)}` : ""].filter(Boolean).join(" · ");
+        if (_alt) doc.fontSize(6).fillColor("#666").text(_alt, x, y + imgH + 13, { width: imgW, align: "center", height: 14, ellipsis: true });
       } catch {}
     }
 
