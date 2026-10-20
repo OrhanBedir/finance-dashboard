@@ -18085,9 +18085,10 @@ app.post("/hr/maas-odeme", async (req, res) => {
     const r = await pool.query(
       `INSERT INTO maas_odeme (personel_id,donem,bankadan,elden,tarih,aciklama,created_by,odeyen)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [personel_id, donem, bankadan||0, elden||0, tarih, aciklama||"", created_by||"",
+      [personel_id, donem, bankadan||0, elden||0, tarih, aciklama||"", created_by || optionalAuth(req)?.email || "",
        (odeyen==="SIMSEK"||altMarkaMi(odeyen)) ? String(odeyen).toUpperCase() : odeyenVarsayilan(tarih)]
     );
+    islemGecmisiYaz(req, "maas_odeme", r.rows[0].id, "OLUSTURMA", null, maasOzet(r.rows[0]), null);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -18095,19 +18096,23 @@ app.post("/hr/maas-odeme", async (req, res) => {
 app.put("/hr/maas-odeme/:id", async (req, res) => {
   try {
     const { donem, bankadan, elden, tarih, aciklama, odeyen } = req.body;
+    const eskiM = (await pool.query("SELECT * FROM maas_odeme WHERE id=$1", [req.params.id])).rows[0];
     const r = await pool.query(
       `UPDATE maas_odeme SET donem=$1, bankadan=$2, elden=$3, tarih=$4, aciklama=$5,
          odeyen=COALESCE(NULLIF($6,''), odeyen) WHERE id=$7 RETURNING *`,
       [donem, bankadan||0, elden||0, tarih, aciklama||"",
        (odeyen==="SIMSEK"||altMarkaMi(odeyen)) ? String(odeyen).toUpperCase() : "", req.params.id]
     );
+    if (r.rows[0]) islemGecmisiYaz(req, "maas_odeme", req.params.id, "DUZENLEME", maasOzet(eskiM), maasOzet(r.rows[0]), req.body.gerekce || null);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete("/hr/maas-odeme/:id", async (req, res) => {
   try {
+    const eskiM = (await pool.query("SELECT * FROM maas_odeme WHERE id=$1", [req.params.id])).rows[0];
     await pool.query("DELETE FROM maas_odeme WHERE id=$1", [req.params.id]);
+    if (eskiM) await islemGecmisiYaz(req, "maas_odeme", req.params.id, "SILME", maasOzet(eskiM), null, req.body?.gerekce || null);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -18977,6 +18982,149 @@ function avansTamGorus(req) {
 // Onay zincirinde olmayan kullanıcı (saha personeli, taşeron) yalnız kendi formlarını görür;
 // istemcideki "Benim Kayıtlarım" kapsamı sunucuda da aynı kuralla korunur.
 const MASRAF_TAM_GORUS = [...AVANS_TAM_GORUS, "tugce.yelmen@simsektel.com"];
+
+// ═══ ORTAK İŞLEM GEÇMİŞİ (20.10.2026, Orhan): avans / maaş ödemesi / masraf formu — kayıt bazında ═══
+// Kimlik yalnız sunucudaki oturumdan (JWT) alınır; token yoksa kullanıcı boş kalır ve ekranda
+// "kullanıcı bilgisi bulunmuyor" görünür — asla mevcut/başka bir kullanıcı atanmaz.
+// Geçmiş kayıtları değiştirilmez/silinmez; parola, token ve oturum bilgisi yazılmaz.
+pool.query(`CREATE TABLE IF NOT EXISTS islem_gecmisi (
+  id SERIAL PRIMARY KEY, modul TEXT NOT NULL, kayit_id INTEGER NOT NULL, tip TEXT NOT NULL,
+  eski JSONB, yeni JSONB, aciklama TEXT, kullanici TEXT, created_at TIMESTAMP DEFAULT now())`)
+  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS islem_gecmisi_kayit_idx ON islem_gecmisi (modul, kayit_id)`))
+  .catch(e => console.error("[islem-gecmisi tablo]", e.message));
+async function islemGecmisiYaz(req, modul, kayitId, tip, eski, yeni, aciklama) {
+  const u = typeof req === "string" ? null : (req && (req.user || optionalAuth(req)));
+  const kullanici = typeof req === "string" ? req : (u && u.email ? String(u.email).toLowerCase().trim() : null);
+  const temiz = (o) => {
+    if (!o || typeof o !== "object") return null;
+    const c = {};
+    for (const [k, v] of Object.entries(o)) { if (v === undefined || /parola|password|token|sifre|şifre|iban/i.test(k)) continue; c[k] = v; }
+    return Object.keys(c).length ? JSON.stringify(c) : null;
+  };
+  await pool.query(`INSERT INTO islem_gecmisi (modul, kayit_id, tip, eski, yeni, aciklama, kullanici) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [modul, Number(kayitId) || 0, tip, temiz(eski), temiz(yeni), aciklama ? String(aciklama).slice(0, 2000) : null, kullanici])
+    .catch(e => console.error("[islem-gecmisi]", e.message));
+}
+const avansOzet = (t) => t ? ({ tutar: t.tutar, tarih: ymdYerel(t.tarih), gider_turu: t.gider_turu, bolge: t.bolge, proje: t.proje, plaka: t.plaka, firma: t.firma, aciklama: t.aciklama, not_aciklama: t.not_aciklama, personel_id: t.personel_id }) : null;
+const maasOzet = (m) => m ? ({ donem: m.donem, bankadan: m.bankadan, elden: m.elden, tarih: ymdYerel(m.tarih), aciklama: m.aciklama, odeyen: m.odeyen, personel_id: m.personel_id }) : null;
+const kalemOzet = (k) => k ? ({ kalem_id: k.id, kategori: k.kategori, tarih: ymdYerel(k.tarih), tutar: k.tutar, aciklama: k.aciklama, belge_no: k.belge_no, belge_aciklama: k.belge_aciklama, plaka: k.plaka, fis_var: k.fis_var }) : null;
+async function avansOnayBitir(req, res, onceki, yeni) {
+  const tip = yeni.durum === "TAMAMLANDI" ? "ODEME" : "ONAY";
+  await islemGecmisiYaz(req, "avans", yeni.id, tip, { durum: onceki.durum, firma: onceki.firma || null }, { durum: yeni.durum, firma: yeni.firma || null }, null);
+  res.json(yeni);
+}
+const GECMIS_DURUM_TR = { TALEP: "Talep", ROLLOUT_MUDUR_ONAY: "Rollout müdürü onayı", PM_ONAY: "PM onayı", DIREKTOR_ONAY: "Direktör onayı", TAMAMLANDI: "Tamamlandı", REDDEDILDI: "Reddedildi",
+  TASLAK: "Taslak", ROLLOUT_BEKLE: "Rollout onayı bekliyor", MUHASEBE_BEKLE: "Muhasebe onayı bekliyor", PM_BEKLE: "PM onayı bekliyor", DIREKTOR_BEKLE: "Direktör onayı bekliyor", ARSIVLENDI: "Arşivlendi" };
+const GECMIS_ETIKET = { tutar: "Tutar", tarih: "Tarih", durum: "Durum", firma: "Firma", aciklama: "Açıklama", not_aciklama: "Not", gider_turu: "Gider türü", bolge: "Bölge", proje: "Proje", plaka: "Plaka",
+  donem: "Dönem", bankadan: "Bankadan", elden: "Elden", odeyen: "Ödeyen", kategori: "Kategori", belge_no: "Belge no", belge_aciklama: "Belge açıklaması", dosya: "Dosya",
+  form_no: "Form no", talep_eden: "Talep eden", kalem_sayisi: "Kalem sayısı", fis_var: "Fiş var", adim: "Adım", kalem: "Kalem" };
+const GECMIS_BASLIK = { OLUSTURMA: "Oluşturuldu", DUZENLEME: "Düzenlendi", ONAY: "Onaylandı", ODEME: "Ödendi / tamamlandı", RED: "Reddedildi", SILME: "Silindi", GONDERIM: "Onaya gönderildi",
+  GERI_GONDER: "Geri gönderildi (iade)", ARSIV: "Arşivlendi", KALEM_EKLE: "Kalem eklendi", KALEM_DUZENLE: "Kalem düzenlendi", KALEM_SIL: "Kalem silindi", BELGE_EKLE: "Fiş / belge eklendi", BELGE_SIL: "Fiş / belge kaldırıldı", NOT: "Ek açıklama", DUZELTME: "Düzeltme" };
+// Kayıt bazında işlem geçmişi: islem_gecmisi + eski kayıtlardan sentezlenen olaylar (onay tarihi kolonları, kalem notları)
+app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
+  try {
+    const modul = String(req.params.modul || "").toLowerCase();
+    const id = Number(req.params.id);
+    if (!["avans", "maas_odeme", "masraf"].includes(modul) || !Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Geçersiz istek" });
+    const email = String(req.user?.email || "").toLowerCase().trim();
+    const rol = String(req.user?.role || "").toLowerCase();
+    const kap = altMarkaKapsam(req);
+    const tr = (d) => d ? ymdYerel(d).split("-").reverse().join(".") : "—";
+    const para = (v) => "₺" + Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör" })[v] || v : String(v);
+    const fark = (eski, yeni) => {
+      const out = []; const y = yeni || {}; const e = eski || {};
+      for (const k of Object.keys(GECMIS_ETIKET)) {
+        if (!(k in y) && !(k in e)) continue;
+        if (k in y && k in e) { if (fmt(k, e[k]) !== fmt(k, y[k])) out.push(`${GECMIS_ETIKET[k]}: ${fmt(k, e[k])} → ${fmt(k, y[k])}`); }
+        else if (k in y) { if (fmt(k, y[k]) !== "—") out.push(`${GECMIS_ETIKET[k]}: ${fmt(k, y[k])}`); }
+        else out.push(`${GECMIS_ETIKET[k]}: ${fmt(k, e[k])}`);
+      }
+      return out;
+    };
+    const logs = (await pool.query(`SELECT * FROM islem_gecmisi WHERE modul=$1 AND kayit_id=$2 ORDER BY id`, [modul, id])).rows;
+    const logVar = (tip, f) => logs.some(l => l.tip === tip && (!f || f(l)));
+    const olaylar = []; let kayit = null; const mailler = new Set();
+    const K = (v, tip = "kullanici", adYedek = null) => { const e = String(v || "").toLowerCase().trim(); if (e) mailler.add(e); return { _e: e, _t: tip, _a: adYedek }; };
+    const KAYIT = (v, adYedek) => K(v, "kayit", adYedek);
+    if (modul === "avans") {
+      const t = (await pool.query(`SELECT t.*, p.ad_soyad, COALESCE(p.marka,'ERC') AS personel_marka FROM is_avans_talep t LEFT JOIN personel p ON p.id=t.personel_id WHERE t.id=$1`, [id])).rows[0];
+      if (!t) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+      const sahip = !!email && String(t.talep_eden_email || "").toLowerCase().trim() === email;
+      const yetkili = sahip || avansTamGorus(req) || ["RM", "PM", "PD", "ODE"].some(a => avansYetkili(req, a)) || ["admin", "platform_admin", "direktor", "muhasebe", "pm", "rollout_mudur", "bolge_mudur", "genel_mudur"].includes(rol);
+      if (!yetkili || !avansKapsamda(kap, t)) return res.status(403).json({ ok: false, error: "Bu kaydın geçmişini görüntüleme yetkiniz yok" });
+      kayit = { id: t.id, baslik: `Avans talebi #${t.id}`, alt: `${t.talep_eden_ad || t.ad_soyad || t.talep_eden_email || "—"} · ${para(t.tutar)} · ${tr(t.tarih)} · ${GECMIS_DURUM_TR[t.durum] || t.durum}` };
+      if (!logVar("OLUSTURMA")) olaylar.push({ zaman: t.created_at, tip: "OLUSTURMA", baslik: "Talep oluşturuldu", kaynak: "kayit", kim: K(null),
+        detay: [`Talep eden: ${t.talep_eden_ad || "—"}${t.talep_eden_email ? ` (${t.talep_eden_email})` : ""}`, `${para(t.tutar)} · ${tr(t.tarih)}${t.gider_turu ? ` · ${t.gider_turu}` : ""}${t.firma ? ` · ${t.firma}` : ""}`, t.aciklama ? `Açıklama: ${t.aciklama}` : null].filter(Boolean) });
+      const SIRA = { TALEP: 0, ROLLOUT_MUDUR_ONAY: 1, PM_ONAY: 2, DIREKTOR_ONAY: 3, TAMAMLANDI: 4 };
+      const ADIM = [["rollout_mudur_onay_tarihi", "ROLLOUT_MUDUR_ONAY", "Rollout müdürü onayladı"], ["pm_onay_tarihi", "PM_ONAY", "PM onayladı"], ["direktor_onay_tarihi", "DIREKTOR_ONAY", "Direktör onayladı"], ["muhasebe_onay_tarihi", "TAMAMLANDI", "Ödendi / tamamlandı"]];
+      for (const [kol, durum, ad] of ADIM) {
+        if (!t[kol]) continue;
+        const sl = SIRA[durum];
+        const kapsandi = logs.some(l => ["ONAY", "ODEME"].includes(l.tip) && (SIRA[l.yeni?.durum] ?? -1) >= sl && (SIRA[l.eski?.durum] ?? 99) < sl);
+        // Oluşturma kaydı geçmişte varsa (yeni kayıt) ve adımın onay olayı yoksa: adım talep anında otomatik geçilmiştir (ör. PM'in kendi talebi)
+        const otomatik = logVar("OLUSTURMA");
+        if (!kapsandi) olaylar.push({ zaman: ymdYerel(t[kol]), sadeceTarih: true, sira: sl, tip: durum === "TAMAMLANDI" ? "ODEME" : "ONAY", baslik: otomatik ? `${ad.replace(" onayladı", " adımı")} — talep anında otomatik geçildi` : ad, kaynak: "kayit", kim: otomatik ? K("sistem") : K(null), detay: [`Durum: ${GECMIS_DURUM_TR[durum]}`] });
+      }
+      if (t.durum === "REDDEDILDI" && !logVar("RED")) olaylar.push({ zaman: null, tip: "RED", baslik: "Reddedildi", kaynak: "kayit", kim: KAYIT(t.reddeden_email), gerekce: t.red_aciklama || null, detay: ["Durum: Reddedildi"] });
+    } else if (modul === "maas_odeme") {
+      const m = (await pool.query(`SELECT m.*, p.ad_soyad, COALESCE(p.marka,'ERC') AS marka FROM maas_odeme m LEFT JOIN personel p ON p.id=m.personel_id WHERE m.id=$1`, [id])).rows[0];
+      if (!m) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+      if (!ikYonetimYetkisi(req, m)) return res.status(403).json({ ok: false, error: "Bu kaydın geçmişini görüntüleme yetkiniz yok" });
+      kayit = { id: m.id, baslik: `Maaş ödemesi #${m.id}`, alt: `${m.ad_soyad || "—"} · ${m.donem} · ${para(Number(m.bankadan || 0) + Number(m.elden || 0))} · ${tr(m.tarih)}` };
+      if (!logVar("OLUSTURMA")) olaylar.push({ zaman: m.created_at, tip: "OLUSTURMA", baslik: "Ödeme kaydı oluşturuldu", kaynak: "kayit", kim: m.created_by ? KAYIT(m.created_by, m.created_by) : K(null),
+        detay: fark(null, maasOzet(m)) });
+    } else {
+      const f = (await pool.query(`SELECT mf.*, p.ad_soyad AS personel_ad, COALESCE(p.marka,'ERC') AS marka FROM masraf_form mf LEFT JOIN personel p ON p.id=mf.personel_id WHERE mf.id=$1`, [id])).rows[0];
+      if (!f) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+      const sahip = !!email && String(f.talep_eden_email || "").toLowerCase().trim() === email;
+      if (!(sahip || masrafTamGorus(req))) return res.status(403).json({ ok: false, error: "Bu kaydın geçmişini görüntüleme yetkiniz yok" });
+      if (kap) {
+        const kq = await pool.query(`SELECT 1 FROM masraf_form mf LEFT JOIN personel p ON p.id=mf.personel_id WHERE mf.id=$1 AND ${kapsamPersonelSql(kap)}`, [id]);
+        if (!kq.rows[0]) return res.status(403).json({ ok: false, error: "Bu kaydın geçmişini görüntüleme yetkiniz yok" });
+      }
+      kayit = { id: f.id, baslik: `Masraf formu #${f.id}`, alt: `${f.talep_eden_ad || f.personel_ad || f.talep_eden_email || "—"} · ${f.donem} · ${GECMIS_DURUM_TR[f.durum] || f.durum}` };
+      if (!logVar("OLUSTURMA")) olaylar.push({ zaman: f.created_at, tip: "OLUSTURMA", baslik: "Form oluşturuldu", kaynak: "kayit", kim: K(null),
+        detay: [`Form no: ${f.form_no ?? "—"} · Dönem: ${f.donem}`, `Talep eden: ${f.talep_eden_ad || "—"}${f.talep_eden_email ? ` (${f.talep_eden_email})` : ""}`] });
+      const ADIM = [["rollout_onay_tarihi", "ROLLOUT", "Rollout müdürü onayladı", f.rollout_not], ["muhasebe_onay_tarihi", "MUHASEBE", "Muhasebe onayladı", f.muhasebe_not], ["pm_onay_tarihi", "PM", "PM onayladı", f.pm_not], ["direktor_onay_tarihi", "DIREKTOR", "Direktör onayladı", f.direktor_not]];
+      for (const [kol, adim, ad, notu] of ADIM) {
+        if (!f[kol]) continue;
+        if (!logVar("ONAY", l => l.yeni?.adim === adim)) olaylar.push({ zaman: ymdYerel(f[kol]), sadeceTarih: true, sira: ADIM.findIndex(x => x[1] === adim) + 1, tip: "ONAY", baslik: ad, kaynak: "kayit", kim: K(null), gerekce: notu || null, detay: [] });
+      }
+      const iade = String(f.red_aciklama || "").startsWith("↩");
+      if (f.durum === "REDDEDILDI" && !logVar("RED")) olaylar.push({ zaman: null, tip: "RED", baslik: "Reddedildi", kaynak: "kayit", kim: KAYIT(f.reddeden_email), gerekce: f.red_aciklama || null, detay: ["Durum: Reddedildi"] });
+      else if (iade && !logVar("GERI_GONDER")) olaylar.push({ zaman: null, tip: "GERI_GONDER", baslik: "Geri gönderildi (iade)", kaynak: "kayit", kim: KAYIT(f.reddeden_email), gerekce: f.red_aciklama.replace(/^↩\s*GERİ GÖNDERİLDİ:\s*/, ""), detay: [] });
+      if (f.arsiv_tarihi && !logVar("ARSIV")) olaylar.push({ zaman: f.arsiv_tarihi, tip: "ARSIV", baslik: "Arşivlendi", kaynak: "kayit", kim: K(null), detay: [] });
+      const notlar = (await pool.query(`SELECT n.*, k.kategori, k.tutar AS ktutar, k.tarih AS ktarih FROM masraf_kalem_not n LEFT JOIN masraf_kalem k ON k.id=n.kalem_id
+        WHERE n.form_id=$1 OR n.kalem_id IN (SELECT id FROM masraf_kalem WHERE form_id=$1) ORDER BY n.id`, [id])).rows;
+      for (const n of notlar) olaylar.push({ zaman: n.created_at, tip: n.tip === "DUZELTME" ? "DUZELTME" : "NOT", baslik: n.tip === "DUZELTME" ? "Kalem düzeltildi" : "Ek açıklama eklendi", kaynak: "not",
+        kim: K(n.yazan_email, "kullanici", n.yazan_ad), detay: [n.kategori ? `Kalem: ${n.kategori} · ${para(n.ktutar)} · ${tr(n.ktarih)}` : "Kalem: (silinmiş)", n.metin].filter(Boolean) });
+    }
+    for (const l of logs) {
+      const y = l.yeni || {}, e = l.eski || {};
+      const detay = fark(l.eski, l.yeni);
+      if (y.kalem_id && e.kalem_id === undefined) detay.unshift(`Kalem #${y.kalem_id}`);
+      olaylar.push({ zaman: l.created_at, tip: l.tip, baslik: GECMIS_BASLIK[l.tip] || l.tip, kaynak: "log", kim: K(l.kullanici), gerekce: l.aciklama || null, detay });
+    }
+    const list = [...mailler];
+    const users = list.length ? await pool.query(`SELECT LOWER(email) AS email, name FROM users WHERE LOWER(email) = ANY($1::text[])`, [list]) : { rows: [] };
+    const adMap = new Map(users.rows.map(u => [u.email, u.name]));
+    const cozKim = (k) => {
+      const e = k?._e || "";
+      if (!e) return { ad: "Eski kayıt — kullanıcı bilgisi bulunmuyor", hesap: null, tip: "bilinmiyor" };
+      if (e === "sistem") return { ad: "Sistem", hesap: null, tip: "sistem" };
+      if (e.startsWith("gecis")) return { ad: "Veri aktarımı", hesap: null, tip: "sistem" };
+      const hesap = e.includes("@") || adMap.has(e) ? e : null;
+      return { ad: adMap.get(e) || k._a || e, hesap, tip: k._t || "kullanici" };
+    };
+    olaylar.forEach(o => { o.kim = cozKim(o.kim); });
+    // Yalnız tarih bilinen (eski kayıt) olaylar günün sonuna konur ki aynı gün oluşturulan kaydın onayları oluşturmadan sonra görünsün;
+    // aynı günkü adımlar kendi sıralarıyla (rollout → PM → direktör → ödeme) dizilir. Tarihi bilinmeyen olaylar en sonda.
+    const anahtar = (o) => !o.zaman ? -Infinity : o.sadeceTarih ? new Date(`${String(o.zaman).slice(0, 10)}T23:59:59+03:00`).getTime() + (o.sira || 0) : new Date(o.zaman).getTime();
+    olaylar.sort((a, b) => anahtar(b) - anahtar(a));
+    res.json({ ok: true, modul, kayit, olaylar });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 function masrafTamGorus(req) {
   const u = optionalAuth(req);
   if (!u) return false;
@@ -19409,7 +19557,9 @@ app.post("/hr/is-avans", async (req, res) => {
           ? Number(req.body.arac_km) : null,
       ]
     );
-    res.json(r.rows[0]);
+    const yeniAvans = r.rows[0];
+    islemGecmisiYaz(req, "avans", yeniAvans.id, "OLUSTURMA", null, { ...avansOzet(yeniAvans), durum: yeniAvans.durum, talep_eden: yeniAvans.talep_eden_ad || yeniAvans.talep_eden_email || null }, null);
+    res.json(yeniAvans);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -19417,7 +19567,7 @@ app.put("/hr/is-avans/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { personel_id, tutar, aciklama, not_aciklama, tarih, gider_turu, bolge, proje, plaka } = req.body;
-    const check = await pool.query("SELECT durum FROM is_avans_talep WHERE id=$1", [id]);
+    const check = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!check.rows[0] || check.rows[0].durum !== "TALEP") {
       return res.status(400).json({ error: "Sadece TALEP durumundaki kayıtlar düzenlenebilir" });
     }
@@ -19426,6 +19576,7 @@ app.put("/hr/is-avans/:id", async (req, res) => {
       [personel_id || null, tutar, aciklama, not_aciklama, tarih, gider_turu || null, bolge || null, proje || null,
        plaka ? String(plaka).trim().toUpperCase().replace(/\s+/g, " ") : null, id]
     );
+    islemGecmisiYaz(req, "avans", id, "DUZENLEME", avansOzet(check.rows[0]), avansOzet(r.rows[0]), req.body.gerekce || null);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -19433,7 +19584,9 @@ app.put("/hr/is-avans/:id", async (req, res) => {
 app.delete("/hr/is-avans/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    const eskiA = (await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id])).rows[0];
     await pool.query("DELETE FROM is_avans_talep WHERE id=$1", [id]);
+    if (eskiA) await islemGecmisiYaz(req, "avans", id, "SILME", { ...avansOzet(eskiA), durum: eskiA.durum }, null, req.body?.gerekce || null);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -19512,14 +19665,14 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
              rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1),
              pm_onay_tarihi=COALESCE(pm_onay_tarihi,$1), direktor_onay_tarihi=$1
            WHERE id=$2 RETURNING *`, [today, id]);
-        return res.json(updated.rows[0]);
+        return avansOnayBitir(req, res, talep, updated.rows[0]);
       }
       if (pmYetki) {
         const updated = await pool.query(
           `UPDATE is_avans_talep SET durum='PM_ONAY',
              rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1
            WHERE id=$2 RETURNING *`, [today, id]);
-        return res.json(updated.rows[0]);
+        return avansOnayBitir(req, res, talep, updated.rows[0]);
       }
     }
 
@@ -19547,13 +19700,13 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
           [talep.personel_id, talep.tarih, talep.tutar, talep.aciklama || "İş Avansı", today]
         );
       }
-      return res.json(updated.rows[0]);
+      return avansOnayBitir(req, res, talep, updated.rows[0]);
     } else {
       return res.status(400).json({ error: "Bu durumda onay yapılamaz" });
     }
 
     const updated = await pool.query(updateSql, updateParams);
-    res.json(updated.rows[0]);
+    avansOnayBitir(req, res, talep, updated.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -19576,7 +19729,7 @@ app.put("/hr/is-avans/:id/pm-onayla", authMiddleware, async (req, res) => {
       "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1, firma=COALESCE($3, NULLIF(TRIM(firma),''), $4) WHERE id=$2 RETURNING *",
       [today, id, firmaSecim, guncelMarka("AHY", today) || "ERC"]
     );
-    res.json(updated.rows[0]);
+    avansOnayBitir(req, res, talep, updated.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -19604,7 +19757,7 @@ app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => 
          firma=COALESCE($3, NULLIF(TRIM(firma),''), $4) WHERE id=$2 RETURNING *`,
       [today, id, firmaSecim, guncelMarka("AHY", today) || "ERC"]
     );
-    res.json(updated.rows[0]);
+    avansOnayBitir(req, res, talep, updated.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -19619,6 +19772,7 @@ app.put("/hr/is-avans/:id/duzenle", async (req, res) => {
       "UPDATE is_avans_talep SET tutar=$1 WHERE id=$2 RETURNING *",
       [Number(tutar), id]
     );
+    islemGecmisiYaz(req, "avans", id, "DUZENLEME", { tutar: row.rows[0].tutar }, { tutar: updated.rows[0].tutar }, req.body.gerekce || null);
     res.json(updated.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -19627,10 +19781,12 @@ app.put("/hr/is-avans/:id/reddet", async (req, res) => {
   try {
     const { id } = req.params;
     const { red_aciklama, reddeden_email } = req.body;
+    const onceki = (await pool.query("SELECT durum FROM is_avans_talep WHERE id=$1", [id])).rows[0];
     const r = await pool.query(
       "UPDATE is_avans_talep SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 RETURNING *",
       [red_aciklama, reddeden_email, id]
     );
+    if (r.rows[0]) await islemGecmisiYaz(req, "avans", id, "RED", { durum: onceki?.durum || null }, { durum: "REDDEDILDI" }, red_aciklama || null);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -20284,6 +20440,7 @@ app.post("/hr/masraf-form", async (req, res) => {
       [personel_id||null, talep_eden_email, adSoyad, formDonem, nextNo, formDurum]
     );
     const form = rows[0];
+    islemGecmisiYaz(req, "masraf", form.id, "OLUSTURMA", null, { form_no: form.form_no, donem: form.donem, durum: form.durum, talep_eden: adSoyad || talep_eden_email || null, kalem_sayisi: Array.isArray(kalemler) ? kalemler.length : 0 }, null);
 
     // Mobil all-in-one: kalemler dizisi varsa hepsini kaydet
     if (Array.isArray(kalemler) && kalemler.length > 0) {
@@ -20313,7 +20470,9 @@ app.post("/hr/masraf-form", async (req, res) => {
 // DELETE form
 app.delete("/hr/masraf-form/:id", async (req, res) => {
   try {
+    const eskiF = (await pool.query("SELECT id, form_no, donem, durum, talep_eden_ad, talep_eden_email FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
     await pool.query("DELETE FROM masraf_form WHERE id=$1", [req.params.id]);
+    if (eskiF) await islemGecmisiYaz(req, "masraf", req.params.id, "SILME", { form_no: eskiF.form_no, donem: eskiF.donem, durum: eskiF.durum, talep_eden: eskiF.talep_eden_ad || eskiF.talep_eden_email || null }, null, req.body?.gerekce || null);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -20378,6 +20537,7 @@ app.post("/hr/masraf-kalem", async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [form_id, kategori, tarih, belge_no||null, belge_aciklama||null, aciklama||null, tutar, fis_var!==false, fis_olmadan_aciklama||null, plaka||null, ceza_personel_id||null]
     );
+    islemGecmisiYaz(req, "masraf", form_id, "KALEM_EKLE", null, kalemOzet(rows[0]), null);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -20441,6 +20601,10 @@ app.put("/hr/masraf-kalem/:id", async (req, res) => {
         await pool.query(`INSERT INTO masraf_kalem_not (kalem_id, form_id, tip, metin, yazan_email, yazan_ad) VALUES ($1,$2,'DUZELTME',$3,$4,$5)`,
           [req.params.id, y.form.form_id, `Düzeltme (${degisen.join("; ")}) — Gerekçe: ${String(gerekce).trim()}`, ye, ya]);
       }
+    } else if (eski && rows[0]) {
+      // Taslak/iade düzenlemesi ve fiş durumu güncellemesi de geçmişe düşer (düzeltme notu zaten yukarıda yazıldı)
+      const eo = kalemOzet(eski), yo = kalemOzet(rows[0]);
+      if (JSON.stringify(eo) !== JSON.stringify(yo)) islemGecmisiYaz(req, "masraf", y.form.form_id, "KALEM_DUZENLE", eo, yo, gerekce || null);
     }
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -20502,7 +20666,9 @@ app.delete("/hr/masraf-kalem/:id", async (req, res) => {
     const y = await masrafKalemYetki(req, req.params.id);
     if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
     if (!y.duzenlenebilir) return res.status(403).json({ error: y.taslak ? "Bu kalemi silme yetkiniz yok" : "Yalnız taslak formdaki kalem silinebilir" });
+    const eskiK = (await pool.query("SELECT * FROM masraf_kalem WHERE id=$1", [req.params.id])).rows[0];
     await pool.query("DELETE FROM masraf_kalem WHERE id=$1", [req.params.id]);
+    if (eskiK) await islemGecmisiYaz(req, "masraf", y.form.form_id, "KALEM_SIL", kalemOzet(eskiK), null, null);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -20575,6 +20741,7 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
       `UPDATE masraf_belge SET ocr_tutar=$1, ocr_plaka=$2, ocr_plaka_eslesti=$3, ocr_para=$5 WHERE id=$4 RETURNING *`,
       [ocrTutar, matchedPlaka, ocrPlakaEslesti, belgeId, ocrPara]
     );
+    islemGecmisiYaz(req, "masraf", y.form.form_id, "BELGE_EKLE", null, { kalem_id: Number(kalemId), dosya: req.file.originalname || null }, null);
     res.json(updated.rows[0]);
   } catch (e) {
     console.error("MASRAF BELGE UPLOAD ERROR:", e.message);
@@ -20592,6 +20759,7 @@ app.delete("/hr/masraf-belge/:id", async (req, res) => {
     if (!y.duzenlenebilir) return res.status(403).json({ error: y.taslak ? "Bu fişi silme yetkiniz yok" : "Form onaya gönderildiği için fiş silinemez" });
     await deleteFromStorage(b.rows[0].dosya_yolu);
     await pool.query("DELETE FROM masraf_belge WHERE id=$1", [req.params.id]);
+    islemGecmisiYaz(req, "masraf", y.form.form_id, "BELGE_SIL", { kalem_id: b.rows[0].kalem_id, dosya: String(b.rows[0].dosya_yolu || "").split("/").pop() || null }, null, null);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -22943,6 +23111,7 @@ app.put("/hr/masraf-form/:id/submit", async (req, res) => {
       [hedef, req.params.id]
     );
     if (!rows[0]) return res.status(422).json({ error: "Form taslak durumunda değil veya bulunamadı" });
+    islemGecmisiYaz(req, "masraf", req.params.id, "GONDERIM", { durum: "TASLAK" }, { durum: hedef }, null);
     if (hedef === "TAMAMLANDI") await masrafCezaAvansOlustur(req.params.id);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -22961,6 +23130,7 @@ app.put("/hr/masraf-form/:id/rollout-onayla", async (req, res) => {
       `UPDATE masraf_form SET durum=$1, rollout_not=$2, rollout_onay_tarihi=NOW() WHERE id=$3 RETURNING *`,
       [hedef, rollout_not || null, req.params.id]
     );
+    islemGecmisiYaz(req, "masraf", req.params.id, "ONAY", { durum: "ROLLOUT_BEKLE" }, { durum: hedef, adim: "ROLLOUT" }, rollout_not || null);
     if (hedef === "TAMAMLANDI") await masrafCezaAvansOlustur(req.params.id);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -22979,6 +23149,7 @@ app.put("/hr/masraf-form/:id/muhasebe-onayla", async (req, res) => {
       `UPDATE masraf_form SET durum=$1, muhasebe_not=$2, muhasebe_onay_tarihi=NOW() WHERE id=$3 RETURNING *`,
       [hedef, muhasebe_not || null, req.params.id]
     );
+    islemGecmisiYaz(req, "masraf", req.params.id, "ONAY", { durum: "MUHASEBE_BEKLE" }, { durum: hedef, adim: "MUHASEBE" }, muhasebe_not || null);
     if (hedef === "TAMAMLANDI") await masrafCezaAvansOlustur(req.params.id);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -22988,13 +23159,14 @@ app.put("/hr/masraf-form/:id/muhasebe-onayla", async (req, res) => {
 app.put("/hr/masraf-form/:id/pm-onayla", async (req, res) => {
   try {
     const { pm_not } = req.body;
-    const f = await pool.query("SELECT talep_eden_email FROM masraf_form WHERE id=$1", [req.params.id]);
+    const f = await pool.query("SELECT talep_eden_email, durum FROM masraf_form WHERE id=$1", [req.params.id]);
     if (!f.rows[0]) return res.status(404).json({ error: "Form bulunamadı" });
     const hedef = masrafSonrakiDurum(f.rows[0].talep_eden_email, 3);
     const { rows } = await pool.query(
       `UPDATE masraf_form SET durum=$1, pm_not=$2, pm_onay_tarihi=NOW() WHERE id=$3 RETURNING *`,
       [hedef, pm_not || null, req.params.id]
     );
+    islemGecmisiYaz(req, "masraf", req.params.id, "ONAY", { durum: f.rows[0].durum }, { durum: hedef, adim: "PM" }, pm_not || null);
     if (hedef === "TAMAMLANDI") await masrafCezaAvansOlustur(req.params.id);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -23004,10 +23176,12 @@ app.put("/hr/masraf-form/:id/pm-onayla", async (req, res) => {
 app.put("/hr/masraf-form/:id/pm-reddet", async (req, res) => {
   try {
     const { red_aciklama, reddeden_email } = req.body;
+    const onceki = (await pool.query("SELECT durum FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
     const { rows } = await pool.query(
       `UPDATE masraf_form SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 RETURNING *`,
       [red_aciklama, reddeden_email, req.params.id]
     );
+    if (rows[0]) await islemGecmisiYaz(req, "masraf", req.params.id, "RED", { durum: onceki?.durum || null }, { durum: "REDDEDILDI" }, red_aciklama || null);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -23020,6 +23194,7 @@ app.put("/hr/masraf-form/:id/geri-gonder", async (req, res) => {
     const { aciklama, gonderen_email } = req.body;
     if (!String(aciklama || "").trim())
       return res.status(400).json({ error: "İade açıklaması zorunlu — personel neyi düzelteceğini bilmeli" });
+    const onceki = (await pool.query("SELECT durum FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
     const { rows } = await pool.query(
       `UPDATE masraf_form
        SET durum='TASLAK',
@@ -23030,6 +23205,7 @@ app.put("/hr/masraf-form/:id/geri-gonder", async (req, res) => {
       [`↩ GERİ GÖNDERİLDİ: ${String(aciklama).trim()}`, gonderen_email || null, req.params.id]
     );
     if (!rows[0]) return res.status(400).json({ error: "Form onay aşamasında değil — yalnız onay bekleyen formlar geri gönderilebilir" });
+    islemGecmisiYaz(req, "masraf", req.params.id, "GERI_GONDER", { durum: onceki?.durum || null }, { durum: "TASLAK" }, String(aciklama).trim());
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -23039,11 +23215,13 @@ app.put("/hr/masraf-form/:id/direktor-onayla", async (req, res) => {
   try {
     const id = req.params.id;
     const { direktor_not } = req.body;
+    const onceki = (await pool.query("SELECT durum FROM masraf_form WHERE id=$1", [id])).rows[0];
     const formRes = await pool.query(
       `UPDATE masraf_form SET durum='TAMAMLANDI', direktor_not=$1, direktor_onay_tarihi=NOW() WHERE id=$2 RETURNING *`,
       [direktor_not||null, id]
     );
     const form = formRes.rows[0];
+    if (form) islemGecmisiYaz(req, "masraf", id, "ONAY", { durum: onceki?.durum || null }, { durum: "TAMAMLANDI", adim: "DIREKTOR" }, direktor_not || null);
     await masrafCezaAvansOlustur(id);
     res.json(form);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -23053,10 +23231,12 @@ app.put("/hr/masraf-form/:id/direktor-onayla", async (req, res) => {
 app.put("/hr/masraf-form/:id/direktor-reddet", async (req, res) => {
   try {
     const { red_aciklama, reddeden_email } = req.body;
+    const onceki = (await pool.query("SELECT durum FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
     const { rows } = await pool.query(
       `UPDATE masraf_form SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 RETURNING *`,
       [red_aciklama, reddeden_email, req.params.id]
     );
+    if (rows[0]) await islemGecmisiYaz(req, "masraf", req.params.id, "RED", { durum: onceki?.durum || null }, { durum: "REDDEDILDI" }, red_aciklama || null);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -23432,6 +23612,7 @@ app.put("/hr/masraf-form/:id/arsivle", async (req, res) => {
       `UPDATE masraf_form SET durum='ARSIVLENDI', arsiv_tarihi=NOW() WHERE id=$1 AND durum='TAMAMLANDI' RETURNING *`,
       [req.params.id]
     );
+    if (rows[0]) islemGecmisiYaz(req, "masraf", req.params.id, "ARSIV", { durum: "TAMAMLANDI" }, { durum: "ARSIVLENDI" }, null);
     res.json(rows[0] || { error: "Güncellenemedi" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

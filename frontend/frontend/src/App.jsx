@@ -440,6 +440,71 @@ const kullaniciBordro = (u) => {
 const devirMetni = (u) => String(u?.marka_devir || "2026-07-15").split("-").reverse().join(".");
 // Masraf/avans uçları kapsam için kimlik ister (15.10.2026): başlık yardımcıları
 const AUTH_H = () => ({ Authorization: `Bearer ${localStorage.getItem("token") || ""}` });
+// 20.10.2026 (Orhan): ortak İşlem Geçmişi paneli — avans / maaş ödemesi / masraf formu (yemek ve kasa panelleriyle aynı ilke).
+// Kayıt bilgisi + en yeniden eskiye zaman çizelgesi; işlemi yapan ad soyad + hesap sunucudaki oturumdan gelir,
+// eski kayıtlarda "kullanıcı bilgisi bulunmuyor" görünür (mevcut kullanıcı atanmaz). Saatler Türkiye saati; geçmiş değiştirilemez.
+function IslemGecmisiPanel({ modul, id, onClose }) {
+  const [g, setG] = useState({ yukleniyor: true, olaylar: [], kayit: null, hata: null });
+  useEffect(() => {
+    let iptal = false;
+    setG({ yukleniyor: true, olaylar: [], kayit: null, hata: null });
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/islem-gecmisi/${modul}/${id}`, { headers: AUTH_H() });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) throw new Error(d.error || "Geçmiş alınamadı");
+        if (!iptal) setG({ yukleniyor: false, olaylar: d.olaylar || [], kayit: d.kayit, hata: null });
+      } catch (e) { if (!iptal) setG({ yukleniyor: false, olaylar: [], kayit: null, hata: e.message }); }
+    })();
+    return () => { iptal = true; };
+  }, [modul, id]);
+  const TIP = {
+    OLUSTURMA: ["Oluşturma", "#dbeafe", "#1e40af"], DUZENLEME: ["Düzenleme", "#fef3c7", "#92400e"], KALEM_DUZENLE: ["Düzenleme", "#fef3c7", "#92400e"], DUZELTME: ["Düzeltme", "#fef3c7", "#92400e"],
+    ONAY: ["Onay", "#dcfce7", "#166534"], ODEME: ["Ödeme", "#ccfbf1", "#0f766e"], GONDERIM: ["Gönderim", "#e0f2fe", "#0369a1"],
+    RED: ["Red", "#fee2e2", "#991b1b"], GERI_GONDER: ["İade", "#ffedd5", "#9a3412"], SILME: ["Silme", "#fee2e2", "#991b1b"], KALEM_SIL: ["Silme", "#fee2e2", "#991b1b"], BELGE_SIL: ["Belge", "#fff7ed", "#9a3412"],
+    ARSIV: ["Arşiv", "#ede9fe", "#5b21b6"], KALEM_EKLE: ["Kalem", "#ecfdf5", "#065f46"], BELGE_EKLE: ["Belge", "#ecfdf5", "#065f46"], NOT: ["Açıklama", "#f1f5f9", "#475569"],
+  };
+  const z = (o) => !o.zaman ? "tarih bilinmiyor"
+    : o.sadeceTarih ? String(o.zaman).slice(0, 10).split("-").reverse().join(".")
+    : new Date(o.zaman).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const k = g.kayit || {};
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: "min(620px, 96vw)", maxHeight: "84vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ padding: "14px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: "15px" }}>🕘 İşlem Geçmişi — {k.baslik || `#${id}`}</div>
+            {k.alt && <div style={{ fontSize: "12.5px", color: "#64748b", marginTop: "3px" }}>{k.alt}</div>}
+            <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "2px" }}>Saatler Türkiye saatidir · geçmiş kayıtları değiştirilemez</div>
+          </div>
+          <button onClick={onClose} style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "6px 12px", cursor: "pointer", fontWeight: 700 }}>Kapat</button>
+        </div>
+        <div style={{ overflowY: "auto", padding: "10px 18px 16px" }}>
+          {g.yukleniyor && <div style={{ color: "#94a3b8", padding: "16px", textAlign: "center" }}>Yükleniyor…</div>}
+          {g.hata && <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", fontWeight: 700 }}>{g.hata}</div>}
+          {!g.yukleniyor && !g.hata && g.olaylar.length === 0 && <div style={{ color: "#94a3b8", padding: "16px", textAlign: "center" }}>Kayıtlı işlem yok</div>}
+          {g.olaylar.map((o, i) => { const t = TIP[o.tip] || [o.tip, "#f1f5f9", "#475569"]; return (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "18px 1fr", gap: "10px", padding: "9px 0", borderBottom: i < g.olaylar.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><span style={{ width: "10px", height: "10px", borderRadius: "50%", background: t[2], marginTop: "5px" }} />{i < g.olaylar.length - 1 && <span style={{ flex: 1, width: "2px", background: "#e2e8f0", marginTop: "4px" }} />}</div>
+              <div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ background: t[1], color: t[2], padding: "1px 8px", borderRadius: "999px", fontSize: "10.5px", fontWeight: 800 }}>{t[0]}</span>
+                  <span style={{ fontWeight: 800, fontSize: "13px" }}>{o.baslik}</span>
+                  <span style={{ fontSize: "11.5px", color: "#64748b", marginLeft: "auto" }}>{z(o)}</span>
+                </div>
+                <div style={{ fontSize: "12px", color: o.kim?.tip === "bilinmiyor" ? "#94a3b8" : "#334155", marginTop: "3px" }}>
+                  <b>{o.kim?.ad}</b>{o.kim?.hesap ? <span style={{ color: "#64748b" }}> · hesap: {o.kim.hesap}</span> : null}{o.kim?.tip === "kayit" ? <span style={{ color: "#94a3b8" }}> · kayıttaki bilgi</span> : null}
+                </div>
+                {(o.detay || []).map((d, j) => <div key={j} style={{ fontSize: "12.5px", color: "#0f172a", marginTop: "2px" }}>{d}</div>)}
+                {o.gerekce && <div style={{ fontSize: "12px", color: "#9a3412", marginTop: "3px" }}>Not / gerekçe: {o.gerekce}</div>}
+              </div>
+            </div>
+          ); })}
+        </div>
+      </div>
+    </div>
+  );
+}
 // Tarayıcı indirmelerinde (Excel/PDF <a href>) başlık gönderilemez; alt marka
 // kullanıcısı için token sorgu parametresiyle eklenir ki sunucu kapsamı uygulasın
 const dlUrl = (path) => {
@@ -17603,6 +17668,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [maasOdeForm, setMaasOdeForm] = useState({ donem:"", bankadan:"", elden:"", tarih:"", aciklama:"", odeyen:"SIMSEK" });
   const [maasOdeSaving, setMaasOdeSaving] = useState(false);
   const [maasOdeEditId, setMaasOdeEditId] = useState(null); // düzenlenen ödeme id'si
+  const [maasGecmis, setMaasGecmis] = useState(null); // 20.10.2026: maaş ödemesi kaydının işlem geçmişi
   const [aylikOdemeler, setAylikOdemeler] = useState([]); // tüm personel bu ay ödeme özeti
   const [prevAyOzet, setPrevAyOzet] = useState([]);       // önceki ay hakediş özeti (fazla ödeme devri için)
   const [prevAyOdemeler, setPrevAyOdemeler] = useState([]); // önceki ay ödemeleri (fazla ödeme devri için)
@@ -18127,14 +18193,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       if (maasOdeEditId) {
         // Güncelleme (PUT)
         await fetch(`${API_BASE}/hr/maas-odeme/${maasOdeEditId}`, {
-          method:"PUT", headers:{"Content-Type":"application/json"},
+          method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
           body: JSON.stringify(maasOdeForm)
         });
         setMaasOdeEditId(null);
       } else {
         // Yeni kayıt (POST)
         await fetch(`${API_BASE}/hr/maas-odeme`, {
-          method:"POST", headers:{"Content-Type":"application/json"},
+          method:"POST", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
           body: JSON.stringify({ personel_id: maasOdeModal.id, ...maasOdeForm, created_by: currentUser?.email })
         });
       }
@@ -18147,7 +18213,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const handleDeleteMaasOde = async (id) => {
     if (!window.confirm("Bu ödeme kaydı silinsin mi?")) return;
     try {
-      await fetch(`${API_BASE}/hr/maas-odeme/${id}`, { method:"DELETE" });
+      await fetch(`${API_BASE}/hr/maas-odeme/${id}`, { headers: AUTH_H(), method:"DELETE" });
       if (maasOdeModal) await loadMaasOde(maasOdeModal.id);
       loadAylikOdemeler();
     } catch { /* sessiz */ }
@@ -20604,6 +20670,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           </div>
                           <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
                             <div style={{ fontWeight:700, color:"#166534", fontSize:"15px" }}>{TL(banka+elden)}</div>
+                            <button onClick={()=>setMaasGecmis(od.id)} title="İşlem geçmişi" style={{ background:"#f1f5f9", color:"#334155", border:"1px solid #e2e8f0", borderRadius:"8px", padding:"4px 8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>🕘</button>
+                            {maasGecmis===od.id && <IslemGecmisiPanel modul="maas_odeme" id={od.id} onClose={()=>setMaasGecmis(null)} />}
                             <button onClick={()=>{ setMaasOdeEditId(od.id); setMaasOdeForm({ donem: od.donem, bankadan: String(od.bankadan||""), elden: String(od.elden||""), tarih: (od.tarih||"").split("T")[0], aciklama: od.aciklama||"", odeyen: od.odeyen||"SIMSEK" }); window.scrollTo({top:0}); }}
                               style={{ background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer", fontWeight:600 }}>✏️ Düzenle</button>
                             <button onClick={()=>handleDeleteMaasOde(od.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", padding:"4px 10px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
@@ -21567,6 +21635,7 @@ const MASRAF_KATEGORILER = [
 ];
 
 function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initialDurum = "", initialFormId = null, initialKapsam = "", initialEditId = null, yeniTetik = 0 }) {
+  const [gecmis, setGecmis] = useState(null); // 20.10.2026: form bazında işlem geçmişi (ortak IslemGecmisiPanel)
   const isPM       = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com" || currentUser?.role === "muhasebe";
@@ -21720,7 +21789,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
       const d = await r0.json();
       if (!(d?.kalemler || []).length) return alert("Formda masraf kalemi yok — önce 'Düzenle' ile kalem ekleyin.");
       if (!window.confirm(`Form #${f.form_no || f.id} onaya gönderilsin mi?`)) return;
-      const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/submit`, { method:"PUT" });
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/submit`, { headers: AUTH_H(), method:"PUT" });
       if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || `Sunucu hatası (${r.status})`); }
       load();
     } catch (err) { alert("Gönderilemedi: " + err.message); }
@@ -21741,7 +21810,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
       const pid = personelList.find(p => p.id == nfPersonelId);
       const r = await fetch(`${API_BASE}/hr/masraf-form`, {
         method: "POST",
-        headers: {"Content-Type":"application/json"},
+        headers: { ...AUTH_H(), "Content-Type":"application/json"},
         body: JSON.stringify({
           personel_id: nfPersonelId,
           talep_eden_email: currentUser?.email,
@@ -21767,7 +21836,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     if (!activeForm) return alert("Önce form oluşturun");
     const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
       method: "POST",
-      headers: {"Content-Type":"application/json"},
+      headers: { ...AUTH_H(), "Content-Type":"application/json"},
       body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, aciklama: kalemForm.site_id ? `Site ID: ${kalemForm.site_id}${kalemForm.aciklama ? " | " + kalemForm.aciklama : ""}` : kalemForm.aciklama, plaka: kalemForm.plaka||null, ceza_personel_id: kalemForm.ceza_personel_id||null })
     });
     const saved = await r.json();
@@ -21798,7 +21867,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     try {
       const r = await fetch(`${API_BASE}/hr/masraf-kalem`, {
         method: "POST",
-        headers: {"Content-Type":"application/json"},
+        headers: { ...AUTH_H(), "Content-Type":"application/json"},
         body: JSON.stringify({ ...kalemForm, form_id: activeForm.id, fis_var: true, plaka: kalemForm.plaka||null, ceza_personel_id: kalemForm.ceza_personel_id||null })
       });
       const saved = await r.json();
@@ -21810,7 +21879,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     try {
       const fd = new FormData();
       fd.append("file", file);
-      await fetch(`${API_BASE}/hr/masraf-kalem/${savedId}/ceza-belge`, {
+      await fetch(`${API_BASE}/hr/masraf-kalem/${savedId}/ceza-belge`, { headers: AUTH_H(),
         method: "POST",
         body: fd
       });
@@ -22053,7 +22122,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
       // Fişsiz ilerleme
       await fetch(`${API_BASE}/hr/masraf-kalem/${kalemId}`, {
         method: "PUT",
-        headers: {"Content-Type":"application/json"},
+        headers: { ...AUTH_H(), "Content-Type":"application/json"},
         body: JSON.stringify({ fis_var: false, fis_olmadan_aciklama: fisAciklama })
       }).catch(()=>{});
       closeFotoModal();
@@ -22120,7 +22189,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     if (tutarUyariAciklamaOverride && belge.id) {
       await fetch(`${API_BASE}/hr/masraf-kalem/${kalemId}`, {
         method: "PUT",
-        headers: {"Content-Type":"application/json"},
+        headers: { ...AUTH_H(), "Content-Type":"application/json"},
         body: JSON.stringify({ tutar_uyari_aciklama: tutarUyariAciklamaOverride })
       }).catch(()=>{});
     }
@@ -22139,7 +22208,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     }
     await fetch(`${API_BASE}/hr/masraf-kalem/${fotoModal}`, {
       method: "PUT",
-      headers: {"Content-Type":"application/json"},
+      headers: { ...AUTH_H(), "Content-Type":"application/json"},
       body: JSON.stringify({ tutar_uyari_aciklama: tutarUyariAciklama })
     }).catch(()=>{});
     closeFotoModal();
@@ -22150,7 +22219,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     if (ocrResult?.tutarAciklama) {
       await fetch(`${API_BASE}/hr/masraf-kalem/${fotoModal}`, {
         method: "PUT",
-        headers: {"Content-Type":"application/json"},
+        headers: { ...AUTH_H(), "Content-Type":"application/json"},
         body: JSON.stringify({ tutar_uyari_aciklama: ocrResult.tutarAciklama })
       }).catch(()=>{});
     }
@@ -22164,7 +22233,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     // PM'in kendi formu PM adımını atlar, doğrudan PD (Proje Direktörü) onayına gider
     const _benPM = (currentUser?.email || "").toLowerCase() === "orhan.bedir@simsektel.com";
     if (!window.confirm(`Masraf formunu ${_benPM ? "PD (Proje Direktörü)" : "PM"} onayına göndermek istediğinize emin misiniz?`)) return;
-    await fetch(`${API_BASE}/hr/masraf-form/${activeForm.id}/submit`, { method:"PUT" });
+    await fetch(`${API_BASE}/hr/masraf-form/${activeForm.id}/submit`, { headers: AUTH_H(), method:"PUT" });
     setActiveForm(null);
     setKalemler([]);
     load();
@@ -22172,7 +22241,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
   const handleRolloutOnayla = async () => {
     await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/rollout-onayla`, {
-      method:"PUT", headers:{"Content-Type":"application/json"},
+      method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
       body: JSON.stringify({ rollout_not: notText })
     });
     setNotModal(null); setNotText(""); load();
@@ -22181,7 +22250,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
   const handleMuhasebeOnayla = async () => {
     await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/muhasebe-onayla`, {
-      method:"PUT", headers:{"Content-Type":"application/json"},
+      method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
       body: JSON.stringify({ muhasebe_not: notText })
     });
     setNotModal(null); setNotText(""); load();
@@ -22190,7 +22259,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
   const handlePMOnayla = async () => {
     await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/pm-onayla`, {
-      method:"PUT", headers:{"Content-Type":"application/json"},
+      method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
       body: JSON.stringify({ pm_not: notText })
     });
     setNotModal(null); setNotText(""); load();
@@ -22199,7 +22268,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
   const handleDirektorOnayla = async () => {
     await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/direktor-onayla`, {
-      method:"PUT", headers:{"Content-Type":"application/json"},
+      method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
       body: JSON.stringify({ direktor_not: notText })
     });
     setNotModal(null); setNotText(""); load();
@@ -22211,7 +22280,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     const ep = isPM ? "pm-reddet" : "direktor-reddet";
     try {
       const r = await fetch(`${API_BASE}/hr/masraf-form/${redModal}/${ep}`, {
-        method:"PUT", headers:{"Content-Type":"application/json"},
+        method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
         body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email })
       });
       if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || `Sunucu hatası (${r.status})`); }
@@ -22228,7 +22297,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     if (!geriText.trim()) return alert("İade açıklaması girilmeden geri gönderilemez — personel neyi düzelteceğini bilmeli!");
     try {
       const r = await fetch(`${API_BASE}/hr/masraf-form/${geriModal}/geri-gonder`, {
-        method:"PUT", headers:{"Content-Type":"application/json"},
+        method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
         body: JSON.stringify({ aciklama: geriText, gonderen_email: currentUser?.email })
       });
       if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || `Sunucu hatası (${r.status})`); }
@@ -22329,7 +22398,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     const handleCezaPersonelAta = async (kalemId, cezaPersonelId) => {
       await fetch(`${API_BASE}/hr/masraf-kalem/${kalemId}/ceza-personel`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...AUTH_H(),  "Content-Type": "application/json" },
         body: JSON.stringify({ ceza_personel_id: cezaPersonelId || null }),
       });
       // Formu yenile
@@ -22339,7 +22408,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
     const handleDeleteView = async () => {
       if (!window.confirm("Bu masraf formu silinecek. Emin misiniz?")) return;
-      await fetch(`${API_BASE}/hr/masraf-form/${viewForm.id}`, { method: "DELETE" });
+      await fetch(`${API_BASE}/hr/masraf-form/${viewForm.id}`, { headers: AUTH_H(), method: "DELETE" });
       setViewForm(null);
       load();
     };
@@ -22360,6 +22429,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
             </div>
             <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
               {durumBadge(viewForm.durum)}
+              <button onClick={()=>setGecmis(viewForm.id)} title="İşlem geçmişi" style={{ padding:"8px 12px", background:"#f1f5f9", color:"#334155", border:"1px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>🕘 Geçmiş</button>
+              {gecmis===viewForm.id && <IslemGecmisiPanel modul="masraf" id={viewForm.id} onClose={()=>setGecmis(null)} />}
               <a href={dlUrl(`/hr/masraf-form/${viewForm.id}/excel`)} style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>📥 Excel</a>
               {(viewForm.kalemler||[]).some(k=>(k.belgeler||[]).length>0) && (
                 <a href={dlUrl(`/hr/masraf-form/${viewForm.id}/pdf`)} style={{ padding:"8px 14px", background:"#7c3aed", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none" }}>📄 PDF Fişler</a>
@@ -22829,7 +22900,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                   onClick={async () => {
                     // Yüklenen belgeyi sil
                     if (ocrResult?.belgeId) {
-                      await fetch(`${API_BASE}/hr/masraf-belge/${ocrResult.belgeId}`, { method:"DELETE" }).catch(()=>{});
+                      await fetch(`${API_BASE}/hr/masraf-belge/${ocrResult.belgeId}`, { headers: AUTH_H(), method:"DELETE" }).catch(()=>{});
                     }
                     closeFotoModal();
                     refreshActive(activeForm.id);
@@ -23210,6 +23281,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                 {needsMyAction && <div style={{ fontSize:"12px", fontWeight:700, color:"#92400e", marginBottom:"8px" }}>⏳ Onayınızı bekliyor</div>}
                 {myPendingRow && <div style={{ fontSize:"12px", fontWeight:700, color:"#b91c1c", marginBottom:"8px" }}>🕐 {f.durum==="ROLLOUT_BEKLE"?"Rollout onayı bekleniyor":f.durum==="MUHASEBE_BEKLE"?"Muhasebe kontrolünde":f.durum==="PM_BEKLE"?"PM onayı bekleniyor":"Direktör onayı bekleniyor"}</div>}
                 <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                  <button onClick={()=>setGecmis(f.id)} title="İşlem geçmişi" style={{ padding:"7px 10px", background:"#f1f5f9", color:"#334155", border:"1px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>🕘</button>
+                  {gecmis===f.id && <IslemGecmisiPanel modul="masraf" id={f.id} onClose={()=>setGecmis(null)} />}
                   <button onClick={()=>loadDetail(f.id)}
                     style={{ padding:"7px 14px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>İncele</button>
                   {f.durum==="TASLAK" && f.talep_eden_email===currentUser?.email && (
@@ -23221,6 +23294,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                       {listLoading ? "Yükleniyor..." : "✏️ Düzenle"}
                     </button>
                   )}
+                  <button onClick={()=>setGecmis(f.id)} title="İşlem geçmişi" style={{ padding:"7px 10px", background:"#f1f5f9", color:"#334155", border:"1px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>🕘</button>
+                  {gecmis===f.id && <IslemGecmisiPanel modul="masraf" id={f.id} onClose={()=>setGecmis(null)} />}
                   {f.durum==="TASLAK" && f.talep_eden_email===currentUser?.email && (
                     <button onClick={()=>handleListeGonder(f)}
                       style={{ padding:"7px 14px", background:"#1e3a5f", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>{iadeMi(f) ? "Yeniden Gönder" : "Onaya Gönder"}</button>
@@ -23234,7 +23309,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                     </>
                   )}
                   {isMuhasebe && f.durum==="TAMAMLANDI" && (
-                    <button onClick={async()=>{ if(window.confirm("Arşivlensin mi?")){ await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`,{method:"PUT"}); load(); } }}
+                    <button onClick={async()=>{ if(window.confirm("Arşivlensin mi?")){ await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`,{ headers: AUTH_H(),method:"PUT"}); load(); } }}
                       style={{ padding:"7px 14px", background:"#ede9fe", color:"#5b21b6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>🗂 Arşivle</button>
                   )}
                 </div>
@@ -23276,6 +23351,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                   </td>
                   <td style={{ padding:"12px 16px" }}>
                     <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                      <button onClick={()=>setGecmis(f.id)} title="İşlem geçmişi" style={{ padding:"4px 8px", background:"#f1f5f9", color:"#334155", border:"1px solid #e2e8f0", borderRadius:"6px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>🕘</button>
+                      {gecmis===f.id && <IslemGecmisiPanel modul="masraf" id={f.id} onClose={()=>setGecmis(null)} />}
                       <button onClick={()=>loadDetail(f.id)} style={{ padding:"4px 12px", background:"#eff6ff", color:"#1d4ed8", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>İncele</button>
                       {f.durum==="TASLAK" && f.talep_eden_email===currentUser?.email && (
                         <button disabled={listLoading} onClick={async()=>{
@@ -23300,7 +23377,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                       )}
                       {(isPM || isDirektor || isMuhasebe) && <a href={dlUrl(`/hr/masraf-form/${f.id}/excel`)} style={{ padding:"4px 10px", background:"#f0fdf4", color:"#166534", borderRadius:"6px", fontSize:"12px", fontWeight:600, textDecoration:"none" }}>Excel</a>}
                       {isMuhasebe && f.durum==="TAMAMLANDI" && (
-                        <button onClick={async()=>{ if(window.confirm("Bu formu arşivlendi olarak işaretleyeceksiniz. Emin misiniz?")){ await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`,{method:"PUT"}); load(); } }}
+                        <button onClick={async()=>{ if(window.confirm("Bu formu arşivlendi olarak işaretleyeceksiniz. Emin misiniz?")){ await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`,{ headers: AUTH_H(),method:"PUT"}); load(); } }}
                           style={{ padding:"4px 10px", background:"#ede9fe", color:"#5b21b6", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>🗂 Arşivle</button>
                       )}
                     </div>
@@ -23471,7 +23548,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
     setFormIslem(true);
     try {
       const r = await fetch(`${API_BASE}/hr/masraf-form/${formModal.id}/${yol}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(govde || {}) });
+        method: "PUT", headers: { ...AUTH_H(),  "Content-Type": "application/json" }, body: JSON.stringify(govde || {}) });
       if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `Sunucu hatası (${r.status})`); }
       setFormModal(null); setTazele(x => x + 1);
     } catch (e) { alert(e.message); }
@@ -23528,7 +23605,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
     const d = await fetch(`${API_BASE}/hr/masraf-form/${f.id}`, { headers: AUTH_H() }).then(r => r.json()).catch(() => null);
     if (!d || !(d.kalemler || []).length) { alert("Formda masraf kalemi yok — önce 'Düzenle' ile kalem ekleyin."); return; }
     if (!window.confirm(`Form #${f.form_no || f.id} (₺${fmt(f.toplam_tutar)}) onaya gönderilsin mi?`)) return;
-    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/submit`, { method: "PUT" });
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/submit`, { headers: AUTH_H(), method: "PUT" });
     if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.error || "Gönderilemedi"); }
     setTazele(x => x + 1);
   };
@@ -23559,14 +23636,14 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
     await avansGonder(t.id, path, _altMarka ? _marka : undefined);
   };
   const avansGonder = async (id, path, firma) => {
-    const r = await fetch(`${API_BASE}/hr/is-avans/${id}/${path}`, { method:"PUT", headers:{ "Content-Type":"application/json", ..._auth }, body: JSON.stringify(firma ? { firma } : {}) });
+    const r = await fetch(`${API_BASE}/hr/is-avans/${id}/${path}`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json", ..._auth }, body: JSON.stringify(firma ? { firma } : {}) });
     if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Onay yapılamadı"); }
     setFirmaSec(null); setTazele(x => x + 1);
   };
   const avansReddet = async (t) => {
     const sebep = window.prompt(`${t.personel_ad || t.talep_eden_ad} · ₺${fmt(t.tutar)} — red açıklaması:`);
     if (!sebep || !sebep.trim()) return;
-    const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/reddet`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
+    const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/reddet`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
     if (!r.ok) alert("Reddedilemedi");
     setTazele(x => x + 1);
   };
@@ -23574,14 +23651,14 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
     const map = { ROLLOUT_BEKLE: ["rollout-onayla", "rollout_not"], MUHASEBE_BEKLE: ["muhasebe-onayla", "muhasebe_not"], PM_BEKLE: ["pm-onayla", "pm_not"], DIREKTOR_BEKLE: ["direktor-onayla", "direktor_not"] };
     if (f.durum === "TAMAMLANDI") {
       if (!window.confirm(`Form #${f.form_no || f.id} (${f.talep_eden_ad}, ₺${fmt(f.toplam_tutar)}) ödendi ve arşivlensin mi? Tutar personelin avans bakiyesinden düşer.`)) return;
-      const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`, { method:"PUT" });
+      const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`, { headers: AUTH_H(), method:"PUT" });
       if (!r.ok) alert("Arşivlenemedi");
       setTazele(x => x + 1); return;
     }
     const m = map[f.durum]; if (!m) return;
     const not = window.prompt(`Form #${f.form_no || f.id} onayı — not (isteğe bağlı):`, "");
     if (not === null) return;
-    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/${m[0]}`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ [m[1]]: not }) });
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/${m[0]}`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json" }, body: JSON.stringify({ [m[1]]: not }) });
     if (!r.ok) alert("Onaylanamadı");
     setTazele(x => x + 1);
   };
@@ -23589,7 +23666,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
     if (!(isPM || isDirektor)) { alert("Red yetkisi PM ve Direktör'de; 'Masraf Formları' sekmesinden geri gönderebilirsiniz."); return; }
     const sebep = window.prompt(`Form #${f.form_no || f.id} — red açıklaması:`);
     if (!sebep || !sebep.trim()) return;
-    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/${isPM ? "pm-reddet" : "direktor-reddet"}`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/${isPM ? "pm-reddet" : "direktor-reddet"}`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
     if (!r.ok) alert("Reddedilemedi");
     setTazele(x => x + 1);
   };
@@ -24156,6 +24233,7 @@ function adlariTeklestir(rows, alanlar) {
 }
 function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = "", initialKapsam = "", yeniTetik = 0 }) {
   const [list, setList] = useState([]);
+  const [gecmis, setGecmis] = useState(null); // 20.10.2026: kayıt bazında işlem geçmişi (ortak IslemGecmisiPanel)
   const [personelList, setPersonelList] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -24413,9 +24491,9 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
         talep_eden_ad: currentUser?.name || currentUser?.email,
       };
       if (editingId) {
-        await fetch(`${API_BASE}/hr/is-avans/${editingId}`, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+        await fetch(`${API_BASE}/hr/is-avans/${editingId}`, { method: "PUT", headers: { ...AUTH_H(), "Content-Type":"application/json"}, body: JSON.stringify(body) });
       } else {
-        await fetch(`${API_BASE}/hr/is-avans`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+        await fetch(`${API_BASE}/hr/is-avans`, { method: "POST", headers: { ...AUTH_H(), "Content-Type":"application/json"}, body: JSON.stringify(body) });
       }
       setShowModal(false);
       load();
@@ -24425,7 +24503,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
 
   const handleDelete = async (id) => {
     if (!window.confirm("Bu talebi silmek istediğinize emin misiniz?")) return;
-    await fetch(`${API_BASE}/hr/is-avans/${id}`, { method: "DELETE" });
+    await fetch(`${API_BASE}/hr/is-avans/${id}`, { headers: AUTH_H(), method: "DELETE" });
     load();
   };
 
@@ -24476,7 +24554,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
     try {
       const r = await fetch(`${API_BASE}/hr/is-avans/${redModal}/reddet`, {
         method: "PUT",
-        headers: {"Content-Type":"application/json"},
+        headers: { ...AUTH_H(), "Content-Type":"application/json"},
         body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email })
       });
       if (!r.ok) {
@@ -24497,7 +24575,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
     try {
       const r = await fetch(`${API_BASE}/hr/is-avans/${editAvansModal.id}/duzenle`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...AUTH_H(),  "Content-Type": "application/json" },
         body: JSON.stringify({ tutar: Number(t.toString().replace(",", ".")) })
       });
       if (!r.ok) { const err = await r.json().catch(() => ({})); throw new Error(err.error || `Sunucu hatası (${r.status})`); }
@@ -25040,6 +25118,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                 {t.red_aciklama && <div style={{ fontSize:"12px", color:"#dc2626", marginBottom:"8px" }}>Red: {t.red_aciklama}</div>}
                 {needsMyAction && <div style={{ fontSize:"12px", fontWeight:700, color:"#92400e", marginBottom:"8px" }}>⏳ Onayınızı bekliyor</div>}
                 <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                  <button onClick={()=>setGecmis({ modul:"avans", id:t.id })} title="İşlem geçmişi" style={{ padding:"6px 10px", background:"#f1f5f9", color:"#334155", border:"1px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>🕘</button>
                   {t.talep_eden_email===currentUser?.email && t.durum==="TALEP" && (
                     <button onClick={()=>openEdit(t)} style={{ padding:"6px 14px", background:"#e0f2fe", color:"#0369a1", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
                   )}
@@ -25147,6 +25226,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                   </td>
                   <td style={{ padding: "8px 9px" }}>
                     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                      <button onClick={() => setGecmis({ modul: "avans", id: t.id })} title="İşlem geçmişi" style={{ padding: "4px 8px", background: "#f1f5f9", color: "#334155", border: "1px solid #e2e8f0", borderRadius: "6px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>🕘</button>
                       {t.talep_eden_email === currentUser?.email && t.durum === "TALEP" && (
                         <button onClick={() => openEdit(t)} style={{ padding: "4px 10px", background: "#e0f2fe", color: "#0369a1", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Düzenle</button>
                       )}
@@ -25193,6 +25273,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
         </div>
       </div>
       )}
+      {gecmis && <IslemGecmisiPanel modul={gecmis.modul} id={gecmis.id} onClose={() => setGecmis(null)} />}
 
       </>)}
 
