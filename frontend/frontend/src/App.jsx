@@ -18966,7 +18966,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       <div><span style={lbl}>Kasa / hesap</span><select value={f.kasa} onChange={e => setF("kasa", e.target.value)} style={inp}><option value="KASA">Kasa (nakit)</option><option value="BANKA">Banka</option><option value="HAVALE">Havale/EFT</option></select></div>
                     </div>
                     <div><span style={lbl}>Açıklama <span style={{ fontWeight:500, color:"#94a3b8" }}>— tutarı değiştirmez</span></span><input value={f.aciklama} onChange={e => setF("aciklama", e.target.value)} style={inp} /></div>
-                    <div><span style={lbl}>Düzeltme gerekçesi *</span><input value={m.gerekce} onChange={e => setYemekDuzeltModal(x => ({ ...x, gerekce: e.target.value }))} placeholder="Örn. gerçekte 5.000 ödendi, sisteme yanlışlıkla 10.000 girildi" style={inp} /></div>
+                    <div><span style={lbl}>Düzeltme gerekçesi *</span><input value={m.gerekce} onChange={e => setYemekDuzeltModal(x => ({ ...x, gerekce: e.target.value }))} placeholder={sifir ? "Örn. ödeme yapılmadı, sisteme yanlışlıkla girildi" : "Örn. gerçekte 5.000 ödendi, sisteme yanlışlıkla 10.000 girildi"} style={{ ...inp, borderColor: m.gerekce.trim() ? "#e5e7eb" : "#fca5a5", background: m.gerekce.trim() ? "#fff" : "#fff7f7" }} />
+                      {!m.gerekce.trim() && <div style={{ fontSize:"11.5px", color:"#b91c1c", fontWeight:700, marginTop:"4px" }}>Kaydetmek için düzeltme gerekçesi yazın — düğme gerekçe girilince açılır.</div>}</div>
                     <div style={{ background: sifir ? "#fff7ed" : "#f8fafc", border:`1px solid ${sifir ? "#fed7aa" : "#e2e8f0"}`, borderRadius:"10px", padding:"9px 12px", fontSize:"12.5px", color:"#0f172a" }}>
                       {sifir && <div style={{ fontWeight:800, color:"#9a3412", marginBottom:"4px" }}>Tutar 0: ödeme hiç yapılmamış → bu kayıt iptal edilir (silinmez), bağlı kasa kaydı kaldırılır, eski tutar geçmişte kalır.</div>}
                       <div>Eski tutar <b>{P(h.tutar)}</b> → yeni tutar <b>{P(yeniTutar)}</b></div>
@@ -18974,7 +18975,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                       <div style={{ color:"#64748b", fontSize:"11px", marginTop:"3px" }}>Bağlı nakit akışı kaydı aynı işlemde {P(yeniTutar)} olarak güncellenir; eski değer geçmişte saklanır; ikinci ödeme ya da iade oluşmaz.</div>
                     </div>
                   </div>
-                  <div style={{ display:"flex", gap:"8px", marginTop:"14px", justifyContent:"flex-end" }}>
+                  {!ok && !m.busy && <div style={{ marginTop:"10px", fontSize:"12px", color:"#b91c1c", fontWeight:700, textAlign:"right" }}>
+                    {!m.gerekce.trim() ? "Eksik: düzeltme gerekçesi" : kartYok ? "Eksik: kart numarası" : asiyor ? "Toplam ödeme hakkı aşıyor" : !f.tarih ? "Eksik: ödeme tarihi" : !(yeniTutar > 0) && !sifir ? "Eksik: doğru tutar" : !degisti ? "Değişiklik yok" : ""}
+                  </div>}
+                  <div style={{ display:"flex", gap:"8px", marginTop:"10px", justifyContent:"flex-end" }}>
                     <button onClick={() => setYemekDuzeltModal(null)} disabled={m.busy} style={{ padding:"9px 16px", background:"#f3f4f6", border:"none", borderRadius:"9px", fontSize:"13px", fontWeight:700, cursor:"pointer", color:"#4b5563" }}>Vazgeç</button>
                     <button disabled={!ok} onClick={async () => {
                       if (!ok) return;
