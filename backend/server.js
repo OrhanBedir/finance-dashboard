@@ -18749,6 +18749,18 @@ function avansTamGorus(req) {
   return ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur", "rollout_mudur", "bolge_mudur", "pm"].includes(rol)
     || AVANS_TAM_GORUS.includes(email);
 }
+// 20.10.2026: masraf formu listesinde tam görüş — avans yetkisi + muhasebe kontrol adımı.
+// Onay zincirinde olmayan kullanıcı (saha personeli, taşeron) yalnız kendi formlarını görür;
+// istemcideki "Benim Kayıtlarım" kapsamı sunucuda da aynı kuralla korunur.
+const MASRAF_TAM_GORUS = [...AVANS_TAM_GORUS, "tugce.yelmen@simsektel.com"];
+function masrafTamGorus(req) {
+  const u = optionalAuth(req);
+  if (!u) return false;
+  const email = String(u.email || "").toLowerCase().trim();
+  const rol = String(u.role || "").toLowerCase();
+  return ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur", "rollout_mudur", "bolge_mudur", "pm"].includes(rol)
+    || MASRAF_TAM_GORUS.includes(email);
+}
 
 app.get("/hr/is-avans/bakiye", authMiddleware, async (req, res) => {
   try {
@@ -19626,6 +19638,12 @@ const masrafUpload = multer({
 // GET all forms (with totals)
 app.get("/hr/masraf-form", async (req, res) => {
   try {
+    const u = optionalAuth(req);
+    if (!u) return res.status(401).json({ error: "Oturum gerekli" });
+    // Kişisel kapsam: onay zincirinde olmayan kullanıcı yalnız talep ettiği ya da adına açılan formları alır
+    const kisisel = !masrafTamGorus(req);
+    const kisiselSql = `(LOWER(TRIM(COALESCE(mf.talep_eden_email,''))) = LOWER(TRIM($1)) OR LOWER(TRIM(COALESCE(p.email,''))) = LOWER(TRIM($1)))`;
+    const kParams = kisisel ? [String(u.email || "")] : [];
     const k = altMarkaKapsam(req);
     if (k) {
       // Alt marka: yalnız bordro kapsamındaki personelin formları ve devirden sonraki kalemler;
@@ -19638,10 +19656,10 @@ app.get("/hr/masraf-form", async (req, res) => {
         FROM masraf_form mf
         LEFT JOIN personel p ON p.id = mf.personel_id
         LEFT JOIN masraf_kalem mk ON mk.form_id = mf.id
-        WHERE ${kapsamPersonelSql(k)}
+        WHERE ${kapsamPersonelSql(k)}${kisisel ? ` AND ${kisiselSql}` : ""}
         GROUP BY mf.id, p.ad_soyad
         HAVING COUNT(mk.id) FILTER (WHERE ${kapsamKalemSql(k)}) > 0
-        ORDER BY mf.created_at DESC`);
+        ORDER BY mf.created_at DESC`, kParams);
       return res.json(rows);
     }
     const { rows } = await pool.query(`
@@ -19650,9 +19668,10 @@ app.get("/hr/masraf-form", async (req, res) => {
       FROM masraf_form mf
       LEFT JOIN personel p ON p.id = mf.personel_id
       LEFT JOIN masraf_kalem mk ON mk.form_id = mf.id
+      ${kisisel ? `WHERE ${kisiselSql}` : ""}
       GROUP BY mf.id, p.ad_soyad
       ORDER BY mf.created_at DESC
-    `);
+    `, kParams);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -19930,7 +19949,7 @@ app.get("/hr/masraf-formlari", async (req, res) => {
     const kalemKosul = k ? ` FILTER (WHERE ${kapsamKalemSql(k)})` : "";
     const { rows } = await pool.query(`
       SELECT mf.id, mf.durum, mf.created_at, mf.donem, mf.form_no,
-        mf.talep_eden_email, mf.talep_eden_ad,
+        mf.talep_eden_email, mf.talep_eden_ad, mf.red_aciklama, mf.reddeden_email,
         COALESCE(SUM(mk.tutar)${kalemKosul},0) as toplam_tutar,
         COUNT(mk.id)${kalemKosul}::int as kalem_sayisi
       FROM masraf_form mf
