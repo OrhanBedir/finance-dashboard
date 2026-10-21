@@ -985,8 +985,19 @@ async function kullaniciYetkiAyari(u) {
 }
 // Rolü olmayan jeton (ör. finans girişi: { email, scope }) → rol kullanıcı kaydından (önbellekten) okunur
 const kayitliRol = (u) => _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.rol || null;
+// 22.10.2026 (Orhan): Maaş görme VARSAYILAN KAPALI. İK/finans verisini okuyabilen (ikOkumaYetkili: rollout/bölge
+// müdürü, pm, muhasebe, onay e-posta listelerindeki kişiler, finans girişi) ama aşağıdaki maaş yetkilisi olmayan
+// herkeste maas_goruntule=false → GİZLİLİK KATMANI maaş alanlarını siler / maaş uçlarını 403 yapar. Maaş yetkilisi
+// web _hrYetkili ile aynı: tam admin rolü (Orhan, Düzgün, Eren Can, AHY, Teknocenter) + adı geçen e-postalar
+// (rolsüz finans jetonunda da geçerli). Kişiye özel açmak için users.yetki_ayar.maas_goruntule=true (Admin → Yetkiler).
+const MAAS_YETKILI_ROLLER = ["admin", "platform_admin"];
+const MAAS_YETKILI_EMAIL = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "duzgun.simsek@simsektel.com",
+  "eren.simsek@simsektel.com", "erencan.simsek@simsektel.com", "info@ahyelektrik.com", "teknocenter"];
 function etkinIzinHesapla(u, ayar) {
   const o = { ...(ROL_IZINLERI[_rol(u)] || {}) };
+  const rol = _rol(u) || String(kayitliRol(u) || "").toLowerCase();
+  if (!("maas_goruntule" in o) && ikOkumaYetkili(u) && !MAAS_YETKILI_ROLLER.includes(rol) && !MAAS_YETKILI_EMAIL.includes(_eposta(u)))
+    o.maas_goruntule = false;
   if (ayar && typeof ayar === "object") for (const [k, v] of Object.entries(ayar)) if (k in IZIN_TANIMLARI && typeof v === "boolean") o[k] = v;
   return o;
 }
