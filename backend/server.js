@@ -7377,7 +7377,9 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           FROM master_works m
           LEFT JOIN best_boq ON TRIM(COALESCE(best_boq.s_bom_code,'')) = TRIM(COALESCE(m.item_code,''))
           WHERE UPPER(TRIM(COALESCE(m.subcon_name,''))) LIKE $1 || '\\_%'`, [markaProfil(marka).onek]);
-        const bm = ahyTaseronBedel(det.rows);
+        // 21.10.2026: markanın kendi (in-house) ekipleri dış taşeron borcu üretmez
+        const icEt = new Set(await icEkipEtiketleri(marka));
+        const bm = ahyTaseronBedel(det.rows.filter(x => !icEt.has(String(x.subcon || "").toUpperCase())));
         for (const [subcon, v] of Object.entries(bm)) {
           const k = taseronCanonKey(subcon);
           bedelByCanon[k] = (bedelByCanon[k] || 0) + Number(v.bedel || 0) * 1.20; // KDV dahil
@@ -8649,12 +8651,17 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
       SELECT
         t.subcon,
         COUNT(*) FILTER (WHERE t.fq > 0) AS is_sayisi,
+        COUNT(*) AS kalem_sayisi,
+        COUNT(DISTINCT t.site) FILTER (WHERE t.fq > 0) AS saha_sayisi,
+        COUNT(*) FILTER (WHERE t.fq > 0 AND t.qc_ok) AS qc_ok_sayisi,
         COALESCE(SUM(CASE WHEN t.cur <> 'USD' THEN t.fq * t.price ELSE 0 END), 0) AS try,
         COALESCE(SUM(CASE WHEN t.cur = 'USD' THEN (t.fq - LEAST(t.fq, t.bq)) * t.price ELSE 0 END), 0) AS usd,
         COALESCE(SUM(CASE WHEN t.cur = 'USD' THEN LEAST(t.fq, t.bq) * t.price * COALESCE(t.item_rate, t.avg_rate, 0) ELSE 0 END), 0) AS billed_tl
       FROM (
         SELECT
           UPPER(TRIM(COALESCE(m.subcon_name, ''))) AS subcon,
+          UPPER(TRIM(COALESCE(m.site_code, ''))) AS site,
+          (UPPER(TRIM(COALESCE(m.qc_durum,'NOK'))) = 'OK') AS qc_ok,
           GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty, 0) END) AS fq,
           COALESCE(site_po.billed_qty, 0) AS bq,
           (CASE
@@ -8688,6 +8695,10 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
       GROUP BY t.subcon
       ORDER BY t.subcon
     `, [markaProfil(marka).onek]);
+    // 21.10.2026: markanın kendi (in-house) ekipleri dış taşeron değildir — hakediş, KDV, fatura beklentisi ve
+    // borç üretmez; ayrı "kendi_ekipler" listesinde iç üretim değeriyle döner (dışarıya borç değildir).
+    const icEtiket = new Set(await icEkipEtiketleri(marka));
+    const icListe = await icEkipleri(marka);
     // Taşeron bedeli: kalem açıklamaları üzerinden hesap kuralı
     let bedelMap = {};
     try {
@@ -8704,14 +8715,24 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
         FROM master_works m
         LEFT JOIN best_boq ON TRIM(COALESCE(best_boq.s_bom_code,'')) = TRIM(COALESCE(m.item_code,''))
         WHERE UPPER(TRIM(COALESCE(m.subcon_name,''))) LIKE $1 || '\\_%'`, [markaProfil(marka).onek]);
-      bedelMap = ahyTaseronBedel(det.rows);
+      bedelMap = ahyTaseronBedel(det.rows.filter(x => !icEtiket.has(String(x.subcon || "").toUpperCase())));
     } catch (e) { console.error("TASERON BEDEL ERROR:", e.message); }
     let kur = 0;
     try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
+    const disRows = r.rows.filter(e => !icEtiket.has(String(e.subcon || "").toUpperCase()));
+    const icRows = r.rows.filter(e => icEtiket.has(String(e.subcon || "").toUpperCase()));
+    const deger = (e) => Math.round(Number(e.try || 0) + Number(e.billed_tl || 0) + (kur > 0 ? Number(e.usd || 0) * kur : 0));
     res.json({ ok: true, marka, kur,
-      ekipler: r.rows.map(e => ({ ...e,
+      ekipler: disRows.map(e => ({ ...e,
         bedel: Math.round(bedelMap[e.subcon]?.bedel || 0),
-        bedel_detay: bedelMap[e.subcon]?.detay || [] })) });
+        bedel_detay: bedelMap[e.subcon]?.detay || [] })),
+      kendi_ekipler: icListe.map(ek => {
+        const satirlar = icRows.filter(e => ek.etiketler.includes(String(e.subcon || "").toUpperCase()));
+        const top = (k) => satirlar.reduce((sm, e) => sm + Number(e[k] || 0), 0);
+        return { ekip_no: ek.ekip_no, ad: ek.ad, bolge: ek.bolge, aktif: ek.aktif !== false, etiketler: ek.etiketler,
+          saha_sayisi: top("saha_sayisi"), kalem_sayisi: top("kalem_sayisi"), is_sayisi: top("is_sayisi"), qc_ok_sayisi: top("qc_ok_sayisi"),
+          ic_uretim_degeri: satirlar.reduce((sm, e) => sm + deger(e), 0) };
+      }) });
   } catch (e) {
     console.error("MARKA TASERON HAKEDIS ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });
@@ -8971,6 +8992,7 @@ app.post("/finance/marka-taseron-fatura", authMiddleware, async (req, res) => {
     const m = String(marka || "AHY").toUpperCase();
     if (!taseron_adi || !fatura_no || !Number(toplam_tutar || 0))
       return res.status(400).json({ ok: false, error: "Taşeron adı, fatura no ve toplam tutar zorunlu" });
+    { const ic = await icEkipAdiMi(m, taseron_adi); if (ic) return res.status(400).json({ ok: false, error: icEkipHataMesaji(ic, m) }); }
     const aracFatura = String(kategori || "").toUpperCase() === "ARAC_KIRA";
     if (aracFatura && !(Array.isArray(arac_kalemler) && arac_kalemler.length))
       return res.status(400).json({ ok: false, error: "Araç Kirası faturasında en az bir araç (plaka + dönem + tutar) satırı zorunlu" });
@@ -9003,6 +9025,7 @@ app.put("/finance/marka-taseron-fatura/:id", authMiddleware, async (req, res) =>
     const m = String(marka || "AHY").toUpperCase();
     if (!taseron_adi || !fatura_no || !Number(toplam_tutar || 0))
       return res.status(400).json({ ok: false, error: "Taşeron adı, fatura no ve toplam tutar zorunlu" });
+    { const ic = await icEkipAdiMi(m, taseron_adi); if (ic) return res.status(400).json({ ok: false, error: icEkipHataMesaji(ic, m) }); }
     if (Array.isArray(arac_kalemler)) {
       const ok = await odemeIslem(res, async (c) => {
         const f = (await c.query(`SELECT id FROM invoice_entries WHERE id=$1 AND UPPER(COALESCE(firma,''))=$2 FOR UPDATE`, [req.params.id, m])).rows[0];
@@ -9041,6 +9064,7 @@ app.post("/finance/marka-taseron-odeme", authMiddleware, async (req, res) => {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     const { marka, taseron_adi, tip, tutar, tarih, aciklama, fatura_id } = req.body;
+    { const mk = String(marka || "AHY").toUpperCase(); const ic = await icEkipAdiMi(mk, taseron_adi); if (ic) return res.status(400).json({ ok: false, error: icEkipHataMesaji(ic, mk) }); }
     if (fatura_id) {
       const af = await client.query(`SELECT 1 FROM invoice_entries i WHERE i.id=$1 AND ${ARAC_FATURA_MI_SQL("i")}`, [fatura_id]).catch(() => ({ rows: [] }));
       if (af.rows.length) return res.status(409).json({ ok: false, error: "Bu fatura araç kirası içeriyor — ödemeyi faturanın 💳 Ödeme ekranından (ortak ödeme kaydı) yapın; aksi halde araç kirası iki kez sayılır." });
@@ -9087,6 +9111,12 @@ app.put("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => 
     const { taseron_adi, tip, tutar, tarih, aciklama } = req.body;
     if (!taseron_adi || !Number(tutar || 0) || !tarih)
       return res.status(400).json({ ok: false, error: "Taşeron adı, tutar ve tarih zorunlu" });
+    {
+      const mr = await client.query(`SELECT marka FROM marka_taseron_odeme WHERE id=$1`, [req.params.id]).catch(() => ({ rows: [] }));
+      const mk = String(mr.rows[0]?.marka || req.body.marka || "AHY").toUpperCase();
+      const ic = await icEkipAdiMi(mk, taseron_adi);
+      if (ic) return res.status(400).json({ ok: false, error: icEkipHataMesaji(ic, mk) });
+    }
     const tipNorm = String(tip || "AVANS").toUpperCase() === "FATURA_ODEME" ? "FATURA_ODEME" : "AVANS";
     const adi = String(taseron_adi).trim();
     const tutarN = Number(tutar);
@@ -19127,23 +19157,25 @@ const GECMIS_DURUM_TR = { TALEP: "Talep", ROLLOUT_MUDUR_ONAY: "Rollout müdürü
 const GECMIS_ETIKET = { tutar: "Tutar", tarih: "Tarih", durum: "Durum", firma: "Firma", aciklama: "Açıklama", not_aciklama: "Not", gider_turu: "Gider türü", bolge: "Bölge", proje: "Proje", plaka: "Plaka",
   donem: "Dönem", bankadan: "Bankadan", elden: "Elden", odeyen: "Ödeyen", kategori: "Kategori", belge_no: "Belge no", belge_aciklama: "Belge açıklaması", dosya: "Dosya",
   form_no: "Form no", talep_eden: "Talep eden", kalem_sayisi: "Kalem sayısı", fis_var: "Fiş var", adim: "Adım", kalem: "Kalem",
-  name: "Ad soyad", email: "E-posta / kullanıcı adı", role: "Rol", subcon_name: "Taşeron / bağlı firma", marka: "Firma", is_active: "Durum", not: "Not" };
+  name: "Ad soyad", email: "E-posta / kullanıcı adı", role: "Rol", subcon_name: "Taşeron / bağlı firma", marka: "Firma", is_active: "Durum", not: "Not",
+  ekip_turu: "Ekip türü", bagli_firma: "Bağlı firma", is_etiketi: "İş etiketi", ad: "Ad" };
 const GECMIS_ROL_TR = { user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
 const GECMIS_BASLIK = { OLUSTURMA: "Oluşturuldu", DUZENLEME: "Düzenlendi", ONAY: "Onaylandı", ODEME: "Ödendi / tamamlandı", RED: "Reddedildi", SILME: "Silindi", GONDERIM: "Onaya gönderildi",
   GERI_GONDER: "Geri gönderildi (iade)", ARSIV: "Arşivlendi", KALEM_EKLE: "Kalem eklendi", KALEM_DUZENLE: "Kalem düzenlendi", KALEM_SIL: "Kalem silindi", BELGE_EKLE: "Fiş / belge eklendi", BELGE_SIL: "Fiş / belge kaldırıldı", NOT: "Ek açıklama", DUZELTME: "Düzeltme",
-  ROL: "Rol değiştirildi", MARKA: "Firma değiştirildi", DURUM: "Erişim durumu değiştirildi", SIFRE: "Şifre yenilendi", IK: "İK kaydı" };
+  ROL: "Rol değiştirildi", MARKA: "Firma değiştirildi", DURUM: "Erişim durumu değiştirildi", SIFRE: "Şifre yenilendi", IK: "İK kaydı",
+  SINIFLANDIRMA: "Ekip türü / bağlı firma" };
 // Kayıt bazında işlem geçmişi: islem_gecmisi + eski kayıtlardan sentezlenen olaylar (onay tarihi kolonları, kalem notları)
 app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
   try {
     const modul = String(req.params.modul || "").toLowerCase();
     const id = Number(req.params.id);
-    if (!["avans", "maas_odeme", "masraf", "kullanici"].includes(modul) || !Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Geçersiz istek" });
+    if (!["avans", "maas_odeme", "masraf", "kullanici", "ekip"].includes(modul) || !Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Geçersiz istek" });
     const email = String(req.user?.email || "").toLowerCase().trim();
     const rol = String(req.user?.role || "").toLowerCase();
     const kap = altMarkaKapsam(req);
     const tr = (d) => d ? ymdYerel(d).split("-").reverse().join(".") : "—";
     const para = (v) => "₺" + Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör" })[v] || v : String(v);
+    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "ekip_turu" ? ({ IC: "Kendi ekibimiz (in-house)", DIS: "Dış taşeron" })[v] || v : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör" })[v] || v : String(v);
     const fark = (eski, yeni) => {
       const out = []; const y = yeni || {}; const e = eski || {};
       for (const k of Object.keys(GECMIS_ETIKET)) {
@@ -19186,6 +19218,10 @@ app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
       kayit = { id: m.id, baslik: `Maaş ödemesi #${m.id}`, alt: `${m.ad_soyad || "—"} · ${m.donem} · ${para(Number(m.bankadan || 0) + Number(m.elden || 0))} · ${tr(m.tarih)}` };
       if (!logVar("OLUSTURMA")) olaylar.push({ zaman: m.created_at, tip: "OLUSTURMA", baslik: "Ödeme kaydı oluşturuldu", kaynak: "kayit", kim: m.created_by ? KAYIT(m.created_by, m.created_by) : K(null),
         detay: fark(null, maasOzet(m)) });
+    } else if (modul === "ekip") {
+      const ek = (await pool.query(`SELECT ekip_no, ad, bolge, taseron_adi, ekip_turu, bagli_firma, is_etiketleri FROM ekipler WHERE ekip_no=$1`, [id])).rows[0];
+      if (!ek) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+      kayit = { id: ek.ekip_no, baslik: `Ekip ${ek.ekip_no} · ${ek.ad || ""}`, alt: `${ek.ekip_turu === "IC" ? "Kendi ekibimiz" : ek.ekip_turu === "DIS" ? "Dış taşeron" : "Tür belirtilmedi"}${ek.bagli_firma ? " · " + ek.bagli_firma : ""}${(ek.is_etiketleri || []).length ? " · iş etiketi " + ek.is_etiketleri.join(", ") : ""}` };
     } else if (modul === "kullanici") {
       const uq = (await pool.query(`SELECT id, name, email, role, subcon_name, marka, tenant, is_active, users_admin, created_at FROM users WHERE id=$1`, [id])).rows[0];
       if (!uq) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
@@ -22842,6 +22878,52 @@ pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ekipler_sablon_kodu_uq ON ekipler 
 pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS ekip_sira INTEGER`).catch(() => {});
 pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ekipler_tekno_sira_uq ON ekipler (ekip_sira) WHERE ekip_sira IS NOT NULL`).catch(() => {});
 const TEKNO_FIRMA_MI = (t) => /^(TEK|TEKNO|TEKNOCENTER)$/i.test(String(t || "").trim());
+// ── EKİP TÜRÜ (21.10.2026, Orhan): "Kendi Ekibimiz / In-house" (IC) ↔ "Dış Taşeron" (DIS) ──
+// Sınıflandırma ekibin KİMLİĞİNE (ekipler.ekip_no) yazılır, ada değil: ekip adı ya da şemadaki yeri değişse de
+// tür ve bağlı firma korunur. is_etiketleri = HW iş kayıtlarında (master_works.subcon_name) geçen ekip
+// etiketleri; hesaplamalar ekibi bu etiketlerle bulur. Kendi ekibinin işi dış taşeron hakedişi/borcu ÜRETMEZ;
+// gerçek giderleri (maaş, yemek, yakıt, araç, konaklama…) kendi modüllerinden gelmeye devam eder.
+pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS ekip_turu TEXT`)
+  .then(() => pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS bagli_firma TEXT`))
+  .then(() => pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS is_etiketleri TEXT[]`))
+  .then(() => ekipTuruIlkSiniflandirma())
+  .catch((e) => console.error("[ekip-turu şema]", e.message));
+// Tek seferlik: Teknocenter'ın mevcut "TEKNO EkipN" ekipleri (firma TEK/TEKNO) → IC / TEKNO, iş etiketi TEKNO_EKIPN.
+// İsim yalnız MEVCUT kayıtları bulmak için kullanılır; kalıcı kural ekip satırındaki ekip_turu/bagli_firma'dır.
+// Yalnız türü hiç atanmamış satırlara dokunur → tekrar çalıştırılınca hiçbir şey değişmez, geçmişe ikinci kayıt düşmez.
+async function ekipTuruIlkSiniflandirma() {
+  const r = await pool.query(`
+    UPDATE ekipler SET ekip_turu='IC', bagli_firma='TEKNO',
+      is_etiketleri = ARRAY[UPPER(regexp_replace(TRIM(ad), '\\s+', '_', 'g'))], updated_at=NOW()
+    WHERE ekip_turu IS NULL AND UPPER(TRIM(COALESCE(taseron_adi,''))) IN ('TEK','TEKNO','TEKNOCENTER')
+      AND TRIM(COALESCE(ad,'')) ~* '^TEKNO\\s*Ekip\\s*[0-9]+$'
+    RETURNING ekip_no, ad, is_etiketleri`);
+  for (const e of r.rows) {
+    await islemGecmisiYaz("sistem", "ekip", e.ekip_no, "SINIFLANDIRMA", { ekip_turu: null, bagli_firma: null },
+      { ekip_turu: "IC", bagli_firma: "TEKNO", ad: e.ad, is_etiketi: (e.is_etiketleri || []).join(", ") },
+      "Teknocenter'ın kendi (in-house) ekibi — dış taşeron hesabından çıkarıldı (21.10.2026, Orhan)");
+  }
+  if (r.rows.length) console.log("[ekip-turu] in-house olarak sınıflandırıldı:", r.rows.map(x => x.ad).join(", "));
+}
+const _etiketNorm = (v) => String(v || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I").replace(/[^A-Z0-9ÇĞÖŞÜ]+/g, "");
+// Markanın kendi (IC) ekipleri: [{ ekip_no, ad, bolge, aktif, etiketler:[UPPER] }] — pasif ekipler de dahil (geçmiş işleri onlarındır)
+async function icEkipleri(marka) {
+  const r = await pool.query(`SELECT ekip_no, ad, bolge, aktif, COALESCE(is_etiketleri, '{}') AS etiketler
+    FROM ekipler WHERE ekip_turu='IC' AND UPPER(COALESCE(bagli_firma,'')) = $1 ORDER BY ekip_sira NULLS LAST, ekip_no`,
+    [String(marka || "").toUpperCase()]).catch(() => ({ rows: [] }));
+  return r.rows.map(e => ({ ...e, etiketler: (e.etiketler || []).map(x => String(x || "").trim().toUpperCase()).filter(Boolean) }));
+}
+const icEkipEtiketleri = async (marka) => [...new Set((await icEkipleri(marka)).flatMap(e => e.etiketler))];
+// Serbest yazılmış bir taşeron adı markanın kendi ekibine mi ait? (etiket ya da ekip adı, boşluk/altçizgi duyarsız)
+async function icEkipAdiMi(marka, ad) {
+  const n = _etiketNorm(ad);
+  if (!n) return null;
+  for (const e of await icEkipleri(marka)) {
+    if (_etiketNorm(e.ad) === n || e.etiketler.some(t => _etiketNorm(t) === n)) return e;
+  }
+  return null;
+}
+const icEkipHataMesaji = (e, marka) => `"${e.ad}" ${markaProfil(marka)?.ad || marka} firmasının kendi ekibidir (in-house). Dış taşeron faturası / ödemesi girilemez; personel maaş, prim ve masrafları İK, maaş ve masraf modüllerinden yapılır.`;
 
 app.get("/hr/ekipler", async (req, res) => {
   try {
@@ -22869,6 +22951,23 @@ app.post("/hr/ekipler", ikYazma, async (req, res) => {
       if (ayni.rows.length) return res.status(409).json({ error: `"${ad}" adı Ekip ${ayni.rows[0].ekip_no} tarafından kullanılıyor — TEKNO ekip adları benzersizdir` });
     }
     if (yeniSira) await pool.query(`UPDATE ekipler SET ekip_sira=$2 WHERE ekip_no=$1`, [no, yeniSira]).catch(() => {});
+    // Ekip türü / bağlı firma / iş etiketleri: alan gönderilmediyse mevcut değer korunur
+    const turGeldi = Object.prototype.hasOwnProperty.call(req.body, "ekip_turu");
+    const firmaGeldi = Object.prototype.hasOwnProperty.call(req.body, "bagli_firma");
+    const etiketGeldi = Object.prototype.hasOwnProperty.call(req.body, "is_etiketleri");
+    const eskiTur = (await pool.query(`SELECT ekip_turu, bagli_firma, is_etiketleri FROM ekipler WHERE ekip_no=$1`, [no])).rows[0] || {};
+    let tur = turGeldi ? (["IC", "DIS"].includes(String(req.body.ekip_turu || "").toUpperCase()) ? String(req.body.ekip_turu).toUpperCase() : null) : (eskiTur.ekip_turu || null);
+    let bagli = firmaGeldi ? (String(req.body.bagli_firma || "").trim().toUpperCase() || null) : (eskiTur.bagli_firma || null);
+    let etiketler = etiketGeldi
+      ? [...new Set((Array.isArray(req.body.is_etiketleri) ? req.body.is_etiketleri : String(req.body.is_etiketleri || "").split(/[,;\n]/))
+          .map(x => String(x || "").trim().toUpperCase()).filter(Boolean))]
+      : (eskiTur.is_etiketleri || []);
+    if (tur === "IC" && !bagli) return res.status(400).json({ error: "Kendi ekibimiz seçildiğinde bağlı firma zorunlu" });
+    if (bagli && !(bagli === "ERC" || ALT_MARKALAR.some(m => m.kod === bagli))) return res.status(400).json({ error: `Geçersiz bağlı firma: ${bagli}` });
+    if (etiketler.length) {
+      const cak = await pool.query(`SELECT ekip_no, ad, t FROM ekipler, unnest(COALESCE(is_etiketleri,'{}')) t WHERE ekip_no<>$1 AND UPPER(t) = ANY($2::text[]) LIMIT 1`, [no, etiketler]);
+      if (cak.rows.length) return res.status(409).json({ error: `"${cak.rows[0].t}" iş etiketi ${cak.rows[0].ad || "Ekip " + cak.rows[0].ekip_no} ekibinde kayıtlı — bir etiket tek ekibe ait olabilir` });
+    }
     const r = await pool.query(
       `INSERT INTO ekipler (ekip_no, plaka, bolge, aciklama, ad, taseron_adi, aktif)
        VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true))
@@ -22878,6 +22977,13 @@ app.post("/hr/ekipler", ikYazma, async (req, res) => {
       [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null, ad,
        (req.body.taseron_adi || "").trim() || null, aktif]);
     if (yeniSira && !r.rows[0].ekip_sira) { await pool.query(`UPDATE ekipler SET ekip_sira=$2 WHERE ekip_no=$1`, [no, yeniSira]).catch(() => {}); r.rows[0].ekip_sira = yeniSira; }
+    const eskiOz = { ekip_turu: eskiTur.ekip_turu || null, bagli_firma: eskiTur.bagli_firma || null, is_etiketi: (eskiTur.is_etiketleri || []).join(", ") || null };
+    const yeniOz = { ekip_turu: tur, bagli_firma: bagli, is_etiketi: etiketler.join(", ") || null };
+    if (JSON.stringify(eskiOz) !== JSON.stringify(yeniOz)) {
+      const u2 = await pool.query(`UPDATE ekipler SET ekip_turu=$2, bagli_firma=$3, is_etiketleri=$4, updated_at=NOW() WHERE ekip_no=$1 RETURNING ekip_turu, bagli_firma, is_etiketleri`, [no, tur, bagli, etiketler]);
+      Object.assign(r.rows[0], u2.rows[0] || {});
+      await islemGecmisiYaz(req, "ekip", no, "SINIFLANDIRMA", eskiOz, yeniOz, null);
+    }
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

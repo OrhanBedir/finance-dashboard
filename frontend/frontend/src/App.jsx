@@ -424,6 +424,7 @@ const ALT_MARKA_LISTE = [
   { kod: "TEKNO", ad: "Teknocenter",  kisa: "TEKNO", ikon: "🔷", renk: "#1d4ed8", bg: "#eff6ff", brd: "#93c5fd" },
 ];
 const GUNCEL_ALT_MARKA = "TEKNO"; // yeni kayıtların (avans, yemek kartı, kira) varsayılan alt markası
+const TEKNO_FIRMA_RE = /^(TEK|TEKNO|TEKNOCENTER)$/i; // ekip firma etiketi Teknocenter mı (21.10.2026)
 const altMarkaBilgi = (kod) => ALT_MARKA_LISTE.find((m) => m.kod === String(kod || "").toUpperCase()) || null;
 const altMarkaMi = (kod) => !!altMarkaBilgi(kod);
 const altMarkaKisa = (kod) => altMarkaBilgi(kod)?.kisa || String(kod || "");
@@ -3793,8 +3794,13 @@ function MarkaTaseronPanel({ currentUser }) {
   const kalan = topFatura - topOdenen;
   const inp = { width: "100%", padding: "9px 11px", border: "1.5px solid #e5e7eb", borderRadius: "9px", fontSize: "13.5px", boxSizing: "border-box" };
   const lbl = { fontSize: "11.5px", fontWeight: 700, color: "#475569", marginBottom: "4px", display: "block" };
+  // 21.10.2026: markanın kendi (in-house) ekipleri dış taşeron değildir — fatura/ödeme girilemez
+  const _ekNorm = (v) => String(v || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I").replace(/[^A-Z0-9ÇĞÖŞÜ]+/g, "");
+  const kendiEkipMi = (ad) => { const n = _ekNorm(ad); return n ? (hakedis?.kendi_ekipler || []).find(e => _ekNorm(e.ad) === n || (e.etiketler || []).some(t => _ekNorm(t) === n)) : null; };
+  const kendiEkipUyari = (e) => `"${e.ad}" ${markaAd} firmasının kendi ekibidir (in-house). Dış taşeron faturası / ödemesi girilemez; personel maaş, prim ve masrafları İK, maaş ve masraf modüllerinden yapılır.`;
   const kaydetFatura = async () => {
     if (!fForm.taseron_adi.trim() || !fForm.fatura_no.trim() || !_num(fForm.toplam_tutar)) { alert("Taşeron adı, fatura no ve toplam tutar (KDV dahil) zorunlu"); return; }
+    { const ke = kendiEkipMi(fForm.taseron_adi); if (ke) { alert(kendiEkipUyari(ke)); return; } }
     if (fForm.kategori === "ARAC_KIRA" && (!(fForm.arac_kalemler || []).length || (fForm.arac_kalemler || []).some(k => !k.arac_id || !k.donem || !(odmSayi(k.tutar) > 0)))) { alert("Araç Kirası faturasında her satır için araç (plaka), kira dönemi ve tutar zorunlu"); return; }
     try {
       const url = fEditId ? `${API_BASE}/finance/marka-taseron-fatura/${fEditId}` : `${API_BASE}/finance/marka-taseron-fatura`;
@@ -3822,6 +3828,7 @@ function MarkaTaseronPanel({ currentUser }) {
   };
   const kaydetOdeme = async () => {
     if (!oForm.taseron_adi.trim() || !_num(oForm.tutar) || !oForm.tarih) { alert("Taşeron adı, tutar ve tarih zorunlu"); return; }
+    { const ke = kendiEkipMi(oForm.taseron_adi); if (ke) { alert(kendiEkipUyari(ke)); return; } }
     try {
       const url = oEditId ? `${API_BASE}/finance/marka-taseron-odeme/${oEditId}` : `${API_BASE}/finance/marka-taseron-odeme`;
       const r = await fetch(url, {
@@ -4039,6 +4046,60 @@ function MarkaTaseronPanel({ currentUser }) {
             <TabloAcKapa id="hesap" count={rowsF.length} />
             <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
               Taşeron Bedeli: saha tipine göre otomatik hesap — co-located (NR700/TRP) kalem bazlı, standalone (NS) paket fiyat (radyolu 52.000 / radyosuz 40.000) + 7,2m LPRT; tutara tıklayıp saha bazlı dökümü görebilirsiniz. Kalan Borç, fatura kesilmemiş olsa da bedel + KDV üzerinden tahakkuk eder (fatura kesilince büyük olan esas alınır). Vinç, nakliye, konaklama gibi hizmetlerde hakediş kestikleri fatura kadardır. Ödemeler nakit akışına ve Kâr/Zarar giderine otomatik yansır.
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Kendi Ekiplerimiz (in-house, 21.10.2026): dış taşeron borcu üretmez; yaptıkları iş korunur ── */}
+      {(hakedis?.kendi_ekipler || []).length > 0 && (() => {
+        const ke = hakedis.kendi_ekipler;
+        const topDeger = ke.reduce((sm, e) => sm + Number(e.ic_uretim_degeri || 0), 0);
+        const num = { ...tdS, textAlign: "right", whiteSpace: "nowrap" };
+        return (
+          <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
+            <div style={{ padding: "12px 16px", background: "#334155", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+              <span>👷 Kendi Ekiplerimiz — In-house ({ke.length})</span>
+              <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                <span>İç Üretim Değeri: ₺{fmt(topDeger)}</span>
+                <button onClick={() => exportStandardExcel({
+                  title: `${markaAd} — Kendi Ekiplerimiz (In-house) · İç Üretim Değeri`,
+                  sheetName: "Kendi Ekiplerimiz", fileBase: `${marka}_Kendi_Ekipleri`,
+                  headers: ["Ekip", "Bölge", "İş Etiketi", "Saha", "İş Kalemi", "Tamamlanan", "QC OK", "İç Üretim Değeri (TL)"],
+                  colWidths: [18, 12, 18, 8, 10, 12, 9, 20], numericCols: [3, 4, 5, 6, 7],
+                  rows: ke.map(e => [e.ad || "", e.bolge || "", (e.etiketler || []).join(", "), Number(e.saha_sayisi || 0), Number(e.kalem_sayisi || 0), Number(e.is_sayisi || 0), Number(e.qc_ok_sayisi || 0), Number(e.ic_uretim_degeri || 0)]),
+                }).catch(er => alert("Excel indirilemedi: " + er.message))}
+                  style={{ padding: "5px 12px", background: "#fff", color: "#334155", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>📥 Excel İndir</button>
+              </span>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead><tr>
+                  <th style={thS}>Ekip</th><th style={thS}>Bölge</th>
+                  <th style={{ ...thS, textAlign: "right" }}>Saha</th><th style={{ ...thS, textAlign: "right" }}>İş Kalemi</th>
+                  <th style={{ ...thS, textAlign: "right" }}>Tamamlanan</th><th style={{ ...thS, textAlign: "right" }}>QC OK</th>
+                  <th style={{ ...thS, textAlign: "right" }}>İç Üretim Değeri</th>
+                </tr></thead>
+                <tbody>
+                  {ke.map(e => (
+                    <tr key={e.ekip_no}>
+                      <td style={tdS}>
+                        <div style={{ fontWeight: 700 }}>{e.ad}{e.aktif === false && <span style={{ marginLeft: 6, fontSize: "10.5px", color: "#94a3b8", fontWeight: 600 }}>pasif</span>}</div>
+                        {(e.etiketler || []).length > 0 && <div style={{ fontSize: "10.5px", color: "#94a3b8" }}>iş etiketi: {e.etiketler.join(", ")}</div>}
+                      </td>
+                      <td style={tdS}>{e.bolge || "—"}</td>
+                      <td style={num}>{Number(e.saha_sayisi || 0) || "—"}</td>
+                      <td style={num}>{Number(e.kalem_sayisi || 0) || "—"}</td>
+                      <td style={num}>{Number(e.is_sayisi || 0) || "—"}</td>
+                      <td style={num}>{Number(e.qc_ok_sayisi || 0) || "—"}</td>
+                      <td style={{ ...num, fontWeight: 800, color: "#334155" }}>{Number(e.ic_uretim_degeri || 0) > 0 ? `₺${fmt(e.ic_uretim_degeri)}` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
+              Bu ekipler {markaAd}'nin kendi personelidir: dış taşeron hakedişi, faturası ve borcu oluşmaz. İç Üretim Değeri, yapılan işin Huawei PO birim fiyatlarıyla değeridir — dışarıya ödenecek borç ya da gerçekleşmiş gider değildir. Maaş, yemek, yakıt, araç ve konaklama giderleri İK ve nakit akışı modüllerinden izlenir.
             </div>
           </div>
         );
@@ -5236,6 +5297,28 @@ function OrgSemasiPanel({ currentUser }) {
                       await fetch(`${API_BASE}/hr/ekipler/${e.ekip_no}`, { method: "DELETE" });
                       loadOrgData();
                     }} style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", padding: "5px 10px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer" }}>🗑</button>
+                    {/* 21.10.2026: ekip türü + bağlı firma + HW iş etiketi — sınıflandırma ekip kimliğine bağlıdır, ad değişse de korunur */}
+                    <div style={{ gridColumn: "2 / -1", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                      <select value={e.ekip_turu || ""} onChange={ev => saveEkip({ ...e, ekip_turu: ev.target.value || null, bagli_firma: ev.target.value === "IC" ? (e.bagli_firma || (TEKNO_FIRMA_RE.test(String(e.taseron_adi || "")) ? "TEKNO" : "")) : (ev.target.value === "DIS" ? null : e.bagli_firma) })}
+                        title="Kendi ekibimiz: firmanın kendi personeli (dış taşeron borcu oluşmaz). Dış taşeron: fatura kesen alt yüklenici."
+                        style={{ padding: "5px 8px", border: `1px solid ${e.ekip_turu ? "#d1d5db" : "#f59e0b"}`, background: e.ekip_turu ? "#fff" : "#fffbeb", borderRadius: "8px", fontSize: "12px", fontWeight: 600 }}>
+                        <option value="">Ekip türü seçilmedi</option>
+                        <option value="IC">Kendi Ekibimiz (In-house)</option>
+                        <option value="DIS">Dış Taşeron</option>
+                      </select>
+                      {e.ekip_turu === "IC" && (
+                        <select value={e.bagli_firma || ""} onChange={ev => saveEkip({ ...e, bagli_firma: ev.target.value || null })} title="Ekibin bağlı olduğu firma"
+                          style={{ padding: "5px 8px", border: `1px solid ${e.bagli_firma ? "#d1d5db" : "#dc2626"}`, borderRadius: "8px", fontSize: "12px", fontWeight: 600 }}>
+                          <option value="">Bağlı firma seçin</option>
+                          <option value="ERC">Şimşek Haberleşme</option>
+                          {ALT_MARKA_LISTE.map(m => <option key={m.kod} value={m.kod}>{m.ad}</option>)}
+                        </select>
+                      )}
+                      <input defaultValue={(e.is_etiketleri || []).join(", ")} key={`et-${e.ekip_no}-${(e.is_etiketleri || []).join(",")}`}
+                        placeholder="HW iş etiketi (ör. TEKNO_EKIP1)" title="HW iş kayıtlarında bu ekibin taşeron etiketi; birden fazlaysa virgülle ayırın"
+                        onBlur={ev => { const yeni = ev.target.value.split(",").map(x => x.trim().toUpperCase()).filter(Boolean); if (yeni.join(",") !== (e.is_etiketleri || []).join(",")) saveEkip({ ...e, is_etiketleri: yeni }); }}
+                        style={{ padding: "5px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12px", fontFamily: "monospace", minWidth: "190px" }} />
+                    </div>
                   </div>
                 ))}
                 {ekipler.length === 0 && <div style={{ fontSize: "12.5px", color: "#9ca3af", padding: "6px 0" }}>Henüz ekip yok — "＋ Yeni Ekip" ile başlayın</div>}
