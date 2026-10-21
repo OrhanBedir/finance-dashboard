@@ -464,6 +464,21 @@ function applySubconFilter(req, rows) {
   return (rows || []).filter((row) => subconRowMatches(scopeName, row.subcon_name));
 }
 
+// Taşeron okuma kapsamı (21.10.2026, Orhan): taşeron / alt marka kullanıcısında sorgu
+// parametresi (?taseron=, ?subcon=) yok sayılır, kapsam kendi adına kilitlenir — aksi halde
+// parametreyi değiştiren taşeron başka taşeronun hakediş/mutabakat verisini görüyordu.
+// Varsayılan-red kapısı req.user'ı doldurmadığı için token optionalAuth ile okunur.
+// role=subcon olup subcon_name'i boş hesap "kapsamsız" sayılmaz, reddedilir.
+// Dönüş: { kapsam: ad | null }  veya  { status, hata }
+function taseronOkumaKapsami(req) {
+  const u = optionalAuth(req);
+  if (!u) return { status: 401, hata: "Oturum gerekli" };
+  const kapsam = subconScope(req);
+  if (kapsam) return { kapsam };
+  if (taseronMu(u)) return { status: 403, hata: "Taşeron hesabına firma adı tanımlı değil" };
+  return { kapsam: null };
+}
+
 const pool = require("./db");
 
 // Alt marka profillerini markalar tablosundan yenile (açılış + 5 dk)
@@ -14006,6 +14021,10 @@ const normalizeSubconName = (name) =>
 
 app.get("/finance/subcon-hakedis-summary", async (req, res) => {
   try {
+    // Taşeron kendi satırlarını, fatura ve manuel hakediş haritasının yalnız kendi anahtarlarını alır
+    const tk = taseronOkumaKapsami(req);
+    if (tk.hata) return res.status(tk.status).json({ ok: false, error: tk.hata });
+    const kapsamDisi = (ad) => !!tk.kapsam && !subconRowMatches(tk.kapsam, ad);
     const usdTryRate = await getTcmbUsdTrySellingRate();
     await ensureBolgeFaturaTable().catch(() => {});
     await ensureTaseronHakedisTable().catch(() => {});
@@ -14018,6 +14037,7 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
       const hasFaturaNo = String(bf.fatura_no || '').trim() !== '';
       const hasMiktar = Number(bf.fatura_miktari || 0) > 0;
       if (!hasFaturaNo && !hasMiktar) continue;
+      if (kapsamDisi(bf.taseron_adi)) continue;
       const key = `${String(bf.site_code||'').toUpperCase()}|${String(bf.item_code||'').trim()}|${String(bf.taseron_adi||'').toLowerCase()}`;
       if (!bfMap[key]) bfMap[key] = [];
       bfMap[key].push({ fatura_no: bf.fatura_no, fatura_tarihi: bf.fatura_tarihi, fatura_miktari: bf.fatura_miktari });
@@ -14027,6 +14047,7 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
     const thResult = await pool.query(`SELECT * FROM taseron_hakedis ORDER BY created_at DESC`).catch(() => ({ rows: [] }));
     const thMap = {};
     for (const th of thResult.rows) {
+      if (kapsamDisi(th.taseron_adi)) continue;
       const site = String(th.site_code || '').toUpperCase();
       const item = String(th.item_code || '').trim();
       const tas = String(th.taseron_adi || '').toLowerCase();
@@ -14067,7 +14088,7 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
     for (const row of detailResult.rows) {
       const rawSubconName = String(row.subcon_name || "").trim();
       const subconName = normalizeSubconName(rawSubconName);
-      if (!subconName) continue;
+      if (!subconName || kapsamDisi(rawSubconName)) continue;
 
       const existing = map.get(subconName) || {
         subcon_name: rawSubconName,
@@ -14106,7 +14127,7 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
     for (const row of invoiceResult.rows) {
       const rawSubconName = String(row.subcon_name || "").trim();
       const subconName = normalizeSubconName(rawSubconName);
-      if (!subconName) continue;
+      if (!subconName || kapsamDisi(rawSubconName)) continue;
 
       const existing = map.get(subconName) || {
         subcon_name: rawSubconName,
@@ -14171,7 +14192,10 @@ app.get("/finance/subcon-hakedis-summary", async (req, res) => {
 // gelecek ödeme planı (Huawei payment vade'sinden). Modal kartları için.
 app.get("/finance/subcon-reconcile", async (req, res) => {
   try {
-    const taseron = (req.query.taseron || "").trim();
+    const tk = taseronOkumaKapsami(req);
+    if (tk.hata) return res.status(tk.status).json({ ok: false, error: tk.hata });
+    // Taşeronda ?taseron= yok sayılır, kendi adı kullanılır (RegionAnalysis zaten kendi adını gönderir)
+    const taseron = tk.kapsam || (req.query.taseron || "").trim();
     if (!taseron) {
       return res.status(400).json({ ok: false, error: "taseron gerekli" });
     }
@@ -14180,7 +14204,9 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
 
     const tasUpper = taseron.toUpperCase().trim();
     const norm = (s) => String(s || "").toUpperCase().trim();
-    const matchTas = (name) => {
+    // Yönetim: serbest arama (içerir eşleşmesi). Taşeron: kanonik ad eşleşmesi — "içerir" kuralı
+    // kısa/ortak bir parçayla başka firmaları yakalayabildiği için kapsamlı kullanıcıda kullanılmaz.
+    const matchTas = tk.kapsam ? (name) => subconRowMatches(tk.kapsam, name) : (name) => {
       const n = norm(name);
       if (!n) return false;
       return n === tasUpper || n.includes(tasUpper) || tasUpper.includes(n);
@@ -14394,8 +14420,11 @@ app.get("/finance/subcon-reconcile", async (req, res) => {
 
 app.get("/finance/subcon-hakedis-detail", authMiddleware, async (req, res) => {
   try {
-    const subconQ = (req.query.subcon || "").trim().toLowerCase();
-    if (!subconQ || subconQ.length < 2) return res.json({ ok: true, rows: [], total_hakedis: 0 });
+    const tk = taseronOkumaKapsami(req);
+    if (tk.hata) return res.status(tk.status).json({ ok: false, error: tk.hata });
+    // Taşeronda ?subcon= yok sayılır; kapsam kendi adı (FERRUMX istisnası subconRowMatches'te)
+    const subconQ = tk.kapsam ? "" : (req.query.subcon || "").trim().toLowerCase();
+    if (!tk.kapsam && (!subconQ || subconQ.length < 2)) return res.json({ ok: true, rows: [], total_hakedis: 0 });
     const usdTryRate = await getTcmbUsdTrySellingRate();
     const result = await pool.query(`
       SELECT
@@ -14409,17 +14438,17 @@ app.get("/finance/subcon-hakedis-detail", authMiddleware, async (req, res) => {
         ON pr.project_code = mw.project_code
        AND pr.site_code = mw.site_code
        AND pr.item_code = mw.item_code
-      WHERE LOWER(TRIM(mw.subcon_name)) LIKE $1 AND COALESCE(mw.done_qty, 0) > 0
+      WHERE ${tk.kapsam ? "TRIM(COALESCE(mw.subcon_name, '')) <> ''" : "LOWER(TRIM(mw.subcon_name)) LIKE $1"} AND COALESCE(mw.done_qty, 0) > 0
       ORDER BY mw.bolge, mw.site_code
-    `, [`%${subconQ}%`]);
+    `, tk.kapsam ? [] : [`%${subconQ}%`]);
     let totalHakedis = 0;
-    const rows = result.rows.map(row => {
+    const rows = result.rows.filter(row => !tk.kapsam || subconRowMatches(tk.kapsam, row.subcon_name)).map(row => {
       const doneAmt = Number(row.done_amount || 0);
       const amtTL = String(row.currency||'TRY').toUpperCase() === 'USD' ? doneAmt * Number(usdTryRate || 0) : doneAmt;
       totalHakedis += amtTL;
       return { site_code: row.site_code, bolge: row.bolge, project_code: row.project_code, item_description: row.item_description, done_qty: Number(row.done_qty||0), unit_price: Number(row.unit_price||0), currency: row.currency, done_amount_tl: Math.round(amtTL*100)/100 };
     });
-    res.json({ ok: true, rows, total_hakedis: Math.round(totalHakedis*100)/100, subcon: req.query.subcon });
+    res.json({ ok: true, rows, total_hakedis: Math.round(totalHakedis*100)/100, subcon: tk.kapsam || req.query.subcon });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -21064,10 +21093,37 @@ app.put("/hr/trafik-ceza/:id/kesildi", ikYazma, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Belge dosyası yönlendirmeleri (?t= ile açılır): girişli olmak yetmez, taşeron hesabı İK belgesi göremez
+// (21.10.2026, Orhan). Dönüş: kullanıcı ya da null (cevap gönderilmiştir).
+function belgeOkuyan(req, res) {
+  const u = optionalAuth(req);
+  if (!u) { res.status(401).json({ ok: false, error: "Oturum gerekli" }); return null; }
+  if (taseronMu(u)) { res.status(403).json({ ok: false, error: "Taşeron hesabı bu belgeyi göremez" }); return null; }
+  return u;
+}
+
 // Redirect masraf belge file requests (dosya_yolu is now a full Supabase URL)
+// Dosya adı fişin ORİJİNAL adıdır ("image.jpg" gibi tahmin edilebilir). Kural GET /hr/masraf-form ile
+// aynı: tam görüş değilse yalnız kendi formundaki (talep eden / bağlı personel) belge; alt marka
+// kullanıcısı yalnız bordro kapsamındaki personelin, devirden sonraki kalemlerinin belgesi. Kapsam dışı → 404.
 app.get("/hr/masraf-belge/file/:filename", async (req, res) => {
   try {
-    const b = await pool.query("SELECT dosya_yolu FROM masraf_belge WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
+    const u = belgeOkuyan(req, res);
+    if (!u) return;
+    const params = [req.params.filename];
+    const kosul = [];
+    if (!masrafTamGorus(req)) {
+      params.push(_eposta(u));
+      kosul.push(`$2 <> '' AND (LOWER(TRIM(COALESCE(mf.talep_eden_email,''))) = $2 OR LOWER(TRIM(COALESCE(p.email,''))) = $2)`);
+    }
+    const k = altMarkaKapsam(req);
+    if (k) kosul.push(kapsamPersonelSql(k), kapsamKalemSql(k));
+    const b = await pool.query(`SELECT mb.dosya_yolu FROM masraf_belge mb
+        LEFT JOIN masraf_form mf ON mf.id = mb.form_id
+        LEFT JOIN personel p ON p.id = mf.personel_id
+        LEFT JOIN masraf_kalem mk ON mk.id = mb.kalem_id
+       WHERE mb.dosya_adi = $1${kosul.map((c) => ` AND ${c}`).join("")}
+       ORDER BY mb.id DESC LIMIT 1`, params);
     if (b.rows[0]?.dosya_yolu?.startsWith("http")) return res.redirect(b.rows[0].dosya_yolu);
     res.status(404).json({ error: "Dosya yok" });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -22579,8 +22635,14 @@ app.delete("/hr/arac-belge/:id", ikYazma, async (req, res) => {
 
 app.get("/hr/arac-belge/file/:filename", async (req, res) => {
   try {
-    const b = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
-    if (b.rows[0]?.dosya_yolu?.startsWith("http")) return res.redirect(b.rows[0].dosya_yolu);
+    if (!belgeOkuyan(req, res)) return;
+    const b = await pool.query("SELECT dosya_yolu, arac_id FROM arac_belgeler WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
+    if (b.rows[0]?.dosya_yolu?.startsWith("http")) {
+      // Alt marka kullanıcısı yalnız kendi bordro kümesindeki firmanın aracı (aracErisim kuralı)
+      const er = await aracErisim(req, b.rows[0].arac_id);
+      if (!er.ok) return res.status(er.status).json({ error: er.status === 404 ? "Dosya yok" : er.error });
+      return res.redirect(b.rows[0].dosya_yolu);
+    }
     res.status(404).json({ error: "Dosya yok" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -23318,6 +23380,7 @@ app.delete("/hr/ofis-belge/:id", ikYazma, async (req, res) => {
 
 app.get("/hr/ofis-belge/file/:filename", async (req, res) => {
   try {
+    if (!belgeOkuyan(req, res)) return;
     const b = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
     if (b.rows[0]?.dosya_yolu?.startsWith("http")) return res.redirect(b.rows[0].dosya_yolu);
     res.status(404).json({ error: "Dosya yok" });
