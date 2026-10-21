@@ -573,6 +573,107 @@ function requirePlatformAdmin(req, res, next) {
   next();
 }
 
+// ── ROL KAPILARI (20.10.2026, Orhan) ─────────────────────────────────────────
+// Varsayılan-red kapısı (aşağıda) yalnız "geçerli token var mı"ya bakar. Eskiden
+// kimliksiz olan İK / finans / onay / silme uçlarında "KİM" sorusunu bu kapılar
+// cevaplar. Kurallar web (App.jsx menü + buton koşulları) ve mobil ekranların
+// bugünkü kullanımından çıkarıldı; uç → izinli rol tablosu:
+// Omnix_KOSGEB/02 TÜBİTAK 1507/Çalışma Notları/ERC_rol_kontrolleri_20261020.md
+// Taşeron (role=subcon) firma erişim hesabıdır: İK / finans verisine yazamaz.
+// E-posta listeleri (AVANS_YETKI, MASRAF_*_MAIL, IK_ESITLE_EMAIL …) dosyanın
+// ilerisinde tanımlı; kapılar yalnız istek anında okuduğu için sıra sorun değil.
+const _rol = (u) => String(u?.role || "").toLowerCase();
+const _eposta = (u) => String(u?.email || "").toLowerCase().trim();
+function rolKapisi(izinli, hata = "Bu işlem için yetkiniz yok") {
+  return (req, res, next) => authMiddleware(req, res, () => {
+    if (izinli(req.user || {}, req)) return next();
+    return res.status(403).json({ ok: false, error: hata });
+  });
+}
+const taseronMu = (u) => _rol(u) === "subcon";
+// Alt marka paneli (AHY/TEKNO, hw_yukleme=false): Şimşek ana finans/saha ekranlarını görmez
+const altMarkaKullanicisi = (u) => u?.hw_yukleme === false && _rol(u) !== "platform_admin";
+// Web isPersonel: 'user' rolündeki saha personeli (bölge müdürleri ve Hatice hariç)
+const WEB_BOLGE_MUDURU_EMAIL = ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com",
+  "murat.istek@simsektel.com", "emre.akdegirmen@simsektel.com", "hatice.omus@simsektel.com"];
+const sahaPersoneliMi = (u) => _rol(u) === "user" && !WEB_BOLGE_MUDURU_EMAIL.includes(_eposta(u));
+
+const IK_YAZMA_ROLLER = ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur", "finance",
+  "rollout_mudur", "bolge_mudur", "pm"];
+// İK yönetimi (personel, maaş/avans, puantaj, yemek kartı, araç, ofis, ekip): yönetim rolleri
+// + kodda adı geçen onaycı/finans/İK e-postaları. Rolü 'user' olsa da bu listelerdeki kişi geçer.
+function ikYazmaYetkili(u) {
+  if (taseronMu(u)) return false;
+  if (IK_YAZMA_ROLLER.includes(_rol(u))) return true;
+  const e = _eposta(u);
+  if (!e) return false;
+  const listeler = [IK_ESITLE_EMAIL, AVANS_TAM_GORUS, MASRAF_TAM_GORUS, ODEME_FINANS_EMAIL, ARAC_SIL_YETKILI,
+    MAAS_KAPAMA_YETKILI, MASRAF_MUHASEBE_MAIL, ...Object.values(AVANS_YETKI)];
+  return listeler.some((l) => l.includes(e));
+}
+// Finans paneli (web: isFinanceUser && !isAltMarka) — requireFinanceAuth'un e-posta/scope kuralı + yönetim rolleri
+const FINANS_YAZMA_ROLLER = ["admin", "platform_admin", "direktor", "muhasebe", "finance", "genel_mudur"];
+const FINANS_YAZMA_EMAIL = ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com", "orhan@simsektel.com",
+  "orhan.bedir@simsektel.com", "duzgun.simsek@simsektel.com"];
+function finansYazmaYetkili(u) {
+  if (taseronMu(u) || altMarkaKullanicisi(u)) return false;
+  return FINANS_YAZMA_ROLLER.includes(_rol(u)) || u?.scope === "finance" || FINANS_YAZMA_EMAIL.includes(_eposta(u));
+}
+// Masraf onay zinciri: her adım yalnız o adımın onaycısına açık (web MasrafFormuPanel / Personel Harcamaları)
+const masrafRolloutOnayci = (u) => MASRAF_ROLLOUT_MAIL.includes(_eposta(u));
+const masrafMuhasebeOnayci = (u) => !taseronMu(u) && (MASRAF_MUHASEBE_MAIL.includes(_eposta(u)) || _rol(u) === "muhasebe");
+const masrafPmOnayci = (u) => MASRAF_PM_MAIL.includes(_eposta(u));
+const masrafDirektorOnayci = (u) => MASRAF_PD_MAIL.includes(_eposta(u));
+const masrafHerhangiOnayci = (u) => masrafRolloutOnayci(u) || masrafMuhasebeOnayci(u) || masrafPmOnayci(u) || masrafDirektorOnayci(u);
+// İş avansı onaycısı (RM/PM/PD/ödeme listeleri + muhasebe / rollout-bölge müdürü rolleri)
+const avansOnayciMi = (u) => !taseronMu(u) && (Object.values(AVANS_YETKI).some((l) => l.includes(_eposta(u)))
+  || ["muhasebe", "rollout_mudur", "bolge_mudur"].includes(_rol(u)));
+
+const taseronDegil = rolKapisi((u) => !taseronMu(u), "Taşeron hesabı bu işlemi yapamaz");
+const ikYazma = rolKapisi(ikYazmaYetkili, "İK kayıtlarını değiştirme yetkiniz yok");
+const puantajYazma = rolKapisi((u) => ikYazmaYetkili(u) || _rol(u) === "rollout", "Puantaj değiştirme yetkiniz yok");
+const finansYazma = rolKapisi(finansYazmaYetkili, "Finans kayıtlarını değiştirme yetkiniz yok");
+const sahaKayitYazma = rolKapisi((u) => !taseronMu(u) && !altMarkaKullanicisi(u) && !sahaPersoneliMi(u), "Saha iş kaydı değiştirme yetkiniz yok");
+// Tüm HW kalem master'ını boşaltma (tek istekte tablo silinir): yalnız tam admin, alt marka hariç
+const hwKalemSifirlama = rolKapisi((u) => ["admin", "platform_admin"].includes(_rol(u)) && !altMarkaKullanicisi(u), "HW kalem master'ını yalnız admin sıfırlayabilir");
+const aracSilme = rolKapisi((u) => ARAC_SIL_YETKILI.includes(_eposta(u)) || ["admin", "platform_admin", "direktor"].includes(_rol(u)), "Silme yetkiniz yok");
+const odemeYazma = rolKapisi((u, req) => !!odemeYetkili(req), "Ödeme işlemi yetkiniz yok");
+const avansOnayKapisi = rolKapisi(avansOnayciMi, "Avans onay/red yetkiniz yok");
+const avansTutarDuzelt = rolKapisi((u) => [...AVANS_YETKI.PM, ...AVANS_YETKI.PD].includes(_eposta(u)), "Avans tutarını yalnız PM / Direktör düzeltebilir");
+const masrafAdimKapisi = (izinli) => rolKapisi(izinli, "Bu onay adımı için yetkiniz yok");
+const masrafRedKapisi = rolKapisi((u) => masrafPmOnayci(u) || masrafDirektorOnayci(u), "Red yetkisi PM ve Direktör'de");
+
+// Kayıt sahibi (talep eden / bağlı personel e-postası) VEYA izinli rol. Kayıt yoksa işleyici
+// kendi 404/boş cevabını verir. kimlikAl: req → kayıt id'si.
+function sahipVeyaKapisi(sql, kimlikAl, izinli, hata = "Bu kayıt üzerinde yetkiniz yok") {
+  return (req, res, next) => authMiddleware(req, res, async () => {
+    try {
+      if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Taşeron hesabı bu işlemi yapamaz" });
+      const id = kimlikAl(req);
+      if (id === undefined || id === null || id === "") return next();
+      const r = (await pool.query(sql, [id])).rows[0];
+      if (!r) return next();
+      const e = _eposta(req.user);
+      const sahip = !!e && [r.talep_eden_email, r.personel_email].some((x) => String(x || "").toLowerCase().trim() === e);
+      if (sahip || izinli(req.user, req)) return next();
+      return res.status(403).json({ ok: false, error: hata });
+    } catch (err) { return res.status(500).json({ ok: false, error: err.message }); }
+  });
+}
+const MASRAF_FORM_SAHIP_SQL = `SELECT mf.talep_eden_email, p.email AS personel_email FROM masraf_form mf
+  LEFT JOIN personel p ON p.id = mf.personel_id WHERE mf.id = $1`;
+const AVANS_SAHIP_SQL = `SELECT t.talep_eden_email, p.email AS personel_email FROM is_avans_talep t
+  LEFT JOIN personel p ON p.id = t.personel_id WHERE t.id = $1`;
+const _sayiId = (v) => (/^\d+$/.test(String(v ?? "")) ? Number(v) : null);
+const masrafFormSahibiVeyaTam = sahipVeyaKapisi(MASRAF_FORM_SAHIP_SQL, (req) => _sayiId(req.params.id), (u, req) => masrafTamGorus(req));
+const masrafFormSilme = sahipVeyaKapisi(MASRAF_FORM_SAHIP_SQL, (req) => _sayiId(req.params.id),
+  (u) => masrafPmOnayci(u) || ["admin", "platform_admin"].includes(_rol(u)), "Masraf formunu yalnız sahibi veya PM silebilir");
+const masrafKalemEkleme = sahipVeyaKapisi(MASRAF_FORM_SAHIP_SQL, (req) => _sayiId(req.body?.form_id), (u, req) => masrafTamGorus(req));
+const masrafCezaAtama = sahipVeyaKapisi(`SELECT mf.talep_eden_email, p.email AS personel_email FROM masraf_kalem mk
+  JOIN masraf_form mf ON mf.id = mk.form_id LEFT JOIN personel p ON p.id = mf.personel_id WHERE mk.id = $1`,
+  (req) => _sayiId(req.params.id), (u) => masrafPmOnayci(u) || masrafDirektorOnayci(u), "Ceza personelini yalnız form sahibi, PM veya Direktör atayabilir");
+const avansSahibiVeyaTam = sahipVeyaKapisi(AVANS_SAHIP_SQL, (req) => _sayiId(req.params.id), (u, req) => avansTamGorus(req));
+
 // ── FİRMA-BAZLI KULLANICI GÖRÜNÜRLÜĞÜ ────────────────────────────────────────
 // Bir adminin başka bir kullanıcıyı görebilmesi/yönetebilmesi kuralı:
 //  - platform_admin (uygulama sahibi) → tüm firmaların kullanıcıları
@@ -5761,7 +5862,7 @@ app.post("/rollout/auto-sync-targets", async (req, res) => {
   }
 });
 
-app.post("/finance/invoices/apply-advance", async (req, res) => {
+app.post("/finance/invoices/apply-advance", finansYazma, async (req, res) => {
   const client = await pool.connect();
 
   try {
@@ -5900,7 +6001,7 @@ app.post("/finance/invoices/apply-advance", async (req, res) => {
   }
 });
 
-app.post("/finance/salary/add", async (req, res) => {
+app.post("/finance/salary/add", finansYazma, async (req, res) => {
   try {
     const {
       ad_soyad,
@@ -5962,7 +6063,7 @@ app.post("/finance/salary/add", async (req, res) => {
   }
 });
 
-app.put("/finance/salary/:id", async (req, res) => {
+app.put("/finance/salary/:id", finansYazma, async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -6033,7 +6134,7 @@ app.put("/finance/salary/:id", async (req, res) => {
   }
 });
 
-app.delete("/finance/salary/:id", async (req, res) => {
+app.delete("/finance/salary/:id", finansYazma, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -6232,7 +6333,7 @@ async function faturaNoMukerrerMi(fatura_no, haricId) {
   return r.rows[0] || null;
 }
 
-app.post("/finance/invoice-entry/add", async (req, res) => {
+app.post("/finance/invoice-entry/add", finansYazma, async (req, res) => {
   try {
     const {
       bolge,
@@ -6669,7 +6770,7 @@ app.get("/finance/invoice-entry/export-excel", async (req, res) => {
   }
 });
 
-app.delete("/finance/invoice-entry/:id", async (req, res) => {
+app.delete("/finance/invoice-entry/:id", finansYazma, async (req, res) => {
   try {
     const result = await pool.query(
       `DELETE FROM invoice_entries WHERE id = $1 RETURNING id`,
@@ -6689,7 +6790,7 @@ app.delete("/finance/invoice-entry/:id", async (req, res) => {
 
 /* ================== Personel Cartı Ekleme Endpoint ================== */
 
-app.post("/finance/personel/add", async (req, res) => {
+app.post("/finance/personel/add", finansYazma, async (req, res) => {
   try {
     const {
       ad_soyad,
@@ -6752,7 +6853,7 @@ app.get("/finance/personel/list", async (req, res) => {
   }
 });
 
-app.post("/finance/personel-movement/add", async (req, res) => {
+app.post("/finance/personel-movement/add", finansYazma, async (req, res) => {
   try {
     const {
       personel_id,
@@ -12615,7 +12716,7 @@ app.get("/export/qc-ready-excel", async (req, res) => {
   }
 });
 
-app.post("/master/add", async (req, res) => {
+app.post("/master/add", sahaKayitYazma, async (req, res) => {
   try {
     const m = req.body;
 
@@ -12764,7 +12865,7 @@ app.post("/master/add", async (req, res) => {
 
 /* ================== MASTER UPDATE ================== */
 
-app.put("/finance/invoice-entry/:id", async (req, res) => {
+app.put("/finance/invoice-entry/:id", finansYazma, async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -12869,7 +12970,7 @@ app.put("/finance/invoice-entry/:id", async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
-app.put("/master/:id", async (req, res) => {
+app.put("/master/:id", sahaKayitYazma, async (req, res) => {
   try {
     const id = req.params.id;
     const m = req.body;
@@ -12926,7 +13027,7 @@ app.put("/master/:id", async (req, res) => {
 });
 
 /* ================== MASTER DELETE ================== */
-app.delete("/master/:id", async (req, res) => {
+app.delete("/master/:id", sahaKayitYazma, async (req, res) => {
   try {
     const id = req.params.id;
 
@@ -15078,7 +15179,7 @@ app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
 });
 
 // Manuel fatura ekle (PDF okunamadı / Excel'de yok ise)
-app.post("/finance/hw-invoice-items/manual", async (req, res) => {
+app.post("/finance/hw-invoice-items/manual", finansYazma, requireHwYukleme, async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
     const b = req.body || {};
@@ -15199,7 +15300,7 @@ app.get("/finance/hw-invoice-items-batches", async (req, res) => {
 
 // Tek bir partiyi (batch) sil — sadece o yüklemenin EKLEDİĞİ satırlar gider,
 // güncellenmiş eski satırlar (kendi batch'inde) korunur.
-app.delete("/finance/hw-invoice-items-batch", async (req, res) => {
+app.delete("/finance/hw-invoice-items-batch", finansYazma, requireHwYukleme, async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
     const batchId = (req.query.batch_id || "").toString().trim();
@@ -15220,7 +15321,7 @@ app.delete("/finance/hw-invoice-items-batch", async (req, res) => {
 });
 
 // Tüm kalem master'ını sıfırla (tam reset — nadiren)
-app.delete("/finance/hw-invoice-items-clear", async (req, res) => {
+app.delete("/finance/hw-invoice-items-clear", hwKalemSifirlama, requireHwYukleme, async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
     const r = await pool.query(`DELETE FROM hw_invoice_items`);
@@ -15748,7 +15849,7 @@ app.post("/finance/zirve-import", requireFinanceAuth, upload.array("files"), asy
 });
 
 /* ================== FINANCE EXPENSE ADD ================== */
-app.post("/finance/expense/add", async (req, res) => {
+app.post("/finance/expense/add", finansYazma, async (req, res) => {
   try {
     const { expense_date, expense_type, description, amount } = req.body;
 
@@ -16145,7 +16246,7 @@ app.get("/finance/subcon-payables", async (req, res) => {
   }
 });
 
-app.post("/finance/subcon-payables/add", async (req, res) => {
+app.post("/finance/subcon-payables/add", finansYazma, async (req, res) => {
   try {
     const { subcon_name, invoice_amount, paid_amount, note } = req.body;
 
@@ -16858,7 +16959,7 @@ app.post(
   }
 );
 
-app.delete("/invoice-entries/:id/belge", async (req, res) => {
+app.delete("/invoice-entries/:id/belge", finansYazma, async (req, res) => {
   const { id } = req.params;
   try {
     const r = await pool.query("SELECT belge_path FROM invoice_entries WHERE id=$1", [id]);
@@ -17421,7 +17522,7 @@ app.get("/hr/maas-gecmisi", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/personel", async (req, res) => {
+app.post("/hr/personel", ikYazma, async (req, res) => {
   try {
     const { ad_soyad, tc_no, dogum_tarihi, telefon, email, unvan, bolge, ise_giris_tarihi,
       net_maas, bankadan_gosterilen, elden_verilen, iban, banka_adi, banka_hesap_no,
@@ -17473,7 +17574,7 @@ app.post("/hr/personel", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/personel/:id", async (req, res) => {
+app.put("/hr/personel/:id", ikYazma, async (req, res) => {
   try {
     const { id } = req.params;
     const { ad_soyad, tc_no, dogum_tarihi, telefon, email, unvan, bolge, ise_giris_tarihi,
@@ -17569,7 +17670,7 @@ app.put("/hr/personel/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/personel/:id", async (req, res) => {
+app.delete("/hr/personel/:id", ikYazma, async (req, res) => {
   try {
     await pool.query("DELETE FROM personel WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
@@ -17577,7 +17678,7 @@ app.delete("/hr/personel/:id", async (req, res) => {
 });
 
 // ---- PERSONEL BELGE ----
-app.post("/hr/personel/:id/belge/:tur", uploadPersonelBelge.single("dosya"), async (req, res) => {
+app.post("/hr/personel/:id/belge/:tur", ikYazma, uploadPersonelBelge.single("dosya"), async (req, res) => {
   try {
     const { id, tur } = req.params;
     if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
@@ -17609,7 +17710,7 @@ app.get("/hr/personel/:id/isg", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/personel/:id/isg", async (req, res) => {
+app.post("/hr/personel/:id/isg", ikYazma, async (req, res) => {
   try {
     const { egitim_turu, egitim_tarihi, gecerlilik_yil } = req.body;
     const bitis = new Date(egitim_tarihi);
@@ -17623,7 +17724,7 @@ app.post("/hr/personel/:id/isg", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/personel/:id/isg/:isgId", async (req, res) => {
+app.delete("/hr/personel/:id/isg/:isgId", ikYazma, async (req, res) => {
   try {
     await pool.query("DELETE FROM personel_isg WHERE id=$1 AND personel_id=$2", [req.params.isgId, req.params.id]);
     res.json({ ok: true });
@@ -17631,7 +17732,7 @@ app.delete("/hr/personel/:id/isg/:isgId", async (req, res) => {
 });
 
 // ISG belge yükleme
-app.post("/hr/personel/:id/isg/:isgId/belge", uploadPersonelBelge.single("dosya"), async (req, res) => {
+app.post("/hr/personel/:id/isg/:isgId/belge", ikYazma, uploadPersonelBelge.single("dosya"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
     const fname = `isg-${req.params.isgId}-${Date.now()}${path.extname(utf8Name(req.file.originalname)).toLowerCase()}`;
@@ -17653,14 +17754,14 @@ app.get("/hr/isg/signed-upload-url", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.patch("/hr/personel/:id/isg/:isgId/belge-url", async (req, res) => {
+app.patch("/hr/personel/:id/isg/:isgId/belge-url", ikYazma, async (req, res) => {
   try {
     const { url } = req.body;
     await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post("/hr/personel/:id/isg/:isgId/belge-url", async (req, res) => {
+app.post("/hr/personel/:id/isg/:isgId/belge-url", ikYazma, async (req, res) => {
   try {
     const { url } = req.body;
     await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
@@ -17683,7 +17784,7 @@ app.get("/hr/puantaj", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/puantaj", async (req, res) => {
+app.post("/hr/puantaj", puantajYazma, async (req, res) => {
   try {
     const { personel_id, tarih, durum, created_by } = req.body;
     // 17.09.2026 (Orhan): işten ayrılma tarihinden SONRAYA ve bordro dışı (puantaj_haric)
@@ -17716,7 +17817,7 @@ app.post("/hr/puantaj", async (req, res) => {
 });
 
 // Puantaj not + belge güncelle
-app.put("/hr/puantaj/:id/not", uploadPuantajBelge.single("belge"), async (req, res) => {
+app.put("/hr/puantaj/:id/not", puantajYazma, uploadPuantajBelge.single("belge"), async (req, res) => {
   try {
     const { id } = req.params;
     const { not_aciklama } = req.body;
@@ -17733,7 +17834,7 @@ app.put("/hr/puantaj/:id/not", uploadPuantajBelge.single("belge"), async (req, r
 });
 
 // Puantaj not sil
-app.delete("/hr/puantaj/:id/not", async (req, res) => {
+app.delete("/hr/puantaj/:id/not", puantajYazma, async (req, res) => {
   try {
     const { id } = req.params;
     const row = await pool.query("SELECT belge_yolu FROM puantaj WHERE id=$1", [id]);
@@ -18025,7 +18126,7 @@ app.get("/hr/avans", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/avans", async (req, res) => {
+app.post("/hr/avans", ikYazma, async (req, res) => {
   try {
     await pool.query(`ALTER TABLE avans ADD COLUMN IF NOT EXISTS donem TEXT`).catch(() => {});
     const { personel_id, tarih, tutar, aciklama, avans_turu = "MAAS", donem = null } = req.body;
@@ -18038,7 +18139,7 @@ app.post("/hr/avans", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/avans/:id", async (req, res) => {
+app.put("/hr/avans/:id", ikYazma, async (req, res) => {
   try {
     // 19.10.2026: düzenleme desteği — yalnız gönderilen alanlar değişir. Maaş dönemi (donem) ile
     // ödeme tarihi (tarih) ayrı alanlardır; biri diğerine uydurulmaz. odendi gönderilmezse dokunulmaz.
@@ -18065,7 +18166,7 @@ app.put("/hr/avans/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/avans/:id", async (req, res) => {
+app.delete("/hr/avans/:id", ikYazma, async (req, res) => {
   try {
     await pool.query("DELETE FROM avans WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
@@ -18085,7 +18186,7 @@ app.get("/hr/maas-odeme", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/maas-odeme", async (req, res) => {
+app.post("/hr/maas-odeme", ikYazma, async (req, res) => {
   try {
     const { personel_id, donem, bankadan, elden, tarih, aciklama, created_by, odeyen } = req.body;
     const r = await pool.query(
@@ -18099,7 +18200,7 @@ app.post("/hr/maas-odeme", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/maas-odeme/:id", async (req, res) => {
+app.put("/hr/maas-odeme/:id", ikYazma, async (req, res) => {
   try {
     const { donem, bankadan, elden, tarih, aciklama, odeyen } = req.body;
     const eskiM = (await pool.query("SELECT * FROM maas_odeme WHERE id=$1", [req.params.id])).rows[0];
@@ -18114,7 +18215,7 @@ app.put("/hr/maas-odeme/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/maas-odeme/:id", async (req, res) => {
+app.delete("/hr/maas-odeme/:id", ikYazma, async (req, res) => {
   try {
     const eskiM = (await pool.query("SELECT * FROM maas_odeme WHERE id=$1", [req.params.id])).rows[0];
     await pool.query("DELETE FROM maas_odeme WHERE id=$1", [req.params.id]);
@@ -19483,7 +19584,7 @@ app.get("/hr/is-avans", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/is-avans", async (req, res) => {
+app.post("/hr/is-avans", taseronDegil, async (req, res) => {
   try {
     const {
       personel_id,
@@ -19585,7 +19686,7 @@ app.post("/hr/is-avans", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/is-avans/:id", async (req, res) => {
+app.put("/hr/is-avans/:id", avansSahibiVeyaTam, async (req, res) => {
   try {
     const { id } = req.params;
     const { personel_id, tutar, aciklama, not_aciklama, tarih, gider_turu, bolge, proje, plaka } = req.body;
@@ -19603,7 +19704,7 @@ app.put("/hr/is-avans/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/is-avans/:id", async (req, res) => {
+app.delete("/hr/is-avans/:id", avansSahibiVeyaTam, async (req, res) => {
   try {
     const { id } = req.params;
     const eskiA = (await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id])).rows[0];
@@ -19783,7 +19884,7 @@ app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/is-avans/:id/duzenle", async (req, res) => {
+app.put("/hr/is-avans/:id/duzenle", avansTutarDuzelt, async (req, res) => {
   try {
     const { id } = req.params;
     const { tutar } = req.body;
@@ -19799,7 +19900,7 @@ app.put("/hr/is-avans/:id/duzenle", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/is-avans/:id/reddet", async (req, res) => {
+app.put("/hr/is-avans/:id/reddet", avansOnayKapisi, async (req, res) => {
   try {
     const { id } = req.params;
     const { red_aciklama, reddeden_email } = req.body;
@@ -20418,7 +20519,7 @@ app.get("/hr/masraf-form/:id", async (req, res) => {
 });
 
 // POST create form (veya mevcut TASLAK'ı döndür)
-app.post("/hr/masraf-form", async (req, res) => {
+app.post("/hr/masraf-form", taseronDegil, async (req, res) => {
   try {
     const {
       personel_id, talep_eden_email,
@@ -20490,7 +20591,7 @@ app.post("/hr/masraf-form", async (req, res) => {
 });
 
 // DELETE form
-app.delete("/hr/masraf-form/:id", async (req, res) => {
+app.delete("/hr/masraf-form/:id", masrafFormSilme, async (req, res) => {
   try {
     const eskiF = (await pool.query("SELECT id, form_no, donem, durum, talep_eden_ad, talep_eden_email FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
     await pool.query("DELETE FROM masraf_form WHERE id=$1", [req.params.id]);
@@ -20541,7 +20642,7 @@ async function masrafKalemYetki(req, kalemId) {
 const notYazan = (u) => [String(u?.email || "").toLowerCase().trim(), u?.name || null];
 const tutarMetni = (v) => Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-app.post("/hr/masraf-kalem", async (req, res) => {
+app.post("/hr/masraf-kalem", masrafKalemEkleme, async (req, res) => {
   try {
     const { form_id, tarih, belge_no, belge_aciklama, aciklama, tutar, fis_var, fis_olmadan_aciklama, plaka, ceza_personel_id } = req.body;
     // Mobil Türkçe kategori adlarını büyük harfe normalize et
@@ -20566,7 +20667,7 @@ app.post("/hr/masraf-kalem", async (req, res) => {
 
 // PUT update kalem — 20.10.2026: bilgisayardan satır düzenleme (tarih, belge no/açıklama, plaka,
 // detaylı açıklama, tutar) + mobilin fis_var / tutar_uyari_aciklama güncellemeleri. Yetki: masrafKalemYetki.
-app.put("/hr/masraf-kalem/:id", async (req, res) => {
+app.put("/hr/masraf-kalem/:id", taseronDegil, async (req, res) => {
   try {
     const y = await masrafKalemYetki(req, req.params.id);
     if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
@@ -20634,7 +20735,7 @@ app.put("/hr/masraf-kalem/:id", async (req, res) => {
 
 // POST ek açıklama — her durumda (taslak, onayda, onaylı, arşiv) sahibi ya da yetkili ekler;
 // geçmişe kim/ne zaman ile yazılır, önceki açıklama değişmez; tutar/bakiye/onay durumuna dokunmaz
-app.post("/hr/masraf-kalem/:id/not", async (req, res) => {
+app.post("/hr/masraf-kalem/:id/not", taseronDegil, async (req, res) => {
   try {
     const y = await masrafKalemYetki(req, req.params.id);
     if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
@@ -20653,7 +20754,7 @@ app.post("/hr/masraf-kalem/:id/not", async (req, res) => {
 // ceza_personel_id = personel id    → o personele yaz, avans kaydı oluştur
 // ceza_personel_id = "sirket"       → şirket gideri, ceza_sirket=true, avans yok
 // ceza_personel_id = "" / null      → atanmadı
-app.put("/hr/masraf-kalem/:id/ceza-personel", async (req, res) => {
+app.put("/hr/masraf-kalem/:id/ceza-personel", masrafCezaAtama, async (req, res) => {
   try {
     const { ceza_personel_id } = req.body;
     const kalemId = req.params.id;
@@ -20683,7 +20784,7 @@ app.put("/hr/masraf-kalem/:id/ceza-personel", async (req, res) => {
 });
 
 // DELETE kalem
-app.delete("/hr/masraf-kalem/:id", async (req, res) => {
+app.delete("/hr/masraf-kalem/:id", taseronDegil, async (req, res) => {
   try {
     const y = await masrafKalemYetki(req, req.params.id);
     if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
@@ -20696,7 +20797,7 @@ app.delete("/hr/masraf-kalem/:id", async (req, res) => {
 });
 
 // POST upload belge for kalem
-app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, res) => {
+app.post("/hr/masraf-belge/:kalemId", taseronDegil, masrafUpload.single("dosya"), async (req, res) => {
   try {
     const { kalemId } = req.params;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
@@ -20772,7 +20873,7 @@ app.post("/hr/masraf-belge/:kalemId", masrafUpload.single("dosya"), async (req, 
 });
 
 // DELETE belge
-app.delete("/hr/masraf-belge/:id", async (req, res) => {
+app.delete("/hr/masraf-belge/:id", taseronDegil, async (req, res) => {
   try {
     const b = await pool.query("SELECT dosya_yolu, kalem_id FROM masraf_belge WHERE id=$1", [req.params.id]);
     if (!b.rows[0]) return res.json({ ok: true });
@@ -20858,7 +20959,7 @@ app.get("/hr/trafik-ceza", async (req, res) => {
 
 // PUT /hr/trafik-ceza/:id/kesildi — maaş ödemesinde kesildi olarak işaretle
 // (bir daha sonraki aylarda görünmez). kesildi=false ile geri alınabilir.
-app.put("/hr/trafik-ceza/:id/kesildi", async (req, res) => {
+app.put("/hr/trafik-ceza/:id/kesildi", ikYazma, async (req, res) => {
   try {
     const kesildi = req.body.kesildi !== false; // varsayılan true
     const donem = (req.body.donem || "").toString().trim() || null;
@@ -21167,7 +21268,7 @@ app.get("/hr/yemek-kartlari", async (req, res) => {
 // ── Ödeme hareketi (20.10.2026): NAKIT ya da KART; kısmi/karma; kalan hakkı aşamaz; aynı istek anahtarı
 //    ikinci kez gelirse mevcut hareket döner (mükerrer yok). Gider firması HAK dönemine göre (yöntemden bağımsız),
 //    ödeyen firma/kasa ayrı; nakit akışına (TICKET) TEK kayıt, gerçek ödeme tarihinde. Maaş/avansa yazılmaz.
-app.post("/hr/yemek-kartlari/:id/hareket", async (req, res) => {
+app.post("/hr/yemek-kartlari/:id/hareket", ikYazma, async (req, res) => {
   const client = await pool.connect();
   try {
     await ensureYemekKartiTables(); await ensureCashflowOdemeTable();
@@ -21358,7 +21459,7 @@ app.delete("/hr/yemek-kartlari/hareket/:id", authMiddleware, async (req, res) =>
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // Makbuz / dekont / teslim belgesi (isteğe bağlı)
-app.post("/hr/yemek-kartlari/hareket/:id/belge", masrafUpload.single("dosya"), async (req, res) => {
+app.post("/hr/yemek-kartlari/hareket/:id/belge", ikYazma, masrafUpload.single("dosya"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ ok: false, error: "Dosya yok" });
     const fname = `yemek-${req.params.id}-${Date.now()}-${utf8Name(req.file.originalname)}`;
@@ -21478,7 +21579,7 @@ app.post("/hr/yemek-kartlari/esitle", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.post("/hr/yemek-kartlari", async (req, res) => {
+app.post("/hr/yemek-kartlari", ikYazma, async (req, res) => {
   try {
     await ensureYemekKartiTables();
     const { kart_no, aylik_tutar, firma } = req.body;
@@ -21511,7 +21612,7 @@ app.post("/hr/yemek-kartlari", async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.put("/hr/yemek-kartlari/:id", async (req, res) => {
+app.put("/hr/yemek-kartlari/:id", ikYazma, async (req, res) => {
   try {
     await ensureYemekKartiTables();
     const alanlar = [];
@@ -21538,7 +21639,7 @@ app.put("/hr/yemek-kartlari/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.delete("/hr/yemek-kartlari/:id", async (req, res) => {
+app.delete("/hr/yemek-kartlari/:id", ikYazma, async (req, res) => {
   try {
     await ensureYemekKartiTables();
     // Karta bağlı ödemelerin (eski kayıt + hareketler) nakit akışı kayıtlarını da temizle
@@ -21551,7 +21652,7 @@ app.delete("/hr/yemek-kartlari/:id", async (req, res) => {
 });
 
 // Dönem ödemesi (upsert): nakit akışına TICKET kaydı açar/günceller
-app.post("/hr/yemek-kartlari/:id/ode", async (req, res) => {
+app.post("/hr/yemek-kartlari/:id/ode", ikYazma, async (req, res) => {
   try {
     await ensureYemekKartiTables();
     await ensureCashflowOdemeTable();
@@ -21609,7 +21710,7 @@ app.post("/hr/yemek-kartlari/:id/ode", async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.delete("/hr/yemek-kartlari/:id/ode/:donem", async (req, res) => {
+app.delete("/hr/yemek-kartlari/:id/ode/:donem", ikYazma, async (req, res) => {
   try {
     await ensureYemekKartiTables();
     const r = await pool.query(`DELETE FROM yemek_karti_odemeler WHERE kart_id=$1 AND donem=$2 RETURNING cashflow_id`,
@@ -21726,7 +21827,7 @@ app.get("/hr/araclar", async (req, res) => {
   res.json(rows);
 });
 
-app.post("/hr/araclar/:id/km", async (req, res) => {
+app.post("/hr/araclar/:id/km", ikYazma, async (req, res) => {
   try {
     await ensureAracKmTable();
     const km = Number(req.body.km);
@@ -21740,14 +21841,14 @@ app.post("/hr/araclar/:id/km", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/arac-km/:id", async (req, res) => {
+app.delete("/hr/arac-km/:id", aracSilme, async (req, res) => {
   try {
     await pool.query(`DELETE FROM arac_km_log WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/araclar", async (req, res) => {
+app.post("/hr/araclar", ikYazma, async (req, res) => {
   try {
     const { plaka, marka, model, yil, tip, kiralama_firmasi, sozlesme_no,
             kira_baslangic, kira_bitis, aylik_kira, bolge, surucu,
@@ -21783,7 +21884,7 @@ app.post("/hr/araclar", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/araclar/:id", async (req, res) => {
+app.put("/hr/araclar/:id", ikYazma, async (req, res) => {
   try {
     const { plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
             kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,
@@ -21841,7 +21942,7 @@ app.put("/hr/araclar/:id", async (req, res) => {
 });
 
 // Sadece durum güncelle (AKTİF/PASİF/SERVİSTE) — diğer alanları bozmadan
-app.put("/hr/araclar/:id/durum", async (req, res) => {
+app.put("/hr/araclar/:id/durum", ikYazma, async (req, res) => {
   try {
     const { durum } = req.body;
     if (!["AKTİF", "PASİF", "SERVİSTE"].includes(durum))
@@ -22295,7 +22396,7 @@ pool.query(`ALTER TABLE arac_kira_odemeler ADD COLUMN IF NOT EXISTS kasadan_dus 
 // 16.10.2026: Kira Öde artık ORTAK ÖDEME KAYDI üretir (aynı dönem/fatura için tek ödeme).
 // Gerçek ödeme tarihi zorunlu; idem_key ile tekrar tıklama/yeniden deneme ikinci ödeme üretmez;
 // dönem bedelini aşan ödeme reddedilir; araç+dönem için açık fatura satırı varsa ödeme o faturaya bağlanır.
-app.post("/hr/araclar/:id/kira-ode", async (req, res) => {
+app.post("/hr/araclar/:id/kira-ode", odemeYazma, async (req, res) => {
   if (altMarkaKapsam(req)) { const er = await aracErisim(req, req.params.id); if (!er.ok) return res.status(er.status).json({ ok: false, error: er.error }); }
   const u = optionalAuth(req);
   const { donem, tutar, tarih, aciklama, kasadan_dus, idem_key, zorla, yontem, referans, fatura_arac_id } = req.body || {};
@@ -22310,7 +22411,7 @@ app.post("/hr/araclar/:id/kira-ode", async (req, res) => {
 
 // Kira ödemesini geri al: o araç+dönemdeki AKTİF ödeme kayıtları İPTAL edilir (silinmez, geçmiş korunur).
 // Ödeme başka araç/fatura kalemlerini de kapsıyorsa fatura ödeme ekranından iptal edilmelidir.
-app.delete("/hr/araclar/:id/kira-ode", async (req, res) => {
+app.delete("/hr/araclar/:id/kira-ode", odemeYazma, async (req, res) => {
   const donem = String(req.query.donem || "");
   if (!/^\d{4}-\d{2}$/.test(donem)) return res.status(400).json({ ok: false, error: "Geçersiz dönem (YYYY-AA)" });
   if (altMarkaKapsam(req)) { const er = await aracErisim(req, req.params.id); if (!er.ok) return res.status(er.status).json({ ok: false, error: er.error }); }
@@ -22355,13 +22456,13 @@ app.get("/hr/arac-kira-odemeler", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/araclar/:id", async (req, res) => {
+app.delete("/hr/araclar/:id", aracSilme, async (req, res) => {
   await pool.query("UPDATE araclar SET aktif=false WHERE id=$1", [req.params.id]);
   res.json({ ok: true });
 });
 
 // Araç belge upload — turu: SOZLESME | RUHSAT | SIGORTA | MUAYENE | DIGER
-app.post("/hr/araclar/:id/belge", aracUpload.single("dosya"), async (req, res) => {
+app.post("/hr/araclar/:id/belge", ikYazma, aracUpload.single("dosya"), async (req, res) => {
   try {
     const { belge_turu, aciklama } = req.body;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
@@ -22380,7 +22481,7 @@ app.post("/hr/araclar/:id/belge", aracUpload.single("dosya"), async (req, res) =
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/arac-belge/:id", async (req, res) => {
+app.delete("/hr/arac-belge/:id", ikYazma, async (req, res) => {
   try {
     const b = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE id=$1", [req.params.id]);
     if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);
@@ -22469,7 +22570,7 @@ app.get("/hr/araclar/:id/teslim", async (req, res) => {
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post("/hr/araclar/:id/teslim", async (req, res) => {
+app.post("/hr/araclar/:id/teslim", ikYazma, async (req, res) => {
   try {
     await ensureAracKmTable().catch(() => {});
     const er = await aracErisim(req, req.params.id);
@@ -22485,7 +22586,7 @@ app.post("/hr/araclar/:id/teslim", async (req, res) => {
     res.json({ ok: true, id: rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.put("/hr/arac-teslim/:tid", async (req, res) => {
+app.put("/hr/arac-teslim/:tid", ikYazma, async (req, res) => {
   try {
     const t0 = await pool.query(`SELECT * FROM arac_teslim WHERE id=$1`, [req.params.tid]);
     if (!t0.rows[0]) return res.status(404).json({ error: "Teslim kaydı yok" });
@@ -22501,7 +22602,7 @@ app.put("/hr/arac-teslim/:tid", async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.delete("/hr/arac-teslim/:tid", async (req, res) => {
+app.delete("/hr/arac-teslim/:tid", ikYazma, async (req, res) => {
   try {
     if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
     const t0 = await pool.query(`SELECT * FROM arac_teslim WHERE id=$1`, [req.params.tid]);
@@ -22518,7 +22619,7 @@ app.delete("/hr/arac-teslim/:tid", async (req, res) => {
 });
 
 // ── Teslim fotoğrafları (çoklu yükleme; her dosya ayrı değerlendirilir, başarısız olan kaydedilmez) ──
-app.post("/hr/arac-teslim/:tid/foto", (req, res, next) => {
+app.post("/hr/arac-teslim/:tid/foto", ikYazma, (req, res, next) => {
   aracFotoUpload.array("foto", 20)(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "Dosya 15 MB'ı aşıyor" : err.message });
     next();
@@ -22556,7 +22657,7 @@ app.post("/hr/arac-teslim/:tid/foto", (req, res, next) => {
     res.json({ ok: eklenen.length > 0, eklenen, hatalar });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.put("/hr/arac-teslim-foto/:fid", async (req, res) => {
+app.put("/hr/arac-teslim-foto/:fid", ikYazma, async (req, res) => {
   try {
     const f0 = await pool.query(`SELECT * FROM arac_teslim_foto WHERE id=$1`, [req.params.fid]);
     if (!f0.rows[0]) return res.status(404).json({ error: "Fotoğraf yok" });
@@ -22569,7 +22670,7 @@ app.put("/hr/arac-teslim-foto/:fid", async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.delete("/hr/arac-teslim-foto/:fid", async (req, res) => {
+app.delete("/hr/arac-teslim-foto/:fid", ikYazma, async (req, res) => {
   try {
     if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
     const f0 = await pool.query(`SELECT * FROM arac_teslim_foto WHERE id=$1`, [req.params.fid]);
@@ -22618,7 +22719,7 @@ app.get("/hr/araclar/:id/lastik", async (req, res) => {
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post("/hr/araclar/:id/lastik", async (req, res) => {
+app.post("/hr/araclar/:id/lastik", ikYazma, async (req, res) => {
   try {
     await ensureAracKmTable().catch(() => {});
     const er = await aracErisim(req, req.params.id);
@@ -22638,7 +22739,7 @@ app.post("/hr/araclar/:id/lastik", async (req, res) => {
     res.json({ ok: true, id: lid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.put("/hr/arac-lastik/:lid", async (req, res) => {
+app.put("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
   try {
     const l0 = await pool.query(`SELECT * FROM arac_lastik WHERE id=$1`, [req.params.lid]);
     const eski = l0.rows[0];
@@ -22664,7 +22765,7 @@ app.put("/hr/arac-lastik/:lid", async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.delete("/hr/arac-lastik/:lid", async (req, res) => {
+app.delete("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
   try {
     if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
     const l0 = await pool.query(`SELECT * FROM arac_lastik WHERE id=$1`, [req.params.lid]);
@@ -22678,7 +22779,7 @@ app.delete("/hr/arac-lastik/:lid", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Lastik fotoğrafı / belgesi (tip=foto | belge)
-app.post("/hr/arac-lastik/:lid/dosya", (req, res, next) => {
+app.post("/hr/arac-lastik/:lid/dosya", ikYazma, (req, res, next) => {
   aracFotoUpload.single("dosya")(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "Dosya 15 MB'ı aşıyor" : err.message });
     next();
@@ -22749,7 +22850,7 @@ app.get("/hr/ekipler", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/ekipler", async (req, res) => {
+app.post("/hr/ekipler", ikYazma, async (req, res) => {
   try {
     const no = Number(req.body.ekip_no || 0);
     if (!no || no < 1) return res.status(400).json({ error: "Geçerli ekip no gerekli" });
@@ -22781,7 +22882,7 @@ app.post("/hr/ekipler", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/ekipler/:no", async (req, res) => {
+app.delete("/hr/ekipler/:no", ikYazma, async (req, res) => {
   try {
     const no = Number(req.params.no);
     await pool.query(`DELETE FROM ekipler WHERE ekip_no=$1`, [no]);
@@ -22843,7 +22944,7 @@ app.post("/hr/ekipler/sablon-kur", authMiddleware, async (req, res) => {
 });
 
 // Personel → ekip ataması (yalnız ekip_bilgisi alanını günceller)
-app.put("/hr/personel/:id/ekip", async (req, res) => {
+app.put("/hr/personel/:id/ekip", ikYazma, async (req, res) => {
   try {
     const sets = [], vals = [req.params.id];
     if ("ekip_bilgisi" in req.body) {
@@ -22925,7 +23026,7 @@ pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS donem_gunu INTEGER`).
 pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS lat NUMERIC(9,6)`).catch(() => {});
 pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS lng NUMERIC(9,6)`).catch(() => {});
 
-app.post("/hr/ofis/:id/kira-ode", async (req, res) => {
+app.post("/hr/ofis/:id/kira-ode", ikYazma, async (req, res) => {
   try {
     const { donem, tutar, tarih, aciklama, kasadan_dus } = req.body;
     if (!/^\d{4}-\d{2}$/.test(String(donem || ""))) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
@@ -22942,7 +23043,7 @@ app.post("/hr/ofis/:id/kira-ode", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/ofis/:id/kira-ode", async (req, res) => {
+app.delete("/hr/ofis/:id/kira-ode", ikYazma, async (req, res) => {
   try {
     const donem = String(req.query.donem || "");
     if (!/^\d{4}-\d{2}$/.test(donem)) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
@@ -22975,7 +23076,7 @@ app.get("/hr/ofis", async (req, res) => {
   res.json(rows);
 });
 
-app.post("/hr/ofis", async (req, res) => {
+app.post("/hr/ofis", ikYazma, async (req, res) => {
   try {
     const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
             aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu } = req.body;
@@ -22992,7 +23093,7 @@ app.post("/hr/ofis", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/ofis/:id", async (req, res) => {
+app.put("/hr/ofis/:id", ikYazma, async (req, res) => {
   try {
     const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
             aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu } = req.body;
@@ -23011,7 +23112,7 @@ app.put("/hr/ofis/:id", async (req, res) => {
 });
 
 // Depo/ofis koordinatı (yalnız lat/lng; null → temizle). Diğer alanlara dokunmaz.
-app.put("/hr/ofis/:id/konum", async (req, res) => {
+app.put("/hr/ofis/:id/konum", ikYazma, async (req, res) => {
   try {
     const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
     const lat = num(req.body?.lat), lng = num(req.body?.lng);
@@ -23025,12 +23126,12 @@ app.put("/hr/ofis/:id/konum", async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.delete("/hr/ofis/:id", async (req, res) => {
+app.delete("/hr/ofis/:id", ikYazma, async (req, res) => {
   await pool.query("UPDATE ofis_depo SET durum='PASİF' WHERE id=$1", [req.params.id]);
   res.json({ ok: true });
 });
 
-app.post("/hr/ofis/:id/belge", ofisUpload.single("dosya"), async (req, res) => {
+app.post("/hr/ofis/:id/belge", ikYazma, ofisUpload.single("dosya"), async (req, res) => {
   try {
     const { belge_turu, aciklama } = req.body;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
@@ -23049,7 +23150,7 @@ app.post("/hr/ofis/:id/belge", ofisUpload.single("dosya"), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/ofis-belge/:id", async (req, res) => {
+app.delete("/hr/ofis-belge/:id", ikYazma, async (req, res) => {
   try {
     const b = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE id=$1", [req.params.id]);
     if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);
@@ -23123,7 +23224,7 @@ async function masrafCezaAvansOlustur(formId) {
 }
 
 // PUT submit for approval (TASLAK → PM_BEKLE)
-app.put("/hr/masraf-form/:id/submit", async (req, res) => {
+app.put("/hr/masraf-form/:id/submit", masrafFormSahibiVeyaTam, async (req, res) => {
   try {
     const f = await pool.query("SELECT talep_eden_email FROM masraf_form WHERE id=$1", [req.params.id]);
     const mail = f.rows[0]?.talep_eden_email || "";
@@ -23140,7 +23241,7 @@ app.put("/hr/masraf-form/:id/submit", async (req, res) => {
 });
 
 // PUT Rollout Müdürü onayla (ROLLOUT_BEKLE → sonraki adım)
-app.put("/hr/masraf-form/:id/rollout-onayla", async (req, res) => {
+app.put("/hr/masraf-form/:id/rollout-onayla", masrafAdimKapisi(masrafRolloutOnayci), async (req, res) => {
   try {
     const { rollout_not } = req.body;
     const f = await pool.query("SELECT talep_eden_email, durum FROM masraf_form WHERE id=$1", [req.params.id]);
@@ -23159,7 +23260,7 @@ app.put("/hr/masraf-form/:id/rollout-onayla", async (req, res) => {
 });
 
 // PUT Muhasebe onayla (MUHASEBE_BEKLE → sonraki adım) — fiş/tutar doğrulaması
-app.put("/hr/masraf-form/:id/muhasebe-onayla", async (req, res) => {
+app.put("/hr/masraf-form/:id/muhasebe-onayla", masrafAdimKapisi(masrafMuhasebeOnayci), async (req, res) => {
   try {
     const { muhasebe_not } = req.body;
     const f = await pool.query("SELECT talep_eden_email, durum FROM masraf_form WHERE id=$1", [req.params.id]);
@@ -23178,7 +23279,7 @@ app.put("/hr/masraf-form/:id/muhasebe-onayla", async (req, res) => {
 });
 
 // PUT PM onayla (PM_BEKLE → PM_ONAY)
-app.put("/hr/masraf-form/:id/pm-onayla", async (req, res) => {
+app.put("/hr/masraf-form/:id/pm-onayla", masrafAdimKapisi(masrafPmOnayci), async (req, res) => {
   try {
     const { pm_not } = req.body;
     const f = await pool.query("SELECT talep_eden_email, durum FROM masraf_form WHERE id=$1", [req.params.id]);
@@ -23195,7 +23296,7 @@ app.put("/hr/masraf-form/:id/pm-onayla", async (req, res) => {
 });
 
 // PUT PM reddet
-app.put("/hr/masraf-form/:id/pm-reddet", async (req, res) => {
+app.put("/hr/masraf-form/:id/pm-reddet", masrafRedKapisi, async (req, res) => {
   try {
     const { red_aciklama, reddeden_email } = req.body;
     const onceki = (await pool.query("SELECT durum FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
@@ -23211,7 +23312,7 @@ app.put("/hr/masraf-form/:id/pm-reddet", async (req, res) => {
 // PUT Geri Gönder (PM_BEKLE / DIREKTOR_BEKLE → TASLAK): fiş hatası vb.
 // durumlarda form reddedilmeden personele iade edilir — personel düzeltip
 // yeniden onaya gönderir. İade notu red_aciklama alanında taşınır (11.08.2026).
-app.put("/hr/masraf-form/:id/geri-gonder", async (req, res) => {
+app.put("/hr/masraf-form/:id/geri-gonder", masrafAdimKapisi(masrafHerhangiOnayci), async (req, res) => {
   try {
     const { aciklama, gonderen_email } = req.body;
     if (!String(aciklama || "").trim())
@@ -23233,7 +23334,7 @@ app.put("/hr/masraf-form/:id/geri-gonder", async (req, res) => {
 });
 
 // PUT Direktör onayla (DIREKTOR_BEKLE → TAMAMLANDI) + avans düş
-app.put("/hr/masraf-form/:id/direktor-onayla", async (req, res) => {
+app.put("/hr/masraf-form/:id/direktor-onayla", masrafAdimKapisi(masrafDirektorOnayci), async (req, res) => {
   try {
     const id = req.params.id;
     const { direktor_not } = req.body;
@@ -23250,7 +23351,7 @@ app.put("/hr/masraf-form/:id/direktor-onayla", async (req, res) => {
 });
 
 // PUT Direktör reddet
-app.put("/hr/masraf-form/:id/direktor-reddet", async (req, res) => {
+app.put("/hr/masraf-form/:id/direktor-reddet", masrafRedKapisi, async (req, res) => {
   try {
     const { red_aciklama, reddeden_email } = req.body;
     const onceki = (await pool.query("SELECT durum FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
@@ -23628,7 +23729,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS marka_taseron_odeme (
 // tamamlanan_qty boot garantisi: /setup-db içindeki ALTER yalnız elle çağrılınca
 // çalışıyor — buildMasterJoinedQuery bu kolonu kullandığı için açılışta garanti et
 pool.query(`ALTER TABLE master_works ADD COLUMN IF NOT EXISTS tamamlanan_qty NUMERIC`).catch(() => {});
-app.put("/hr/masraf-form/:id/arsivle", async (req, res) => {
+app.put("/hr/masraf-form/:id/arsivle", masrafAdimKapisi(masrafMuhasebeOnayci), async (req, res) => {
   try {
     const { rows } = await pool.query(
       `UPDATE masraf_form SET durum='ARSIVLENDI', arsiv_tarihi=NOW() WHERE id=$1 AND durum='TAMAMLANDI' RETURNING *`,
@@ -25973,7 +26074,7 @@ app.get("/subcons", async (req, res) => {
   }
 });
 
-app.post("/subcons", async (req, res) => {
+app.post("/subcons", sahaKayitYazma, async (req, res) => {
   try {
     const name = (req.body.subcon_name || "").trim().toUpperCase();
     if (!name) return res.status(400).json({ error: "subcon_name boş olamaz" });
