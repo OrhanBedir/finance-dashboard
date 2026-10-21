@@ -706,7 +706,10 @@ function okumaKapisi(izinli, hata) {
 const ikOkumaYetkili = (u) => ikYazmaYetkili(u) || finansYazmaYetkili(u);
 const ikOkuma = okumaKapisi(ikOkumaYetkili, "İK kayıtlarını görme yetkiniz yok");
 // Puantaj ekranı rollout rolüne de açık (web canSeePuantaj); maaş alanları ikMaskele ile gizlenir
-const puantajOkuma = okumaKapisi((u) => ikOkumaYetkili(u) || _rol(u) === "rollout", "Puantaj görme yetkiniz yok");
+const puantajOkuma = okumaKapisi((u) => ikOkumaYetkili(u) || _rol(u) === "rollout" || !!ROL_IZINLERI[_rol(u)]?.puantaj_goruntule, "Puantaj görme yetkiniz yok");
+// 21.10.2026: İSG kayıtları (eğitim/belge matrisi, uyarılar, İSG Excel'i, personel İSG/belge dökümü) İK okuma yetkilisine
+// + rol izin setinde isg_goruntule olan role (İSG Sorumlusu) açık; maaş/banka alanları ikMaskele ile zaten gizlenir
+const isgOkuma = okumaKapisi((u) => ikOkumaYetkili(u) || !!ROL_IZINLERI[_rol(u)]?.isg_goruntule, "İSG kayıtlarını görme yetkiniz yok");
 const finansOkuma = okumaKapisi(finansYazmaYetkili, "Finans kayıtlarını görme yetkiniz yok");
 const odemeOkuma = okumaKapisi((u, req) => !!odemeYetkili(req), "Ödeme bilgisini görme yetkiniz yok");
 const taseronDegilOkuma = okumaKapisi((u) => !taseronMu(u), "Taşeron hesabı bu listeyi göremez");
@@ -874,6 +877,158 @@ app.use((req, res, next) => {
     try { jwt.verify(tok, JWT_SECRET); return next(); } catch {}
   }
   return res.status(401).json({ ok: false, error: tok ? "Oturum süresi dolmuş veya geçersiz — lütfen tekrar giriş yapın" : "Oturum gerekli" });
+});
+
+// ═══ İSG SORUMLUSU ROLÜ (21.10.2026, Orhan) — role='isg' ════════════════════════════════════════
+// Kişiye / e-postaya özel değil: izinler ROLDEN gelir, ileride işe alınan her İSG sorumlusuna aynı rol atanır.
+// Başlangıç kapsamı GÖRÜNTÜLEME: İSG paneli, puantaj, Rollout Data (salt okunur) + kendi iş avansı / masraf formu.
+// İSG kaydı değiştirme, puantaj değiştirme, Rollout yazma izinleri ayrı anahtarlar olarak burada durur (false);
+// ileride açılacaksa yalnız bu tablo değişir. Kapı aşağıda: İZİN LİSTESİ dışında kalan her istek 403 döner.
+const ROL_IZINLERI = {
+  isg: {
+    isg_goruntule: true, isg_duzenle: false, isg_sil: false, isg_onayla: false,
+    puantaj_goruntule: true, puantaj_duzenle: false,
+    rollout_goruntule: true, rollout_excel: true, rollout_duzenle: false,
+    kendi_avans: true, kendi_masraf: true,
+  },
+};
+const isgMu = (u) => _rol(u) === "isg";
+const rolIzinleri = (u) => ROL_IZINLERI[_rol(u)] || null;
+// Kendi personel kaydı (kimlik oturumdan: user_id, yoksa e-posta) — istemcinin gönderdiği personel_id kullanılmaz
+async function kendiPersonelKaydi(u) {
+  const r = await pool.query(`SELECT id, ad_soyad, COALESCE(marka,'ERC') AS marka FROM personel
+    WHERE (user_id = $1 OR LOWER(TRIM(COALESCE(email,''))) = LOWER(TRIM($2)))
+    ORDER BY (user_id = $1) DESC, aktif DESC, id DESC LIMIT 1`, [Number(u?.user_id || u?.id || 0), String(u?.email || "")]).catch(() => ({ rows: [] }));
+  return r.rows[0] || null;
+}
+const _isgYol = (rx) => rx;
+// GET: görüntüleme izin listesi (kendi kayıtları sunucuda ayrıca kilitlidir)
+const ISG_OKUMA = [
+  _isgYol(/^\/auth\/me$/),
+  // Kendi iş avansı / masraf (personel akışı)
+  /^\/hr\/is-avans$/, /^\/hr\/is-avans\/(bakiye|hesap|excel)$/, /^\/hr\/personel-odeme$/, /^\/hr\/personel-secim$/,
+  /^\/hr\/masraf-form$/, /^\/hr\/masraf-form\/\d+$/, /^\/hr\/masraf-form\/\d+\/(excel|pdf)$/, /^\/hr\/masraf-form\/bakiye\/\d+$/,
+  /^\/hr\/masraf-formlari$/, /^\/hr\/masraf-belge\/file\/[^/]+$/, /^\/islem-gecmisi\/(avans|masraf)\/\d+$/,
+  /^\/hr\/mobile-dashboard$/, /^\/hr\/atanan-arac$/, /^\/hr\/araclar$/, /^\/is-atama\/benim$/,
+  // İSG paneli
+  /^\/hr\/personel$/, /^\/hr\/personel\/\d+\/(isg|belgeler)$/, /^\/hr\/isg\/(matris|uyarilar)$/, /^\/hr\/isg-egitim-turleri$/, /^\/hr\/excel\/isg$/,
+  // Puantaj
+  /^\/hr\/puantaj$/, /^\/hr\/puantaj\/ozet$/, /^\/hr\/excel\/puantaj$/, /^\/hr\/ekipler$/,
+  // Rollout Data (salt okunur)
+  /^\/rollout\/list$/, /^\/rollout\/summary$/, /^\/rollout\/is-kolu$/, /^\/rollout\/is-kolu\/tanim$/, /^\/rollout\/is-kolu\/site\/[^/]+$/,
+  /^\/is-atama\/(liste|yetkim|is-yuku|kategoriler)$/,
+];
+const ISG_EXCEL = [/^\/export\/excel$/]; // Rollout Excel'i: ayrı izin (rollout_excel) — finansal kolon içermez
+// Yazma: yalnız kendi avans / masraf akışı (sahiplik kontrolleri uçların kendi kapılarında da var)
+const ISG_YAZMA = [
+  ["POST", /^\/auth\/(login|reset-password-request|reset-password)$/],
+  ["POST", /^\/hr\/is-avans$/], ["PUT", /^\/hr\/is-avans\/\d+$/], ["DELETE", /^\/hr\/is-avans\/\d+$/],
+  ["POST", /^\/hr\/masraf-form$/], ["DELETE", /^\/hr\/masraf-form\/\d+$/], ["PUT", /^\/hr\/masraf-form\/\d+\/submit$/],
+  ["POST", /^\/hr\/masraf-kalem$/], ["PUT", /^\/hr\/masraf-kalem\/\d+$/], ["DELETE", /^\/hr\/masraf-kalem\/\d+$/],
+  ["POST", /^\/hr\/masraf-kalem\/\d+\/not$/], ["POST", /^\/hr\/masraf-belge\/\d+$/], ["DELETE", /^\/hr\/masraf-belge\/\d+$/],
+];
+// Yanıtlardan çıkarılan alanlar (maaş, ücret, banka, ödeme tutarı; araç kira/depozito; saha hakediş/perakende tutarı)
+const ISG_GIZLI_PERSONEL = ["net_maas", "bankadan_gosterilen", "elden_verilen", "iban", "banka_adi",
+  "banka_hesap_no", "hakedilen_maas", "hakedis_otomatik", "hakedis_manuel", "manuel_tutar", "bankadan", "elden", "avans", "kalan",
+  "extra_hakedis", "maas_gecerli_donem", "odenen", "toplam_odenen", "kalan_net_odeme", "brut", "maas"];
+const ISG_ARAC_ALANLARI = ["id", "plaka", "marka", "model", "yil", "aktif", "tip", "bolge", "surucu", "durum", "sigorta_bitis", "muayene_bitis"];
+const ISG_GIZLI_ROLLOUT = ["hakedis", "enh_perakende_tutar", "enh_perakende_odeme_tarihi", "enh_perakende_dekont_url", "enh_perakende_sozlesme_url"];
+const _isgSatirTemizle = (b, alanlar) => {
+  const t = (x) => { if (!x || typeof x !== "object") return x; const c = { ...x }; for (const k of alanlar) delete c[k]; return c; };
+  if (Array.isArray(b)) return b.map(t);
+  if (b && typeof b === "object") {
+    const c = { ...b };
+    for (const k of ["rows", "data", "personel", "liste"]) if (Array.isArray(c[k])) c[k] = c[k].map(t);
+    return t(c);
+  }
+  return b;
+};
+// Sahiplik: masraf formu / belge / personel kaydı oturumdaki kullanıcıya mı ait?
+async function isgMasrafFormSahibi(u, formId) {
+  const r = await pool.query(`SELECT 1 FROM masraf_form mf LEFT JOIN personel p ON p.id = mf.personel_id
+    WHERE mf.id=$1 AND (LOWER(TRIM(COALESCE(mf.talep_eden_email,''))) = LOWER(TRIM($2)) OR LOWER(TRIM(COALESCE(p.email,''))) = LOWER(TRIM($2)) OR p.user_id = $3)`,
+    [Number(formId), String(u.email || ""), Number(u.user_id || u.id || 0)]).catch(() => ({ rows: [] }));
+  return r.rows.length > 0;
+}
+app.use(async (req, res, next) => {
+  try {
+    if (req.method === "OPTIONS") return next();
+    const u = optionalAuth(req);
+    if (!u || !isgMu(u)) return next();
+    const izin = rolIzinleri(u);
+    const yol = req.path.replace(/\/+$/, "") || "/";
+    const m = req.method === "HEAD" ? "GET" : req.method;
+    const red = (msg) => res.status(403).json({ ok: false, error: msg || "İSG Sorumlusu rolü bu işlemi yapamaz" });
+    const ben = String(u.email || "").toLowerCase().trim();
+    if (m === "GET") {
+      const okuma = ISG_OKUMA.some((rx) => rx.test(yol));
+      const excel = ISG_EXCEL.some((rx) => rx.test(yol));
+      if (!okuma && !(excel && izin.rollout_excel)) return red("İSG Sorumlusu rolü bu sayfayı / veriyi göremez");
+      if (/^\/rollout\//.test(yol) || /^\/is-atama\/(liste|is-yuku)$/.test(yol) || excel) { if (!izin.rollout_goruntule) return red(); }
+      if (/^\/hr\/(puantaj|excel\/puantaj|ekipler)/.test(yol) && !izin.puantaj_goruntule) return red();
+      if (/^\/hr\/(isg|isg-egitim-turleri|excel\/isg|personel\/\d+\/(isg|belgeler))/.test(yol) && !izin.isg_goruntule) return red();
+      // Kimlik oturumdan: sorgudaki e-posta / personel / form başkasına aitse reddet
+      if (/^\/hr\/(mobile-dashboard|atanan-arac|masraf-formlari)$/.test(yol)) {
+        const q = String(req.query?.email || "").toLowerCase().trim();
+        if (q && q !== ben) return red("Yalnız kendi kayıtlarınızı görebilirsiniz");
+        if (!q && yol === "/hr/masraf-formlari") return red("Yalnız kendi kayıtlarınızı görebilirsiniz");
+      }
+      let mm;
+      if ((mm = yol.match(/^\/hr\/masraf-form\/(\d+)(\/(excel|pdf))?$/))) {
+        if (!(await isgMasrafFormSahibi(u, mm[1]))) return red("Bu masraf formu size ait değil");
+      }
+      if ((mm = yol.match(/^\/hr\/masraf-form\/bakiye\/(\d+)$/))) {
+        const kp = await kendiPersonelKaydi(u);
+        if (!kp || String(kp.id) !== mm[1]) return red("Yalnız kendi bakiyenizi görebilirsiniz");
+      }
+      if ((mm = yol.match(/^\/hr\/masraf-belge\/file\/([^/]+)$/))) {
+        const b = await pool.query(`SELECT mk.form_id FROM masraf_belge mb JOIN masraf_kalem mk ON mk.id = mb.kalem_id WHERE mb.dosya_adi=$1 ORDER BY mb.id DESC LIMIT 1`, [decodeURIComponent(mm[1])]).catch(() => ({ rows: [] }));
+        if (!b.rows[0] || !(await isgMasrafFormSahibi(u, b.rows[0].form_id))) return red("Bu belge size ait değil");
+      }
+      // Yanıt maskesi + firma kapsamı (alt marka İSG kullanıcısı yalnız kendi bordro firmasını görür)
+      const kap = altMarkaKapsam(req);
+      const orig = res.json.bind(res);
+      if (/^\/hr\/(personel|puantaj|puantaj\/ozet)$/.test(yol)) {
+        // Maaş / banka / ödeme alanları anahtarıyla birlikte çıkarılır (değer boş olsa da yanıtta yer almaz)
+        res.json = (b) => {
+          let c = _isgSatirTemizle(b, ISG_GIZLI_PERSONEL);
+          if (kap && Array.isArray(c)) c = c.filter((p) => { const mk = p.personel_marka ?? p.marka; return mk === undefined || kap.bordro.includes(String(mk || "ERC").toUpperCase()); });
+          return orig(c);
+        };
+      } else if (/^\/hr\/isg\/(matris|uyarilar)$/.test(yol) && kap) {
+        res.json = (b) => orig(Array.isArray(b) ? b.filter((p) => kap.bordro.includes(String(p.marka || "ERC").toUpperCase())) : b);
+      } else if (yol === "/hr/araclar") {
+        res.json = (b) => orig(Array.isArray(b) ? b.map((a) => Object.fromEntries(ISG_ARAC_ALANLARI.filter((k) => k in (a || {})).map((k) => [k, a[k]]))) : b);
+      } else if (yol === "/rollout/list") {
+        res.json = (b) => {
+          const c = _isgSatirTemizle(b, ISG_GIZLI_ROLLOUT);
+          if (kap && c && Array.isArray(c.rows)) {
+            const on = String(markaProfil(kap.kod)?.onek || kap.kod || "").toUpperCase();
+            c.rows = c.rows.filter((r) => ["rf_subcon", "enh_subcon", "trs_subcon", "power_subcon"].some((k) => String(r[k] || "").toUpperCase().startsWith(on)));
+          }
+          return orig(c);
+        };
+      }
+      return next();
+    }
+    const yazma = ISG_YAZMA.find(([mt, rx]) => mt === m && rx.test(yol));
+    if (!yazma) return red("İSG Sorumlusu rolü bu kaydı değiştiremez");
+    if (/^\/hr\/is-avans/.test(yol) && !izin.kendi_avans) return red();
+    if (/^\/hr\/masraf/.test(yol) && !izin.kendi_masraf) return red();
+    // Yeni avans / masraf formu: talep eden ve personel OTURUMDAN — istemcinin gönderdiği kimlik kullanılmaz
+    if (m === "POST" && (yol === "/hr/is-avans" || yol === "/hr/masraf-form")) {
+      const kp = await kendiPersonelKaydi(u);
+      if (!req.body || typeof req.body !== "object") return res.status(400).json({ ok: false, error: "Geçersiz istek" });
+      req.body.talep_eden_email = u.email;
+      req.body.talep_eden_ad = kp?.ad_soyad || u.name || u.email;
+      req.body.talep_eden = req.body.talep_eden_ad;
+      req.body.personel_id = kp?.id || null;
+    }
+    return next();
+  } catch (e) {
+    console.error("[isg-kapisi]", e.message);
+    return res.status(500).json({ ok: false, error: "Yetki kontrolü yapılamadı" });
+  }
 });
 
 // TÜM KULLANICILARI LİSTELE
@@ -1089,7 +1244,7 @@ app.post("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
 
 // GENEL DÜZENLEME (20.10.2026, Orhan): Admin → Kullanıcılar yan paneli tek "Kaydet" ile ad, e-posta, rol,
 // taşeron/bağlı firma ve markayı günceller. Yetki kuralları /role ve /marka uçlarıyla aynı; şifre burada değişmez.
-const ADMIN_ROLLER = ["admin", "user", "subcon", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe"];
+const ADMIN_ROLLER = ["admin", "user", "subcon", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe", "isg"];
 app.put("/admin/users/:id", authMiddleware, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1147,7 +1302,7 @@ app.put(
       const { id } = req.params;
       const { role, subcon_name } = req.body;
 
-      if (!role || !["admin", "user", "subcon", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe"].includes(role)) {
+      if (!role || !["admin", "user", "subcon", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe", "isg"].includes(role)) {
         return res.status(400).json({ ok: false, error: "Geçersiz rol" });
       }
       if (role === "subcon" && !String(subcon_name || "").trim()) {
@@ -1514,6 +1669,7 @@ app.post("/auth/login", async (req, res) => {
         marka_ad: markaAd,
         hw_yukleme: hwYukleme,
         ...markaProfilAlanlari,
+        ...(rolIzinleri(user) ? { izinler: rolIzinleri(user) } : {}), // 21.10.2026: rol bazlı izin seti (İSG Sorumlusu)
       },
     });
   } catch (err) {
@@ -1565,6 +1721,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
       marka: markaKod, marka_ad: markaAd, hw_yukleme: hwYukleme,
       users_admin: u.users_admin === true,
       ...(_mp ? { marka_devir: _mp.devir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay } : {}),
+      ...(rolIzinleri(u) ? { izinler: rolIzinleri(u) } : {}),
     }});
   } catch (e) {
     console.error("AUTH ME ERROR:", e.message);
@@ -17201,7 +17358,7 @@ pool.query(`
 // tablosundan beslendiği için aktif edilen kişi kadroda görünmüyordu. Çözüm: kimlik esaslı
 // bağlantı (personel.user_id → e-posta), aktivasyonda otomatik bağlama/profil açma ve
 // "Aktif Personelleri Eşitle" ucu. Maaş, işe giriş, avans, ödeme ve puantaj verisi hiç yazılmaz.
-const IK_OTOMATIK_ROLLER = ["user"];                               // İK kaydı yoksa profil açılır (yalnız saha personeli rolü)
+const IK_OTOMATIK_ROLLER = ["user", "isg"];               // 21.10.2026: İSG Sorumlusu da personeldir (unvan/maaş/giriş İK'da ayrı girilir)                               // İK kaydı yoksa profil açılır (yalnız saha personeli rolü)
 const IK_ERISIM_ROLLERI = ["subcon", "platform_admin"];            // firma / erişim hesabı: otomatik kadroya alınmaz
 const ikAdNormalize = (s) => String(s || "").trim()
   .replace(/İ/g, "i").replace(/I/g, "i").toLowerCase() // Türkçe İ/I: toLowerCase'den ÖNCE (JS 'İ' → 'i̇' birleşik nokta üretir)
@@ -17799,7 +17956,7 @@ app.post("/hr/personel/:id/belge/:tur", ikYazma, uploadPersonelBelge.single("dos
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/hr/personel/:id/belgeler", ikOkuma, async (req, res) => {
+app.get("/hr/personel/:id/belgeler", isgOkuma, async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM personel_belgeler WHERE personel_id=$1", [req.params.id]);
     res.json(r.rows);
@@ -17807,7 +17964,7 @@ app.get("/hr/personel/:id/belgeler", ikOkuma, async (req, res) => {
 });
 
 // ---- ISG EĞİTİMLER ----
-app.get("/hr/personel/:id/isg", ikOkuma, async (req, res) => {
+app.get("/hr/personel/:id/isg", isgOkuma, async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM personel_isg WHERE personel_id=$1 ORDER BY egitim_tarihi DESC", [req.params.id]);
     res.json(r.rows);
@@ -18541,7 +18698,7 @@ app.get("/finance/sarkan-odemeler", requireFinanceAuth, async (req, res) => {
 
 // ISG uyarı özeti (süresi biten/bitecek eğitimler)
 // GET /hr/isg/matris — tüm personel × tüm ISG eğitimler (matrix view için)
-app.get("/hr/isg/matris", ikOkuma, async (req, res) => {
+app.get("/hr/isg/matris", isgOkuma, async (req, res) => {
   try {
     const personelRows = await pool.query(
       "SELECT id,ad_soyad,unvan,aktif,firma_tipi,elektrik_isi,yuksekte_calisma,arac_kullanim,ekip_bilgisi,alt_yuklenici,COALESCE(marka,'ERC') AS marka FROM personel ORDER BY aktif DESC, ad_soyad ASC"
@@ -18563,7 +18720,7 @@ app.get("/hr/isg/matris", ikOkuma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/hr/isg/uyarilar", ikOkuma, async (req, res) => {
+app.get("/hr/isg/uyarilar", isgOkuma, async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT i.*, p.ad_soyad, p.unvan, COALESCE(p.marka,'ERC') AS marka,
@@ -18809,7 +18966,7 @@ function rfqCell(ws, rowNo, colNo, value, bgArgb, bold, fontArgb) {
 }
 
 // GET /hr/excel/isg?tip=hw|simsek&personel_id=X
-app.get("/hr/excel/isg", ikOkuma, async (req, res) => {
+app.get("/hr/excel/isg", isgOkuma, async (req, res) => {
   try {
     const { tip, personel_id } = req.query; // tip: "hw" (aktif) | "simsek" (tümü)
     const ExcelJS = require("exceljs");
@@ -19235,7 +19392,7 @@ const GECMIS_ETIKET = { tutar: "Tutar", tarih: "Tarih", durum: "Durum", firma: "
   form_no: "Form no", talep_eden: "Talep eden", kalem_sayisi: "Kalem sayısı", fis_var: "Fiş var", adim: "Adım", kalem: "Kalem",
   name: "Ad soyad", email: "E-posta / kullanıcı adı", role: "Rol", subcon_name: "Taşeron / bağlı firma", marka: "Firma", is_active: "Durum", not: "Not",
   ekip_turu: "Ekip türü", bagli_firma: "Bağlı firma", is_etiketi: "İş etiketi", ad: "Ad" };
-const GECMIS_ROL_TR = { user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
+const GECMIS_ROL_TR = { isg: "İSG Sorumlusu", user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
 const GECMIS_BASLIK = { OLUSTURMA: "Oluşturuldu", DUZENLEME: "Düzenlendi", ONAY: "Onaylandı", ODEME: "Ödendi / tamamlandı", RED: "Reddedildi", SILME: "Silindi", GONDERIM: "Onaya gönderildi",
   GERI_GONDER: "Geri gönderildi (iade)", ARSIV: "Arşivlendi", KALEM_EKLE: "Kalem eklendi", KALEM_DUZENLE: "Kalem düzenlendi", KALEM_SIL: "Kalem silindi", BELGE_EKLE: "Fiş / belge eklendi", BELGE_SIL: "Fiş / belge kaldırıldı", NOT: "Ek açıklama", DUZELTME: "Düzeltme",
   ROL: "Rol değiştirildi", MARKA: "Firma değiştirildi", DURUM: "Erişim durumu değiştirildi", SIFRE: "Şifre yenilendi", IK: "İK kaydı",

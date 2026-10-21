@@ -6001,7 +6001,7 @@ function HwYuklemeMerkezi({ odak, onRejected }) {
   );
 }
 
-function RolloutDashboard({ currentUser }) {
+function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true }) {
   const [belgeSecRow, setBelgeSecRow] = useState(null);
   const [showCleanupPanel, setShowCleanupPanel] = useState(false);
   // İş Atama (Faz 1, 03.09.2026): yetkili görür; açık iş sayısı butonda
@@ -6337,7 +6337,7 @@ function RolloutDashboard({ currentUser }) {
       });
 
       setRows(data.rows || []);
-      try {
+      if (!saltOkunur) try {
         const cleanupData = await fetchJson(`${API_BASE}/rollout/cleanup`, { withAuth: true });
         setCleanupRows(cleanupData.rows || []);
       } catch(e) { /* ignore cleanup fetch errors */ }
@@ -6351,9 +6351,11 @@ function RolloutDashboard({ currentUser }) {
   }, []);
 
   useEffect(() => {
-    // DB migration + site type fix
-    fetch(`${API_BASE}/migrate`).catch(() => {});
-    fetch(`${API_BASE}/rollout/fix-site-types`).catch(() => {});
+    // DB migration + site type fix — salt okunur (İSG) görünümde çağrılmaz
+    if (!saltOkunur) {
+      fetch(`${API_BASE}/migrate`).catch(() => {});
+      fetch(`${API_BASE}/rollout/fix-site-types`).catch(() => {});
+    }
     loadData();
   }, []);
 
@@ -6544,7 +6546,8 @@ function RolloutDashboard({ currentUser }) {
         </select>
 
         <div className="qcActionBox">
-          <button
+          {saltOkunur && <span style={{ fontSize: "12px", fontWeight: 700, color: "#475569", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "8px 12px", whiteSpace: "nowrap" }}>Görüntüleme yetkisi</span>}
+          {!saltOkunur && <button
             className="saveButton"
             onClick={() => {
               const site = search.trim();
@@ -6576,8 +6579,8 @@ function RolloutDashboard({ currentUser }) {
             }}
           >
             Veri Gir
-          </button>
-          <button
+          </button>}
+          {excelIzni && <button
             onClick={handleExportExcel}
             style={{
               background: "#2e7d32",
@@ -6591,9 +6594,9 @@ function RolloutDashboard({ currentUser }) {
             }}
           >
             Excel İndir
-          </button>
+          </button>}
           {/* Clean Up kısayolu (02.09.2026): arama yapmadan doğrudan Clean Up bölümüne git */}
-          <button
+          {!saltOkunur && <button
             type="button"
             onClick={() => setShowCleanupPanel(true)}
             title="Clean Up kayıtlarını aç"
@@ -6610,9 +6613,9 @@ function RolloutDashboard({ currentUser }) {
             }}
           >
             🧹 Clean Up{cleanupRows.length ? ` (${cleanupRows.length})` : ""}
-          </button>
+          </button>}
           {/* İş Atama (Faz 1, 03.09.2026): kategori + saha + personel → mobil "Rollout · İşlerim" */}
-          {isAtamaYetkili && (
+          {isAtamaYetkili && !saltOkunur && (
             <button
               type="button"
               onClick={() => setShowIsAtama(true)}
@@ -6646,11 +6649,12 @@ function RolloutDashboard({ currentUser }) {
         regionFilter={regionFilter}
         isKoluFilter={isKoluFilter}
         yenile={isKoluYenile}
-        onGuncelle={(site) => { setSelectedRolloutSite(site); setShowRolloutEntryModal(true); }}
+        onGuncelle={saltOkunur ? null : (site) => { setSelectedRolloutSite(site); setShowRolloutEntryModal(true); }}
         onBelgeler={(row) => setBelgeSecRow(row)}
         onIsAta={(baslangic) => { setIsAtamaBaslangic(baslangic); setShowIsAtama(true); }}
         onSiteAc={(site) => setSearch(site)}
-        atamaYetkili={isAtamaYetkili}
+        atamaYetkili={isAtamaYetkili && !saltOkunur}
+        saltOkunur={saltOkunur}
       />
 
       <div className="tableWrap" style={isKoluListeModu(rows, search, isKoluFilter) ? { display: "none" } : undefined}>
@@ -6778,12 +6782,12 @@ function RolloutDashboard({ currentUser }) {
                 return (
                 <tr key={row.id}>
                   <td style={{ textAlign:"center" }}>
-                    <button
+                    {saltOkunur ? <span title="Görüntüleme yetkisi" style={{ color: "#cbd5e1" }}>—</span> : <button
                       onClick={() => { setSelectedRolloutSite(row.site_code); setShowRolloutEntryModal(true); }}
                       title="Kaydı güncelle"
                       style={{ background:"#2563eb", color:"#fff", border:"none", borderRadius:"6px", padding:"4px 8px", cursor:"pointer", fontSize:"13px" }}>
                       ✏️
-                    </button>
+                    </button>}
                   </td>
                   <td style={{ textAlign:"center" }}>
                     <button onClick={() => setBelgeSecRow(row)} title="Saha belgelerini seç ve ZIP indir"
@@ -6903,7 +6907,7 @@ function RolloutDashboard({ currentUser }) {
         />,
         document.body
       )}
-      {showRolloutEntryModal && (
+      {showRolloutEntryModal && !saltOkunur && (
         <RolloutEntryModal
           siteCode={selectedRolloutSite}
           rows={rows}
@@ -17055,7 +17059,7 @@ function formatTRY(value) {
 /* ============================================================
    PUANTAJ PANEL - Sadece Rollout Müdürü için (maaş bilgisi yok)
    ============================================================ */
-function PuantajPanel({ currentUser, onBack }) {
+function PuantajPanel({ currentUser, onBack, saltOkunur = false }) {
   // MAAŞ BİLGİSİ yetkisi: hakediş kartı sadece Orhan Bedir + Düzgün Şimşek
   const _pEmail = (currentUser?.email || "").toLowerCase();
   // AHY (info@) burada YOK: maaş/hakediş bilgisi AHY tarafında yalnız
@@ -17210,7 +17214,8 @@ function PuantajPanel({ currentUser, onBack }) {
     <div style={{ maxWidth:"1400px", margin:"0 auto" }}>
       <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"16px", flexWrap:"wrap" }}>
         {onBack && <button onClick={onBack} style={{ background:"#f3f4f6", border:"1px solid #d1d5db", borderRadius:"8px", padding:"7px 14px", fontSize:"13px", fontWeight:600, color:"#374151", cursor:"pointer" }}>← Geri</button>}
-        <h2 style={{ margin:0, fontSize:"22px", fontWeight:700, color:"#1f2937" }}>📋 Puantaj Girişi</h2>
+        <h2 style={{ margin:0, fontSize:"22px", fontWeight:700, color:"#1f2937" }}>📋 {saltOkunur ? "Puantajlar" : "Puantaj Girişi"}</h2>
+        {saltOkunur && <span style={{ fontSize:"12px", fontWeight:700, color:"#475569", background:"#f1f5f9", border:"1px solid #e2e8f0", borderRadius:"8px", padding:"4px 10px" }}>Görüntüleme yetkisi — değiştirme kapalı</span>}
 
         {/* Yıl seçici */}
         <select value={yilStr} onChange={e=>setPuantajAy(`${e.target.value}-${ayStr}`)}
@@ -17233,7 +17238,7 @@ function PuantajPanel({ currentUser, onBack }) {
           {visiblePersonel.map(p=><option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
         </select>
 
-        <span style={{ fontSize:"12px", color:"#9ca3af" }}>Tıkla: ✅→❌→🏖→☪️→⭕→💤→🎌</span>
+        {!saltOkunur && <span style={{ fontSize:"12px", color:"#9ca3af" }}>Tıkla: ✅→❌→🏖→☪️→⭕→💤→🎌</span>}
 
         <a href={tokenliUrl(`${API_BASE}/hr/excel/puantaj?ay=${ayStr}&yil=${yilStr}`)}
           style={{ padding:"8px 14px", background:"#166534", color:"#fff", borderRadius:"8px", fontSize:"13px", fontWeight:600, textDecoration:"none", marginLeft:"auto" }}>
@@ -17350,10 +17355,10 @@ function PuantajPanel({ currentUser, onBack }) {
                     const defaultCellBg = dayOfWeek===0 ? "#ede9fe" : isResmiTatilCell ? "#dbeafe" : dayOfWeek===6 ? "#f8fafc" : "transparent";
                     const cellBg = DURUM_COLOR[durum] || defaultCellBg;
                     const hasNot = !!(row?.not_aciklama || row?.belge_yolu);
-                    const showNot = durum!=="CALISDI" && durum!=="TATIL" && durum!=="RESMI_TATIL" && row?.id;
+                    const showNot = durum!=="CALISDI" && durum!=="TATIL" && durum!=="RESMI_TATIL" && row?.id && (!saltOkunur || !!(row?.not_aciklama || row?.belge_yolu)); // salt okunur: yalnız mevcut not
                     const _ayrC = (p.isten_ayrilma_tarihi||"").split("T")[0];
                     const ayrilmaSonrasi = !!_ayrC && tarih > _ayrC;   // 17.09.2026: ayrılan personele puantaj girilmez
-                    const cellEditable = !ayrilmaSonrasi && (canEditAny || tarih === todayStr);
+                    const cellEditable = !saltOkunur && !ayrilmaSonrasi && (canEditAny || tarih === todayStr);
                     return (
                       <td key={g} style={{ padding:"0", background:cellBg, border:"1px solid #f0f0f0", minWidth:"36px", width:"36px", userSelect:"none" }}>
                         <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
@@ -17410,16 +17415,16 @@ function PuantajPanel({ currentUser, onBack }) {
               )}
             </div>
             <div style={{ display:"flex", gap:"8px", justifyContent:"flex-end" }}>
-              {(notModal.row?.not_aciklama || notModal.row?.belge_yolu) && (
+              {!saltOkunur && (notModal.row?.not_aciklama || notModal.row?.belge_yolu) && (
                 <button type="button" onClick={handleDeleteNot}
                   style={{ padding:"8px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Notu Sil</button>
               )}
               <button type="button" onClick={()=>setNotModal(null)}
                 style={{ padding:"8px 14px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Vazgeç</button>
-              <button type="button" onClick={handleSaveNot} disabled={notSaving}
+              {!saltOkunur && <button type="button" onClick={handleSaveNot} disabled={notSaving}
                 style={{ padding:"8px 16px", background:"#1f2937", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>
                 {notSaving?"Kaydediliyor...":"Kaydet"}
-              </button>
+              </button>}
             </div>
           </div>
         </div>
@@ -17609,7 +17614,135 @@ function PersonelAramaSecim({ value, onChange, personeller, placeholder = "Perso
     </div>
   );
 }
-function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
+/* ═══ İSG SORUMLUSU ÇALIŞMA ALANI (21.10.2026, Orhan) — role='isg' ═══
+   Rol bazlı (kişiye özel değil). Mevcut ekranları kullanır: İK modülünün ISG sekmesi (salt okunur),
+   Puantaj (salt okunur), Rollout Data (salt okunur) ve personel akışındaki kendi İş Avansı / Masraf Formu.
+   Yetkiler sunucudan gelen user.izinler ile okunur; asıl kontrol sunucudaki İSG kapısındadır. */
+function IsgCalismaAlani({ user, page, setPage, onLogout, setPendingAvansCount, setPendingMasrafCount }) {
+  const izin = user?.izinler || {};
+  const [dar, setDar] = useState(typeof window !== "undefined" && window.innerWidth < 768);
+  useEffect(() => { const f = () => setDar(window.innerWidth < 768); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
+  const [ozet, setOzet] = useState({ yukleniyor: true, uyarilar: null, matris: null });
+  useEffect(() => {
+    if (page !== "isg_home") return;
+    let iptal = false;
+    (async () => {
+      try {
+        const [u, m] = await Promise.all([
+          fetch(`${API_BASE}/hr/isg/uyarilar`, { headers: AUTH_H() }).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`${API_BASE}/hr/isg/matris`, { headers: AUTH_H() }).then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
+        if (!iptal) setOzet({ yukleniyor: false, uyarilar: Array.isArray(u) ? u : null, matris: Array.isArray(m) ? m : null });
+      } catch { if (!iptal) setOzet({ yukleniyor: false, uyarilar: null, matris: null }); }
+    })();
+    return () => { iptal = true; };
+  }, [page]);
+  const SEKMELER = [
+    { k: "isg_home", ad: "Ana Ekran", ikon: "🏠", goster: true },
+    { k: "isg_panel", ad: "İSG Paneli", ikon: "🎓", goster: !!izin.isg_goruntule },
+    { k: "puantaj", ad: "Puantajlar", ikon: "📋", goster: !!izin.puantaj_goruntule },
+    { k: "executive", ad: "Rollout Data", ikon: "📡", goster: !!izin.rollout_goruntule },
+    { k: "is_avans", ad: "İş Avanslarım", ikon: "💳", goster: !!izin.kendi_avans },
+    { k: "masraf", ad: "Masraf Formlarım", ikon: "🧾", goster: !!izin.kendi_masraf },
+  ].filter(s => s.goster);
+  const aktif = SEKMELER.some(s => s.k === page) ? page : "isg_home";
+  // Özet: yalnız mevcut İSG verisinden; veri gelmezse sayı gösterilmez
+  const aktifPersonel = (ozet.matris || []).filter(p => p.aktif);
+  const doldu = (ozet.uyarilar || []).filter(x => x.durum === "SURESI_DOLDU").length;
+  const yaklasan = (ozet.uyarilar || []).filter(x => x.durum === "YAKLASAN").length;
+  const egitimsiz = aktifPersonel.filter(p => !(p.egitimler || []).length).length;
+  const kart = (baslik, deger, renk, alt) => (
+    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "14px 16px", minWidth: 0 }}>
+      <div style={{ fontSize: "11.5px", fontWeight: 800, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.03em" }}>{baslik}</div>
+      <div style={{ fontSize: "24px", fontWeight: 800, color: renk, marginTop: "4px" }}>{deger}</div>
+      {alt && <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>{alt}</div>}
+    </div>
+  );
+  const anaEkran = (
+    <div style={{ maxWidth: "1100px", margin: "0 auto", textAlign: "left" }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a", textAlign: "left" }}>Merhaba {String(user?.name || "").split(" ")[0] || ""}</h2>
+      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "16px" }}>İSG Sorumlusu · {user?.marka_ad || "ERC Mühendislik"} — personel eğitim/belge durumu, puantaj ve saha ilerlemesi (görüntüleme)</div>
+      <div style={{ display: "grid", gridTemplateColumns: dar ? "1fr 1fr" : "repeat(5, 1fr)", gap: "10px", marginBottom: "18px" }}>
+        {SEKMELER.filter(s => s.k !== "isg_home").map(s => (
+          <button key={s.k} className="isg-focus" onClick={() => setPage(s.k)}
+            style={{ background: "#fff", border: "1px solid #dbe3ee", borderRadius: "12px", padding: "16px 14px", textAlign: "left", cursor: "pointer", boxShadow: "0 1px 3px rgba(15,23,42,0.05)" }}>
+            <div style={{ fontSize: "22px" }}>{s.ikon}</div>
+            <div style={{ fontWeight: 800, fontSize: "14px", color: "#1e3a5f", marginTop: "6px" }}>{s.ad}</div>
+          </button>
+        ))}
+      </div>
+      <div style={{ fontSize: "13px", fontWeight: 800, color: "#1e3a5f", margin: "4px 0 8px" }}>İSG Durumu</div>
+      {ozet.yukleniyor ? <div style={{ color: "#94a3b8", fontSize: "13px" }}>Yükleniyor…</div>
+        : (ozet.uyarilar === null && ozet.matris === null) ? <div style={{ color: "#94a3b8", fontSize: "13px" }}>İSG özeti alınamadı.</div>
+        : (
+          <div style={{ display: "grid", gridTemplateColumns: dar ? "1fr 1fr" : "repeat(4, 1fr)", gap: "10px" }}>
+            {ozet.matris !== null && kart("Takip edilen personel", aktifPersonel.length, "#0f172a", "aktif kayıt")}
+            {ozet.uyarilar !== null && kart("Süresi dolan belge", doldu, doldu ? "#b91c1c" : "#15803d")}
+            {ozet.uyarilar !== null && kart("30 gün içinde dolacak", yaklasan, yaklasan ? "#b45309" : "#15803d")}
+            {ozet.matris !== null && kart("Hiç eğitim kaydı yok", egitimsiz, egitimsiz ? "#b45309" : "#15803d", "aktif personel")}
+          </div>
+        )}
+      {ozet.uyarilar && ozet.uyarilar.length > 0 && (
+        <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", marginTop: "14px", overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", fontWeight: 800, fontSize: "13px", borderBottom: "1px solid #f1f5f9" }}>Yaklaşan / dolan belgeler</div>
+          {ozet.uyarilar.slice(0, 8).map((x, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: "10px", padding: "8px 14px", fontSize: "13px", borderTop: i ? "1px solid #f8fafc" : "none" }}>
+              <span style={{ fontWeight: 600 }}>{x.ad_soyad} <span style={{ color: "#64748b", fontWeight: 400 }}>· {x.egitim_turu}</span></span>
+              <span style={{ fontWeight: 700, color: x.durum === "SURESI_DOLDU" ? "#b91c1c" : "#b45309", whiteSpace: "nowrap" }}>{x.durum === "SURESI_DOLDU" ? "Süresi doldu" : "Yaklaşıyor"} · {String(x.bitis_tarihi || "").slice(0, 10).split("-").reverse().join(".")}</span>
+            </div>
+          ))}
+          {ozet.uyarilar.length > 8 && <div style={{ padding: "8px 14px", fontSize: "12px" }}><button className="isg-focus" onClick={() => setPage("isg_panel")} style={{ background: "none", border: "none", color: "#1d4ed8", fontWeight: 700, cursor: "pointer", padding: 0 }}>Tümü İSG Paneli'nde ({ozet.uyarilar.length}) →</button></div>}
+        </div>
+      )}
+    </div>
+  );
+  const icerik =
+    aktif === "isg_panel" ? <HrDashboard currentUser={user} initialTab="isg" sadeceSekme="isg" saltOkunur={!izin.isg_duzenle} />
+    : aktif === "puantaj" ? <PuantajPanel currentUser={user} saltOkunur={!izin.puantaj_duzenle} />
+    : aktif === "executive" ? <RolloutDashboard currentUser={user} saltOkunur={!izin.rollout_duzenle} excelIzni={!!izin.rollout_excel} />
+    : aktif === "is_avans" ? <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />
+    : aktif === "masraf" ? <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />
+    : anaEkran;
+  return (
+    <div style={{ minHeight: "100vh", background: "#f4f6f9" }}>
+      <style>{`.isg-focus:focus-visible{outline:2px solid #1e3a5f;outline-offset:2px}`}</style>
+      <div style={{ background: "#1e3a5f", color: "#fff", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px" }}>
+          <button className="isg-focus" onClick={() => setPage("isg_home")} style={{ background: "none", border: "none", color: "#fff", fontWeight: 800, fontSize: "15px", cursor: "pointer", padding: 0, textAlign: "left" }}>
+            {user?.marka_ad || "ERC Mühendislik"}<span style={{ display: "block", fontSize: "11px", fontWeight: 600, opacity: 0.75 }}>İSG Sorumlusu</span>
+          </button>
+          {!dar && (
+            <nav aria-label="İSG menüsü" style={{ display: "flex", gap: "4px", marginLeft: "12px", flexWrap: "wrap" }}>
+              {SEKMELER.map(s => (
+                <button key={s.k} className="isg-focus" onClick={() => setPage(s.k)} aria-current={aktif === s.k ? "page" : undefined}
+                  style={{ background: aktif === s.k ? "rgba(255,255,255,0.18)" : "transparent", border: "none", color: "#fff", padding: "8px 12px", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                  {s.ad}
+                </button>
+              ))}
+            </nav>
+          )}
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
+            {!dar && <span style={{ fontSize: "12px", opacity: 0.8 }}>{user?.name || user?.email}</span>}
+            <button className="isg-focus" onClick={onLogout} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", borderRadius: "8px", padding: "6px 12px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Çıkış</button>
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: dar ? "12px 10px 84px" : "18px 20px 40px" }}>{icerik}</div>
+      {dar && (
+        <nav aria-label="İSG menüsü" style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100, background: "#fff", borderTop: "1px solid #e5e7eb", display: "flex", height: "64px", boxShadow: "0 -2px 10px rgba(0,0,0,0.08)" }}>
+          {SEKMELER.map(s => (
+            <button key={s.k} className="isg-focus" onClick={() => setPage(s.k)} aria-current={aktif === s.k ? "page" : undefined}
+              style={{ flex: 1, border: "none", background: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "2px", color: aktif === s.k ? "#1e3a5f" : "#94a3b8", fontSize: "9.5px", fontWeight: 700, padding: "0 2px" }}>
+              <span style={{ fontSize: "19px" }}>{s.ikon}</span>{s.ad.replace("Masraf Formlarım", "Masraf").replace("İş Avanslarım", "Avans").replace("Rollout Data", "Rollout")}
+            </button>
+          ))}
+        </nav>
+      )}
+    </div>
+  );
+}
+
+function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme = null, saltOkunur = false }) {
   const _hrEmail = (currentUser?.email || "").toLowerCase();
   // Maaş görünürlüğü (21.07.2026): ERC'de YALNIZ Orhan Bedir + Düzgün Şimşek.
   // Muhasebe maaş bilgilerini GÖREMEZ (puantaj/ISG erişimi devam eder).
@@ -17651,7 +17784,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [personelUnlocked, setPersonelUnlocked] = useState(_hrYetkili && !_maasSifreli);
   // İş Avansı İK'dan kaldırıldı (Muhasebe menüsünde) — Muhasebe puantajdan,
   // Nurcan ISG'den, diğerleri personelden başlar
-  const [tab, _setTab] = useState(_isMuhasebe ? "puantaj" : (_isNurcanHR ? "isg" : "personel"));
+  const [tab, _setTab] = useState(sadeceSekme || (_isMuhasebe ? "puantaj" : (_isNurcanHR ? "isg" : "personel")));
   const setTab = (k) => { _setTab(k); if (onTabChange) onTabChange(k); };
   // Kenar menüdeki İK alt sekmeleriyle senkron: ilk açılışta modülün kendi
   // varsayılanı yukarı bildirilir, sonrasında kenar menü seçimi aşağı iner
@@ -17838,6 +17971,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
   const [yemekMenu, setYemekMenu] = useState(null);       // açık ⋯ menüsünün satır anahtarı
   const yemekMobil = typeof window !== "undefined" && window.innerWidth < 768;
   const loadYemek = async () => {
+    if (sadeceSekme && sadeceSekme !== "yemek") return; // İSG görünümü yemek verisi yüklemez
     try {
       const r = await fetch(`${API_BASE}/hr/yemek-kartlari?donem=${puantajAy}&gorunum=${yemekGorunum}`, { headers: AUTH_H() });
       const d = await r.json();
@@ -18648,7 +18782,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
         )}
         <div style={{ position:"relative" }}>
           <div style={{ fontSize:"10.5px", fontWeight:800, color:"#93c5fd", letterSpacing:"0.14em", marginBottom:"3px" }}>HUMAN RESOURCES</div>
-          <h2 style={{ margin:0, fontSize:"22px", fontWeight:900, color:"#fff", letterSpacing:"-0.4px" }}>👥 İnsan Kaynakları Modülü</h2>
+          <h2 style={{ margin:0, fontSize:"22px", fontWeight:900, color:"#fff", letterSpacing:"-0.4px" }}>{sadeceSekme === "isg" ? "🎓 İSG Paneli" : "👥 İnsan Kaynakları Modülü"}</h2>
+          {saltOkunur && <div style={{ fontSize:"12px", color:"#bfdbfe", marginTop:"3px" }}>Görüntüleme yetkisi — kayıt ekleme, değiştirme ve silme kapalı</div>}
         </div>
       </div>
       {/* ISG Uyarı Bandı */}
@@ -18704,7 +18839,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
       )}
 
       {/* Modül sekmeleri — ERP tarzı segment (İş Avansı Muhasebe menüsündedir) */}
-      <div style={{ display:"inline-flex", gap:"4px", marginBottom:"22px", background:"#f1f5f9", borderRadius:"14px", padding:"5px", flexWrap:"wrap" }}>
+      {!sadeceSekme && <div style={{ display:"inline-flex", gap:"4px", marginBottom:"22px", background:"#f1f5f9", borderRadius:"14px", padding:"5px", flexWrap:"wrap" }}>
         {[
           // Muhasebe maaş göremez ama personel KÜNYESİNİ yönetir: sekme adı
           // ona 'Personel' olarak görünür, Maaş Avansı sekmesi hiç görünmez
@@ -18733,7 +18868,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
             </span>
           </button>
         ))}
-      </div>
+      </div>}
 
       {/* ===== YEMEK HAKLARI VE ÖDEMELERİ SEKMESİ ===== */}
       {tab==="yemek" && (() => {
@@ -21122,13 +21257,13 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                 .filter(p => p.aktif && (isgFirmaTip === "taseron" ? (p.firma_tipi||"simsek")==="taseron" : (p.firma_tipi||"simsek")==="simsek"))
                 .map(p => <option key={p.id} value={p.id}>{p.ad_soyad}</option>)}
             </select>
-            {isgFirmaTip === "taseron" && (
+            {isgFirmaTip === "taseron" && !saltOkunur && (
               <button onClick={()=>setShowTaseronForm(s=>!s)}
                 style={{ padding:"8px 14px", borderRadius:"8px", border:"none", cursor:"pointer", fontSize:"13px", fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#7c3aed,#a855f7)", whiteSpace:"nowrap" }}>
                 {showTaseronForm ? "✕ Kapat" : "➕ Taşeron Personeli Ekle"}
               </button>
             )}
-            {isgFirmaTip === "taseron" && !showTaseronForm && personelList.filter(p => p.aktif && (p.firma_tipi||"simsek")==="taseron").length === 0 && (
+            {isgFirmaTip === "taseron" && !showTaseronForm && !saltOkunur && personelList.filter(p => p.aktif && (p.firma_tipi||"simsek")==="taseron").length === 0 && (
               <span style={{ fontSize:"12px", color:"#6b7280", lineHeight:1.4 }}>
                 Henüz taşeron personeli yok — <strong>➕ Taşeron Personeli Ekle</strong> ile tek tek ekleyip belgelerini girebilirsin.
               </span>
@@ -21136,7 +21271,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
           </div>
 
           {/* Taşeron personeli — ISG'ye özel satır içi ekleme formu (maaş formu DEĞİL) */}
-          {isgFirmaTip === "taseron" && showTaseronForm && (
+          {isgFirmaTip === "taseron" && showTaseronForm && !saltOkunur && (
             <div style={{ marginTop:"12px", background:"#faf5ff", border:"1.5px solid #e9d5ff", borderRadius:"12px", padding:"14px 16px" }}>
               <div style={{ fontSize:"13px", fontWeight:700, color:"#6b21a8", marginBottom:"4px" }}>➕ Taşeron Personeli Ekle (yalnız ISG takibi için)</div>
               <div style={{ fontSize:"11.5px", color:"#7c3aed", marginBottom:"10px" }}>Bu personel sadece ISG/eğitim ve RFQ takibi için eklenir — maaş tarafında görünmez, maaş bilgisi istenmez.</div>
@@ -21191,6 +21326,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                           {mevcut ? (
                             <a href={mevcut.dosya_yolu} target="_blank" rel="noreferrer"
                               style={{ fontSize:"12px", color:"#166534", fontWeight:600 }}>Görüntüle →</a>
+                          ) : saltOkunur ? (
+                            <span style={{ fontSize:"12px", color:"#9ca3af" }}>Yüklenmemiş</span>
                           ) : (
                             <label style={{ fontSize:"12px", color:"#6b7280", cursor:"pointer" }}>
                               <input type="file" style={{display:"none"}} onChange={e=>handleBelgeUpload(selectedPersonel.id,bt.key,e.target.files[0])} />
@@ -21212,10 +21349,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                         style={{ fontSize:"12px", padding:"4px 10px", borderRadius:"8px", background:"#064e3b", color:"#fff", border:"none", cursor:"pointer" }}>
                         📦 Tüm Belgeleri İndir
                       </button>
-                      <button className="tab" onClick={()=>setShowIsgForm(true)} style={{ fontSize:"12px" }}>+ Eğitim Ekle</button>
+                      {!saltOkunur && <button className="tab" onClick={()=>setShowIsgForm(true)} style={{ fontSize:"12px" }}>+ Eğitim Ekle</button>}
                     </div>
                   </div>
-                  {showIsgForm && (
+                  {showIsgForm && !saltOkunur && (
                     <form onSubmit={handleSaveIsg} style={{ background:"#f8fafc", borderRadius:"10px", padding:"14px", marginBottom:"12px" }}>
                       <div style={{ marginBottom:"8px" }}>
                         <label style={labelSt}>Eğitim Türü</label>
@@ -21258,13 +21395,14 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange }) {
                               <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
                                 {eg.belge_yolu
                                   ? <a href={eg.belge_yolu} target="_blank" rel="noreferrer" style={{ background:"#dbeafe", color:"#1d4ed8", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", textDecoration:"none", whiteSpace:"nowrap" }}>📎 Belge</a>
+                                  : saltOkunur ? <span style={{ fontSize:"11.5px", color:"#9ca3af" }}>Belge yok</span>
                                   : <label style={{ background:"#e0e7ff", color:"#4338ca", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer", whiteSpace:"nowrap" }}>
                                       📎 Yükle
                                       <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }}
                                         onChange={e=>{ const f=e.target.files[0]; if(f) handleIsgBelgeUpload(selectedPersonel.id, eg.id, f); }} />
                                     </label>
                                 }
-                                <button onClick={()=>handleDeleteIsg(eg.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
+                                {!saltOkunur && <button onClick={()=>handleDeleteIsg(eg.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>}
                               </div>
                             </div>
                           </div>
@@ -34668,6 +34806,7 @@ function App() {
       muhasebe: 'Muhasebe',
       genel_mudur: 'Genel Müdür',
       user: 'Personel',
+      isg: 'İSG Sorumlusu',
     };
     return map[u.role] || u.role;
   };
@@ -34750,6 +34889,7 @@ function App() {
     const isRolloutOverride = rolloutOverrideEmails.includes(_ue);
     const is2KX = String(u?.subcon_name || "").toUpperCase().includes("2KX");
     if (u?.role === "platform_admin") return "platform";
+    if (String(u?.role || "").toLowerCase() === "isg") return "isg_home"; // 21.10.2026: İSG Sorumlusu ana ekranı
     // Alt marka (AHY) yöneticisi: subcon_name taşısa da kendi Kâr/Zarar'ına iner
     if (u?.hw_yukleme === false && ["admin","direktor","muhasebe","genel_mudur"].includes(String(u?.role||"").toLowerCase())) return "marka_pl";
     // 2KX kullanıcısı (serdaraltinova@gmail.com) doğrudan 2KX Paneli'ne iner
@@ -35241,6 +35381,7 @@ function App() {
       const _luIs2KX = String(_lu?.subcon_name || "").toUpperCase().includes("2KX");
       const _luIsFinance = ["finance","admin","genel_mudur","muhasebe"].includes(_luRole) || _lue === "orhan@simsektel.com" || _lue === "nurcan.kus@simsektel.com";
       if (_luRole === "platform_admin") setPage("platform");
+      else if (_luRole === "isg") setPage("isg_home");
       else if (_luIsFinance && !_luIsSubcon) setPage("finance");
       else if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("is_avans"); // 20.10.2026: Personel Harcamaları → "Benim İşlemlerim" açılır
       else if (_luIsBolge || _luIsSubcon) setPage("region");
@@ -35598,6 +35739,11 @@ function App() {
     );
   }
 
+  // 21.10.2026: İSG Sorumlusu (role='isg') — rol bazlı ayrı çalışma alanı; yetkiler sunucudaki İSG kapısında
+  if (String(user?.role || "").toLowerCase() === "isg") {
+    return <IsgCalismaAlani user={user} page={page} setPage={setPage} onLogout={handleLogout}
+      setPendingAvansCount={setPendingAvansCount} setPendingMasrafCount={setPendingMasrafCount} />;
+  }
   if (isPersonel) {
     return (
       <div style={{ minHeight:"100vh", background:"#f8fafc" }}>
@@ -36273,8 +36419,8 @@ function App() {
    satırda "Düzenle" + ⋯ menüsü (Detay-İşlem Geçmişi, Aktif Et/Pasife Al, Şifre, Sil), sağdan açılan ekle/düzenle paneli.
    Veri modeli korunur: role (erişim rolü), marka (firma: ERC/AHY/TEKNO), subcon_name (taşeron / bağlı firma), tenant, is_active.
    Yetki: tam admin her şeyi yapar; kısıtlı kullanıcı yöneticisi (users_admin) yalnız ekler, şifre belirler ve detay görür. */
-const ADM_ROL_TR = { user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
-const ADM_ROL_SECENEK = ["user", "subcon", "admin", "rollout_mudur", "pm", "direktor", "muhasebe"]; // sunucunun /role ucunda kabul ettiği roller (genel_mudur yalnız mevcut kayıtta korunur)
+const ADM_ROL_TR = { isg: "İSG Sorumlusu", user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
+const ADM_ROL_SECENEK = ["user", "isg", "subcon", "admin", "rollout_mudur", "pm", "direktor", "muhasebe"]; // sunucunun /role ucunda kabul ettiği roller (genel_mudur yalnız mevcut kayıtta korunur)
 const admNorm = (v) => String(v || "").toLocaleLowerCase("tr-TR").replace(/ı/g, "i").replace(/i̇/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c").normalize("NFD").replace(/[̀-ͯ]/g, "");
 // Sayıya Türkçe iyelik eki (12’si, 30’u, 40’ı, 100’ü): sonuç sayacı doğru okunsun
 const admSayiEki = (n) => { const a = Math.abs(Number(n) || 0); if (a === 0) return "ı"; const b = a % 10 || (a % 100) || (a % 1000) || a; const t = { 1: "i", 2: "si", 3: "ü", 4: "ü", 5: "i", 6: "sı", 7: "si", 8: "i", 9: "u", 10: "u", 20: "si", 30: "u", 40: "ı", 50: "si", 60: "ı", 70: "i", 80: "i", 90: "ı", 100: "ü", 1000: "i" }; return t[a % 10 ? a % 10 : (a % 100 ? a % 100 : (a % 1000 ? a % 1000 : 1000))] || "i"; };
@@ -37408,7 +37554,7 @@ const isKoluTekSite = (rows, search) => {
 };
 const isKoluListeModu = (rows, search, isKoluFilter) => isKoluFilter !== "ALL" && !isKoluTekSite(rows, search);
 const IS_KOLU_HW_DURUM = ["", "To Be Executed", "Executing", "To Be Reviewed", "Reviewing", "Rejected", "Pass With Issues", "Closed"];
-function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGuncelle, onBelgeler, onIsAta, onSiteAc, atamaYetkili }) {
+function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGuncelle, onBelgeler, onIsAta, onSiteAc, atamaYetkili, saltOkunur = false }) {
   const headers = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
   const site = useMemo(() => isKoluTekSite(rows, search), [rows, search]);
   const nsSite = site && nsSahaMiF(site) ? site : null;
@@ -37445,6 +37591,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
   }, [nsSite?.site_code, listeModu, isKoluFilter, regionFilter, yenile]); // eslint-disable-line
 
   const metaGuncelle = async (id, body) => {
+    if (saltOkunur) return; // görüntüleme yetkisi
     try {
       const d = await fetch(`${API_BASE}/rollout/is-kolu/${id}`, { method: "PUT", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
       if (!d?.ok) throw new Error(d?.error);
@@ -37452,6 +37599,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
     } catch (e) { alert("Kaydedilemedi: " + e.message); }
   };
   const isKoluEkle = async (sc, kolu) => {
+    if (saltOkunur) return; // görüntüleme yetkisi
     try {
       const d = await fetch(`${API_BASE}/rollout/is-kolu`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ site_code: sc, is_kolu: kolu }) }).then((r) => r.json());
       if (!d?.ok) throw new Error(d?.error);
@@ -37544,7 +37692,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
           <tbody>
             {satirlar.map(({ r, m }) => (
               <tr key={m.id}>
-                <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}><button type="button" onClick={() => onGuncelle(r.site_code)} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: "6px", padding: "4px 8px", cursor: "pointer" }}>✏️</button></td>
+                <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}>{onGuncelle && <button type="button" onClick={() => onGuncelle(r.site_code)} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: "6px", padding: "4px 8px", cursor: "pointer" }}>✏️</button>}</td>
                 <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}><button type="button" onClick={() => onBelgeler(r)} style={{ background: "#0b1a33", color: "#fff", border: "none", borderRadius: "6px", padding: "4px 8px", cursor: "pointer" }}>📦</button></td>
                 {gruplar.flatMap((g) => g.kolon(r, m)).map(([k, v], i) => <React.Fragment key={i}>{td(v)}</React.Fragment>)}
               </tr>
@@ -37597,7 +37745,7 @@ function IsKoluGorunumu({ rows, search, regionFilter, isKoluFilter, yenile, onGu
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", gap: "10px", flexWrap: "wrap" }}>
               <div style={{ fontWeight: 800, fontSize: "14px" }}>{sec.ikon} {sec.ad} — {sec.aciklama}</div>
               <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                <button type="button" onClick={() => onGuncelle(r.site_code)} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>✏️ Güncelle</button>
+                {onGuncelle && <button type="button" onClick={() => onGuncelle(r.site_code)} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>✏️ Güncelle</button>}
                 <button type="button" onClick={() => onBelgeler(r)} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>📦 Belgeler</button>
                 {atamaYetkili && <button type="button" onClick={() => onIsAta({ kategori: sec.kategori, alt_tip: sec.is_kolu === "ONE_BAND" ? "One Band" : (sec.is_kolu === "NS_AI" ? "Standalone" : ""), site_codes: [r.site_code], atayan_not: sec.hw_status === "Rejected" && sec.notu ? `HW red: ${sec.notu}` : "" })} style={{ background: "#0b1a33", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>🗂 İş Ata</button>}
                 <input defaultValue={sec.notu || ""} placeholder="İş kolu notu (HW red gerekçesi vb.)" onBlur={(e) => { if (e.target.value !== (sec.notu || "")) metaGuncelle(sec.id, { notu: e.target.value }); }} style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "6px 10px", fontSize: "12px", minWidth: "260px" }} />
