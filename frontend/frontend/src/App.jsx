@@ -34923,7 +34923,8 @@ function App() {
   const _ROLLOUT_OVERRIDE = ["hatice.omus@simsektel.com"]; // user rolünde olsa bile rollout gibi davranır
   const _isBolgeMudur = _userEmail === "nurcan.kus@simsektel.com" || _userEmail === "serdar.altinova@simsektel.com" || _userEmail === "murat.istek@simsektel.com" || _userEmail === "emre.akdegirmen@simsektel.com" || ["rollout_mudur","bolge_mudur"].includes((user?.role||"").toLowerCase());
   const isRollout = user?.role === "rollout" || user?.role === "admin" || _isBolgeMudur || _ROLLOUT_OVERRIDE.includes(_userEmail);
-  const canSeePuantaj = (isRollout || user?.role === "muhasebe") && !_PUANTAJ_HARIC.includes(_userEmail);
+  // 21.10.2026: kullanıcı yetki ayarında puantaj_goruntule açıksa (ör. Hatice) haric listesine rağmen görür
+  const canSeePuantaj = ((isRollout || user?.role === "muhasebe") && !_PUANTAJ_HARIC.includes(_userEmail)) || user?.izinler?.puantaj_goruntule === true;
   const isPersonel = user?.role === "user" && !_isBolgeMudur && !_ROLLOUT_OVERRIDE.includes(_userEmail);
   const canSeeMalzeme = [
     "nurcan.kus@simsektel.com",
@@ -36109,6 +36110,9 @@ function App() {
                       .filter(([k]) => !((user?.role === "muhasebe" || user?.izinler?.maas_goruntule === false) && ["personel","maas_avans"].includes(k)))
                       .map(([k, ic, l]) => ({ ikon: ic, label: l, alt: true, aktif: page==='hr' && hrTab===k, onClick:()=>{ setPage('hr'); setHrTab(k); } })),
                   ] : []),
+                  // İK paneli olmayan kullanıcıya yetki ayarıyla açılan İSG ekranı (görüntüleme)
+                  ...(!(isAdmin || user?.role === "muhasebe" || _userEmail === "nurcan.kus@simsektel.com") && user?.izinler?.isg_goruntule === true
+                    ? [{ ikon:'🎓', label:'ISG / Belgeler', sub:'Eğitim ve belge durumu', aktif: page==='isg_salt', onClick:()=>setPage('isg_salt') }] : []),
                   { ikon:'🏢', label:'Organizasyon Şeması', aktif: page==='orgsema', onClick:()=>setPage('orgsema') },
                 ]} />
 
@@ -36256,7 +36260,8 @@ function App() {
             {page === "ofis" && <OfisDepoPanel currentUser={user} onBack={()=>setPage("finance")} onGoArac={()=>setPage("araclar")} />}
             {page === "malzeme" && <MalzemeYonetimiPanel currentUser={user} onBack={()=>setPage("finance")} />}
             {page === "cashflow" && ["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) && <CashFlowPanel currentUser={user} onBack={()=>setPage("finance")} />}
-            {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} />}
+            {page === "puantaj" && canSeePuantaj && <PuantajPanel currentUser={user} onBack={()=>setPage("hr")} saltOkunur={user?.izinler?.puantaj_duzenle === false} />}
+            {page === "isg_salt" && user?.izinler?.isg_goruntule === true && <HrDashboard currentUser={user} initialTab="isg" sadeceSekme="isg" saltOkunur={user?.izinler?.isg_duzenle !== true} />}
             {page === "orgsema" && <OrgSemasiPanel currentUser={user} />}
             {page === "kirilim" && isAdmin && <KirilimRaporuPanel />}
             {page === "executive" && !isAltMarka && <RolloutDashboard currentUser={user} />}

@@ -551,7 +551,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-21-yetki", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-21-isg-puantaj", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -706,10 +706,12 @@ function okumaKapisi(izinli, hata) {
 const ikOkumaYetkili = (u) => ikYazmaYetkili(u) || finansYazmaYetkili(u);
 const ikOkuma = okumaKapisi(ikOkumaYetkili, "İK kayıtlarını görme yetkiniz yok");
 // Puantaj ekranı rollout rolüne de açık (web canSeePuantaj); maaş alanları ikMaskele ile gizlenir
-const puantajOkuma = okumaKapisi((u) => ikOkumaYetkili(u) || _rol(u) === "rollout" || !!ROL_IZINLERI[_rol(u)]?.puantaj_goruntule, "Puantaj görme yetkiniz yok");
+const puantajOkuma = okumaKapisi((u, req) => ikOkumaYetkili(u) || _rol(u) === "rollout" || !!ROL_IZINLERI[_rol(u)]?.puantaj_goruntule
+  || req?.izinler?.puantaj_goruntule === true, "Puantaj görme yetkiniz yok"); // + kullanıcı yetki ayarı (21.10.2026)
 // 21.10.2026: İSG kayıtları (eğitim/belge matrisi, uyarılar, İSG Excel'i, personel İSG/belge dökümü) İK okuma yetkilisine
 // + rol izin setinde isg_goruntule olan role (İSG Sorumlusu) açık; maaş/banka alanları ikMaskele ile zaten gizlenir
-const isgOkuma = okumaKapisi((u) => ikOkumaYetkili(u) || !!ROL_IZINLERI[_rol(u)]?.isg_goruntule, "İSG kayıtlarını görme yetkiniz yok");
+const isgOkuma = okumaKapisi((u, req) => ikOkumaYetkili(u) || !!ROL_IZINLERI[_rol(u)]?.isg_goruntule
+  || req?.izinler?.isg_goruntule === true, "İSG kayıtlarını görme yetkiniz yok"); // + kullanıcı yetki ayarı (21.10.2026)
 const finansOkuma = okumaKapisi(finansYazmaYetkili, "Finans kayıtlarını görme yetkiniz yok");
 const odemeOkuma = okumaKapisi((u, req) => !!odemeYetkili(req), "Ödeme bilgisini görme yetkiniz yok");
 const taseronDegilOkuma = okumaKapisi((u) => !taseronMu(u), "Taşeron hesabı bu listeyi göremez");
@@ -1016,6 +1018,19 @@ app.use(async (req, res, next) => {
     if (kr && ROL_IZINLERI[String(kr).toLowerCase()]) u.role = kr;
     req.izinler = etkinIzinHesapla(u, ayar);
   } catch { req.izinler = etkinIzinHesapla(u, null); }
+  next();
+});
+// Düzenleme kilidi: etkin izinde isg_duzenle / puantaj_duzenle AÇIKÇA false ise o alanda yazma yok — rolü İK yazma
+// yetkisi verse bile (ör. rollout müdürüne İSG / puantaj yalnız görüntüleme olarak açıldığında)
+const ISG_YAZMA_YOLLARI = [/^\/hr\/personel\/\d+\/isg(\/|$)/, /^\/hr\/personel\/\d+\/belge\//, /^\/hr\/isg(\/|-egitim-turleri|$)/];
+const PUANTAJ_YAZMA_YOLLARI = [/^\/hr\/puantaj(\/|$)/];
+app.use((req, res, next) => {
+  if (!req.izinler || req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return next();
+  const yol = req.path.replace(/\/+$/, "") || "/";
+  if (req.izinler.isg_duzenle === false && ISG_YAZMA_YOLLARI.some((rx) => rx.test(yol)))
+    return res.status(403).json({ ok: false, error: "İSG kayıtlarını yalnız görüntüleme yetkiniz var" });
+  if (req.izinler.puantaj_duzenle === false && PUANTAJ_YAZMA_YOLLARI.some((rx) => rx.test(yol)))
+    return res.status(403).json({ ok: false, error: "Puantajı yalnız görüntüleme yetkiniz var" });
   next();
 });
 // İzne bağlı görüntüleme yolları (İSG kapısı: rolü 'isg' olan kullanıcı yalnız izinli gruplara girer)
