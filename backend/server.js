@@ -551,7 +551,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-09-07-fotoyetki", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-21-yetki", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -890,6 +890,10 @@ const ROL_IZINLERI = {
     puantaj_goruntule: true, puantaj_duzenle: false,
     rollout_goruntule: true, rollout_excel: true, rollout_duzenle: false,
     kendi_avans: true, kendi_masraf: true,
+    // 21.10.2026: Araç & Depo görüntüleme rolün tamamına açık; maaş ve kira bedeli gizli araç kirası kapalı.
+    // Ek alanlar (Günlük iş, Bölge Analizi, PO talebi, Malzeme) kullanıcıya özel yetki ayarıyla açılır.
+    arac_depo_goruntule: true, maas_goruntule: false, gizli_arac_kira_goruntule: false,
+    gunluk_is_goruntule: false, po_talep_olustur: false, bolge_analizi_goruntule: false, malzeme_goruntule: false,
   },
 };
 const isgMu = (u) => _rol(u) === "isg";
@@ -910,13 +914,9 @@ const ISG_OKUMA = [
   /^\/hr\/masraf-form$/, /^\/hr\/masraf-form\/\d+$/, /^\/hr\/masraf-form\/\d+\/(excel|pdf)$/, /^\/hr\/masraf-form\/bakiye\/\d+$/,
   /^\/hr\/masraf-formlari$/, /^\/hr\/masraf-belge\/file\/[^/]+$/, /^\/islem-gecmisi\/(avans|masraf)\/\d+$/,
   /^\/hr\/mobile-dashboard$/, /^\/hr\/atanan-arac$/, /^\/hr\/araclar$/, /^\/is-atama\/benim$/,
-  // İSG paneli
-  /^\/hr\/personel$/, /^\/hr\/personel\/\d+\/(isg|belgeler)$/, /^\/hr\/isg\/(matris|uyarilar)$/, /^\/hr\/isg-egitim-turleri$/, /^\/hr\/excel\/isg$/,
-  // Puantaj
-  /^\/hr\/puantaj$/, /^\/hr\/puantaj\/ozet$/, /^\/hr\/excel\/puantaj$/, /^\/hr\/ekipler$/,
-  // Rollout Data (salt okunur)
-  /^\/rollout\/list$/, /^\/rollout\/summary$/, /^\/rollout\/is-kolu$/, /^\/rollout\/is-kolu\/tanim$/, /^\/rollout\/is-kolu\/site\/[^/]+$/,
-  /^\/is-atama\/(liste|yetkim|is-yuku|kategoriler)$/,
+  // Personel listesi (kişi seçimleri; maaş/banka alanları maskeli). İSG / puantaj / Rollout / Araç & Depo / Günlük iş /
+  // Bölge Analizi / Malzeme yolları izne bağlı: IZIN_OKUMA_YOLLARI (21.10.2026)
+  /^\/hr\/personel$/,
 ];
 const ISG_EXCEL = [/^\/export\/excel$/]; // Rollout Excel'i: ayrı izin (rollout_excel) — finansal kolon içermez
 // Yazma: yalnız kendi avans / masraf akışı (sahiplik kontrolleri uçların kendi kapılarında da var)
@@ -950,23 +950,98 @@ async function isgMasrafFormSahibi(u, formId) {
     [Number(formId), String(u.email || ""), Number(u.user_id || u.id || 0)]).catch(() => ({ rows: [] }));
   return r.rows.length > 0;
 }
+// ═══ YETKİ PROFİLİ (21.10.2026, Orhan) ══════════════════════════════════════════════════════════
+// Etkin izin = rol varsayılanı (ROL_IZINLERI) + kullanıcıya özel ayar (users.yetki_ayar JSONB, yalnız true/false).
+// Kişiye özel izinler KODDA değil veride durur; Admin "PUT /admin/users/:id/yetkiler" ile yönetilir ve işlem
+// geçmişine yazılır. Gizlilik izinleri (maas_goruntule, gizli_arac_kira_goruntule) false ise veri API'de,
+// detayda, dışa aktarımda ve toplamlarda gizlenir (aşağıdaki GİZLİLİK KATMANI).
+pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS yetki_ayar JSONB`).catch(() => {});
+pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS kira_gizli BOOLEAN DEFAULT false`).catch(() => {});
+pool.query(`ALTER TABLE master_works ADD COLUMN IF NOT EXISTS olusturan TEXT`).catch(() => {});
+const IZIN_TANIMLARI = {
+  isg_goruntule: "İSG ekranı (görüntüleme)", isg_duzenle: "İSG kaydı düzenleme", isg_sil: "İSG kaydı silme", isg_onayla: "İSG onayı",
+  puantaj_goruntule: "Puantajlar (görüntüleme)", puantaj_duzenle: "Puantaj düzenleme",
+  rollout_goruntule: "Rollout Data (görüntüleme)", rollout_excel: "Rollout Data Excel", rollout_duzenle: "Rollout Data düzenleme",
+  gunluk_is_goruntule: "Günlük iş girişleri (görüntüleme)", po_talep_olustur: "PO talebi oluşturma (yalnız yeni talep)",
+  bolge_analizi_goruntule: "Bölge Analizi (görüntüleme)", arac_depo_goruntule: "Araç & Depo (görüntüleme)",
+  malzeme_goruntule: "Malzeme Yönetimi (görüntüleme)", kendi_avans: "Kendi iş avansları", kendi_masraf: "Kendi masraf formları",
+  maas_goruntule: "Personel maaşlarını görme", gizli_arac_kira_goruntule: "Kira bedeli gizli araçların kirasını görme",
+};
+const _yetkiOnbellek = new Map(); // anahtar: e-posta → { t, ayar }
+const YETKI_TTL_MS = 60 * 1000;
+async function kullaniciYetkiAyari(u) {
+  const e = String(u?.email || "").toLowerCase().trim();
+  if (!e) return null;
+  const c = _yetkiOnbellek.get(e);
+  if (c && Date.now() - c.t < YETKI_TTL_MS) return c.ayar;
+  let ayar = null, rol = null;
+  try {
+    const r = await pool.query(`SELECT yetki_ayar, role FROM users WHERE LOWER(TRIM(email)) = $1 ORDER BY (id = $2) DESC, id DESC LIMIT 1`,
+      [e, Number(u?.user_id || u?.id || 0)]);
+    ayar = r.rows[0]?.yetki_ayar || null; rol = r.rows[0]?.role || null;
+  } catch { ayar = c?.ayar ?? null; rol = c?.rol ?? null; }
+  _yetkiOnbellek.set(e, { t: Date.now(), ayar, rol });
+  return ayar;
+}
+// Rolü olmayan jeton (ör. finans girişi: { email, scope }) → rol kullanıcı kaydından (önbellekten) okunur
+const kayitliRol = (u) => _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.rol || null;
+function etkinIzinHesapla(u, ayar) {
+  const o = { ...(ROL_IZINLERI[_rol(u)] || {}) };
+  if (ayar && typeof ayar === "object") for (const [k, v] of Object.entries(ayar)) if (k in IZIN_TANIMLARI && typeof v === "boolean") o[k] = v;
+  return o;
+}
+const maasGizliMi = (req) => req?.izinler?.maas_goruntule === false;
+const aracKiraGizliMi = (req) => req?.izinler?.gizli_arac_kira_goruntule === false;
+// Her kimlikli isteğe etkin izinleri bağla (İSG ve gizlilik kapıları bunu kullanır)
+app.use(async (req, res, next) => {
+  if (req.method === "OPTIONS") return next();
+  const u = optionalAuth(req);
+  if (!u) return next();
+  try {
+    const ayar = await kullaniciYetkiAyari(u);
+    // Rolsüz jetonda (finans girişi) kayıtlı rol, yalnız rol izin profili olan roller (ör. isg) için uygulanır:
+    // İSG kapısı ve rol varsayılanları (maaş / gizli kira) atlanmasın; diğer rollerin davranışı değişmez
+    const kr = !u.role ? kayitliRol(u) : null;
+    if (kr && ROL_IZINLERI[String(kr).toLowerCase()]) u.role = kr;
+    req.izinler = etkinIzinHesapla(u, ayar);
+  } catch { req.izinler = etkinIzinHesapla(u, null); }
+  next();
+});
+// İzne bağlı görüntüleme yolları (İSG kapısı: rolü 'isg' olan kullanıcı yalnız izinli gruplara girer)
+const IZIN_OKUMA_YOLLARI = {
+  isg_goruntule: [/^\/hr\/personel\/\d+\/(isg|belgeler)$/, /^\/hr\/isg\/(matris|uyarilar)$/, /^\/hr\/isg-egitim-turleri$/, /^\/hr\/excel\/isg$/],
+  puantaj_goruntule: [/^\/hr\/puantaj$/, /^\/hr\/puantaj\/ozet$/, /^\/hr\/excel\/puantaj$/, /^\/hr\/ekipler$/],
+  rollout_goruntule: [/^\/rollout\/list$/, /^\/rollout\/summary$/, /^\/rollout\/is-kolu$/, /^\/rollout\/is-kolu\/tanim$/, /^\/rollout\/is-kolu\/site\/[^/]+$/,
+    /^\/is-atama\/(liste|yetkim|is-yuku|kategoriler)$/],
+  rollout_excel: [/^\/export\/excel$/],
+  gunluk_is_goruntule: [/^\/master\/list-detailed$/, /^\/master\/by-site$/, /^\/master\/site-suggest$/, /^\/master\/saha-kalemler$/, /^\/master\/saha-kalem$/,
+    /^\/lookup\/(items|project-codes|site-pos)$/, /^\/po\/(eksik-girisler|saha-oneri|akilli-asistan)$/, /^\/export\/site-entry-excel(-all)?$/, /^\/subcons$/],
+  po_talep_olustur: [/^\/master\/taleplerim$/, /^\/lookup\/(items|project-codes|site-pos)$/, /^\/master\/site-suggest$/, /^\/subcons$/],
+  bolge_analizi_goruntule: [/^\/dashboard\/result$/, /^\/finance\/subcon-reconcile$/, /^\/finance\/subcon-hakedis-summary$/,
+    /^\/finance\/hw-invoice-items\/billable-keys$/, /^\/hw-acceptance\/onay-bekleyen$/, /^\/export\/qc-ready-excel$/],
+  arac_depo_goruntule: [/^\/hr\/arac-gecmis$/, /^\/hr\/arac-kira-odemeler$/, /^\/hr\/arac-fatura-kalemleri$/, /^\/hr\/arac-teslim-projeler$/,
+    /^\/hr\/araclar\/\d+\/(teslim|lastik|islem-log)$/, /^\/hr\/arac-belge\/file\/[^/]+$/, /^\/hr\/ofis$/, /^\/hr\/ofis-kira-odemeler$/, /^\/hr\/ofis-belge\/file\/[^/]+$/],
+  malzeme_goruntule: [/^\/malzeme\/(talepler|talepler\/\d+|dagitim|dagitim\/ozet|dagitim\/personel|fiyat-listesi|sarf|depo-stok|site-codes)$/],
+};
+// İzne bağlı yazma yolları (İSG kapısı). PO talebi: yalnız YENİ satır (mevcut satır güncellenmez, onay alanı yok)
+const IZIN_YAZMA_YOLLARI = {
+  po_talep_olustur: [["POST", /^\/master\/add$/]],
+};
 app.use(async (req, res, next) => {
   try {
     if (req.method === "OPTIONS") return next();
     const u = optionalAuth(req);
     if (!u || !isgMu(u)) return next();
-    const izin = rolIzinleri(u);
+    const izin = req.izinler || rolIzinleri(u) || {};
     const yol = req.path.replace(/\/+$/, "") || "/";
     const m = req.method === "HEAD" ? "GET" : req.method;
     const red = (msg) => res.status(403).json({ ok: false, error: msg || "İSG Sorumlusu rolü bu işlemi yapamaz" });
     const ben = String(u.email || "").toLowerCase().trim();
     if (m === "GET") {
-      const okuma = ISG_OKUMA.some((rx) => rx.test(yol));
-      const excel = ISG_EXCEL.some((rx) => rx.test(yol));
-      if (!okuma && !(excel && izin.rollout_excel)) return red("İSG Sorumlusu rolü bu sayfayı / veriyi göremez");
-      if (/^\/rollout\//.test(yol) || /^\/is-atama\/(liste|is-yuku)$/.test(yol) || excel) { if (!izin.rollout_goruntule) return red(); }
-      if (/^\/hr\/(puantaj|excel\/puantaj|ekipler)/.test(yol) && !izin.puantaj_goruntule) return red();
-      if (/^\/hr\/(isg|isg-egitim-turleri|excel\/isg|personel\/\d+\/(isg|belgeler))/.test(yol) && !izin.isg_goruntule) return red();
+      const okuma = ISG_OKUMA.some((rx) => rx.test(yol))
+        || Object.entries(IZIN_OKUMA_YOLLARI).some(([k, rxs]) => izin[k] === true && rxs.some((rx) => rx.test(yol)));
+      if (!okuma) return red("İSG Sorumlusu rolü bu sayfayı / veriyi göremez");
+      if (/^\/export\/excel$/.test(yol) && !(izin.rollout_goruntule && izin.rollout_excel)) return red();
       // Kimlik oturumdan: sorgudaki e-posta / personel / form başkasına aitse reddet
       if (/^\/hr\/(mobile-dashboard|atanan-arac|masraf-formlari)$/.test(yol)) {
         const q = String(req.query?.email || "").toLowerCase().trim();
@@ -997,7 +1072,8 @@ app.use(async (req, res, next) => {
         };
       } else if (/^\/hr\/isg\/(matris|uyarilar)$/.test(yol) && kap) {
         res.json = (b) => orig(Array.isArray(b) ? b.filter((p) => kap.bordro.includes(String(p.marka || "ERC").toUpperCase())) : b);
-      } else if (yol === "/hr/araclar") {
+      } else if (yol === "/hr/araclar" && !izin.arac_depo_goruntule) {
+        // Araç & Depo yetkisi yoksa yalnız plaka seçimi için gereken alanlar (avans formu)
         res.json = (b) => orig(Array.isArray(b) ? b.map((a) => Object.fromEntries(ISG_ARAC_ALANLARI.filter((k) => k in (a || {})).map((k) => [k, a[k]]))) : b);
       } else if (yol === "/rollout/list") {
         res.json = (b) => {
@@ -1011,8 +1087,15 @@ app.use(async (req, res, next) => {
       }
       return next();
     }
-    const yazma = ISG_YAZMA.find(([mt, rx]) => mt === m && rx.test(yol));
+    const yazma = ISG_YAZMA.find(([mt, rx]) => mt === m && rx.test(yol))
+      || Object.entries(IZIN_YAZMA_YOLLARI).filter(([k]) => izin[k] === true).flatMap(([, l]) => l).find(([mt, rx]) => mt === m && rx.test(yol));
     if (!yazma) return red("İSG Sorumlusu rolü bu kaydı değiştiremez");
+    // PO talebi: yalnız yeni satır; QC / kabul (onay) alanları istemciden alınmaz, talep eden oturumdan
+    if (m === "POST" && yol === "/master/add") {
+      if (!req.body || typeof req.body !== "object") return res.status(400).json({ ok: false, error: "Geçersiz istek" });
+      req.poTalepModu = true;
+      req.body.qc_durum = "NOK"; req.body.kabul_durum = "NOK"; req.body.kabul_not = null;
+    }
     if (/^\/hr\/is-avans/.test(yol) && !izin.kendi_avans) return red();
     if (/^\/hr\/masraf/.test(yol) && !izin.kendi_masraf) return red();
     // Yeni avans / masraf formu: talep eden ve personel OTURUMDAN — istemcinin gönderdiği kimlik kullanılmaz
@@ -1029,6 +1112,195 @@ app.use(async (req, res, next) => {
     console.error("[isg-kapisi]", e.message);
     return res.status(500).json({ ok: false, error: "Yetki kontrolü yapılamadı" });
   }
+});
+
+// ═══ GİZLİLİK KATMANI (21.10.2026, Orhan) — rol fark etmeksizin etkin izinden ═════════════════════
+// maas_goruntule=false  → maaş uçları 403; maaş alanları her JSON yanıttan anahtarıyla çıkar; puantaj özetinde
+//                         hakediş/ödeme kalemleri, nakit akışında maaş satırları yok; personel kaydında maaş değişmez.
+// gizli_arac_kira_goruntule=false → araclar.kira_gizli=true olan aracın kira/depozito tutarları, kira ödemeleri,
+//                         fatura kalemleri, bağlı faturaların tutarları, kira sözleşmesi belgesi ve geçmişteki kira
+//                         değerleri gizlenir; bu tutarları içeren ikili Excel dışa aktarımları reddedilir.
+// Toplamlar istemcide görünür satırlardan hesaplanır → gizli tutar toplamdan türetilemez.
+const MAAS_RED_YOLLARI = [/^\/finance\/salary(\/|$)/, /^\/finance\/personel-aylik-ozet$/, /^\/finance\/personel(\/|-movement)/,
+  /^\/hr\/maas-/, /^\/hr\/avans(\/|$)/, /^\/hr\/hakedis-override$/, /^\/finance\/sarkan-odemeler$/, /^\/finance\/erc-banka$/,
+  /^\/islem-gecmisi\/maas_odeme\//];
+const MAAS_ANAHTARLARI = new Set(["net_maas", "banka_net_maas", "elden_net_maas", "bankadan_gosterilen", "elden_verilen",
+  "hakedilen_maas", "hakedis_otomatik", "hakedis_manuel", "manuel_tutar", "extra_hakedis", "maas_gecerli_donem",
+  "aylik_isveren_maliyeti", "brut_maas", "maas_tutari", "kalan_net_odeme"]);
+const PUANTAJ_OZET_PARA = ["bankadan", "elden", "avans", "kalan", "odenen", "toplam_odenen", "brut", "maas", "pazar_bonus_tutar"];
+const ARAC_KIRA_ALANLARI = ["aylik_kira", "kira_kdv_haric", "kira_kdv_orani", "kira_gecerli_donem", "depozito_tutar",
+  "depozito_tarihi", "depozito_iade_tarihi", "depozito_not", "odeme_tipi", "donem_gunu", "sozlesme_no", "kiralama_firmasi", "kira_bedeli"];
+const FATURA_TUTAR_ALANLARI = ["tutar", "kdv", "toplam_tutar", "odenen_tutar", "kalan", "kalan_tutar", "odenen", "net_tutar"];
+function _anahtarSil(x, anahtarlar, derinlik = 0) {
+  if (derinlik > 6 || !x || typeof x !== "object") return x;
+  if (Array.isArray(x)) return x.map((v) => _anahtarSil(v, anahtarlar, derinlik + 1));
+  const c = {};
+  for (const [k, v] of Object.entries(x)) {
+    if (anahtarlar.has(k)) continue;
+    c[k] = (v && typeof v === "object" && !(v instanceof Date)) ? _anahtarSil(v, anahtarlar, derinlik + 1) : v;
+  }
+  return c;
+}
+// Kira bedeli gizli araçlar + bağlı faturalar (60 sn önbellek; DB yoksa boş küme)
+let _gizliAracOnbellek = { t: 0, v: null };
+async function gizliAracKumesi() {
+  if (_gizliAracOnbellek.v && Date.now() - _gizliAracOnbellek.t < YETKI_TTL_MS) return _gizliAracOnbellek.v;
+  const v = { ids: new Set(), plakalar: new Set(), faturalar: new Set() };
+  try {
+    const a = await pool.query(`SELECT id, UPPER(REPLACE(COALESCE(plaka,''),' ','')) AS plaka FROM araclar WHERE kira_gizli = true`);
+    for (const r of a.rows) { v.ids.add(Number(r.id)); if (r.plaka) v.plakalar.add(r.plaka); }
+    if (v.ids.size) {
+      const f = await pool.query(`SELECT DISTINCT fatura_id FROM fatura_arac_kalem WHERE arac_id = ANY($1::int[]) AND fatura_id IS NOT NULL
+        UNION SELECT DISTINCT fatura_id FROM arac_kira_odemeler WHERE arac_id = ANY($1::int[]) AND fatura_id IS NOT NULL`, [[...v.ids]]).catch(() => ({ rows: [] }));
+      for (const r of f.rows) v.faturalar.add(Number(r.fatura_id));
+    }
+  } catch {}
+  _gizliAracOnbellek = { t: Date.now(), v };
+  return v;
+}
+const _plk = (p) => String(p || "").toUpperCase().replace(/\s+/g, "");
+app.use(async (req, res, next) => {
+  try {
+    if (req.method === "OPTIONS" || !req.izinler) return next();
+    const maasGizli = maasGizliMi(req), kiraGizli = aracKiraGizliMi(req);
+    if (!maasGizli && !kiraGizli) return next();
+    const yol = req.path.replace(/\/+$/, "") || "/";
+    const m = req.method === "HEAD" ? "GET" : req.method;
+    // /hr/avans iki türü taşır: maaş avansı kapalı, iş avansı (turu=IS) listesi açık kalır
+    const isAvansListesi = m === "GET" && yol === "/hr/avans" && String(req.query?.turu || "").toUpperCase() === "IS";
+    if (maasGizli && !isAvansListesi && MAAS_RED_YOLLARI.some((rx) => rx.test(yol)))
+      return res.status(403).json({ ok: false, error: "Maaş bilgilerini görme / değiştirme yetkiniz yok" });
+    // Personel kaydı güncelleme: maaş alanları istemciden alınmaz, mevcut değer korunur; yeni kayıtta maaş girilmez
+    if (maasGizli && m === "PUT" && /^\/hr\/personel\/\d+$/.test(yol) && req.body && typeof req.body === "object") {
+      const cur = (await pool.query(`SELECT net_maas, bankadan_gosterilen, elden_verilen FROM personel WHERE id=$1`, [Number(yol.split("/").pop())])).rows[0];
+      if (!cur) return res.status(404).json({ error: "Personel bulunamadı" });
+      Object.assign(req.body, { net_maas: cur.net_maas, bankadan_gosterilen: cur.bankadan_gosterilen, elden_verilen: cur.elden_verilen });
+      delete req.body.maas_donem;
+    }
+    if (maasGizli && m === "POST" && yol === "/hr/personel" && req.body && typeof req.body === "object") {
+      for (const k of ["net_maas", "bankadan_gosterilen", "elden_verilen", "maas_donem"]) delete req.body[k];
+    }
+    let gz = null;
+    if (kiraGizli) {
+      gz = await gizliAracKumesi();
+      if (!gz.ids.size) gz = null;
+      else if (m === "GET" && /^\/finance\/(invoice-entry\/export-excel|taseron-odeme-excel)$/.test(yol))
+        return res.status(403).json({ ok: false, error: "Bu dışa aktarım kira bedeli gizli araç tutarı içeriyor — yetkiniz yok" });
+    }
+    // Gizli araçta yazma: kira alanları istemciden alınmaz (maskeli boş değer kaydı ezmesin), kira ödemesi ve
+    // kira belgesi silme kapalı
+    if (gz && m !== "GET") {
+      const aid = (yol.match(/^\/hr\/araclar\/(\d+)(\/|$)/) || [])[1];
+      if (aid && gz.ids.has(Number(aid))) {
+        if (/\/kira-ode$/.test(yol)) return res.status(403).json({ ok: false, error: "Bu aracın kira işlemleri yetkinize kapalı" });
+        if (/\/belge$/.test(yol)) req.gizliKiraAraci = true;
+        if (m === "PUT" && /^\/hr\/araclar\/\d+$/.test(yol) && req.body && typeof req.body === "object") {
+          const cur = (await pool.query(`SELECT * FROM araclar WHERE id=$1`, [Number(aid)])).rows[0];
+          if (!cur) return res.status(404).json({ error: "Araç bulunamadı" });
+          for (const k of [...ARAC_KIRA_ALANLARI, "mulkiyet_turu", "sahip_firma", "kira_baslangic", "kira_bitis"]) if (k in cur) req.body[k] = cur[k];
+        }
+      }
+      if (m === "DELETE" && /^\/hr\/arac-belge\/\d+$/.test(yol)) {
+        const b = (await pool.query(`SELECT arac_id FROM arac_belgeler WHERE id=$1`, [Number(yol.split("/").pop())])).rows[0];
+        if (b && gz.ids.has(Number(b.arac_id))) return res.status(403).json({ ok: false, error: "Bu aracın belgeleri yetkinize kapalı" });
+      }
+    }
+    // Marka özet / P&L / gelecek tahsilat / sabit giderler maaş ve araç kirası TOPLAMLARI içerir → toplamdan türetilmesin diye kapalı
+    if (m === "GET" && ((maasGizli && /^\/finance\/marka-(ozet|pl|gelecek-tahsilat|sabit-giderler)$/.test(yol))
+      || (gz && /^\/finance\/marka-(ozet|pl|gelecek-tahsilat)$/.test(yol))))
+      return res.status(403).json({ ok: false, error: "Bu özet maaş / gizli araç kirası toplamı içeriyor — yetkiniz yok" });
+    const orig = res.json.bind(res);
+    res.json = (b) => {
+      let c = b;
+      if (maasGizli) {
+        c = _anahtarSil(c, MAAS_ANAHTARLARI);
+        if (yol === "/hr/puantaj/ozet") c = _anahtarSil(c, new Set(PUANTAJ_OZET_PARA));
+        if (yol === "/finance/cashflow-odeme" && c && typeof c === "object") { c = { ...c }; delete c.maaslar; }
+      }
+      if (gz) {
+        const gizliArac = (r) => r && (gz.ids.has(Number(r.arac_id ?? r.id)) || gz.plakalar.has(_plk(r.plaka)));
+        const kiraBos = (r) => { const x = { ...r }; for (const k of ARAC_KIRA_ALANLARI) if (k in x) x[k] = null; x.kira_gizli = true; return x; };
+        if (yol === "/hr/araclar" && Array.isArray(c)) {
+          c = c.map((a) => gz.ids.has(Number(a.id)) ? { ...kiraBos(a),
+            belgeler: Array.isArray(a.belgeler) ? a.belgeler.filter((d) => !/kira|s[oö]zle[sş]me|fatura|dekont/i.test(String(d?.belge_turu || "") + " " + String(d?.dosya_adi || ""))) : a.belgeler } : a);
+        } else if (/^\/hr\/(arac-kira-odemeler|arac-fatura-kalemleri)$/.test(yol) && Array.isArray(c)) {
+          c = c.filter((r) => !gz.ids.has(Number(r.arac_id)));
+        } else if (yol === "/hr/arac-gecmis" && Array.isArray(c)) {
+          c = c.map((r) => gizliArac(r) ? kiraBos(r) : r);
+        } else if (/^\/hr\/araclar\/\d+\/islem-log$/.test(yol) && gz.ids.has(Number(yol.split("/")[3])) && Array.isArray(c)) {
+          c = c.map((r) => /kira|depozito|₺|\btl\b|\d{3,}/i.test(String(r.detay || "")) ? { ...r, detay: "Kira / tutar bilgisi gizli" } : r);
+        } else if (/^\/finance\/fatura\/\d+\/arac-kalem$/.test(yol) && c && Array.isArray(c.kalemler)) {
+          c = { ...c, kalemler: c.kalemler.map((k) => gz.ids.has(Number(k.arac_id)) ? { ...k, tutar: null, odenen: null, aylik_kira: null, kira_gizli: true } : k) };
+        } else if (/^\/finance\/fatura\/\d+\/odeme-durumu$/.test(yol) && gz.faturalar.has(Number(yol.split("/")[3]))) {
+          c = { ok: true, kira_gizli: true, mesaj: "Bu fatura kira bedeli gizli bir araç içeriyor" };
+        } else if (yol === "/finance/invoice-entry/list") {
+          const tut = (rows) => rows.map((r) => gz.faturalar.has(Number(r.id)) ? (() => { const x = { ...r }; for (const k of FATURA_TUTAR_ALANLARI) if (k in x) x[k] = null; x.kira_gizli = true; return x; })() : r);
+          if (Array.isArray(c)) c = tut(c); else if (c && Array.isArray(c.rows)) c = { ...c, rows: tut(c.rows) };
+        } else if (yol === "/finance/cashflow-odeme" && c && Array.isArray(c.odemeler)) {
+          c = { ...c, odemeler: c.odemeler.map((r) => gz.ids.has(Number(r.arac_id)) ? { ...r, tutar: null, kira_gizli: true } : r) };
+        }
+      }
+      // Serbest metinli gider listesi: maaş satırları / gizli aracın plakası geçen satırların tutarı boş
+      if (yol === "/finance/expenses/list" && c && Array.isArray(c.rows)) {
+        const gizliSatir = (r) => { const t = `${r.expense_type || ""} ${r.description || ""}`;
+          return (maasGizli && /maa[sş]|bordro|elden [oö]deme/i.test(t)) || (gz && [...gz.plakalar].some((p) => _plk(t).includes(p))); };
+        c = { ...c, rows: c.rows.map((r) => gizliSatir(r) ? { ...r, amount: null, gizli: true } : r) };
+      }
+      return orig(c);
+    };
+    return next();
+  } catch (e) {
+    console.error("[gizlilik-katmani]", e.message);
+    return res.status(500).json({ ok: false, error: "Yetki kontrolü yapılamadı" });
+  }
+});
+// Kullanıcı yetki ayarı (yalnız tam admin): { yetki_ayar: { anahtar: true | false | null } } — null = rol varsayılanı
+app.put("/admin/users/:id/yetkiler", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!(await guardUserScope(req, res, id))) return;
+    const gelen = req.body?.yetki_ayar;
+    if (!gelen || typeof gelen !== "object" || Array.isArray(gelen)) return res.status(400).json({ ok: false, error: "yetki_ayar nesnesi gerekli" });
+    const cur = (await pool.query(`SELECT id, email, role, yetki_ayar FROM users WHERE id=$1`, [id])).rows[0];
+    if (!cur) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
+    const yeni = { ...(cur.yetki_ayar || {}) };
+    for (const [k, v] of Object.entries(gelen)) {
+      if (!(k in IZIN_TANIMLARI)) return res.status(400).json({ ok: false, error: `Bilinmeyen yetki: ${k}` });
+      if (v === null) delete yeni[k]; else if (typeof v === "boolean") yeni[k] = v; else return res.status(400).json({ ok: false, error: `${k}: true / false / null olmalı` });
+    }
+    const r = await pool.query(`UPDATE users SET yetki_ayar=$1 WHERE id=$2 RETURNING id, email, role, yetki_ayar`, [Object.keys(yeni).length ? JSON.stringify(yeni) : null, id]);
+    _yetkiOnbellek.delete(String(cur.email || "").toLowerCase().trim());
+    await islemGecmisiYaz(req, "kullanici", id, "YETKI", { yetki_ayar: JSON.stringify(cur.yetki_ayar || {}) }, { yetki_ayar: JSON.stringify(yeni) }, req.body?.gerekce || null);
+    res.json({ ok: true, user: r.rows[0], etkin: etkinIzinHesapla(cur, yeni) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Aracın kira bedelini gizli yap / aç (yalnız tam admin) — hangi aracın gizleneceği kayıtlardan doğrulanıp seçilir
+app.put("/hr/araclar/:id/kira-gizli", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const gizli = req.body?.kira_gizli === true;
+    const cur = (await pool.query(`SELECT id, plaka, kira_gizli FROM araclar WHERE id=$1`, [id])).rows[0];
+    if (!cur) return res.status(404).json({ ok: false, error: "Araç bulunamadı" });
+    await pool.query(`UPDATE araclar SET kira_gizli=$1 WHERE id=$2`, [gizli, id]);
+    _gizliAracOnbellek = { t: 0, v: null };
+    await islemGecmisiYaz(req, "arac", id, "GIZLILIK", { kira_gizli: !!cur.kira_gizli }, { kira_gizli: gizli, plaka: cur.plaka }, req.body?.gerekce || null);
+    res.json({ ok: true, id, plaka: cur.plaka, kira_gizli: gizli });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// PO taleplerim: oturumdaki kullanıcının açtığı PR satırları ve PO durumu (fiyat yok)
+app.get("/master/taleplerim", authMiddleware, async (req, res) => {
+  try {
+    const ben = String(req.user?.email || "").toLowerCase().trim();
+    const r = await pool.query(`
+      SELECT m.id, m.project_code, m.site_code, m.item_code, m.item_description, m.done_qty AS pr_qty, m.created_at,
+        COALESCE((SELECT SUM(p.requested_qty) FROM po_rows p WHERE UPPER(TRIM(p.site_code)) = UPPER(TRIM(m.site_code))
+          AND TRIM(p.item_code) = TRIM(m.item_code)), 0) AS po_qty,
+        (SELECT string_agg(DISTINCT p.po_no, ', ') FROM po_rows p WHERE UPPER(TRIM(p.site_code)) = UPPER(TRIM(m.site_code))
+          AND TRIM(p.item_code) = TRIM(m.item_code)) AS po_no
+      FROM master_works m WHERE LOWER(TRIM(COALESCE(m.olusturan,''))) = $1
+      ORDER BY m.created_at DESC, m.id DESC LIMIT 500`, [ben]);
+    res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, durum: Number(x.po_qty) >= Number(x.pr_qty) && Number(x.pr_qty) > 0 ? "PO açıldı" : Number(x.po_qty) > 0 ? "Kısmi PO" : "PO bekleniyor" })) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // TÜM KULLANICILARI LİSTELE
@@ -1510,7 +1782,7 @@ app.post("/auth/login", async (req, res) => {
 
     const result = await pool.query(
       `
-      SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate, tenant, status, marka, users_admin
+      SELECT id, name, email, password_hash, role, is_active, subcon_name, payment_rate, tenant, status, marka, users_admin, yetki_ayar
       FROM users
       WHERE LOWER(TRIM(email)) = $1
       ORDER BY id DESC
@@ -1669,7 +1941,7 @@ app.post("/auth/login", async (req, res) => {
         marka_ad: markaAd,
         hw_yukleme: hwYukleme,
         ...markaProfilAlanlari,
-        ...(rolIzinleri(user) ? { izinler: rolIzinleri(user) } : {}), // 21.10.2026: rol bazlı izin seti (İSG Sorumlusu)
+        ...((() => { const iz = etkinIzinHesapla(user, user.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()), // rol + kullanıcı yetki ayarı
       },
     });
   } catch (err) {
@@ -1689,7 +1961,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
     const email = String(req.user?.email || "").trim().toLowerCase();
     if (!email) return res.status(401).json({ ok: false, error: "Oturum geçersiz" });
     const r = await pool.query(
-      `SELECT id, name, email, role, is_active, subcon_name, payment_rate, tenant, status, marka, users_admin
+      `SELECT id, name, email, role, is_active, subcon_name, payment_rate, tenant, status, marka, users_admin, yetki_ayar
        FROM users WHERE LOWER(TRIM(email)) = $1 ORDER BY id DESC LIMIT 1`, [email]);
     const u = r.rows[0];
     if (!u || !u.is_active || String(u.status || "active") !== "active") {
@@ -1721,7 +1993,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
       marka: markaKod, marka_ad: markaAd, hw_yukleme: hwYukleme,
       users_admin: u.users_admin === true,
       ...(_mp ? { marka_devir: _mp.devir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay } : {}),
-      ...(rolIzinleri(u) ? { izinler: rolIzinleri(u) } : {}),
+      ...((() => { const iz = etkinIzinHesapla(u, u.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()),
     }});
   } catch (e) {
     console.error("AUTH ME ERROR:", e.message);
@@ -13000,6 +13272,9 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
     );
 
     console.log("DUPLICATE CHECK BITTI:", duplicateCheck.rows.length);
+    // 21.10.2026: PO talebi yetkisi (İSG kapısı) mevcut satırı GÜNCELLEYEMEZ — yalnız yeni talep açar
+    if (req.poTalepModu && duplicateCheck.rows.length > 0)
+      return res.status(409).json({ ok: false, error: "Bu saha + kalem için kayıt zaten var; mevcut kaydı değiştirme yetkiniz yok" });
 
     // Tamamlanan (fiziki) miktar: boş gönderildiyse NULL kalır (= done kabul edilir)
     const tamamlananQty =
@@ -13062,9 +13337,10 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
         note,
         qc_durum,
         kabul_durum,
-        kabul_not
+        kabul_not,
+        olusturan
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
       RETURNING *
       `,
       [
@@ -13081,6 +13357,7 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
         m.qc_durum || "NOK",
         m.kabul_durum || "NOK",
         m.kabul_not ? String(m.kabul_not).trim() : null,
+        (optionalAuth(req)?.email || "").toLowerCase().trim() || null, // 21.10.2026: talebi açan (PO taleplerim)
       ],
     );
 
@@ -22774,6 +23051,9 @@ app.post("/hr/araclar/:id/belge", ikYazma, aracUpload.single("dosya"), async (re
   try {
     const { belge_turu, aciklama } = req.body;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
+    // Kira bedeli gizli araç: sözleşme yüklemesi eski kira sözleşmesini sileceği için kapalı (gizlilik katmanı işaretler)
+    if (req.gizliKiraAraci && /SOZLESME|KIRA|FATURA|DEKONT/i.test(String(belge_turu || "")))
+      return res.status(403).json({ error: "Bu aracın kira / sözleşme belgeleri yetkinize kapalı" });
     if (["SOZLESME","RUHSAT","SIGORTA","MUAYENE"].includes(belge_turu)) {
       const old = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE arac_id=$1 AND belge_turu=$2", [req.params.id, belge_turu]);
       for (const r of old.rows) await deleteFromStorage(r.dosya_yolu);
