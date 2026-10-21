@@ -7511,7 +7511,10 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
   );
 }
 
-function DailyEntry({ actionTrigger, onActionHandled } = {}) {
+function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTalep = false } = {}) {
+  // 21.10.2026: saltOkunur → yükleme / düzenleme yok; poTalep → yalnız YENİ PR satırı (QC / kabul alanı yok,
+  // sunucu da zorlar: mevcut satır güncellenmez, onay alanları NOK)
+  const yeniKayitIzni = !saltOkunur || poTalep;
   const usdRate = useUsdRate();
   function getTodayTR() {
     const d = new Date();
@@ -8058,6 +8061,7 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
   }, [itemOptions, itemDescriptionSearch]);
 
   const handleOpenEntryModal = () => {
+    if (!yeniKayitIzni) return;
     if (!siteSearchCode) {
       alert("Önce Site Code gir");
       return;
@@ -8072,6 +8076,7 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
   };
 
   const handleEdit = (row) => {
+    if (saltOkunur) { alert("Kayıtlı satırı değiştirme yetkiniz yok — yalnız yeni PO talebi açabilirsiniz."); return; }
     setEditingId(row.id);
     setMessage("");
 
@@ -8197,8 +8202,8 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
         kabul_not: form.kabul_not,
       };
 
-      // Save new subcon to master list if not already there
-      if (normalizedSubcon && !subconList.includes(normalizedSubcon)) {
+      // Save new subcon to master list if not already there (PO talebi modunda taşeron listesi değişmez)
+      if (!saltOkunur && normalizedSubcon && !subconList.includes(normalizedSubcon)) {
         try {
           await fetch(`${API_BASE}/subcons`, {
             method: "POST",
@@ -8370,7 +8375,7 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
             </button>
           )}
           {/* İşlemler dropdown */}
-          <div style={{ position:"relative" }}>
+          {!saltOkunur && <div style={{ position:"relative" }}>
             <button type="button"
               onClick={() => setShowDailyIslemlerMenu((prev) => !prev)}
               style={{ height:38, padding:"0 16px", background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.25)", borderRadius:9, color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
@@ -8393,7 +8398,7 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
                 ))}
               </div>
             )}
-          </div>
+          </div>}
           {/* Tüm İşleri Excel */}
           <button type="button" onClick={handleExportAllEntriesExcel}
             style={{ height:38, padding:"0 18px", background:"rgba(255,255,255,0.92)", border:"none", borderRadius:9, color:"#1d4ed8", fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
@@ -8484,6 +8489,7 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
                                 <td style={{ padding:"8px 12px", textAlign:"center" }}>
                                   <button type="button" disabled={eksikSaving===key}
                                     onClick={async ()=>{
+                                      if (!yeniKayitIzni) return;
                                       const adet = Number(eksikQty[key] ?? it.requested_qty ?? 0);
                                       if (!(adet > 0)) { alert("Miktar giriniz"); return; }
                                       setEksikSaving(key);
@@ -8572,10 +8578,10 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
                 </div>
               )}
             </div>
-            <button type="button" onClick={handleOpenEntryModal} disabled={!siteSearchCode}
+            {yeniKayitIzni && <button type="button" onClick={handleOpenEntryModal} disabled={!siteSearchCode}
               style={{ height:48, padding:"0 26px", background:siteSearchCode?"linear-gradient(135deg,#1d4ed8,#4f46e5)":"#cbd5e1", border:"none", borderRadius:12, color:"#fff", fontSize:14, fontWeight:700, cursor:siteSearchCode?"pointer":"not-allowed", boxShadow:siteSearchCode?"0 4px 12px rgba(79,70,229,0.35)":"none", display:"flex", alignItems:"center", gap:7, whiteSpace:"nowrap" }}>
-              📡 Veri Gir
-            </button>
+              📡 {saltOkunur ? "PO Talebi Aç" : "Veri Gir"}
+            </button>}
           </div>
         </div>
       </div>
@@ -8585,6 +8591,8 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
         siteCode={siteSearchCode}
         oneriler={sahaOneri?.oneriler || []}
         onVeriGir={async (r) => {
+          if (saltOkunur && r.master_id) { alert("Bu kalem kayıtlı — değiştirme yetkiniz yok. Yalnız kaydı olmayan kalem için PO talebi açabilirsiniz."); return; }
+          if (!yeniKayitIzni) return;
           // 12.09.2026 (Orhan): kayıtlı kalemde "Veri Gir" o SATIRI düzenler (PUT /master/:id).
           // Eskiden editingId verilmediği için kalem kodu değişince /master/add ile YENİ satır
           // açılıyordu (AI5006 1-3 RRU → 4-6 RRU vakası). Tam satır by-site'tan alınır ki
@@ -8951,8 +8959,9 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ fontSize: 16 }}>✅</span> Durum & Notlar
                 </div>
-                {/* QC + Kabul Durum */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                {/* QC + Kabul Durum — PO talebi modunda gösterilmez (onay sorumlusu belirler) */}
+                {saltOkunur && <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>QC ve kabul durumu talep sonrası sorumlu tarafından işlenir.</div>}
+                <div style={{ display: saltOkunur ? "none" : "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>QC Durum</label>
                     <div style={{ display: "flex", gap: 8 }}>
@@ -8987,7 +8996,7 @@ function DailyEntry({ actionTrigger, onActionHandled } = {}) {
                   </div>
                   <div>
                     <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Kabul Not</label>
-                    <textarea name="kabul_not" value={form.kabul_not} onChange={handleChange} placeholder="Kabul ile ilgili not..." rows={3}
+                    <textarea name="kabul_not" value={form.kabul_not} onChange={handleChange} placeholder={saltOkunur ? "Kabul notu sorumlu tarafından girilir" : "Kabul ile ilgili not..."} rows={3} disabled={saltOkunur}
                       style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, boxSizing: "border-box", resize: "vertical", outline: "none", fontFamily: "inherit", background: "#fafafa" }} />
                   </div>
                 </div>
@@ -12583,7 +12592,8 @@ function FinanceDashboard({
         fetchJson(paymentsUrl, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/upcoming-payments`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/invoice-entry/list`, { withAuth: true }),
-        fetchJson(`${API_BASE}/finance/salary/list`, { withAuth: true }),
+        // Maaş yetkisi kapalı kullanıcıda sunucu 403 döner — panelin geri kalanı yüklenmeye devam etsin
+        user?.izinler?.maas_goruntule === false ? Promise.resolve({ rows: [] }) : fetchJson(`${API_BASE}/finance/salary/list`, { withAuth: true }),
         fetchJson(`${API_BASE}/finance/hw-payment/last-upload`).catch(() => ({ ok: true, last_upload: null })),
         fetchJson(`${API_BASE}/hw-acceptance/summary`).catch(() => ({ total_usd: 0, total_try: 0, total_count: 0, by_handler: [] })),
       ]);
@@ -17614,6 +17624,67 @@ function PersonelAramaSecim({ value, onChange, personeller, placeholder = "Perso
     </div>
   );
 }
+/* ═══ PO TALEPLERİM (21.10.2026, Orhan) — po_talep_olustur yetkisi ═══
+   Oturumdaki kullanıcının Günlük İş ekranından açtığı PR satırları ve PO durumu. Fiyat / onay alanı yok. */
+function PoTaleplerimPanel({ onYeniTalep }) {
+  const [d, setD] = useState({ yukleniyor: true, rows: [], hata: "" });
+  const [ara, setAra] = useState("");
+  const yukle = useCallback(async () => {
+    setD(x => ({ ...x, yukleniyor: true, hata: "" }));
+    try {
+      const r = await fetch(`${API_BASE}/master/taleplerim`, { headers: AUTH_H() });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.ok === false) throw new Error(j.error || `Liste alınamadı (${r.status})`);
+      setD({ yukleniyor: false, rows: Array.isArray(j.rows) ? j.rows : [], hata: "" });
+    } catch (e) { setD({ yukleniyor: false, rows: [], hata: e.message }); }
+  }, []);
+  useEffect(() => { yukle(); }, [yukle]);
+  const q = ara.trim().toLowerCase();
+  const liste = q ? d.rows.filter(r => `${r.site_code} ${r.item_code} ${r.item_description} ${r.po_no || ""}`.toLowerCase().includes(q)) : d.rows;
+  const renk = { "PO açıldı": ["#dcfce7", "#166534"], "Kısmi PO": ["#fef3c7", "#92400e"], "PO bekleniyor": ["#e0e7ff", "#3730a3"] };
+  const th = { padding: "9px 10px", fontSize: "11.5px", fontWeight: 800, color: "#475569", textAlign: "left", background: "#f8fafc", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap" };
+  const td = { padding: "9px 10px", fontSize: "13px", borderBottom: "1px solid #f1f5f9", verticalAlign: "top" };
+  return (
+    <div style={{ maxWidth: "1100px", margin: "0 auto", textAlign: "left" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
+        <h2 style={{ margin: 0, fontSize: "19px", fontWeight: 800, color: "#0f172a" }}>PO Taleplerim</h2>
+        <span style={{ fontSize: "12.5px", color: "#64748b" }}>Açtığınız PR satırları ve PO durumu</span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <input value={ara} onChange={e => setAra(e.target.value)} placeholder="Saha / kalem / PO ara" aria-label="Taleplerde ara"
+            style={{ height: "36px", padding: "0 10px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "13px", minWidth: 0, width: "200px", maxWidth: "100%" }} />
+          <button onClick={yukle} style={{ height: "36px", padding: "0 12px", border: "1px solid #cbd5e1", background: "#fff", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>Yenile</button>
+          {onYeniTalep && <button onClick={onYeniTalep} style={{ height: "36px", padding: "0 14px", border: "none", background: "#1e3a5f", color: "#fff", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>+ Yeni talep (Günlük İş)</button>}
+        </div>
+      </div>
+      {d.yukleniyor ? <div style={{ color: "#94a3b8", fontSize: "13px" }}>Yükleniyor…</div>
+        : d.hata ? <div role="alert" style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", borderRadius: "8px", padding: "10px 12px", fontSize: "13px" }}>{d.hata}</div>
+        : liste.length === 0 ? <div style={{ background: "#fff", border: "1px dashed #cbd5e1", borderRadius: "10px", padding: "18px", color: "#64748b", fontSize: "13px" }}>{d.rows.length ? "Aramayla eşleşen talep yok." : "Henüz açtığınız PO talebi yok. Günlük İş ekranında sahayı seçip kalem ekleyerek talep açabilirsiniz."}</div>
+        : (
+          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "640px" }}>
+              <thead><tr>{["Tarih", "Saha", "Kalem", "Talep", "PO", "PO No", "Durum"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {liste.map(r => {
+                  const [bg, fg] = renk[r.durum] || ["#f1f5f9", "#334155"];
+                  return (
+                    <tr key={r.id}>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{r.created_at ? String(r.created_at).slice(0, 10).split("-").reverse().join(".") : "—"}</td>
+                      <td style={{ ...td, fontWeight: 700, whiteSpace: "nowrap" }}>{r.site_code}<div style={{ fontSize: "11.5px", color: "#94a3b8", fontWeight: 500 }}>{r.project_code || ""}</div></td>
+                      <td style={td}><span style={{ fontFamily: "monospace", fontSize: "12px" }}>{r.item_code}</span><div style={{ fontSize: "12px", color: "#64748b" }}>{r.item_description || ""}</div></td>
+                      <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Number(r.pr_qty || 0).toLocaleString("tr-TR")}</td>
+                      <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Number(r.po_qty || 0).toLocaleString("tr-TR")}</td>
+                      <td style={{ ...td, fontSize: "12px" }}>{r.po_no || "—"}</td>
+                      <td style={td}><span style={{ background: bg, color: fg, borderRadius: "999px", padding: "2px 9px", fontSize: "12px", fontWeight: 700, whiteSpace: "nowrap" }}>{r.durum}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+    </div>
+  );
+}
 /* ═══ İSG SORUMLUSU ÇALIŞMA ALANI (21.10.2026, Orhan) — role='isg' ═══
    Rol bazlı (kişiye özel değil). Mevcut ekranları kullanır: İK modülünün ISG sekmesi (salt okunur),
    Puantaj (salt okunur), Rollout Data (salt okunur) ve personel akışındaki kendi İş Avansı / Masraf Formu.
@@ -17642,10 +17713,21 @@ function IsgCalismaAlani({ user, page, setPage, onLogout, setPendingAvansCount, 
     { k: "isg_panel", ad: "İSG Paneli", ikon: "🎓", goster: !!izin.isg_goruntule },
     { k: "puantaj", ad: "Puantajlar", ikon: "📋", goster: !!izin.puantaj_goruntule },
     { k: "executive", ad: "Rollout Data", ikon: "📡", goster: !!izin.rollout_goruntule },
+    // 21.10.2026: kullanıcıya özel yetki ayarıyla açılan ekranlar (Admin → yetki_ayar); asıl kontrol sunucuda
+    { k: "region", ad: "Bölge Analizi", ikon: "🗺", goster: !!izin.bolge_analizi_goruntule },
+    { k: "entry", ad: "Günlük İş", ikon: "✏️", goster: !!izin.gunluk_is_goruntule },
+    { k: "po_taleplerim", ad: "PO Taleplerim", ikon: "📨", goster: !!izin.po_talep_olustur },
+    { k: "araclar", ad: "Araç & Depo", ikon: "🚗", goster: !!izin.arac_depo_goruntule },
+    { k: "malzeme", ad: "Malzeme", ikon: "📦", goster: !!izin.malzeme_goruntule },
     { k: "is_avans", ad: "İş Avanslarım", ikon: "💳", goster: !!izin.kendi_avans },
     { k: "masraf", ad: "Masraf Formlarım", ikon: "🧾", goster: !!izin.kendi_masraf },
   ].filter(s => s.goster);
-  const aktif = SEKMELER.some(s => s.k === page) ? page : "isg_home";
+  // Menüde ayrı sekmesi olmayan alt sayfa: Depo & Ofis (Araç & Depo içinden açılır)
+  const aktif = SEKMELER.some(s => s.k === page) || (page === "ofis" && izin.arac_depo_goruntule) ? page : "isg_home";
+  const [digerAcik, setDigerAcik] = useState(false);
+  // Dar ekranda alt çubuk en fazla 5 düğme: ilk 4 sekme + "Diğer" (kalanlar açılır listede)
+  const ALT_SEKMELER = SEKMELER.length > 5 ? SEKMELER.slice(0, 4) : SEKMELER;
+  const DIGER_SEKMELER = SEKMELER.length > 5 ? SEKMELER.slice(4) : [];
   // Özet: yalnız mevcut İSG verisinden; veri gelmezse sayı gösterilmez
   const aktifPersonel = (ozet.matris || []).filter(p => p.aktif);
   const doldu = (ozet.uyarilar || []).filter(x => x.durum === "SURESI_DOLDU").length;
@@ -17661,7 +17743,7 @@ function IsgCalismaAlani({ user, page, setPage, onLogout, setPendingAvansCount, 
   const anaEkran = (
     <div style={{ maxWidth: "1100px", margin: "0 auto", textAlign: "left" }}>
       <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a", textAlign: "left" }}>Merhaba {String(user?.name || "").split(" ")[0] || ""}</h2>
-      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "16px" }}>İSG Sorumlusu · {user?.marka_ad || "ERC Mühendislik"} — personel eğitim/belge durumu, puantaj ve saha ilerlemesi (görüntüleme)</div>
+      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "16px" }}>İSG Sorumlusu · {user?.marka_ad || "ERC Mühendislik"} — personel eğitim/belge durumu, puantaj ve saha ilerlemesi (görüntüleme){izin.po_talep_olustur ? " · yeni PO talebi" : ""}</div>
       <div style={{ display: "grid", gridTemplateColumns: dar ? "1fr 1fr" : "repeat(5, 1fr)", gap: "10px", marginBottom: "18px" }}>
         {SEKMELER.filter(s => s.k !== "isg_home").map(s => (
           <button key={s.k} className="isg-focus" onClick={() => setPage(s.k)}
@@ -17700,6 +17782,12 @@ function IsgCalismaAlani({ user, page, setPage, onLogout, setPendingAvansCount, 
     aktif === "isg_panel" ? <HrDashboard currentUser={user} initialTab="isg" sadeceSekme="isg" saltOkunur={!izin.isg_duzenle} />
     : aktif === "puantaj" ? <PuantajPanel currentUser={user} saltOkunur={!izin.puantaj_duzenle} />
     : aktif === "executive" ? <RolloutDashboard currentUser={user} saltOkunur={!izin.rollout_duzenle} excelIzni={!!izin.rollout_excel} />
+    : aktif === "region" ? <RegionAnalysis isSubconUser={false} />
+    : aktif === "entry" ? <DailyEntry saltOkunur poTalep={!!izin.po_talep_olustur} />
+    : aktif === "po_taleplerim" ? <PoTaleplerimPanel onYeniTalep={izin.gunluk_is_goruntule ? () => setPage("entry") : null} />
+    : aktif === "araclar" ? <AraclarPanel currentUser={user} saltOkunur onGoOfis={() => setPage("ofis")} />
+    : aktif === "ofis" ? <OfisDepoPanel currentUser={user} saltOkunur onGoArac={() => setPage("araclar")} />
+    : aktif === "malzeme" ? <MalzemeYonetimiPanel currentUser={user} saltOkunur />
     : aktif === "is_avans" ? <IsAvansPanel currentUser={user} onPendingCount={setPendingAvansCount} />
     : aktif === "masraf" ? <MasrafFormuPanel currentUser={user} onPendingCount={setPendingMasrafCount} />
     : anaEkran;
@@ -17714,8 +17802,8 @@ function IsgCalismaAlani({ user, page, setPage, onLogout, setPendingAvansCount, 
           {!dar && (
             <nav aria-label="İSG menüsü" style={{ display: "flex", gap: "4px", marginLeft: "12px", flexWrap: "wrap" }}>
               {SEKMELER.map(s => (
-                <button key={s.k} className="isg-focus" onClick={() => setPage(s.k)} aria-current={aktif === s.k ? "page" : undefined}
-                  style={{ background: aktif === s.k ? "rgba(255,255,255,0.18)" : "transparent", border: "none", color: "#fff", padding: "8px 12px", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                <button key={s.k} className="isg-focus" onClick={() => setPage(s.k)} aria-current={aktif === s.k || (s.k === "araclar" && aktif === "ofis") ? "page" : undefined}
+                  style={{ background: aktif === s.k || (s.k === "araclar" && aktif === "ofis") ? "rgba(255,255,255,0.18)" : "transparent", border: "none", color: "#fff", padding: "8px 12px", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
                   {s.ad}
                 </button>
               ))}
@@ -17730,13 +17818,29 @@ function IsgCalismaAlani({ user, page, setPage, onLogout, setPendingAvansCount, 
       <div style={{ padding: dar ? "12px 10px 84px" : "18px 20px 40px" }}>{icerik}</div>
       {dar && (
         <nav aria-label="İSG menüsü" style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100, background: "#fff", borderTop: "1px solid #e5e7eb", display: "flex", height: "64px", boxShadow: "0 -2px 10px rgba(0,0,0,0.08)" }}>
-          {SEKMELER.map(s => (
-            <button key={s.k} className="isg-focus" onClick={() => setPage(s.k)} aria-current={aktif === s.k ? "page" : undefined}
+          {ALT_SEKMELER.map(s => (
+            <button key={s.k} className="isg-focus" onClick={() => { setDigerAcik(false); setPage(s.k); }} aria-current={aktif === s.k ? "page" : undefined}
               style={{ flex: 1, border: "none", background: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "2px", color: aktif === s.k ? "#1e3a5f" : "#94a3b8", fontSize: "9.5px", fontWeight: 700, padding: "0 2px" }}>
               <span style={{ fontSize: "19px" }}>{s.ikon}</span>{s.ad.replace("Masraf Formlarım", "Masraf").replace("İş Avanslarım", "Avans").replace("Rollout Data", "Rollout")}
             </button>
           ))}
+          {DIGER_SEKMELER.length > 0 && (
+            <button className="isg-focus" onClick={() => setDigerAcik(v => !v)} aria-expanded={digerAcik} aria-controls="isg-diger-menu"
+              style={{ flex: 1, border: "none", background: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "2px", color: digerAcik || DIGER_SEKMELER.some(s => s.k === aktif) || aktif === "ofis" ? "#1e3a5f" : "#94a3b8", fontSize: "9.5px", fontWeight: 700, padding: "0 2px" }}>
+              <span style={{ fontSize: "19px" }}>☰</span>Diğer
+            </button>
+          )}
         </nav>
+      )}
+      {dar && digerAcik && DIGER_SEKMELER.length > 0 && (
+        <div id="isg-diger-menu" role="menu" style={{ position: "fixed", left: 8, right: 8, bottom: 72, zIndex: 101, background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", boxShadow: "0 8px 24px rgba(15,23,42,0.18)", padding: "6px" }}>
+          {DIGER_SEKMELER.map(s => (
+            <button key={s.k} role="menuitem" className="isg-focus" onClick={() => { setDigerAcik(false); setPage(s.k); }}
+              style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", border: "none", background: aktif === s.k || (s.k === "araclar" && aktif === "ofis") ? "#eef2f7" : "transparent", borderRadius: "8px", padding: "11px 12px", fontSize: "14px", fontWeight: 700, color: "#1e3a5f", cursor: "pointer", textAlign: "left" }}>
+              <span style={{ fontSize: "18px" }}>{s.ikon}</span>{s.ad}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -17776,7 +17880,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   const _isMuhasebe = currentUser?.role === "muhasebe";
   // Maaş gizli modu: personel KÜNYESİNİ yönetir (İBAN, işe giriş, TC...) ama
   // maaş alanlarını GÖREMEZ — muhasebe (Tuğçe)
-  const _maasGizli = _isMuhasebe;
+  // 21.10.2026: kullanıcı yetki ayarında maaş kapalıysa (sunucu da maaş alanlarını yanıttan çıkarır) aynı gizli mod
+  const _maasKapali = currentUser?.izinler?.maas_goruntule === false;
+  const _maasGizli = _isMuhasebe || _maasKapali;
   // AHY tarafında maaşlar ekstra şifre korumalı: sadece Haşım Bey bilir
   // (ahy2026gsm). ERC yetkilileri şifresiz girer, AHY yetkilisi şifreyle.
   const _maasSifreli = _hrEmail === "info@ahyelektrik.com"; // Teknocenter yöneticisi (teknocenter) şifresiz görür
@@ -18851,7 +18957,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
         .filter(([k]) => !(_maasGizli && !_hrYetkili && k === "maas_avans"))
         .map(([k, ic, l, alt]) => (
           <button key={k} onClick={()=>{
-            if ((k === "personel" || k === "maas_avans") && !personelUnlocked && !(_maasGizli && k === "personel")) {
+            if ((k === "personel" || k === "maas_avans") && !personelUnlocked && !(_isMuhasebe && k === "personel")) {
               const pwd = prompt("Maaş bilgileri için şifre giriniz:");
               if (!_maasSifreler.includes(pwd)) { alert("Yetkisiz erişim!"); return; }
               setPersonelUnlocked(true);
@@ -19489,7 +19595,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
       })()}
 
       {/* ===== PERSONEL SEKMESİ ===== */}
-      {(tab==="personel" || tab==="maas_avans") && !personelUnlocked && !(_maasGizli && tab==="personel") && (
+      {(tab==="personel" || tab==="maas_avans") && !personelUnlocked && !(_isMuhasebe && tab==="personel") && (
         <div style={{ textAlign:"center", padding:"60px 20px" }}>
           <div style={{ fontSize:"48px", marginBottom:"16px" }}>🔒</div>
           <div style={{ fontSize:"18px", fontWeight:700, color:"#1f2937", marginBottom:"8px" }}>Bu alan şifre korumalıdır</div>
@@ -19503,7 +19609,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
           </button>
         </div>
       )}
-      {tab==="personel" && (personelUnlocked || _maasGizli) && (
+      {tab==="personel" && (personelUnlocked || _isMuhasebe) && (
         <div>
               <div style={{ marginBottom:"16px" }}>
                 <div>
@@ -32028,7 +32134,7 @@ function PersonelMalzemePanel({ currentUser }) {
   );
 }
 
-function MalzemeYonetimiPanel({ currentUser, onBack }) {
+function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
   const _email = (currentUser?.email || "").toLowerCase();
   const isAdmin    = currentUser?.role === "admin" || currentUser?.role === "platform_admin";
   const isPM       = _email === "orhan.bedir@simsektel.com";
@@ -32042,7 +32148,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   const canSeeDepo   = isAdmin || isPM || isDirektor || isNurcan || isMurat;
   const canEditFiyat = isAdmin || isPM;
 
-  const _isPersonelOnly = !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat && !isBolgeMudur;
+  // saltOkunur (21.10.2026): talep ve dağıtım listelerini görür; yeni talep / çıkış / düzenleme düğmeleri yok (sunucu da reddeder)
+  const _isPersonelOnly = !saltOkunur && !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat && !isBolgeMudur;
   const [tab, setTab] = useState(_isPersonelOnly ? "dagitim" : "talepler");
   const [talepler, setTalepler] = useState([]);
   const [talepLoading, setTalepLoading] = useState(false);
@@ -32442,11 +32549,11 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
   // ── LOAD ──
   const loadTalepler = async () => {
     setTalepLoading(true);
-    try { const r = await fetch(`${API_BASE}/malzeme/talepler`, { headers }); setTalepler(await r.json()); }
+    try { const r = await fetch(`${API_BASE}/malzeme/talepler`, { headers }); const d = await r.json(); setTalepler(Array.isArray(d) ? d : []); }
     catch {} finally { setTalepLoading(false); }
   };
   const loadDepoStok = async () => {
-    try { const r = await fetch(`${API_BASE}/malzeme/depo-stok`, { headers }); setDepoStok(await r.json()); } catch {}
+    try { const r = await fetch(`${API_BASE}/malzeme/depo-stok`, { headers }); const d = await r.json(); setDepoStok(Array.isArray(d) ? d : []); } catch {}
   };
   const loadFiyatListe = async () => {
     try {
@@ -33907,10 +34014,10 @@ function MalzemeYonetimiPanel({ currentUser, onBack }) {
                     📥 Depo Stok Excel
                   </button>
                 )}
-                <button onClick={()=>{setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);setEditingId(null);setFormView("form");}}
+                {!saltOkunur && <button onClick={()=>{setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);setEditingId(null);setFormView("form");}}
                   style={{ padding:"10px 22px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
                   + Yeni Talep
-                </button>
+                </button>}
               </div>
             </div>
 
@@ -35999,7 +36106,7 @@ function App() {
                   ...((isAdmin || user?.role === "muhasebe" || _userEmail === "nurcan.kus@simsektel.com") ? [
                     { ikon:'👥', label:'İK Paneli', sub:'Personel, maaş, puantaj, ISG', aktif: page==='hr', onClick:()=>setPage('hr') },
                     ...[["personel","👤","Personel Maaş"],["maas_avans","💰","Maaş Avansı"],["puantaj","📋","Puantaj"],["isg","🎓","ISG / Belgeler"]]
-                      .filter(([k]) => !(user?.role === "muhasebe" && ["personel","maas_avans"].includes(k)))
+                      .filter(([k]) => !((user?.role === "muhasebe" || user?.izinler?.maas_goruntule === false) && ["personel","maas_avans"].includes(k)))
                       .map(([k, ic, l]) => ({ ikon: ic, label: l, alt: true, aktif: page==='hr' && hrTab===k, onClick:()=>{ setPage('hr'); setHrTab(k); } })),
                   ] : []),
                   { ikon:'🏢', label:'Organizasyon Şeması', aktif: page==='orgsema', onClick:()=>setPage('orgsema') },
@@ -39673,12 +39780,12 @@ const ARAC_MARKALAR = {
 const ARAC_YIL = Array.from({length: 25}, (_, i) => 2026 - i);
 
 // ─── ARAÇLAR PANELİ ───────────────────────────────────────────────────────────
-function AraclarPanel({ currentUser, onBack, onGoOfis }) {
+function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
   const isRollout = ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com"].includes(currentUser?.email); // filo güncelleme yetkisi
-  const canEdit = isPM || isDirektor || isMuhasebe || isRollout;
+  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe || isRollout);
 
   const [araclar, setAraclar] = useState([]);
   const [selected, setSelected] = useState(null); // detail/edit araç
@@ -39764,7 +39871,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   const openEdit = (a) => {
     const fmt = (d) => d ? d.slice(0,10) : "";
     acForm({
-      plaka: a.plaka||"", marka: a.marka||"", model: a.model||"", yil: a.yil||"",
+      plaka: a.plaka||"", marka: a.marka||"", model: a.model||"", yil: a.yil||"", kira_gizli: !!a.kira_gizli,
       tip: a.tip||"Binek", kiralama_firmasi: a.kiralama_firmasi||"",
       sozlesme_no: a.sozlesme_no||"",
       kira_baslangic: fmt(a.kira_baslangic), kira_bitis: fmt(a.kira_bitis),
@@ -39938,9 +40045,9 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       title: "Araç Filosu — Aktif Araçlar", sheetName: "Araçlar", fileBase: "Arac_Filosu",
       headers: ["Plaka", "Marka", "Model", "Yıl", "Tip", "Mülkiyet", "Bölge", "Sürücü (Adı Soyadı)", "Aylık Kira KDV Dahil (₺)", "Depozito (₺)", "Depozito Durumu", "Ödeme", "Kiralama Firması / Sahibi", "Kira Başlangıç", "Kira Bitiş", "Sigorta Bitiş", "Muayene Bitiş", "Durum"],
       colWidths: [12, 12, 14, 8, 10, 13, 12, 26, 14, 14, 22, 14, 22, 13, 13, 13, 13, 10], numericCols: [8, 9],
-      rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", aracSirketMi(a) ? "Şirket aracı" : "Kiralık", a.bolge || "", a.surucu || "", aracSirketMi(a) ? 0 : Number(a.aylik_kira || 0),
-        aracSirketMi(a) ? 0 : Number(a.depozito_tutar || 0), !aracSirketMi(a) && Number(a.depozito_tutar || 0) > 0 ? (a.depozito_iade_tarihi ? `İade alındı ${fT(a.depozito_iade_tarihi)}` : `Ödendi ${fT(a.depozito_tarihi) || ""} · iade bekleniyor`) : "",
-        aracSirketMi(a) ? "Uygulanmaz" : (a.odeme_tipi || "PESIN") === "SONRADAN" ? `Ay sonu (${a.donem_gunu || 1})` : `Peşin (${a.donem_gunu || 15})`, aracSirketMi(a) ? (a.sahip_firma || "Şirket") : (a.kiralama_firmasi || ""),
+      rows: liste.map(a => [a.plaka || "", a.marka || "", a.model || "", a.yil || "", a.tip || "", aracSirketMi(a) ? "Şirket aracı" : "Kiralık", a.bolge || "", a.surucu || "", aracSirketMi(a) ? 0 : a.kira_gizli ? "Gizli" : Number(a.aylik_kira || 0),
+        aracSirketMi(a) ? 0 : a.kira_gizli ? "Gizli" : Number(a.depozito_tutar || 0), a.kira_gizli ? "" : !aracSirketMi(a) && Number(a.depozito_tutar || 0) > 0 ? (a.depozito_iade_tarihi ? `İade alındı ${fT(a.depozito_iade_tarihi)}` : `Ödendi ${fT(a.depozito_tarihi) || ""} · iade bekleniyor`) : "",
+        aracSirketMi(a) ? "Uygulanmaz" : a.kira_gizli ? "Gizli" : (a.odeme_tipi || "PESIN") === "SONRADAN" ? `Ay sonu (${a.donem_gunu || 1})` : `Peşin (${a.donem_gunu || 15})`, aracSirketMi(a) ? (a.sahip_firma || "Şirket") : (a.kiralama_firmasi || ""),
         fT(a.kira_baslangic), fT(a.kira_bitis), fT(a.sigorta_bitis), fT(a.muayene_bitis), a.durum || ""]),
       extraSheets: [{
         sheetName: "Geçmiş Araçlar", title: "Geçmiş Araçlar — Kim, Hangi Aracı, Ne Zaman Kullandı",
@@ -40060,7 +40167,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))", gap:"12px", marginTop:"14px" }}>
         {[
           { l:"Aktif araç", v:String(aktifAraclar.length), d:bolgeOzet, c:"#0f1c2e" },
-          { l:"Aylık toplam kira", v:`₺${aylikToplam.toLocaleString("tr-TR")}`, d:"KDV dahil", c:"#0f1c2e" },
+          { l:"Aylık toplam kira", v:`₺${aylikToplam.toLocaleString("tr-TR")}`, d: araclar.some(a => a.kira_gizli) ? "KDV dahil · gizli araç hariç" : "KDV dahil", c:"#0f1c2e" },
           { l:"Ödenmemiş kira", v:`₺${toplamBorc.toLocaleString("tr-TR")}`, d: toplamBorc > 0 ? `${borcluAraclar.length} araç · vadesi geçen dönemler` : "Vadesi geçen ödeme yok", c: toplamBorc > 0 ? "#b91c1c" : "#15803d" },
           { l:"Bu dönem ödenen", v:`₺${buDonemOdenen.toplam.toLocaleString("tr-TR")}`, d:`${buDonemOdenen.adet} / ${kiralikAraclar.length} araç · ${buDonem}`, c:"#15803d" },
           { l:"Sıradaki vade", v: siradakiVade ? siradakiVade.split("-").reverse().join(".") : "—", d: siradakiVade ? `${siradakiAdet} araç · ₺${siradakiTutar.toLocaleString("tr-TR")}` : "Tanımlı vade yok", c:"#b45309" },
@@ -40123,6 +40230,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                 const durumPill = !a.aktif
                   ? { bg:"#f3f5f8", c:"#6b7a90", t: a.durum === "SERVİSTE" ? "Serviste" : "Pasif / iade" }
                   : aracSirketMi(a) ? { bg:"#e0e7ff", c:"#3730a3", t:"Şirket mülkiyeti" }
+                  : a.kira_gizli ? { bg:"#f3f5f8", c:"#6b7a90", t:"Kira bilgisi gizli" }
                   : kira <= 0 ? { bg:"#f3f5f8", c:"#6b7a90", t:"Kira yok" }
                   : borc.tutar > 0 ? { bg: borc.gecikti ? "#fee2e2" : "#fef3c7", c: borc.gecikti ? "#b91c1c" : "#b45309", t: borc.gecikti ? `Borç ₺${borc.tutar.toLocaleString("tr-TR")} · ${borc.gecikti} dönem${borc.kismi ? ` + ${borc.kismi} kısmi` : ""}` : `Kalan ₺${borc.tutar.toLocaleString("tr-TR")} · ${borc.kismi} dönem kısmi` }
                   : borc.siradaki ? { bg:"#dcfce7", c:"#15803d", t:`Ödendi · sıradaki ${borc.siradaki.vade.split("-").reverse().slice(0, 2).join(".")}` }
@@ -40139,7 +40247,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                         </div>
                       </td>
                       <td style={tdSt}>{a.bolge || "—"}</td>
-                      <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums", fontWeight:700 }}>{kira > 0 ? `₺${kira.toLocaleString("tr-TR")}` : "—"}<div style={{ fontSize:"11px", color:"#6b7a90", fontWeight:500 }}>{aracSirketMi(a) ? "uygulanmaz" : kira > 0 ? ((a.odeme_tipi || "PESIN") === "SONRADAN" ? `ay sonu · ${a.donem_gunu || 1}'i` : `peşin · ${a.donem_gunu || 15}'i`) : ""}</div></td>
+                      <td style={{ ...tdSt, textAlign:"right", fontVariantNumeric:"tabular-nums", fontWeight:700 }}>{a.kira_gizli ? "Gizli" : kira > 0 ? `₺${kira.toLocaleString("tr-TR")}` : "—"}<div style={{ fontSize:"11px", color:"#6b7a90", fontWeight:500 }}>{aracSirketMi(a) ? "uygulanmaz" : kira > 0 ? ((a.odeme_tipi || "PESIN") === "SONRADAN" ? `ay sonu · ${a.donem_gunu || 1}'i` : `peşin · ${a.donem_gunu || 15}'i`) : ""}</div></td>
                       <td style={tdSt}>
                         {a.aktif && kira > 0 ? (
                           <div style={{ display:"flex", gap:"4px" }}>
@@ -40451,7 +40559,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
               ) : (
                 <div>
                   <label style={lblSt}>Kiralama Firması</label>
-                  <input value={form.kiralama_firmasi||""} onChange={e=>setForm(f=>({...f,kiralama_firmasi:e.target.value}))} style={aInpSt} />
+                  <input value={form.kira_gizli ? "" : (form.kiralama_firmasi||"")} placeholder={form.kira_gizli ? "Gizli" : undefined} disabled={!!form.kira_gizli} onChange={e=>setForm(f=>({...f,kiralama_firmasi:e.target.value}))} style={aInpSt} />
                 </div>
               )}
               <div>
@@ -40499,7 +40607,12 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                 </select>
               </div>
 
-              {!sirket && (<>
+              {!sirket && form.kira_gizli && (
+                <div style={{ gridColumn:"1/-1", background:"#f3f5f8", border:"1px solid #dbe3ee", borderRadius:"8px", padding:"10px 12px", fontSize:"12.5px", color:"#475569" }}>
+                  Bu aracın kira bilgileri gizlidir; kira, depozito ve sözleşme alanları bu ekrandan değiştirilmez.
+                </div>
+              )}
+              {!sirket && !form.kira_gizli && (<>
                 <div style={{ gridColumn:"1/-1", fontSize:"11px", letterSpacing:".06em", textTransform:"uppercase", color:"#6b7a90", fontWeight:700, marginTop:"4px" }}>Kira bilgileri</div>
                 <div style={{ gridColumn:"1/-1" }}>
                   <label style={lblSt}>Sözleşme No</label>
@@ -40692,13 +40805,13 @@ function KonumIkon({ tur, size = 18, color = "#fff" }) {
   );
 }
 
-function OfisDepoPanel({ currentUser, onBack, onGoArac }) {
+function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
   /* 11.09.2026: Araç Filosu paneliyle aynı kurumsal yapı — başlık şeridi, KPI,
      satır görünümü + açılır detay, vade bazlı kira takibi, toplu Kira Öde. */
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
-  const canEdit = isPM || isDirektor || isMuhasebe;
+  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe);
 
   const [liste, setListe] = useState([]);
   const [kiraOdemeler, setKiraOdemeler] = useState([]);
