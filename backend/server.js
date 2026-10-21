@@ -674,6 +674,50 @@ const masrafCezaAtama = sahipVeyaKapisi(`SELECT mf.talep_eden_email, p.email AS 
   (req) => _sayiId(req.params.id), (u) => masrafPmOnayci(u) || masrafDirektorOnayci(u), "Ceza personelini yalnız form sahibi, PM veya Direktör atayabilir");
 const avansSahibiVeyaTam = sahipVeyaKapisi(AVANS_SAHIP_SQL, (req) => _sayiId(req.params.id), (u, req) => avansTamGorus(req));
 
+// ── OKUMA KAPILARI (21.10.2026, Orhan) ───────────────────────────────────────
+// Maaş, IBAN, TC, bordro ve finans listeleri yalnız İK / finans yetkilisine döner (KVKK).
+// Token başlıktan VEYA ?t= ile okunur (web Excel/belge linkleri <a href> ile açılır, başlık
+// gönderemez); bu yüzden authMiddleware yerine optionalAuth. Uç → izinli rol tablosu:
+// Omnix_KOSGEB/02 TÜBİTAK 1507/Çalışma Notları/ERC_okuma_kapilari_20261021.md
+function okumaKapisi(izinli, hata) {
+  return (req, res, next) => {
+    const u = optionalAuth(req);
+    if (!u) return res.status(401).json({ ok: false, error: "Oturum gerekli" });
+    if (izinli(u, req)) return next();
+    return res.status(403).json({ ok: false, error: hata });
+  };
+}
+// İK verisini okuyabilen: İK yazma yetkilisi + finans paneli kullanıcısı (bordro/maaş listesini zaten görür)
+const ikOkumaYetkili = (u) => ikYazmaYetkili(u) || finansYazmaYetkili(u);
+const ikOkuma = okumaKapisi(ikOkumaYetkili, "İK kayıtlarını görme yetkiniz yok");
+// Puantaj ekranı rollout rolüne de açık (web canSeePuantaj); maaş alanları ikMaskele ile gizlenir
+const puantajOkuma = okumaKapisi((u) => ikOkumaYetkili(u) || _rol(u) === "rollout", "Puantaj görme yetkiniz yok");
+const finansOkuma = okumaKapisi(finansYazmaYetkili, "Finans kayıtlarını görme yetkiniz yok");
+const odemeOkuma = okumaKapisi((u, req) => !!odemeYetkili(req), "Ödeme bilgisini görme yetkiniz yok");
+const taseronDegilOkuma = okumaKapisi((u) => !taseronMu(u), "Taşeron hesabı bu listeyi göremez");
+// Liste İK dışı ekranlarda da (masraf/avans kişi seçimi, org şeması, malzeme, mobil masraf) kullanılır:
+// yetkisi olmayana satır döner ama kimlik/banka/maaş alanları boşaltılır. Alt marka İK yetkilisi
+// (AHY/TEKNO) yalnız kendi bordro kümesindeki kişinin hassas alanlarını görür.
+const IK_HASSAS_ALANLAR = ["tc_no", "dogum_tarihi", "iban", "banka_adi", "banka_hesap_no", "net_maas",
+  "bankadan_gosterilen", "elden_verilen", "hakedilen_maas", "hakedis_otomatik", "bankadan", "elden", "avans",
+  "kalan", "extra_hakedis"];
+function ikHassasGorur(req, marka) {
+  const u = optionalAuth(req);
+  if (!u || !ikOkumaYetkili(u)) return false;
+  const k = altMarkaKapsam(req);
+  return !k || k.bordro.includes(String(marka || "ERC").toUpperCase());
+}
+// Para listeleri (avans, maaş ödemesi, maaş geçmişi): alt marka İK yetkilisi kapsam dışı kişinin satırını hiç almaz
+const ikKapsamSuz = (req, rows, markaAl = (r) => r.personel_marka) => (rows || []).filter((r) => ikHassasGorur(req, markaAl(r)));
+function ikMaskele(req, rows, markaAl = (r) => r.marka) {
+  for (const r of rows || []) {
+    if (ikHassasGorur(req, markaAl(r))) continue;
+    for (const a of IK_HASSAS_ALANLAR) if (a in r) r[a] = null;
+    if (r.ek_donem && typeof r.ek_donem === "object") r.ek_donem.hakedis = null;
+  }
+  return rows;
+}
+
 // ── FİRMA-BAZLI KULLANICI GÖRÜNÜRLÜĞÜ ────────────────────────────────────────
 // Bir adminin başka bir kullanıcıyı görebilmesi/yönetebilmesi kuralı:
 //  - platform_admin (uygulama sahibi) → tüm firmaların kullanıcıları
@@ -4755,7 +4799,7 @@ app.get("/test-boq", async (req, res) => {
 // /force-reset-boq kaldırıldı (20.10.2026): kimlik doğrulamasız GET ile boq_items tablosunu DROP ediyordu.
 
 /* ================== FINANCE SUMMARY ================== */
-app.get("/finance/summary", async (req, res) => {
+app.get("/finance/summary", finansOkuma, async (req, res) => {
   try {
     // Türkiye saati (UTC+3) baz alınarak yıl/ay belirlenir
     const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
@@ -4873,7 +4917,7 @@ app.get("/finance/summary", async (req, res) => {
   }
 });
 
-app.get("/finance/invoices/list", async (req, res) => {
+app.get("/finance/invoices/list", finansOkuma, async (req, res) => {
   try {
     await ensureHwInvoiceTable();
 
@@ -5317,7 +5361,7 @@ app.get("/dashboard/result", authMiddleware, async (req, res) => {
 
 /* ================== FINANCE SALARY ================== */
 
-app.get("/finance/salary/payment-plan", async (req, res) => {
+app.get("/finance/salary/payment-plan", finansOkuma, async (req, res) => {
   try {
     const { ay, yil } = req.query;
 
@@ -5414,7 +5458,7 @@ app.get("/finance/salary/payment-plan", async (req, res) => {
   }
 });
 
-app.get("/finance/salary/list", async (req, res) => {
+app.get("/finance/salary/list", finansOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT *
@@ -5435,7 +5479,7 @@ app.get("/finance/salary/list", async (req, res) => {
   }
 });
 
-app.get("/finance/salary/export-excel", async (req, res) => {
+app.get("/finance/salary/export-excel", finansOkuma, async (req, res) => {
   try {
     const { ay, yil } = req.query;
 
@@ -5615,7 +5659,7 @@ app.get("/finance/salary/export-excel", async (req, res) => {
   }
 });
 
-app.get("/finance/supplier-advances", async (req, res) => {
+app.get("/finance/supplier-advances", finansOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -6485,7 +6529,7 @@ app.post("/finance/invoice-entry/add", finansYazma, async (req, res) => {
   }
 });
 
-app.get("/finance/invoice-entry/list", async (req, res) => {
+app.get("/finance/invoice-entry/list", finansOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT ie.*, bf.fatura_no AS bagli_fatura_no
@@ -6501,7 +6545,7 @@ app.get("/finance/invoice-entry/list", async (req, res) => {
   }
 });
 
-app.get("/finance/invoice-entry/export-excel", async (req, res) => {
+app.get("/finance/invoice-entry/export-excel", finansOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -6838,7 +6882,7 @@ app.post("/finance/personel/add", finansYazma, async (req, res) => {
   }
 });
 
-app.get("/finance/personel/list", async (req, res) => {
+app.get("/finance/personel/list", finansOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT *
@@ -6901,7 +6945,7 @@ app.post("/finance/personel-movement/add", finansYazma, async (req, res) => {
   }
 });
 
-app.get("/finance/personel-aylik-ozet", async (req, res) => {
+app.get("/finance/personel-aylik-ozet", finansOkuma, async (req, res) => {
   try {
     const now = new Date();
     const donem_ay = Number(req.query.donem_ay || now.getMonth() + 1);
@@ -14529,7 +14573,7 @@ app.post(
 );
 
 /* ================== HW PAYMENT LAST UPLOAD INFO ================== */
-app.get("/finance/hw-payment/last-upload", async (req, res) => {
+app.get("/finance/hw-payment/last-upload", finansOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -14561,7 +14605,7 @@ app.get("/finance/hw-payment/last-upload", async (req, res) => {
 });
 
 /* ================== FINANCE DEBUG PAYMENTS (TEMP) ================== */
-app.get("/finance/debug-payments", async (req, res) => {
+app.get("/finance/debug-payments", finansOkuma, async (req, res) => {
   try {
     const monthStr = '2026-06';
     // Haziran günlük breakdown — hem received hem pending
@@ -15105,7 +15149,7 @@ app.post(
 );
 
 // Yüklenen kalemleri listele (fatura no bazında özet + son kayıtlar)
-app.get("/finance/hw-invoice-items", async (req, res) => {
+app.get("/finance/hw-invoice-items", finansOkuma, async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
     // Sadece fatura kesilmiş (invoice_no dolu) kalemleri fatura bazında grupla
@@ -15192,7 +15236,7 @@ app.get("/finance/hw-invoice-items/billable-keys", async (req, res) => {
   }
 });
 
-app.get("/finance/hw-invoice-items/:invoiceNo", async (req, res) => {
+app.get("/finance/hw-invoice-items/:invoiceNo", finansOkuma, async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
     const result = await pool.query(
@@ -15304,7 +15348,7 @@ app.post("/finance/hw-invoice-items/manual", finansYazma, requireHwYukleme, asyn
 });
 
 // Yüklenen partileri (batch) listele — tarih, dosya, kalem sayısı
-app.get("/finance/hw-invoice-items-batches", async (req, res) => {
+app.get("/finance/hw-invoice-items-batches", finansOkuma, async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
     const r = await pool.query(`
@@ -15366,7 +15410,7 @@ app.delete("/finance/hw-invoice-items-clear", hwKalemSifirlama, requireHwYukleme
 
 // Tüm kalemleri subcon_name (master_works'ten eşlenmiş) ile dök — Excel için
 // NOT: /:invoiceNo route'u ile çakışmasın diye ayrı path
-app.get("/finance/hw-invoice-items-export", async (req, res) => {
+app.get("/finance/hw-invoice-items-export", finansOkuma, async (req, res) => {
   try {
     await ensureHwInvoiceItemsTable();
     const result = await pool.query(`
@@ -15906,7 +15950,7 @@ app.post("/finance/expense/add", finansYazma, async (req, res) => {
 });
 
 /* ================== FINANCE EXPENSE LIST ================== */
-app.get("/finance/expenses/list", async (req, res) => {
+app.get("/finance/expenses/list", finansOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT *
@@ -16180,7 +16224,7 @@ app.get("/finance/cashflow-monthly", requireFinanceAuth, async (req, res) => {
 });
 
 /* ================== FINANCE UPCOMING COLLECTIONS ================== */
-app.get("/finance/upcoming-payments", async (req, res) => {
+app.get("/finance/upcoming-payments", finansOkuma, async (req, res) => {
   try {
     const upcomingData = await buildUpcomingCollectionsData();
     const overdueData = await buildOverdueInvoicesData();
@@ -16255,7 +16299,7 @@ app.get("/finance/debug-tables", authMiddleware, async (req, res) => {
 });
 
 /* ================== SUBCON PAYABLES ================== */
-app.get("/finance/subcon-payables", async (req, res) => {
+app.get("/finance/subcon-payables", finansOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -16303,7 +16347,7 @@ app.post("/finance/subcon-payables/add", finansYazma, async (req, res) => {
 });
 
 /* ================== FINANCE OVERDUE INVOICES ================== */
-app.get("/finance/overdue-invoices", async (req, res) => {
+app.get("/finance/overdue-invoices", finansOkuma, async (req, res) => {
   try {
     await ensureHwInvoiceTable();
 
@@ -17455,7 +17499,7 @@ app.post("/hr/personel/:id/yeniden-ise-baslat", authMiddleware, async (req, res)
   } finally { try { client.release(); } catch {} }
 });
 // Çalışma geçmişi / arşiv listesi: kapanmış dönemler + o kişinin güncel durumu (yeniden başladı mı)
-app.get("/hr/calisma-donemleri", authMiddleware, async (req, res) => {
+app.get("/hr/calisma-donemleri", ikOkuma, async (req, res) => {
   try {
     const k = altMarkaKapsam(req);
     const q = req.query || {};
@@ -17495,7 +17539,7 @@ app.get("/hr/ayni-isim", authMiddleware, async (req, res) => {
     res.json({ ok: true, ad_standart: adSoyadStandart(ad), personel, users });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
-app.get("/hr/personel", async (req, res) => {
+app.get("/hr/personel", taseronDegilOkuma, async (req, res) => {
   try {
     const donem = String(req.query.donem || "").trim(); // 'YYYY-MM' — o ay geçerli maaşla döner
     if (/^\d{4}-\d{2}$/.test(donem)) {
@@ -17532,23 +17576,24 @@ app.get("/hr/personel", async (req, res) => {
           row.bilgi_eksik = false; row.eksik_alanlar = []; row.guncel_bilgi_eksik = true;
         }
       });
-      return res.json(r.rows);
+      return res.json(ikMaskele(req, r.rows));
     }
     const r = await pool.query(`SELECT p.*, ${ikEksikSql("p.net_maas")} FROM personel p WHERE p.birlestirildi_personel_id IS NULL ORDER BY p.aktif DESC, p.ad_soyad ASC`);
     const dm = await ikDonemleriYukle(r.rows.map(x => x.id));
     r.rows.forEach(row => { row.donemler = dm.get(row.id) || []; });
-    res.json(r.rows);
+    res.json(ikMaskele(req, r.rows));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Maaş geçmişi (Excel "Maaş Geçmişi" sayfası için): kim, hangi aydan itibaren, ne maaş
-app.get("/hr/maas-gecmisi", async (req, res) => {
+app.get("/hr/maas-gecmisi", ikOkuma, async (req, res) => {
   try {
     const r = await pool.query(`
-      SELECT g.personel_id, g.donem, g.net_maas, g.bankadan_gosterilen, g.elden_verilen, g.created_at, p.ad_soyad
+      SELECT g.personel_id, g.donem, g.net_maas, g.bankadan_gosterilen, g.elden_verilen, g.created_at, p.ad_soyad,
+             COALESCE(p.marka,'ERC') AS personel_marka
       FROM personel_maas_gecmisi g JOIN personel p ON p.id = g.personel_id
       ORDER BY p.ad_soyad ASC, g.donem ASC`);
-    res.json(r.rows);
+    res.json(ikKapsamSuz(req, r.rows));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -17725,7 +17770,7 @@ app.post("/hr/personel/:id/belge/:tur", ikYazma, uploadPersonelBelge.single("dos
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/hr/personel/:id/belgeler", async (req, res) => {
+app.get("/hr/personel/:id/belgeler", ikOkuma, async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM personel_belgeler WHERE personel_id=$1", [req.params.id]);
     res.json(r.rows);
@@ -17733,7 +17778,7 @@ app.get("/hr/personel/:id/belgeler", async (req, res) => {
 });
 
 // ---- ISG EĞİTİMLER ----
-app.get("/hr/personel/:id/isg", async (req, res) => {
+app.get("/hr/personel/:id/isg", ikOkuma, async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM personel_isg WHERE personel_id=$1 ORDER BY egitim_tarihi DESC", [req.params.id]);
     res.json(r.rows);
@@ -17773,7 +17818,7 @@ app.post("/hr/personel/:id/isg/:isgId/belge", ikYazma, uploadPersonelBelge.singl
 });
 
 // Signed URL — browser Supabase'e direkt upload yapar (Vercel body limitini aşmak için)
-app.get("/hr/isg/signed-upload-url", async (req, res) => {
+app.get("/hr/isg/signed-upload-url", ikYazma, async (req, res) => {
   try {
     const { isgId, ext } = req.query;
     const filePath = `isg-belgeler/isg-${isgId}-${Date.now()}.${(ext||"jpg").replace(/^\./, "")}`;
@@ -17800,17 +17845,18 @@ app.post("/hr/personel/:id/isg/:isgId/belge-url", ikYazma, async (req, res) => {
 });
 
 // ---- PUANTAJ ----
-app.get("/hr/puantaj", async (req, res) => {
+app.get("/hr/puantaj", puantajOkuma, async (req, res) => {
   try {
     const { ay, yil } = req.query;
     const r = await pool.query(
-      `SELECT p.*, per.ad_soyad, per.unvan, per.net_maas, per.bankadan_gosterilen, per.elden_verilen, per.aktif
+      `SELECT p.*, per.ad_soyad, per.unvan, per.net_maas, per.bankadan_gosterilen, per.elden_verilen, per.aktif,
+              COALESCE(per.marka,'ERC') AS personel_marka
        FROM puantaj p JOIN personel per ON p.personel_id = per.id
        WHERE EXTRACT(MONTH FROM p.tarih)=$1 AND EXTRACT(YEAR FROM p.tarih)=$2
        ORDER BY per.ad_soyad, p.tarih`,
       [ay, yil]
     );
-    res.json(r.rows);
+    res.json(ikMaskele(req, r.rows, (x) => x.personel_marka));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -17919,7 +17965,7 @@ app.put("/hr/hakedis-override", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/hr/puantaj/ozet", async (req, res) => {
+app.get("/hr/puantaj/ozet", puantajOkuma, async (req, res) => {
   try {
     const { ay, yil } = req.query;
     // O ayın geçerli maaşıyla hesapla (maaş geçmişi versiyonlaması)
@@ -18127,12 +18173,13 @@ app.get("/hr/puantaj/ozet", async (req, res) => {
       };
     }).filter(p => p.istihdamda);
 
-    res.json(ozet);
+    const _ozetMarka = new Map(personelList.rows.map((x) => [x.id, x.marka]));
+    res.json(ikMaskele(req, ozet, (x) => _ozetMarka.get(x.personel_id)));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ---- AVANS ----
-app.get("/hr/avans", async (req, res) => {
+app.get("/hr/avans", ikOkuma, async (req, res) => {
   try {
     const { personel_id, turu } = req.query;
     const conditions = [];
@@ -18148,11 +18195,11 @@ app.get("/hr/avans", async (req, res) => {
               to_char(a.tarih,'YYYY-MM-DD') AS tarih,
               to_char(a.odeme_tarihi,'YYYY-MM-DD') AS odeme_tarihi,
               to_char(a.created_at,'YYYY-MM-DD HH24:MI') AS kayit_zamani,
-              ${avansOdeyenSql("a")} AS odeyen_marka
+              ${avansOdeyenSql("a")} AS odeyen_marka, COALESCE(p.marka,'ERC') AS personel_marka
        FROM avans a JOIN personel p ON a.personel_id=p.id ${where} ORDER BY a.tarih DESC, a.id DESC`,
       params
     );
-    res.json(r.rows);
+    res.json(ikKapsamSuz(req, r.rows));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -18204,15 +18251,15 @@ app.delete("/hr/avans/:id", ikYazma, async (req, res) => {
 });
 
 // ---- MAAŞ ÖDEME ----
-app.get("/hr/maas-odeme", async (req, res) => {
+app.get("/hr/maas-odeme", ikOkuma, async (req, res) => {
   try {
     const { personel_id } = req.query;
     const r = await pool.query(
-      `SELECT m.*, p.ad_soyad FROM maas_odeme m JOIN personel p ON m.personel_id=p.id
+      `SELECT m.*, p.ad_soyad, COALESCE(p.marka,'ERC') AS personel_marka FROM maas_odeme m JOIN personel p ON m.personel_id=p.id
        WHERE m.personel_id=$1 ORDER BY m.donem DESC, m.created_at DESC`,
       [personel_id]
     );
-    res.json(r.rows);
+    res.json(ikKapsamSuz(req, r.rows));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -18278,7 +18325,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS maas_donem_kapama (
 )`).then(() => pool.query(`ALTER TABLE maas_donem_kapama ENABLE ROW LEVEL SECURITY`)).catch(() => {});
 
 // donem=YYYY-MM → o ay + bir önceki ay (devir hesabı önceki ayın kayıtlarını da ister)
-app.get("/hr/maas-kapama", authMiddleware, async (req, res) => {
+app.get("/hr/maas-kapama", ikOkuma, async (req, res) => {
   try {
     const donem = String(req.query.donem || "");
     if (!/^\d{4}-\d{2}$/.test(donem)) return res.status(400).json({ error: "donem (YYYY-AA) zorunlu" });
@@ -18318,20 +18365,20 @@ app.delete("/hr/maas-kapama/:id", authMiddleware, async (req, res) => {
 });
 
 // Aylık tüm personel ödeme özeti (personel maaş ödeme takibi için)
-app.get("/hr/maas-odeme-aylik", async (req, res) => {
+app.get("/hr/maas-odeme-aylik", ikOkuma, async (req, res) => {
   try {
     const { donem } = req.query;
     if (!donem) return res.status(400).json({ error: "donem required (YYYY-MM)" });
     const r = await pool.query(`
       SELECT m.id, m.personel_id, m.bankadan, m.elden, m.tarih, m.aciklama, m.odeyen, m.created_at,
-             p.ad_soyad, p.net_maas,
+             p.ad_soyad, p.net_maas, COALESCE(p.marka,'ERC') AS personel_marka,
              (COALESCE(m.bankadan,0) + COALESCE(m.elden,0)) AS toplam
       FROM maas_odeme m
       JOIN personel p ON m.personel_id = p.id
       WHERE m.donem = $1
       ORDER BY p.ad_soyad, m.tarih
     `, [donem]);
-    res.json(r.rows);
+    res.json(ikKapsamSuz(req, r.rows));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -18465,7 +18512,7 @@ app.get("/finance/sarkan-odemeler", requireFinanceAuth, async (req, res) => {
 
 // ISG uyarı özeti (süresi biten/bitecek eğitimler)
 // GET /hr/isg/matris — tüm personel × tüm ISG eğitimler (matrix view için)
-app.get("/hr/isg/matris", async (req, res) => {
+app.get("/hr/isg/matris", ikOkuma, async (req, res) => {
   try {
     const personelRows = await pool.query(
       "SELECT id,ad_soyad,unvan,aktif,firma_tipi,elektrik_isi,yuksekte_calisma,arac_kullanim,ekip_bilgisi,alt_yuklenici,COALESCE(marka,'ERC') AS marka FROM personel ORDER BY aktif DESC, ad_soyad ASC"
@@ -18487,7 +18534,7 @@ app.get("/hr/isg/matris", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/hr/isg/uyarilar", async (req, res) => {
+app.get("/hr/isg/uyarilar", ikOkuma, async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT i.*, p.ad_soyad, p.unvan, COALESCE(p.marka,'ERC') AS marka,
@@ -18503,7 +18550,7 @@ app.get("/hr/isg/uyarilar", async (req, res) => {
 });
 
 // ---- HR EXCEL EXPORTS ----
-app.get("/hr/excel/puantaj", async (req, res) => {
+app.get("/hr/excel/puantaj", puantajOkuma, async (req, res) => {
   try {
     const { ay, yil, personel_id } = req.query;
     const ExcelJS = require("exceljs");
@@ -18733,7 +18780,7 @@ function rfqCell(ws, rowNo, colNo, value, bgArgb, bold, fontArgb) {
 }
 
 // GET /hr/excel/isg?tip=hw|simsek&personel_id=X
-app.get("/hr/excel/isg", async (req, res) => {
+app.get("/hr/excel/isg", ikOkuma, async (req, res) => {
   try {
     const { tip, personel_id } = req.query; // tip: "hw" (aktif) | "simsek" (tümü)
     const ExcelJS = require("exceljs");
@@ -20219,7 +20266,11 @@ app.get("/hr/masraf-form", async (req, res) => {
 // ── Mobil Dashboard: email ile tek seferde tüm kişisel veriler ──────────────
 app.get("/hr/mobile-dashboard", async (req, res) => {
   try {
-    const { email, name } = req.query;
+    // 21.10.2026: kişi oturumdan (JWT) alınır — sorgudaki ?email= ile başkasının panosu açılamaz.
+    // Mobil zaten kendi user.email / user.name'ini gönderiyor; token'da e-posta yoksa eski davranış.
+    const _u = optionalAuth(req) || {};
+    const email = _u.email || req.query.email;
+    const name = _u.email ? (_u.name || req.query.name) : req.query.name;
     if (!email) return res.status(400).json({ error: "email gerekli" });
 
     const now = new Date();
@@ -20948,7 +20999,7 @@ app.post("/hr/masraf-kalem/:id/odeme-belge", authMiddleware, masrafUpload.single
 });
 
 // GET /hr/trafik-ceza — kişiye ait tüm trafik ceza kalemleri (masraf_kalem tablosundan, tüm durumlar)
-app.get("/hr/trafik-ceza", async (req, res) => {
+app.get("/hr/trafik-ceza", ikOkuma, async (req, res) => {
   try {
     const { personel_id } = req.query;
     if (!personel_id) return res.status(400).json({ error: "personel_id gerekli" });
@@ -21288,7 +21339,7 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
   return { liste, dilimler, ayBas, aySon, bugun, kartSayisi: kartlar.rows.length, bagsiz: bagsiz.length, tercih };
 }
 
-app.get("/hr/yemek-kartlari", async (req, res) => {
+app.get("/hr/yemek-kartlari", ikOkuma, async (req, res) => {
   try {
     await ensureYemekKartiTables();
     const [kartlar, odemeler] = await Promise.all([
@@ -21540,7 +21591,7 @@ app.put("/hr/yemek-kartlari/donem-tercih", authMiddleware, async (req, res) => {
 // ── Kayıt bazında işlem geçmişi (20.10.2026): oluşturma, kart güncelleme, hak değişikliği, ödeme kaydı, ödeme
 //    düzeltmesi, iptal — en yeniden eskiye. Kimlik sunucudaki oturum kayıtlarından; eski kayıtlarda kullanıcı
 //    bilinmiyorsa açıkça belirtilir (mevcut kullanıcı atanmaz). Görüntüleme yetkisi: firma kapsamı + rol.
-app.get("/hr/yemek-kartlari/:id/gecmis", authMiddleware, async (req, res) => {
+app.get("/hr/yemek-kartlari/:id/gecmis", ikOkuma, async (req, res) => {
   try {
     await ensureYemekKartiTables();
     const kq = await pool.query(`SELECT k.*, p.ad_soyad AS personel_ad, p.marka AS personel_marka FROM yemek_kartlari k LEFT JOIN personel p ON p.id = k.personel_id WHERE k.id=$1`, [req.params.id]);
@@ -22353,7 +22404,7 @@ app.get("/finance/fatura/:id/odeme-durumu", async (req, res) => {
       eski_dogrudan_odenen: yuvarla2(Math.max(0, Number(f.odenen) - ortakOdenen)), log });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
-app.get("/finance/fatura/:id/arac-kalem", async (req, res) => {
+app.get("/finance/fatura/:id/arac-kalem", odemeOkuma, async (req, res) => {
   try {
     await ensureOdemeTablolari();
     const r = await pool.query(`SELECT k.id, k.arac_id, k.donem, k.tutar, k.aciklama, a.plaka, a.aylik_kira,
