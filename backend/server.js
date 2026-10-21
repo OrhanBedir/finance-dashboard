@@ -22124,6 +22124,14 @@ app.get("/hr/araclar", async (req, res) => {
     LEFT JOIN arac_belgeler b ON b.arac_id = a.id
     GROUP BY a.id ORDER BY a.plaka
   `);
+  // Liste org şeması için herkese açık, ama belgeler[].dosya_yolu Supabase public URL'si (ruhsat,
+  // sigorta, kira sözleşmesi): taşerona hiç, alt marka kullanıcısına yalnız kendi kapsamındaki
+  // aracın belgeleri döner (aracErisim kuralı). Satırın kendisi değişmez (21.10.2026, Orhan).
+  const u = optionalAuth(req);
+  const k = altMarkaKapsam(req);
+  if (taseronMu(u) || k) {
+    for (const a of rows) if (taseronMu(u) || !aracKapsamda(k, a.firma)) a.belgeler = null;
+  }
   res.json(rows);
 });
 
@@ -22793,7 +22801,11 @@ app.delete("/hr/arac-belge/:id", ikYazma, async (req, res) => {
 app.get("/hr/arac-belge/file/:filename", async (req, res) => {
   try {
     if (!belgeOkuyan(req, res)) return;
-    const b = await pool.query("SELECT dosya_yolu, arac_id FROM arac_belgeler WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
+    // dosya_adi yüklenen dosyanın orijinal adıdır ("ruhsat.pdf" iki araçta da olabilir) → web ?id= ile belgeyi tekil seçer
+    const id = /^\d+$/.test(String(req.query.id || "")) ? Number(req.query.id) : null;
+    const b = id
+      ? await pool.query("SELECT dosya_yolu, arac_id FROM arac_belgeler WHERE id=$1 AND dosya_adi=$2", [id, req.params.filename])
+      : await pool.query("SELECT dosya_yolu, arac_id FROM arac_belgeler WHERE dosya_adi=$1 ORDER BY id DESC LIMIT 1", [req.params.filename]);
     if (b.rows[0]?.dosya_yolu?.startsWith("http")) {
       // Alt marka kullanıcısı yalnız kendi bordro kümesindeki firmanın aracı (aracErisim kuralı)
       const er = await aracErisim(req, b.rows[0].arac_id);
@@ -22824,13 +22836,14 @@ async function aracErisim(req, aracId) {
   const r = await pool.query(`SELECT id, plaka, firma FROM araclar WHERE id=$1`, [aracId]);
   const a = r.rows[0];
   if (!a) return { ok: false, status: 404, error: "Araç bulunamadı" };
-  const k = altMarkaKapsam(req);
-  if (k) {
-    const firma = String(a.firma || "AHY").toUpperCase();
-    if (!k.bordro.map(x => String(x).toUpperCase()).includes(firma))
-      return { ok: false, status: 403, error: "Bu araç firmanızın kapsamında değil" };
-  }
+  if (!aracKapsamda(altMarkaKapsam(req), a.firma))
+    return { ok: false, status: 403, error: "Bu araç firmanızın kapsamında değil" };
   return { ok: true, arac: a };
+}
+// Alt marka kapsamı (k = altMarkaKapsam) yoksa her araç kapsamda; firması boş araç AHY sayılır
+function aracKapsamda(k, firma) {
+  if (!k) return true;
+  return k.bordro.map(x => String(x).toUpperCase()).includes(String(firma || "AHY").toUpperCase());
 }
 function aracSilebilir(req) {
   const { email, role } = aracKullanici(req);
@@ -23449,6 +23462,8 @@ app.get("/hr/ofis", async (req, res) => {
     LEFT JOIN ofis_belgeler b ON b.ofis_id = o.id
     GROUP BY o.id ORDER BY o.ad
   `);
+  // Kira sözleşmesi vb. belgeler public URL taşır: taşerona dönmez, ofis/depo satırları (org şeması) kalır (21.10.2026)
+  if (taseronMu(optionalAuth(req))) for (const o of rows) o.belgeler = null;
   res.json(rows);
 });
 

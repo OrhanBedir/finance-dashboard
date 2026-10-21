@@ -39820,6 +39820,8 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
   };
 
   const getBelge = (arac, turu) => (arac.belgeler||[]).find(b => b.belge_turu === turu);
+  // Uç belgeyi dosya_adi + belge id ile bulur; eskiden tam Supabase URL'si yola ekleniyordu → 404 (21.10.2026)
+  const aracBelgeUrl = (b) => tokenliUrl(`${API_BASE}/hr/arac-belge/file/${encodeURIComponent(b.dosya_adi || "")}?id=${b.id}`);
 
   // AHY görünümü (alt marka): yalnız aktif araçlar — iade edilmiş/pasif filo görünmez
   const _altMarkaGorunum = currentUser?.hw_yukleme === false;
@@ -40161,7 +40163,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                             const b = getBelge(a, turu);
                             const harf = label.replace(/^[^ ]+ /, "")[0];
                             return b
-                              ? <a key={turu} onClick={e => e.stopPropagation()} href={tokenliUrl(`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`)} title={label} style={{ width:"26px", height:"26px", borderRadius:"7px", background:"#d9f2ee", color:"#0f766e", display:"grid", placeItems:"center", fontSize:"11px", fontWeight:800, textDecoration:"none" }}>{harf}</a>
+                              ? <a key={turu} onClick={e => e.stopPropagation()} href={aracBelgeUrl(b)} title={label} style={{ width:"26px", height:"26px", borderRadius:"7px", background:"#d9f2ee", color:"#0f766e", display:"grid", placeItems:"center", fontSize:"11px", fontWeight:800, textDecoration:"none" }}>{harf}</a>
                               : <span key={turu} title={`${label} yüklenmedi`} style={{ width:"26px", height:"26px", borderRadius:"7px", border:"1px dashed #cfd7e2", color:"#9ca3af", display:"grid", placeItems:"center", fontSize:"11px" }}>{harf}</span>;
                           })}
                         </div>
@@ -40611,7 +40613,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                         <span style={{ fontWeight:700, fontSize:"13px", color:"#374151", minWidth:"150px" }}>{label}</span>
                         {b ? (
                           <>
-                            <a href={tokenliUrl(`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`)}
+                            <a href={aracBelgeUrl(b)}
                               style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1, minWidth:"120px", overflowWrap:"anywhere" }}>
                               📥 {b.dosya_adi}
                             </a>
@@ -40639,7 +40641,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis }) {
                   {(detailArac.belgeler||[]).filter(b=>b.belge_turu==="DIGER").map(b => (
                     <div key={b.id} style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:"10px", padding:"12px 14px", display:"flex", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
                       <span style={{ fontSize:"12px", color:"#6b7280", minWidth:"150px" }}>📎 Ek Belge</span>
-                      <a href={tokenliUrl(`${API_BASE}/hr/arac-belge/file/${b.dosya_yolu}?name=${encodeURIComponent(b.dosya_adi)}`)}
+                      <a href={aracBelgeUrl(b)}
                         style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, flex:1, minWidth:"120px", overflowWrap:"anywhere" }}>📥 {b.dosya_adi}</a>
                       {canEdit && (
                         <button onClick={()=>handleBelgeSil(b.id)}
