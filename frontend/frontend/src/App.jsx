@@ -3100,7 +3100,7 @@ function SimsekFaturaTakipPanel({ currentUser }) {
     (async () => {
       try {
         const [r1, r2] = await Promise.all([
-          fetch(`${API_BASE}/finance/simsek-fatura-takip`, { headers: _auth }),
+          fetch(`${API_BASE}/finance/simsek-fatura-takip?marka=${marka}`, { headers: _auth }), // 22.10.2026: marka gönderilir (sunucu alt markada oturumdan zorlar)
           fetch(`${API_BASE}/finance/marka-gelecek-tahsilat?marka=${marka}`, { headers: _auth }),
         ]);
         const d1 = await r1.json().catch(() => ({}));

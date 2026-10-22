@@ -338,6 +338,15 @@ const altMarkaKodlari = () => ALT_MARKALAR.map((m) => m.kod);
 const altMarkaMi = (kod) => !!altMarka(kod);
 // SQL literal listesi: 'AHY','TEKNO' (kodlar koddan gelir, kullanıcı girdisi değildir)
 const altMarkaInSql = () => ALT_MARKALAR.map((m) => `'${m.kod}'`).join(",");
+// Markanın Şimşek'e kestiği fatura / yaptığı tahsilat kaydı: tedarikçi (firma) adının ilk kelimesi (22.10.2026, Orhan)
+//   - taşeron öneki tek başına bir kelime (ör. "TEKNO CENTER …", "AHY-ELEKTRİK") ya da
+//   - marka adının ilk kelimesiyle başlıyor (ör. "TEKNOCENTER …", "AHY ELEKTRİK …"); alt çizgili ekip kodu (AHY_VEDAT) hariç.
+// Önekle başlayan başka bir firma ("TEKNOSA …") markanın kaydı sayılmaz. AHY için kural eskisiyle aynıdır (önek = ad kelimesi).
+function markaTedarikciRe(P) {
+  const kelime = (x) => String(x || "").trim().split(/\s+/)[0].toUpperCase().replace(/[^A-Z0-9ÇĞİÖŞÜ]/g, "");
+  const onek = kelime(P.onek), ad = kelime(P.ad) || onek;
+  return `^(${onek}([^A-Z0-9_ÇĞİÖŞÜ]|$)|${ad}([^_]|$))`;
+}
 // Ödeyen/firma boş eski kayıtlar için tarih kuralı: tarih hangi markanın devir
 // penceresine düşüyorsa (bitiş varsa dahil) o marka; hiçbirine düşmüyorsa Şimşek
 // (ör. 01–14.10.2026 arası AHY bitmiş, TEKNO başlamamış → SIMSEK).
@@ -551,7 +560,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-21-isg-puantaj", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-22-marka-kapsam", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -1329,6 +1338,46 @@ app.get("/master/taleplerim", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ═══ MARKA PANELİ FİRMA KAPSAMI (22.10.2026, Orhan) ═══════════════════════════════════════════════
+// Alt marka hesabı (hw_yukleme=false, ör. Teknocenter / AHY) marka panel uçlarında YALNIZ kendi markasını görür ve
+// değiştirir: marka oturumdan gelir (parametre / gövde yoksa doldurulur, başka marka istenirse 403), kimlikle
+// çalışan uçlarda kaydın markası doğrulanır. Devralınan marka (TEKNO ← AHY) bu uçlarda kapsama girmez.
+// Şimşek yönetim hesapları (alt marka olmayanlar) bu katmandan etkilenmez — mevcut davranış korunur.
+const MARKA_PANEL_YOLU = /^\/finance\/(marka-[a-z-]+|simsek-ahy-odeme|simsek-fatura-takip)(\/|$)/;
+const MARKA_KAYIT_SAHIBI = [
+  [/^\/finance\/marka-kasa\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_kasa WHERE id=$1`],
+  [/^\/finance\/simsek-ahy-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'AHY')) AS m FROM simsek_ahy_odeme WHERE id=$1`],
+  [/^\/finance\/marka-borc\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_borc WHERE id=$1`],
+  [/^\/finance\/marka-taseron-fatura\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(firma,'')) AS m FROM invoice_entries WHERE id=$1`],
+  [/^\/finance\/marka-taseron-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_taseron_odeme WHERE id=$1`],
+];
+app.use(async (req, res, next) => {
+  try {
+    if (req.method === "OPTIONS") return next();
+    const yol = req.path.replace(/\/+$/, "") || "/";
+    if (!MARKA_PANEL_YOLU.test(yol)) return next();
+    const u = optionalAuth(req);
+    if (!u || !altMarkaKullanicisi(u) || !altMarkaMi(u.marka)) return next();
+    const kendi = String(u.marka).trim().toUpperCase();
+    const red = () => res.status(403).json({ ok: false, error: "Bu kayıt başka bir firmaya ait — erişim yetkiniz yok" });
+    const farkli = (v) => v != null && String(v).trim() !== "" && String(v).trim().toUpperCase() !== kendi;
+    if (farkli(req.query?.marka)) return red();
+    if (req.body && typeof req.body === "object" && farkli(req.body.marka)) return red();
+    Object.defineProperty(req, "query", { value: { ...(req.query || {}), marka: kendi }, writable: true, configurable: true, enumerable: true });
+    if (req.body && typeof req.body === "object" && !Array.isArray(req.body) && req.method !== "GET") req.body.marka = kendi;
+    for (const [rx, sql] of MARKA_KAYIT_SAHIBI) {
+      const m = yol.match(rx);
+      if (!m) continue;
+      const r = await pool.query(sql, [Number(m[1])]).catch(() => ({ rows: [] }));
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+      if (r.rows[0].m !== kendi) return red();
+    }
+    next();
+  } catch (e) {
+    console.error("[marka-kapsami]", e.message);
+    res.status(500).json({ ok: false, error: "Firma kapsamı doğrulanamadı" });
+  }
+});
 // TÜM KULLANICILARI LİSTELE
 app.get("/admin/users", authMiddleware, requireUserAdmin, async (req, res) => {
   try {
@@ -7936,7 +7985,7 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
     } catch {}
     const ahyPay = (100 - yuzde) / 100; // markanın payı (varsayılan %90)
     // Markanın Şimşek'e kestiği faturalar: tedarikçi ilk kelimesi marka öneki (AHY, TEKNOCENTER…)
-    const onekRe = `^${P.onek}([^_]|$)`;
+    const onekRe = markaTedarikciRe(P);
     const r = await pool.query(`
       WITH py AS (
         SELECT regexp_replace(regexp_replace(TRIM(invoice_no),'-.*$',''),'^(SIM\\d{4})0+','\\1') n,
@@ -8627,7 +8676,7 @@ app.get("/finance/simsek-fatura-takip", authMiddleware, async (req, res) => {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     const marka = String(req.query.marka || "AHY").toUpperCase();
-    const onekRe = `^${markaProfil(marka).onek}([^_]|$)`;
+    const onekRe = markaTedarikciRe(markaProfil(marka));
     const r = await pool.query(`
       SELECT id, COALESCE(fatura_no,'') AS fatura_no,
              to_char(fatura_tarihi,'YYYY-MM-DD') AS tarih,
