@@ -560,7 +560,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-23-oturum-tazeleme", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-23-saha-fatura", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -5717,34 +5717,291 @@ app.get("/master/by-site", async (req, res) => {
   }
 });
 
-/* Günlük İş Girişi — saha kodu önerisi (12.10.2026, Orhan): yazılan önekle başlayan ve
-   DAHA ÖNCE İŞ GİRİŞİ YAPILMIŞ benzersiz Site ID'ler. Yalnız master_works'e bakar; PO /
-   rollout / HW listelerinde olup iş girilmemiş sahalar önerilmez. Yetki: /master/by-site ile
-   aynı (sayfanın tam kodla zaten görebildiği kayıt kümesi). Salt okuma — hiçbir şey yazmaz. */
+/* ═══ ORTAK SAHA ARAMA (23.10.2026, Orhan) — Günlük İş Girişi + Fatura Girişi ═══════════════════════
+   Eski uç yalnız master_works'te ÖNEK arıyordu: günlük işi açılmamış, yalnız PO'su olan saha (ör. KA0181_NS_KIRSAL_MWA)
+   hiç önerilmiyor, ancak tam kod yazılınca /lookup/site-pos PO'yu bulduğu için "tam kodla bulunuyor" görünüyordu.
+   Kaynaklar: günlük iş (master_works) + PO (po_rows) + Rollout Data (rollout_progress); tam saha koduna göre tekilleştirilir
+   (farklı tam kodlar birleştirilmez). Önce önekle başlayanlar, sonra kısmi eşleşmeler. Büyük/küçük harf ve baş/son boşluk
+   yok sayılır; LIKE jokerleri (_ %) kaçışlanır.
+   Kapsam (backend): ERC kullanıcıları tüm kaynaklar; alt marka (Teknocenter) yalnız kendi işleri — taşeronu marka önekli
+   günlük iş (TEKNO_…) ve Rollout satırları (devralınan marka dahil değil, PO-yalnız sahalar dahil değil); taşeron hesabı yalnız
+   kendi günlük iş sahaları. Salt okuma. */
+const sahaKodTemizle = (s) => String(s || "").trim().toUpperCase();
+const likeKacis = (s) => String(s).replace(/[\\%_]/g, (c) => "\\" + c);
+function sahaAramaKapsami(req) {
+  const u = optionalAuth(req) || {};
+  if (altMarkaKullanicisi(u) && altMarkaMi(u.marka)) {
+    const P = markaProfil(u.marka);
+    return { tur: "marka", kod: P.kod, onek: String(P.onek || P.kod).toUpperCase() };
+  }
+  if (taseronMu(u)) return { tur: "taseron", subcon: String(u.subcon_name || "").trim().toUpperCase() };
+  return { tur: "tum" };
+}
+async function sahaOneriAra(req, qHam, limitHam) {
+  const q = sahaKodTemizle(qHam);
+  const limit = Math.min(Math.max(parseInt(limitHam, 10) || 20, 1), 50);
+  if (q.length < 2) return { q, rows: [] };
+  const k = sahaAramaKapsami(req);
+  const ici = "%" + likeKacis(q) + "%", bas = likeKacis(q) + "%";
+  const parcalar = [];
+  if (k.tur === "taseron") {
+    if (!k.subcon) return { q, rows: [] };
+    parcalar.push(`SELECT UPPER(TRIM(site_code)) AS sc, NULLIF(TRIM(project_code),'') AS pc, NULL::text AS bolge, NULLIF(TRIM(site_type),'') AS st, 'GUNLUK_IS' AS k
+      FROM master_works WHERE UPPER(TRIM(COALESCE(site_code,''))) LIKE $1 ESCAPE '\\' AND UPPER(TRIM(COALESCE(subcon_name,''))) = $4`);
+  } else if (k.tur === "marka") {
+    parcalar.push(`SELECT UPPER(TRIM(site_code)) AS sc, NULLIF(TRIM(project_code),'') AS pc, NULL::text AS bolge, NULLIF(TRIM(site_type),'') AS st, 'GUNLUK_IS' AS k
+      FROM master_works WHERE UPPER(TRIM(COALESCE(site_code,''))) LIKE $1 ESCAPE '\\' AND UPPER(TRIM(COALESCE(subcon_name,''))) LIKE $4 ESCAPE '\\'`);
+    parcalar.push(`SELECT UPPER(TRIM(r.site_code)), NULLIF(TRIM(to_jsonb(r)->>'project_code'),''), NULLIF(TRIM(to_jsonb(r)->>'bolge'),''), NULLIF(TRIM(r.site_type),''), 'ROLLOUT'
+      FROM rollout_progress r WHERE UPPER(TRIM(COALESCE(r.site_code,''))) LIKE $1 ESCAPE '\\'
+        AND (UPPER(COALESCE(to_jsonb(r)->>'rf_subcon','')) LIKE $5 ESCAPE '\\' OR UPPER(COALESCE(to_jsonb(r)->>'enh_subcon','')) LIKE $5 ESCAPE '\\'
+          OR UPPER(COALESCE(to_jsonb(r)->>'trs_subcon','')) LIKE $5 ESCAPE '\\' OR UPPER(COALESCE(to_jsonb(r)->>'power_subcon','')) LIKE $5 ESCAPE '\\')`);
+  } else {
+    parcalar.push(`SELECT UPPER(TRIM(site_code)) AS sc, NULLIF(TRIM(project_code),'') AS pc, NULL::text AS bolge, NULLIF(TRIM(site_type),'') AS st, 'GUNLUK_IS' AS k
+      FROM master_works WHERE UPPER(TRIM(COALESCE(site_code,''))) LIKE $1 ESCAPE '\\'`);
+    parcalar.push(`SELECT UPPER(TRIM(site_code)), NULLIF(TRIM(project_code),''), NULL::text, NULL::text, 'PO'
+      FROM po_rows WHERE UPPER(TRIM(COALESCE(site_code,''))) LIKE $1 ESCAPE '\\'`);
+    parcalar.push(`SELECT UPPER(TRIM(r.site_code)), NULLIF(TRIM(to_jsonb(r)->>'project_code'),''), NULLIF(TRIM(to_jsonb(r)->>'bolge'),''), NULLIF(TRIM(r.site_type),''), 'ROLLOUT'
+      FROM rollout_progress r WHERE UPPER(TRIM(COALESCE(r.site_code,''))) LIKE $1 ESCAPE '\\'`);
+  }
+  const params = [ici, bas, limit];
+  if (k.tur === "taseron") params.push(k.subcon);
+  if (k.tur === "marka") params.push(likeKacis(k.onek) + "\\_%", likeKacis(k.onek) + "%");
+  const r = await pool.query(
+    `WITH kaynak AS (${parcalar.join(" UNION ALL ")})
+     SELECT sc AS site_code, MAX(pc) AS project_code, MAX(bolge) AS bolge, MAX(st) AS site_type,
+            ARRAY_AGG(DISTINCT k) AS kaynaklar, (COUNT(*) FILTER (WHERE k = 'GUNLUK_IS'))::int AS kayit,
+            (sc LIKE $2 ESCAPE '\\') AS onek_eslesme
+       FROM kaynak WHERE COALESCE(sc,'') <> ''
+      GROUP BY sc ORDER BY (sc LIKE $2 ESCAPE '\\') DESC, sc LIMIT $3`, params);
+  return { q, kapsam: k.tur, rows: r.rows.map((x) => ({ ...x, bolge: x.bolge || detectRegion(x.site_code) || null })) };
+}
 app.get("/master/site-suggest", async (req, res) => {
   try {
-    const q = String(req.query.q || "").trim().toUpperCase();
-    if (q.length < 2) return res.json({ ok: true, q, rows: [] });
-    // Site ID'de geçen _ ve % LIKE jokeri sayılmasın → kaçışla, yalnız gerçek önek eşleşsin
-    const onek = q.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
-    const r = await pool.query(
-      `SELECT UPPER(TRIM(m.site_code))                                   AS site_code,
-              MAX(COALESCE(NULLIF(TRIM(m.project_code), ''), ''))        AS project_code,
-              MAX(COALESCE(NULLIF(TRIM(m.site_type), ''), ''))           AS site_type,
-              COUNT(*)::int                                              AS kayit,
-              MAX(m.created_at)                                          AS son_kayit
-         FROM master_works m
-        WHERE UPPER(TRIM(COALESCE(m.site_code, ''))) LIKE $1 ESCAPE '\\'
-        GROUP BY UPPER(TRIM(m.site_code))
-        ORDER BY UPPER(TRIM(m.site_code))
-        LIMIT $2`,
-      [onek, limit],
-    );
-    res.json({ ok: true, q, rows: r.rows });
+    const sonuc = await sahaOneriAra(req, req.query.q, req.query.limit);
+    res.json({ ok: true, ...sonuc });
   } catch (err) {
     console.error("MASTER SITE SUGGEST ERROR:", err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: "Saha önerileri alınamadı" });
+  }
+});
+
+/* ═══ FATURA SAHA / KALEM SATIRLARI (23.10.2026, Orhan) ═══════════════════════════════════════════════
+   Tablolar migrations/2026-10-23_fatura_saha_kalem.sql ile kurulur (otomatik oluşturulmaz). Kurulu değilse satır kaydı 503
+   döner; tek Site ID (invoice_entries.site_id) ve mevcut fatura akışı etkilenmez. */
+let _fskHazir = { t: 0, v: false };
+async function fskTablolariHazir() {
+  if (Date.now() - _fskHazir.t < 60000) return _fskHazir.v;
+  try {
+    const r = await pool.query(`SELECT to_regclass('public.fatura_saha_kalem') IS NOT NULL AS a, to_regclass('public.akilli_kontrol_durum') IS NOT NULL AS b`);
+    _fskHazir = { t: Date.now(), v: !!(r.rows[0]?.a && r.rows[0]?.b) };
+  } catch { _fskHazir = { t: Date.now(), v: false }; }
+  return _fskHazir.v;
+}
+const FSK_BIRIM = { m: "metre", mt: "metre", metre: "metre", meter: "metre", adet: "adet", ad: "adet", pcs: "adet", piece: "adet", gun: "gün", "gün": "gün",
+  day: "gün", saat: "saat", hour: "saat", kg: "kg", ton: "ton", set: "set", takim: "set", "takım": "set", sefer: "sefer", m2: "m2", m3: "m3", lt: "litre", litre: "litre", km: "km" };
+const fskBirim = (b) => { const k = String(b || "").trim().toLocaleLowerCase("tr"); return k ? (FSK_BIRIM[k] || k) : null; };
+const fskSayi = (v) => { if (v === null || v === undefined || v === "") return null; const n = Number(String(v).replace(/\s/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".")); return Number.isFinite(n) ? n : NaN; };
+// İstemciden gelen saha_kalemler listesini doğrular. Miktar/birim/tutar verilmemişse NULL kalır (tahmin edilmez).
+function fskSatirlariDogrula(liste, faturaTutar) {
+  if (!Array.isArray(liste)) return { satirlar: null };
+  const satirlar = [];
+  for (const [i, s] of liste.entries()) {
+    const site = sahaKodTemizle(s?.site_code);
+    const kalem = String(s?.kalem_adi || "").trim();
+    if (!site && !kalem) continue; // tamamen boş satır
+    if (!site) return { hata: `${i + 1}. satırda Site ID eksik` };
+    if (!kalem) return { hata: `${i + 1}. satırda malzeme / hizmet adı eksik` };
+    const miktar = fskSayi(s.miktar), tutar = fskSayi(s.tutar);
+    if (Number.isNaN(miktar) || (miktar !== null && miktar <= 0)) return { hata: `${i + 1}. satırda miktar geçersiz` };
+    if (Number.isNaN(tutar) || (tutar !== null && tutar < 0)) return { hata: `${i + 1}. satırda tutar geçersiz` };
+    satirlar.push({ id: Number(s.id) > 0 ? Number(s.id) : null, site_code: site, kalem_adi: kalem.slice(0, 200), kategori: String(s.kategori || "").trim().toUpperCase() || null,
+      miktar, birim: fskBirim(s.birim), tutar, aciklama: String(s.aciklama || "").trim() || null });
+  }
+  const dagitilan = satirlar.reduce((t, s) => t + (s.tutar || 0), 0);
+  if (dagitilan > Number(faturaTutar || 0) + 1)
+    return { hata: `Saha satırlarına dağıtılan tutar (${dagitilan.toLocaleString("tr-TR")}) fatura tutarını (KDV hariç ${Number(faturaTutar || 0).toLocaleString("tr-TR")}) aşıyor — aynı maliyet iki kez yazılamaz` };
+  return { satirlar };
+}
+// Tam liste kaydı: aynı faturadaki mevcut satır (id) yerinde güncellenir — Akıllı Kontrol işareti satıra bağlı kalır ve
+// değişen satır "yeniden değerlendirin" olarak görünür; listede olmayan satır silinir, yeni satır eklenir.
+async function fskSatirlariKaydet(db, faturaId, satirlar, kullanici) {
+  const mevcut = new Set((await db.query(`SELECT id FROM fatura_saha_kalem WHERE fatura_id = $1`, [faturaId])).rows.map((r) => Number(r.id)));
+  const kalan = satirlar.filter((s) => s.id && mevcut.has(s.id)).map((s) => s.id);
+  await db.query(`DELETE FROM fatura_saha_kalem WHERE fatura_id = $1 AND NOT (id = ANY($2::int[]))`, [faturaId, kalan]);
+  for (const s of satirlar) {
+    if (s.id && mevcut.has(s.id))
+      await db.query(`UPDATE fatura_saha_kalem SET site_code=$3, kalem_adi=$4, kategori=$5, miktar=$6, birim=$7, tutar=$8, aciklama=$9, updated_at=NOW()
+        WHERE id=$1 AND fatura_id=$2`, [s.id, faturaId, s.site_code, s.kalem_adi, s.kategori, s.miktar, s.birim, s.tutar, s.aciklama]);
+    else
+      await db.query(`INSERT INTO fatura_saha_kalem (fatura_id, site_code, kalem_adi, kategori, miktar, birim, tutar, aciklama, olusturan)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [faturaId, s.site_code, s.kalem_adi, s.kategori, s.miktar, s.birim, s.tutar, s.aciklama, kullanici || null]);
+  }
+}
+
+/* ═══ AKILLI KONTROL — SAHAYA BAĞLI FATURA KALEMLERİ (23.10.2026, Orhan) ═══════════════════════════════
+   Saha seçilince o sahaya bağlı, kullanıcının Fatura Girişi'nde görmeye yetkili olduğu fatura kalemlerini getirir ve günlük iş
+   (PR = master_works) / PO satırlarıyla karşılaştırır. Hiçbir şeyi değiştirmez; kalem kodu / miktar uydurmaz:
+   - eşleşme yalnız BoQ / PO açıklamalarındaki gerçek kalemlerle; belirsizse aday kalemler listelenir,
+   - miktar yalnız fatura satırında girilmişse ve birim kalemin birimiyle aynıysa karşılaştırılır,
+   - satın alma faturası malzemenin sahada kullanıldığını / işin tamamlandığını kanıtlamaz (metin bunu söyler).
+   Saha maliyeti: satır tutarı varsa satır; satırı olmayan (yalnız Site ID'li) ya da tüm satırları tek sahada olan fatura bütün
+   tutarıyla; çok sahalı ve tutarı dağıtılmamış fatura saha maliyetine EKLENMEZ ("dağıtılmamış" olarak gösterilir) → çift sayım yok.
+   Kapsam: faturaOkuma (finans yetkilisi tüm firmalar; alt marka yalnız kendi firması). PR/PO karşılaştırması ERC verisidir —
+   alt markaya verilmez (saha seçimi yeni erişim açmaz). */
+const FSK_ESLESME = [
+  { rx: /vin[cç]|crane/i, boq: /crane|vin[cç]/i, ad: "vinç hizmeti", tur: "hizmet" },
+  { rx: /kablo|cable|\bnyy\b|yv[sş]v|alpek/i, boq: /cable|kablo/i, ad: "kablo", tur: "malzeme" },
+  { rx: /nakliye|ta[sş][iı]ma|transport/i, boq: /transport|nakliye/i, ad: "nakliye", tur: "hizmet" },
+  { rx: /konaklama|otel|hotel|accommodation/i, boq: /accommodation|konaklama/i, ad: "konaklama", tur: "hizmet" },
+  { rx: /topraklama|grounding|earthing/i, boq: /ground|earth/i, ad: "topraklama", tur: "malzeme" },
+  { rx: /\bdirek|\bpole\b/i, boq: /\bpole\b/i, ad: "direk", tur: "malzeme" },
+  { rx: /pano|panel|cabinet|kabin/i, boq: /panel|cabinet|\bbox\b/i, ad: "pano", tur: "malzeme" },
+  { rx: /kablo kanal|kanal|duct|tray|tava/i, boq: /duct|tray|trunk/i, ad: "kablo kanalı", tur: "malzeme" },
+  { rx: /beton|concrete|temel|foundation/i, boq: /concrete|foundation/i, ad: "beton / temel", tur: "malzeme" },
+  { rx: /ekskavat|excavat|dozer|kaz[iı]/i, boq: /excavat|\bspo\b|digging/i, ad: "kazı", tur: "hizmet" },
+];
+const FSK_KATEGORI_ESLESME = { VINC: 0, NAKLIYE: 2, KONAKLAMA: 3 };
+function fskKalemEslesmesi(kalemAdi, kategori) {
+  const e = FSK_ESLESME.find((x) => x.rx.test(String(kalemAdi || "")));
+  if (e) return e;
+  const i = FSK_KATEGORI_ESLESME[String(kategori || "").toUpperCase()];
+  return i === undefined ? null : FSK_ESLESME[i];
+}
+// BoQ açıklamasındaki "per Meter / per Day / per Piece" birimi (yoksa null — birim tahmin edilmez)
+function boqBirimi(d) {
+  const m = String(d || "").match(/per\s+(meter|metre|m|day|piece|pcs|unit|each|site|set|km|kg)\b/i);
+  if (!m) return null;
+  return ({ meter: "metre", metre: "metre", m: "metre", day: "gün", piece: "adet", pcs: "adet", unit: "adet", each: "adet", site: "saha", set: "set", km: "km", kg: "kg" })[m[1].toLowerCase()];
+}
+const fskImza = (x) => require("crypto").createHash("sha1").update(JSON.stringify([x.fatura_id, x.site_code, x.kalem_adi, x.kategori,
+  x.miktar === null || x.miktar === undefined ? null : Number(x.miktar), x.birim || null, x.tutar === null || x.tutar === undefined ? null : Number(x.tutar),
+  x.fatura_no, Number(x.f_toplam || 0), Number(x.f_tutar || 0), x.f_silindi || false])).digest("hex").slice(0, 16);
+const fmtSayi = (n) => Number(n).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+async function sahaFaturaKaynaklari(req, site) {
+  const M = markaFaturaKapsami(req); // alt marka → yalnız kendi firması; finans yetkilisi → null (tümü)
+  const hazir = await fskTablolariHazir();
+  const firmaSart = (al) => (M ? ` AND UPPER(COALESCE(${al}.firma,'')) = $2` : "");
+  const p = M ? [site, M] : [site];
+  const alanlar = `i.fatura_no, to_char(i.fatura_tarihi,'YYYY-MM-DD') AS fatura_tarihi, i.tedarikci, UPPER(COALESCE(i.firma,'')) AS firma,
+    i.is_kalemi, i.fatura_kalemi, COALESCE(NULLIF(i.currency,''),'TRY') AS currency, UPPER(COALESCE(i.fatura_turu,'GELEN')) AS fatura_turu,
+    COALESCE(i.tutar,0) AS f_tutar, COALESCE(i.toplam_tutar,0) AS f_toplam, COALESCE(i.odenen_tutar,0) AS f_odenen, COALESCE(i.kalan_borc,0) AS f_kalan, i.belge_path`;
+  const satirlar = hazir ? (await pool.query(`
+    SELECT 'kalem' AS kaynak, k.id AS kaynak_id, k.fatura_id, UPPER(TRIM(k.site_code)) AS site_code, k.kalem_adi, k.kategori, k.miktar, k.birim, k.tutar, k.aciklama, ${alanlar},
+      (SELECT COUNT(DISTINCT UPPER(TRIM(k2.site_code))) FROM fatura_saha_kalem k2 WHERE k2.fatura_id = k.fatura_id)::int AS f_saha_sayisi
+    FROM fatura_saha_kalem k JOIN invoice_entries i ON i.id = k.fatura_id
+    WHERE UPPER(TRIM(k.site_code)) = $1${firmaSart("i")} ORDER BY i.fatura_tarihi DESC NULLS LAST, k.id`, p)).rows : [];
+  // Satırı olmayan, yalnız Site ID'si bu saha olan faturalar (eski kayıtlar dahil — eksik bağlantılar tahminle doldurulmaz)
+  const tekil = (await pool.query(`
+    SELECT 'fatura' AS kaynak, i.id AS kaynak_id, i.id AS fatura_id, UPPER(TRIM(i.site_id)) AS site_code,
+      COALESCE(NULLIF(TRIM(i.fatura_kalemi),''), NULLIF(TRIM(i.is_kalemi),''), 'Fatura') AS kalem_adi, UPPER(NULLIF(TRIM(i.is_kalemi),'')) AS kategori,
+      NULL::numeric AS miktar, NULL::text AS birim, NULL::numeric AS tutar, NULL::text AS aciklama, ${alanlar}, 1 AS f_saha_sayisi
+    FROM invoice_entries i
+    WHERE UPPER(TRIM(COALESCE(i.site_id,''))) = $1${firmaSart("i")}
+      ${hazir ? "AND NOT EXISTS (SELECT 1 FROM fatura_saha_kalem k WHERE k.fatura_id = i.id)" : ""}
+    ORDER BY i.fatura_tarihi DESC NULLS LAST, i.id`, p)).rows;
+  return { M, hazir, kaynaklar: [...satirlar, ...tekil] };
+}
+async function sahaKalemleriPrPo(site) {
+  return (await pool.query(`
+    WITH mw AS (SELECT TRIM(COALESCE(item_code,'')) AS ic, MAX(COALESCE(item_description,'')) AS d,
+                       SUM(COALESCE(done_qty,0)) AS pr_qty, SUM(COALESCE(tamamlanan_qty, done_qty, 0)) AS done_qty
+                  FROM master_works WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) <> '' GROUP BY 1),
+         po AS (SELECT TRIM(COALESCE(item_code,'')) AS ic, MAX(COALESCE(item_description,'')) AS d,
+                       SUM(COALESCE(requested_qty,0)) AS po_qty, STRING_AGG(DISTINCT NULLIF(TRIM(po_no),''), ', ') AS po_no
+                  FROM po_rows WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) <> '' GROUP BY 1)
+    SELECT COALESCE(mw.ic, po.ic) AS item_code, COALESCE(NULLIF(mw.d,''), po.d, '') AS item_description,
+           COALESCE(mw.pr_qty,0) AS pr_qty, COALESCE(mw.done_qty,0) AS done_qty, COALESCE(po.po_qty,0) AS po_qty, COALESCE(po.po_no,'') AS po_no
+      FROM mw FULL OUTER JOIN po ON po.ic = mw.ic ORDER BY 1`, [site])).rows
+    .map((x) => ({ ...x, pr_qty: Number(x.pr_qty), done_qty: Number(x.done_qty), po_qty: Number(x.po_qty), birim: boqBirimi(x.item_description) }));
+}
+function fskKarsilastir(x, kalemler) {
+  const e = fskKalemEslesmesi(x.kalem_adi, x.kategori);
+  if (!e) return { durum: "ESLESTIRILEMEDI", mesaj: "Kalem adı BoQ / PO kalemleriyle otomatik eşleştirilemedi — sahanın PR/PO listesini elle kontrol edin." };
+  const aday = kalemler.filter((k) => e.boq.test(k.item_description));
+  if (!aday.length) return { durum: "PR_PO_YOK", mesaj: `Bu sahanın günlük iş (PR) ve PO satırlarında ${e.ad} kalemi yok — iş yapıldıysa günlük işe / PR talebine eklenmesi gerekip gerekmediğini kontrol edin.` };
+  if (aday.length > 1) return { durum: "BELIRSIZ", adaylar: aday, mesaj: `${e.ad} için birden fazla olası kalem var — hangisinin ilgili olduğunu kontrol edin.` };
+  const k = aday[0];
+  const ozet = `${k.item_code} · ${k.item_description}`;
+  if (k.pr_qty <= 0 && k.po_qty > 0) return { durum: "PO_VAR_GIRIS_YOK", kalem: k, mesaj: `PO açılmış (${fmtSayi(k.po_qty)}) ama günlük iş girişi yok: ${ozet}` };
+  if (k.pr_qty > 0 && k.po_qty <= 0) return { durum: "PO_BEKLENIYOR", kalem: k, mesaj: `Günlük işte var (PR ${fmtSayi(k.pr_qty)}), PO henüz açılmamış: ${ozet}` };
+  const fb = x.miktar !== null && x.miktar !== undefined ? fskBirim(x.birim) : null;
+  if (fb && k.birim && fb === k.birim && Number(x.miktar) > k.pr_qty)
+    return { durum: "MIKTAR_KONTROL", kalem: k, mesaj: `Faturada ${fmtSayi(x.miktar)} ${fb}, günlük işte (PR) ${fmtSayi(k.pr_qty)} ${k.birim} var — satın alınan miktar PR miktarı değildir; gerçekleşen işe göre kontrol edin: ${ozet}` };
+  const neden = !fb ? "faturada miktar/birim belirtilmemiş" : !k.birim ? "kalemin birimi BoQ'dan okunamadı" : fb !== k.birim ? `birimler farklı (${fb} / ${k.birim})` : null;
+  return { durum: "KALEM_VAR", kalem: k, mesaj: `İlgili kalem günlük işte (PR ${fmtSayi(k.pr_qty)}) ve PO'da (${fmtSayi(k.po_qty)}) var: ${ozet}${neden ? ` — miktar karşılaştırılmadı (${neden})` : ""}` };
+}
+async function sahaFaturaKontrolHesapla(req, site) {
+  const { M, hazir, kaynaklar } = await sahaFaturaKaynaklari(req, site);
+  const kalemler = M ? null : await sahaKalemleriPrPo(site);
+  const durumlar = hazir && kaynaklar.length ? (await pool.query(`SELECT kaynak, kaynak_id, durum, kaynak_imza, aciklama, kullanici, to_char(updated_at,'YYYY-MM-DD HH24:MI') AS zaman
+    FROM akilli_kontrol_durum WHERE UPPER(TRIM(site_code)) = $1`, [site])).rows : [];
+  const maliyet = {}; const dagitilmamis = []; const tamFatura = new Set();
+  const uyarilar = kaynaklar.map((x) => {
+    const e = fskKalemEslesmesi(x.kalem_adi, x.kategori);
+    const malzeme = String(x.kategori || "").toUpperCase() === "MALZEME" || e?.tur === "malzeme";
+    const miktarMetni = x.miktar !== null && x.miktar !== undefined ? `${fmtSayi(x.miktar)} ${x.birim || "(birim belirtilmemiş)"}` : "miktar belirtilmemiş";
+    const iade = x.fatura_turu !== "GELEN";
+    const mesaj = iade ? `Bu saha için iade/kesilen fatura kaydı var (${x.kalem_adi}) — maliyete eklenmedi.`
+      : malzeme ? `Bu saha için ${miktarMetni} ${x.kalem_adi} satın alma kaydı var. Satın alma, malzemenin sahada kullanıldığını göstermez; ilgili kalemin günlük iş ve PR miktarını kontrol edin.`
+      : `Bu saha için ${x.kalem_adi} faturası kayıtlı (${miktarMetni}). Günlük iş ve PR/PO kalemlerini kontrol edin.`;
+    // Saha maliyeti (çift sayım yok) — firma ve para birimi ayrı: Şimşek / alt marka maliyetleri tek rakamda toplanmaz
+    if (!iade) {
+      const cur = x.currency || "TRY", fk = `${altMarkaMi(x.firma) ? x.firma : "SIMSEK"}|${cur}`;
+      const m = (maliyet[fk] = maliyet[fk] || { firma: altMarkaMi(x.firma) ? x.firma : "SIMSEK", currency: cur, kdv_haric: 0, kdv_dahil: 0 });
+      const oran = Number(x.f_tutar) > 0 ? Number(x.f_toplam) / Number(x.f_tutar) : 1;
+      if (x.tutar !== null && x.tutar !== undefined) { m.kdv_haric += Number(x.tutar); m.kdv_dahil += Number(x.tutar) * oran; }
+      else if (Number(x.f_saha_sayisi) <= 1) {
+        if (!tamFatura.has(x.fatura_id)) { tamFatura.add(x.fatura_id); m.kdv_haric += Number(x.f_tutar); m.kdv_dahil += Number(x.f_toplam); }
+      } else if (!dagitilmamis.some((d) => d.fatura_id === x.fatura_id)) {
+        dagitilmamis.push({ fatura_id: x.fatura_id, fatura_no: x.fatura_no, saha_sayisi: Number(x.f_saha_sayisi), toplam: Number(x.f_toplam), currency: cur });
+      }
+    }
+    const imza = fskImza({ ...x });
+    const d = durumlar.find((s) => s.kaynak === x.kaynak && Number(s.kaynak_id) === Number(x.kaynak_id));
+    return {
+      kaynak: x.kaynak, kaynak_id: x.kaynak_id, fatura_id: x.fatura_id, site_code: x.site_code,
+      fatura_no: x.fatura_no, fatura_tarihi: x.fatura_tarihi, tedarikci: x.tedarikci, firma: x.firma, belge_path: x.belge_path || null,
+      kalem_adi: x.kalem_adi, kategori: x.kategori, miktar: x.miktar === null ? null : Number(x.miktar), birim: x.miktar === null ? null : (x.birim || null),
+      tutar: x.tutar === null ? null : Number(x.tutar), currency: x.currency, fatura_tutar: Number(x.f_tutar), fatura_toplam: Number(x.f_toplam),
+      fatura_odenen: Number(x.f_odenen), fatura_kalan: Number(x.f_kalan), saha_sayisi: Number(x.f_saha_sayisi), satin_alma: malzeme, iade,
+      mesaj, karsilastirma: kalemler ? fskKarsilastir(x, kalemler) : null,
+      isaret: d ? { durum: d.durum, aciklama: d.aciklama, kullanici: d.kullanici, zaman: d.zaman, guncel: d.kaynak_imza === imza } : null,
+    };
+  });
+  return { ok: true, site, kapsam: M || "TUM", satir_tablosu_hazir: hazir, uyarilar, maliyet: Object.values(maliyet), dagitilmamis, pr_po_karsilastirma: !!kalemler };
+}
+app.get("/po/saha-fatura-kontrol", faturaOkuma, async (req, res) => {
+  try {
+    const site = sahaKodTemizle(req.query.site);
+    if (!site) return res.json({ ok: true, site, uyarilar: [], maliyet: [], dagitilmamis: [] });
+    res.json(await sahaFaturaKontrolHesapla(req, site));
+  } catch (e) {
+    console.error("SAHA FATURA KONTROL:", e.message);
+    res.status(500).json({ ok: false, error: "Saha fatura kontrolü alınamadı" });
+  }
+});
+// Uyarıyı izlenebilir duruma al (Kontrol edildi / İlgili değil / PR talebi oluşturuldu). Kaynak kayıt değişirse imza tutmaz →
+// uyarı yeniden değerlendirilmeli olarak görünür. PR / günlük iş kaydına dokunmaz.
+app.post("/po/saha-fatura-kontrol/durum", faturaYazma, async (req, res) => {
+  try {
+    if (!(await fskTablolariHazir())) return res.status(503).json({ ok: false, error: "Akıllı Kontrol durumu için veritabanı güncellemesi (migration) bekleniyor" });
+    const b = req.body || {};
+    const kaynak = b.kaynak === "kalem" ? "kalem" : b.kaynak === "fatura" ? "fatura" : null;
+    const durum = ["KONTROL_EDILDI", "ILGILI_DEGIL", "PR_TALEBI_OLUSTURULDU"].includes(b.durum) ? b.durum : null;
+    const site = sahaKodTemizle(b.site_code);
+    if (!kaynak || !durum || !site || !Number(b.kaynak_id)) return res.status(400).json({ ok: false, error: "Geçersiz durum isteği" });
+    const { kaynaklar } = await sahaFaturaKaynaklari(req, site); // kapsam (alt marka → kendi firması) burada uygulanır
+    const x = kaynaklar.find((k) => k.kaynak === kaynak && Number(k.kaynak_id) === Number(b.kaynak_id));
+    if (!x) return res.status(404).json({ ok: false, error: "Uyarının kaynağı bulunamadı" });
+    await pool.query(`INSERT INTO akilli_kontrol_durum (kaynak, kaynak_id, site_code, durum, kaynak_imza, aciklama, kullanici, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+      ON CONFLICT (kaynak, kaynak_id, site_code) DO UPDATE SET durum = EXCLUDED.durum, kaynak_imza = EXCLUDED.kaynak_imza,
+        aciklama = EXCLUDED.aciklama, kullanici = EXCLUDED.kullanici, updated_at = NOW()`,
+      [kaynak, Number(b.kaynak_id), site, durum, fskImza({ ...x }), String(b.aciklama || "").trim().slice(0, 500) || null, String(req.user?.email || "").toLowerCase()]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("SAHA FATURA KONTROL DURUM:", e.message);
+    res.status(500).json({ ok: false, error: "Durum kaydedilemedi" });
   }
 });
 
@@ -7061,6 +7318,11 @@ app.post("/finance/invoice-entry/add", faturaYazma, async (req, res) => {
     if (aracFatura && !(Array.isArray(arac_kalemler) && arac_kalemler.length)) {
       return res.status(400).json({ ok: false, error: "Araç Kirası faturasında en az bir araç (plaka + dönem + tutar) satırı zorunlu" });
     }
+    // 23.10.2026: saha / kalem satırları (fatura eklenmeden önce doğrulanır — yarım kayıt kalmaz)
+    const fsk = fskSatirlariDogrula(req.body?.saha_kalemler, Number(tutar || 0) || Number(toplam_tutar || 0));
+    if (fsk.hata) return res.status(400).json({ ok: false, error: fsk.hata });
+    if (fsk.satirlar && fsk.satirlar.length && !(await fskTablolariHazir()))
+      return res.status(503).json({ ok: false, error: "Saha / kalem satırları için veritabanı güncellemesi (migration) bekleniyor — faturayı satırsız (yalnız Site ID ile) kaydedebilirsiniz" });
     const mukerrer = await faturaNoMukerrerMi(fatura_no);
     if (mukerrer && req.markaFatura && String(mukerrer.firma || "").toUpperCase() !== req.markaFatura)
       return res.status(409).json({ ok: false, error: "Bu fatura numarası sistemde kayıtlı; aynı faturayı ikinci kez girmeyin." });
@@ -7147,6 +7409,15 @@ app.post("/finance/invoice-entry/add", faturaYazma, async (req, res) => {
       if (!ok) { await pool.query(`DELETE FROM invoice_entries WHERE id=$1`, [newRow.id]).catch(() => {}); return; }
     }
 
+    if (fsk.satirlar && fsk.satirlar.length) {
+      try { await fskSatirlariKaydet(pool, newRow.id, fsk.satirlar, String(req.user?.email || "").toLowerCase()); }
+      catch (e) {
+        await pool.query(`DELETE FROM invoice_entries WHERE id=$1`, [newRow.id]).catch(() => {});
+        console.error("[invoice-add] saha satırları:", e.message);
+        return res.status(500).json({ ok: false, error: "Saha satırları kaydedilemedi — fatura kaydedilmedi" });
+      }
+    }
+
     // Geçici PDF varsa belge_path olarak bağla
     if (temp_belge_key && newRow.id) {
       const finalFilename = `fatura-${newRow.id}-${Date.now()}.pdf`;
@@ -7189,8 +7460,16 @@ app.get("/finance/invoice-entry/list", faturaOkuma, async (req, res) => {
       LEFT JOIN invoice_entries bf ON bf.id = ie.bagli_fatura_id
       ORDER BY ie.created_at DESC
     `);
+    const rows = result.rows || [];
+    // 23.10.2026: saha / kalem satırları (tablo kuruluysa) — faturayla birlikte döner, kapsam süzgeci fatura satırına uygulanır
+    if (rows.length && (await fskTablolariHazir())) {
+      const k = await pool.query(`SELECT id, fatura_id, site_code, kalem_adi, kategori, miktar, birim, tutar, aciklama FROM fatura_saha_kalem
+        WHERE fatura_id = ANY($1::int[]) ORDER BY fatura_id, id`, [rows.map((r) => r.id)]);
+      const g = {}; for (const x of k.rows) (g[x.fatura_id] = g[x.fatura_id] || []).push(x);
+      for (const r of rows) r.saha_kalemler = g[r.id] || [];
+    }
 
-    res.json({ ok: true, rows: result.rows || [] });
+    res.json({ ok: true, rows });
   } catch (err) {
     console.error("INVOICE ENTRY LIST ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -13624,6 +13903,12 @@ app.put("/finance/invoice-entry/:id", faturaYazma, async (req, res) => {
       firma, // ŞİMŞEK (SIMSEK) veya AHY — AHY taşeron panelinde görünür
       arac_kalemler,
     } = req.body;
+    // 23.10.2026: saha / kalem satırları — dizi gönderildiyse doğrula ve değiştir, gönderilmediyse mevcut satırlar korunur
+    const fsk = fskSatirlariDogrula(req.body?.saha_kalemler, Number(tutar || 0) || Number(toplam_tutar || 0));
+    if (fsk.hata) return res.status(400).json({ ok: false, error: fsk.hata });
+    const fskHazir = await fskTablolariHazir();
+    if (fsk.satirlar && fsk.satirlar.length && !fskHazir)
+      return res.status(503).json({ ok: false, error: "Saha / kalem satırları için veritabanı güncellemesi (migration) bekleniyor" });
     // 16.10.2026: araç kirası faturasında ödenen/kalan yalnız ortak ödeme kayıtlarından gelir — formdaki değer yok sayılır
     await ensureOdemeTablolari();
     const _mev = (await pool.query(`SELECT COALESCE(odenen_tutar,0) AS odenen, ${ARAC_FATURA_MI_SQL("i")} AS arac FROM invoice_entries i WHERE i.id=$1`, [id])).rows[0];
@@ -13690,6 +13975,8 @@ app.put("/finance/invoice-entry/:id", faturaYazma, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
     }
+
+    if (fsk.satirlar && fskHazir) await fskSatirlariKaydet(pool, Number(id), fsk.satirlar, String(req.user?.email || "").toLowerCase());
 
     let aracUyarilar = [];
     if (Array.isArray(arac_kalemler)) {

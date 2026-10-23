@@ -6981,6 +6981,265 @@ function useUsdRate() {
    Kaydet tek seferde hepsini gönderir. Satırdaki "Veri Gir" eski
    detay formunu açar (onair/not/kabul gibi alanlar için).
    ═══════════════════════════════════════════════════════════════════════ */
+/* ═══ ORTAK SAHA ARAMA KUTUSU (23.10.2026, Orhan) — Günlük İş Girişi + Fatura Girişi ═══════════════════════
+   GET /master/site-suggest (günlük iş + PO + Rollout, kapsam sunucuda). Yazılan METİN ile SEÇİLEN tam saha ayrı tutulur:
+   onChange(metin) her tuşta çağrılır (üst bileşen seçimi bırakır), onSelect(satir) yalnız listeden seçimde ya da metin bir
+   sahanın tam koduyla BİREBİR aynıysa çağrılır — kısmi metin hiçbir zaman sessizce bir sahaya bağlanmaz.
+   Klavye: ↑/↓ gezinme, Enter seçim (vurgulu yoksa seçmez), Escape kapatır; bayat yanıt yeni yazılanı ezmez. */
+const SAHA_KAYNAK_ADI = { GUNLUK_IS: "Günlük iş", PO: "PO", ROLLOUT: "Rollout" };
+function SahaAramaKutusu({ value, onChange, onSelect, placeholder = "Site ID — örn: KA0181", inputStyle = {}, odakRengi = "#3b82f6", ad = "saha", autoFocus = false }) {
+  const [liste, setListe] = useState([]);
+  const [acik, setAcik] = useState(false);
+  const [idx, setIdx] = useState(-1);
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [aranan, setAranan] = useState("");
+  const [odak, setOdak] = useState(false);
+  const seq = useRef(0);          // son istek — bayat yanıt yok sayılır
+  const secilen = useRef("");     // listeden seçilen kod: aynı metin için liste yeniden açılmaz
+  const odakRef = useRef(false);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  useEffect(() => {
+    const q = String(value || "").trim().toUpperCase();
+    if (q.length < 2 || q === secilen.current) { seq.current += 1; setListe([]); setAcik(false); setIdx(-1); setYukleniyor(false); return; }
+    const s = ++seq.current;
+    setYukleniyor(true);
+    if (odakRef.current) setAcik(true);
+    const t = setTimeout(async () => {
+      try {
+        const d = await fetchJson(`${API_BASE}/master/site-suggest?q=${encodeURIComponent(q)}&limit=20`);
+        if (s !== seq.current) return;
+        const gorulen = new Set();
+        const l = (d?.rows || []).filter((r) => { const k = String(r.site_code || "").trim().toUpperCase(); if (!k || gorulen.has(k)) return false; gorulen.add(k); return true; });
+        setListe(l); setAranan(q); setIdx(-1); setAcik(odakRef.current);
+        const tam = l.find((r) => String(r.site_code).trim().toUpperCase() === q);
+        if (tam) onSelectRef.current?.(tam, { otomatik: true }); // birebir aynı tam kod → seçili sayılır
+      } catch {
+        if (s === seq.current) { setListe([]); setAranan(q); }
+      } finally {
+        if (s === seq.current) setYukleniyor(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [value]);
+  const sec = (r) => {
+    const kod = String(r?.site_code || "").trim().toUpperCase();
+    if (!kod) return;
+    secilen.current = kod; seq.current += 1;
+    setListe([]); setAcik(false); setIdx(-1); setYukleniyor(false);
+    onChange?.(kod);
+    onSelect?.(r, { otomatik: false });
+  };
+  const klavye = (e) => {
+    if (!acik || !liste.length) { if (e.key === "Escape") setAcik(false); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); setIdx((i) => (i + 1) % liste.length); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setIdx((i) => (i <= 0 ? liste.length - 1 : i - 1)); }
+    else if (e.key === "Enter") { if (idx >= 0) { e.preventDefault(); sec(liste[idx]); } }
+    else if (e.key === "Escape") { e.preventDefault(); setAcik(false); setIdx(-1); }
+  };
+  const q = String(value || "").trim().toUpperCase();
+  const listeId = `${ad}-oneri-listesi`;
+  return (
+    <div style={{ position: "relative", width: "100%", minWidth: 0 }}>
+      <input
+        value={value || ""}
+        onChange={(e) => { secilen.current = ""; onChange?.(e.target.value.toUpperCase()); }}
+        onKeyDown={klavye}
+        placeholder={placeholder}
+        autoComplete="off" autoFocus={autoFocus} spellCheck={false}
+        role="combobox" aria-autocomplete="list" aria-expanded={acik} aria-controls={listeId}
+        aria-activedescendant={acik && idx >= 0 ? `${ad}-oneri-${idx}` : undefined}
+        style={{ width: "100%", boxSizing: "border-box", outline: "none", ...inputStyle, ...(odak ? { borderColor: odakRengi } : {}) }}
+        onFocus={() => { odakRef.current = true; setOdak(true); if (q.length >= 2 && q !== secilen.current && (liste.length || yukleniyor || aranan === q)) setAcik(true); }}
+        onBlur={() => { odakRef.current = false; setOdak(false); setTimeout(() => setAcik(false), 150); }}
+      />
+      {acik && q.length >= 2 && (
+        <div id={listeId} role="listbox" aria-label="Saha önerileri"
+          style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 80, background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 12, boxShadow: "0 10px 30px rgba(15,23,42,0.14)", maxHeight: 280, overflowY: "auto", textAlign: "left" }}>
+          {yukleniyor && !liste.length ? (
+            <div style={{ padding: "10px 12px", fontSize: 12.5, color: "#64748b" }}>Aranıyor…</div>
+          ) : !liste.length ? (
+            <div style={{ padding: "10px 12px", fontSize: 12.5, color: "#64748b" }}>“{aranan || q}” için yetkiniz dahilinde kayıtlı saha bulunamadı</div>
+          ) : (
+            <>
+              <div style={{ padding: "6px 12px 4px", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "#94a3b8" }}>
+                Sahalar · {liste.length}{liste.length >= 20 ? "+ (aramayı daraltın)" : ""}{yukleniyor ? " · güncelleniyor…" : ""}
+              </div>
+              {liste.map((r, i) => (
+                <div key={r.site_code} id={`${ad}-oneri-${i}`} role="option" aria-selected={i === idx}
+                  onMouseDown={(e) => { e.preventDefault(); sec(r); }}
+                  onMouseEnter={() => setIdx(i)}
+                  style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "8px 12px", cursor: "pointer", background: i === idx ? "#eff6ff" : "transparent", borderTop: i ? "1px solid #f1f5f9" : "none" }}>
+                  <span style={{ fontWeight: 800, fontSize: 13.5, color: "#0f172a", fontFamily: "ui-monospace,Menlo,Consolas,monospace", whiteSpace: "nowrap" }}>{r.site_code}</span>
+                  <span style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flex: 1 }}>
+                    {[r.project_code, r.bolge, r.site_type].filter(Boolean).join(" · ")}
+                  </span>
+                  <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                    {(r.kaynaklar || []).map((k) => (
+                      <span key={k} style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: k === "PO" ? "#ecfdf5" : k === "ROLLOUT" ? "#f5f3ff" : "#eff6ff", color: k === "PO" ? "#047857" : k === "ROLLOUT" ? "#6d28d9" : "#1d4ed8" }}>{SAHA_KAYNAK_ADI[k] || k}</span>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Fatura saha / kalem satırları (23.10.2026): bir fatura birden çok saha ve kalem taşıyabilir. Miktar/birim bilinmiyorsa boş kalır
+   ("belirtilmemiş" — toplamdan tahmin edilmez). Tutar (KDV hariç) satırlara dağıtılabilir; dağıtılmayan çok sahalı fatura saha
+   maliyetine eklenmez, satır tutarları toplamı fatura tutarını aşamaz (sunucu da kontrol eder). */
+const FSK_BIRIMLER = ["metre", "adet", "gün", "saat", "sefer", "kg", "ton", "set", "m2", "m3", "litre", "km"];
+function FaturaSahaKalemEditor({ value = [], onChange, varsayilanSite = "", faturaTutar = 0, currency = "TRY" }) {
+  const satirlar = Array.isArray(value) ? value : [];
+  // onChange'e güncelleyici fonksiyon verilir: aynı anda gelen iki güncelleme (ör. iki satırın otomatik doğrulaması) birbirini ezmez
+  const guncelle = (i, alan, v) => onChange((onceki) => onceki.map((s, j) => (j === i ? { ...s, [alan]: v, ...(alan === "site_code" ? { _dogrulandi: false } : {}) } : s)));
+  const sayi = (v) => { const n = Number(String(v ?? "").replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
+  const dagitilan = satirlar.reduce((t, s) => t + (String(s.tutar ?? "").trim() === "" ? 0 : sayi(s.tutar)), 0);
+  const sahaSayisi = new Set(satirlar.map((s) => String(s.site_code || "").trim().toUpperCase()).filter(Boolean)).size;
+  const hucre = { padding: "7px 9px", border: "1.5px solid #e5e7eb", borderRadius: 8, fontSize: 13, boxSizing: "border-box", width: "100%" };
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, padding: "14px 18px", marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a" }}>📍 Saha / kalem satırları</div>
+          <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>Malzeme / hizmet hangi sahaya ait? Miktar bilinmiyorsa boş bırakın (belirtilmemiş görünür). Akıllı Kontrol bu satırları sahanın günlük iş ve PR/PO kalemleriyle karşılaştırır.</div>
+        </div>
+        <button type="button" onClick={() => onChange((onceki) => [...onceki, { site_code: onceki.length ? "" : String(varsayilanSite || "").toUpperCase(), kalem_adi: "", miktar: "", birim: "", tutar: "", _dogrulandi: false }])}
+          style={{ padding: "7px 12px", borderRadius: 8, border: "1.5px solid #1e3a5f", background: "#fff", color: "#1e3a5f", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>+ Satır ekle</button>
+      </div>
+      {satirlar.length === 0 ? (
+        <div style={{ fontSize: 12, color: "#94a3b8", padding: "6px 0" }}>Satır yok — fatura yalnız yukarıdaki Site ID ile sahaya bağlanır (kalem / miktar bilgisi olmadan).</div>
+      ) : (
+        <>
+          {satirlar.map((s, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "minmax(170px,1.4fr) minmax(140px,1.4fr) 90px 110px 120px 34px", gap: 8, alignItems: "start", marginBottom: 8 }}>
+              <div>
+                <SahaAramaKutusu ad={`fsk-${i}`} value={s.site_code || ""} placeholder="Site ID"
+                  onChange={(v) => guncelle(i, "site_code", v)}
+                  onSelect={(r) => onChange((onceki) => onceki.map((x, j) => (j === i ? { ...x, site_code: r.site_code, _dogrulandi: true } : x)))}
+                  inputStyle={hucre} />
+                {String(s.site_code || "").trim() && (
+                  <div style={{ fontSize: 10.5, marginTop: 2, color: s._dogrulandi ? "#15803d" : "#b45309" }}>{s._dogrulandi ? "✓ kayıtlı saha" : "⚠ listeden seçilmedi"}</div>
+                )}
+              </div>
+              <input value={s.kalem_adi || ""} onChange={(e) => guncelle(i, "kalem_adi", e.target.value)} placeholder="Malzeme / hizmet — örn: Kablo, Vinç hizmeti" style={hucre} />
+              <input value={s.miktar ?? ""} onChange={(e) => guncelle(i, "miktar", e.target.value)} placeholder="Miktar" inputMode="decimal" style={hucre} />
+              <select value={s.birim || ""} onChange={(e) => guncelle(i, "birim", e.target.value)} style={hucre}>
+                <option value="">Birim (belirtilmemiş)</option>
+                {FSK_BIRIMLER.map((b) => <option key={b} value={b}>{b}</option>)}
+                {s.birim && !FSK_BIRIMLER.includes(s.birim) && <option value={s.birim}>{s.birim}</option>}
+              </select>
+              <input value={s.tutar ?? ""} onChange={(e) => guncelle(i, "tutar", e.target.value)} placeholder={`Tutar (KDV hariç, ${currency})`} inputMode="decimal" style={hucre} />
+              <button type="button" title="Satırı sil" onClick={() => onChange((onceki) => onceki.filter((_, j) => j !== i))}
+                style={{ height: 34, border: "1.5px solid #fecaca", background: "#fef2f2", color: "#b91c1c", borderRadius: 8, cursor: "pointer", fontWeight: 800 }}>×</button>
+            </div>
+          ))}
+          <div style={{ fontSize: 11.5, color: dagitilan > Number(faturaTutar || 0) + 1 ? "#b91c1c" : "#64748b", marginTop: 4 }}>
+            Satırlara dağıtılan: {dagitilan.toLocaleString("tr-TR", { maximumFractionDigits: 2 })} / fatura tutarı (KDV hariç) {Number(faturaTutar || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 })}
+            {dagitilan > Number(faturaTutar || 0) + 1 ? " — dağıtılan tutar faturayı aşamaz" : sahaSayisi > 1 && dagitilan === 0 ? " — çok sahalı faturada tutar dağıtılmazsa saha maliyetine eklenmez (çift sayım olmaz)" : ""}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* Akıllı Kontrol — sahaya bağlı fatura kalemleri (23.10.2026). GET /po/saha-fatura-kontrol; yetki yoksa hiçbir şey göstermez.
+   Hiçbir PR / günlük iş kaydını değiştirmez; yalnız uyarının durumunu işaretler. */
+const AK_DURUM = { KONTROL_EDILDI: "Kontrol edildi", ILGILI_DEGIL: "İlgili değil", PR_TALEBI_OLUSTURULDU: "PR talebi oluşturuldu" };
+const AK_KARSILASTIRMA = {
+  PR_PO_YOK: ["#b91c1c", "#fef2f2", "PR/PO'da yok"], PO_VAR_GIRIS_YOK: ["#b45309", "#fffbeb", "PO var, günlük iş yok"],
+  PO_BEKLENIYOR: ["#1d4ed8", "#eff6ff", "PO bekleniyor"], MIKTAR_KONTROL: ["#b45309", "#fffbeb", "Miktarı kontrol et"],
+  KALEM_VAR: ["#15803d", "#f0fdf4", "Kalem var"], BELIRSIZ: ["#6d28d9", "#f5f3ff", "Eşleşme belirsiz"], ESLESTIRILEMEDI: ["#475569", "#f1f5f9", "Otomatik eşleşmedi"],
+};
+function SahaFaturaKontrolKarti({ site }) {
+  const [veri, setVeri] = useState(null);
+  const [kayit, setKayit] = useState("");
+  const seq = useRef(0);
+  const yukle = useCallback(async () => {
+    const s = String(site || "").trim().toUpperCase();
+    const n = ++seq.current;
+    if (!s || !s.includes("_") || s.length < 6) { setVeri(null); return; }
+    try {
+      const d = await fetchJson(`${API_BASE}/po/saha-fatura-kontrol?site=${encodeURIComponent(s)}`);
+      if (n === seq.current) setVeri(d && d.ok && d.site === s ? d : null);
+    } catch { if (n === seq.current) setVeri(null); } // yetki yoksa (403) kart görünmez
+  }, [site]);
+  useEffect(() => { const t = setTimeout(yukle, 600); return () => clearTimeout(t); }, [yukle]);
+  if (!veri || !veri.uyarilar?.length) return null;
+  const isaretle = async (u, durum) => {
+    setKayit(`${u.kaynak}-${u.kaynak_id}`);
+    try {
+      await fetchJson(`${API_BASE}/po/saha-fatura-kontrol/durum`, { method: "POST", body: JSON.stringify({ kaynak: u.kaynak, kaynak_id: u.kaynak_id, site_code: u.site_code, durum }) });
+      await yukle();
+    } catch (e) { alert(e.message || "Durum kaydedilemedi"); }
+    setKayit("");
+  };
+  const para = (n, c) => formatMoneyByCurrency(n, c || "TRY");
+  const maliyetler = Array.isArray(veri.maliyet) ? veri.maliyet : [];
+  const firmaAdi = (f) => (f === "SIMSEK" ? "Şimşek" : f === "TEKNO" ? "Teknocenter" : f);
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, marginBottom: 16, boxShadow: "0 2px 10px rgba(0,0,0,0.07)", overflow: "hidden", border: "1.5px solid #fde68a", textAlign: "left" }}>
+      <div style={{ background: "linear-gradient(135deg,#b45309,#d97706)", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>🧾 Akıllı Kontrol — {veri.site} sahasına bağlı faturalar ({veri.uyarilar.length})</div>
+        <div style={{ color: "rgba(255,255,255,0.9)", fontSize: 12, fontWeight: 700 }}>
+          Saha maliyeti: {maliyetler.length ? maliyetler.map((m) => `${maliyetler.length > 1 || m.firma !== "SIMSEK" ? `${firmaAdi(m.firma)} ` : ""}${para(m.kdv_haric, m.currency)} + KDV (${para(m.kdv_dahil, m.currency)})`).join(" · ") : "—"}
+        </div>
+      </div>
+      {veri.dagitilmamis?.length > 0 && (
+        <div style={{ padding: "8px 20px", background: "#fffbeb", fontSize: 12, color: "#92400e", borderBottom: "1px solid #fef3c7" }}>
+          Tutarı sahalara dağıtılmamış çok sahalı fatura{veri.dagitilmamis.length > 1 ? "lar" : ""}: {veri.dagitilmamis.map((d) => `${d.fatura_no} (${d.saha_sayisi} saha, ${para(d.toplam, d.currency)})`).join(", ")} — saha maliyetine eklenmedi.
+        </div>
+      )}
+      {!veri.satir_tablosu_hazir && (
+        <div style={{ padding: "8px 20px", background: "#f8fafc", fontSize: 11.5, color: "#64748b", borderBottom: "1px solid #f1f5f9" }}>Kalem / miktar satırları için veritabanı güncellemesi bekleniyor — şimdilik yalnız Site ID ile bağlı faturalar gösteriliyor.</div>
+      )}
+      {veri.uyarilar.map((u, i) => {
+        const k = u.karsilastirma; const renk = k ? AK_KARSILASTIRMA[k.durum] : null;
+        return (
+          <div key={`${u.kaynak}-${u.kaynak_id}`} style={{ padding: "12px 20px", borderTop: i ? "1px solid #f1f5f9" : "none", background: u.isaret?.guncel ? "#fafafa" : "#fff" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{u.iade ? "↩️" : u.satin_alma ? "📦" : "🛠️"} {u.mesaj}</div>
+            <div style={{ fontSize: 12, color: "#475569", marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <span>Kaynak: <b>{u.fatura_no || "—"}</b>{u.fatura_tarihi ? ` · ${u.fatura_tarihi.split("-").reverse().join(".")}` : ""}{u.tedarikci ? ` · ${u.tedarikci}` : ""}</span>
+              <span>Kalem: <b>{u.kalem_adi}</b> · {u.miktar !== null ? `${Number(u.miktar).toLocaleString("tr-TR")} ${u.birim || "(birim belirtilmemiş)"}` : "miktar belirtilmemiş"}</span>
+              <span>{u.tutar !== null ? `Satır: ${para(u.tutar, u.currency)} + KDV` : u.saha_sayisi > 1 ? `Fatura ${para(u.fatura_toplam, u.currency)} (${u.saha_sayisi} saha, tutar dağıtılmamış)` : `Fatura: ${para(u.fatura_toplam, u.currency)}`} · Ödenen {para(u.fatura_odenen, u.currency)} · Kalan {para(u.fatura_kalan, u.currency)}</span>
+              {u.belge_path && <a href={u.belge_path} target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8", fontWeight: 700 }}>📄 Belge</a>}
+              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("erc:fatura-ac", { detail: { fatura_no: u.fatura_no } }))}
+                style={{ border: "none", background: "none", color: "#1d4ed8", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 12 }}>Fatura Girişi'nde aç →</button>
+            </div>
+            {k && (
+              <div style={{ marginTop: 6, fontSize: 12, padding: "6px 10px", borderRadius: 8, background: renk?.[1], color: renk?.[0] }}>
+                <b>{renk?.[2]}:</b> {k.mesaj}
+                {k.durum === "BELIRSIZ" && (k.adaylar || []).length > 0 && (
+                  <div style={{ marginTop: 4 }}>{k.adaylar.map((a) => <div key={a.item_code}>• <span style={{ fontFamily: "monospace" }}>{a.item_code}</span> · {a.item_description} — PR {Number(a.pr_qty).toLocaleString("tr-TR")} · PO {Number(a.po_qty).toLocaleString("tr-TR")}</div>)}</div>
+                )}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+              {u.isaret && (
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: u.isaret.guncel ? "#15803d" : "#b45309" }}>
+                  {u.isaret.guncel ? `✓ ${AK_DURUM[u.isaret.durum]} — ${u.isaret.kullanici || ""} ${u.isaret.zaman || ""}` : `⟳ Kaynak kayıt değişti — yeniden değerlendirin (önceki: ${AK_DURUM[u.isaret.durum]})`}
+                </span>
+              )}
+              {Object.entries(AK_DURUM).map(([d, ad]) => (
+                <button key={d} type="button" disabled={kayit === `${u.kaynak}-${u.kaynak_id}`} onClick={() => isaretle(u, d)}
+                  style={{ fontSize: 11.5, padding: "4px 9px", borderRadius: 7, cursor: "pointer", fontWeight: 700, border: `1.5px solid ${u.isaret?.guncel && u.isaret.durum === d ? "#15803d" : "#e2e8f0"}`, background: u.isaret?.guncel && u.isaret.durum === d ? "#f0fdf4" : "#fff", color: "#334155" }}>{ad}</button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ padding: "8px 20px", fontSize: 11, color: "#92400e", background: "#fffbeb" }}>
+        Satın alma faturası malzemenin sahada kullanıldığını ya da işin tamamlandığını tek başına göstermez. Satın alınan miktar PR miktarı değildir — PR ve günlük işi mevcut düzenleme / talep akışından siz güncellersiniz.
+      </div>
+    </div>
+  );
+}
+
 function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
   const [data, setData] = useState({ rows: [], meta: {} });
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -7960,7 +8219,6 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
 
   const handleSiteSearchChange = (e) => {
     const value = e.target.value.trim().toUpperCase();
-    sahaOneriSecilen.current = ""; // kullanıcı yeniden yazıyor → öneriler tekrar açılabilir
     setSiteSearchCode(value);
 
     setForm((prev) => ({
@@ -7970,50 +8228,13 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
     }));
   };
 
-  // Saha kodu önerisi (12.10.2026, Orhan): yazılan önekle başlayan, daha önce iş girişi yapılmış
-  // benzersiz Site ID'ler (GET /master/site-suggest — sunucuda arar, ekranda yüklü satırlarla sınırlı
-  // değil). Seçim yalnız state değiştirir, hiçbir şey kaydetmez; tam kodu elle yazmakla aynı yolu
-  // izler (siteSearchCode + form.site_code/site_type) → SahaKalemGridi o sahayı otomatik yükler.
-  const [sahaOneriListe, setSahaOneriListe] = useState([]);
-  const [sahaOneriAcik, setSahaOneriAcik] = useState(false);
-  const [sahaOneriIdx, setSahaOneriIdx] = useState(-1);   // klavye vurgusu; -1 = hiçbiri (ilk sonuç otomatik seçilmez)
-  const sahaOneriSeq = useRef(0);                          // bayat yanıt yeni yazılanı ezmesin
-  const sahaOneriSecilen = useRef("");                     // öneriden seçilen kod için liste yeniden açılmasın
-  useEffect(() => {
-    const q = String(siteSearchCode || "").trim().toUpperCase();
-    if (q.length < 2 || q === sahaOneriSecilen.current) { setSahaOneriListe([]); setSahaOneriAcik(false); setSahaOneriIdx(-1); return; }
-    const seq = ++sahaOneriSeq.current;
-    const t = setTimeout(async () => {
-      try {
-        const d = await fetchJson(`${API_BASE}/master/site-suggest?q=${encodeURIComponent(q)}`);
-        if (seq !== sahaOneriSeq.current) return; // bu arada başka harf yazıldı
-        const gorulen = new Set();
-        const liste = (d?.rows || []).filter((r) => {
-          const k = String(r.site_code || "").trim().toUpperCase();
-          if (!k || gorulen.has(k)) return false;
-          gorulen.add(k); return true;
-        });
-        setSahaOneriListe(liste); setSahaOneriAcik(liste.length > 0); setSahaOneriIdx(-1);
-      } catch {
-        if (seq === sahaOneriSeq.current) { setSahaOneriListe([]); setSahaOneriAcik(false); }
-      }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [siteSearchCode]);
+  // Saha önerisi (23.10.2026): ortak SahaAramaKutusu (günlük iş + PO + Rollout, kapsam sunucuda). Seçim yalnız state
+  // değiştirir, hiçbir şey kaydetmez; tam kodu elle yazmakla aynı yolu izler → SahaKalemGridi o sahayı yükler.
   const sahaOneriSec = (r) => {
     const kod = String(r?.site_code || "").trim().toUpperCase();
     if (!kod) return;
-    sahaOneriSecilen.current = kod;
-    setSahaOneriListe([]); setSahaOneriAcik(false); setSahaOneriIdx(-1);
     setSiteSearchCode(kod);
     setForm((prev) => ({ ...prev, site_code: kod, site_type: detectSiteTypeFromSiteCode(kod) }));
-  };
-  const sahaOneriKlavye = (e) => {
-    if (!sahaOneriAcik || !sahaOneriListe.length) { if (e.key === "Escape") setSahaOneriAcik(false); return; }
-    if (e.key === "ArrowDown")      { e.preventDefault(); setSahaOneriIdx((i) => (i + 1) % sahaOneriListe.length); }
-    else if (e.key === "ArrowUp")   { e.preventDefault(); setSahaOneriIdx((i) => (i <= 0 ? sahaOneriListe.length - 1 : i - 1)); }
-    else if (e.key === "Enter")     { if (sahaOneriIdx >= 0) { e.preventDefault(); sahaOneriSec(sahaOneriListe[sahaOneriIdx]); } } // vurgulu yoksa seçme
-    else if (e.key === "Escape")    { e.preventDefault(); setSahaOneriAcik(false); setSahaOneriIdx(-1); }
   };
 
   // Akıllı kontrol (20.08.2026): saha yazılınca o sahanın eksik kalemleri +
@@ -8546,37 +8767,12 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
         <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:12, flexWrap:"wrap" }}>
           <div style={{ fontSize:13, fontWeight:700, color:"#64748b", letterSpacing:"0.05em", textTransform:"uppercase" }}>🔎 Saha Kodu ile Ara</div>
           <div style={{ display:"flex", gap:10, width:"100%", maxWidth:520 }}>
-            <div style={{ position:"relative", flex:1, minWidth:0 }}>
-              <input
-                value={siteSearchCode}
-                onChange={handleSiteSearchChange}
-                onKeyDown={sahaOneriKlavye}
-                placeholder="Site ID giriniz — örn: AT8227_NS_WM"
-                autoComplete="off"
-                role="combobox" aria-autocomplete="list" aria-expanded={sahaOneriAcik} aria-controls="saha-oneri-listesi"
-                aria-activedescendant={sahaOneriAcik && sahaOneriIdx >= 0 ? `saha-oneri-${sahaOneriIdx}` : undefined}
-                style={{ width:"100%", boxSizing:"border-box", height:48, padding:"0 16px", border:"2px solid #e2e8f0", borderRadius:12, fontSize:15, outline:"none", transition:"border 0.15s", fontWeight:500 }}
-                onFocus={e=>{ e.currentTarget.style.border="2px solid #3b82f6"; if (sahaOneriListe.length) setSahaOneriAcik(true); }}
-                onBlur={e=>{ e.currentTarget.style.border="2px solid #e2e8f0"; setTimeout(() => setSahaOneriAcik(false), 150); }}
-              />
-              {/* Kayıtlı saha önerileri — kutunun hemen altında, sınırlı yükseklik + kaydırma; mobilde kutu genişliğinde */}
-              {sahaOneriAcik && sahaOneriListe.length > 0 && (
-                <div id="saha-oneri-listesi" role="listbox" aria-label="Kayıtlı saha önerileri"
-                  style={{ position:"absolute", top:"calc(100% + 6px)", left:0, right:0, zIndex:60, background:"#fff", border:"1.5px solid #e2e8f0", borderRadius:12, boxShadow:"0 10px 30px rgba(15,23,42,0.14)", maxHeight:260, overflowY:"auto", overscrollBehavior:"contain", textAlign:"left" }}>
-                  <div style={{ padding:"6px 12px 4px", fontSize:10.5, fontWeight:800, letterSpacing:"0.06em", textTransform:"uppercase", color:"#94a3b8" }}>Kayıtlı sahalar · {sahaOneriListe.length}</div>
-                  {sahaOneriListe.map((r, i) => (
-                    <div key={r.site_code} id={`saha-oneri-${i}`} role="option" aria-selected={i === sahaOneriIdx}
-                      onMouseDown={(e) => { e.preventDefault(); sahaOneriSec(r); }}
-                      onMouseEnter={() => setSahaOneriIdx(i)}
-                      style={{ display:"flex", alignItems:"baseline", gap:10, padding:"9px 12px", cursor:"pointer", background: i === sahaOneriIdx ? "#eff6ff" : "transparent", borderTop: i ? "1px solid #f1f5f9" : "none" }}>
-                      <span style={{ fontWeight:800, fontSize:14, color:"#0f172a", fontFamily:"ui-monospace,Menlo,Consolas,monospace", whiteSpace:"nowrap" }}>{r.site_code}</span>
-                      <span style={{ fontSize:12, color:"#64748b", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>
-                        {[r.project_code, r.site_type, r.kayit ? `${r.kayit} kayıt` : ""].filter(Boolean).join(" · ")}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div style={{ flex:1, minWidth:0 }}>
+              <SahaAramaKutusu ad="gunluk-is" value={siteSearchCode}
+                onChange={(v) => handleSiteSearchChange({ target: { value: v } })}
+                onSelect={sahaOneriSec}
+                placeholder="Site ID — örn: KA0181 ya da AT8227_NS_WM"
+                inputStyle={{ height:48, padding:"0 16px", border:"2px solid #e2e8f0", borderRadius:12, fontSize:15, transition:"border 0.15s", fontWeight:500 }} />
             </div>
             {yeniKayitIzni && <button type="button" onClick={handleOpenEntryModal} disabled={!siteSearchCode}
               style={{ height:48, padding:"0 26px", background:siteSearchCode?"linear-gradient(135deg,#1d4ed8,#4f46e5)":"#cbd5e1", border:"none", borderRadius:12, color:"#fff", fontSize:14, fontWeight:700, cursor:siteSearchCode?"pointer":"not-allowed", boxShadow:siteSearchCode?"0 4px 12px rgba(79,70,229,0.35)":"none", display:"flex", alignItems:"center", gap:7, whiteSpace:"nowrap" }}>
@@ -8740,6 +8936,9 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
         </div>
       )}
 
+
+      {/* 23.10.2026: sahaya bağlı fatura kalemleri (yetki yoksa görünmez) */}
+      <SahaFaturaKontrolKarti site={siteSearchCode} />
 
       {showEntryModal && (
         <div
@@ -10658,6 +10857,7 @@ function FinanceDashboard({
 }) {
   // Alt marka fatura modu: kayıtlar oturumdaki firma adına (sunucu da firmayı oturumdan zorlar)
   const markaFirma = sadeceFatura ? String(user?.marka || currentUser?.marka || "").trim().toUpperCase() : "";
+  const [faturaSiteSecim, setFaturaSiteSecim] = useState(""); // listeden seçilen / birebir doğrulanan tam Site ID
   const faturaYuklemeSirasi = useRef(0);   // son fatura listesi isteği (gecikmiş yanıtlar yok sayılır)
   const faturaKayitSuruyor = useRef(false); // çift tıklamada ikinci kayıt gönderilmez
   useEffect(() => () => { faturaYuklemeSirasi.current += 1; }, []);
@@ -11883,6 +12083,10 @@ function FinanceDashboard({
       setShowUpload(false);
       setEditingInvoiceId(null);
       setInvoiceForm({ bolge:"", proje:"", proje_kodu:"", fatura_no:"", fatura_tarihi:"", odeme_tarihi:"", tedarikci:"", rf_montaj_firma:"", fatura_kalemi:"", is_kalemi:"", po_no:"", site_id:"", tutar:"", kdv:"", toplam_tutar:"", odenen_tutar:"", kalan_borc:"", note:"", fatura_turu:"GELEN", bagli_fatura_id:"", currency: "TRY", usd_kur: "" });
+    } else if (String(actionTrigger).startsWith('fatura_ara:')) {
+      // 23.10.2026: Akıllı Kontrol'deki "Fatura Girişi'nde aç" — fatura numarasıyla aranmış listeyi açar
+      setShowInvoiceEntryModal(true); setShowInvoiceFormPanel(false); setEditingInvoiceId(null);
+      setManualInvoiceSearch(String(actionTrigger).slice('fatura_ara:'.length));
     } else if (actionTrigger === 'taseron_hakedis') {
       handleShowSubconSummary();
     } else if (actionTrigger === 'hw_payment') {
@@ -12198,7 +12402,10 @@ function FinanceDashboard({
       currency: row.currency || "TRY",
       usd_kur: row.usd_kur ?? "",
       arac_kalemler: [],
+      saha_kalemler: (row.saha_kalemler || []).map((k) => ({ id: k.id, site_code: k.site_code || "", kalem_adi: k.kalem_adi || "", kategori: k.kategori || "",
+        miktar: k.miktar ?? "", birim: k.birim || "", tutar: k.tutar ?? "", aciklama: k.aciklama || "", _dogrulandi: false })),
     });
+    setFaturaSiteSecim("");
     // 16.10.2026: araç kirası satırları
     if (String(row.is_kalemi || "").toUpperCase() === "ARAC_KIRA") {
       fetch(`${API_BASE}/finance/fatura/${row.id}/arac-kalem`).then(r => r.json()).then(j => {
@@ -12271,6 +12478,18 @@ function FinanceDashboard({
         payload.odeme_tarihi = null;
       }
 
+      // 23.10.2026: saha / kalem satırları (araç kirası dışında). Listeden seçilmemiş Site ID sessizce kaydedilmez — kullanıcı onaylar.
+      if (String(invoiceForm.is_kalemi || "").toUpperCase() !== "ARAC_KIRA") {
+        const fsk = (invoiceForm.saha_kalemler || []).filter((k) => String(k.site_code || "").trim() || String(k.kalem_adi || "").trim());
+        payload.saha_kalemler = fsk.map(({ _dogrulandi, ...k }) => ({ ...k, site_code: String(k.site_code || "").trim().toUpperCase() }));
+        const anaSite = String(invoiceForm.site_id || "").trim().toUpperCase();
+        const dogrulanmamis = [...new Set([
+          ...(anaSite && anaSite !== faturaSiteSecim ? [anaSite] : []),
+          ...fsk.filter((k) => !k._dogrulandi && String(k.site_code || "").trim()).map((k) => String(k.site_code).trim().toUpperCase()),
+        ])];
+        if (dogrulanmamis.length && !window.confirm(`Şu Site ID listeden seçilmedi ve kayıtlı sahalarda birebir bulunamadı:\n• ${dogrulanmamis.join("\n• ")}\n\nYazıldığı gibi kaydedilsin mi?`)) { faturaKayitSuruyor.current = false; return; }
+        payload.site_id = anaSite || null;
+      }
       // Firma seçimi (modaldaki Şimşek/AHY toggle) — AHY ise AHY Taşeron Faturaları paneline yansır
       payload.firma = sadeceFatura ? markaFirma : (altMarkaMi(invoiceForm.firma) ? String(invoiceForm.firma).toUpperCase() : "SIMSEK");
       console.log("MANUAL INVOICE PAYLOAD:", payload);
@@ -13256,7 +13475,21 @@ function FinanceDashboard({
                       { label: "İş Kalemi", name: "is_kalemi", placeholder: "KONAKLAMA / PROJE" },
                       { label: "PO No", name: "po_no", placeholder: "PO numarası" },
                       { label: "Site ID", name: "site_id", placeholder: "BU8944" },
-                    ].map(f => f.name === "is_kalemi" ? (
+                    ].map(f => f.name === "site_id" ? (
+                      /* 23.10.2026: Site ID — ortak saha arama (Günlük İş Girişi ile aynı bileşen ve kapsam) */
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <SahaAramaKutusu ad="fatura-site" value={invoiceForm.site_id || ""} placeholder="Site ID — örn: KA0181"
+                          onChange={(v) => { setFaturaSiteSecim(""); setInvoiceForm((p) => ({ ...p, site_id: v })); }}
+                          onSelect={(r) => setFaturaSiteSecim(String(r.site_code || "").toUpperCase())}
+                          inputStyle={{ padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px" }} />
+                        {String(invoiceForm.site_id || "").trim() && (
+                          <div style={{ fontSize: "10.5px", marginTop: "3px", color: faturaSiteSecim && faturaSiteSecim === String(invoiceForm.site_id).trim().toUpperCase() ? "#15803d" : "#b45309" }}>
+                            {faturaSiteSecim && faturaSiteSecim === String(invoiceForm.site_id).trim().toUpperCase() ? "✓ kayıtlı saha" : "⚠ listeden seçilmedi"}
+                          </div>
+                        )}
+                      </div>
+                    ) : f.name === "is_kalemi" ? (
                       /* İş Kalemi: AHY Taşeron Faturaları'ndaki kategori chipleri */
                       <div key={f.name}>
                         <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>İş Kalemi</label>
@@ -13293,6 +13526,11 @@ function FinanceDashboard({
                       <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>{String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" ? "Araç kirası faturasında kullanılmaz — ödeme tarihi ödeme kaydında girilir" : "Nakit Akış'ta taşeron satırı olarak görünür"}</div>
                     </div>
                   </div>
+                  {String(invoiceForm.is_kalemi || "").toUpperCase() !== "ARAC_KIRA" && (
+                    <FaturaSahaKalemEditor value={invoiceForm.saha_kalemler || []} varsayilanSite={invoiceForm.site_id}
+                      faturaTutar={Number(invoiceForm.tutar || 0) || Number(invoiceForm.toplam_tutar || 0)} currency={invoiceForm.currency || "TRY"}
+                      onChange={(f) => setInvoiceForm((pr) => ({ ...pr, saha_kalemler: f(Array.isArray(pr.saha_kalemler) ? pr.saha_kalemler : []) }))} />
+                  )}
                   {String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (
                     <AracKiraKalemEditor value={invoiceForm.arac_kalemler || []} toplam={Number(invoiceForm.toplam_tutar || 0)}
                       onChange={(rows) => setInvoiceForm(pr => ({ ...pr, arac_kalemler: rows }))} />
@@ -35099,6 +35337,17 @@ function App() {
     } catch { return false; }
   });
   const [financeActionTrigger, setFinanceActionTrigger] = useState(null);
+  // 23.10.2026: Akıllı Kontrol (Günlük İş Girişi) → "Fatura Girişi'nde aç": Finans Paneli fatura listesi, numarayla aranmış
+  useEffect(() => {
+    const ac = (e) => {
+      const no = String(e?.detail?.fatura_no || "").trim();
+      if (!no) return;
+      setPage("finance");
+      setFinanceActionTrigger(`fatura_ara:${no}`);
+    };
+    window.addEventListener("erc:fatura-ac", ac);
+    return () => window.removeEventListener("erc:fatura-ac", ac);
+  }, []);
   // Üst menü (02.09.2026): hangi kart açık (ana/ik/muhasebe/depo/daha/user) + Günlük İş Girişi yükleme tetikleyicisi
   const [navOpen, setNavOpen] = useState(null);
   const [entryActionTrigger, setEntryActionTrigger] = useState(null);
