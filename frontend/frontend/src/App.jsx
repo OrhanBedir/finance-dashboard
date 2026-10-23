@@ -10658,6 +10658,9 @@ function FinanceDashboard({
 }) {
   // Alt marka fatura modu: kayıtlar oturumdaki firma adına (sunucu da firmayı oturumdan zorlar)
   const markaFirma = sadeceFatura ? String(user?.marka || currentUser?.marka || "").trim().toUpperCase() : "";
+  const faturaYuklemeSirasi = useRef(0);   // son fatura listesi isteği (gecikmiş yanıtlar yok sayılır)
+  const faturaKayitSuruyor = useRef(false); // çift tıklamada ikinci kayıt gönderilmez
+  useEffect(() => () => { faturaYuklemeSirasi.current += 1; }, []);
   function parseDateTR(dateStr) {
     const [day, month, year] = dateStr.split(".");
     return new Date(`${year}-${month}-${day}`);
@@ -12211,6 +12214,7 @@ function FinanceDashboard({
 
   const handleSaveManualInvoice = async (e) => {
     if (e) e.preventDefault();
+    if (faturaKayitSuruyor.current) return;
 
     if (
       !invoiceForm.fatura_no ||
@@ -12231,6 +12235,7 @@ function FinanceDashboard({
         return;
       }
 
+      faturaKayitSuruyor.current = true;
       const payload = {
         bolge: invoiceForm.bolge,
         proje: invoiceForm.proje,
@@ -12325,6 +12330,8 @@ function FinanceDashboard({
     } catch (err) {
       console.error("MANUAL INVOICE SAVE ERROR:", err);
       alert(err.message || "Fatura kaydedilemedi");
+    } finally {
+      faturaKayitSuruyor.current = false;
     }
   };
 
@@ -12581,9 +12588,18 @@ function FinanceDashboard({
       setErrorMessage("");
 
       if (sadeceFatura) {
-        // Alt marka: yalnız fatura listesi (sunucu kendi firmasına süzer); ERC özet/ödeme/maaş uçları çağrılmaz
+        // Alt marka: yalnız fatura listesi (sunucu kendi firmasına süzer); ERC özet/ödeme/maaş uçları çağrılmaz.
+        // 23.10.2026: gecikmiş yanıt yeni isteği ezemez; sunucu kapsamı oturumdaki markayla aynı değilse
+        // (ör. başka sekmede başka hesapla giriş yapılmış) liste gösterilmez.
+        const sira = ++faturaYuklemeSirasi.current;
+        setManualInvoiceRows([]);
         const d = await fetchJson(`${API_BASE}/finance/invoice-entry/list`, { withAuth: true });
-        setManualInvoiceRows(d.rows || []);
+        if (sira !== faturaYuklemeSirasi.current) return;
+        if (!markaFirma || String(d?.kapsam || "").toUpperCase() !== markaFirma) {
+          setManualInvoiceRows([]);
+          throw new Error("Oturum bilgisi bu hesapla uyuşmuyor — sayfayı yenileyin veya yeniden giriş yapın");
+        }
+        setManualInvoiceRows((d.rows || []).filter((r) => String(r.firma || "").toUpperCase() === markaFirma));
         setSummary({});
         return;
       }
@@ -13385,7 +13401,11 @@ function FinanceDashboard({
   if (sadeceFatura) {
     return (
       <div style={{ padding: "24px 28px" }}>
-        {errorMessage && <div className="loading">Veri alınamadı: {errorMessage}</div>}
+        {errorMessage && (
+          <div role="alert" style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", zIndex: 100000, background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", padding: "10px 16px", borderRadius: 10, fontWeight: 600, fontSize: 14, maxWidth: "90vw", boxShadow: "0 6px 20px rgba(0,0,0,0.12)" }}>
+            ⚠️ {errorMessage}
+          </div>
+        )}
         {faturaGirisiJSX}
       </div>
     );
@@ -34921,6 +34941,17 @@ function App() {
       })
       .catch(() => {});
   }, []);
+  // 23.10.2026: aynı tarayıcıda başka sekmede giriş/çıkış yapılınca token ortak (localStorage) değişir;
+  // bu sekme ekranda eski hesabı gösterip yeni hesabın token'ıyla veri çekmesin → sayfa yenilenir.
+  useEffect(() => {
+    const dinle = (e) => {
+      if (e.storageArea === localStorage && (e.key === "token" || e.key === null) && e.oldValue !== e.newValue) {
+        window.location.reload();
+      }
+    };
+    window.addEventListener("storage", dinle);
+    return () => window.removeEventListener("storage", dinle);
+  }, []);
   // Platform sahibi (uygulamanın admini) — firma adminlerinin üstünde; yeni firma onayı vb. platform işlemleri yalnızca bu role açıktır.
   const isPlatformAdmin = user?.role === "platform_admin";
   const isAdmin = user?.role === "admin" || user?.role === "direktor" || isPlatformAdmin;
@@ -36252,7 +36283,7 @@ function App() {
             {page === "marka_pl" && isAltMarka && <MarkaPLPanel currentUser={user} />}
             {page === "marka_nakit" && isAltMarka && <MarkaNakitPanel currentUser={user} />}
             {page === "marka_taseron" && isAltMarka && <MarkaTaseronPanel currentUser={user} />}
-            {page === "marka_fatura_girisi" && isAltMarka && isAdmin && <FinanceDashboard user={user} currentUser={user} sadeceFatura onBack={() => setPage("marka_finans")} />}
+            {page === "marka_fatura_girisi" && isAltMarka && isAdmin && <FinanceDashboard key={`marka-fatura-${user?.email || ""}`} user={user} currentUser={user} sadeceFatura onBack={() => setPage("marka_finans")} />}
             {page === "marka_fatura_takip" && isAltMarka && <SimsekFaturaTakipPanel currentUser={user} />}
             {page === "erc_taseron" && !isAltMarka && <ErcTaseronPanel />}
             {page === "taseron_borc" && !isAltMarka && <TaseronBorcPanel />}
@@ -36261,6 +36292,7 @@ function App() {
               financeToken ? (
                 <div style={{padding:"24px 28px"}}>
                 <FinanceDashboard
+                  key={`finans-${user?.email || ""}`}
                   user={user}
                   financeToken={financeToken}
                   financeUserEmail={financeUserEmail}

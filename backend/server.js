@@ -286,7 +286,7 @@ function authMiddleware(req, res, next) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    req.user = decoded;
+    req.user = req._tazeOturum || decoded; // oturum tazeleme katmanı DB'den güncel rol/marka yazdı
 
     next();
   } catch {
@@ -560,7 +560,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-23-marka-fatura", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-23-oturum-tazeleme", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -897,6 +897,57 @@ app.use((req, res, next) => {
     try { jwt.verify(tok, JWT_SECRET); return next(); } catch {}
   }
   return res.status(401).json({ ok: false, error: tok ? "Oturum süresi dolmuş veya geçersiz — lütfen tekrar giriş yapın" : "Oturum gerekli" });
+});
+
+// ── OTURUM TAZELEME (23.10.2026, Orhan — Teknocenter fatura sızıntısı) ──────────────────────────
+// Token 90 gün geçerli; içindeki rol / marka / hw_yukleme giriş anındaki değerdir. Web her açılışta
+// /auth/me ile bu bilgileri DB'den tazeliyordu, API ise token'daki ESKİ değere güveniyordu: alt marka
+// tanımlanmadan önce alınmış bir Teknocenter token'ı (hw_yukleme=true, rol admin, scope finance)
+// ERC finans yetkilisi sayılıyor, Fatura Girişi'nde TÜM firmaların faturalarını alıyordu.
+// Artık yetkiyi belirleyen alanlar her istekte DB'den (/auth/me ile aynı kaynak, 30 sn önbellek)
+// alınır ve req.user'a yazılır; kullanıcı bulunamaz/pasifse 401, doğrulanamazsa 503 (kapalı kalır).
+const OTURUM_ONBELLEK = new Map(); // e-posta → { t, v }
+async function tazeOturumBilgisi(email) {
+  const k = String(email || "").trim().toLowerCase();
+  if (!k) return null;
+  const c = OTURUM_ONBELLEK.get(k);
+  if (c && Date.now() - c.t < 30000) return c.v;
+  const r = await pool.query(
+    `SELECT id, email, role, is_active, status, subcon_name, tenant, marka FROM users
+      WHERE LOWER(TRIM(email)) = $1 ORDER BY id DESC LIMIT 1`, [k]);
+  const u = r.rows[0];
+  let v = null;
+  if (u && u.is_active && String(u.status || "active") === "active") {
+    const tenant = u.tenant || detectTenant(u.email, u.subcon_name);
+    let markaAd = null, hw = true;
+    if (u.marka) {
+      const mr = await pool.query("SELECT ad, hw_yukleme FROM markalar WHERE kod=$1 AND tenant=$2 AND aktif=true", [u.marka, tenant]);
+      if (mr.rows[0]) { markaAd = mr.rows[0].ad; hw = mr.rows[0].hw_yukleme !== false; }
+    }
+    v = { user_id: u.id, role: u.role, marka: u.marka || null, marka_ad: markaAd, hw_yukleme: hw };
+  }
+  OTURUM_ONBELLEK.set(k, { t: Date.now(), v });
+  return v;
+}
+app.use(async (req, res, next) => {
+  if (req.method === "OPTIONS") return next();
+  const yontem = req.method === "HEAD" ? "GET" : req.method;
+  if (KIMLIKSIZ_UCLAR.has(`${yontem} ${(req.path.replace(/\/+$/, "") || "/").toLowerCase()}`)) return next();
+  const tok = kapiTokeni(req);
+  if (!tok) return next();
+  let d;
+  try { d = jwt.verify(tok, JWT_SECRET); } catch { return next(); }
+  if (!d?.email) return next();
+  try {
+    const v = await tazeOturumBilgisi(d.email);
+    if (!v) return res.status(401).json({ ok: false, error: "Oturum geçersiz veya kullanıcı pasif — lütfen tekrar giriş yapın" });
+    req.user = { ...d, ...v };
+    req._tazeOturum = req.user;
+    next();
+  } catch (e) {
+    console.error("[oturum-tazeleme]", e.message);
+    res.status(503).json({ ok: false, error: "Oturum doğrulanamadı — lütfen biraz sonra tekrar deneyin" });
+  }
 });
 
 // ═══ İSG SORUMLUSU ROLÜ (21.10.2026, Orhan) — role='isg' ════════════════════════════════════════
@@ -1421,7 +1472,7 @@ app.use(async (req, res, next) => {
     };
     if (req.method === "GET" && yol === "/finance/invoice-entry/list") {
       const orig = res.json.bind(res);
-      res.json = (o) => orig(o && Array.isArray(o.rows) ? { ...o, rows: o.rows.filter((r) => String(r.firma || "").toUpperCase() === M) } : o);
+      res.json = (o) => orig(o && Array.isArray(o.rows) ? { ...o, kapsam: M, rows: o.rows.filter((r) => String(r.firma || "").toUpperCase() === M) } : o);
       return next();
     }
     if (req.method === "GET" && yol === "/finance/invoice-entry/export-excel") return next(); // sorgu req.markaFatura ile süzülür
@@ -3685,6 +3736,10 @@ function requireFinanceAuth(req, res, next) {
       "duzgun.simsek@simsektel.com",
     ];
     const decodedEmail = String(decoded.email || "").toLowerCase();
+    // 23.10.2026: alt marka (Teknocenter/AHY) yöneticisi admin rolüyle scope=finance alır — ERC finans uçları kapalı
+    if (altMarkaKullanicisi(req._tazeOturum || decoded)) {
+      return res.status(403).json({ ok: false, error: "Bu finans ekranı ana yükleniciye aittir" });
+    }
     const hasFinanceAccess =
       decoded.scope === "finance" ||
       FINANCE_EMAILS_HARDCODED.includes(decodedEmail);
@@ -3696,7 +3751,7 @@ function requireFinanceAuth(req, res, next) {
       });
     }
 
-    req.financeUser = decoded;
+    req.financeUser = req._tazeOturum || decoded;
     next();
   } catch (err) {
     return res.status(401).json({
@@ -12359,7 +12414,7 @@ app.get("/is-atama/is-yuku", authMiddleware, async (req, res) => {
 app.get("/rollout/cleanup/:site/rapor.pdf", async (req, res) => {
   try {
     const token = (req.headers.authorization || "").split(" ")[1] || req.query.token;
-    try { req.user = jwt.verify(token, process.env.JWT_SECRET); } catch { return res.status(401).json({ error: "Geçersiz token" }); }
+    try { req.user = req._tazeOturum || jwt.verify(token, process.env.JWT_SECRET); } catch { return res.status(401).json({ error: "Geçersiz token" }); }
     const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
     const r = await pool.query(`SELECT c.*, ${cleanupBolgeSorgu} AS bolge FROM rollout_cleanup c WHERE UPPER(TRIM(c.site_code)) = $1 LIMIT 1`, [site]);
     if (!r.rows[0]) return res.status(404).json({ error: "Kayıt yok" });
@@ -22811,6 +22866,18 @@ function odemeFirmaKapsamda(req, firma) {
   const f = String(firma || "").toUpperCase();
   return k.bordro.map((x) => String(x).toUpperCase()).includes(f);
 }
+// 23.10.2026: FATURA düzeyindeki ödeme işlemleri yalnız markanın KENDİ faturaları (invoice_entries.firma = marka);
+// devralınan markanın (TEKNO → AHY) faturaları bu kapsama girmez. Araç ödemeleri bordro kapsamında kalır.
+function odemeFaturaKapsamda(req, firma) {
+  const k = altMarkaKapsam(req);
+  if (!k) return true;
+  return String(firma || "").trim().toUpperCase() === String(k.kod).toUpperCase();
+}
+async function odemeFaturaKapsamKontrol(req, db, faturaId) {
+  if (!altMarkaKapsam(req) || faturaId == null) return;
+  const f = (await db.query(`SELECT firma FROM invoice_entries WHERE id=$1`, [faturaId])).rows[0];
+  if (!f || !odemeFaturaKapsamda(req, f.firma)) throw odemeHata(403, "Bu fatura firmanızın kapsamında değil");
+}
 function odemeHata(status, msg, extra) { const e = new Error(msg); e.status = status; e.extra = extra || {}; return e; }
 const tl2 = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
 const yuvarla2 = (n) => Math.round(Number(n || 0) * 100) / 100;
@@ -23037,7 +23104,7 @@ app.get("/finance/fatura/:id/odeme-durumu", async (req, res) => {
         COALESCE(tutar,0) AS matrah, COALESCE(kdv,0) AS kdv, COALESCE(toplam_tutar,0) AS toplam, COALESCE(odenen_tutar,0) AS odenen, COALESCE(kalan_borc,0) AS kalan
       FROM invoice_entries WHERE id=$1`, [req.params.id])).rows[0];
     if (!f) return res.status(404).json({ ok: false, error: "Fatura yok" });
-    if (!odemeFirmaKapsamda(req, f.firma)) return res.status(403).json({ ok: false, error: "Bu fatura firmanızın kapsamında değil" });
+    if (!odemeFaturaKapsamda(req, f.firma)) return res.status(403).json({ ok: false, error: "Bu fatura firmanızın kapsamında değil" });
     const kalemler = (await pool.query(`SELECT k.id, k.arac_id, k.donem, k.tutar, k.aciklama, a.plaka, a.aylik_kira, a.marka, a.model,
         COALESCE((SELECT SUM(d.tutar) FROM odeme_dagilim d JOIN odeme_kayit o ON o.id=d.odeme_id AND o.durum='AKTIF' WHERE d.fatura_arac_id=k.id),0) AS odenen,
         COALESCE((SELECT json_agg(json_build_object('dagilim_id', d.id, 'odeme_id', o.id, 'tutar', d.tutar, 'tarih', to_char(o.tarih,'YYYY-MM-DD'),
@@ -23062,6 +23129,7 @@ app.get("/finance/fatura/:id/odeme-durumu", async (req, res) => {
 app.get("/finance/fatura/:id/arac-kalem", odemeOkuma, async (req, res) => {
   try {
     await ensureOdemeTablolari();
+    try { await odemeFaturaKapsamKontrol(req, pool, req.params.id); } catch (e) { return res.status(e.status || 403).json({ ok: false, error: e.message }); }
     const r = await pool.query(`SELECT k.id, k.arac_id, k.donem, k.tutar, k.aciklama, a.plaka, a.aylik_kira,
         COALESCE((SELECT SUM(d.tutar) FROM odeme_dagilim d JOIN odeme_kayit o ON o.id=d.odeme_id AND o.durum='AKTIF' WHERE d.fatura_arac_id=k.id),0) AS odenen
       FROM fatura_arac_kalem k JOIN araclar a ON a.id=k.arac_id WHERE k.fatura_id=$1 ORDER BY k.id`, [req.params.id]);
@@ -23074,7 +23142,7 @@ app.put("/finance/fatura/:id/arac-kalem", async (req, res) => {
   const sonuc = await odemeIslem(res, async (c) => {
     const f = (await c.query(`SELECT id, firma FROM invoice_entries WHERE id=$1 FOR UPDATE`, [req.params.id])).rows[0];
     if (!f) throw odemeHata(404, "Fatura yok");
-    if (!odemeFirmaKapsamda(req, f.firma)) throw odemeHata(403, "Bu fatura firmanızın kapsamında değil");
+    if (!odemeFaturaKapsamda(req, f.firma)) throw odemeHata(403, "Bu fatura firmanızın kapsamında değil");
     return faturaAracKalemleriKaydet(c, f.id, req.body?.kalemler || [], String(u.email || "").toLowerCase());
   });
   if (sonuc) res.json({ ok: true, ...sonuc });
@@ -23086,7 +23154,7 @@ app.post("/finance/odeme", async (req, res) => {
     for (const d of req.body?.dagilim || []) {
       if (String(d.tur).toUpperCase() === "FATURA" || d.fatura_id) {
         const f = (await c.query(`SELECT firma FROM invoice_entries WHERE id=$1`, [d.fatura_id])).rows[0];
-        if (f && !odemeFirmaKapsamda(req, f.firma)) throw odemeHata(403, "Fatura firmanızın kapsamında değil");
+        if (f ? !odemeFaturaKapsamda(req, f.firma) : !!altMarkaKapsam(req)) throw odemeHata(403, "Fatura firmanızın kapsamında değil");
       }
       if (d.arac_id) {
         const a = (await c.query(`SELECT firma FROM araclar WHERE id=$1`, [d.arac_id])).rows[0];
@@ -23110,13 +23178,25 @@ app.post("/finance/odeme/:id/iptal", async (req, res) => {
 app.post("/finance/odeme-dagilim/:id/fatura-esle", async (req, res) => {
   const u = odemeYetkili(req);
   if (!u) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-  const sonuc = await odemeIslem(res, (c) => dagilimFaturaEsle(c, Number(req.params.id), Number(req.body?.fatura_arac_id), String(u.email || "").toLowerCase()));
+  const sonuc = await odemeIslem(res, async (c) => {
+    if (altMarkaKapsam(req)) {
+      const kl = (await c.query(`SELECT fatura_id FROM fatura_arac_kalem WHERE id=$1`, [Number(req.body?.fatura_arac_id)])).rows[0];
+      await odemeFaturaKapsamKontrol(req, c, kl ? kl.fatura_id : -1);
+    }
+    return dagilimFaturaEsle(c, Number(req.params.id), Number(req.body?.fatura_arac_id), String(u.email || "").toLowerCase());
+  });
   if (sonuc) res.json({ ok: true });
 });
 app.post("/finance/odeme-dagilim/:id/fatura-ayir", async (req, res) => {
   const u = odemeYetkili(req);
   if (!u) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-  const sonuc = await odemeIslem(res, async (c) => { await dagilimFaturaAyir(c, Number(req.params.id), String(u.email || "").toLowerCase()); return { ok: true }; });
+  const sonuc = await odemeIslem(res, async (c) => {
+    if (altMarkaKapsam(req)) {
+      const dg = (await c.query(`SELECT fatura_id FROM odeme_dagilim WHERE id=$1`, [Number(req.params.id)])).rows[0];
+      await odemeFaturaKapsamKontrol(req, c, dg ? dg.fatura_id : -1);
+    }
+    await dagilimFaturaAyir(c, Number(req.params.id), String(u.email || "").toLowerCase()); return { ok: true };
+  });
   if (sonuc) res.json({ ok: true });
 });
 // Araç paneli: fatura satırları (dönem bazlı) — "Kira Öde" ekranında bağlı faturayı göstermek için
@@ -23126,6 +23206,13 @@ app.get("/hr/arac-fatura-kalemleri", async (req, res) => {
     const r = await pool.query(`SELECT k.id, k.fatura_id, k.arac_id, k.donem, k.tutar, i.fatura_no, i.tedarikci,
         COALESCE((SELECT SUM(d.tutar) FROM odeme_dagilim d JOIN odeme_kayit o ON o.id=d.odeme_id AND o.durum='AKTIF' WHERE d.fatura_arac_id=k.id),0) AS odenen
       FROM fatura_arac_kalem k JOIN invoice_entries i ON i.id=k.fatura_id ORDER BY k.donem DESC, k.id`);
+    // 23.10.2026: alt marka yalnız kendi faturalarının ya da kendi (bordro kapsamı) araçlarının satırlarını görür
+    const ak = altMarkaKapsam(req);
+    if (ak) {
+      const araclar = new Set((await pool.query(`SELECT id FROM araclar WHERE UPPER(COALESCE(NULLIF(firma,''),'AHY')) = ANY($1::text[])`, [ak.bordro])).rows.map((x) => Number(x.id)));
+      const fat = new Set((await pool.query(`SELECT id FROM invoice_entries WHERE UPPER(COALESCE(firma,'')) = $1`, [ak.kod])).rows.map((x) => Number(x.id)));
+      return res.json(r.rows.filter((x) => fat.has(Number(x.fatura_id)) || araclar.has(Number(x.arac_id))));
+    }
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
